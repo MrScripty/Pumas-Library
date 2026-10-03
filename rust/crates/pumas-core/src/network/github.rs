@@ -503,6 +503,8 @@ where
 
 /// GitHub API client.
 pub struct GitHubClient {
+    #[cfg(any(test, feature = "test-support"))]
+    loopback_fixture: bool,
     http: Arc<HttpClient>,
     api_base: String,
     cache: ReleasesCache,
@@ -574,12 +576,50 @@ impl GitHubClient {
                 message: "Fixture API requires literal loopback HTTP(S) without credentials, query or fragment".into(),
             });
         }
-        Self::with_config(cache_dir, ttl, api_base)
+        let mut client = Self::with_http(HttpClient::loopback_fixture()?, cache_dir, ttl, api_base);
+        client.loopback_fixture = true;
+        Ok(client)
+    }
+
+    /// Reuse the fixture's credential-free transport only for its exact
+    /// validated loopback origin. Ordinary GitHub clients return no override.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn loopback_fixture_http_client(&self, source: &str) -> Result<Option<reqwest::Client>> {
+        if !self.loopback_fixture {
+            return Ok(None);
+        }
+        let source = Url::parse(source).map_err(|_| PumasError::Config {
+            message: "Invalid loopback fixture artifact URL".into(),
+        })?;
+        let base = Url::parse(&self.api_base).map_err(|_| PumasError::Config {
+            message: "Invalid loopback fixture API origin".into(),
+        })?;
+        if source.origin() != base.origin()
+            || !source.username().is_empty()
+            || source.password().is_some()
+            || source.query().is_some()
+            || source.fragment().is_some()
+        {
+            return Err(PumasError::Config {
+                message: "Fixture artifacts require the validated API origin without credentials, query or fragment".into(),
+            });
+        }
+        Ok(Some(self.http.inner().clone()))
     }
 
     fn with_config(cache_dir: PathBuf, ttl: Duration, api_base: String) -> Result<Self> {
-        let http = HttpClient::new()?;
-        Ok(Self {
+        Ok(Self::with_http(
+            HttpClient::new()?,
+            cache_dir,
+            ttl,
+            api_base,
+        ))
+    }
+
+    fn with_http(http: HttpClient, cache_dir: PathBuf, ttl: Duration, api_base: String) -> Self {
+        Self {
+            #[cfg(any(test, feature = "test-support"))]
+            loopback_fixture: false,
             http: Arc::new(http),
             api_base: api_base.trim_end_matches('/').to_string(),
             cache: ReleasesCache::new(cache_dir, ttl),
@@ -588,7 +628,7 @@ impl GitHubClient {
             pending_fetches: Mutex::new(HashMap::new()),
             #[cfg(test)]
             follower_joined: Notify::new(),
-        })
+        }
     }
 
     /// Get releases for a repository (offline-first strategy).
@@ -1786,5 +1826,42 @@ mod tests {
         let status = client.get_cache_status("test/repo").await;
         assert!(!status.has_cache);
         assert!(!status.is_fetching);
+    }
+}
+
+#[cfg(test)]
+mod loopback_artifact_fixture_tests {
+    use super::*;
+
+    #[test]
+    fn acquisition_integration_fixture_artifacts_require_exact_loopback_origin() {
+        let temp = tempfile::tempdir().unwrap();
+        let client = GitHubClient::with_loopback_api(
+            temp.path().into(),
+            Duration::from_secs(1),
+            "http://127.0.0.1:12345".into(),
+        )
+        .unwrap();
+        assert!(client
+            .loopback_fixture_http_client("http://127.0.0.1:12345/archive")
+            .unwrap()
+            .is_some());
+        for source in [
+            "http://127.0.0.1:12346/archive",
+            "https://example.com/archive",
+            "http://localhost:12345/archive",
+            "http://127.0.0.1:12345/archive?token=x",
+            "http://user:synthetic@127.0.0.1:12345/archive",
+        ] {
+            assert!(
+                client.loopback_fixture_http_client(source).is_err(),
+                "{source}"
+            );
+        }
+        let ordinary = GitHubClient::new(temp.path().into()).unwrap();
+        assert!(ordinary
+            .loopback_fixture_http_client("https://example.com/archive")
+            .unwrap()
+            .is_none());
     }
 }

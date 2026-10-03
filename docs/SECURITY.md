@@ -18,8 +18,13 @@ maintainer explicitly announces otherwise.
   a security boundary.
 - `pumas-rpc` binds to loopback by default and limits body size and concurrent
   requests.
-- `pumas-rpc --allow-lan` currently has no caller authentication or
-  authorization. Do not expose it to an untrusted network.
+- `pumas-rpc` has no supported LAN mode. Its receiving HTTP boundary rejects
+  non-loopback Host values, non-loopback or malformed Origin values, duplicate
+  authority/origin headers, and originless cross-site browser requests before
+  dispatch. CORS controls response visibility and is not authorization.
+- Direct local clients without browser headers remain supported. These checks
+  do not authenticate hostile native processes with the same local privileges;
+  a future remote node interface needs a separate authenticated/encrypted contract.
 - The Torch sidecar is loopback-only by default. Non-loopback use requires both
   `PUMAS_TORCH_ALLOW_LAN=1` and `PUMAS_TORCH_API_TOKEN`; all routes except
   `/health` then require the token.

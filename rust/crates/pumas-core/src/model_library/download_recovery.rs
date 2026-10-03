@@ -1,5 +1,13 @@
 #![deny(unsafe_code)]
 
+mod import_custody;
+mod import_permissions;
+pub(crate) use import_custody::{
+    require_import_document_size, ImportFileIdentity, ImportPayloadIdentity,
+    IMPORT_DOCUMENT_MAX_BYTES, IMPORT_METADATA_BACKUP, IMPORT_MUTABLE_DOCUMENTS, IMPORT_RECEIPT,
+};
+pub(crate) use import_permissions::ImportDirectoryPermissions;
+
 use crate::platform::capability_fs::{open_directory, sync_directory};
 use crate::{ModelRecord, PumasError, Result};
 #[cfg(unix)]
@@ -31,7 +39,7 @@ struct LibraryIdDocument {
     library_id: String,
 }
 
-fn nofollow_options(options: &mut OpenOptions) {
+pub(super) fn nofollow_options(options: &mut OpenOptions) {
     #[cfg(unix)]
     options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     #[cfg(windows)]
@@ -80,8 +88,8 @@ fn invalid_library_id() -> io::Error {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct FilesystemIdentity {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub(super) struct FilesystemIdentity {
     volume: u64,
     file: u64,
 }
@@ -196,6 +204,15 @@ pub(crate) struct DownloadRecoveryDestination {
     held: Arc<OnceLock<HeldDestination>>,
     creation_anchor: Arc<CreationAnchor>,
     file_parents: Arc<Mutex<BTreeMap<PathBuf, Arc<HeldDestination>>>>,
+    // A released import cannot silently repopulate its cache from new paths.
+    import_released: Arc<Mutex<bool>>,
+    import_payload: Arc<OnceLock<ImportPayloadIdentity>>,
+    #[cfg(test)]
+    import_document_uncertainty: Arc<Mutex<Option<String>>>,
+    #[cfg(all(test, unix))]
+    import_permission_failure: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(test)]
+    import_hash_passes: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
     cleanup_parent_sync: Option<Arc<CleanupParentSync>>,
 }
@@ -364,6 +381,40 @@ impl DownloadDestinationRoot {
         }
     }
 
+    /// Exclusively create a private copied-import workspace under this held root.
+    /// A failed bind after mkdir retains the workspace; it must never be recovered
+    /// by scanning names or reacquiring pathname authority.
+    pub(crate) fn create_import_stage(&self) -> Result<DownloadRecoveryDestination> {
+        self.0.require_current()?;
+        let name = format!(
+            "{}{}",
+            super::importer::TEMP_IMPORT_PREFIX,
+            uuid::Uuid::new_v4()
+        );
+        let destination = self.resolve(Path::new(&name))?;
+        let builder = cap_std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        let builder = {
+            use cap_std::fs::DirBuilderExt;
+            let mut builder = builder;
+            builder.mode(0o700);
+            builder
+        };
+        self.0.root.create_dir_with(&name, &builder)?;
+        if let Err(error) = destination
+            .directory(false)
+            .and_then(|_| sync_directory(&self.0.root))
+        {
+            return Err(PumasError::ImportFailed {
+                message: format!(
+                    "Created import workspace {} but could not establish durable custody: {error}; workspace retained, no automatic cleanup retry",
+                    destination.display_path.display()
+                ),
+            });
+        }
+        Ok(destination)
+    }
+
     pub(crate) fn resolve(&self, path: &Path) -> io::Result<DownloadRecoveryDestination> {
         self.0.require_current()?;
         // Find a prefix which is the configured root itself. Missing descendants
@@ -394,6 +445,14 @@ impl DownloadDestinationRoot {
             model_relative: relative,
             held: Arc::new(OnceLock::new()),
             file_parents: Arc::new(Mutex::new(BTreeMap::new())),
+            import_released: Arc::new(Mutex::new(false)),
+            import_payload: Arc::new(OnceLock::new()),
+            #[cfg(test)]
+            import_document_uncertainty: Arc::new(Mutex::new(None)),
+            #[cfg(all(test, unix))]
+            import_permission_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(test)]
+            import_hash_passes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
             cleanup_parent_sync: None,
         };
@@ -466,6 +525,14 @@ impl RecoveryRoot {
             display_path,
             held: Arc::new(OnceLock::new()),
             file_parents: Arc::new(Mutex::new(BTreeMap::new())),
+            import_released: Arc::new(Mutex::new(false)),
+            import_payload: Arc::new(OnceLock::new()),
+            #[cfg(test)]
+            import_document_uncertainty: Arc::new(Mutex::new(None)),
+            #[cfg(all(test, unix))]
+            import_permission_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(test)]
+            import_hash_passes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
             cleanup_parent_sync: None,
         })
@@ -742,6 +809,23 @@ impl DownloadRecoveryDestination {
         held.directory.try_clone().map(Some)
     }
 
+    pub(crate) fn import_receipt_claimed(&self) -> io::Result<bool> {
+        let Some(directory) = self.directory_if_present(false)? else {
+            return Ok(false);
+        };
+        let claimed = match directory.symlink_metadata(IMPORT_RECEIPT) {
+            Ok(_) => true,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error),
+        };
+        self.directory(false)?;
+        Ok(claimed)
+    }
+
+    pub(crate) fn model_directory_exists(&self) -> io::Result<bool> {
+        Ok(self.directory_if_present(false)?.is_some())
+    }
+
     pub(crate) fn prepare(&self) -> io::Result<()> {
         self.directory(true).map(|_| ())
     }
@@ -773,7 +857,42 @@ impl DownloadRecoveryDestination {
         self.write_model_metadata_value(&serde_json::to_value(metadata)?)
     }
 
+    /// Only the copied producer uses this publication primitive to establish
+    /// its initial Pending identity. Ordinary typed/raw edits preserve gates.
+    pub(crate) fn write_copied_import_metadata(
+        &self,
+        metadata: &crate::models::ModelMetadata,
+    ) -> Result<()> {
+        require_import_document_size(metadata)?;
+        self.publish_model_metadata_value(&serde_json::to_value(metadata)?)
+    }
+
+    /// Raw re-publication is used by the HF completion owner. It cannot erase
+    /// or alter a copied producer's gates, including malformed raw identity.
     pub(crate) fn write_model_metadata_value(&self, metadata: &Value) -> Result<()> {
+        require_import_document_size(metadata)?;
+        let existing = self.read_model_metadata_value()?;
+        let previous = existing
+            .as_ref()
+            .and_then(|value| value.get("import_publication"));
+        let next = metadata.get("import_publication");
+        if self.import_receipt_claimed()? && previous.is_none_or(|value| value.is_null())
+            || previous.filter(|value| !value.is_null()) != next.filter(|value| !value.is_null())
+            || previous.is_some_and(|value| !value.is_null())
+                && ["import_state", "validation_state"].iter().any(|field| {
+                    existing.as_ref().and_then(|value| value.get(*field)) != metadata.get(*field)
+                })
+        {
+            return Err(PumasError::Validation {
+                field: "import_publication".into(),
+                message: "Metadata publication cannot replace copied-import identity or readiness"
+                    .into(),
+            });
+        }
+        self.publish_model_metadata_value(metadata)
+    }
+
+    fn publish_model_metadata_value(&self, metadata: &Value) -> Result<()> {
         let directory = self.directory(false)?;
         let expected = directory_identity(&directory)?;
         let destination = self.clone();
@@ -801,9 +920,124 @@ impl DownloadRecoveryDestination {
         }
     }
 
+    /// Exclusive output creation also detects filesystem-equivalent names.
+    /// The returned descriptor owns all writes and permission restoration.
+    pub(crate) fn create_import_file(&self, filename: &str) -> io::Result<std::fs::File> {
+        let (parent, name) = self.file_parent(filename, true)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        nofollow_options(&mut options);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let file = parent.open_with(name, &options)?.into_std();
+        if !file.metadata()?.is_file() {
+            return Err(invalid_capability_path());
+        }
+        Ok(file)
+    }
+
+    pub(crate) fn open_import_file(&self, filename: &str) -> io::Result<std::fs::File> {
+        let (parent, name) = self.file_parent(filename, false)?;
+        let mut options = OpenOptions::new();
+        options.read(true);
+        nofollow_options(&mut options);
+        let file = parent.open_with(name, &options)?.into_std();
+        if !file.metadata()?.is_file() || file.metadata()?.file_type().is_symlink() {
+            return Err(invalid_capability_path());
+        }
+        Ok(file)
+    }
+
+    /// Preserve copied bundle directories, including empty components, without
+    /// merging filesystem-equivalent source names into an existing directory.
+    pub(crate) fn create_import_directory(&self, relative: &str) -> io::Result<()> {
+        let (parent, name) = self.file_parent(relative, true)?;
+        parent.create_dir(&name)?;
+        let directory = self
+            .payload_directory_if_present(Path::new(relative), false)?
+            .ok_or_else(invalid_capability_path)?;
+        sync_directory(&directory)?;
+        sync_directory(&parent)
+    }
+
+    pub(crate) fn import_component_exists(&self, relative: &str) -> io::Result<bool> {
+        let Some((parent, name)) = self.file_parent_if_present(relative, false)? else {
+            return Ok(false);
+        };
+        match parent.symlink_metadata(&name) {
+            Ok(metadata) if metadata.is_dir() && !metadata.is_symlink() => Ok(self
+                .payload_directory_if_present(Path::new(relative), false)?
+                .is_some()),
+            Ok(metadata) if metadata.is_file() && !metadata.is_symlink() => {
+                self.open_import_file(relative).map(|_| true)
+            }
+            Ok(_) => Err(invalid_capability_path()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Publication and cleanup must not adopt replacement or newly introduced
+    /// child directories. Validate every observed binding and the complete tree.
+    /// The root grant excludes cooperating writers throughout this
+    /// check/use interval; arbitrary hostile equal-authority mutation is not
+    /// excluded by a preflight check and is not claimed here.
+    pub(crate) fn validate_import_stage_bindings(&self) -> Result<()> {
+        self.require_import_bound()?;
+        let root = self.directory(false)?;
+        let known = self
+            .file_parents
+            .lock()
+            .map_err(|_| io::Error::other("Import descendant authority lock poisoned"))?
+            .clone();
+        for (relative, held) in &known {
+            if directory_identity(&open_directory_chain(&root, relative, false)?)? != held.identity
+            {
+                return Err(invalid_capability_path().into());
+            }
+        }
+        let identities = known
+            .into_values()
+            .map(|held| (held.identity, held))
+            .collect();
+        Ok(validate_import_descendants(&root, &identities)?)
+    }
+
+    /// Validate the complete import tree before deleting any payload.
+    pub(crate) fn remove_import_stage_all(&self) -> Result<()> {
+        self.validate_import_stage_bindings()?;
+        if let Some(expected) = self.import_payload.get() {
+            self.verify_import_payload(expected)?;
+        }
+        self.remove_model_directory_all()
+    }
+
+    pub(crate) fn read_import_json(&self, filename: &str) -> Result<Option<Value>> {
+        match self.open_import_file(filename) {
+            Ok(file) => match serde_json::from_reader(file) {
+                Ok(value) => Ok(Some(value)),
+                Err(error) if error.is_io() => Err(error.into()),
+                // Optional runtime-hint JSON historically treats invalid data
+                // as no hint. Filesystem failures must still reach the owner.
+                Err(_) => Ok(None),
+            },
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub(crate) fn sync_import_payload(&self, filenames: &[String]) -> io::Result<()> {
+        for filename in filenames {
+            let (parent, _) = self.file_parent(filename, false)?;
+            sync_directory(&parent)?;
+        }
+        sync_directory(&self.directory(false)?)
+    }
+
     /// Remove only the bound model directory, using held directory-relative
     /// operations. Symlinks inside the payload are unlinked, never traversed.
-    /// The caller retains native exclusion and a durable deletion claim.
+    /// The caller retains native exclusion and either a durable deletion claim
+    /// or exclusive custody of an unpublished import workspace.
     pub(crate) fn remove_model_directory_all(&self) -> Result<()> {
         let directory = self.directory(false)?;
         let parent_relative = self
@@ -836,6 +1070,19 @@ impl DownloadRecoveryDestination {
     /// destination. The caller retains grants for both roots; cross-filesystem
     /// copying is not authorized by this capability.
     pub(crate) fn rename_model_directory_noreplace(&self, target: &Self) -> Result<()> {
+        match self.publish_model_directory_noreplace(target)? {
+            crate::metadata::AtomicPublication::Durable => Ok(()),
+            crate::metadata::AtomicPublication::PublishedDurabilityUnknown { error }
+            | crate::metadata::AtomicPublication::VisibilityUnknown { error, .. } => Err(error),
+        }
+    }
+
+    /// An Err guarantees rename was not observed successful. Once the syscall
+    /// succeeds, every later failure is a published outcome, never rollback authority.
+    pub(crate) fn publish_model_directory_noreplace(
+        &self,
+        target: &Self,
+    ) -> Result<crate::metadata::AtomicPublication> {
         #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             let _ = target;
@@ -898,8 +1145,6 @@ impl DownloadRecoveryDestination {
                     target_name,
                     false,
                 )?;
-                sync_directory(&source_parent)?;
-                sync_directory(&target_parent)?;
             }
             #[cfg(unix)]
             {
@@ -921,15 +1166,38 @@ impl DownloadRecoveryDestination {
                     &target_parent,
                     &target_c,
                 )?;
-                source_parent.sync_all()?;
-                target_parent.sync_all()?;
             }
-            self.authority.require_current()?;
-            target.authority.require_current()?;
-            if directory_identity(&target.directory(false)?)? != expected {
-                return Err(invalid_capability_path().into());
+            // Publication is already visible. Do not turn fsync or identity
+            // confirmation failures into a pre-publication error.
+            let durability = (|| -> Result<()> {
+                #[cfg(test)]
+                if let Some(sync) = &self.cleanup_parent_sync {
+                    sync(&source_parent)?;
+                }
+                sync_directory(&source_parent)?;
+                sync_directory(&target_parent)?;
+                Ok(())
+            })();
+            if let Err(error) = durability {
+                return Ok(
+                    crate::metadata::AtomicPublication::PublishedDurabilityUnknown { error },
+                );
             }
-            Ok(())
+            let confirmation = (|| -> Result<()> {
+                self.authority.require_current()?;
+                target.authority.require_current()?;
+                if directory_identity(&target.directory(false)?)? != expected {
+                    return Err(invalid_capability_path().into());
+                }
+                Ok(())
+            })();
+            Ok(match confirmation {
+                Ok(()) => crate::metadata::AtomicPublication::Durable,
+                Err(error) => crate::metadata::AtomicPublication::VisibilityUnknown {
+                    error,
+                    cleanup: crate::metadata::StagingCleanup::NotRequired,
+                },
+            })
         }
     }
 
@@ -959,7 +1227,16 @@ impl DownloadRecoveryDestination {
         if !file.metadata()?.is_file() {
             return Err(invalid_capability_path().into());
         }
-        let value: Value = serde_json::from_reader(file).map_err(|source| PumasError::Json {
+        let mut bytes = Vec::new();
+        file.take(IMPORT_DOCUMENT_MAX_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > IMPORT_DOCUMENT_MAX_BYTES {
+            return Err(PumasError::Validation {
+                field: "import_publication.evidence_size".into(),
+                message: "Held metadata/provenance exceeds its bounded observation limit".into(),
+            });
+        }
+        let value: Value = serde_json::from_slice(&bytes).map_err(|source| PumasError::Json {
             message: "Download provenance is not valid JSON".to_string(),
             source: Some(source),
         })?;
@@ -994,11 +1271,18 @@ impl DownloadRecoveryDestination {
             .file_name()
             .and_then(|s| s.to_str())
             .ok_or_else(invalid_capability_path)?;
+        Ok(self
+            .payload_directory_if_present(path.parent().unwrap_or(Path::new("")), create)?
+            .map(|directory| (directory, name.to_owned())))
+    }
+
+    fn payload_directory_if_present(&self, path: &Path, create: bool) -> io::Result<Option<Dir>> {
+        self.require_import_bound()?;
         let Some(mut directory) = self.directory_if_present(false)? else {
             return Ok(None);
         };
         let mut relative = PathBuf::new();
-        for component in path.parent().unwrap_or(Path::new("")).components() {
+        for component in path.components() {
             let Component::Normal(component) = component else {
                 return Err(invalid_capability_path());
             };
@@ -1040,7 +1324,7 @@ impl DownloadRecoveryDestination {
             }
             directory = held.directory.try_clone()?;
         }
-        Ok(Some((directory, name.to_owned())))
+        Ok(Some(directory))
     }
 
     /// Publish the unchanged object schema through held directory authority.
@@ -1310,7 +1594,7 @@ impl DownloadRecoveryDestination {
     }
 }
 
-fn directory_identity(directory: &Dir) -> io::Result<FilesystemIdentity> {
+pub(super) fn directory_identity(directory: &Dir) -> io::Result<FilesystemIdentity> {
     filesystem_identity(&directory.dir_metadata()?).ok_or_else(invalid_capability_path)
 }
 
@@ -1357,6 +1641,25 @@ fn rename_held_directories_noreplace(
     }
 }
 
+fn validate_import_descendants(
+    directory: &Dir,
+    known: &BTreeMap<FilesystemIdentity, Arc<HeldDestination>>,
+) -> io::Result<()> {
+    for entry in directory.entries()? {
+        let name = entry?.file_name();
+        if directory.symlink_metadata(&name)?.is_dir() {
+            let identity =
+                directory_identity(&open_directory_chain(directory, Path::new(&name), false)?)?;
+            // Readdir spelling can differ on a Unicode-normalizing filesystem.
+            // The observed bindings were checked above; match their held
+            // physical identities rather than guessing filename equivalence.
+            let held = known.get(&identity).ok_or_else(invalid_capability_path)?;
+            validate_import_descendants(&held.directory, known)?;
+        }
+    }
+    Ok(())
+}
+
 fn remove_held_directory_contents(directory: &Dir) -> io::Result<()> {
     for entry in directory.entries()? {
         let name = entry?.file_name();
@@ -1386,7 +1689,7 @@ fn invalid_download_integrity(message: &str) -> PumasError {
 
 /// Walk one component at a time without following symlinks. Each next operation
 /// is anchored to the held preceding directory, including missing-tail creation.
-fn open_directory_chain(root: &Dir, relative: &Path, create: bool) -> io::Result<Dir> {
+pub(super) fn open_directory_chain(root: &Dir, relative: &Path, create: bool) -> io::Result<Dir> {
     #[cfg(windows)]
     {
         let mut directory = root.try_clone()?;
@@ -1808,6 +2111,95 @@ fn invalid_capability_path() -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[test]
+    fn copied_import_publication_retains_output_after_parent_sync_failure() {
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        let mut stage = root.create_import_stage().unwrap();
+        stage
+            .create_import_file("weights")
+            .unwrap()
+            .write_all(b"published bytes")
+            .unwrap();
+        stage.cleanup_parent_sync = Some(std::sync::Arc::new(|_| {
+            Err(std::io::Error::other("injected publication fsync failure"))
+        }));
+        let target = root
+            .resolve(std::path::Path::new("vision/family/model"))
+            .unwrap();
+        let outcome = stage.publish_model_directory_noreplace(&target).unwrap();
+        assert!(
+            matches!(outcome, crate::metadata::AtomicPublication::PublishedDurabilityUnknown { error } if error.to_string().contains("injected publication fsync failure"))
+        );
+        assert!(!stage.display_path().exists());
+        assert!(stage.remove_model_directory_all().is_err());
+        assert_eq!(
+            std::fs::read(target.display_path().join("weights")).unwrap(),
+            b"published bytes"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copied_import_exclusive_creation_is_private_under_permissive_umask() {
+        let root = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new("sh")
+            .args(["-c", "umask 000; exec \"$@\"", "sh"])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "model_library::download_recovery::tests::copied_import_private_creation_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("PUMAS_IMPORT_MODE_FIXTURE_ROOT", root.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(std::fs::read_dir(root.path()).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(super::super::importer::TEMP_IMPORT_PREFIX)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "invoked by the permissive-umask subprocess test"]
+    fn copied_import_private_creation_child() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let path =
+            std::path::PathBuf::from(std::env::var_os("PUMAS_IMPORT_MODE_FIXTURE_ROOT").unwrap());
+        let root = super::DownloadDestinationRoot::open(&path).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        let stage = root.create_import_stage().unwrap();
+        assert_eq!(
+            std::fs::metadata(stage.display_path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        let mut file = stage.create_import_file("output").unwrap();
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        file.write_all(b"original").unwrap();
+        assert!(stage.create_import_file("output").is_err());
+        assert_eq!(
+            std::fs::read(stage.display_path().join("output")).unwrap(),
+            b"original"
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn windows_root_grant_excludes_competitors_and_pins_lock_file() {

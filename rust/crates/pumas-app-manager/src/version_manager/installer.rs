@@ -2026,14 +2026,27 @@ impl VersionInstaller {
                 Ok(())
             }
             Ok(None) => {
-                let client = reqwest::Client::builder()
-                    .connect_timeout(InstallationConfig::URL_FETCH_TIMEOUT)
-                    .user_agent("pumas-library")
-                    .build()
-                    .map_err(|error| PumasError::Network {
-                        message: "Failed to create shared artifact HTTP client".into(),
-                        cause: Some(error.to_string()),
-                    })?;
+                #[cfg(feature = "test-support")]
+                let fixture_client = self
+                    .github_client
+                    .as_ref()
+                    .map(|client| client.loopback_fixture_http_client(&download_url))
+                    .transpose()?
+                    .flatten();
+                #[cfg(not(feature = "test-support"))]
+                let fixture_client: Option<reqwest::Client> = None;
+                let client = if let Some(client) = fixture_client {
+                    client
+                } else {
+                    reqwest::Client::builder()
+                        .connect_timeout(InstallationConfig::URL_FETCH_TIMEOUT)
+                        .user_agent("pumas-library")
+                        .build()
+                        .map_err(|error| PumasError::Network {
+                            message: "Failed to create shared artifact HTTP client".into(),
+                            cause: Some(error.to_string()),
+                        })?
+                };
                 let host = LlamaCppHttpAttemptHost {
                     cancel_flag: self.cancel_flag.clone(),
                     shutdown_flag: self.shutdown_flag.clone(),

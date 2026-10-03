@@ -104,14 +104,14 @@ async fn create_selected_artifact_gguf_model(library: &ModelLibrary, model_id: &
         &model_dir.join("model-Q4_K_M.gguf"),
         &[
             gguf_kv_string("general.architecture", "llama"),
-            gguf_kv_u32("general.file_type", 13),
+            gguf_kv_u32("general.file_type", 15),
         ],
     );
     write_minimal_gguf(
         &model_dir.join("model-Q5_K_M.gguf"),
         &[
             gguf_kv_string("general.architecture", "llama"),
-            gguf_kv_u32("general.file_type", 15),
+            gguf_kv_u32("general.file_type", 17),
         ],
     );
 
@@ -1286,7 +1286,7 @@ async fn extracts_header_derived_gguf_package_evidence() {
         &model_dir.join("model-Q4_K_M.gguf"),
         &[
             gguf_kv_string("general.architecture", "llama"),
-            gguf_kv_u32("general.file_type", 13),
+            gguf_kv_u32("general.file_type", 15),
             gguf_kv_u64("llama.context_length", 4096),
             gguf_kv_u64("llama.embedding_length", 4096),
         ],
@@ -2454,5 +2454,91 @@ async fn concurrent_package_facts_requests_share_cache_path() {
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&cached.facts_json).unwrap(),
         serde_json::to_value(left).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn stale_gguf_detail_and_summary_reinspect_raw_header_before_becoming_fresh() {
+    let (_temp, library) = setup_library().await;
+    let model_id = "llm/llama/multi-quant-gguf";
+    create_selected_artifact_gguf_model(&library, model_id).await;
+    let model_dir = library.library_root().join(model_id);
+    let metadata_path = model_dir.join("metadata.json");
+    let mut metadata: ModelMetadata =
+        serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
+    metadata.selected_artifact_id = Some("model-q4".into());
+    metadata.selected_artifact_files = Some(vec!["model-Q4_K_M.gguf".into()]);
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+    library.index_model_dir(&model_dir).await.unwrap();
+    let metadata_before = std::fs::read(&metadata_path).unwrap();
+    let bytes_before = std::fs::read(model_dir.join("model-Q4_K_M.gguf")).unwrap();
+    let mut legacy_facts = library.resolve_model_package_facts(model_id).await.unwrap();
+    let gguf = legacy_facts.gguf.as_mut().unwrap();
+    assert_eq!(gguf.quantization.as_deref(), Some("MOSTLY_Q4_K_M"));
+    // Reproduce the old producer's wrong label with a pre-revision fingerprint.
+    // The manifest unit test separately proves the actual old/new hash divergence.
+    gguf.file_type = Some("MOSTLY_Q5_K_M".into());
+    gguf.quantization = Some("MOSTLY_Q5_K_M".into());
+    let legacy_fingerprint = "0".repeat(64);
+    let mut expected_fingerprint = None;
+    for scope in [
+        ModelPackageFactsCacheScope::Detail,
+        ModelPackageFactsCacheScope::Summary,
+    ] {
+        let mut row = library
+            .index()
+            .get_model_package_facts_cache(model_id, Some("model-q4"), scope)
+            .unwrap()
+            .unwrap();
+        expected_fingerprint.get_or_insert(row.source_fingerprint.clone());
+        row.source_fingerprint = legacy_fingerprint.clone();
+        if scope == ModelPackageFactsCacheScope::Detail {
+            row.facts_json = serde_json::to_string(&legacy_facts).unwrap();
+        }
+        library
+            .index()
+            .upsert_model_package_facts_cache(&row)
+            .unwrap();
+    }
+    let result = library
+        .resolve_model_package_facts_summary(model_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        result.status,
+        pumas_library::models::ModelPackageFactsSummaryStatus::Regenerated
+    );
+    for scope in [
+        ModelPackageFactsCacheScope::Detail,
+        ModelPackageFactsCacheScope::Summary,
+    ] {
+        let row = library
+            .index()
+            .get_model_package_facts_cache(model_id, Some("model-q4"), scope)
+            .unwrap()
+            .unwrap();
+        assert_eq!(Some(&row.source_fingerprint), expected_fingerprint.as_ref());
+        assert_ne!(row.source_fingerprint, legacy_fingerprint);
+        if scope == ModelPackageFactsCacheScope::Detail {
+            let facts: pumas_library::models::ResolvedModelPackageFacts =
+                serde_json::from_str(&row.facts_json).unwrap();
+            assert_eq!(
+                facts.gguf.unwrap().quantization.as_deref(),
+                Some("MOSTLY_Q4_K_M")
+            );
+        }
+    }
+    assert_eq!(std::fs::read(&metadata_path).unwrap(), metadata_before);
+    assert_eq!(
+        std::fs::read(model_dir.join("model-Q4_K_M.gguf")).unwrap(),
+        bytes_before
+    );
+    assert_eq!(
+        library
+            .resolve_model_package_facts_summary(model_id)
+            .await
+            .unwrap()
+            .status,
+        pumas_library::models::ModelPackageFactsSummaryStatus::Fresh
     );
 }

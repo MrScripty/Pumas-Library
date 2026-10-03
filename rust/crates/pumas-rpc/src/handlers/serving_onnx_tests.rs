@@ -19,6 +19,7 @@ async fn serving_test_state() -> (TempDir, AppState) {
     (
         temp_dir,
         AppState {
+            shutdown_request: crate::server::ShutdownRequest::default(),
             catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
             api,
             version_managers: Arc::new(RwLock::new(HashMap::new())),

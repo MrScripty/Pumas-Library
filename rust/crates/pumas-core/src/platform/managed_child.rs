@@ -18,6 +18,8 @@ pub struct ManagedChild {
     custody: Option<Arc<ManagedChildCustodySlot>>,
     #[cfg(test)]
     force_observation_failure: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(all(test, target_os = "linux"))]
+    incomplete_group_observations: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(all(test, target_os = "macos"))]
     force_group_signal_permission_denied: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(windows)]
@@ -177,6 +179,8 @@ impl ManagedChild {
                 custody: Some(custody),
                 #[cfg(test)]
                 force_observation_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                #[cfg(all(test, target_os = "linux"))]
+                incomplete_group_observations: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 #[cfg(all(test, target_os = "macos"))]
                 force_group_signal_permission_denied: Arc::new(std::sync::atomic::AtomicBool::new(
                     false,
@@ -265,6 +269,28 @@ impl ManagedChild {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    fn observe_linux_group(&self) -> io::Result<bool> {
+        #[cfg(test)]
+        if self
+            .incomplete_group_observations
+            .fetch_update(
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+                |remaining| remaining.checked_sub(1),
+            )
+            .is_ok()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "Injected incomplete task observation",
+            ));
+        }
+        super::linux_group::group_has_live_members(
+            i32::try_from(self.id()).map_err(|_| io::Error::other("Invalid group ID"))?,
+        )
+    }
+
     /// Stop the owned generation, prove descendant drain, then reap its leader.
     /// An error retains custody so callers can retry rather than publishing or
     /// deleting a still-owned staging directory.
@@ -279,14 +305,17 @@ impl ManagedChild {
         let until = Instant::now() + deadline;
         loop {
             #[cfg(target_os = "linux")]
-            {
+            let incomplete_observation = {
                 super::linux_group::signal_group(self.id())?;
-                if !super::linux_group::group_has_live_members(
-                    i32::try_from(self.id()).map_err(|_| io::Error::other("Invalid group ID"))?,
-                )? {
-                    break;
+                match self.observe_linux_group() {
+                    Ok(false) => break,
+                    Ok(true) => None,
+                    // A procfs disappearance race is uncertainty, not an empty
+                    // group. Keep the unreaped leader, custody and caller budget.
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => Some(error),
+                    Err(error) => return Err(error),
                 }
-            }
+            };
             #[cfg(target_os = "macos")]
             {
                 let pid =
@@ -317,6 +346,13 @@ impl ManagedChild {
                 }
             }
             if Instant::now() >= until {
+                #[cfg(target_os = "linux")]
+                if let Some(error) = incomplete_observation {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("Owned process-tree drain timed out with incomplete observation: {error}"),
+                    ));
+                }
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "Owned process-tree drain timed out",
@@ -358,6 +394,8 @@ impl Drop for ManagedChild {
             let job = self.job.clone();
             #[cfg(test)]
             let force_observation_failure = self.force_observation_failure.clone();
+            #[cfg(all(test, target_os = "linux"))]
+            let incomplete_group_observations = self.incomplete_group_observations.clone();
             #[cfg(all(test, target_os = "macos"))]
             let force_group_signal_permission_denied =
                 self.force_group_signal_permission_denied.clone();
@@ -370,6 +408,8 @@ impl Drop for ManagedChild {
                 job,
                 #[cfg(test)]
                 force_observation_failure,
+                #[cfg(all(test, target_os = "linux"))]
+                incomplete_group_observations,
                 #[cfg(all(test, target_os = "macos"))]
                 force_group_signal_permission_denied,
             };
@@ -972,6 +1012,58 @@ mod unix_tests {
         assert!(!super::super::linux_group::group_has_live_members(group).unwrap());
         #[cfg(target_os = "macos")]
         assert!(!macos_group_has_live_members(group).unwrap());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn transient_task_disappearance_retries_without_releasing_custody() {
+        use std::sync::atomic::Ordering;
+        let custody = ManagedChildCustodySlot::new();
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        let mut child = ManagedChild::spawn(&mut command, custody.clone()).unwrap();
+        child
+            .incomplete_group_observations
+            .store(2, Ordering::Release);
+        let result = child.terminate_and_drain(Duration::from_secs(5));
+        // Always settle the real child before asserting a failing test result.
+        child
+            .incomplete_group_observations
+            .store(0, Ordering::Release);
+        if result.is_err() {
+            let _ = child.terminate_and_drain(Duration::from_secs(5));
+        }
+        result.unwrap();
+        assert!(!custody.is_active());
+        assert!(child.drained);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn incomplete_task_observation_exhausts_existing_deadline_and_retains_owner() {
+        use std::sync::atomic::Ordering;
+        let custody = ManagedChildCustodySlot::new();
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        let mut child = ManagedChild::spawn(&mut command, custody.clone()).unwrap();
+        let pid = child.id();
+        child
+            .incomplete_group_observations
+            .store(usize::MAX, Ordering::Release);
+        let result = child.terminate_and_drain(Duration::ZERO);
+        let retained = custody.is_active() && !child.drained && child.id() == pid;
+        child
+            .incomplete_group_observations
+            .store(0, Ordering::Release);
+        child.terminate_and_drain(Duration::from_secs(5)).unwrap();
+        let error = result.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert!(error.to_string().contains("incomplete observation"));
+        assert!(
+            retained,
+            "uncertainty must not release or reap the owned generation"
+        );
+        assert!(!custody.is_active());
     }
 
     #[test]

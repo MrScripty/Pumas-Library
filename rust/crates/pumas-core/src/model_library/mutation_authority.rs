@@ -348,6 +348,11 @@ impl LibraryMutationAuthority {
         let metadata = destination
             .read_model_metadata()?
             .ok_or_else(|| import_invalid("Completion receipt metadata is missing"))?;
+        if metadata.import_publication.is_some() || destination.import_receipt_claimed()? {
+            return Err(import_invalid(
+                "Copied publication cannot settle managed HF completion",
+            ));
+        }
         if metadata.model_id.as_deref() != Some(receipt.model_id.as_str())
             || metadata.repo_id.as_deref() != Some(receipt.manifest.source().source_id())
         {
@@ -426,7 +431,14 @@ impl LibraryMutationAuthority {
         grant.validate_root(&self.root)?;
         let destination = self.root.resolve(model_dir)?;
         proof.validate(&self.downloads, &destination.persisted_identity()?, partial)?;
-        destination.read_model_metadata()?;
+        let metadata = destination.read_model_metadata()?;
+        if metadata.is_some_and(|metadata| metadata.import_publication.is_some())
+            || destination.import_receipt_claimed()?
+        {
+            return Err(import_invalid(
+                "Managed HF import cannot replace copied-publication custody",
+            ));
+        }
         Ok(Arc::new(LibraryImportGuard {
             root: self.root.clone(),
             grant,
@@ -642,6 +654,13 @@ impl LibraryImportGuard {
     }
 
     pub(crate) fn validate(&self, path: &Path) -> Result<()> {
+        self.held_destination(path)?.read_model_metadata()?;
+        Ok(())
+    }
+
+    /// Borrow the original destination under this guard's grant. This validates
+    /// physical binding independently of whether canonical JSON is readable.
+    pub(crate) fn held_destination(&self, path: &Path) -> Result<&DownloadRecoveryDestination> {
         self.grant.validate_root(&self.root)?;
         if let Some(proof) = &self.proof {
             proof.validate_binding()?;
@@ -653,8 +672,10 @@ impl LibraryImportGuard {
                 message: "Import effect does not identify its admitted destination".into(),
             });
         }
-        self.destination.read_model_metadata()?;
-        Ok(())
+        if !self.destination.model_directory_exists()? {
+            return Err(import_invalid("Admitted import destination is missing"));
+        }
+        Ok(&self.destination)
     }
 
     pub(crate) fn require_package_facts(&self) -> Result<()> {
@@ -721,7 +742,12 @@ impl LibraryImportGuard {
         })
         .await??;
         let outputs = library
-            .hf_completion_output_proof(&self.destination, model_id, require_package_facts)
+            .hf_completion_output_proof(
+                &self.destination,
+                model_id,
+                require_package_facts,
+                self.grant.clone(),
+            )
             .await?;
         if outputs.package_facts.is_some() != require_package_facts {
             return Err(import_invalid(

@@ -1424,9 +1424,13 @@ impl ModelLibrary {
                 .await?;
         }
 
+        let publication_blocked = checkpoint_state
+            .completed_results
+            .iter()
+            .any(|item| item.action == "blocked_import_publication");
         let mut report = MigrationExecutionReport {
             generated_at: checkpoint_state.created_at.clone(),
-            completed_at: Some(chrono::Utc::now().to_rfc3339()),
+            completed_at: (!publication_blocked).then(|| chrono::Utc::now().to_rfc3339()),
             resumed_from_checkpoint,
             checkpoint_path: checkpoint_path.display().to_string(),
             planned_move_count,
@@ -1437,6 +1441,10 @@ impl ModelLibrary {
             match item.action.as_str() {
                 "moved" | "already_migrated" | "split_directory" => {
                     report.completed_move_count += 1
+                }
+                "blocked_import_publication" => {
+                    report.skipped_move_count += 1;
+                    report.error_count += 1;
                 }
                 "blocked_collision"
                 | "missing_source"
@@ -1462,7 +1470,7 @@ impl ModelLibrary {
             report.error_count += report.referential_integrity_errors.len();
         }
 
-        if checkpoint_state.pending_moves.is_empty() {
+        if checkpoint_state.pending_moves.is_empty() && !publication_blocked {
             let _ = fs::remove_file(&checkpoint_path).await;
         } else {
             save_migration_checkpoint_async(checkpoint_path.clone(), checkpoint_state.clone())
@@ -1537,6 +1545,10 @@ impl ModelLibrary {
                 let grant = Arc::new(migration_authority.root().try_acquire_execution_grant()?);
                 let source = migration_authority.root().resolve(&source_dir)?;
                 let target = migration_authority.root().resolve(&target_dir)?;
+                if let Err(error) = migration_library.require_finalized_import_edit(&source_dir, source.read_model_metadata()?.as_ref()) {
+                    return publication_preflight_outcome(error);
+                }
+                let expected_publication = migration_index.get(&old_model_id)?.filter(|record| record.metadata.get("import_publication").is_some_and(|value| !value.is_null()));
                 let conversion_targets = conversion_candidates
                     .into_iter()
                     .filter_map(|(model_id, path)| {
@@ -1553,13 +1565,18 @@ impl ModelLibrary {
                                     source.source_model_id == old_model_id
                                 }) =>
                             {
+                                if let Err(error) = migration_library.require_finalized_import_edit(&path, Some(&metadata)) { return Some(Err(error)); }
                                 Some(Ok((model_id, path)))
                             }
                             Ok(_) => None,
                             Err(error) => Some(Err(error)),
                         }
                     })
-                    .collect::<Result<Vec<_>>>()?;
+                    .collect::<Result<Vec<_>>>();
+                let conversion_targets = match conversion_targets {
+                    Ok(targets) => targets,
+                    Err(error) => return publication_preflight_outcome(error),
+                };
                 let mut metadata_mutation = migration_authority
                     .protect_metadata_under_grant(&conversion_targets, grant.clone())?;
                 let mut mutation = migration_authority.acquire_under_grant(
@@ -1603,11 +1620,17 @@ impl ModelLibrary {
                 }
                 mutation.mark_started();
                 source.rename_model_directory_noreplace(&target)?;
+                migration_library.normalize_owned_move_metadata(&target_for_record, &mut metadata)?;
                 target.write_model_metadata(&metadata)?;
                 let record = metadata_to_record(&target_model_id, &target_for_record, &metadata);
-                migration_index.replace_model_id_preserving_references(&old_model_id, &record)?;
+                if let Some(expected) = expected_publication {
+                    migration_library.project_owned_import_move(&expected, &target, &metadata)?;
+                } else {
+                    migration_index.replace_model_id_preserving_references(&old_model_id, &record)?;
+                }
                 for (conversion_model_id, conversion_path) in conversion_targets {
                     let destination = migration_authority.root().resolve(&conversion_path)?;
+                    let expected_index = migration_index.get(&conversion_model_id)?;
                     let Some(mut conversion_metadata) = destination.read_model_metadata()? else {
                         return Err(PumasError::Validation {
                             field: "model_library.mutation".into(),
@@ -1644,21 +1667,31 @@ impl ModelLibrary {
                         &conversion_path,
                         &conversion_metadata,
                     );
-                    migration_index.upsert(&conversion_record)?;
+                    if migration_index.upsert_projection_if_unchanged(&conversion_record, expected_index.as_ref())? == crate::index::ProjectionCommit::Conflict {
+                        return Err(PumasError::Other("Conversion metadata index changed during migration; newer state preserved".into()));
+                    }
                 }
                 metadata_mutation.finish_success()?;
                 mutation.finish_success()?;
-                Ok::<_, PumasError>(())
+                Ok::<_, PumasError>(PlannedMigrationOutcome::Moved)
             })
             .await;
 
         match outcome {
-            Ok(Ok(())) => Ok(MigrationExecutionItem {
+            Ok(Ok(PlannedMigrationOutcome::Moved)) => Ok(MigrationExecutionItem {
                 model_id: planned.model_id.clone(),
                 target_model_id: planned.target_model_id.clone(),
                 action: "moved".to_string(),
                 error: None,
             }),
+            Ok(Ok(PlannedMigrationOutcome::BlockedPublication(error))) => {
+                Ok(MigrationExecutionItem {
+                    model_id: planned.model_id.clone(),
+                    target_model_id: planned.target_model_id.clone(),
+                    action: "blocked_import_publication".to_string(),
+                    error: Some(error),
+                })
+            }
             Ok(Err(error)) => match error {
                 domain_error @ PumasError::DownloadRootBusy
                 | domain_error @ PumasError::ModelNotFound { .. } => Ok(MigrationExecutionItem {
@@ -2261,6 +2294,25 @@ pub struct PackageFactsCacheMigrationValidationReport {
     pub blocked_partial_download_count: usize,
     pub error_count: usize,
     pub valid: bool,
+}
+
+/// Outcome of one owned move before checkpoint/report projection.
+enum PlannedMigrationOutcome {
+    Moved,
+    BlockedPublication(String),
+}
+
+/// Only pre-effect publication refusals are terminal blocked attempts. A later
+/// publication failure may follow a rename and must retain its error outcome.
+fn publication_preflight_outcome(error: PumasError) -> Result<PlannedMigrationOutcome> {
+    match error {
+        PumasError::Validation { field, message } if field == "import_publication" => {
+            Ok(PlannedMigrationOutcome::BlockedPublication(
+                PumasError::Validation { field, message }.to_string(),
+            ))
+        }
+        error => Err(error),
+    }
 }
 
 /// Planned move row persisted in migration checkpoint state.

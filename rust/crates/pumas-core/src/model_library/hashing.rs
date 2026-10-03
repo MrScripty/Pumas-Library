@@ -8,7 +8,7 @@
 use crate::error::{PumasError, Result};
 use blake3::Hasher as Blake3Hasher;
 use sha2::{Digest, Sha256};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 /// Chunk size for reading files (8MB, optimal for SSDs).
 const CHUNK_SIZE: usize = 8 * 1024 * 1024;
@@ -41,14 +41,25 @@ pub fn compute_dual_hash(path: impl AsRef<Path>) -> Result<DualHash> {
     let path = path.as_ref();
     let mut file = std::fs::File::open(path).map_err(|e| PumasError::io_with_path(e, path))?;
 
+    compute_dual_hash_reader(&mut file).map_err(|error| match error {
+        PumasError::Io {
+            message, source, ..
+        } => PumasError::Io {
+            message,
+            path: Some(path.to_path_buf()),
+            source,
+        },
+        error => error,
+    })
+}
+
+pub(super) fn compute_dual_hash_reader(file: &mut impl Read) -> Result<DualHash> {
     let mut sha256_hasher = Sha256::new();
     let mut blake3_hasher = Blake3Hasher::new();
 
     let mut buffer = vec![0u8; CHUNK_SIZE];
     loop {
-        let bytes_read = file
-            .read(&mut buffer)
-            .map_err(|e| PumasError::io_with_path(e, path))?;
+        let bytes_read = read_chunk(file, &mut buffer)?;
         if bytes_read == 0 {
             break;
         }
@@ -61,6 +72,46 @@ pub fn compute_dual_hash(path: impl AsRef<Path>) -> Result<DualHash> {
     let blake3 = blake3_hasher.finalize().to_hex().to_string();
 
     Ok(DualHash { sha256, blake3 })
+}
+
+/// Hash precisely the bytes written during a copied import, without a second
+/// source read. The caller owns both descriptors and their final synchronization.
+pub(super) fn copy_and_hash(
+    input: &mut impl Read,
+    output: &mut impl Write,
+) -> Result<(u64, DualHash)> {
+    let mut sha256 = Sha256::new();
+    let mut blake3 = Blake3Hasher::new();
+    let mut size = 0_u64;
+    let mut buffer = vec![0_u8; CHUNK_SIZE];
+    loop {
+        let count = read_chunk(input, &mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        output.write_all(&buffer[..count])?;
+        sha256.update(&buffer[..count]);
+        blake3.update(&buffer[..count]);
+        size += count as u64;
+    }
+    Ok((
+        size,
+        DualHash {
+            sha256: hex::encode(sha256.finalize()),
+            blake3: blake3.finalize().to_hex().to_string(),
+        },
+    ))
+}
+
+// Interrupted reads transfer no bytes. Retrying only that structured OS kind
+// preserves EOF, partial output and all other input errors.
+fn read_chunk(input: &mut impl Read, buffer: &mut [u8]) -> std::io::Result<usize> {
+    loop {
+        match input.read(buffer) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => return result,
+        }
+    }
 }
 
 /// Compute a fast hash for quick candidate filtering.
@@ -190,6 +241,61 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    struct InterruptedInput {
+        input: std::io::Cursor<Vec<u8>>,
+        interrupt_next: bool,
+    }
+
+    impl Read for InterruptedInput {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.interrupt_next = !self.interrupt_next;
+            if self.interrupt_next {
+                return Err(std::io::ErrorKind::Interrupted.into());
+            }
+            let limit = buffer.len().min(3);
+            self.input.read(&mut buffer[..limit])
+        }
+    }
+
+    #[test]
+    fn copied_import_stream_and_verification_retry_interrupted_reads_without_changing_evidence() {
+        let bytes = b"synthetic model bytes";
+        let interrupted = || InterruptedInput {
+            input: std::io::Cursor::new(bytes.to_vec()),
+            interrupt_next: false,
+        };
+        let mut output = Vec::new();
+        let (size, copied) = copy_and_hash(&mut interrupted(), &mut output).unwrap();
+        let verified = compute_dual_hash_reader(&mut interrupted()).unwrap();
+        let expected = compute_dual_hash_reader(&mut bytes.as_slice()).unwrap();
+        assert_eq!(size, bytes.len() as u64);
+        assert_eq!(output, bytes);
+        assert_eq!(copied.sha256, expected.sha256);
+        assert_eq!(copied.blake3, expected.blake3);
+        assert_eq!(verified.sha256, expected.sha256);
+        assert_eq!(verified.blake3, expected.blake3);
+    }
+
+    #[test]
+    fn copied_import_stream_preserves_non_interruption_errors_and_partial_output() {
+        struct FailingInput(bool);
+        impl Read for FailingInput {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                if self.0 {
+                    return Err(std::io::ErrorKind::InvalidData.into());
+                }
+                self.0 = true;
+                buffer[..3].copy_from_slice(b"one");
+                Ok(3)
+            }
+        }
+        let mut output = Vec::new();
+        let error = copy_and_hash(&mut FailingInput(false), &mut output).unwrap_err();
+        assert!(matches!(error, PumasError::Io { source: Some(source), .. }
+            if source.kind() == std::io::ErrorKind::InvalidData));
+        assert_eq!(output, b"one");
+    }
 
     #[test]
     fn test_dual_hash_empty_file() {

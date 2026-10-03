@@ -10,11 +10,13 @@ use crate::handlers::{
     handle_openai_models, handle_openai_proxy, handle_runtime_profile_update_events,
     handle_serving_status_update_events,
 };
+use crate::http_admission::{enforce_local_request, is_allowed_origin};
 #[cfg(feature = "inference-plugins")]
 use crate::provider_clients::{LlamaCppRouterClient, OllamaClientFactory};
 use axum::{
     extract::DefaultBodyLimit,
-    http::{header, HeaderValue, Method},
+    http::{header, Method},
+    middleware,
     routing::{get, post},
     Router,
 };
@@ -30,7 +32,6 @@ use pumas_library::{
 };
 #[cfg(feature = "inference-plugins")]
 use std::collections::HashMap;
-use std::future::IntoFuture;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -78,8 +79,43 @@ impl LoopbackHost {
     }
 }
 
+/// Admission-only handle. Request handlers never receive the completion future,
+/// because it includes completion of their own HTTP response.
+#[derive(Clone)]
+pub(crate) struct ShutdownRequest {
+    signal: watch::Sender<bool>,
+}
+
+impl Default for ShutdownRequest {
+    fn default() -> Self {
+        Self {
+            signal: watch::channel(false).0,
+        }
+    }
+}
+
+impl ShutdownRequest {
+    pub(crate) fn is_requested(&self) -> bool {
+        *self.signal.borrow()
+    }
+
+    pub(crate) fn request(&self) {
+        self.signal.send_replace(true);
+    }
+
+    pub(crate) async fn requested(self) {
+        let mut receiver = self.signal.subscribe();
+        while !*receiver.borrow_and_update() {
+            if receiver.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+}
+
 /// Application state shared across handlers.
 pub struct AppState {
+    pub(crate) shutdown_request: ShutdownRequest,
     pub(crate) catalog_projection: CatalogProjection,
     /// Core API (model library, system utilities)
     pub api: PumasApi,
@@ -160,7 +196,17 @@ impl ServerHandle {
     /// Stop serving and observe both owned drains. Cancelling a waiter does not
     /// cancel the supervisor or consume its result; repeated waiters share it.
     pub async fn shutdown(&self) -> anyhow::Result<()> {
+        self.request_shutdown();
+        self.wait().await
+    }
+
+    /// Request cessation without waiting for the requesting HTTP response.
+    pub fn request_shutdown(&self) {
         self.shutdown_signal.send_replace(true);
+    }
+
+    /// Observe the process-owned receipt without initiating shutdown.
+    pub async fn wait(&self) -> anyhow::Result<()> {
         self.completion
             .clone()
             .await
@@ -227,6 +273,7 @@ pub async fn start_server(
     #[cfg(feature = "inference-plugins")] plugin_loader: PluginLoader,
     host: LoopbackHost,
     port: u16,
+    http_policy: crate::http_transport::HttpShutdownPolicy,
 ) -> anyhow::Result<ServerHandle> {
     #[cfg(feature = "inference-plugins")]
     let gateway_http_client = build_gateway_http_client()?;
@@ -249,7 +296,10 @@ pub async fn start_server(
     #[cfg(feature = "inference-plugins")]
     let provider_registry = ProviderRegistry::builtin();
     let (catalog_projection, catalog_worker) = CatalogProjection::start(MAX_IN_FLIGHT_RPC_REQUESTS);
+    let shutdown_request = ShutdownRequest::default();
+    let shutdown_signal = shutdown_request.signal.clone();
     let state = Arc::new(AppState {
+        shutdown_request: shutdown_request.clone(),
         catalog_projection,
         api,
         #[cfg(feature = "inference-plugins")]
@@ -275,7 +325,7 @@ pub async fn start_server(
     // Configure CORS for local development and packaged renderer diagnostics.
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(|origin, _parts| {
-            is_allowed_cors_origin(origin)
+            is_allowed_origin(origin)
         }))
         .allow_methods([Method::GET, Method::POST])
         .allow_headers([header::CONTENT_TYPE]);
@@ -317,6 +367,11 @@ pub async fn start_server(
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))
         .layer(cors)
+        .layer(axum::middleware::from_fn_with_state(
+            shutdown_request.clone(),
+            reject_during_shutdown,
+        ))
+        .layer(middleware::from_fn(enforce_local_request))
         .with_state(state.clone());
 
     info!(
@@ -335,12 +390,26 @@ pub async fn start_server(
     let downloads_drained = Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(test)]
     let downloads_drain_observed = downloads_drained.clone();
-    let (shutdown_signal, mut shutdown) = watch::channel(false);
     let task = tokio::spawn(async move {
-        let serving = axum::serve(listener, app).into_future();
-        let server_result = tokio::select! {
-            result = serving => result.map_err(anyhow::Error::from),
-            _ = shutdown.changed() => Ok(()),
+        let mut serving = Box::pin(crate::http_transport::serve(
+            listener,
+            app,
+            shutdown_request.clone(),
+            http_policy,
+        ));
+        let early_result = tokio::select! {
+            result = &mut serving => Some(result),
+            _ = shutdown_request.clone().requested() => None,
+        };
+        shutdown_request.request();
+        // Retain accepted connections until their responses settle. Core owners
+        // drain concurrently, so requests awaiting those owners cannot deadlock
+        // behind an HTTP-first shutdown ordering.
+        let http_completion = async move {
+            match early_result {
+                Some(result) => result,
+                None => serving.await,
+            }
         };
         let installation_cleanup = async {
             #[cfg(feature = "inference-plugins")]
@@ -364,9 +433,10 @@ pub async fn start_server(
             }
             Ok::<(), anyhow::Error>(())
         };
-        let (owners, runtimes, installation_cleanup) = tokio::join!(
+        let (http, owners, runtimes, installation_cleanup) = tokio::join!(
+            http_completion,
             drain_server_owners(
-                server_result,
+                Ok(()),
                 async {
                     let result = state.api.shutdown_intent().await;
                     #[cfg(test)]
@@ -395,6 +465,14 @@ pub async fn start_server(
         // Consumer owners must finish draining before the shared supervisor
         // closes admission. Always observe its settlement, including failures.
         let acquisition_cleanup = state.api.shutdown_acquisition().await;
+        let owners = match (owners, http) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(anyhow::anyhow!("HTTP connections: {error}")),
+            (Err(owners), Err(error)) => {
+                Err(anyhow::anyhow!("{owners}; HTTP connections: {error}"))
+            }
+        };
         let installation_cleanup = match (installation_cleanup, acquisition_cleanup) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) => Err(error),
@@ -432,6 +510,20 @@ pub async fn start_server(
     Ok(handle)
 }
 
+async fn reject_during_shutdown(
+    axum::extract::State(shutdown): axum::extract::State<ShutdownRequest>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    // RPC rechecks after decoding so a repeated shutdown can acknowledge without
+    // admitting other commands. Other routes stop at the header boundary.
+    if shutdown.is_requested() && request.uri().path() != "/rpc" {
+        return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    next.run(request).await
+}
+
 #[cfg(feature = "inference-plugins")]
 fn build_gateway_http_client() -> anyhow::Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
@@ -454,27 +546,28 @@ fn build_ollama_client_factory() -> anyhow::Result<OllamaClientFactory> {
     Ok(OllamaClientFactory::new(http_clients))
 }
 
-fn is_allowed_cors_origin(origin: &HeaderValue) -> bool {
-    let Ok(origin) = origin.to_str() else {
-        return false;
-    };
-    let Ok(url) = url::Url::parse(origin) else {
-        return false;
-    };
-    if !matches!(url.scheme(), "http" | "https") {
-        return false;
-    }
-    match url.host() {
-        Some(url::Host::Domain("localhost")) => true,
-        Some(url::Host::Ipv4(address)) => address.is_loopback(),
-        Some(url::Host::Ipv6(address)) => address.is_loopback(),
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn shutdown_request_is_idempotent_and_visible_to_late_subscribers() {
+        let request = super::ShutdownRequest::default();
+        let observed = request.clone().requested();
+        tokio::pin!(observed);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), &mut observed)
+                .await
+                .is_err()
+        );
+        request.request();
+        request.request();
+        observed.await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), request.requested())
+            .await
+            .unwrap();
+    }
+
     use super::*;
+    use axum::http::HeaderValue;
     #[cfg(feature = "inference-plugins")]
     use pumas_library::AppId;
     use std::io::ErrorKind;
@@ -770,6 +863,7 @@ mod tests {
             plugin_loader,
             LoopbackHost::parse("127.0.0.1").unwrap(),
             0,
+            crate::http_transport::HttpShutdownPolicy::default(),
         )
         .await
     }
@@ -2268,6 +2362,7 @@ mod tests {
             plugins,
             LoopbackHost::parse("127.0.0.1").unwrap(),
             0,
+            crate::http_transport::HttpShutdownPolicy::default(),
         )
         .await
         {
@@ -2313,7 +2408,7 @@ mod tests {
             "http://[::1]:5173",
         ] {
             let header = HeaderValue::from_str(origin).unwrap();
-            assert!(is_allowed_cors_origin(&header), "{origin}");
+            assert!(is_allowed_origin(&header), "{origin}");
         }
     }
 
@@ -2325,7 +2420,7 @@ mod tests {
             "file:///tmp/index.html",
         ] {
             let header = HeaderValue::from_str(origin).unwrap();
-            assert!(!is_allowed_cors_origin(&header), "{origin}");
+            assert!(!is_allowed_origin(&header), "{origin}");
         }
     }
 
@@ -2334,4 +2429,35 @@ mod tests {
     fn gateway_http_client_builds_with_configured_policy() {
         build_gateway_http_client().unwrap();
     }
+    #[tokio::test]
+    async fn shutdown_rejects_health_events_and_gateway_before_handlers() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use tower::ServiceExt;
+        let shutdown = ShutdownRequest::default();
+        let app = Router::new()
+            .fallback(|| async { axum::http::StatusCode::IM_A_TEAPOT })
+            .layer(axum::middleware::from_fn_with_state(
+                shutdown.clone(),
+                reject_during_shutdown,
+            ));
+        shutdown.request();
+        for path in [
+            "/health",
+            "/events/model-library-updates",
+            "/v1/completions",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
 }
+
+#[cfg(test)]
+mod acquisition_integration;

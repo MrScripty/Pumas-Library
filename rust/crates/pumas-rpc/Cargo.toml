@@ -21,7 +21,10 @@ tokio = { workspace = true, features = ["rt-multi-thread", "sync", "net", "macro
 
 # HTTP server
 axum = { workspace = true }
-tower = { workspace = true, features = ["limit"] }
+# Own HTTP/1 connection shutdown; these versions already exist in Cargo.lock.
+hyper = { version = "1", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+tower = { workspace = true, features = ["limit", "util"] }
 tower-http = { workspace = true }
 
 # Serialization
@@ -51,6 +54,8 @@ reqwest = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 
 [features]
+# Weak forwarding preserves the inference-disabled dependency boundary.
+test-support = ["pumas-app-manager?/test-support"]
 export-contract = ["dep:schemars", "dep:tempfile", "pumas-library/contract-schema"]
 default = ["inference-plugins"]
 inference-plugins = [

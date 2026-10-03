@@ -17,6 +17,8 @@ const DB_FILENAME: &str = "models.db";
 ///
 /// This type opens the existing SQLite model index without claiming instance
 /// ownership, starting watchers, creating schema, or running reconciliation.
+/// New copied-publication gates additionally observe bounded canonical metadata
+/// and receipts; cached Ready facts cannot replace that physical evidence.
 pub struct PumasReadOnlyLibrary {
     library_root: PathBuf,
     index: ModelIndex,
@@ -40,7 +42,15 @@ impl PumasReadOnlyLibrary {
         &self,
         request: ModelLibrarySelectorSnapshotRequest,
     ) -> Result<ModelLibrarySelectorSnapshot> {
-        self.index.list_model_library_selector_snapshot(&request)
+        let (mut snapshot, indexed) = self
+            .index
+            .list_selector_snapshot_with_publication(&request)?;
+        super::importer::publication::observe_selector_snapshot(
+            &self.library_root,
+            &mut snapshot,
+            &indexed,
+        );
+        Ok(snapshot)
     }
 
     pub fn resolve_model_artifact_load_target(
@@ -51,7 +61,7 @@ impl PumasReadOnlyLibrary {
             return Ok(mode_not_allowed_response());
         }
 
-        resolve_artifact_load_target_from_index(&self.index, request)
+        resolve_artifact_load_target_from_index(&self.index, &self.library_root, request)
     }
 }
 

@@ -304,8 +304,14 @@ impl VersionManager {
     /// * `launcher_root` - Path to the launcher root directory
     /// * `app_id` - The application to manage versions for
     pub async fn new(launcher_root: impl Into<PathBuf>, app_id: AppId) -> Result<Self> {
-        let launcher_root = launcher_root.into();
+        Self::new_with_github_client(launcher_root.into(), app_id, None).await
+    }
 
+    async fn new_with_github_client(
+        launcher_root: PathBuf,
+        app_id: AppId,
+        configured_client: Option<Arc<GitHubClient>>,
+    ) -> Result<Self> {
         if !app_id.has_version_manager() {
             return Err(PumasError::Config {
                 message: format!(
@@ -331,7 +337,10 @@ impl VersionManager {
         let (metadata_manager, github_client) = tokio::task::spawn_blocking(move || {
             let metadata_manager = Arc::new(MetadataManager::new(&launcher_root_for_setup));
             metadata_manager.ensure_directories()?;
-            let github_client = Arc::new(GitHubClient::new(cache_dir_for_setup)?);
+            let github_client = match configured_client {
+                Some(client) => client,
+                None => Arc::new(GitHubClient::new(cache_dir_for_setup)?),
+            };
             Ok::<_, PumasError>((metadata_manager, github_client))
         })
         .await
@@ -458,12 +467,22 @@ impl VersionManager {
         app_id: AppId,
         acquisition: Arc<AcquisitionService>,
     ) -> Result<Self> {
+        Self::new_with_acquisition_client(launcher_root.into(), app_id, acquisition, None).await
+    }
+
+    async fn new_with_acquisition_client(
+        launcher_root: PathBuf,
+        app_id: AppId,
+        acquisition: Arc<AcquisitionService>,
+        configured_client: Option<Arc<GitHubClient>>,
+    ) -> Result<Self> {
         if app_id != AppId::LlamaCpp {
             return Err(PumasError::Config {
                 message: "Shared artifact acquisition is currently required for llama.cpp".into(),
             });
         }
-        let mut manager = Self::new(launcher_root, app_id).await?;
+        let mut manager =
+            Self::new_with_github_client(launcher_root, app_id, configured_client).await?;
         let consumer = Arc::new(acquisition.open_consumer("runtime.llama.cpp")?);
         manager.acquisition_consumer = Some(consumer.clone());
         let store = acquisition.store().clone();
@@ -479,7 +498,8 @@ impl VersionManager {
             manager.progress_tracker.clone(),
             manager.cancel_flag.clone(),
         )
-        .with_acquisition_consumer(manager.acquisition_consumer.clone());
+        .with_acquisition_consumer(manager.acquisition_consumer.clone())
+        .with_github_client(manager.github_client.clone());
         if let Err(error) = installer
             .reconcile_retained_llama_cpp(records.into_values().collect())
             .await
@@ -494,6 +514,59 @@ impl VersionManager {
         }
         manager.state.write().await.refresh().await?;
         Ok(manager)
+    }
+
+    /// Construct a real native-install integration fixture on literal loopback.
+    ///
+    /// This non-default seam uses an isolated caller-owned root and the existing
+    /// shared acquisition owner. The GitHub client has no token/credential loader;
+    /// the source URL rejects user information, queries, fragments, and DNS names.
+    /// No environment or product runtime setting selects this constructor.
+    #[cfg(feature = "test-support")]
+    pub async fn new_with_loopback_acquisition_fixture(
+        launcher_root: impl Into<PathBuf>,
+        acquisition: Arc<AcquisitionService>,
+        api_base: String,
+    ) -> Result<Self> {
+        let launcher_root = launcher_root.into();
+        // Validate before opening any installation owner or touching its store.
+        let client = GitHubClient::with_loopback_api(
+            launcher_root
+                .join("launcher-data")
+                .join(PathsConfig::CACHE_DIR_NAME),
+            Duration::from_secs(3600),
+            api_base,
+        )?;
+        Self::new_with_acquisition_client(
+            launcher_root,
+            AppId::LlamaCpp,
+            acquisition,
+            Some(Arc::new(client)),
+        )
+        .await
+    }
+
+    /// Observe the monotonic admission fence without waiting behind the install
+    /// lock held by shutdown. This observation never authorizes a new operation.
+    #[cfg(feature = "test-support")]
+    pub fn acquisition_fixture_admission_closed(&self) -> bool {
+        self.torch_shutting_down.load(Ordering::SeqCst)
+    }
+
+    /// Hold a synthetic finite effect in this manager's existing consumer scope.
+    /// This fixture does not create an owner or grant filesystem authority.
+    #[cfg(feature = "test-support")]
+    pub async fn run_acquisition_fixture_effect<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.acquisition_consumer
+            .as_ref()
+            .ok_or_else(|| PumasError::Config {
+                message: "Native acquisition fixture requires the composed consumer".into(),
+            })?
+            .run_blocking("native integration fixture barrier", work)
+            .await
     }
 
     // ========================================

@@ -39,8 +39,17 @@ function readySelection(request: TorchRuntimePreviewRequest): ReadySelection {
   };
 }
 
+// The button exists while choices are loading. Existence is not admission.
+async function readyInstallButton(): Promise<HTMLElement> {
+  await waitFor(() => {
+    expect(screen.queryByText('Loading Torch choices…')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Install Torch' })).toBeEnabled();
+  });
+  return screen.getByRole('button', { name: 'Install Torch' });
+}
+
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   getOptions.mockResolvedValue(options);
   getSelection.mockImplementation(async (request) => readySelection(request));
 });
@@ -70,7 +79,7 @@ describe('TorchInstallPreview', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Loading Torch choices…');
     expect(screen.getByRole('button', { name: 'Install Torch' })).toBeDisabled();
     expect(screen.getByText(/Package and Python resolution, wheel downloads, and installation happen within the install task/)).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'Install Torch' })).toBeEnabled();
+    expect(await readyInstallButton()).toBeEnabled();
     expect(getReleaseOptions).not.toHaveBeenCalled();
     expect(getSelection).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Check selected combination' })).not.toBeInTheDocument();
@@ -88,7 +97,7 @@ describe('TorchInstallPreview', () => {
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
     expect(getReleaseOptions).not.toHaveBeenCalled();
     expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
@@ -101,7 +110,7 @@ describe('TorchInstallPreview', () => {
 
     expect(await screen.findByRole('radio', { name: 'Core Torch' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'FLUX.2 image generation' })).not.toBeChecked();
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
     expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
   });
@@ -112,7 +121,7 @@ describe('TorchInstallPreview', () => {
     const { rerender } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
 
     expect(await screen.findByRole('radio', { name: 'FLUX.2 image generation' })).toBeChecked();
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
     expect(getSelection).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'flux2' });
 
@@ -120,7 +129,7 @@ describe('TorchInstallPreview', () => {
     rerender(<TorchInstallPreview tag="v2.14.1" onBack={vi.fn()} onInstall={onInstall} />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Install Torch' })).toBeEnabled());
     expect(screen.queryByRole('radio', { name: 'FLUX.2 image generation' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledTimes(2));
     expect(getSelection).toHaveBeenLastCalledWith({ tag: 'v2.14.1', build: 'auto', python: 'auto', adapter: 'none' });
   });
@@ -132,12 +141,12 @@ describe('TorchInstallPreview', () => {
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
 
     fireEvent.click(await screen.findByRole('radio', { name: 'FLUX.2 image generation' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'flux2' });
     expect(await screen.findByRole('alert')).toHaveTextContent('Torch selection could not be confirmed');
     expect(onInstall).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
   });
 
@@ -149,12 +158,12 @@ describe('TorchInstallPreview', () => {
     const { rerender } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
 
     fireEvent.click(await screen.findByRole('radio', { name: 'FLUX.2 image generation' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     rerender(<TorchInstallPreview tag="v2.14.1" onBack={vi.fn()} onInstall={onInstall} />);
     expect(await screen.findByRole('radio', { name: 'Core Torch' })).toBeChecked();
     await act(async () => { resolveSelection(readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'flux2' })); });
     expect(onInstall).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
     expect(getSelection).toHaveBeenLastCalledWith({ tag: 'v2.14.1', build: 'auto', python: 'auto', adapter: 'none' });
   });
@@ -165,9 +174,25 @@ describe('TorchInstallPreview', () => {
     const { rerender } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
     rerender(<TorchInstallPreview tag="v2.14.1" onBack={vi.fn()} onInstall={vi.fn()} />);
 
-    expect(await screen.findByRole('button', { name: 'Install Torch' })).toBeEnabled();
+    expect(await readyInstallButton()).toBeEnabled();
     await act(async () => { resolveOldOptions({ ...options, adapters: ['none', 'flux2'] }); });
     expect(screen.queryByRole('radio', { name: 'FLUX.2 image generation' })).not.toBeInTheDocument();
+  });
+
+  it('waits for delayed choices before treating the existing button as installable', async () => {
+    let resolveOptions!: (value: TorchRuntimeOptions) => void;
+    getOptions.mockImplementationOnce(() => new Promise((resolve) => { resolveOptions = resolve; }));
+    const onInstall = vi.fn();
+    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
+
+    const existingButton = await screen.findByRole('button', { name: 'Install Torch' });
+    expect(existingButton).toBeDisabled();
+    fireEvent.click(existingButton);
+    expect(getSelection).not.toHaveBeenCalled();
+    expect(onInstall).not.toHaveBeenCalled();
+    await act(async () => { resolveOptions(options); });
+    fireEvent.click(await readyInstallButton());
+    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
   });
 
   it('shows immediate pending status and starts the install with the selection token', async () => {
@@ -176,8 +201,7 @@ describe('TorchInstallPreview', () => {
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Install Torch' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     expect(screen.getByRole('status')).toHaveTextContent('Starting installation…');
     expect(screen.getByRole('button', { name: 'Starting installation…' })).toBeDisabled();
     expect(onInstall).not.toHaveBeenCalled();
@@ -209,7 +233,7 @@ describe('TorchInstallPreview', () => {
     fireEvent.click(await screen.findByText('Advanced setup'));
     fireEvent.change(screen.getByRole('combobox', { name: 'Torch build' }), { target: { value: 'cu130' } });
     fireEvent.click(screen.getByRole('radio', { name: 'FLUX.2 image generation' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
     expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cu130', python: 'auto', adapter: 'flux2' });
     expect(getReleaseOptions).not.toHaveBeenCalled();
@@ -223,7 +247,7 @@ describe('TorchInstallPreview', () => {
     expect(presetButton).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(presetButton);
     expect(screen.getByText(/This tuple has historical qualification/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
     expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' });
     expect(presetButton).toBeDisabled();
@@ -243,7 +267,7 @@ describe('TorchInstallPreview', () => {
     getSelection.mockImplementation(async (request) => readySelection({ ...request, python: 'auto' }));
     render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Fixed v2.9.1 preset' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     expect(await screen.findByRole('alert')).toHaveTextContent('Torch selection could not be confirmed');
     expect(onInstall).not.toHaveBeenCalled();
   });
@@ -252,12 +276,12 @@ describe('TorchInstallPreview', () => {
     const onInstall = vi.fn();
     getSelection.mockResolvedValueOnce({ status: 'rejected', reason: 'unsupported', message: 'Unavailable build' });
     const { rerender } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     expect(await screen.findByRole('alert')).toHaveTextContent('Unsupported selection: Unavailable build');
     expect(onInstall).not.toHaveBeenCalled();
 
     getSelection.mockResolvedValueOnce(readySelection({ tag: 'wrong-tag', build: 'auto', python: 'auto', adapter: 'none' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     expect(await screen.findByRole('alert')).toHaveTextContent('Torch selection could not be confirmed');
     expect(onInstall).not.toHaveBeenCalled();
     rerender(<TorchInstallPreview tag="v2.14.1" onBack={vi.fn()} onInstall={onInstall} />);
@@ -269,7 +293,7 @@ describe('TorchInstallPreview', () => {
     const ready = readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
     getSelection.mockResolvedValueOnce({ status: 'resolved', preview: ready.preview });
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Install Torch' }));
+    fireEvent.click(await readyInstallButton());
     expect(await screen.findByRole('alert')).toHaveTextContent('Torch selection could not be confirmed');
     expect(onInstall).not.toHaveBeenCalled();
   });

@@ -74,6 +74,7 @@ async fn gateway_test_state_with_clients(
         .unwrap();
     let onnx_session_manager = OnnxSessionManager::new(onnx_backend, 2).unwrap();
     let state = Arc::new(AppState {
+        shutdown_request: crate::server::ShutdownRequest::default(),
         catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
         api,
         version_managers: Arc::new(RwLock::new(HashMap::new())),

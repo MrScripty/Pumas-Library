@@ -74,9 +74,13 @@ use tokio::sync::mpsc;
 use walkdir::WalkDir;
 
 /// Prefix for temporary import directories.
-const TEMP_IMPORT_PREFIX: &str = ".tmp_import_";
+pub(super) const TEMP_IMPORT_PREFIX: &str = ".tmp_import_";
 
+#[cfg(test)]
+mod acquisition_integration_tests;
+pub(super) mod publication;
 mod recovery;
+mod staging;
 
 fn join_validation_errors(errors: &[crate::models::AssetValidationError]) -> String {
     errors
@@ -175,6 +179,8 @@ async fn load_model_metadata_or_default(
 pub struct ModelImporter {
     /// Reference to the model library
     library: Arc<ModelLibrary>,
+    #[cfg(test)]
+    import_hook: Option<staging::ImportHook>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -190,177 +196,29 @@ impl ModelImporter {
     ///
     /// * `library` - Reference to the model library
     pub fn new(library: Arc<ModelLibrary>) -> Self {
-        Self { library }
+        Self {
+            library,
+            #[cfg(test)]
+            import_hook: None,
+        }
     }
 
     /// Import a single model file or directory.
     ///
     /// This is the main entry point for importing local models.
-    /// Uses atomic operations to ensure partial imports are rolled back.
+    /// Requires the lifecycle-owned library supplied by `PumasApi` (or its
+    /// language binding). Standalone copied imports return `PumasError::Config`.
+    /// Before admission, dropping the future has no effects. After admission,
+    /// dropping it cancels observation only: the finite import settles under
+    /// its runtime owner. Unpublished failures clean only the held workspace;
+    /// observed custody loss retains it with an explicit error. Published
+    /// outputs are never rolled back for indexing or confirmation failures.
     ///
     /// # Arguments
     ///
     /// * `spec` - Import specification with path and metadata hints
     pub async fn import(&self, spec: &ModelImportSpec) -> Result<ModelImportResult> {
-        let source_path = PathBuf::from(&spec.path);
-
-        // Validate source exists
-        if !tokio::fs::try_exists(&source_path).await? {
-            return Err(PumasError::FileNotFound(source_path.clone()));
-        }
-        let source_metadata = tokio::fs::metadata(&source_path).await?;
-
-        // Detect file type and model info
-        let importer = self.clone();
-        let source_path_for_detection = source_path.clone();
-        let type_info = self
-            .library
-            .run_import_blocking("importer blocking effect", move || {
-                importer.detect_type(&source_path_for_detection)
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join import type detection task: {}",
-                    err
-                ))
-            })??;
-
-        // Check security tier
-        let security_tier = type_info.format.security_tier();
-        if security_tier == SecurityTier::Pickle && !spec.security_acknowledged.unwrap_or(false) {
-            return Ok(ModelImportResult {
-                path: spec.path.clone(),
-                success: false,
-                model_id: None,
-                model_path: None,
-                error: Some("Pickle files may contain malicious code. Set security_acknowledged=true to proceed.".to_string()),
-                security_tier: Some(security_tier),
-            });
-        }
-
-        let bundle_validation = if source_metadata.is_dir() {
-            let validation_source_path = source_path.clone();
-            Some(
-                self.library
-                    .run_import_blocking("importer blocking effect", move || {
-                        validate_diffusers_directory_for_import(&validation_source_path)
-                    })
-                    .await
-                    .map_err(|err| {
-                        PumasError::Other(format!(
-                            "Failed to join import diffusers validation task: {}",
-                            err
-                        ))
-                    })?,
-            )
-        } else {
-            None
-        };
-
-        let is_valid_diffusers_bundle = bundle_validation.as_ref().is_some_and(|validation| {
-            validation.validation_state == crate::models::AssetValidationState::Valid
-        });
-
-        // Determine model type and family
-        // Resolve through SQLite model-type mapping rules first.
-        let model_type = if is_valid_diffusers_bundle {
-            "diffusion".to_string()
-        } else if let Some(hint) = spec.model_type.as_deref() {
-            self.library
-                .index()
-                .resolve_model_type_hint(hint)?
-                .unwrap_or_else(|| type_info.model_type.as_str().to_string())
-        } else {
-            type_info.model_type.as_str().to_string()
-        };
-
-        let family = if is_valid_diffusers_bundle {
-            spec.family.clone()
-        } else {
-            type_info
-                .family
-                .as_ref()
-                .map(|f| f.to_string())
-                .unwrap_or_else(|| spec.family.clone())
-        };
-
-        // Build target path
-        let cleaned_name = normalize_name(&spec.official_name);
-        let target_dir = self
-            .library
-            .build_model_path(&model_type, &family, &cleaned_name);
-
-        // Check if already exists
-        if tokio::fs::try_exists(&target_dir).await? {
-            return Ok(ModelImportResult {
-                path: spec.path.clone(),
-                success: false,
-                model_id: None,
-                model_path: Some(target_dir.display().to_string()),
-                error: Some("Model already exists at this location".to_string()),
-                security_tier: Some(security_tier),
-            });
-        }
-
-        if let Some(validation) = bundle_validation.as_ref().filter(|validation| {
-            validation.validation_state == crate::models::AssetValidationState::Valid
-        }) {
-            return self
-                .import_copied_diffusers_directory(
-                    &source_path,
-                    &target_dir,
-                    spec,
-                    validation,
-                    &model_type,
-                    &family,
-                )
-                .await;
-        }
-
-        // Create temporary directory for atomic import
-        let temp_dir = self.create_temp_import_dir().await?;
-
-        // Perform the import atomically
-        match self
-            .do_import(&source_path, &temp_dir, spec, &type_info)
-            .await
-        {
-            Ok(_metadata) => {
-                // Atomic rename to final location
-                tokio::fs::create_dir_all(target_dir.parent().unwrap()).await?;
-                tokio::fs::rename(&temp_dir, &target_dir).await?;
-
-                // Index the imported model
-                if let Err(e) = self.library.index_model_dir(&target_dir).await {
-                    tracing::warn!("Failed to index imported model: {}", e);
-                }
-
-                let model_id = self.library.get_model_id(&target_dir);
-
-                Ok(ModelImportResult {
-                    path: spec.path.clone(),
-                    success: true,
-                    model_id: model_id.clone(),
-                    model_path: model_id,
-                    error: None,
-                    security_tier: Some(security_tier),
-                })
-            }
-            Err(e) => {
-                // Cleanup temp directory on failure
-                let _ = tokio::fs::remove_dir_all(&temp_dir).await;
-
-                Ok(ModelImportResult {
-                    path: spec.path.clone(),
-                    success: false,
-                    model_id: None,
-                    model_path: None,
-                    error: Some(e.to_string()),
-                    security_tier: Some(security_tier),
-                })
-            }
-        }
+        self.import_owned(spec, None).await
     }
 
     /// Register an existing external diffusers bundle without copying its contents.
@@ -421,88 +279,6 @@ impl ModelImporter {
             } else {
                 Some(join_validation_errors(&validation.validation_errors))
             },
-            security_tier: None,
-        })
-    }
-
-    async fn import_copied_diffusers_directory(
-        &self,
-        source_path: &Path,
-        target_dir: &Path,
-        spec: &ModelImportSpec,
-        _validation: &DiffusersValidationResult,
-        model_type: &str,
-        family: &str,
-    ) -> Result<ModelImportResult> {
-        let temp_dir = self.create_temp_import_dir().await?;
-        let source_path_for_copy = source_path.to_path_buf();
-        let temp_dir_for_copy = temp_dir.clone();
-        if let Err(err) = self
-            .library
-            .run_import_blocking("importer blocking effect", move || {
-                copy_directory_preserving_layout(&source_path_for_copy, &temp_dir_for_copy)
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join copied diffusers directory copy task: {}",
-                    err
-                ))
-            })?
-        {
-            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
-            return Err(err);
-        }
-
-        tokio::fs::create_dir_all(target_dir.parent().unwrap()).await?;
-        if let Err(err) = tokio::fs::rename(&temp_dir, target_dir).await {
-            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
-            return Err(PumasError::Io {
-                message: format!("failed to finalize diffusers bundle import: {}", err),
-                path: Some(target_dir.to_path_buf()),
-                source: Some(err),
-            });
-        }
-
-        let target_dir_for_expected_files = target_dir.to_path_buf();
-        let expected_files = self
-            .library
-            .run_import_blocking("importer blocking effect", move || {
-                collect_relative_file_paths(&target_dir_for_expected_files)
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join copied diffusers expected-files task: {}",
-                    err
-                ))
-            })??;
-
-        let in_place_spec = InPlaceImportSpec {
-            model_dir: target_dir.to_path_buf(),
-            official_name: spec.official_name.clone(),
-            family: family.to_string(),
-            model_type: Some(model_type.to_string()),
-            repo_id: spec.repo_id.clone(),
-            download_request: None,
-            known_sha256: None,
-            compute_hashes: false,
-            expected_files: Some(expected_files),
-            pipeline_tag: Some("text-to-image".to_string()),
-            huggingface_evidence: None,
-            release_date: None,
-            download_url: None,
-            model_card_json: None,
-            license_status: None,
-        };
-
-        let import_result = self.import_in_place(&in_place_spec).await?;
-        Ok(ModelImportResult {
-            path: spec.path.clone(),
-            success: import_result.success,
-            model_id: import_result.model_id,
-            model_path: import_result.model_path,
-            error: import_result.error,
             security_tier: None,
         })
     }
@@ -637,6 +413,8 @@ impl ModelImporter {
                                 .await??;
                             let importer = Self {
                                 library: Arc::new(importer.library.with_import_guard(guard)),
+                                #[cfg(test)]
+                                import_hook: importer.import_hook.clone(),
                             };
                             importer
                                 .finalize_downloaded_directory_guarded(&info, &revision)
@@ -679,6 +457,8 @@ impl ModelImporter {
         guard.claim_final_import_completion()?;
         let importer = Self {
             library: Arc::new(self.library.with_import_guard(guard)),
+            #[cfg(test)]
+            import_hook: self.import_hook.clone(),
         };
         importer
             .finalize_downloaded_directory_guarded(info, revision)
@@ -810,6 +590,8 @@ impl ModelImporter {
                                 .await??;
                             let importer = Self {
                                 library: Arc::new(importer.library.with_import_guard(guard)),
+                                #[cfg(test)]
+                                import_hook: importer.import_hook.clone(),
                             };
                             importer
                                 .upsert_download_metadata_stub_effects(&info, &revision)
@@ -850,6 +632,8 @@ impl ModelImporter {
             })??;
         let importer = Self {
             library: Arc::new(self.library.with_import_guard(guard)),
+            #[cfg(test)]
+            import_hook: self.import_hook.clone(),
         };
         importer
             .upsert_download_metadata_stub_effects(info, revision)
@@ -967,213 +751,7 @@ impl ModelImporter {
         spec: &ModelImportSpec,
         progress_tx: mpsc::Sender<ImportProgress>,
     ) -> Result<ModelImportResult> {
-        let source_path = PathBuf::from(&spec.path);
-
-        // Report start
-        let _ = progress_tx
-            .send(ImportProgress {
-                stage: ImportStage::Copying,
-                progress: 0.0,
-                message: format!("Starting import of {}", source_path.display()),
-            })
-            .await;
-
-        // Validate source
-        if !tokio::fs::try_exists(&source_path).await? {
-            return Err(PumasError::FileNotFound(source_path.clone()));
-        }
-
-        // Detect type
-        let _ = progress_tx
-            .send(ImportProgress {
-                stage: ImportStage::Copying,
-                progress: 0.05,
-                message: "Detecting file type".to_string(),
-            })
-            .await;
-
-        let importer = self.clone();
-        let source_path_for_detection = source_path.clone();
-        let type_info = self
-            .library
-            .run_import_blocking("importer blocking effect", move || {
-                importer.detect_type(&source_path_for_detection)
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join progress import type detection task: {}",
-                    err
-                ))
-            })??;
-        let security_tier = type_info.format.security_tier();
-
-        // Security check
-        if security_tier == SecurityTier::Pickle && !spec.security_acknowledged.unwrap_or(false) {
-            return Ok(ModelImportResult {
-                path: spec.path.clone(),
-                success: false,
-                model_id: None,
-                model_path: None,
-                error: Some("Pickle files require security acknowledgment".to_string()),
-                security_tier: Some(security_tier),
-            });
-        }
-
-        // Resolve through SQLite model-type mapping rules first.
-        let model_type = if let Some(hint) = spec.model_type.as_deref() {
-            self.library
-                .index()
-                .resolve_model_type_hint(hint)?
-                .unwrap_or_else(|| type_info.model_type.as_str().to_string())
-        } else {
-            type_info.model_type.as_str().to_string()
-        };
-        let family = type_info
-            .family
-            .as_ref()
-            .map(|f| f.to_string())
-            .unwrap_or_else(|| spec.family.clone());
-
-        let cleaned_name = normalize_name(&spec.official_name);
-        let target_dir = self
-            .library
-            .build_model_path(&model_type, &family, &cleaned_name);
-
-        if tokio::fs::try_exists(&target_dir).await? {
-            return Ok(ModelImportResult {
-                path: spec.path.clone(),
-                success: false,
-                model_id: None,
-                model_path: Some(target_dir.display().to_string()),
-                error: Some("Model already exists".to_string()),
-                security_tier: Some(security_tier),
-            });
-        }
-
-        // Create temp dir
-        let temp_dir = self.create_temp_import_dir().await?;
-
-        // Copy files
-        let _ = progress_tx
-            .send(ImportProgress {
-                stage: ImportStage::Copying,
-                progress: 0.1,
-                message: "Copying files".to_string(),
-            })
-            .await;
-
-        let importer = self.clone();
-        let source_path_for_copy = source_path.clone();
-        let temp_dir_for_copy = temp_dir.clone();
-        let files = self
-            .library
-            .run_import_blocking("importer blocking effect", move || {
-                importer.copy_files(&source_path_for_copy, &temp_dir_for_copy)
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join progress import file copy task: {}",
-                    err
-                ))
-            })??;
-
-        // Compute hashes
-        let _ = progress_tx
-            .send(ImportProgress {
-                stage: ImportStage::Hashing,
-                progress: 0.5,
-                message: "Computing hashes".to_string(),
-            })
-            .await;
-
-        let importer = self.clone();
-        let temp_dir_for_primary = temp_dir.clone();
-        let primary_file = self
-            .library
-            .run_import_blocking("importer blocking effect", move || {
-                importer.choose_primary_file(&temp_dir_for_primary)
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join progress import primary file selection task: {}",
-                    err
-                ))
-            })??;
-        let hashes = if let Some(ref primary) = primary_file {
-            let primary_for_hash = primary.clone();
-            Some(
-                self.library
-                    .run_import_blocking("importer blocking effect", move || {
-                        compute_dual_hash(&primary_for_hash)
-                    })
-                    .await
-                    .map_err(|err| {
-                        PumasError::Other(format!(
-                            "Failed to join import hash computation task: {}",
-                            err
-                        ))
-                    })??,
-            )
-        } else {
-            None
-        };
-
-        // Create metadata
-        let _ = progress_tx
-            .send(ImportProgress {
-                stage: ImportStage::WritingMetadata,
-                progress: 0.8,
-                message: "Writing metadata".to_string(),
-            })
-            .await;
-
-        let metadata = self.create_metadata(spec, &type_info, &files, hashes)?;
-        self.library.save_metadata(&temp_dir, &metadata).await?;
-
-        // Finalize
-        let _ = progress_tx
-            .send(ImportProgress {
-                stage: ImportStage::Syncing,
-                progress: 0.9,
-                message: "Finalizing import".to_string(),
-            })
-            .await;
-
-        tokio::fs::create_dir_all(target_dir.parent().unwrap()).await?;
-        tokio::fs::rename(&temp_dir, &target_dir).await?;
-
-        // Index
-        let _ = progress_tx
-            .send(ImportProgress {
-                stage: ImportStage::Indexing,
-                progress: 0.95,
-                message: "Indexing model".to_string(),
-            })
-            .await;
-
-        if let Err(e) = self.library.index_model_dir(&target_dir).await {
-            tracing::warn!("Failed to index: {}", e);
-        }
-
-        let _ = progress_tx
-            .send(ImportProgress {
-                stage: ImportStage::Complete,
-                progress: 1.0,
-                message: "Import complete".to_string(),
-            })
-            .await;
-
-        Ok(ModelImportResult {
-            path: spec.path.clone(),
-            success: true,
-            model_id: self.library.get_model_id(&target_dir),
-            model_path: self.library.get_model_id(&target_dir),
-            error: None,
-            security_tier: Some(security_tier),
-        })
+        self.import_owned(spec, Some(progress_tx)).await
     }
 
     /// Batch import multiple models.
@@ -1196,7 +774,7 @@ impl ModelImporter {
             progress.update(idx, Some(spec.path.clone()), ImportStage::Copying);
 
             if let Some(ref tx) = progress_tx {
-                let _ = tx.send(progress.clone()).await;
+                let _ = tx.try_send(progress.clone());
             }
 
             // Import
@@ -1219,6 +797,9 @@ impl ModelImporter {
         // Final progress
         progress.update(total, None, ImportStage::Complete);
         if let Some(ref tx) = progress_tx {
+            // Every per-item owner has already settled. Backpressure here only
+            // retains this caller's final batch receipt, never payload custody.
+            // Receiver closure is explicit observer loss; results still return.
             let _ = tx.send(progress).await;
         }
 
@@ -1275,149 +856,6 @@ impl ModelImporter {
         } else {
             Ok(ModelTypeInfo::default())
         }
-    }
-
-    /// Create a temporary directory for atomic import.
-    async fn create_temp_import_dir(&self) -> Result<PathBuf> {
-        let uuid = uuid::Uuid::new_v4();
-        let temp_name = format!("{}{}", TEMP_IMPORT_PREFIX, uuid);
-        let temp_dir = self.library.library_root().join(temp_name);
-        tokio::fs::create_dir_all(&temp_dir).await?;
-        Ok(temp_dir)
-    }
-
-    /// Perform the actual import into temp directory.
-    async fn do_import(
-        &self,
-        source: &Path,
-        temp_dir: &Path,
-        spec: &ModelImportSpec,
-        type_info: &ModelTypeInfo,
-    ) -> Result<ModelMetadata> {
-        // Copy files
-        let importer = self.clone();
-        let source_for_copy = source.to_path_buf();
-        let temp_dir_for_copy = temp_dir.to_path_buf();
-        let files = self
-            .library
-            .run_import_blocking("importer blocking effect", move || {
-                importer.copy_files(&source_for_copy, &temp_dir_for_copy)
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join temp import file copy task: {}",
-                    err
-                ))
-            })??;
-
-        // Compute hashes for primary file
-        let importer = self.clone();
-        let temp_dir_for_primary = temp_dir.to_path_buf();
-        let primary_file = self
-            .library
-            .run_import_blocking("importer blocking effect", move || {
-                importer.choose_primary_file(&temp_dir_for_primary)
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join temp import primary file selection task: {}",
-                    err
-                ))
-            })??;
-        let hashes = if let Some(ref primary) = primary_file {
-            let primary_for_hash = primary.clone();
-            Some(
-                self.library
-                    .run_import_blocking("importer blocking effect", move || {
-                        compute_dual_hash(&primary_for_hash)
-                    })
-                    .await
-                    .map_err(|err| {
-                        PumasError::Other(format!(
-                            "Failed to join temp import hash computation task: {}",
-                            err
-                        ))
-                    })??,
-            )
-        } else {
-            None
-        };
-
-        // Create metadata
-        let metadata = self.create_metadata(spec, type_info, &files, hashes)?;
-
-        // Save metadata
-        self.library.save_metadata(temp_dir, &metadata).await?;
-
-        Ok(metadata)
-    }
-
-    /// Copy files from source to destination.
-    ///
-    /// Returns list of copied file info.
-    fn copy_files(&self, source: &Path, dest_dir: &Path) -> Result<Vec<ModelFileInfo>> {
-        let mut files = Vec::new();
-
-        if source.is_file() {
-            // Single file
-            let original_name = source
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("model");
-            let normalized = normalize_filename(original_name);
-            let dest_path = dest_dir.join(&normalized);
-
-            std::fs::copy(source, &dest_path)?;
-
-            let size = std::fs::metadata(&dest_path)?.len();
-
-            files.push(ModelFileInfo {
-                name: normalized,
-                original_name: Some(original_name.to_string()),
-                size: Some(size),
-                sha256: None, // Will be computed later for primary file
-                blake3: None,
-            });
-        } else if source.is_dir() {
-            // Directory - copy all model files
-            for entry in WalkDir::new(source)
-                .min_depth(1)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                if !entry.file_type().is_file() {
-                    continue;
-                }
-
-                // Get relative path within source
-                let rel_path = entry.path().strip_prefix(source).unwrap();
-                let original_name = rel_path.to_string_lossy().to_string();
-                let normalized = normalize_filename(&original_name);
-
-                let dest_path = dest_dir.join(&normalized);
-
-                // Create parent directories if needed
-                if let Some(parent) = dest_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-
-                std::fs::copy(entry.path(), &dest_path)?;
-
-                let size = std::fs::metadata(&dest_path)?.len();
-
-                files.push(ModelFileInfo {
-                    name: normalized,
-                    original_name: Some(original_name),
-                    size: Some(size),
-                    sha256: None,
-                    blake3: None,
-                });
-            }
-        }
-
-        Ok(files)
     }
 
     /// Choose the primary model file from a directory.
@@ -1618,6 +1056,8 @@ impl ModelImporter {
                             .await??;
                         let importer = Self {
                             library: Arc::new(importer.library.with_import_guard(guard)),
+                            #[cfg(test)]
+                            import_hook: importer.import_hook.clone(),
                         };
                         importer
                             .import_in_place_effects(&spec, mode, &revision)
@@ -1638,6 +1078,20 @@ impl ModelImporter {
     ) -> Result<ModelImportResult> {
         let model_dir = &spec.model_dir;
         let metadata_path = model_dir.join("metadata.json");
+
+        if path_exists(&metadata_path).await? || publication::receipt_path_claimed(model_dir) {
+            let existing =
+                load_model_metadata_or_default(self.library.clone(), model_dir.to_path_buf())
+                    .await?;
+            self.library
+                .require_finalized_import_edit(model_dir, Some(&existing))?;
+            if !existing.copied_import_ready() {
+                return Err(PumasError::Validation {
+                    field: "import_publication".into(),
+                    message: "An unconfirmed copied import cannot be adopted or finalized in place; retain it for explicit diagnosis".into(),
+                });
+            }
+        }
 
         // Guard: skip if metadata already exists (idempotent)
         if mode == InPlaceImportMode::PreserveExisting && path_exists(&metadata_path).await? {
@@ -1781,45 +1235,17 @@ impl ModelImporter {
                 ))
             })??;
 
-        // Validate shard completeness — reject if any file is part of an incomplete set.
-        // Uses extract_shard_info per file to catch even single-shard-of-set cases
-        // (which detect_sharded_sets would treat as standalone).
-        for file_info in &files {
-            if let Some((base_name, _idx, Some(total))) =
-                sharding::extract_shard_info(&file_info.name)
-            {
-                if total > 1 {
-                    // Count how many shards of this set we actually have
-                    let found_count = files
-                        .iter()
-                        .filter(|f| {
-                            sharding::extract_shard_info(&f.name)
-                                .map(|(b, _, _)| b == base_name)
-                                .unwrap_or(false)
-                        })
-                        .count();
-                    if found_count < total {
-                        tracing::warn!(
-                            "Incomplete shard set '{}': found {}/{} shards",
-                            base_name,
-                            found_count,
-                            total,
-                        );
-                        return Ok(ModelImportResult {
-                            path: model_dir.display().to_string(),
-                            success: false,
-                            model_id: None,
-                            model_path: None,
-                            error: Some(format!(
-                                "Incomplete shard set '{}': have {}/{} shards",
-                                base_name, found_count, total,
-                            )),
-                            security_tier: None,
-                        });
-                    }
-                    break; // Only need to validate once per directory
-                }
-            }
+        if let Err(error) =
+            sharding::validate_explicit_shard_sets(files.iter().map(|file| file.name.as_str()))
+        {
+            return Ok(ModelImportResult {
+                path: model_dir.display().to_string(),
+                success: false,
+                model_id: None,
+                model_path: None,
+                error: Some(error),
+                security_tier: None,
+            });
         }
 
         // Build hashes from known value or compute
@@ -2044,97 +1470,59 @@ impl ModelImporter {
         Ok(model_id)
     }
 
-    /// Enumerate model files already present in a directory (no copy).
+    /// Enumerate model files as root-relative paths without truncating depth.
+    /// Missing metadata or traversal errors cannot establish a complete set.
     fn enumerate_model_files(&self, dir: &Path) -> Result<Vec<ModelFileInfo>> {
         let mut files = Vec::new();
-
-        for entry in WalkDir::new(dir)
-            .min_depth(1)
-            .max_depth(2)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
+        for entry in WalkDir::new(dir).min_depth(1) {
+            let entry = entry.map_err(|error| PumasError::Io {
+                message: "Could not enumerate the complete in-place import".into(),
+                path: error.path().map(Path::to_path_buf),
+                source: error.into_io_error(),
+            })?;
             if !entry.file_type().is_file() {
                 continue;
             }
-
             let filename = entry.file_name().to_string_lossy();
-
-            // Skip metadata and incomplete downloads
-            if filename == "metadata.json" || filename == "overrides.json" {
+            if filename == "metadata.json"
+                || filename == "overrides.json"
+                || filename.ends_with(".part")
+            {
                 continue;
             }
-            if filename.ends_with(".part") {
-                continue;
-            }
-
-            let size = entry.metadata().ok().map(|m| m.len());
-
+            let relative = entry
+                .path()
+                .strip_prefix(dir)
+                .map_err(|_| PumasError::Validation {
+                    field: "import.filename".into(),
+                    message: "Import entry is outside the selected directory".into(),
+                })?;
+            let name = relative
+                .to_str()
+                .ok_or_else(|| PumasError::Validation {
+                    field: "import.filename".into(),
+                    message: "Import filename must be valid UTF-8".into(),
+                })?
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            let size = entry
+                .metadata()
+                .map_err(|error| PumasError::Io {
+                    message: "Could not observe an in-place import file".into(),
+                    path: error.path().map(Path::to_path_buf),
+                    source: error.into_io_error(),
+                })?
+                .len();
             files.push(ModelFileInfo {
-                name: filename.to_string(),
-                original_name: Some(filename.to_string()),
-                size,
+                original_name: Some(name.clone()),
+                name,
+                size: Some(size),
                 sha256: None,
                 blake3: None,
             });
         }
-
+        files.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(files)
     }
-}
-
-fn copy_directory_preserving_layout(source: &Path, dest_dir: &Path) -> Result<()> {
-    for entry in WalkDir::new(source)
-        .min_depth(1)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-    {
-        let relative = entry
-            .path()
-            .strip_prefix(source)
-            .map_err(|err| PumasError::Io {
-                message: format!("failed to determine relative path during import: {}", err),
-                path: Some(entry.path().to_path_buf()),
-                source: None,
-            })?;
-        let dest_path = dest_dir.join(relative);
-
-        if entry.file_type().is_dir() {
-            std::fs::create_dir_all(&dest_path)?;
-            continue;
-        }
-
-        if let Some(parent) = dest_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::copy(entry.path(), &dest_path)?;
-    }
-
-    Ok(())
-}
-
-fn collect_relative_file_paths(root: &Path) -> Result<Vec<String>> {
-    let mut files = Vec::new();
-    for entry in WalkDir::new(root)
-        .min_depth(1)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let relative = entry
-            .path()
-            .strip_prefix(root)
-            .map_err(|err| PumasError::Io {
-                message: format!("failed to determine relative path during import: {}", err),
-                path: Some(entry.path().to_path_buf()),
-                source: None,
-            })?;
-        files.push(relative.to_string_lossy().replace('\\', "/"));
-    }
-    files.sort();
-    Ok(files)
 }
 
 /// Specification for in-place import (model files already in final location).
@@ -2178,12 +1566,111 @@ pub struct InPlaceImportSpec {
     pub license_status: Option<String>,
 }
 
-/// Descriptor for an incomplete sharded model that needs recovery download.
+/// Read-only observations of shards beneath canonical library model roots.
+///
+/// Neither filename coverage nor this report establishes package completeness,
+/// repository identity, download authorization, or a durable filesystem snapshot.
+/// Consult diagnostics even when no roots or missing ordinals are returned.
+#[derive(Debug, Clone)]
+pub struct ShardRecoveryDiscovery {
+    pub library_root: PathBuf,
+    /// False if any relevant layout, directory, or file could not be inspected.
+    pub enumeration_complete: bool,
+    pub model_roots: Vec<ShardModelDiscovery>,
+    pub diagnostics: Vec<ShardRecoveryDiagnostic>,
+}
+
+/// One observed `{model_type}/{family}/{model_or_artifact}` storage root.
+#[derive(Debug, Clone)]
+pub struct ShardModelDiscovery {
+    pub model_dir: PathBuf,
+    pub library_relative_root: PathBuf,
+    pub has_metadata: bool,
+    pub enumeration_complete: bool,
+    /// Regular files observed relative to this root, without content validation.
+    pub observed_files: Vec<PathBuf>,
+    pub shard_sets: Vec<ShardSetDiscovery>,
+    pub indexes: Vec<ShardIndexDiscovery>,
+}
+
+/// One set identified by its full root-relative directory and base/extension.
+#[derive(Debug, Clone)]
+pub struct ShardSetDiscovery {
+    pub relative_directory: PathBuf,
+    /// Includes the file extension, for example `model.safetensors`.
+    pub base_name: String,
+    pub expected_total: Option<usize>,
+    pub found_ordinals: Vec<usize>,
+    /// Inclusive ranges, bounded by observed files rather than the declared total.
+    pub missing_ordinals: Vec<MissingShardRange>,
+    pub files: Vec<PathBuf>,
+    pub status: ShardSetDiscoveryStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingShardRange {
+    pub first: usize,
+    pub last: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShardSetDiscoveryStatus {
+    /// Only the explicitly counted filename ordinals were observed.
+    CountedOrdinalsPresent,
+    MissingOrdinals,
+    /// Invalid, inconsistent, duplicate, or uncounted names prevent a conclusion.
+    Ambiguous,
+}
+
+/// Evidence from one weight-map index; paths are relative to the model root.
+#[derive(Debug, Clone)]
+pub struct ShardIndexDiscovery {
+    pub relative_path: PathBuf,
+    pub referenced_files: Vec<PathBuf>,
+    pub missing_files: Vec<PathBuf>,
+    /// Syntax and reference names are valid; does not establish package integrity.
+    pub valid: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShardRecoveryDiagnostic {
+    /// Library-relative when available; the configured root on root-open failure.
+    pub path: PathBuf,
+    pub kind: ShardRecoveryDiagnosticKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ShardRecoveryDiagnosticKind {
+    EnumerationFailed,
+    MetadataFailed,
+    /// The held binding no longer matched or could not be re-observed. This is
+    /// not proof that an actor replaced the directory.
+    BindingChanged,
+    SymlinkRefused,
+    NonCanonicalLayout,
+    InvalidShardName,
+    InvalidShardOrdinal,
+    InconsistentShardTotals,
+    DuplicateShardOrdinal,
+    AmbiguousShardNames,
+    MissingShardIndex,
+    InvalidShardIndex,
+    MissingIndexedFile,
+    ResourceLimit,
+    WorkerFailed,
+}
+
+/// Lossy legacy discovery descriptor, not an authorized recovery request.
+///
+/// Names are unverified path-derived guesses. Use `ShardRecoveryDiscovery` for
+/// incomplete enumeration, ambiguity, and root-relative shard/index evidence.
 #[derive(Debug, Clone)]
 pub struct IncompleteShardRecovery {
     /// Directory containing the partial shard files.
     pub model_dir: PathBuf,
-    /// Reconstructed HuggingFace repo ID (`{family}/{name}`).
+    /// Unverified reconstructed HuggingFace repo ID; never download authorization.
     pub repo_id: String,
     /// Model family (from directory path).
     pub family: String,
@@ -2191,7 +1678,7 @@ pub struct IncompleteShardRecovery {
     pub official_name: String,
     /// Model type (from directory path).
     pub model_type: Option<String>,
-    /// Files currently present in the directory.
+    /// Observed model files relative to the canonical model root.
     pub existing_files: Vec<String>,
 }
 
@@ -2247,17 +1734,16 @@ mod tests {
 
     async fn setup() -> (TempDir, Arc<ModelLibrary>) {
         let temp_dir = TempDir::new().unwrap();
+        std::fs::create_dir(temp_dir.path().join("downloads")).unwrap();
         let library = Arc::new(ModelLibrary::new(temp_dir.path()).await.unwrap());
         library
             .install_mutation_authority(
                 crate::api::RuntimeTasks::new(),
-                crate::model_library::download_recovery::DownloadDestinationRoot::open(
-                    library.library_root(),
-                )
-                .unwrap(),
-                Arc::new(
-                    crate::model_library::download_store::DownloadPersistence::new(temp_dir.path()),
-                ),
+                crate::model_library::DownloadDestinationRoot::open(library.library_root())
+                    .unwrap(),
+                Arc::new(crate::model_library::DownloadPersistence::new(
+                    &temp_dir.path().join("downloads"),
+                )),
             )
             .unwrap();
         (temp_dir, library)
@@ -3357,6 +2843,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(deprecated)] // Retained public compatibility projection.
     async fn test_recover_incomplete_shards_async_detects_missing_shard_set() {
         let (_temp_dir, library) = setup().await;
         let importer = ModelImporter::new(library.clone());
@@ -3409,7 +2896,7 @@ mod tests {
         file.write_all(&content).unwrap();
     }
 
-    fn create_external_diffusers_bundle(dir: &Path) -> PathBuf {
+    pub(super) fn create_external_diffusers_bundle(dir: &Path) -> PathBuf {
         let bundle_root = dir.join("tiny-sd-turbo");
         std::fs::create_dir_all(bundle_root.join("unet")).unwrap();
         std::fs::create_dir_all(bundle_root.join("vae")).unwrap();
@@ -3443,6 +2930,65 @@ mod tests {
         )
         .unwrap();
         bundle_root
+    }
+
+    #[tokio::test]
+    async fn in_place_import_refuses_a_second_incomplete_shard_set_before_publication() {
+        let (_temp, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let directory = library.build_model_path("llm", "fixture", "shards");
+        std::fs::create_dir_all(&directory).unwrap();
+        write_min_safetensors(&directory.join("complete-1-of-2.safetensors"));
+        write_min_safetensors(&directory.join("complete-2-of-2.safetensors"));
+        write_min_safetensors(&directory.join("incomplete-1-of-2.safetensors"));
+        let spec = InPlaceImportSpec {
+            model_dir: directory.clone(),
+            official_name: "shards".into(),
+            family: "fixture".into(),
+            model_type: Some("llm".into()),
+            repo_id: None,
+            download_request: None,
+            known_sha256: None,
+            compute_hashes: false,
+            expected_files: None,
+            pipeline_tag: None,
+            huggingface_evidence: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let result = importer.import_in_place(&spec).await.unwrap();
+        assert!(!result.success);
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("incomplete.safetensors"));
+        assert!(!directory.join("metadata.json").exists());
+        assert!(library.index().get("llm/fixture/shards").unwrap().is_none());
+        assert!(directory.join("complete-1-of-2.safetensors").is_file());
+        assert!(directory.join("complete-2-of-2.safetensors").is_file());
+        assert!(directory.join("incomplete-1-of-2.safetensors").is_file());
+    }
+
+    #[tokio::test]
+    async fn in_place_enumeration_preserves_deep_relative_shard_identity() {
+        let (_temp, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let directory = library.build_model_path("llm", "fixture", "nested");
+        std::fs::create_dir_all(directory.join("left/nested")).unwrap();
+        std::fs::create_dir_all(directory.join("right/nested")).unwrap();
+        write_min_safetensors(&directory.join("left/nested/model-1-of-2.safetensors"));
+        write_min_safetensors(&directory.join("right/nested/model-2-of-2.safetensors"));
+        let files = importer.enumerate_model_files(&directory).unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].name, "left/nested/model-1-of-2.safetensors");
+        assert_eq!(files[1].name, "right/nested/model-2-of-2.safetensors");
+        assert!(sharding::validate_explicit_shard_sets(
+            files.iter().map(|file| file.name.as_str())
+        )
+        .is_err());
     }
 
     #[tokio::test]
@@ -4164,7 +3710,11 @@ mod tests {
     #[tokio::test]
     async fn test_import_copies_diffusers_bundle_into_library_owned_model_dir() {
         let (temp_dir, library) = setup().await;
-        let importer = ModelImporter::new(library.clone());
+        let mut importer = ModelImporter::new(library.clone());
+        importer.import_hook = Some(Arc::new(|boundary, _| {
+            eprintln!("copied Diffusers boundary: {boundary:?}");
+            Ok(())
+        }));
 
         let source_dir = temp_dir.path().join("external");
         std::fs::create_dir_all(&source_dir).unwrap();

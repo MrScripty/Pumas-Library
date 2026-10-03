@@ -52,6 +52,10 @@ pub(super) fn metadata_to_record(
         .unwrap_or_else(|| "unknown".to_string());
     let download = download_projection_status(model_dir, metadata);
     let mut metadata_json = serde_json::to_value(metadata).unwrap_or(serde_json::Value::Null);
+    if !metadata.copied_import_ready() {
+        metadata_json["import_state"] = serde_json::json!("pending");
+        metadata_json["validation_state"] = serde_json::json!("invalid");
+    }
     if let Some(obj) = metadata_json.as_object_mut() {
         obj.insert(
             "download_incomplete".to_string(),

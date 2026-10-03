@@ -2381,6 +2381,8 @@ dependencies = [
  "clap",
  "dirs",
  "futures",
+ "hyper",
+ "hyper-util",
  "pumas-app-manager",
  "pumas-library",
  "reqwest",

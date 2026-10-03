@@ -16,6 +16,14 @@ impl ModelIndex {
         &self,
         request: &ModelLibrarySelectorSnapshotRequest,
     ) -> Result<ModelLibrarySelectorSnapshot> {
+        self.list_selector_snapshot_with_publication(request)
+            .map(|(snapshot, _)| snapshot)
+    }
+
+    pub(crate) fn list_selector_snapshot_with_publication(
+        &self,
+        request: &ModelLibrarySelectorSnapshotRequest,
+    ) -> Result<(ModelLibrarySelectorSnapshot, Vec<serde_json::Value>)> {
         let conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
@@ -63,7 +71,8 @@ impl ModelIndex {
                     pf_selected.package_facts_contract_version,
                     pf_default.package_facts_contract_version
                 ),
-                COALESCE(pf_selected.facts_json, pf_default.facts_json)
+                COALESCE(pf_selected.facts_json, pf_default.facts_json),
+                m.metadata_json
              FROM models m
              LEFT JOIN model_package_facts_cache pf_selected
                ON pf_selected.model_id = m.id
@@ -88,20 +97,30 @@ impl ModelIndex {
                     limit as i64,
                     offset as i64
                 ],
-                row_to_selector_snapshot_row,
+                |row| {
+                    let metadata: String = row.get(25)?;
+                    Ok((
+                        row_to_selector_snapshot_row(row)?,
+                        serde_json::from_str(&metadata).unwrap_or_default(),
+                    ))
+                },
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        let (rows, publication): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
         let cursor = model_library_update_cursor(
             Self::current_model_library_update_event_id_with_conn(&conn)?,
         );
 
-        Ok(ModelLibrarySelectorSnapshot {
-            selector_snapshot_contract_version:
-                crate::models::MODEL_LIBRARY_SELECTOR_SNAPSHOT_CONTRACT_VERSION,
-            cursor,
-            rows,
-            total_count: Some(total_count as u64),
-        })
+        Ok((
+            ModelLibrarySelectorSnapshot {
+                selector_snapshot_contract_version:
+                    crate::models::MODEL_LIBRARY_SELECTOR_SNAPSHOT_CONTRACT_VERSION,
+                cursor,
+                rows,
+                total_count: Some(total_count as u64),
+            },
+            publication,
+        ))
     }
 }
 
@@ -144,17 +163,25 @@ fn row_to_selector_snapshot_row(
     let summary_selected_artifact_id: Option<String> = row.get(22)?;
     let summary_package_facts_contract_version: Option<i64> = row.get(23)?;
     let summary_json: Option<String> = row.get(24)?;
+    let metadata_json: String = row.get(25)?;
+    let import_ready = crate::models::copied_import_ready_value(
+        &serde_json::from_str(&metadata_json).unwrap_or_default(),
+    );
 
     let tags = parse_string_vec(&tags_json);
     let mut runtime_engine_hints =
         parse_optional_string_vec(runtime_engine_hints_json.as_deref()).unwrap_or_default();
-    let (package_facts_summary_status, package_facts_summary) =
+    let (mut package_facts_summary_status, mut package_facts_summary) =
         classify_package_facts_summary_cache_row(
             metadata_selected_artifact_id.as_deref(),
             summary_selected_artifact_id.as_deref(),
             summary_package_facts_contract_version,
             summary_json.as_deref(),
         );
+    if !import_ready {
+        package_facts_summary_status = ModelPackageFactsSummaryStatus::Invalid;
+        package_facts_summary = None;
+    }
     let summary = package_facts_summary.as_ref();
 
     let mut model_ref = summary
@@ -189,18 +216,25 @@ fn row_to_selector_snapshot_row(
                 .clone()
                 .filter(|path| !path.trim().is_empty())
         });
-    let artifact_state = derive_artifact_state(
-        import_state.as_deref(),
-        validation_state,
-        download_incomplete,
-        download_has_part_files,
-        download_missing_expected_files,
-        match_source.as_deref(),
-    );
+    let artifact_state = if !import_ready {
+        ModelArtifactState::Invalid
+    } else {
+        derive_artifact_state(
+            import_state.as_deref(),
+            validation_state,
+            download_incomplete,
+            download_has_part_files,
+            download_missing_expected_files,
+            match_source.as_deref(),
+        )
+    };
     let entry_path_state = derive_entry_path_state(entry_path.as_deref(), artifact_state);
     let storage_kind = storage_kind.or_else(|| summary.map(|summary| summary.storage_kind));
-    let validation_state =
-        validation_state.or_else(|| summary.map(|summary| summary.validation_state));
+    let validation_state = if !import_ready {
+        Some(AssetValidationState::Invalid)
+    } else {
+        validation_state.or_else(|| summary.map(|summary| summary.validation_state))
+    };
     let task_type_primary = task_type_primary
         .or_else(|| summary.and_then(|summary| summary.task.task_type_primary.clone()));
 
@@ -492,6 +526,93 @@ mod tests {
             updated_at: "2026-05-06T00:00:00Z".to_string(),
         };
         index.upsert_model_package_facts_cache(&record).unwrap();
+    }
+
+    #[test]
+    fn copied_import_pending_cannot_be_promoted_by_cached_ready_summary() {
+        let (index, temp) = create_test_index();
+        let id = "llm/example/model";
+        let artifact_path = temp.path().join(id).join("model-q4.gguf");
+        assert!(artifact_path.is_absolute());
+        let path = artifact_path.to_str().unwrap();
+        let mut record = create_selector_record(
+            id,
+            "Pending",
+            "llm",
+            serde_json::json!({
+                "entry_path": path,
+                "import_state": "ready", "validation_state": "valid",
+                "import_publication": {"version":1,"id":"dc68fd90-c1eb-4c60-8a72-21cc9344238c","confirmed":false}
+            }),
+        );
+        index.upsert(&record).unwrap();
+        cache_summary(
+            &index,
+            id,
+            serde_json::to_string(&summary_for(id, path)).unwrap(),
+        );
+        cache_summary_for_selected(
+            &index,
+            id,
+            "model-q4.gguf",
+            serde_json::to_string(&summary_for(id, path)).unwrap(),
+        );
+        let reader = crate::model_library::PumasReadOnlyLibrary::open(temp.path()).unwrap();
+        let request = crate::models::ResolveModelArtifactLoadTargetRequest {
+            model_ref: summary_for(id, path).model_ref,
+            expected_artifact_kind: Some(PackageArtifactKind::Gguf),
+            caller_observed_entry_path: None,
+            caller_observed_package_facts_contract_version: None,
+            resolution_mode: crate::models::PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            consumer: crate::models::PumasArtifactConsumer {
+                consumer_name: "publication regression".into(),
+                task_kind: None,
+                runtime_family: None,
+            },
+        };
+        let pending = reader
+            .resolve_model_artifact_load_target(request.clone())
+            .unwrap();
+        assert!(!pending.is_ready());
+        assert!(pending.target.is_none());
+        let snapshot = index
+            .list_model_library_selector_snapshot(&Default::default())
+            .unwrap();
+        assert_eq!(snapshot.rows[0].artifact_state, ModelArtifactState::Invalid);
+        assert_eq!(
+            snapshot.rows[0].validation_state,
+            Some(AssetValidationState::Invalid)
+        );
+        assert!(snapshot.rows[0].package_facts_summary.is_none());
+        let facts = index
+            .list_model_package_facts_summary_snapshot(10, 0)
+            .unwrap();
+        assert_eq!(
+            facts.items[0].status,
+            ModelPackageFactsSummaryStatus::Invalid
+        );
+        assert!(facts.items[0].summary.is_none());
+        // The optional new gate changes no legacy valid row semantics.
+        record
+            .metadata
+            .as_object_mut()
+            .unwrap()
+            .remove("import_publication");
+        index.upsert(&record).unwrap();
+        let legacy = index
+            .list_model_library_selector_snapshot(&Default::default())
+            .unwrap();
+        assert_eq!(legacy.rows[0].artifact_state, ModelArtifactState::Ready);
+        assert!(legacy.rows[0].package_facts_summary.is_some());
+        assert!(index
+            .list_model_package_facts_summary_snapshot(10, 0)
+            .unwrap()
+            .items[0]
+            .summary
+            .is_some());
+        let legacy_target = reader.resolve_model_artifact_load_target(request).unwrap();
+        assert!(legacy_target.is_ready());
+        assert_eq!(legacy_target.target.unwrap().local_load_path, path);
     }
 
     #[test]

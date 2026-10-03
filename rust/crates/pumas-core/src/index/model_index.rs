@@ -1,6 +1,8 @@
 //! SQLite model index for storing and querying model metadata.
 
 mod dependency_profiles;
+mod publication_projection;
+pub(crate) use publication_projection::ProjectionCommit;
 mod governance;
 mod intent_declarations;
 mod metadata_overlays;
@@ -409,11 +411,24 @@ impl ModelIndex {
     /// Returns `true` when SQLite inserted or updated a row and `false` when the
     /// existing row already matched the projected record.
     pub fn upsert(&self, record: &ModelRecord) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|_| PumasError::Database {
-            message: "Failed to acquire connection lock".to_string(),
+        let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".into(),
             source: None,
         })?;
+        let tx = conn.transaction()?;
+        let (changed, event) = self.upsert_with_conn(&tx, record)?;
+        tx.commit()?;
+        if let Some(event) = event {
+            self.publish_model_library_update_event_with_conn(&conn, event)?;
+        }
+        Ok(changed)
+    }
 
+    fn upsert_with_conn(
+        &self,
+        conn: &Connection,
+        record: &ModelRecord,
+    ) -> Result<(bool, Option<i64>)> {
         let tags_json = serde_json::to_string(&record.tags)?;
         let hashes_json = serde_json::to_string(&record.hashes)?;
         let metadata_json = serde_json::to_string_pretty(&record.metadata)?;
@@ -460,6 +475,7 @@ impl ModelIndex {
             ],
         )? > 0;
 
+        let mut event = None;
         if changed {
             debug!("Upserted model: {}", record.id);
             let change_kind = if existing {
@@ -468,7 +484,7 @@ impl ModelIndex {
                 ModelLibraryChangeKind::ModelAdded
             };
             let event_id = Self::append_model_library_update_event_with_conn(
-                &conn,
+                conn,
                 &record.id,
                 change_kind,
                 ModelFactFamily::ModelRecord,
@@ -476,9 +492,9 @@ impl ModelIndex {
                 None,
                 Some(record.updated_at.clone()),
             )?;
-            self.publish_model_library_update_event_with_conn(&conn, event_id)?;
+            event = Some(event_id);
         }
-        Ok(changed)
+        Ok((changed, event))
     }
 
     /// Replace `old_id` with `record.id` while preserving durable references.
@@ -490,8 +506,46 @@ impl ModelIndex {
         old_id: &str,
         record: &ModelRecord,
     ) -> Result<ModelIdRemapSummary> {
+        self.replace_model_id_with_expectation(old_id, record, None)
+    }
+
+    pub(crate) fn replace_import_model_id_if_unchanged(
+        &self,
+        expected: &ModelRecord,
+        record: &ModelRecord,
+    ) -> Result<ModelIdRemapSummary> {
+        if !crate::models::copied_import_ready_value(&expected.metadata)
+            || !crate::models::copied_import_ready_value(&record.metadata)
+            || expected.metadata.get("import_publication")
+                != record.metadata.get("import_publication")
+        {
+            return Err(PumasError::Validation {
+                field: "import_publication".into(),
+                message: "An owned model move must preserve a finalized publication identity"
+                    .into(),
+            });
+        }
+        self.replace_model_id_with_expectation(&expected.id, record, Some(expected))
+    }
+
+    fn replace_model_id_with_expectation(
+        &self,
+        old_id: &str,
+        record: &ModelRecord,
+        expected: Option<&ModelRecord>,
+    ) -> Result<ModelIdRemapSummary> {
         if old_id == record.id {
-            self.upsert(record)?;
+            if let Some(expected) = expected {
+                if self.upsert_projection_if_unchanged(record, Some(expected))?
+                    == ProjectionCommit::Conflict
+                {
+                    return Err(PumasError::Other(
+                        "Publication changed before owned index projection".into(),
+                    ));
+                }
+            } else {
+                self.upsert(record)?;
+            }
             return Ok(ModelIdRemapSummary::default());
         }
 
@@ -499,7 +553,13 @@ impl ModelIndex {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
         })?;
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(expected) = expected {
+            let current = Self::projection_row(&tx, old_id)?;
+            if serde_json::to_value(&current)? != serde_json::to_value(Some(expected))? {
+                return Err(PumasError::Validation { field: "import_publication".into(), message: "Source publication index changed during its owned move; retained destination requires diagnosis".into() });
+            }
+        }
 
         let old_exists = tx
             .query_row(

@@ -39,6 +39,50 @@ The RPC operations are `intent_query_models`, `intent_get_model`,
 connects to an existing owner and `PumasReadOnlyLibrary` provides direct read-only
 access. A second owning instance fails when another live process owns the root.
 
+**Copied-import compatibility change:** `ModelImporter::import` and
+`import_with_progress` (including copied Diffusers bundles) now require the
+lifecycle-owned `ModelLibrary` provided by `PumasApi` / `PumasLibraryInstance`.
+Constructing `ModelLibrary` and `ModelImporter` directly no longer admits these
+copy mutations: it returns an actionable `PumasError::Config` before staging.
+Use the existing owning API for imports; standalone read-only access remains
+available. There is no per-call runtime fallback or new standalone mutation API.
+
+Admitted copied imports continue to publication or workspace settlement after
+the initiating caller disconnects. Shutdown rejects new admission and drains
+that work. Unpublished metadata is excluded from model discovery. Copy/name
+collisions preserve source files. Copy, hash, metadata, or rename failures clean
+only the held workspace; observed replacement or failed cleanup reports a
+retained/unknown workspace and the original error, with no automatic cleanup
+retry. A successful rename is never rolled back for a later sync, confirmation,
+or indexing failure; that error identifies the published model for inspection.
+Source symlinks/non-regular entries and payloads colliding with the reserved
+`metadata.json`, `metadata.json.bak`, `overrides.json` or
+`.pumas_import_publication.json` names are refused, including original names,
+normalized aliases and filesystem-equivalent collisions.
+
+New copied imports persist Pending metadata until a versioned receipt confirms
+the exact published payload. Windows publication releases only child directory
+handles and verifies their identities after rename. Unknown or replaced content
+remains unavailable and retained. Existing Pending index entries cannot be
+promoted by watchers, cached package facts, metadata edits or in-place recovery.
+A confirmed payload can still report uncertain final metadata durability; that
+error is not success and does not authorize rollback or an automatic retry.
+There is currently no supported API to resume a retained Pending import; retain
+its payload and receipt for manual diagnosis. Digests are computed during copying,
+then one full destination hash verifies the payload after the last callback.
+Cold adoption of an already Ready asset also verifies its complete payload.
+
+Canonical metadata damage cannot be hidden by Ready cached facts. Conditional
+index commits protect newer publication state from stale watcher/rebuild results,
+and deep rebuild preserves Pending fences. Metadata/override edits require a
+finalized Ready index; normal metadata backups remain supported. Primary metadata
+and publication receipts have a shared 16 MiB producer/reader limit.
+
+Same-root reclassification preserves publication identity through a conditional
+index-ID transfer. Cross-root merge now refuses copied assets using the new receipt
+before moving them; a supported re-publication workflow is not yet available.
+Legacy assets without the new receipt retain their existing readiness contract.
+
 Downloads and acquisition now have stronger root-level mutation exclusion,
 durable ownership, restart reconciliation, cancellation, and shutdown handling.
 Admitted work is retained by the backend across initiating-client disconnection.
@@ -47,6 +91,21 @@ recovery state when an operation is interrupted.
 
 Hugging Face downloads also gain stricter destination validation, resumable
 acquisition handling, and coordination with local metadata and recovery state.
+
+Startup shard inspection is now read-only. It reports nested shard sets beneath
+canonical model roots, missing ordinal ranges, ambiguous names, and unavailable
+or invalid index evidence. It no longer starts new downloads using a repository
+guessed from a shard directory name. Persisted authorized download recovery and
+the separate interrupted-download path retain their existing behavior. An
+orphan shard set needs an explicit recovery/download request with a verified
+source; matching filename counts alone do not prove a complete model package.
+
+Rust consumers can use `ModelImporter::discover_shard_recovery` (or its async
+variant) for the typed report and must retain its incomplete-scan diagnostics.
+The old Vec-returning helpers are deprecated compatibility projections, with
+nested filenames relative to the canonical model root. They cannot prove
+completeness or authorize downloads. Inspection does not migrate or clean up
+existing model directories.
 
 ## Backend-owned conversion
 

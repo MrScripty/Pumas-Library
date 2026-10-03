@@ -32,12 +32,35 @@ vi.mock('../api/adapter', () => ({
 }));
 
 import { MigrationReportsPanel } from './MigrationReportsPanel';
+import type { MigrationExecutionReport } from '../types/api';
 
 const artifact = {
   generated_at: '2026-04-12T00:00:00Z',
   report_kind: 'dry_run',
   json_report_path: '/tmp/reports/2026/04/report.json',
   markdown_report_path: '/tmp/reports/2026/04/report.md',
+};
+
+const successfulExecutionReport: MigrationExecutionReport = {
+  generated_at: '2026-04-12T00:00:00Z',
+  completed_at: '2026-04-12T00:05:00Z',
+  resumed_from_checkpoint: false,
+  checkpoint_path: '/tmp/checkpoint.json',
+  planned_move_count: 9,
+  completed_move_count: 9,
+  skipped_move_count: 0,
+  error_count: 0,
+  reindexed_model_count: 9,
+  metadata_dir_count: 9,
+  index_model_count: 9,
+  index_metadata_model_count: 9,
+  index_partial_download_count: 0,
+  index_stale_model_count: 0,
+  referential_integrity_ok: true,
+  referential_integrity_errors: [],
+  machine_readable_report_path: null,
+  human_readable_report_path: null,
+  results: [],
 };
 
 describe('MigrationReportsPanel', () => {
@@ -66,27 +89,7 @@ describe('MigrationReportsPanel', () => {
     });
     executeMigrationMock.mockResolvedValue({
       success: true,
-      report: {
-        generated_at: '2026-04-12T00:00:00Z',
-        completed_at: '2026-04-12T00:05:00Z',
-        resumed_from_checkpoint: false,
-        checkpoint_path: '/tmp/checkpoint.json',
-        planned_move_count: 9,
-        completed_move_count: 9,
-        skipped_move_count: 0,
-        error_count: 0,
-        reindexed_model_count: 9,
-        metadata_dir_count: 9,
-        index_model_count: 9,
-        index_metadata_model_count: 9,
-        index_partial_download_count: 0,
-        index_stale_model_count: 0,
-        referential_integrity_ok: true,
-        referential_integrity_errors: [],
-        machine_readable_report_path: null,
-        human_readable_report_path: null,
-        results: [],
-      },
+      report: successfulExecutionReport,
     });
     deleteReportMock.mockResolvedValue({
       success: true,
@@ -148,6 +151,41 @@ describe('MigrationReportsPanel', () => {
       expect(deleteReportMock).toHaveBeenCalledWith('/tmp/reports/2026/04/report.json');
       expect(screen.getByText('Migration report deleted.')).toBeInTheDocument();
     });
+  });
+
+  it.each([
+    {
+      name: 'a retained publication block',
+      changes: {
+        completed_at: null,
+        planned_move_count: 2,
+        completed_move_count: 1,
+        skipped_move_count: 1,
+        error_count: 1,
+        results: [{
+          model_id: 'vision/fixture/pending',
+          target_model_id: 'vision/fixture/target',
+          action: 'blocked_import_publication',
+          error: 'Retained Pending publication requires manual diagnosis',
+        }],
+      },
+    },
+    { name: 'an incomplete checkpoint', changes: { completed_at: null } },
+    { name: 'remaining skipped work', changes: { skipped_move_count: 1 } },
+    { name: 'an execution error', changes: { error_count: 1 } },
+  ])('does not claim completion for $name with consistent references', async ({ changes }) => {
+    executeMigrationMock.mockResolvedValueOnce({
+      success: true,
+      report: { ...successfulExecutionReport, ...changes },
+    });
+    render(<MigrationReportsPanel />);
+    await waitFor(() => expect(listReportsMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: /Migration Reports/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Execute Migration/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Execute migration' }));
+    await waitFor(() => expect(screen.getByText(/Migration incomplete:/)).toBeInTheDocument());
+    expect(screen.queryByText(/Migration complete:/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Inspect the report for retained work/)).toBeInTheDocument();
   });
 
   it('reports validation and open-path failures without crashing', async () => {

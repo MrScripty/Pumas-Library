@@ -43,15 +43,15 @@ pub struct PumasApiBuilder {
 
 struct InstanceClaimGuard {
     registry: registry::LibraryRegistry,
-    library_path: PathBuf,
+    claim: registry::PrimaryInstanceClaim,
     active: bool,
 }
 
 impl InstanceClaimGuard {
-    fn new(registry: registry::LibraryRegistry, library_path: PathBuf) -> Self {
+    fn new(registry: registry::LibraryRegistry, claim: registry::PrimaryInstanceClaim) -> Self {
         Self {
             registry,
-            library_path,
+            claim,
             active: true,
         }
     }
@@ -64,7 +64,7 @@ impl InstanceClaimGuard {
 impl Drop for InstanceClaimGuard {
     fn drop(&mut self) {
         if self.active {
-            let _ = self.registry.unregister_instance(&self.library_path);
+            let _ = self.registry.release_instance_claim(&self.claim);
         }
     }
 }
@@ -87,6 +87,39 @@ async fn load_known_download_dirs(
     .unwrap_or_default()
 }
 
+// The startup shard observer receives no download client or admission authority.
+// Persisted authorized recovery and interrupted-download recovery retain their owners.
+async fn inspect_startup_shards(
+    importer: model_library::ModelImporter,
+) -> model_library::ShardRecoveryDiscovery {
+    let report = importer.discover_shard_recovery_async().await;
+    for diagnostic in &report.diagnostics {
+        tracing::warn!(
+            path = %diagnostic.path.display(),
+            kind = ?diagnostic.kind,
+            "Shard discovery: {}", diagnostic.message
+        );
+    }
+    if !report.enumeration_complete {
+        tracing::warn!("Shard discovery was incomplete; an empty result is not a clean library");
+    }
+    for model in &report.model_roots {
+        for set in &model.shard_sets {
+            if set.status != model_library::ShardSetDiscoveryStatus::CountedOrdinalsPresent {
+                tracing::warn!(
+                    model_root = %model.model_dir.display(),
+                    directory = %set.relative_directory.display(),
+                    shard_set = %set.base_name,
+                    status = ?set.status,
+                    missing_ordinals = ?set.missing_ordinals,
+                    "Shard evidence needs review; discovery does not authorize a download"
+                );
+            }
+        }
+    }
+    report
+}
+
 fn start_primary_background_work(
     primary_state: Arc<PrimaryState>,
     known_download_dirs: HashSet<PathBuf>,
@@ -102,57 +135,9 @@ fn start_primary_background_work(
     };
 
     {
-        let ps = primary_state.clone();
+        let importer = primary_state.model_importer.clone();
         runtime_tasks.spawn(async move {
-            let recoveries = ps.model_importer.recover_incomplete_shards_async().await;
-            if recoveries.is_empty() {
-                return;
-            }
-            tracing::info!(
-                "Found {} incomplete sharded model(s) to recover",
-                recoveries.len()
-            );
-            let Some(ref client) = ps.hf_client else {
-                tracing::warn!("Cannot recover incomplete shards: HF client not available");
-                return;
-            };
-            for recovery in recoveries {
-                let request = model_library::DownloadRequest {
-                    repo_id: recovery.repo_id.clone(),
-                    family: recovery.family,
-                    official_name: recovery.official_name,
-                    model_type: recovery.model_type,
-                    quant: None,
-                    filename: None,
-                    filenames: None,
-                    pipeline_tag: None,
-                    bundle_format: None,
-                    pipeline_class: None,
-                    release_date: None,
-                    download_url: None,
-                    model_card_json: None,
-                    license_status: None,
-                };
-                match client
-                    .start_download(&request, &recovery.model_dir, None)
-                    .await
-                {
-                    Ok(id) => {
-                        tracing::info!(
-                            "Started shard recovery download {} for repo {}",
-                            id,
-                            recovery.repo_id,
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to start shard recovery for {}: {}",
-                            recovery.repo_id,
-                            e,
-                        );
-                    }
-                }
-            }
+            inspect_startup_shards(importer).await;
         });
     }
 
@@ -351,7 +336,7 @@ impl PumasApiBuilder {
                 });
             }
         };
-        let mut claim_guard = InstanceClaimGuard::new(registry.clone(), claim.library_path.clone());
+        let mut claim_guard = InstanceClaimGuard::new(registry.clone(), claim.clone());
 
         let state = Arc::new(RwLock::new(ApiState {
             background_fetch_completed: false,
@@ -602,5 +587,96 @@ impl PumasApiBuilder {
         claim_guard.disarm();
 
         Ok(api)
+    }
+}
+
+#[cfg(test)]
+mod claim_guard_tests {
+    use super::*;
+
+    #[test]
+    fn startup_guard_cannot_delete_a_successor_or_promoted_instance() {
+        let root = tempfile::tempdir().unwrap();
+        let registry =
+            registry::LibraryRegistry::open_at(&root.path().join("registry.db")).unwrap();
+        let library = root.path().join("library");
+        std::fs::create_dir(&library).unwrap();
+        registry.register(&library, "Library").unwrap();
+        let claim = || match registry
+            .try_claim_instance(&library, std::process::id())
+            .unwrap()
+        {
+            registry::InstanceClaimResult::Claimed(claim) => claim,
+            registry::InstanceClaimResult::Occupied(_) => {
+                panic!("test requires an empty claim slot")
+            }
+        };
+        let first = claim();
+        let stale = InstanceClaimGuard::new(registry.clone(), first);
+        registry.unregister_instance(&library).unwrap();
+        let replacement = claim();
+        drop(stale);
+        registry
+            .mark_instance_ready(&library, &replacement.claim_token, 12345)
+            .unwrap();
+        // Promoting a claim transfers its ownership: even its own old startup
+        // guard cannot unregister the ready endpoint.
+        drop(InstanceClaimGuard::new(registry.clone(), replacement));
+        assert_eq!(
+            registry.get_instance(&library).unwrap().unwrap().port,
+            12345
+        );
+
+        registry.unregister_instance(&library).unwrap();
+        let abandoned = InstanceClaimGuard::new(registry.clone(), claim());
+        drop(abandoned);
+        assert!(registry.get_instance(&library).unwrap().is_none());
+    }
+}
+
+#[cfg(test)]
+mod shard_startup_tests {
+    use super::*;
+
+    fn byte_snapshot(root: &Path) -> std::collections::BTreeMap<PathBuf, Option<Vec<u8>>> {
+        walkdir::WalkDir::new(root)
+            .into_iter()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                let relative = entry.path().strip_prefix(root).unwrap().to_owned();
+                let contents = entry
+                    .file_type()
+                    .is_file()
+                    .then(|| std::fs::read(entry.path()).unwrap());
+                (relative, contents)
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn startup_shard_observer_returns_evidence_without_writes() {
+        let temp = tempfile::tempdir().unwrap();
+        let library = Arc::new(
+            model_library::ModelLibrary::new(temp.path().join("models"))
+                .await
+                .unwrap(),
+        );
+        let model_dir = library.build_model_path("llm", "guessed-publisher", "guessed-repository");
+        std::fs::create_dir_all(model_dir.join("nested")).unwrap();
+        std::fs::write(model_dir.join("nested/model-1-of-2.gguf"), b"partial").unwrap();
+        let before = byte_snapshot(temp.path());
+        // Keep the library owner alive so connection shutdown cannot change the
+        // SQLite files included in the snapshot when the observer's clone drops.
+        let report =
+            inspect_startup_shards(model_library::ModelImporter::new(library.clone())).await;
+        assert!(report.enumeration_complete);
+        assert_eq!(report.model_roots.len(), 1);
+        assert_eq!(
+            report.model_roots[0].shard_sets[0].status,
+            model_library::ShardSetDiscoveryStatus::MissingOrdinals
+        );
+        assert_eq!(byte_snapshot(temp.path()), before);
+        assert!(!model_dir.join(".pumas_download").exists());
+        assert!(!model_dir.join("metadata.json").exists());
     }
 }

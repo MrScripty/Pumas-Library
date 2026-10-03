@@ -1590,16 +1590,27 @@ mod tests {
         let cleanup = Arc::new(TorchCleanupTasks::default());
         let provider = Arc::new(ManagedPythonProvider::new(root.path(), cleanup.clone()).unwrap());
         let marker = root.path().join("timed-out-descendant.pid");
+        // Process startup uses real OS time and can be slow on hosted Windows.
+        // The timeout must not race the evidence that a live descendant exists.
+        const DEADLINE: Duration = Duration::from_secs(60);
         let running_provider = provider.clone();
         let command = native_sleeping_tree_command(&marker);
-        let running = tokio::spawn(async move {
-            running_provider
-                .run_bounded(command, Duration::from_secs(5), 4096)
-                .await
-        });
+        let running =
+            tokio::spawn(
+                async move { running_provider.run_bounded(command, DEADLINE, 4096).await },
+            );
         let descendant = wait_for_descendant_marker(&marker).await;
         #[cfg(target_os = "windows")]
         let descendant_handle = open_live_descendant_handle(descendant).await;
+        #[cfg(target_os = "macos")]
+        assert!(pumas_library::platform::process::is_process_alive(
+            descendant
+        ));
+        // Only advance the provider's clock once descendant custody is proven.
+        // Resume real time before testing the bounded cleanup/drain behavior.
+        tokio::time::pause();
+        tokio::time::advance(DEADLINE).await;
+        tokio::time::resume();
         let failure = tokio::time::timeout(Duration::from_secs(20), running)
             .await
             .expect("provider timeout cleanup exceeded its bound")

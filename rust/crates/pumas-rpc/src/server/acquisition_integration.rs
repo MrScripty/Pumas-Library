@@ -282,7 +282,7 @@ async fn native_transfer(
     SourceTask,
     Option<std::sync::mpsc::Sender<()>>,
 ) {
-    use pumas_app_manager::ProgressUpdate;
+    use pumas_app_manager::version_manager::ProgressUpdate;
     use pumas_library::network::{GitHubAsset, GitHubRelease, ReleasesCache};
     use pumas_library::AppId;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

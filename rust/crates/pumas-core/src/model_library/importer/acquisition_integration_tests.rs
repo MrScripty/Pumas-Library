@@ -404,16 +404,20 @@ async fn produce_hf_using(
                             "huggingface.commit",
                             "main",
                             RevisionStrength::Weak,
-                        )?,
-                    )?,
+                        )
+                        .expect("synthetic acquisition manifest must be valid"),
+                    )
+                    .expect("synthetic acquisition manifest must be valid"),
                     vec![ArtifactFile::new(
                         "detector.onnx",
                         "detector.onnx",
                         Some(4),
                         None,
                         FileVerificationRequirement::CompleteRepresentation,
-                    )?],
-                )?;
+                    )
+                    .expect("synthetic acquisition manifest must be valid")],
+                )
+                .expect("synthetic acquisition manifest must be valid");
                 let operation = service
                     .begin(
                         &context,

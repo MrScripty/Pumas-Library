@@ -51,8 +51,8 @@ model/metadata bytes. No live store is edited by that synthetic test.
 
 ## Temporary qualification binary
 
-Only this repair's PR25 headless job may retain its already-tested Linux x86_64
-no-inference RPC output for one day. The archive is explicitly unreleased and
+This repair's PR25 headless job retained its already-tested Linux x86_64
+no-inference RPC output for one day. The archive was explicitly unreleased and
 includes exact source/checkout commits and trees, Rust/Cargo toolchain, build
 command/features, runtime-library listing, transformed/original binary hashes,
 per-file hashes, and unchanged license/notice inventory provenance. It contains
@@ -60,4 +60,23 @@ no model weights, credentials, Python runtime, or runtime userdata. It is not a
 production release or a model-inference executable. Using it against an owned
 library requires the prior process to be observed stopped and the supported
 inspection API; no cache edits or duplicate library owner are authorized by the
-archive. The temporary workflow gate must be removed after qualification.
+archive. The temporary workflow gate has been removed after qualification;
+the allowlisted packager and its tests remain as provenance tooling, without
+any automatic artifact publication.
+
+### Qualification receipt
+
+- Final source head `6a3e6ce6998f326e9cf7d2e1bc0ea51e3a2d381c`, source and hosted
+  merge tree `e025953b16178f5d953780171fc43fe953b22526`.
+- [Build 37098100687](https://github.com/MrScripty/Pumas-Library/actions/runs/37098100687)
+  passed all ordinary gates, including native Linux/macOS/Windows.
+- Artifact ZIP SHA-256 `698a2cf1f54964ca9c421104127a0f7630aa6fff85367f3cf77d2ec62a212a0b`;
+  packaged tar SHA-256 `c05201824d255bc4691f2b404ed813f8cf327ec4fc9930f6724a71e9485397a3`;
+  stripped RPC SHA-256 `4495e24298c37c2f861683dfbb74ff55f5c01dd88caa370ba6243883d6dbf26b`.
+- ZIP digest, archive sidecar, every per-file checksum, notice source bytes and
+  source/checkout tree identity were independently verified. The stripped binary
+  executed `--help` successfully; that is not full runtime startup evidence.
+- Supported reinspection of the historical managed store remains unqualified:
+  the prior process has no observed exit receipt across execution namespaces.
+  The store was preserved; no stale-row deletion, duplicate owner, manual cache
+  edit, model inference, installed-v0.7 repair or real-model readiness is claimed.

@@ -36,7 +36,7 @@ class Inputs(dict):
 class LoaderTests(unittest.TestCase):
     def setUp(self):
         self.folder = self.enterContext(tempfile.TemporaryDirectory())
-        self.root = Path(self.folder)
+        self.root = Path(self.folder).resolve()
         (self.root / "config.json").write_text(
             json.dumps(
                 {"model_type": "cohere_asr", "architectures": ["CohereAsrForConditionalGeneration"]}

@@ -493,20 +493,24 @@ impl LibraryRegistry {
 
     /// Claim primary ownership for a library path.
     pub fn try_claim_instance(&self, path: &Path, pid: u32) -> Result<InstanceClaimResult> {
-        let conn = self.lock_conn()?;
         let canonical = Self::canonicalize_library_path(path)?;
         let path_str = canonical.to_string_lossy().to_string();
         let now = Utc::now().to_rfc3339();
         let version = env!("CARGO_PKG_VERSION").to_string();
+        let mut conn = self.lock_conn()?;
+        // Serialize observation and replacement across independently opened
+        // registries. A per-connection mutex cannot protect primary admission.
+        let transaction =
+            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
-        if let Some(existing) = Self::read_instance_entry(&conn, &path_str)? {
+        if let Some(existing) = Self::read_instance_entry(&transaction, &path_str)? {
             if crate::platform::is_process_alive(existing.pid) {
                 return Ok(InstanceClaimResult::Occupied(existing));
             }
         }
 
         let claim_token = uuid::Uuid::new_v4().to_string();
-        conn.execute(
+        transaction.execute(
             "INSERT INTO instances (
                  library_path, pid, port, started_at, version, status, claim_token,
                  transport_kind, endpoint, connection_token
@@ -533,11 +537,29 @@ impl LibraryRegistry {
             ],
         )?;
 
+        transaction.commit()?;
+
         Ok(InstanceClaimResult::Claimed(PrimaryInstanceClaim {
             library_path: canonical,
             pid,
             claim_token,
         }))
+    }
+
+    /// Release only this unpromoted startup claim. Stale startup cleanup must
+    /// never remove a successor or a claim already promoted to a ready instance.
+    pub(crate) fn release_instance_claim(&self, claim: &PrimaryInstanceClaim) -> Result<bool> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "DELETE FROM instances WHERE library_path = ?1 AND pid = ?2
+             AND claim_token = ?3 AND status = 'claiming'",
+            params![
+                claim.library_path.to_string_lossy(),
+                claim.pid,
+                claim.claim_token
+            ],
+        )?;
+        Ok(rows > 0)
     }
 
     /// Mark a previously claimed instance row as ready for client attachment.

@@ -29,7 +29,11 @@ def load_model(
     if model_type is None:
         model_type = _detect_model_type(path)
 
-    if model_type == "dllm":
+    if model_type == "cohere-asr":
+        from .cohere_asr_loader import load_cohere_asr
+
+        return load_cohere_asr(path, device)
+    elif model_type == "dllm":
         from .dllm_loader import load_dllm
 
         return load_dllm(path, device)
@@ -54,6 +58,9 @@ def _detect_model_type(path: Path) -> str:
 
             architectures = config.get("architectures", [])
             model_type_field = config.get("model_type", "")
+
+            if model_type_field == "cohere_asr":
+                return "cohere-asr"
 
             # Check for DLLM markers
             if any("dllm" in arch.lower() for arch in architectures):

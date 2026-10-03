@@ -105,9 +105,9 @@ impl ModelLibrary {
             // Existing producer identity, including malformed raw evidence, is
             // never replaced by observation. A receipt-only claim gets the
             // unavailable identity produced by the shared readiness owner.
-            if !original
+            if original
                 .get("import_publication")
-                .is_some_and(|value| !value.is_null())
+                .is_none_or(|value| value.is_null())
             {
                 if let Some(value) = observed.get("import_publication") {
                     original.insert("import_publication".into(), value.clone());

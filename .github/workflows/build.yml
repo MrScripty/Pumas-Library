@@ -224,6 +224,21 @@ jobs:
       - name: Test Windows locked-stage cleanup ownership
         if: runner.os == 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned
+      # Exercise the integrated filesystem and registry repairs on each host;
+      # compilation of these modules alone is not native behavioral evidence.
+      - name: Test native import integrity and shard completeness
+        run: |
+          cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::importer::tests
+          cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::sharding::tests
+      - name: Test native registry startup ownership
+        run: |
+          cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library registry::library_registry::tests
+          cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library startup_guard_cannot_delete_a_successor_or_promoted_instance
+      - name: Test native local RPC request admission
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests http_admission_rejects_untrusted_sources_before_rpc_dispatch
+      - name: Test native Unix RPC signal drain
+        if: runner.os != 'Windows'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests unix_termination_signals_complete_the_owned_shutdown
       - name: Test native managed Python paths
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library test_venv_python_path
       - name: Test Unix managed process-group ownership

@@ -86,6 +86,43 @@ use tokio::fs;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{info, warn};
 
+/// The timer belongs to one completion, including repeated attempts of a tag.
+#[derive(Clone, PartialEq, Eq)]
+struct CompletedProgressIdentity {
+    tag: String,
+    started_at: String,
+    completed_at: String,
+}
+
+impl CompletedProgressIdentity {
+    fn capture(progress: &InstallationProgress) -> Option<Self> {
+        Some(Self {
+            tag: progress.tag.clone()?,
+            started_at: progress.started_at.clone()?,
+            completed_at: progress.completed_at.clone()?,
+        })
+    }
+}
+
+async fn clear_matching_completed_progress(
+    tracker: &mut InstallationProgressTracker,
+    app_id: AppId,
+    expected: Option<CompletedProgressIdentity>,
+) {
+    let Some(expected) = expected else {
+        return;
+    };
+    let Some(current) = tracker.get_current_state() else {
+        return;
+    };
+    if CompletedProgressIdentity::capture(&current).as_ref() != Some(&expected)
+        || (app_id == AppId::LlamaCpp && installer::has_native_cleanup_pending(&current))
+    {
+        return;
+    }
+    tracker.clear_completed_state_async().await;
+}
+
 async fn path_exists(path: &Path) -> Result<bool> {
     fs::try_exists(path)
         .await
@@ -1159,6 +1196,12 @@ impl VersionManager {
                 tracker.set_error(&error.to_string());
                 tracker.complete_installation(false);
             }
+            let completed_progress = progress_tracker
+                .read()
+                .await
+                .get_current_state()
+                .as_ref()
+                .and_then(CompletedProgressIdentity::capture);
             let terminal = result.as_ref().map(|_| ()).map_err(ToString::to_string);
             tokio::select! {
                 _ = tx.send(match result {
@@ -1175,7 +1218,10 @@ impl VersionManager {
             let cleanup = tokio::spawn(async move {
                 tokio::select! {
                     _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                        progress_tracker.write().await.clear_completed_state_async().await;
+                        let mut tracker = progress_tracker.write().await;
+                        clear_matching_completed_progress(
+                            &mut tracker, app_id, completed_progress,
+                        ).await;
                     },
                     _ = wait_for_install_cancel(manager.torch_shutting_down.clone()) => {},
                 }
@@ -1354,9 +1400,11 @@ impl VersionManager {
         let removed_tag = tag.to_owned();
         let app_id = self.app_id;
         let versions_for_removal = self.versions_dir();
+        let cleanup_lock = native_versions_lock.clone();
         let remove = move || {
-            if app_id == AppId::LlamaCpp {
-                installer::mark_native_attempt_removed(&versions_for_removal, &removed_tag)?;
+            if let Some(lock) = cleanup_lock {
+                installer::mark_native_attempt_removed(&versions_for_removal, &removed_tag, lock)?
+                    .into_result()?;
             }
             info!("Removing version directory: {}", version_path.display());
             match std::fs::remove_dir_all(&version_path) {
@@ -2055,6 +2103,285 @@ mod tests {
                 assert!(manager.set_default_version(None).await.is_err());
             }
         });
+    }
+
+    #[tokio::test]
+    async fn native_completed_progress_clears_only_its_own_nonpending_completion() {
+        let root = TempDir::new().unwrap();
+        let mut tracker = InstallationProgressTracker::new(root.path().to_owned());
+        tracker.start_installation("ordinary", None, None, None);
+        tracker.complete_installation(true);
+        let ordinary = tracker
+            .get_current_state()
+            .as_ref()
+            .and_then(CompletedProgressIdentity::capture);
+        clear_matching_completed_progress(&mut tracker, AppId::LlamaCpp, ordinary).await;
+        assert!(tracker.get_current_state().is_none());
+
+        for old_pending in [false, true] {
+            for new_pending in [false, true] {
+                tracker.start_installation("first", None, None, None);
+                if old_pending {
+                    tracker.update_stage(
+                        pumas_library::models::InstallationStage::Setup,
+                        100.0,
+                        Some("Installed output verified; staging cleanup pending: first"),
+                    );
+                }
+                tracker.complete_installation(true);
+                let old = tracker
+                    .get_current_state()
+                    .as_ref()
+                    .and_then(CompletedProgressIdentity::capture);
+                if old_pending {
+                    clear_matching_completed_progress(&mut tracker, AppId::LlamaCpp, old.clone())
+                        .await;
+                    assert!(tracker.get_current_state().is_some());
+                }
+                tracker.start_installation("unrelated-newer", None, None, None);
+                if new_pending {
+                    tracker.update_stage(
+                        pumas_library::models::InstallationStage::Setup,
+                        100.0,
+                        Some("Installed output verified; staging cleanup pending: newer"),
+                    );
+                }
+                tracker.complete_installation(true);
+                let newer = tracker.get_current_state().unwrap();
+                let expected = CompletedProgressIdentity::capture(&newer);
+                clear_matching_completed_progress(&mut tracker, AppId::LlamaCpp, old).await;
+                let observed = tracker.get_current_state().unwrap();
+                assert_eq!(observed.tag, newer.tag);
+                assert_eq!(observed.current_item, newer.current_item);
+                clear_matching_completed_progress(&mut tracker, AppId::LlamaCpp, expected).await;
+                assert_eq!(tracker.get_current_state().is_some(), new_pending);
+            }
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_adopted_output_survives_legacy_or_mismatched_cleanup_custody() {
+        for legacy in [false, true] {
+            let root = TempDir::new().unwrap();
+            let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+            let api = pumas_library::PumasApi::builder(root.path())
+                .with_hf_client(false)
+                .with_process_manager(false)
+                .build()
+                .await
+                .unwrap();
+            let mut manager = VersionManager::new_with_acquisition(
+                root.path(),
+                AppId::LlamaCpp,
+                api.acquisition().clone(),
+            )
+            .await
+            .unwrap();
+            manager.github_client = Arc::new(
+                GitHubClient::with_loopback_api(
+                    manager.cache_dir(),
+                    Duration::from_secs(3600),
+                    base_url,
+                )
+                .unwrap(),
+            );
+            let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+            tokio::time::timeout(Duration::from_secs(2), observed)
+                .await
+                .unwrap()
+                .unwrap();
+            release.send(true).unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    match updates.recv().await.unwrap() {
+                        ProgressUpdate::Completed { success: true } => break,
+                        ProgressUpdate::Error { message } => {
+                            panic!("installation failed: {message}")
+                        }
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            server.await.unwrap();
+            manager.shutdown_installations().await.unwrap();
+            api.shutdown_acquisition().await.unwrap();
+            let versions = manager.versions_dir();
+            let output = manager.version_path("b1234+cpu").join("bin/llama-server");
+            let output_before = std::fs::read(&output).unwrap();
+            let store_path = root.path().join("launcher-data/downloads.json");
+            let store_before = std::fs::read(&store_path).unwrap();
+            let store: serde_json::Value = serde_json::from_slice(&store_before).unwrap();
+            let record = store["acquisitions"]
+                .as_object()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap();
+            assert_eq!(record["phase"]["state"], "adopted");
+            let stage = versions.join(record["workspace"]["relative_target"].as_str().unwrap());
+            assert!(!stage.exists());
+            std::fs::create_dir(&stage).unwrap();
+            std::fs::write(stage.join("sentinel"), b"unowned retained stage").unwrap();
+            let identity_path = std::fs::read_dir(&versions)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with(".llama-attempt-")
+                })
+                .unwrap();
+            let mut identity: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&identity_path).unwrap()).unwrap();
+            if legacy {
+                identity["schema_version"] = serde_json::json!(1);
+                identity.as_object_mut().unwrap().remove("binding");
+                identity.as_object_mut().unwrap().remove("cleanup_pending");
+            } else {
+                // Deterministic mismatch even on a filesystem reusing the
+                // removed leaf's inode. This models retained v2 custody loss.
+                identity["binding"]["components"][0][1] = serde_json::json!(0);
+                identity["cleanup_pending"] =
+                    serde_json::json!("retained cleanup requires reconciliation");
+            }
+            std::fs::write(&identity_path, serde_json::to_vec(&identity).unwrap()).unwrap();
+            drop(manager);
+            drop(api);
+            let reopened_api = pumas_library::PumasApi::builder(root.path())
+                .with_hf_client(false)
+                .with_process_manager(false)
+                .build()
+                .await
+                .unwrap();
+            let reopened = VersionManager::new_with_acquisition(
+                root.path(),
+                AppId::LlamaCpp,
+                reopened_api.acquisition().clone(),
+            )
+            .await
+            .unwrap();
+            let progress = reopened
+                .progress_tracker
+                .read()
+                .await
+                .get_current_state()
+                .unwrap();
+            assert_eq!(progress.success, Some(true));
+            assert!(progress.error.is_none());
+            assert!(progress.current_item.unwrap().contains("cleanup pending"));
+            assert!(reopened
+                .metadata_manager
+                .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+                .unwrap()
+                .is_some());
+            assert_eq!(std::fs::read(&output).unwrap(), output_before);
+            assert_eq!(
+                std::fs::read(stage.join("sentinel")).unwrap(),
+                b"unowned retained stage"
+            );
+            assert_eq!(std::fs::read(&store_path).unwrap(), store_before);
+            reopened.shutdown_installations().await.unwrap();
+            reopened_api.shutdown_acquisition().await.unwrap();
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_cancel_failed_clear_keeps_using_and_both_error_causes() {
+        let root = TempDir::new().unwrap();
+        let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
+        let pause = Arc::new(installer::TorchPublicationPause::new());
+        manager.native_receipt_pause = Some(pause.clone());
+        let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        release.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), pause.reached.notified())
+            .await
+            .unwrap();
+        let store_path = root.path().join("launcher-data/downloads.json");
+        let before: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap();
+        let record = before["acquisitions"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap();
+        let stage = manager
+            .versions_dir()
+            .join(record["workspace"]["relative_target"].as_str().unwrap());
+        let input = record["files"][0]["path"].as_str().unwrap();
+        let original_input = std::fs::read(stage.join(input)).unwrap();
+        let retired = root.path().join("retired-stage");
+        std::fs::rename(&stage, &retired).unwrap();
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::write(stage.join("sentinel"), b"replacement").unwrap();
+        assert!(manager.cancel_installation().await.unwrap());
+        pause.resume.add_permits(1);
+        let error = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match updates.recv().await.unwrap() {
+                    ProgressUpdate::Error { message } => break message,
+                    ProgressUpdate::Completed { success } => {
+                        panic!("failed cancellation completed: {success}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(error.to_lowercase().contains("cancel"), "{error}");
+        assert!(error.contains("binding changed"), "{error}");
+        server.await.unwrap();
+        assert!(manager.shutdown_installations().await.is_err());
+        let after: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap();
+        assert_eq!(
+            after["acquisitions"]
+                .as_object()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap()["phase"]["state"],
+            "using"
+        );
+        assert!(after["consumer_receipts"].as_object().unwrap().is_empty());
+        assert_eq!(
+            std::fs::read(stage.join("sentinel")).unwrap(),
+            b"replacement"
+        );
+        assert_eq!(std::fs::read(retired.join(input)).unwrap(), original_input);
+        assert!(!manager.version_path("b1234+cpu").exists());
+        let _ = api.shutdown_acquisition().await;
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]

@@ -31,11 +31,11 @@ use futures::future::{BoxFuture, Shared};
 use futures::FutureExt;
 use pumas_library::acquisition::{
     AcquisitionConsumer, AcquisitionDemand, AcquisitionHttpRequest, AcquisitionHttpSource,
-    AcquisitionRetryPolicy, AcquisitionWorkspace,
+    AcquisitionRetryPolicy, AcquisitionWorkspace, ReservedDirectory, ReservedDirectoryBinding,
 };
 use pumas_library::config::{AppId, InstallationConfig, PathsConfig};
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
-use pumas_library::models::InstallationStage;
+use pumas_library::models::{InstallationProgress, InstallationStage};
 use pumas_library::network::{GitHubAsset, GitHubClient, GitHubRelease, RetryConfig};
 use pumas_library::{PumasError, Result};
 use sha2::{Digest, Sha256};
@@ -146,13 +146,17 @@ fn sync_native_metadata(versions: &Path, app_id: AppId) -> Result<()> {
     sync_native_directory(launcher)
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NativeAttemptIdentity {
     schema_version: u32,
     tag: String,
     attempt: String,
     removed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    binding: Option<ReservedDirectoryBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cleanup_pending: Option<String>,
 }
 
 fn native_attempt_path(versions: &Path, tag: &str) -> PathBuf {
@@ -165,23 +169,114 @@ fn native_workspace_path(versions: &Path, tag: &str, attempt: &str) -> PathBuf {
     versions.join(format!(".llama-install-{}-{attempt}", &digest[..24]))
 }
 
-fn cleanup_native_workspace_if_present(directory: &Path, versions: &Path) -> Result<()> {
-    if !path_exists_sync(directory)? {
-        return Ok(());
+const NATIVE_CLEANUP_STATUS_PREFIX: &str = "Installed output verified; ";
+
+pub(crate) fn has_native_cleanup_pending(progress: &InstallationProgress) -> bool {
+    progress.success == Some(true)
+        && progress
+            .current_item
+            .as_deref()
+            .is_some_and(|item| item.starts_with(NATIVE_CLEANUP_STATUS_PREFIX))
+}
+
+/// Cleanup is independent of installed-output validity. Retained staging must
+/// never turn an already verified publication into an installation failure.
+#[derive(Debug)]
+pub(crate) enum NativeCleanupReport {
+    Removed,
+    Absent,
+    Retained {
+        reason: String,
+    },
+    /// Staging was removed or already absent; only its durable status update failed.
+    DiagnosticPending {
+        reason: String,
+    },
+}
+
+impl NativeCleanupReport {
+    fn retained(error: impl std::fmt::Display) -> Self {
+        Self::Retained {
+            reason: error.to_string(),
+        }
     }
-    let metadata = std::fs::symlink_metadata(directory)
-        .map_err(|error| PumasError::io_with_path(error, directory))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(PumasError::InstallationFailed {
-            message: "Native workspace is not a safe owned directory; reclamation required".into(),
-        });
+
+    pub(crate) fn into_result(self) -> Result<()> {
+        match self {
+            Self::Removed | Self::Absent => Ok(()),
+            Self::Retained { reason } | Self::DiagnosticPending { reason } => {
+                Err(PumasError::InstallationFailed { message: reason })
+            }
+        }
     }
-    std::fs::remove_dir_all(directory).map_err(|error| PumasError::Io {
-        message: format!("Native workspace cleanup incomplete; reclamation required: {error}"),
-        path: Some(directory.to_path_buf()),
-        source: Some(error),
-    })?;
-    sync_native_directory(versions)
+
+    fn pending_message(&self) -> Option<String> {
+        match self {
+            Self::Retained { reason } => Some(format!("staging cleanup pending: {reason}")),
+            Self::DiagnosticPending { reason } => Some(format!(
+                "staging is absent; cleanup-status update pending: {reason}"
+            )),
+            _ => None,
+        }
+    }
+}
+
+fn cleanup_native_workspace_if_present(
+    versions: &Path,
+    identity: &NativeAttemptIdentity,
+    lock: NativeVersionsLock,
+) -> NativeCleanupReport {
+    let directory = native_workspace_path(versions, &identity.tag, &identity.attempt);
+    if let Some(binding) = &identity.binding {
+        match binding.matches_root(versions) {
+            Ok(true) => {}
+            Ok(false) => {
+                return NativeCleanupReport::retained(
+                    "Native staging root binding changed; reconciliation required",
+                )
+            }
+            Err(error) => return NativeCleanupReport::retained(error),
+        }
+    }
+    let report = match path_exists_sync(&directory) {
+        Ok(false) => NativeCleanupReport::Absent,
+        Err(error) => NativeCleanupReport::retained(error),
+        Ok(true) => match NativeInstallWorkspace::reopen(versions, identity, lock.clone()) {
+            Ok(workspace) => return workspace.cleanup(),
+            Err(error) => NativeCleanupReport::retained(format!(
+                "Native staging cleanup pending at {}: {error}",
+                directory.display()
+            )),
+        },
+    };
+    // Legacy records remain byte-compatible. A present v1 leaf itself remains
+    // durable reconciliation evidence; do not invent a physical binding for it.
+    if let Some(binding) = &identity.binding {
+        let persist = (|| {
+            if !binding.matches_root(versions)? {
+                return Err(PumasError::Other(
+                    "Native cleanup diagnostic root changed".into(),
+                ));
+            }
+            let mut updated = identity.clone();
+            updated.cleanup_pending = report.pending_message();
+            write_native_attempt(versions, &updated)
+        })();
+        if let Err(error) = persist {
+            let reason = format!(
+                "{}; cleanup diagnostic persistence failed: {error}",
+                report
+                    .pending_message()
+                    .as_deref()
+                    .unwrap_or("Native staging absent")
+            );
+            return match report {
+                NativeCleanupReport::Absent => NativeCleanupReport::DiagnosticPending { reason },
+                _ => NativeCleanupReport::retained(reason),
+            };
+        }
+    }
+    report
 }
 
 fn read_native_attempt(versions: &Path, tag: &str) -> Result<Option<NativeAttemptIdentity>> {
@@ -198,7 +293,10 @@ fn read_native_attempt(versions: &Path, tag: &str) -> Result<Option<NativeAttemp
     }
     let identity: Option<NativeAttemptIdentity> = pumas_library::metadata::atomic_read_json(&path)?;
     if let Some(identity) = &identity {
-        if identity.schema_version != 1
+        if !matches!(identity.schema_version, 1 | 2)
+            || (identity.schema_version == 1
+                && (identity.binding.is_some() || identity.cleanup_pending.is_some()))
+            || (identity.schema_version == 2 && identity.binding.is_none())
             || identity.tag != tag
             || identity.attempt.len() != 32
             || !identity
@@ -226,15 +324,20 @@ fn write_native_attempt(versions: &Path, identity: &NativeAttemptIdentity) -> Re
 
 /// Called only while removal holds the permanent native versions lease.
 /// Persist revocation before deleting output so restart can never republish it.
-pub(crate) fn mark_native_attempt_removed(versions: &Path, tag: &str) -> Result<()> {
+pub(crate) fn mark_native_attempt_removed(
+    versions: &Path,
+    tag: &str,
+    lock: NativeVersionsLock,
+) -> Result<NativeCleanupReport> {
     VersionInstaller::validate_native_tag(tag)?;
     if let Some(mut identity) = read_native_attempt(versions, tag)? {
         identity.removed = true;
         write_native_attempt(versions, &identity)?;
-        let directory = native_workspace_path(versions, tag, &identity.attempt);
-        cleanup_native_workspace_if_present(&directory, versions)?;
+        return Ok(cleanup_native_workspace_if_present(
+            versions, &identity, lock,
+        ));
     }
-    Ok(())
+    Ok(NativeCleanupReport::Absent)
 }
 
 fn path_exists_sync(path: &Path) -> Result<bool> {
@@ -360,6 +463,9 @@ struct NativeInstallWorkspace {
     // explicit fallible operation after all file/extraction effects settle.
     directory: PathBuf,
     attempt: String,
+    tag: String,
+    grant: ReservedDirectory,
+    contents_cleared: AtomicBool,
     _lock: NativeVersionsLock,
 }
 
@@ -412,59 +518,112 @@ impl NativeInstallWorkspace {
         VersionInstaller::validate_native_tag(tag)?;
         let lock = NativeVersionsLock::try_acquire(versions)?;
         let current = read_native_attempt(versions, tag)?;
-        let identity = match (current, expected) {
+        match (current, expected) {
             (Some(identity), Some(expected))
                 if !identity.removed && identity.attempt == expected =>
             {
-                identity
+                Self::reopen(versions, &identity, lock)
             }
-            (_, Some(_)) => {
-                return Err(PumasError::Validation {
-                    field: "acquisition.consumer_recovery_required".into(),
-                    message: "Native recovery attempt was removed or changed".into(),
-                })
-            }
-            (Some(identity), None) if !identity.removed => identity,
+            (_, Some(_)) => Err(PumasError::Validation {
+                field: "acquisition.consumer_recovery_required".into(),
+                message: "Native recovery attempt was removed or changed".into(),
+            }),
+            (Some(identity), None) if !identity.removed => Self::reopen(versions, &identity, lock),
             (previous, None) => {
                 if path_exists_sync(&versions.join(tag))? {
                     return Err(PumasError::VersionAlreadyInstalled { tag: tag.into() });
                 }
-                if previous.is_some() {
-                    mark_native_attempt_removed(versions, tag)?;
+                if let Some(previous) = previous {
+                    // Never replace a retained record to manufacture ownership.
+                    cleanup_native_workspace_if_present(versions, &previous, lock.clone())
+                        .into_result()?;
                 }
                 let mut entropy = [0u8; 16];
                 getrandom::fill(&mut entropy).map_err(|error| {
                     PumasError::Other(format!("Native attempt identity failed: {error}"))
                 })?;
+                let attempt: String = entropy.iter().map(|byte| format!("{byte:02x}")).collect();
+                let directory = native_workspace_path(versions, tag, &attempt);
+                // Creation precedes persistence. A crash here leaves an unclaimed
+                // orphan, never an identity which can adopt a preexisting leaf.
+                std::fs::create_dir(&directory)
+                    .map_err(|error| PumasError::io_with_path(error, &directory))?;
+                let grant = Self::capture(versions, &directory, &lock)?;
+                sync_native_directory(&directory)?;
+                sync_native_directory(versions)?;
+                sync_native_directory(
+                    versions
+                        .parent()
+                        .ok_or_else(|| PumasError::Other("Native versions parent absent".into()))?,
+                )?;
                 let identity = NativeAttemptIdentity {
-                    schema_version: 1,
+                    schema_version: 2,
                     tag: tag.into(),
-                    attempt: entropy.iter().map(|byte| format!("{byte:02x}")).collect(),
+                    attempt: attempt.clone(),
                     removed: false,
+                    binding: Some(grant.binding().clone()),
+                    // Durable even if later custody loss prevents updating it.
+                    cleanup_pending: Some(
+                        "Native staging is retained until verified cleanup completes".into(),
+                    ),
                 };
                 write_native_attempt(versions, &identity)?;
-                identity
+                Ok(Self {
+                    directory,
+                    attempt,
+                    tag: tag.into(),
+                    grant,
+                    contents_cleared: AtomicBool::new(false),
+                    _lock: lock,
+                })
             }
-        };
-        let directory = native_workspace_path(versions, tag, &identity.attempt);
-        std::fs::create_dir_all(&directory)
-            .map_err(|error| PumasError::io_with_path(error, &directory))?;
-        let metadata = std::fs::symlink_metadata(&directory)
-            .map_err(|error| PumasError::io_with_path(error, &directory))?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            return Err(PumasError::InstallationFailed {
-                message: "Native acquisition stage is not a held directory".into(),
+        }
+    }
+
+    fn capture(
+        versions: &Path,
+        directory: &Path,
+        lock: &NativeVersionsLock,
+    ) -> Result<ReservedDirectory> {
+        let relative =
+            directory
+                .strip_prefix(versions)
+                .map_err(|_| PumasError::InstallationFailed {
+                    message: "Native staging escaped the versions root".into(),
+                })?;
+        ReservedDirectory::capture(versions, relative, Arc::new(lock.clone()), || Ok(()))
+    }
+
+    fn reopen(
+        versions: &Path,
+        identity: &NativeAttemptIdentity,
+        lock: NativeVersionsLock,
+    ) -> Result<Self> {
+        let binding = identity
+            .binding
+            .as_ref()
+            .filter(|_| identity.schema_version == 2)
+            .ok_or_else(|| PumasError::Validation {
+                field: "acquisition.consumer_recovery_required".into(),
+                message:
+                    "Legacy native staging has no physical custody proof; reconciliation required"
+                        .into(),
+            })?;
+        let directory = native_workspace_path(versions, &identity.tag, &identity.attempt);
+        // Missing active staging is never recreated on restart.
+        let grant = Self::capture(versions, &directory, &lock)?;
+        if grant.binding() != binding {
+            return Err(PumasError::Validation {
+                field: "acquisition.consumer_recovery_required".into(),
+                message: "Native staging physical binding changed; reconciliation required".into(),
             });
         }
-        sync_native_directory(versions)?;
-        sync_native_directory(
-            versions
-                .parent()
-                .ok_or_else(|| PumasError::Other("Native versions parent absent".into()))?,
-        )?;
         Ok(Self {
             directory,
-            attempt: identity.attempt,
+            attempt: identity.attempt.clone(),
+            tag: identity.tag.clone(),
+            grant,
+            contents_cleared: AtomicBool::new(false),
             _lock: lock,
         })
     }
@@ -473,17 +632,95 @@ impl NativeInstallWorkspace {
         &self.directory
     }
 
-    fn cleanup(self) -> Result<()> {
-        std::fs::remove_dir_all(&self.directory).map_err(|error| PumasError::Io {
-            message: format!("Native staging cleanup incomplete; retained workspace requires reconciliation: {error}"),
-            path: Some(self.directory.clone()),
-            source: Some(error),
-        })?;
-        sync_native_directory(
-            self.directory
-                .parent()
-                .ok_or_else(|| PumasError::Other("Native workspace parent absent".into()))?,
-        )
+    /// Called with settled acquisition effects, while use custody still exists.
+    fn revoke_and_clear(&self) -> Result<()> {
+        self.grant.validate_root()?;
+        let versions = self
+            .directory
+            .parent()
+            .ok_or_else(|| PumasError::Other("Native workspace parent absent".into()))?;
+        let mut identity = read_native_attempt(versions, &self.tag)?
+            .ok_or_else(|| PumasError::Other("Cancelled native attempt identity absent".into()))?;
+        if identity.attempt != self.attempt
+            || identity.binding.as_ref() != Some(self.grant.binding())
+        {
+            return Err(PumasError::Other(
+                "Cancelled native attempt identity changed".into(),
+            ));
+        }
+        identity.removed = true;
+        write_native_attempt(versions, &identity)?;
+        self.grant.clear_contents()?;
+        self.contents_cleared.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn cleanup(self) -> NativeCleanupReport {
+        let Self {
+            directory,
+            attempt,
+            tag,
+            grant,
+            _lock,
+            ..
+        } = self;
+        let versions = directory.parent().expect("native workspace parent");
+        let root_identity = grant.workspace_identity().clone();
+        let outcome = grant.clear_contents().and_then(|()| grant.remove_empty());
+        let mut reason = outcome.err().map(|error| {
+            format!(
+                "Native staging cleanup incomplete at {}; cleanup pending: {error}",
+                directory.display()
+            )
+        });
+        let persist = (|| {
+            // Only the captured root may receive diagnostics. The permanent lock
+            // serializes cooperating writers through this final compare/write.
+            let relative = directory
+                .strip_prefix(versions)
+                .map_err(|_| PumasError::Other("Native workspace parent changed".into()))?;
+            if AcquisitionWorkspace::identity_for_reserved_directory(versions, relative)?
+                != root_identity
+            {
+                return Err(PumasError::Other(
+                    "Native cleanup diagnostic root changed".into(),
+                ));
+            }
+            let mut identity = read_native_attempt(versions, &tag)?
+                .ok_or_else(|| PumasError::Other("Native cleanup attempt absent".into()))?;
+            if identity.attempt != attempt {
+                return Err(PumasError::Other("Native cleanup attempt changed".into()));
+            }
+            identity.cleanup_pending = reason.clone();
+            write_native_attempt(versions, &identity)
+        })();
+        if let Err(error) = persist {
+            if reason.is_none() {
+                return NativeCleanupReport::DiagnosticPending {
+                    reason: error.to_string(),
+                };
+            }
+            reason = Some(format!(
+                "{}; cleanup diagnostic persistence failed: {error}",
+                reason.as_deref().expect("failed physical cleanup")
+            ));
+        }
+        // Keep the lock through removal, parent sync, and diagnostic persistence.
+        drop(_lock);
+        match reason {
+            Some(reason) => NativeCleanupReport::Retained { reason },
+            None => NativeCleanupReport::Removed,
+        }
+    }
+}
+
+fn cleanup_settled_native_workspace(custody: Arc<NativeInstallWorkspace>) -> NativeCleanupReport {
+    match Arc::try_unwrap(custody) {
+        Ok(custody) => custody.cleanup(),
+        Err(custody) => NativeCleanupReport::retained(format!(
+            "Native staging cleanup pending: workspace remains in use at {}",
+            custody.path().display()
+        )),
     }
 }
 
@@ -600,24 +837,7 @@ fn prepare_native_acquisition_workspace(
         &tag,
         expected.as_deref(),
     )?);
-    let relative = custody
-        .path()
-        .strip_prefix(&versions)
-        .map_err(|_| PumasError::InstallationFailed {
-            message: "Native acquisition stage escaped the versions root".into(),
-        })?
-        .to_path_buf();
-    let execution_lease: Arc<dyn Send + Sync> = Arc::new(custody._lock.clone());
-    let validator_lease = execution_lease.clone();
-    let workspace = AcquisitionWorkspace::from_reserved_directory(
-        &versions,
-        &relative,
-        execution_lease,
-        move || {
-            let _held = &validator_lease;
-            Ok(())
-        },
-    )?;
+    let workspace = custody.grant.acquisition_workspace()?;
     Ok((custody, workspace))
 }
 
@@ -1259,9 +1479,11 @@ impl VersionInstaller {
                 let app_id = self.app_id;
                 #[cfg(test)]
                 let recovery_pause = self.native_recovery_pause.clone();
-                consumer.run_blocking("verify adopted native output and clean workspace", move || {
+                let verify_and_clean = move || {
                     #[cfg(test)]
-                    if let Some(pause) = recovery_pause { pause.block(); }
+                    if let Some(pause) = recovery_pause {
+                        pause.block();
+                    }
                     let _lock = NativeVersionsLock::try_acquire(&versions_for_cleanup)?;
                     let current = read_native_attempt(&versions_for_cleanup, &tag_for_cleanup)?;
                     let Some(current) = current else {
@@ -1271,7 +1493,7 @@ impl VersionInstaller {
                         });
                     };
                     if current.removed || current.attempt != attempt_for_cleanup {
-                        return Ok(());
+                        return Ok(NativeCleanupReport::Absent);
                     }
                     let workspace = native_workspace_path(
                         &versions_for_cleanup,
@@ -1284,17 +1506,6 @@ impl VersionInstaller {
                             field: "acquisition.consumer_recovery_required".into(),
                             message: "Adopted native workspace escaped its versions root".into(),
                         })?;
-                    let actual_workspace =
-                        pumas_library::acquisition::AcquisitionWorkspace::identity_for_reserved_directory(
-                            &versions_for_cleanup,
-                            relative_workspace,
-                        )?;
-                    if actual_workspace != expected_workspace {
-                        return Err(PumasError::Validation {
-                            field: "acquisition.consumer_recovery_required".into(),
-                            message: "Adopted native workspace identity changed".into(),
-                        });
-                    }
                     let destination = versions_for_cleanup.join(&tag_for_cleanup);
                     let metadata = std::fs::symlink_metadata(&destination)
                         .map_err(|error| PumasError::io_with_path(error, &destination))?;
@@ -1314,9 +1525,28 @@ impl VersionInstaller {
                             })
                         }
                     }
-                    cleanup_native_workspace_if_present(&workspace, &versions_for_cleanup)
-                })
-                .await?;
+                    let actual_workspace = AcquisitionWorkspace::identity_for_reserved_directory(
+                        &versions_for_cleanup,
+                        relative_workspace,
+                    )?;
+                    if actual_workspace != expected_workspace {
+                        return Ok(NativeCleanupReport::retained(
+                            "Native staging cleanup pending: workspace root changed",
+                        ));
+                    }
+                    Ok(cleanup_native_workspace_if_present(
+                        &versions_for_cleanup,
+                        &current,
+                        _lock,
+                    ))
+                };
+                let cleanup = consumer
+                    .run_blocking(
+                        "verify adopted native output and clean workspace",
+                        verify_and_clean,
+                    )
+                    .await?;
+                self.report_native_cleanup(&tag, &cleanup, None).await;
                 continue;
             }
             let recovery_versions = versions.clone();
@@ -1331,6 +1561,7 @@ impl VersionInstaller {
                     )
                 })
                 .await?;
+            let recovery_status_tag = tag.clone();
             let custody_for_reconcile = custody.clone();
             let manager = self.metadata_manager.clone();
             let app_id = self.app_id;
@@ -1370,24 +1601,52 @@ impl VersionInstaller {
                 })?;
             #[cfg(test)]
             let recovery_pause = self.native_recovery_pause.clone();
-            consumer
+            let cleanup = consumer
                 .run_blocking("clean reconciled native workspace", move || {
                     #[cfg(test)]
                     if let Some(pause) = recovery_pause {
                         pause.block();
                     }
-                    Arc::try_unwrap(custody)
-                        .map_err(|workspace| PumasError::InstallationFailed {
-                            message: format!(
-                                "Reconciled native workspace remains in use: {}",
-                                workspace.path().display()
-                            ),
-                        })?
-                        .cleanup()
+                    Ok(cleanup_settled_native_workspace(custody))
                 })
-                .await?;
+                .await
+                .unwrap_or_else(NativeCleanupReport::retained);
+            self.report_native_cleanup(&recovery_status_tag, &cleanup, None)
+                .await;
         }
         Ok(())
+    }
+
+    async fn report_native_cleanup(
+        &self,
+        tag: &str,
+        report: &NativeCleanupReport,
+        sender: Option<&mpsc::Sender<ProgressUpdate>>,
+    ) {
+        if let Some(reason) = report.pending_message() {
+            let message = format!("{NATIVE_CLEANUP_STATUS_PREFIX}{reason}");
+            let mut tracker = self.progress_tracker.write().await;
+            let current = tracker.get_current_state();
+            if current.as_ref().and_then(|state| state.tag.as_deref()) != Some(tag)
+                || current.as_ref().is_some_and(|state| state.error.is_some())
+            {
+                tracker.start_installation(tag, None, None, None);
+            }
+            tracker.update_stage(InstallationStage::Setup, 100.0, Some(&message));
+            tracker.complete_installation(true);
+            drop(tracker);
+            if let Some(sender) = sender {
+                self.send_progress(sender, ProgressUpdate::Setup { message })
+                    .await;
+            }
+        } else {
+            let mut tracker = self.progress_tracker.write().await;
+            if tracker.get_current_state().as_ref().is_some_and(|state| {
+                state.tag.as_deref() == Some(tag) && has_native_cleanup_pending(state)
+            }) {
+                tracker.clear_completed_state_async().await;
+            }
+        }
     }
 
     /// Drain Torch quarantine cleanup after the last direct install call.
@@ -1762,7 +2021,10 @@ impl VersionInstaller {
             .await;
 
         let result = match reconcile {
-            Ok(Some(())) => Ok(()),
+            Ok(Some(())) => {
+                drop(workspace);
+                Ok(())
+            }
             Ok(None) => {
                 let client = reqwest::Client::builder()
                     .connect_timeout(InstallationConfig::URL_FETCH_TIMEOUT)
@@ -1824,8 +2086,6 @@ impl VersionInstaller {
                 let cancel_for_prepare = self.cancel_flag.clone();
                 let control_for_prepare = self.torch_control.clone();
                 let custody_for_prepare = custody.clone();
-                let versions_for_cancel = versions.clone();
-                let tag_for_cancel = tag.to_owned();
                 let request = AcquisitionHttpRequest {
                     demand,
                     manifest,
@@ -1844,9 +2104,11 @@ impl VersionInstaller {
                         move |use_set| async move {
                             let archive = use_set.open_file(0).await?;
                             let stage_for_extract = stage.clone();
+                            let custody_for_extract = custody_for_prepare.clone();
                             let asset_name = asset_for_prepare.clone();
                             let extracted = use_set
                                 .run_blocking("extract publisher-verified llama.cpp archive", move || {
+                                    custody_for_extract.grant.validate()?;
                                     if path_exists_sync(&stage_for_extract)? {
                                         return Err(PumasError::InstallationFailed {
                                             message: "llama.cpp output stage already contains unresolved work".into(),
@@ -1900,17 +2162,10 @@ impl VersionInstaller {
                             if cancel_for_prepare.load(Ordering::SeqCst)
                                 || !control_for_prepare.try_begin_publication()
                             {
-                                use_set.withdraw_after_cleanup(move || {
-                                    let mut identity = read_native_attempt(&versions_for_cancel, &tag_for_cancel)?
-                                        .ok_or_else(|| PumasError::Other("Cancelled native attempt identity absent".into()))?;
-                                    if identity.attempt != custody_for_prepare.attempt || identity.removed {
-                                        return Err(PumasError::Other("Cancelled native attempt identity changed".into()));
-                                    }
-                                    identity.removed = true;
-                                    write_native_attempt(&versions_for_cancel, &identity)?;
-                                    cleanup_native_workspace_if_present(custody_for_prepare.path(), &versions_for_cancel)
-                                }).await?;
-                                return Err(VersionInstaller::cancellation_error());
+                                let withdrawal = use_set.withdraw_after_cleanup(move || {
+                                    custody_for_prepare.revoke_and_clear()
+                                }).await;
+                                return settled_result(Err(VersionInstaller::cancellation_error()), withdrawal);
                             }
                             let prepared = PreparedLlamaCppInstall {
                                 use_set,
@@ -1977,22 +2232,30 @@ impl VersionInstaller {
             result => result,
         };
 
-        let result = if result.is_ok() {
-            let cleanup = consumer
-                .run_blocking("clean published native workspace", move || {
-                    Arc::try_unwrap(custody)
-                        .map_err(|workspace| PumasError::InstallationFailed {
-                            message: format!(
-                                "Native workspace remains in use: {}",
-                                workspace.path().display()
-                            ),
-                        })?
-                        .cleanup()
-                })
-                .await;
-            settled_result(result, cleanup)
+        let cleanup = if result.is_ok() || custody.contents_cleared.load(Ordering::SeqCst) {
+            Some(
+                consumer
+                    .run_blocking("clean settled native workspace", move || {
+                        Ok(cleanup_settled_native_workspace(custody))
+                    })
+                    .await
+                    .unwrap_or_else(NativeCleanupReport::retained),
+            )
         } else {
-            result
+            None
+        };
+        // Failed clear retains acquisition custody. A cancelled operation keeps
+        // both its cancellation cause and any later shell-cleanup error.
+        let result = match (
+            &result,
+            cleanup
+                .as_ref()
+                .and_then(NativeCleanupReport::pending_message),
+        ) {
+            (Err(error), Some(cleanup)) => Err(PumasError::InstallationFailed {
+                message: format!("{error}; {cleanup}"),
+            }),
+            _ => result,
         };
 
         {
@@ -2001,6 +2264,13 @@ impl VersionInstaller {
                 tracker.set_error(&error.to_string());
             }
             tracker.complete_installation(result.is_ok());
+        }
+
+        if result.is_ok() {
+            if let Some(cleanup) = &cleanup {
+                self.report_native_cleanup(tag, cleanup, Some(&progress_tx))
+                    .await;
+            }
         }
 
         result
@@ -2177,6 +2447,7 @@ impl VersionInstaller {
             #[cfg(test)]
             park_after_native_rename_marker,
         } = publication;
+        custody.grant.validate()?;
         Self::validate_llama_cpp_receipt(&proof.tag, &proof, &stage)?;
         if manager
             .get_installed_version(&proof.tag, Some(app_id))?
@@ -2245,6 +2516,7 @@ impl VersionInstaller {
         custody: Arc<NativeInstallWorkspace>,
         proof: LlamaCppInstallReceiptV1,
     ) -> Result<()> {
+        custody.grant.validate()?;
         Self::validate_llama_cpp_receipt(tag, &proof, custody.path().join("output").as_path())?;
         let destination = versions.join(tag);
         let staged_output = custody.path().join("output");
@@ -3462,7 +3734,10 @@ mod tests {
         assert_eq!(reopened.path(), first_path);
         drop(reopened);
         let lock = NativeVersionsLock::try_acquire(root.path()).unwrap();
-        mark_native_attempt_removed(root.path(), "b1234+cpu").unwrap();
+        mark_native_attempt_removed(root.path(), "b1234+cpu", lock.clone())
+            .unwrap()
+            .into_result()
+            .unwrap();
         assert!(!first_path.exists());
         drop(lock);
         assert!(NativeInstallWorkspace::create_for_attempt(
@@ -3474,7 +3749,273 @@ mod tests {
         let reinstalled = NativeInstallWorkspace::create(root.path(), "b1234+cpu").unwrap();
         assert_ne!(reinstalled.attempt, first_identity);
         assert_ne!(reinstalled.path(), first_path);
-        reinstalled.cleanup().unwrap();
+        reinstalled.cleanup().into_result().unwrap();
+    }
+
+    #[test]
+    fn native_v2_reopen_rejects_replacement_and_missing_stage_without_mutation() {
+        for replace_root in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let versions = temp.path().join("versions");
+            let first = NativeInstallWorkspace::create(&versions, "fixture").unwrap();
+            let path = first.path().to_owned();
+            let relative = path.strip_prefix(&versions).unwrap().to_owned();
+            std::fs::write(path.join("owned"), b"owned").unwrap();
+            let record = read_native_attempt(&versions, "fixture").unwrap().unwrap();
+            assert_eq!(record.schema_version, 2);
+            assert!(record.binding.is_some());
+            assert!(record.cleanup_pending.is_some());
+            drop(first);
+            let retired = temp.path().join("retired");
+            std::fs::rename(if replace_root { &versions } else { &path }, &retired).unwrap();
+            std::fs::create_dir_all(&path).unwrap();
+            if replace_root {
+                std::fs::copy(
+                    native_attempt_path(&retired, "fixture"),
+                    native_attempt_path(&versions, "fixture"),
+                )
+                .unwrap();
+            }
+            std::fs::write(path.join("sentinel"), b"replacement").unwrap();
+            assert!(NativeInstallWorkspace::create(&versions, "fixture").is_err());
+            let lock = NativeVersionsLock::try_acquire(&versions).unwrap();
+            let report = cleanup_native_workspace_if_present(&versions, &record, lock);
+            assert!(matches!(report, NativeCleanupReport::Retained { .. }));
+            assert_eq!(
+                std::fs::read(path.join("sentinel")).unwrap(),
+                b"replacement"
+            );
+            let original = if replace_root {
+                retired.join(relative)
+            } else {
+                retired
+            };
+            assert_eq!(std::fs::read(original.join("owned")).unwrap(), b"owned");
+        }
+        let root = tempfile::tempdir().unwrap();
+        let first = NativeInstallWorkspace::create(root.path(), "missing").unwrap();
+        let path = first.path().to_owned();
+        let attempt = first.attempt.clone();
+        drop(first);
+        std::fs::remove_dir(&path).unwrap();
+        assert!(
+            NativeInstallWorkspace::create_for_attempt(root.path(), "missing", Some(&attempt))
+                .is_err()
+        );
+        assert!(!path.exists());
+        let identity = read_native_attempt(root.path(), "missing")
+            .unwrap()
+            .unwrap();
+        let lock = NativeVersionsLock::try_acquire(root.path()).unwrap();
+        assert!(matches!(
+            cleanup_native_workspace_if_present(root.path(), &identity, lock),
+            NativeCleanupReport::Absent
+        ));
+    }
+
+    #[test]
+    fn native_legacy_present_is_retained_and_absent_cleanup_is_harmless() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = NativeAttemptIdentity {
+            schema_version: 1,
+            tag: "fixture".into(),
+            attempt: "a".repeat(32),
+            removed: false,
+            binding: None,
+            cleanup_pending: None,
+        };
+        write_native_attempt(root.path(), &legacy).unwrap();
+        let path = native_workspace_path(root.path(), "fixture", &legacy.attempt);
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("sentinel"), b"legacy").unwrap();
+        let record_before = std::fs::read(native_attempt_path(root.path(), "fixture")).unwrap();
+        assert!(NativeInstallWorkspace::create(root.path(), "fixture").is_err());
+        let lock = NativeVersionsLock::try_acquire(root.path()).unwrap();
+        let report = cleanup_native_workspace_if_present(root.path(), &legacy, lock.clone());
+        assert!(matches!(report, NativeCleanupReport::Retained { .. }));
+        assert_eq!(std::fs::read(path.join("sentinel")).unwrap(), b"legacy");
+        assert_eq!(
+            std::fs::read(native_attempt_path(root.path(), "fixture")).unwrap(),
+            record_before
+        );
+        // An absent legacy leaf needs no fabricated binding or schema migration.
+        std::fs::remove_file(path.join("sentinel")).unwrap();
+        std::fs::remove_dir(path).unwrap();
+        assert!(matches!(
+            cleanup_native_workspace_if_present(root.path(), &legacy, lock),
+            NativeCleanupReport::Absent
+        ));
+        assert_eq!(
+            std::fs::read(native_attempt_path(root.path(), "fixture")).unwrap(),
+            record_before
+        );
+    }
+
+    #[test]
+    fn native_creation_crash_orphan_is_not_adopted_by_a_later_attempt() {
+        let root = tempfile::tempdir().unwrap();
+        let orphan = native_workspace_path(root.path(), "fixture", &"f".repeat(32));
+        std::fs::create_dir(&orphan).unwrap();
+        std::fs::write(
+            orphan.join("sentinel"),
+            b"created before identity persistence",
+        )
+        .unwrap();
+        assert!(read_native_attempt(root.path(), "fixture")
+            .unwrap()
+            .is_none());
+        let admitted = NativeInstallWorkspace::create(root.path(), "fixture").unwrap();
+        assert_ne!(admitted.path(), orphan);
+        assert_eq!(
+            std::fs::read(orphan.join("sentinel")).unwrap(),
+            b"created before identity persistence"
+        );
+        let identity = read_native_attempt(root.path(), "fixture")
+            .unwrap()
+            .unwrap();
+        assert_eq!(identity.binding.as_ref(), Some(admitted.grant.binding()));
+        admitted.cleanup().into_result().unwrap();
+        assert!(orphan.exists());
+    }
+
+    #[test]
+    fn native_cancellation_clears_before_releasing_acquisition_and_removes_shell_after() {
+        let root = tempfile::tempdir().unwrap();
+        let (custody, workspace) =
+            prepare_native_acquisition_workspace(root.path().to_owned(), "fixture".into(), None)
+                .unwrap();
+        let path = custody.path().to_owned();
+        std::fs::write(path.join("input"), b"owned").unwrap();
+        custody.revoke_and_clear().unwrap();
+        assert!(
+            read_native_attempt(root.path(), "fixture")
+                .unwrap()
+                .unwrap()
+                .removed
+        );
+        assert!(path.is_dir());
+        assert_eq!(std::fs::read_dir(&path).unwrap().count(), 0);
+        assert!(custody.grant.acquisition_workspace().is_err());
+        assert!(custody.grant.clone().remove_empty().is_err());
+        assert!(NativeVersionsLock::try_acquire(root.path()).is_err());
+        drop(workspace);
+        cleanup_settled_native_workspace(custody)
+            .into_result()
+            .unwrap();
+        assert!(!path.exists());
+        assert!(read_native_attempt(root.path(), "fixture")
+            .unwrap()
+            .unwrap()
+            .cleanup_pending
+            .is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_failed_clear_preserves_cancellation_and_cleanup_causes() {
+        let root = tempfile::tempdir().unwrap();
+        let (custody, workspace) =
+            prepare_native_acquisition_workspace(root.path().to_owned(), "fixture".into(), None)
+                .unwrap();
+        let path = custody.path().to_owned();
+        std::fs::write(path.join("owned"), b"original").unwrap();
+        let retired = root.path().join("retired");
+        std::fs::rename(&path, &retired).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("sentinel"), b"replacement").unwrap();
+        let error = settled_result::<()>(
+            Err(VersionInstaller::cancellation_error()),
+            custody.revoke_and_clear(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("cancelled"), "{error}");
+        assert!(error.contains("binding changed"), "{error}");
+        assert!(!custody.contents_cleared.load(Ordering::SeqCst));
+        let identity = read_native_attempt(root.path(), "fixture")
+            .unwrap()
+            .unwrap();
+        assert!(identity.removed && identity.cleanup_pending.is_some());
+        assert_eq!(
+            std::fs::read(path.join("sentinel")).unwrap(),
+            b"replacement"
+        );
+        assert_eq!(std::fs::read(retired.join("owned")).unwrap(), b"original");
+        assert!(NativeVersionsLock::try_acquire(root.path()).is_err());
+        drop(workspace);
+        drop(custody);
+    }
+
+    #[test]
+    fn native_removed_stage_with_failed_diagnostic_is_not_reported_retained() {
+        let root = tempfile::tempdir().unwrap();
+        let custody = NativeInstallWorkspace::create(root.path(), "fixture").unwrap();
+        let path = custody.path().to_owned();
+        let saved_record = root.path().join("saved-attempt.json");
+        std::fs::rename(native_attempt_path(root.path(), "fixture"), &saved_record).unwrap();
+        let report = custody.cleanup();
+        assert!(!path.exists());
+        assert!(matches!(
+            report,
+            NativeCleanupReport::DiagnosticPending { .. }
+        ));
+        assert!(report
+            .pending_message()
+            .unwrap()
+            .contains("staging is absent"));
+        assert!(saved_record.is_file());
+    }
+
+    #[tokio::test]
+    async fn native_cleanup_pending_remains_successful_and_visible() {
+        let root = tempfile::tempdir().unwrap();
+        let tracker = Arc::new(RwLock::new(InstallationProgressTracker::new(
+            root.path().to_owned(),
+        )));
+        let installer = VersionInstaller::new(
+            root.path().to_owned(),
+            AppId::LlamaCpp,
+            Arc::new(MetadataManager::new(root.path())),
+            tracker.clone(),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let report = NativeCleanupReport::retained("custody mismatch");
+        let (tx, mut rx) = mpsc::channel(1);
+        installer
+            .report_native_cleanup("fixture", &report, Some(&tx))
+            .await;
+        let state = tracker.read().await.get_current_state().unwrap();
+        assert_eq!(state.success, Some(true));
+        assert!(state.error.is_none());
+        assert!(state
+            .current_item
+            .as_deref()
+            .unwrap()
+            .contains("custody mismatch"));
+        assert!(state.current_item.unwrap().contains("cleanup pending"));
+        assert!(
+            matches!(rx.recv().await, Some(ProgressUpdate::Setup { message }) if message.contains("cleanup pending"))
+        );
+        let report = NativeCleanupReport::DiagnosticPending {
+            reason: "status write failed".into(),
+        };
+        installer
+            .report_native_cleanup("fixture", &report, None)
+            .await;
+        let state = tracker.read().await.get_current_state().unwrap();
+        assert_eq!(state.success, Some(true));
+        assert!(state.error.is_none());
+        let message = state.current_item.unwrap();
+        assert!(message.contains("staging is absent"));
+        assert!(!message.contains("staging cleanup pending"));
+        installer
+            .report_native_cleanup("unrelated", &NativeCleanupReport::Removed, None)
+            .await;
+        assert!(tracker.read().await.get_current_state().is_some());
+        installer
+            .report_native_cleanup("fixture", &NativeCleanupReport::Removed, None)
+            .await;
+        assert!(tracker.read().await.get_current_state().is_none());
     }
 
     #[test]
@@ -3885,10 +4426,56 @@ mod tests {
         // bytes for reconciliation even after the blocking worker has settled.
         assert!(path.exists());
         let next = NativeInstallWorkspace::create(root.path(), "fixture").unwrap();
-        next.cleanup().unwrap();
+        next.cleanup().into_result().unwrap();
         assert!(!path.exists());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn native_cleanup_preserves_replaced_root_or_workspace_contents() {
+        for replace_root in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let versions = root.path().join("versions");
+            let custody = NativeInstallWorkspace::create(&versions, "fixture").unwrap();
+            let original_path = custody.path().to_owned();
+            let relative = original_path.strip_prefix(&versions).unwrap().to_owned();
+            std::fs::write(original_path.join("owned"), b"owned input").unwrap();
+            let retired = root.path().join("retired");
+            let source = if replace_root {
+                versions.clone()
+            } else {
+                original_path.clone()
+            };
+            std::fs::rename(&source, &retired).unwrap();
+            std::fs::create_dir_all(&original_path).unwrap();
+            std::fs::write(original_path.join("sentinel"), b"unrelated replacement").unwrap();
+            let retained_original = if replace_root {
+                retired.join(relative)
+            } else {
+                retired
+            };
+
+            let outcome = custody.cleanup().into_result();
+
+            assert_eq!(
+                std::fs::read(original_path.join("sentinel"))
+                    .ok()
+                    .as_deref(),
+                Some(b"unrelated replacement".as_slice()),
+                "cleanup must never delete replacement contents (root={replace_root})",
+            );
+            assert!(
+                outcome.is_err(),
+                "changed binding must require reconciliation"
+            );
+            assert_eq!(
+                std::fs::read(retained_original.join("owned")).unwrap(),
+                b"owned input"
+            );
+        }
+    }
+
+    #[cfg(unix)]
     #[test]
     fn native_cleanup_failure_reports_and_retains_its_path() {
         let root = tempfile::tempdir().unwrap();
@@ -3896,7 +4483,7 @@ mod tests {
         let path = custody.path().to_owned();
         std::fs::remove_dir(&path).unwrap();
         std::fs::write(&path, "retained uncertainty").unwrap();
-        let error = custody.cleanup().unwrap_err().to_string();
+        let error = custody.cleanup().into_result().unwrap_err().to_string();
         assert!(error.contains("cleanup incomplete"));
         assert!(error.contains(&path.display().to_string()));
         assert_eq!(std::fs::read(&path).unwrap(), b"retained uncertainty");
@@ -3951,7 +4538,7 @@ mod tests {
                 .to_string()
                 .contains("cancelled"));
             assert_eq!(std::fs::read(&path).unwrap(), b"pending native bytes");
-            custody.cleanup().unwrap();
+            custody.cleanup().into_result().unwrap();
             assert!(!path.exists());
         });
     }

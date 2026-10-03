@@ -6762,7 +6762,7 @@
     "rust/Cargo.toml": "c81fc6cbbe7b8a371f7492cb08b8715cf567ba9ec5321f19ffc1a1b8df50fd28",
     "rust/crates/pumas-app-manager/Cargo.toml": "1093f1165c8ffc78567548aca81779386648594227978c1f77e048ac247e0f74",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "52872188b38b9010c0af7cd6004cd84712a3ad08dfa3f5c92c9a24c1ab48c637",
-    "rust/crates/pumas-core/Cargo.toml": "fee5929bacfa0c97cde60da0f4b9e2c4f5929d7a9ecf35320dd0ea194a3a2a5e",
+    "rust/crates/pumas-core/Cargo.toml": "93a001b51be01874070d5035a23de805e644d52c4236053cea985428b9f2d00b",
     "rust/crates/pumas-rpc/Cargo.toml": "8adfc44f73c0d325d27d8bf2055a6d5260eef67ba8361d6e4b0147efaf11a61c",
     "scripts/release/artifact-plan.json": "d5e4a2700728ba61cabca36d727efd477d716f3b50cc90fa9ce7f5e7959c7b0c",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",

@@ -165,10 +165,9 @@ async fn assert_preflight_metadata_refusal(case: &str) {
         "metadata_fifo" => {
             std::fs::create_dir(&model).unwrap();
             std::fs::write(model.join("detector.onnx"), b"owned payload").unwrap();
-            rustix::fs::mkfifoat(
-                rustix::fs::CWD,
-                model.join("metadata.json"),
-                rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+            nix::unistd::mkfifo(
+                model.join("metadata.json").as_path(),
+                nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
             )
             .unwrap();
             model.clone()

@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = ("x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-windows-msvc")
 FORBIDDEN_FEATURES = {
+    "nix": {"fs"},  # FIFO helper is a Unix dev-dependency feature only.
     "sysinfo": {"component", "network", "user"},
     "zip": {"aes-crypto", "deflate-zopfli"},
     "tracing-subscriber": {"json"},

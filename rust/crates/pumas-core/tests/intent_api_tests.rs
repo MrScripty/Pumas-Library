@@ -582,7 +582,7 @@ async fn gguf_header_quantization_matches_canonical_label_but_filename_is_not_pr
             bytes.extend_from_slice(&(key.len() as u64).to_le_bytes());
             bytes.extend_from_slice(key);
             bytes.extend_from_slice(&4_u32.to_le_bytes());
-            bytes.extend_from_slice(&13_u32.to_le_bytes());
+            bytes.extend_from_slice(&15_u32.to_le_bytes());
         }
         std::fs::write(model_dir.join(filename), bytes).unwrap();
         let mut metadata: serde_json::Value =

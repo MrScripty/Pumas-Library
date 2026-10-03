@@ -72,6 +72,34 @@ Consumer disposition:
   require separate ownership review; this slice does not expand or guard them.
 - B2 below is unchanged, including its download-authorization limitation.
 
+Independent review follow-ups:
+
+- Copied Diffusers layout includes exclusively created, held empty directories.
+  Source validation selects the copy strategy only. The shared validator reads
+  `model_index.json` and referenced components through staged capabilities before
+  metadata may claim Ready/Valid. Empty-component and changed-staged-index
+  regressions reopen the published result through the normal reader.
+- Import cleanup validates every observed descendant-directory binding and the
+  complete directory inventory before deleting any payload. Unknown or replaced
+  descendants retain the workspace and replacement sentinel. Physical identity
+  is used when readdir spelling differs on Unicode-normalizing filesystems.
+  This is import-specific; generic download deletion retains its prior contract.
+- Copied metadata preserves final model ID, final bundle source/entry paths,
+  generic recommended-backend normalization (shared with `save_metadata`), task
+  projection, custom runtime bindings and active dependency references. The
+  existing record-type fallback only applies when metadata lacks model_type;
+  copied metadata explicitly supplies it. External-reference revalidation does
+  not apply to the LibraryOwned copied path.
+- Held metadata writes invoke the existing write notifier using display paths
+  solely as watcher observations. They never derive filesystem authority from a
+  callback path. Unchanged post-publication dependency projections skip another
+  write/notification. ONNX persisted/indexed recommendations and notifier
+  replacement-sentinel regressions cover these compatibility boundaries.
+- New stages have no previous authoritative metadata to back up. Custom metadata
+  projection is prepared before publication; an unchanged post-publication
+  projection needs no replacement or backup. No existing model metadata is
+  overwritten: final directory publication remains exclusive.
+
 Acceptance remains **verifying**, not accepted: local `rustfmt` parsing and
 `git diff --check` passed; no Rust compilation or tests were run locally because
 of the shared resource budget. Parent-owned hosted CI and independent review

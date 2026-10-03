@@ -706,6 +706,33 @@ impl ModelLibrary {
         Ok(None)
     }
 
+    /// Apply the same generic normalization and watcher notification as the
+    /// path-backed save owner, while using the capability for every effect.
+    /// The final model ID was already assigned by copied-import admission.
+    pub(crate) fn write_import_metadata(
+        &self,
+        destination: &crate::model_library::DownloadRecoveryDestination,
+        metadata: &mut ModelMetadata,
+    ) -> Result<()> {
+        self.normalize_metadata_projection(metadata)?;
+        self.notify_metadata_projection_write(&destination.display_path().join(METADATA_FILENAME));
+        destination.write_model_metadata(metadata)
+    }
+
+    fn normalize_metadata_projection(&self, metadata: &mut ModelMetadata) -> Result<()> {
+        let active_bindings = metadata
+            .model_id
+            .as_deref()
+            .map(|model_id| {
+                self.index
+                    .list_active_model_dependency_bindings(model_id, None)
+            })
+            .transpose()?
+            .unwrap_or_default();
+        apply_recommended_backend_hint(metadata, &active_bindings);
+        Ok(())
+    }
+
     /// Complete projections without reacquiring a published pathname. If this
     /// fails, the caller reports the published identity and never rolls it back.
     pub(crate) fn index_import_metadata(
@@ -727,8 +754,11 @@ impl ModelLibrary {
         ))?;
         if let Some(projection) = projection {
             self.ensure_custom_runtime_binding(model_id, projection)?;
+            let before = serde_json::to_value(&*metadata)?;
             self.project_active_dependency_refs(model_id, metadata)?;
-            target.write_model_metadata(metadata)?;
+            if before != serde_json::to_value(&*metadata)? {
+                self.write_import_metadata(target, metadata)?;
+            }
             self.index.upsert(&metadata_to_record(
                 model_id,
                 target.display_path(),
@@ -4078,17 +4108,7 @@ async fn save_metadata_projection_async(
         if let Some(model_id) = library.get_model_id(&model_dir) {
             normalized.model_id = Some(model_id);
         }
-        let active_bindings = normalized
-            .model_id
-            .as_deref()
-            .map(|model_id| {
-                library
-                    .index
-                    .list_active_model_dependency_bindings(model_id, None)
-            })
-            .transpose()?
-            .unwrap_or_default();
-        apply_recommended_backend_hint(&mut normalized, &active_bindings);
+        library.normalize_metadata_projection(&mut normalized)?;
         let path = model_dir.join(METADATA_FILENAME);
         if let Some(existing) = atomic_read_json::<ModelMetadata>(&path)? {
             let existing_json = serde_json::to_value(existing).unwrap_or(Value::Null);

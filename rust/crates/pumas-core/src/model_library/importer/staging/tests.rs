@@ -118,7 +118,15 @@ async fn copied_import_success_keeps_final_identity_source_permissions_and_index
         std::fs::read(target.join("model.onnx")).unwrap()
     );
     assert!(metadata.hashes.unwrap().sha256.is_some());
-    assert!(fixture.library.index().get(&id).unwrap().is_some());
+    assert_eq!(
+        metadata.recommended_backend.as_deref(),
+        Some("onnx-runtime")
+    );
+    let indexed = fixture.library.index().get(&id).unwrap().unwrap();
+    assert_eq!(
+        indexed.metadata["recommended_backend"].as_str(),
+        Some("onnx-runtime")
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -916,5 +924,69 @@ async fn copied_import_unknown_nested_directory_is_retained_before_any_deletion(
         b"unknown custody"
     );
     assert!(fixture.stages()[0].join("model.onnx").is_file());
+    assert!(fixture.tasks.shutdown_owned().await.is_err());
+}
+
+#[tokio::test]
+async fn copied_import_metadata_notifier_observes_write_paths_without_authorizing_effects() {
+    let fixture = Fixture::new().await;
+    let notifications = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = notifications.clone();
+    fixture
+        .library
+        .set_metadata_write_notifier(Some(Arc::new(move |path| {
+            seen.lock().unwrap().push(path);
+        })));
+    let result = fixture.importer.import(&fixture.spec).await.unwrap();
+    assert!(result.success);
+    let paths = notifications.lock().unwrap().clone();
+    assert_eq!(
+        paths.len(),
+        1,
+        "ordinary import has one metadata projection write"
+    );
+    assert_eq!(paths[0].file_name().unwrap(), "metadata.json");
+    assert!(paths[0]
+        .parent()
+        .unwrap()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .starts_with(TEMP_IMPORT_PREFIX));
+    assert!(
+        !paths[0].exists(),
+        "notification is the former stage path, not retained filesystem authority"
+    );
+    assert!(fixture.target().join("metadata.json").is_file());
+    fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn copied_import_notifier_cannot_redirect_held_metadata_write_to_replacement() {
+    let fixture = Fixture::new().await;
+    let original = fixture.temp.path().join("notifier-original");
+    let original_for_callback = original.clone();
+    fixture
+        .library
+        .set_metadata_write_notifier(Some(Arc::new(move |metadata_path| {
+            let stage = metadata_path.parent().unwrap();
+            std::fs::rename(stage, &original_for_callback).unwrap();
+            std::fs::create_dir(stage).unwrap();
+            std::fs::write(stage.join("sentinel"), b"replacement after notification").unwrap();
+        })));
+    let error = fixture
+        .importer
+        .import(&fixture.spec)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("cleanup failed"));
+    assert!(original.join("model.onnx").is_file());
+    assert_eq!(
+        std::fs::read(fixture.stages()[0].join("sentinel")).unwrap(),
+        b"replacement after notification"
+    );
+    assert!(!fixture.stages()[0].join("metadata.json").exists());
     assert!(fixture.tasks.shutdown_owned().await.is_err());
 }

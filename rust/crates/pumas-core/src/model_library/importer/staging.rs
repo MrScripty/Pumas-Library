@@ -212,7 +212,7 @@ impl ModelImporter {
             let projection =
                 self.library
                     .prepare_import_metadata(&model_id, &stage, &mut metadata)?;
-            stage.write_model_metadata(&metadata)?;
+            self.library.write_import_metadata(&stage, &mut metadata)?;
             stage.sync_import_payload(
                 &files
                     .iter()

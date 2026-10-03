@@ -1,5 +1,19 @@
 # Acquisition issues and dispositions
 
+## 2026-10-03 current repair priorities
+
+The [takeover audit](../../audits/development-takeover-2026-10-03.md) is the exact-baseline evidence for these open findings. Historical rows below are not proof that the current candidate passes.
+
+- **AQ-I24 — High:** native reserved-workspace descriptor checks do not bind the current root/child path, while cleanup removes the ambient pathname. Repair exact-identity reclamation before S3; replacement contents must survive refusal (audit A9).
+- **AQ-I25 — High:** explicit HF selection resolves upstream before local authority/configuration/deletion-claim refusal. Restore preflight while preserving complete-selection validation before effects (A1).
+- **AQ-I26 — High:** schema-7 application upgrade has no exposed offline migration entry point for main's schema-5 stores. Keep startup fail-closed; provide an explicit fixture-verified operator workflow before upgrade claims (A8).
+- **AQ-I27 — Baseline blocker:** exact-head ticket recovery reports a shutdown failure; causal diagnosis remains open. Preserve failure accounting until the responsible effect is established (A6).
+- **AQ-I28 — Consumer prerequisite:** existing importer normalizes distinct source names into overwrites and validates only the first shard set. Repair collision-free complete-set admission before S3 model publication (A10).
+
+Baseline HTTP request admission, termination, executable-code trust, stale UI results and release-attribution findings remain with their existing subsystem owners, under the current audit priority. No live-root migration or broader networking is authorized by these issue entries.
+
+## Earlier scoped findings
+
 Q1 is active; production repairs and acceptance claims remain pending until evidence is recorded. Evidence references [the source audit](reports/codebase-audit.md), [the canonical contract](../../contracts/artifact-acquisition.md), and its linked primary sources. Severity is consequence within this scope, not an asserted exploited vulnerability.
 
 | ID | Severity / issue | Owner / disposition | Deciding evidence and revisit condition |

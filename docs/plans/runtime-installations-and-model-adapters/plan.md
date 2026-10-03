@@ -2,13 +2,13 @@
 
 **Revision:** 4 — coordinated with the separate prerequisite acquisition plan; supersedes revision 3 at the same canonical runtime plan path.
 
-**Status:** Planned and adopted; runtime implementation has not started because R1 is gated by AQ-HTTP.
+**Status:** Deferred for the 2026-10-03 baseline/S3/network assignment. The adopted design is retained; runtime implementation has not started.
 
 **Objective acceptance:** pending; real runtime, model, migration, native-platform, and desktop acceptance has not been performed.
 
-**Current phase:** waiting for Acquisition Q1 to satisfy and merge AQ-HTTP; read-only preparation may continue.
+**Current phase:** deferred behind baseline repairs, S3 and restricted networking under the [current acquisition priority](../artifact-acquisition/plan.md#requested-development-order-and-stopping-boundary). Revisit only after that assignment or a demonstrated prerequisite; AQ-HTTP remains required.
 
-**Exactly one next runtime slice:** **R1 — shared installation identity and bound launch for Torch and llama.cpp; begin only after AQ-HTTP is accepted and merged for the target in scope.**
+**Exactly one next runtime slice:** none while deferred. R1 remains the first candidate only after the deferral is explicitly lifted and AQ-HTTP is accepted and integrated for its target scope.
 
 **Canonical repository path:** `docs/plans/runtime-installations-and-model-adapters/plan.md`.
 

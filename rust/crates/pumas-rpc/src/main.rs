@@ -101,6 +101,13 @@ fn main() -> Result<()> {
 }
 
 async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
+    // Install Unix handlers before readiness is published. Electron and service
+    // managers use SIGTERM, which must enter the same owned drain as SIGINT.
+    #[cfg(unix)]
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    #[cfg(unix)]
+    let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+
     info!("Starting Pumas RPC Server");
 
     // Determine launcher root
@@ -197,10 +204,16 @@ async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
             Some(()) = ctrl_break.recv() => {}
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
+    tokio::select! {
+        _ = interrupt.recv() => {},
+        _ = terminate.recv() => {},
+    }
+    #[cfg(not(any(unix, windows)))]
     tokio::signal::ctrl_c().await?;
     info!("Shutdown signal received, exiting");
     server.shutdown().await?;
+    info!("RPC shutdown completed");
 
     Ok(())
 }

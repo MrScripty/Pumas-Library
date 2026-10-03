@@ -2085,6 +2085,41 @@ mod tests {
         assert!(flag_stderr.contains("--allow-lan"), "{flag_stderr}");
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unix_termination_signals_complete_the_owned_shutdown() {
+        if !can_bind_local_tcp_for_tests() {
+            return;
+        }
+        for signal in ["TERM", "INT"] {
+            let env = create_test_env();
+            let mut server = start_rpc_server(env.path()).await.unwrap();
+            let pid = server.child.id().expect("server process must be running");
+            let sent = tokio::process::Command::new("kill")
+                .args(["-s", signal, &pid.to_string()])
+                .status()
+                .await
+                .expect("Unix kill utility must be available");
+            assert!(sent.success(), "failed to send SIG{signal}");
+            let status = tokio::time::timeout(Duration::from_secs(15), server.child.wait())
+                .await
+                .expect("server must finish its owned drain")
+                .unwrap();
+            if let Some(drain) = server.stdout_drain.take() {
+                drain.await.unwrap();
+            }
+            if let Some(drain) = server.stderr_drain.take() {
+                drain.await.unwrap();
+            }
+            let diagnostics = server.diagnostics().await;
+            assert!(status.success(), "SIG{signal}: {status}; {diagnostics}");
+            assert!(
+                diagnostics.contains("RPC shutdown completed"),
+                "{diagnostics}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn debug_rpc_process_does_not_disclose_credentials_or_private_locators() {
         const SENTINEL_TOKEN: &str = "hf_test_rpc_secret_do_not_disclose";

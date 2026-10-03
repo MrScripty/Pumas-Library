@@ -3749,11 +3749,52 @@ impl HuggingFaceClient {
         remote_evidence: Option<crate::models::HuggingFaceEvidence>,
         revision: DownloadRevision,
     ) -> Result<String> {
-        let selection = self
-            .resolve_download_selection_in_context(context, request, revision)
+        // Refused local mutation must not resolve upstream or poison the
+        // owner's drain with a network failure. Retain root custody during
+        // selection, then revalidate the destination before committing it.
+        let (protected_context, _, _) = self
+            .preflight_download_destination(context, dest_dir)
             .await?;
-        self.start_download_admitted_with_selection(context, selection, dest_dir, remote_evidence)
+        let selection = self
+            .resolve_download_selection_in_context(&protected_context, request, revision)
+            .await?;
+        self.start_download_admitted_with_selection(
+            &protected_context,
+            selection,
+            dest_dir,
+            remote_evidence,
+        )
+        .await
+    }
+
+    async fn preflight_download_destination(
+        &self,
+        context: &TaskContext,
+        dest_dir: &Path,
+    ) -> Result<(
+        TaskContext,
+        crate::model_library::DownloadRecoveryDestination,
+        Arc<DownloadPersistence>,
+    )> {
+        let protected_context = self.protect_download_mutation(context).await?;
+        let root = self
+            .destination_root
+            .clone()
+            .ok_or_else(|| PumasError::Config {
+                message: "Download destination authority is unavailable".into(),
+            })?;
+        let persistence = self.persistence.clone().ok_or_else(|| PumasError::Config {
+            message: "Durable download admission is unavailable".into(),
+        })?;
+        let requested_destination = dest_dir.to_path_buf();
+        let destination = protected_context
+            .run_fallible_blocking_named("resolve download destination", move || {
+                root.resolve(&requested_destination)
+            })
             .await
+            .map_err(|error| error.into_pumas_error("Download authority resolution failed"))??;
+        assert_no_intent_deletion_claim(&protected_context, &destination).await?;
+        Ok((protected_context, destination, persistence))
     }
 
     async fn start_download_admitted_with_selection(
@@ -3772,26 +3813,11 @@ impl HuggingFaceClient {
             manifest,
         } = selection;
         let request = &request;
-        let protected_context = self.protect_download_mutation(context).await?;
+        let (protected_context, destination, persistence) = self
+            .preflight_download_destination(context, dest_dir)
+            .await?;
         let context = &protected_context;
-        let root = self
-            .destination_root
-            .clone()
-            .ok_or_else(|| PumasError::Config {
-                message: "Download destination authority is unavailable".into(),
-            })?;
-        let persistence = self.persistence.clone().ok_or_else(|| PumasError::Config {
-            message: "Durable download admission is unavailable".into(),
-        })?;
-        let requested_destination = dest_dir.to_path_buf();
-        let destination = context
-            .run_fallible_blocking_named("resolve download destination", move || {
-                root.resolve(&requested_destination)
-            })
-            .await
-            .map_err(|error| error.into_pumas_error("Download authority resolution failed"))??;
         let dest_dir = destination.display_path();
-        assert_no_intent_deletion_claim(context, &destination).await?;
         let provenance_destination = destination.clone();
         let provenance_revision = revision.clone();
         context
@@ -7935,6 +7961,47 @@ mod tests {
         ));
         assert!(!destination.exists());
         assert!(client.list_downloads().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn local_preflight_refuses_missing_configuration_without_contacting_source() {
+        for configured_root in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut client = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+            if configured_root {
+                client
+                    .configure_download_destination_root(temp.path())
+                    .unwrap();
+            }
+            // No persistence is installed. A listening, non-serving source
+            // lets the test distinguish refusal from an attempted HTTP read.
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            client.set_test_download_base_url(format!("http://{}", listener.local_addr().unwrap()));
+            let request = recovery_test_request("acme/model", &["weights.gguf".to_string()]);
+            let destination = temp.path().join("model");
+            let outcome = tokio::time::timeout(
+                Duration::from_secs(2),
+                client.start_download(&request, &destination, None),
+            )
+            .await;
+            let contacted = listener.accept();
+            drop(listener);
+            let contact_error = contacted.as_ref().err().map(std::io::Error::kind);
+            drop(contacted);
+            let drain =
+                tokio::time::timeout(Duration::from_secs(2), client.shutdown_downloads()).await;
+
+            assert!(matches!(outcome, Ok(Err(PumasError::Config { .. }))));
+            assert_eq!(
+                contact_error,
+                Some(std::io::ErrorKind::WouldBlock),
+                "local refusal must precede source I/O"
+            );
+            assert!(matches!(drain, Ok(Ok(()))));
+            assert!(!destination.exists());
+            assert!(client.list_downloads().await.is_empty());
+        }
     }
 
     #[tokio::test]

@@ -238,7 +238,7 @@ async fn acquisition_integration_copied_readiness_survives_guarded_observation()
     guarded_observation(
         library.clone(),
         model.clone(),
-        move |scoped, path, _guard| {
+        move |scoped, path, guard| {
             std::fs::rename(path, &displaced).unwrap();
             std::fs::create_dir(path).unwrap();
             std::fs::write(path.join("metadata.json"), &replacement_metadata).unwrap();
@@ -249,9 +249,26 @@ async fn acquisition_integration_copied_readiness_survives_guarded_observation()
             .unwrap();
             std::fs::write(path.join("detector.onnx"), b"replacement").unwrap();
             assert!(
-                scoped.load_metadata(path).is_err(),
-                "held reader must refuse a replacement"
+                guard.held_destination(path).is_err(),
+                "the original held destination must reject the replacement identity"
             );
+            // Public reads preserve a diagnostic row rather than returning the
+            // replacement's metadata as Ready. The held guard itself still fails.
+            let observed = scoped.load_metadata(path).unwrap().unwrap();
+            assert!(!observed.copied_import_ready());
+            assert_eq!(
+                observed.import_state,
+                Some(crate::models::ImportState::Pending)
+            );
+            assert_eq!(
+                observed.validation_state,
+                Some(crate::models::AssetValidationState::Invalid)
+            );
+            assert!(observed
+                .validation_errors
+                .unwrap()
+                .iter()
+                .any(|error| error.code == "import_publication_metadata_unavailable"));
             assert!(!cached_target_ready(
                 scoped,
                 &scoped.get_model_id(path).unwrap(),
@@ -260,6 +277,26 @@ async fn acquisition_integration_copied_readiness_survives_guarded_observation()
             assert_eq!(
                 std::fs::read(displaced.join("detector.onnx")).unwrap(),
                 b"data"
+            );
+            assert_eq!(
+                std::fs::read(displaced.join("metadata.json")).unwrap(),
+                replacement_metadata
+            );
+            assert_eq!(
+                std::fs::read(displaced.join(publication::RECEIPT_FILENAME)).unwrap(),
+                replacement_receipt
+            );
+            assert_eq!(
+                std::fs::read(path.join("detector.onnx")).unwrap(),
+                b"replacement"
+            );
+            assert_eq!(
+                std::fs::read(path.join("metadata.json")).unwrap(),
+                replacement_metadata
+            );
+            assert_eq!(
+                std::fs::read(path.join(publication::RECEIPT_FILENAME)).unwrap(),
+                replacement_receipt
             );
             std::fs::rename(path, &replacement).unwrap();
             std::fs::rename(&displaced, path).unwrap();
@@ -853,9 +890,19 @@ async fn acquisition_integration_completion_receipts_are_not_interchangeable() {
     .unwrap();
     assert!(no_receipt.is_none());
     let retained = std::fs::read(temp.path().join("downloads.json")).unwrap();
-    for store in [
-        downloads.clone(),
-        Arc::new(DownloadPersistence::new(temp.path())),
+    let retained_document: serde_json::Value = serde_json::from_slice(&retained).unwrap();
+    let expected_queue: crate::model_library::download_store::PersistedQueueAdmission =
+        serde_json::from_value(retained_document["queue_admissions"]["receiptless"].clone())
+            .unwrap();
+    let expected_snapshot = retained_document["downloads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|snapshot| snapshot["download_id"] == "receiptless")
+        .unwrap();
+    for (cold, store) in [
+        (false, downloads.clone()),
+        (true, Arc::new(DownloadPersistence::new(temp.path()))),
     ] {
         assert!(store
             .read_hf_completion_receipt(receiptless_record.id)
@@ -865,11 +912,35 @@ async fn acquisition_integration_completion_receipts_are_not_interchangeable() {
             store.acquisition_store().acquisitions().unwrap()[&receiptless_record.id],
             receiptless_record
         );
-        assert!(store
-            .load_lifecycle_inventory_strict()
-            .unwrap()
-            .queue_admissions
-            .contains_key("receiptless"));
+        let inventory = store.load_lifecycle_inventory_strict().unwrap();
+        if cold {
+            // A reopened facade has no in-memory durability acknowledgement.
+            // Its exact durable queue record therefore remains hidden custody;
+            // absence from the warm projection is never a release receipt.
+            assert!(!inventory.queue_admissions.contains_key("receiptless"));
+            let hidden = inventory.hidden_admissions.get("receiptless").unwrap();
+            assert_eq!(hidden.position, expected_queue.position);
+            assert_eq!(hidden.request.domain, expected_queue.domain);
+            assert_eq!(hidden.request.destination, expected_queue.destination);
+            assert_eq!(
+                hidden.request.requested_payload_files,
+                expected_queue.requested_payload_files
+            );
+            assert_eq!(
+                hidden.request.execution_files,
+                expected_queue.execution_files
+            );
+            assert_eq!(
+                serde_json::to_value(&hidden.request.snapshot).unwrap(),
+                *expected_snapshot
+            );
+        } else {
+            assert_eq!(
+                inventory.queue_admissions.get("receiptless"),
+                Some(&expected_queue)
+            );
+            assert!(!inventory.hidden_admissions.contains_key("receiptless"));
+        }
         assert!(!receiptless_model.join("metadata.json").exists());
         assert_eq!(
             std::fs::read(receiptless_model.join("detector.onnx")).unwrap(),

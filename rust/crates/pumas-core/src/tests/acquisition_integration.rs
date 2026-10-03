@@ -87,10 +87,13 @@ pub(super) async fn assert_startup_retained_evidence(
         .discover_shard_recovery_async()
         .await;
     assert!(report.enumeration_complete);
+    // Discovery reports the canonical root; macOS temporary roots may be
+    // spelled through /var while their held location is under /private/var.
+    let canonical_shards = shards.canonicalize().unwrap();
     assert!(report
         .model_roots
         .iter()
-        .any(|model| model.model_dir == shards
+        .any(|model| model.model_dir == canonical_shards
             && model
                 .shard_sets
                 .iter()

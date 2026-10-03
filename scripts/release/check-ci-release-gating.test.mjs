@@ -60,3 +60,16 @@ test('release builds and frontend artifact upload are guarded inside shared jobs
     new RegExp(`uses: actions/upload-artifact@v7\\.0\\.1\\n        if: ${escapedVersionTagGuard}`),
   );
 });
+
+// PowerShell's final native exit code must not mask a preceding failing test.
+test('native baseline gates keep each cargo command in its own step', () => {
+  const native = job('torch-quality');
+  for (const name of [
+    'Test native import integrity',
+    'Test native shard completeness',
+    'Test native registry startup ownership',
+    'Test native failed-start claim release',
+  ]) {
+    assert.ok(native.includes(`      - name: ${name}\n        run: cargo test --locked `), name);
+  }
+});

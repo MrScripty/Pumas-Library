@@ -263,6 +263,8 @@ jobs:
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library registry::library_registry::tests
       - name: Test native failed-start claim release
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library startup_guard_cannot_delete_a_successor_or_promoted_instance
+      - name: Test native intent IPC readiness and lifecycle
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --test intent_ipc_tests
       - name: Test native local RPC request admission
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests http_admission_rejects_untrusted_sources_before_rpc_dispatch
       - name: Test native Unix RPC signal drain

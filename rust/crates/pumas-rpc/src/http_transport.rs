@@ -8,7 +8,10 @@ use crate::server::ShutdownRequest;
 use axum::{body::Body, http::StatusCode, response::IntoResponse, Router};
 use hyper::{body::Incoming, Request, Response};
 use hyper_util::rt::TokioIo;
+use std::collections::BTreeSet;
 use std::convert::Infallible;
+use std::future::Future;
+use std::io;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -17,6 +20,8 @@ use tokio::time::Instant;
 use tower::ServiceExt;
 
 const REQUEST_QUEUE_CAPACITY: usize = 64;
+// Transport recovery cadence, not an admitted-request or shutdown deadline.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 pub(crate) const DEFAULT_HTTP_SHUTDOWN_GRACE_MS: u64 = 10_000;
 
 /// Lifecycle policy, not an ordinary request or generation timeout.
@@ -113,8 +118,75 @@ async fn serve_connection(
     }
 }
 
+/// An owned accept source; the private seam permits deterministic OS-error tests.
+trait AcceptSource: Send {
+    fn accept(&mut self) -> impl Future<Output = io::Result<TcpStream>> + Send;
+    fn check_listener(&self) -> io::Result<()>;
+}
+
+impl AcceptSource for TcpListener {
+    async fn accept(&mut self) -> io::Result<TcpStream> {
+        TcpListener::accept(self).await.map(|(socket, _)| socket)
+    }
+
+    fn check_listener(&self) -> io::Result<()> {
+        self.local_addr().map(|_| ())
+    }
+}
+
+/// Retry connection failures immediately and resource/unknown errors with backoff.
+/// Invalid accept state or failed observation of the owned listener is terminal.
+/// Even permission
+/// or unsupported errors may concern an individual pending socket (for example,
+/// Linux EPERM/EOPNOTSUPP), rather than prove the listener itself is unusable.
+fn accept_backoff(error: &io::Error, listener: &impl AcceptSource) -> io::Result<Duration> {
+    listener.check_listener()?;
+    match error.kind() {
+        io::ErrorKind::ConnectionRefused
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::ConnectionReset
+        | io::ErrorKind::Interrupted => Ok(Duration::ZERO),
+        // EINVAL/WSAEINVAL identifies an invalid listening socket (or invalid
+        // fixed accept arguments), not a pending connection failure.
+        io::ErrorKind::InvalidInput => Err(io::Error::new(error.kind(), error.to_string())),
+        _ => Ok(ACCEPT_ERROR_BACKOFF),
+    }
+}
+
+/// Retain both explicit connection outcomes and task panics in every phase.
+/// A shutdown request can race the active select after its shutdown arm polls.
+fn record_connection_result(
+    result: Result<Result<(), &'static str>, tokio::task::JoinError>,
+    failures: &mut BTreeSet<String>,
+) {
+    match result {
+        Ok(Ok(())) => {}
+        Ok(Err(failure)) => {
+            tracing::error!(failure, "HTTP connection reported incomplete cleanup");
+            failures.insert(failure.to_string());
+        }
+        Err(_) => {
+            tracing::error!(
+                "HTTP connection task failed; final shutdown receipt will report failure"
+            );
+            failures.insert("HTTP connection task failed".to_string());
+        }
+    }
+}
+
+/// Serve until explicit shutdown or an unrecoverable listener failure, retaining
+/// all admitted handlers through the final receipt even after transport loss.
 pub(crate) async fn serve(
     listener: TcpListener,
+    app: Router,
+    shutdown: ShutdownRequest,
+    policy: HttpShutdownPolicy,
+) -> anyhow::Result<()> {
+    serve_owned_listener(listener, app, shutdown, policy).await
+}
+
+async fn serve_owned_listener(
+    mut listener: impl AcceptSource,
     app: Router,
     shutdown: ShutdownRequest,
     policy: HttpShutdownPolicy,
@@ -123,31 +195,43 @@ pub(crate) async fn serve(
     let (stop_connections, stopping) = watch::channel(None);
     let mut connections = JoinSet::new();
     let mut requests = JoinSet::new();
-    let mut failures = Vec::new();
+    // Repeated isolated failures must not grow an unbounded receipt.
+    let mut failures = BTreeSet::new();
+    let mut accept_not_before = Instant::now();
     loop {
         tokio::select! {
             biased;
             _ = shutdown.clone().requested() => break,
             Some(result) = requests.join_next(), if !requests.is_empty() => {
                 if result.is_err() {
-                    failures.push("HTTP handler task failed".to_string());
-                    shutdown.request();
+                    tracing::error!("HTTP handler task failed; final shutdown receipt will report failure");
+                    failures.insert("HTTP handler task failed".to_string());
                 }
             }
             Some(result) = connections.join_next(), if !connections.is_empty() => {
-                if result.is_err() {
-                    failures.push("HTTP connection task failed".to_string());
-                    shutdown.request();
-                }
+                record_connection_result(result, &mut failures);
             }
             Some(request) = receive_request.recv() => spawn_request(&mut requests, app.clone(), request),
-            accepted = listener.accept() => match accepted {
-                Ok((socket, _)) => {
+            accepted = async {
+                // The absolute retry time survives other select branches. No
+                // resource-error hot loop, and admitted work stays responsive.
+                tokio::time::sleep_until(accept_not_before).await;
+                listener.accept().await
+            } => match accepted {
+                Ok(socket) => {
                     connections.spawn(serve_connection(socket, send_request.clone(), stopping.clone(), shutdown.clone()));
                 }
                 Err(error) => {
-                    failures.push(format!("HTTP listener failed: {error}"));
-                    break;
+                    match accept_backoff(&error, &listener) {
+                        Ok(delay) => {
+                            tracing::warn!(%error, ?delay, "HTTP accept failed; retaining listener and retrying");
+                            accept_not_before = Instant::now() + delay;
+                        }
+                        Err(observation) => {
+                            failures.insert(format!("HTTP listener failed: {error}; listener condition: {observation}"));
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -165,21 +249,19 @@ pub(crate) async fn serve(
             },
             Some(result) = requests.join_next(), if !requests.is_empty() => {
                 if result.is_err() {
-                    failures.push("HTTP handler task failed".to_string());
-                    shutdown.request();
+                    tracing::error!("HTTP handler task failed; final shutdown receipt will report failure");
+                    failures.insert("HTTP handler task failed".to_string());
                 }
             }
-            Some(result) = connections.join_next(), if !connections.is_empty() => match result {
-                Ok(Err(failure)) => failures.push(failure.to_string()),
-                Ok(Ok(())) => {},
-                Err(_) => failures.push("HTTP connection task failed".to_string()),
+            Some(result) = connections.join_next(), if !connections.is_empty() => {
+                record_connection_result(result, &mut failures);
             }
         }
     }
     if failures.is_empty() {
         Ok(())
     } else {
-        anyhow::bail!(failures.join("; "))
+        anyhow::bail!(failures.into_iter().collect::<Vec<_>>().join("; "))
     }
 }
 
@@ -214,6 +296,337 @@ mod tests {
             HttpShutdownPolicy::from_millis(100).unwrap(),
         ));
         (address, shutdown, owner)
+    }
+
+    /// Script failures around a real listener without changing OS resource limits.
+    struct ScriptedListener {
+        listener: TcpListener,
+        errors: std::collections::VecDeque<Option<io::ErrorKind>>,
+        attempts: Arc<std::sync::atomic::AtomicUsize>,
+        attempted: Arc<Notify>,
+        observation_fails: bool,
+        error_gate: Option<Arc<Notify>>,
+        failed: Arc<Notify>,
+    }
+
+    impl AcceptSource for ScriptedListener {
+        async fn accept(&mut self) -> io::Result<TcpStream> {
+            // Keep scripted state intact if another select arm cancels this
+            // pending accept. Count only an actually delivered result.
+            let result = if let Some(Some(kind)) = self.errors.front().copied() {
+                if let Some(gate) = &self.error_gate {
+                    gate.notified().await;
+                }
+                Err(io::Error::from(kind))
+            } else {
+                self.listener.accept().await.map(|(socket, _)| socket)
+            };
+            self.errors.pop_front();
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            self.attempted.notify_one();
+            if result.is_err() {
+                self.failed.notify_one();
+            }
+            result
+        }
+
+        fn check_listener(&self) -> io::Result<()> {
+            if self.observation_fails {
+                Err(io::Error::from(io::ErrorKind::NotConnected))
+            } else {
+                self.listener.check_listener()
+            }
+        }
+    }
+
+    async fn scripted(errors: &[io::ErrorKind]) -> ScriptedListener {
+        ScriptedListener {
+            listener: TcpListener::bind("127.0.0.1:0").await.unwrap(),
+            errors: errors.iter().copied().map(Some).collect(),
+            attempts: Arc::default(),
+            attempted: Arc::default(),
+            observation_fails: false,
+            error_gate: None,
+            failed: Arc::default(),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn recoverable_accept_failures_retry_then_serve() {
+        let listener = scripted(&[
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::ConnectionRefused,
+            io::ErrorKind::Interrupted,
+            io::ErrorKind::OutOfMemory,
+        ])
+        .await;
+        let mut client = TcpStream::connect(listener.listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let started = Instant::now();
+        let attempts = listener.attempts.clone();
+        let attempted = listener.attempted.clone();
+        let shutdown = ShutdownRequest::default();
+        let owner = tokio::spawn(serve_owned_listener(
+            listener,
+            Router::new().route("/ok", get(|| async { "complete" })),
+            shutdown.clone(),
+            HttpShutdownPolicy::default(),
+        ));
+        while attempts.load(Ordering::SeqCst) < 5 {
+            attempted.notified().await;
+        }
+        assert_eq!(
+            Instant::now(),
+            started,
+            "connection errors acquired a resource delay"
+        );
+        tokio::time::advance(ACCEPT_ERROR_BACKOFF - Duration::from_millis(1)).await;
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            5,
+            "resource backoff was bypassed"
+        );
+        assert!(!shutdown.is_requested());
+        tokio::time::advance(Duration::from_millis(1)).await;
+        tokio::time::resume();
+        client
+            .write_all(b"GET /ok HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).await.unwrap();
+        assert!(String::from_utf8(response).unwrap().contains("complete"));
+        assert!(attempts.load(Ordering::SeqCst) >= 6);
+        shutdown.request();
+        owner.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn admitted_handler_completes_while_accept_is_backing_off() {
+        let mut listener = scripted(&[]).await;
+        listener.errors = [None, Some(io::ErrorKind::Other)].into_iter().collect();
+        let gate = Arc::new(Notify::new());
+        listener.error_gate = Some(gate.clone());
+        let failed = listener.failed.clone();
+        let attempts = listener.attempts.clone();
+        let mut client = TcpStream::connect(listener.listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        client
+            .write_all(b"GET /hold HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let completed = Arc::new(Notify::new());
+        let app = Router::new().route(
+            "/hold",
+            get({
+                let entered = entered.clone();
+                let release = release.clone();
+                let completed = completed.clone();
+                move || {
+                    let entered = entered.clone();
+                    let release = release.clone();
+                    let completed = completed.clone();
+                    async move {
+                        entered.notify_one();
+                        release.notified().await;
+                        completed.notify_one();
+                        "complete"
+                    }
+                }
+            }),
+        );
+        let shutdown = ShutdownRequest::default();
+        let owner = tokio::spawn(serve_owned_listener(
+            listener,
+            app,
+            shutdown.clone(),
+            HttpShutdownPolicy::default(),
+        ));
+        tokio::time::timeout(Duration::from_secs(5), entered.notified())
+            .await
+            .unwrap();
+        // Real I/O is registered and the handler is already admitted. Pause
+        // only around notification-driven work, not a kernel readiness wait.
+        tokio::time::pause();
+        let started = Instant::now();
+        gate.notify_one();
+        failed.notified().await;
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        release.notify_one();
+        completed.notified().await;
+        assert_eq!(Instant::now(), started, "handler waited for accept backoff");
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        tokio::time::resume();
+        shutdown.request();
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut response))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(String::from_utf8(response).unwrap().contains("complete"));
+        owner.await.unwrap().unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_interrupts_resource_backoff_without_waiting_or_retrying() {
+        let listener = scripted(&[io::ErrorKind::Other]).await;
+        let attempts = listener.attempts.clone();
+        let attempted = listener.attempted.clone();
+        let shutdown = ShutdownRequest::default();
+        let started = Instant::now();
+        let owner = tokio::spawn(serve_owned_listener(
+            listener,
+            Router::new(),
+            shutdown.clone(),
+            HttpShutdownPolicy::default(),
+        ));
+        attempted.notified().await;
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        shutdown.request();
+        owner.await.unwrap().unwrap();
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        assert_eq!(Instant::now(), started);
+    }
+
+    #[tokio::test]
+    async fn healthy_listener_retries_ambiguous_pending_socket_errors() {
+        let listener = scripted(&[]).await;
+        for kind in [
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::NotConnected,
+            io::ErrorKind::Unsupported,
+        ] {
+            assert_eq!(
+                accept_backoff(&io::Error::from(kind), &listener).unwrap(),
+                ACCEPT_ERROR_BACKOFF
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_accept_state_fails_receipt() {
+        let listener = scripted(&[io::ErrorKind::InvalidInput]).await;
+        let shutdown = ShutdownRequest::default();
+        let error = serve_owned_listener(
+            listener,
+            Router::new(),
+            shutdown.clone(),
+            HttpShutdownPolicy::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(shutdown.is_requested());
+        assert!(error.to_string().contains("HTTP listener failed"));
+    }
+
+    #[tokio::test]
+    async fn unobservable_listener_fails_receipt() {
+        let mut listener = scripted(&[io::ErrorKind::Other]).await;
+        listener.observation_fails = true;
+        let shutdown = ShutdownRequest::default();
+        let error = serve_owned_listener(
+            listener,
+            Router::new(),
+            shutdown.clone(),
+            HttpShutdownPolicy::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(shutdown.is_requested());
+        assert!(error.to_string().contains("HTTP listener failed"));
+    }
+
+    #[test]
+    fn ready_connection_failure_is_retained_before_or_during_drain() {
+        // Both supervisor phases use this same collector. A request becoming
+        // ready after the active shutdown arm polls cannot erase an explicit
+        // connection error just because its JoinHandle completed successfully.
+        let mut failures = BTreeSet::new();
+        record_connection_result(Ok(Err("response completion unconfirmed")), &mut failures);
+        record_connection_result(Ok(Ok(())), &mut failures);
+        record_connection_result(Ok(Err("response completion unconfirmed")), &mut failures);
+        assert_eq!(
+            failures.into_iter().collect::<Vec<_>>(),
+            ["response completion unconfirmed"]
+        );
+    }
+
+    #[tokio::test]
+    async fn isolated_handler_panic_keeps_service_and_failed_final_receipt() {
+        let app = Router::new()
+            .route(
+                "/panic",
+                get(|| async {
+                    panic!("synthetic isolated handler panic");
+                    #[allow(unreachable_code)]
+                    "unreachable"
+                }),
+            )
+            .route("/ok", get(|| async { "complete" }));
+        let (address, shutdown, owner) = start(app).await;
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("http://{address}/panic"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!shutdown.is_requested());
+        assert_eq!(
+            client
+                .get(format!("http://{address}/ok"))
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap(),
+            "complete"
+        );
+        shutdown.request();
+        let error = owner.await.unwrap().unwrap_err();
+        assert!(error.to_string().contains("HTTP handler task failed"));
+    }
+
+    #[tokio::test]
+    async fn isolated_connection_panic_keeps_service_and_failed_final_receipt() {
+        let app = Router::new()
+            .route(
+                "/panic",
+                get(|| async {
+                    Body::from_stream(futures::stream::poll_fn(
+                        |_| -> std::task::Poll<Option<Result<Bytes, Infallible>>> {
+                            panic!("synthetic isolated response-body panic")
+                        },
+                    ))
+                }),
+            )
+            .route("/ok", get(|| async { "complete" }));
+        let (address, shutdown, owner) = start(app).await;
+        let client = reqwest::Client::new();
+        if let Ok(response) = client.get(format!("http://{address}/panic")).send().await {
+            assert!(response.bytes().await.is_err());
+        }
+        assert!(!shutdown.is_requested());
+        assert_eq!(
+            client
+                .get(format!("http://{address}/ok"))
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap(),
+            "complete"
+        );
+        shutdown.request();
+        let error = owner.await.unwrap().unwrap_err();
+        assert!(error.to_string().contains("HTTP connection task failed"));
     }
 
     #[test]

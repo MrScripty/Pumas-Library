@@ -37,6 +37,34 @@ that transport closure proves all effects have ceased. The external process
 owner may escalate under its separate policy, but must report forced or
 unconfirmed cleanup.
 
+## Availability and failure receipts
+
+An isolated request-handler or response-connection panic is logged and retained
+in the final failed receipt, but does not request server-wide shutdown. Other
+clients keep serving; a failed handler receives HTTP 500 if its response can
+still be delivered. This does not erase domain-owner failure or establish that
+an unknown operation ceased. Existing domain custody and drain owners retain
+their independent outcomes and still participate in final shutdown.
+
+Accept errors are classified from structured I/O state. Aborted/reset/refused
+connections and interruption retry without a resource delay. Resource or
+unclassified errors retain the observed listener and retry after one second;
+that absolute backoff does not block admitted request/connection work or delay
+an explicit shutdown. ErrorKind alone cannot establish that the listener is
+unusable: even permission/unsupported errors can describe a rejected pending
+socket. Invalid accept state (EINVAL/WSAEINVAL) or a failed observation of the
+held listener stops serving and stays in the final failed receipt. No string matching or empty-group assumption is
+used. Repeated identical task failures are deduplicated in the receipt rather
+than growing an unbounded history.
+
+Native tests cover isolated handler and response-body panics, subsequent healthy
+requests, transient-then-success accept sequences, resource backoff, immediate
+shutdown during backoff, ambiguous pending-socket errors and unobservable
+listener failure. The same outcome collector records explicit connection
+failures in active serving and drainage, including a shutdown-observation race. Accept
+failures are injected around a real loopback listener without changing process
+resource limits or operating-system settings.
+
 Hyper and hyper-util were already locked and included in shipped attribution.
 The RPC crate now directly owns their HTTP/1 server and Tokio adapter features;
 no package version or license selection changed. Tests cover partial request

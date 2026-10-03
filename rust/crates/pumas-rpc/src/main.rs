@@ -6,6 +6,7 @@
 mod catalog_projection;
 mod contract;
 mod handlers;
+mod http_transport;
 #[cfg(feature = "inference-plugins")]
 mod provider_clients;
 mod server;
@@ -53,6 +54,10 @@ struct Args {
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
 
+    /// Grace for accepted HTTP connections after shutdown; not a request timeout
+    #[arg(long, default_value_t = http_transport::DEFAULT_HTTP_SHUTDOWN_GRACE_MS)]
+    http_shutdown_grace_ms: u64,
+
     /// Enable debug logging
     #[arg(short, long)]
     debug: bool,
@@ -75,6 +80,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let host = server::LoopbackHost::parse(&args.host)?;
+    let http_policy = http_transport::HttpShutdownPolicy::from_millis(args.http_shutdown_grace_ms)?;
 
     // Set up logging
     let log_level = if args.debug {
@@ -96,10 +102,14 @@ fn main() -> Result<()> {
         .thread_name("pumas-rpc")
         .build()?;
 
-    runtime.block_on(run(args, host))
+    runtime.block_on(run(args, host, http_policy))
 }
 
-async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
+async fn run(
+    args: Args,
+    host: server::LoopbackHost,
+    http_policy: http_transport::HttpShutdownPolicy,
+) -> Result<()> {
     // Install Unix handlers before readiness is published. Electron and service
     // managers use SIGTERM, which must enter the same owned drain as SIGINT.
     #[cfg(unix)]
@@ -189,6 +199,7 @@ async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
         plugin_loader,
         host,
         args.port,
+        http_policy,
     )
     .await?;
     let addr = server.addr();

@@ -2034,13 +2034,34 @@ mod tests {
         };
         let mut feeds = Vec::new();
         for route in routes {
-            let response = client
+            let mut response = client
                 .get(format!("http://127.0.0.1:{}{route}", server.port))
                 .timeout(Duration::from_secs(15))
                 .send()
                 .await
                 .unwrap();
             assert!(response.status().is_success(), "{route}");
+            assert_eq!(response.headers()["content-type"], "text/event-stream");
+            let initial = response
+                .chunk()
+                .await
+                .unwrap()
+                .expect("feed must start with data");
+            assert!(
+                !String::from_utf8_lossy(&initial).contains("-error"),
+                "{route}"
+            );
+            if let Ok(next) =
+                tokio::time::timeout(Duration::from_millis(25), response.chunk()).await
+            {
+                let next = next
+                    .unwrap()
+                    .expect("feed must remain live before shutdown");
+                assert!(
+                    !String::from_utf8_lossy(&next).contains("-error"),
+                    "{route}"
+                );
+            }
             feeds.push(response);
         }
         let acknowledgement = rpc_call(server.port, "shutdown", json!({})).await.unwrap();

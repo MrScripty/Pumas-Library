@@ -445,6 +445,12 @@ pub async fn handle_rpc(State(state): State<Arc<AppState>>, body: Bytes) -> impl
         }
     };
     let id = request.id;
+    if state.shutdown_request.is_requested() && !matches!(request.command, RpcCommand::Shutdown) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(JsonRpcResponse::error(id, PublicError::unavailable())),
+        );
+    }
     let method = request.command.method().to_string();
 
     debug!(
@@ -3392,5 +3398,31 @@ exit 9
                 "error": "The partial download could not be resumed."
             })
         );
+    }
+    #[tokio::test]
+    async fn shutdown_refuses_rpc_commands_after_decoding_but_repeats_acknowledgement() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        state.shutdown_request.request();
+        for (method, expected) in [
+            ("health_check", StatusCode::SERVICE_UNAVAILABLE),
+            ("shutdown", StatusCode::OK),
+        ] {
+            let body = Bytes::from(
+                serde_json::to_vec(&json!({"jsonrpc":"2.0", "id":1, "method":method, "params":{}}))
+                    .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), body).await.into_response();
+            assert_eq!(response.status(), expected);
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            let value: Value = serde_json::from_slice(&bytes).unwrap();
+            if method == "shutdown" {
+                assert_eq!(value["result"]["status"], "shutting_down");
+            } else {
+                assert_eq!(value["error"]["code"], -32000);
+            }
+        }
     }
 }

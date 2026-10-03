@@ -30,7 +30,6 @@ use pumas_library::{
 };
 #[cfg(feature = "inference-plugins")]
 use std::collections::HashMap;
-use std::future::IntoFuture;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -94,6 +93,10 @@ impl Default for ShutdownRequest {
 }
 
 impl ShutdownRequest {
+    pub(crate) fn is_requested(&self) -> bool {
+        *self.signal.borrow()
+    }
+
     pub(crate) fn request(&self) {
         self.signal.send_replace(true);
     }
@@ -268,6 +271,7 @@ pub async fn start_server(
     #[cfg(feature = "inference-plugins")] plugin_loader: PluginLoader,
     host: LoopbackHost,
     port: u16,
+    http_policy: crate::http_transport::HttpShutdownPolicy,
 ) -> anyhow::Result<ServerHandle> {
     #[cfg(feature = "inference-plugins")]
     let gateway_http_client = build_gateway_http_client()?;
@@ -361,6 +365,10 @@ pub async fn start_server(
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))
         .layer(cors)
+        .layer(axum::middleware::from_fn_with_state(
+            shutdown_request.clone(),
+            reject_during_shutdown,
+        ))
         .with_state(state.clone());
 
     info!(
@@ -380,13 +388,14 @@ pub async fn start_server(
     #[cfg(test)]
     let downloads_drain_observed = downloads_drained.clone();
     let task = tokio::spawn(async move {
-        let mut serving = Box::pin(
-            axum::serve(listener, app)
-                .with_graceful_shutdown(shutdown_request.clone().requested())
-                .into_future(),
-        );
+        let mut serving = Box::pin(crate::http_transport::serve(
+            listener,
+            app,
+            shutdown_request.clone(),
+            http_policy,
+        ));
         let early_result = tokio::select! {
-            result = &mut serving => Some(result.map_err(anyhow::Error::from)),
+            result = &mut serving => Some(result),
             _ = shutdown_request.clone().requested() => None,
         };
         shutdown_request.request();
@@ -396,7 +405,7 @@ pub async fn start_server(
         let http_completion = async move {
             match early_result {
                 Some(result) => result,
-                None => serving.await.map_err(anyhow::Error::from),
+                None => serving.await,
             }
         };
         let torch_cleanup = async {
@@ -477,6 +486,20 @@ pub async fn start_server(
         handle
     };
     Ok(handle)
+}
+
+async fn reject_during_shutdown(
+    axum::extract::State(shutdown): axum::extract::State<ShutdownRequest>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    // RPC rechecks after decoding so a repeated shutdown can acknowledge without
+    // admitting other commands. Other routes stop at the header boundary.
+    if shutdown.is_requested() && request.uri().path() != "/rpc" {
+        return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    next.run(request).await
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -835,6 +858,7 @@ mod tests {
             plugin_loader,
             LoopbackHost::parse("127.0.0.1").unwrap(),
             0,
+            crate::http_transport::HttpShutdownPolicy::default(),
         )
         .await
     }
@@ -1004,5 +1028,33 @@ mod tests {
     #[test]
     fn gateway_http_client_builds_with_configured_policy() {
         build_gateway_http_client().unwrap();
+    }
+    #[tokio::test]
+    async fn shutdown_rejects_health_events_and_gateway_before_handlers() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use tower::ServiceExt;
+        let shutdown = ShutdownRequest::default();
+        let app = Router::new()
+            .fallback(|| async { axum::http::StatusCode::IM_A_TEAPOT })
+            .layer(axum::middleware::from_fn_with_state(
+                shutdown.clone(),
+                reject_during_shutdown,
+            ));
+        shutdown.request();
+        for path in [
+            "/health",
+            "/events/model-library-updates",
+            "/v1/completions",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        }
     }
 }

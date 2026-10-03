@@ -21,7 +21,10 @@ tokio = { workspace = true, features = ["rt-multi-thread", "sync", "net", "macro
 
 # HTTP server
 axum = { workspace = true }
-tower = { workspace = true, features = ["limit"] }
+# Own HTTP/1 connection shutdown; these versions already exist in Cargo.lock.
+hyper = { version = "1", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+tower = { workspace = true, features = ["limit", "util"] }
 tower-http = { workspace = true }
 
 # Serialization

@@ -43,15 +43,15 @@ pub struct PumasApiBuilder {
 
 struct InstanceClaimGuard {
     registry: registry::LibraryRegistry,
-    library_path: PathBuf,
+    claim: registry::PrimaryInstanceClaim,
     active: bool,
 }
 
 impl InstanceClaimGuard {
-    fn new(registry: registry::LibraryRegistry, library_path: PathBuf) -> Self {
+    fn new(registry: registry::LibraryRegistry, claim: registry::PrimaryInstanceClaim) -> Self {
         Self {
             registry,
-            library_path,
+            claim,
             active: true,
         }
     }
@@ -64,7 +64,7 @@ impl InstanceClaimGuard {
 impl Drop for InstanceClaimGuard {
     fn drop(&mut self) {
         if self.active {
-            let _ = self.registry.unregister_instance(&self.library_path);
+            let _ = self.registry.release_instance_claim(&self.claim);
         }
     }
 }
@@ -351,7 +351,7 @@ impl PumasApiBuilder {
                 });
             }
         };
-        let mut claim_guard = InstanceClaimGuard::new(registry.clone(), claim.library_path.clone());
+        let mut claim_guard = InstanceClaimGuard::new(registry.clone(), claim.clone());
 
         let state = Arc::new(RwLock::new(ApiState {
             background_fetch_completed: false,
@@ -597,5 +597,49 @@ impl PumasApiBuilder {
         claim_guard.disarm();
 
         Ok(api)
+    }
+}
+
+#[cfg(test)]
+mod claim_guard_tests {
+    use super::*;
+
+    #[test]
+    fn startup_guard_cannot_delete_a_successor_or_promoted_instance() {
+        let root = tempfile::tempdir().unwrap();
+        let registry =
+            registry::LibraryRegistry::open_at(&root.path().join("registry.db")).unwrap();
+        let library = root.path().join("library");
+        std::fs::create_dir(&library).unwrap();
+        registry.register(&library, "Library").unwrap();
+        let claim = || match registry
+            .try_claim_instance(&library, std::process::id())
+            .unwrap()
+        {
+            registry::InstanceClaimResult::Claimed(claim) => claim,
+            registry::InstanceClaimResult::Occupied(_) => {
+                panic!("test requires an empty claim slot")
+            }
+        };
+        let first = claim();
+        let stale = InstanceClaimGuard::new(registry.clone(), first);
+        registry.unregister_instance(&library).unwrap();
+        let replacement = claim();
+        drop(stale);
+        registry
+            .mark_instance_ready(&library, &replacement.claim_token, 12345)
+            .unwrap();
+        // Promoting a claim transfers its ownership: even its own old startup
+        // guard cannot unregister the ready endpoint.
+        drop(InstanceClaimGuard::new(registry.clone(), replacement));
+        assert_eq!(
+            registry.get_instance(&library).unwrap().unwrap().port,
+            12345
+        );
+
+        registry.unregister_instance(&library).unwrap();
+        let abandoned = InstanceClaimGuard::new(registry.clone(), claim());
+        drop(abandoned);
+        assert!(registry.get_instance(&library).unwrap().is_none());
     }
 }

@@ -70,6 +70,7 @@ class OperationStatus:
     cleanup: str
     text: str | None
     operation_diagnostic: Diagnostic | None
+    startup_diagnostic: Diagnostic | None
     cleanup_diagnostic: Diagnostic | None
     receipt_ttl_seconds: float
     max_settled_receipts: int
@@ -105,6 +106,7 @@ class _Entry:
     cleanup: str = "pending"
     text: str | None = None
     diagnostic: Diagnostic | None = None
+    startup_diagnostic: Diagnostic | None = None
     cleanup_diagnostic: Diagnostic | None = None
     settled_at: float | None = None
     runner: asyncio.Task | None = field(default=None, repr=False)
@@ -113,15 +115,43 @@ class _Entry:
     quarantine: Any = field(default=None, repr=False)
 
 
+_DIAGNOSTIC_MESSAGES = {
+    "cancelled": "Speech inference was cancelled.",
+    "inference_failed": "Speech inference failed.",
+    "runtime_unsupported": "The speech runtime is unsupported.",
+    "model_unavailable": "The speech model is unavailable or ambiguous.",
+    "model_unsupported": "The selected model does not support speech inference.",
+    "runtime_busy": "The speech device is busy.",
+    "lease_refused": "The speech device lease was refused.",
+    "worker_start_unconfirmed": "Native worker startup is unconfirmed; runtime termination is required.",
+    "device_cleanup_unconfirmed": "Speech device cleanup is unconfirmed.",
+    "lease_cleanup_unconfirmed": "Speech lease cleanup is unconfirmed.",
+    "owner_cleanup_unconfirmed": "Speech operation owner cleanup is unconfirmed.",
+}
+_SAFE_EXCEPTION_TYPES = (
+    SpeechCleanupUnconfirmed,
+    SpeechCancelled,
+    SpeechRuntimeUnsupported,
+    asyncio.CancelledError,
+    KeyboardInterrupt,
+    SystemExit,
+    MemoryError,
+    UnicodeError,
+    ValueError,
+    KeyError,
+    RuntimeError,
+    OSError,
+    Exception,
+    BaseException,
+)
+
+
 def _diagnostic(error: BaseException, code: str) -> Diagnostic:
-    # Do not retain exception objects, traceback frames, model inputs or arbitrary
-    # exception attributes in settled receipts. Do not log exception messages.
-    try:
-        message = str(error)[:1024]
-        message = message.encode("utf-8", errors="replace")[:1024].decode("utf-8", errors="ignore")
-    except BaseException:
-        message = "Diagnostic text unavailable"
-    return Diagnostic(code, type(error).__name__[:128], message)
+    # Backend exception text/args/custom type names may contain PCM or transcripts.
+    # Never invoke str/repr on the exception or copy its attributes into receipts.
+    # Keep only an allowlisted category and code-owned, fixed bounded message.
+    category = next(kind.__name__ for kind in _SAFE_EXCEPTION_TYPES if isinstance(error, kind))
+    return Diagnostic(code, category, _DIAGNOSTIC_MESSAGES[code])
 
 
 def _unique_object(pairs):
@@ -359,6 +389,7 @@ class SpeechOperationOwner:
             entry.cleanup,
             entry.text,
             entry.diagnostic,
+            entry.startup_diagnostic,
             entry.cleanup_diagnostic,
             self._ttl,
             self._max_receipts,
@@ -424,7 +455,19 @@ class SpeechOperationOwner:
             if entry.worker.is_alive():
                 self._loop.call_later(0.001, receive)
             elif not notification.done():
-                notification.set_result(result.pop())
+                outcome = result.pop()
+                if entry.startup_diagnostic is not None:
+                    # A startup exception already quarantined this operation.
+                    # Preserve any later inference/device-cleanup diagnostics and
+                    # conversion buffer, but never expose late successful text or
+                    # turn an outcome notification into a release API.
+                    entry.diagnostic = outcome.diagnostic
+                    entry.cleanup_diagnostic = outcome.cleanup_diagnostic
+                    if outcome.quarantine is not None:
+                        entry.quarantine = (entry.quarantine, outcome.quarantine)
+                    notification.set_result(None)
+                else:
+                    notification.set_result(outcome)
 
         def work():
             result.append(_invoke(self._adapter, loaded, entry.audio, entry.language, entry.cancel))
@@ -438,7 +481,13 @@ class SpeechOperationOwner:
         try:
             entry.worker.start()
         except BaseException as error:
-            outcome = _Outcome(diagnostic=_diagnostic(error, "worker_start_failed"))
+            # Thread.start may raise after native creation but before its start
+            # acknowledgement is delivered. Neither is_alive()==False nor a
+            # missing acknowledgement proves non-start. Fail closed without ever
+            # exiting this lease; only the external process owner can resolve it.
+            entry.startup_diagnostic = _diagnostic(error, "worker_start_unconfirmed")
+            entry.quarantine = error
+            await self._hold_quarantine(entry)
         else:
             outcome = await self._resist_cancellation(notification, entry)
         if outcome.quarantine is not None:

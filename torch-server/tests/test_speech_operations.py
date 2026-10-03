@@ -380,7 +380,7 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(entry.runner)
         self.assertIsNone(entry.quarantine)
         self.assertEqual(done.operation_diagnostic.exception_type, "RuntimeError")
-        self.assertEqual(done.operation_diagnostic.message, "synthetic failure")
+        self.assertEqual(done.operation_diagnostic.message, "Speech inference failed.")
         self.assertNotIn(owner, _CUSTODIANS)
 
     async def test_count_and_ttl_eviction_unknown_outcome_without_replay_guarantee(self):
@@ -617,6 +617,52 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await owner.drain(timeout)
 
+    async def test_receipt_diagnostic_does_not_copy_submitted_audio_or_backend_text(self):
+        secret = b"PRIVATE-PCM-1234"
+        copied = []
+
+        class AudioError(RuntimeError):
+            def __str__(self):
+                copied.append(True)
+                return repr(secret) + " private transcript content"
+
+        AudioError.__name__ = "PRIVATE_BACKEND_TYPE_NAME"
+
+        def fail(*args):
+            raise AudioError(secret)
+
+        owner, _, _ = self.make_owner(adapter=fail)
+        started = owner.start(encode(payload(owner, pcm=secret)))
+        done = await owner.wait(started.operation_ref)
+        self.assertEqual(done.state, "failed")
+        self.assertFalse(copied, "Diagnostic extraction called backend exception __str__")
+        self.assertNotIn("PRIVATE", repr(done))
+        self.assertNotIn("private transcript", repr(done))
+        self.assertEqual(done.operation_diagnostic.exception_type, "RuntimeError")
+
+    async def test_outcome_notification_is_not_thread_exit(self):
+        returned, release_exit = threading.Event(), threading.Event()
+
+        class DelayedExitThread(threading.Thread):
+            def run(self):
+                super().run()
+                returned.set()
+                release_exit.wait(3)
+
+        owner, manager, _ = self.make_owner(adapter=lambda *args: "done")
+        with patch("speech_operations.Thread", DelayedExitThread):
+            started = owner.start(encode(payload(owner)))
+            try:
+                await eventually(returned.is_set)
+                await asyncio.sleep(0.01)
+                self.assertTrue(manager.lock.locked())
+                self.assertEqual(owner.status(started.operation_ref).state, "running")
+                self.assertFalse(owner._active.observed.done())
+            finally:
+                release_exit.set()
+                done = await owner.wait(started.operation_ref)
+        self.assertEqual(done.state, "completed")
+
     async def test_foreign_event_loop_is_rejected(self):
         owner, _, _ = self.make_owner()
         body = encode(payload(owner))
@@ -655,8 +701,10 @@ async def quarantine_fixture():
     assert result.state == "cleanup_unconfirmed"
     assert result.cleanup == "unconfirmed"
     assert result.text is None
-    assert result.operation_diagnostic.message == "original generation failure"
-    assert result.cleanup_diagnostic.message == "synthetic device sync failure"
+    assert result.operation_diagnostic.code == "inference_failed"
+    assert result.operation_diagnostic.exception_type == "ValueError"
+    assert result.cleanup_diagnostic.code == "device_cleanup_unconfirmed"
+    assert result.cleanup_diagnostic.exception_type == "RuntimeError"
     assert owner._active.quarantine.retained_audio is retained
     assert retained.tolist() == [0.25]
     assert owner._active.audio is not None
@@ -703,7 +751,86 @@ async def quarantine_fixture():
     asyncio.get_running_loop().call_later(0.05, after_shutdown_cancel)
 
 
+async def startup_fixture(mode):
+    manager = Manager()
+    retained = np.array([0.5], dtype=np.float32)
+    gate = Gate(
+        error=SpeechCleanupUnconfirmed(
+            ValueError("private inference content"),
+            RuntimeError("private cleanup content"),
+            retained,
+        )
+        if mode == "cleanup"
+        else None
+    )
+    workers = []
+
+    class AmbiguousStartThread(threading.Thread):
+        def start(self):
+            workers.append(self)
+            if mode != "unacknowledged":
+                super().start()
+            raise RuntimeError("private startup exception content")
+
+    owner = SpeechOperationOwner(manager, "fixture", adapter=gate)
+    with patch("speech_operations.Thread", AmbiguousStartThread):
+        started = owner.start(encode(payload(owner)))
+        result = await owner.wait(started.operation_ref)
+    assert result.state == "cleanup_unconfirmed", result.state
+    assert result.startup_diagnostic.code == "worker_start_unconfirmed"
+    assert result.startup_diagnostic.exception_type == "RuntimeError"
+    assert "private startup" not in repr(result)
+    assert manager.lock.locked(), "Startup exception released live device custody"
+    assert manager.exited == 0
+    assert owner in _CUSTODIANS
+    assert owner._active.audio is not None
+    if mode != "unacknowledged":
+        await eventually(gate.entered.is_set)
+        assert workers[0].is_alive()
+        gate.release.set()
+        await eventually(lambda: not workers[0].is_alive())
+        await asyncio.sleep(0.01)
+        assert manager.lock.locked(), "Native completion alone released startup quarantine"
+    else:
+        assert not gate.entered.is_set()
+    result = owner.status(started.operation_ref)
+    assert result.state == "cleanup_unconfirmed"
+    assert result.startup_diagnostic.code == "worker_start_unconfirmed"
+    assert result.text is None
+    if mode == "cleanup":
+        assert result.operation_diagnostic.code == "inference_failed"
+        assert result.cleanup_diagnostic.code == "device_cleanup_unconfirmed"
+        assert owner._active.quarantine[1].retained_audio is retained
+        assert "private" not in repr(result)
+    else:
+        assert result.cleanup_diagnostic is None
+    assert not (await owner.drain(0.01)).custody_complete
+    owner._active.runner.cancel()
+    await asyncio.sleep(0)
+    assert manager.lock.locked()
+    print("AMBIGUOUS_STARTUP_CUSTODY_RETAINED", flush=True)
+
+
 class QuarantineProcessTests(unittest.TestCase):
+    def test_exceptional_start_retains_running_or_unknown_native_custody(self):
+        for mode in ("started", "unacknowledged", "cleanup"):
+            with self.subTest(mode=mode):
+                process = subprocess.Popen(
+                    [sys.executable, str(Path(__file__).resolve()), "--startup-fixture", mode],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                )
+                try:
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        process.communicate(timeout=2)
+                finally:
+                    process.kill()
+                    stdout, stderr = process.communicate(timeout=3)
+                    self.assertIsNotNone(process.returncode)
+                self.assertIn(b"AMBIGUOUS_STARTUP_CUSTODY_RETAINED", stdout, stderr.decode())
+                self.assertNotIn(b"Traceback", stderr)
+
     def test_cleanup_unconfirmed_survives_cancellation_expiry_drain_and_orderly_loop_shutdown(self):
         process = subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve()), "--quarantine-fixture"],
@@ -723,6 +850,9 @@ class QuarantineProcessTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if "--startup-fixture" in sys.argv:
+        asyncio.run(startup_fixture(sys.argv[-1]))
+        raise AssertionError("Startup quarantine unexpectedly allowed runtime shutdown")
     if "--quarantine-fixture" in sys.argv:
         asyncio.run(quarantine_fixture())
         raise AssertionError("Quarantine unexpectedly allowed orderly runtime shutdown")

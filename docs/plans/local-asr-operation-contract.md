@@ -112,3 +112,34 @@ Verification in the existing environment:
   full-suite pass; no existing route test was changed.
 - No route mounting, capability advertisement, Rust changes, dependency/lock
   changes, model acquisition, real model inference or speech-quality claim.
+
+
+#### Exceptional startup and data-free diagnostics review
+
+An exception from `Thread.start` is now an unconfirmed native-startup outcome,
+not evidence that no worker exists. Such operations retain their thread, audio,
+lease and a cancellation-resistant quarantine owner. Even an apparently
+non-started exceptional startup requires the external managed runtime to be
+stopped/recreated: an ordinary status/identity probe cannot prove non-start.
+A late successful worker result does not convert startup quarantine to success
+or release custody. Later inference/device-cleanup diagnostics and retained
+conversion buffers remain separate from the original startup diagnostic.
+
+Diagnostic receipts now use only stable codes, allowlisted exception categories
+and fixed code-owned messages. They never call backend exception `str`/`repr`,
+copy exception arguments, or expose custom exception class names that could
+contain audio/transcript data. Original operation, startup and cleanup failures
+remain distinguishable without copying backend content.
+
+Regressions were observed failing before the correction for exceptional startup
+and an exception containing submitted PCM. Added fixtures cover native start
+followed by an acknowledgement error, unacknowledged startup, late unconfirmed
+device cleanup, and an outcome notification emitted before the actual thread
+exits. Every synthetic subprocess remains owned by its test supervisor through
+termination and observed exit.
+
+Post-review verification: 34 operation tests passed, along with the existing 15
+loader, 2 manager and 7 load-lifecycle tests. Whole Torch Ruff checks/formatting
+still pass. The broad suite ran 169 tests with only the same 7 inherited
+`_IncludedRouter.path` errors; this is not a full-suite pass. No production
+scope beyond this private owner was changed.

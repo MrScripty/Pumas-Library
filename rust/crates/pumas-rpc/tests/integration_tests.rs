@@ -2018,6 +2018,16 @@ mod tests {
         let env = create_test_env();
         let mut server = start_rpc_server(env.path()).await.unwrap();
         let client = reqwest::Client::new();
+        let initial_feed = rpc_call(
+            server.port,
+            "list_model_library_updates_since",
+            json!({"cursor": null, "limit": 100}),
+        )
+        .await
+        .unwrap();
+        let library_cursor = initial_feed["cursor"].as_str().unwrap().to_string();
+        create_indexable_test_model(env.path(), "llm/llama/shutdown-feed", "Shutdown Feed");
+        refresh_test_model_index(server.port).await;
         let routes = vec![
             "/events/model-library-updates",
             "/events/model-download-updates",
@@ -2034,8 +2044,13 @@ mod tests {
         };
         let mut feeds = Vec::new();
         for route in routes {
-            let mut response = client
-                .get(format!("http://127.0.0.1:{}{route}", server.port))
+            let request = client.get(format!("http://127.0.0.1:{}{route}", server.port));
+            let request = if route == "/events/model-library-updates" {
+                request.query(&[("cursor", library_cursor.as_str())])
+            } else {
+                request
+            };
+            let mut response = request
                 .timeout(Duration::from_secs(15))
                 .send()
                 .await

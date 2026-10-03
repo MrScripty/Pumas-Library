@@ -1918,12 +1918,111 @@ pub struct InPlaceImportSpec {
     pub license_status: Option<String>,
 }
 
-/// Descriptor for an incomplete sharded model that needs recovery download.
+/// Read-only observations of shards beneath canonical library model roots.
+///
+/// Neither filename coverage nor this report establishes package completeness,
+/// repository identity, download authorization, or a durable filesystem snapshot.
+/// Consult diagnostics even when no roots or missing ordinals are returned.
+#[derive(Debug, Clone)]
+pub struct ShardRecoveryDiscovery {
+    pub library_root: PathBuf,
+    /// False if any relevant layout, directory, or file could not be inspected.
+    pub enumeration_complete: bool,
+    pub model_roots: Vec<ShardModelDiscovery>,
+    pub diagnostics: Vec<ShardRecoveryDiagnostic>,
+}
+
+/// One observed `{model_type}/{family}/{model_or_artifact}` storage root.
+#[derive(Debug, Clone)]
+pub struct ShardModelDiscovery {
+    pub model_dir: PathBuf,
+    pub library_relative_root: PathBuf,
+    pub has_metadata: bool,
+    pub enumeration_complete: bool,
+    /// Regular files observed relative to this root, without content validation.
+    pub observed_files: Vec<PathBuf>,
+    pub shard_sets: Vec<ShardSetDiscovery>,
+    pub indexes: Vec<ShardIndexDiscovery>,
+}
+
+/// One set identified by its full root-relative directory and base/extension.
+#[derive(Debug, Clone)]
+pub struct ShardSetDiscovery {
+    pub relative_directory: PathBuf,
+    /// Includes the file extension, for example `model.safetensors`.
+    pub base_name: String,
+    pub expected_total: Option<usize>,
+    pub found_ordinals: Vec<usize>,
+    /// Inclusive ranges, bounded by observed files rather than the declared total.
+    pub missing_ordinals: Vec<MissingShardRange>,
+    pub files: Vec<PathBuf>,
+    pub status: ShardSetDiscoveryStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingShardRange {
+    pub first: usize,
+    pub last: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShardSetDiscoveryStatus {
+    /// Only the explicitly counted filename ordinals were observed.
+    CountedOrdinalsPresent,
+    MissingOrdinals,
+    /// Invalid, inconsistent, duplicate, or uncounted names prevent a conclusion.
+    Ambiguous,
+}
+
+/// Evidence from one weight-map index; paths are relative to the model root.
+#[derive(Debug, Clone)]
+pub struct ShardIndexDiscovery {
+    pub relative_path: PathBuf,
+    pub referenced_files: Vec<PathBuf>,
+    pub missing_files: Vec<PathBuf>,
+    /// Syntax and reference names are valid; does not establish package integrity.
+    pub valid: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShardRecoveryDiagnostic {
+    /// Library-relative when available; the configured root on root-open failure.
+    pub path: PathBuf,
+    pub kind: ShardRecoveryDiagnosticKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ShardRecoveryDiagnosticKind {
+    EnumerationFailed,
+    MetadataFailed,
+    /// The held binding no longer matched or could not be re-observed. This is
+    /// not proof that an actor replaced the directory.
+    BindingChanged,
+    SymlinkRefused,
+    NonCanonicalLayout,
+    InvalidShardName,
+    InvalidShardOrdinal,
+    InconsistentShardTotals,
+    DuplicateShardOrdinal,
+    AmbiguousShardNames,
+    MissingShardIndex,
+    InvalidShardIndex,
+    MissingIndexedFile,
+    ResourceLimit,
+    WorkerFailed,
+}
+
+/// Lossy legacy discovery descriptor, not an authorized recovery request.
+///
+/// Names are unverified path-derived guesses. Use `ShardRecoveryDiscovery` for
+/// incomplete enumeration, ambiguity, and root-relative shard/index evidence.
 #[derive(Debug, Clone)]
 pub struct IncompleteShardRecovery {
     /// Directory containing the partial shard files.
     pub model_dir: PathBuf,
-    /// Reconstructed HuggingFace repo ID (`{family}/{name}`).
+    /// Unverified reconstructed HuggingFace repo ID; never download authorization.
     pub repo_id: String,
     /// Model family (from directory path).
     pub family: String,
@@ -1931,7 +2030,7 @@ pub struct IncompleteShardRecovery {
     pub official_name: String,
     /// Model type (from directory path).
     pub model_type: Option<String>,
-    /// Files currently present in the directory.
+    /// Observed model files relative to the canonical model root.
     pub existing_files: Vec<String>,
 }
 
@@ -2556,6 +2655,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(deprecated)] // Retained public compatibility projection.
     async fn test_recover_incomplete_shards_async_detects_missing_shard_set() {
         let (_temp_dir, library) = setup().await;
         let importer = ModelImporter::new(library.clone());

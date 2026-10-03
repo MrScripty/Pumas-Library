@@ -31,7 +31,7 @@ struct LibraryIdDocument {
     library_id: String,
 }
 
-fn nofollow_options(options: &mut OpenOptions) {
+pub(super) fn nofollow_options(options: &mut OpenOptions) {
     #[cfg(unix)]
     options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     #[cfg(windows)]
@@ -81,7 +81,7 @@ fn invalid_library_id() -> io::Error {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct FilesystemIdentity {
+pub(super) struct FilesystemIdentity {
     volume: u64,
     file: u64,
 }
@@ -1275,7 +1275,7 @@ impl DownloadRecoveryDestination {
     }
 }
 
-fn directory_identity(directory: &Dir) -> io::Result<FilesystemIdentity> {
+pub(super) fn directory_identity(directory: &Dir) -> io::Result<FilesystemIdentity> {
     filesystem_identity(&directory.dir_metadata()?).ok_or_else(invalid_capability_path)
 }
 
@@ -1351,7 +1351,7 @@ fn invalid_download_integrity(message: &str) -> PumasError {
 
 /// Walk one component at a time without following symlinks. Each next operation
 /// is anchored to the held preceding directory, including missing-tail creation.
-fn open_directory_chain(root: &Dir, relative: &Path, create: bool) -> io::Result<Dir> {
+pub(super) fn open_directory_chain(root: &Dir, relative: &Path, create: bool) -> io::Result<Dir> {
     #[cfg(windows)]
     {
         let mut directory = root.try_clone()?;

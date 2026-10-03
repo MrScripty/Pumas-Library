@@ -143,3 +143,180 @@ loader, 2 manager and 7 load-lifecycle tests. Whole Torch Ruff checks/formatting
 still pass. The broad suite ran 169 tests with only the same 7 inherited
 `_IncludedRouter.path` errors; this is not a full-suite pass. No production
 scope beyond this private owner was changed.
+
+
+### Private exact-slot checkpoint, 2026-10-03
+
+This continuation of milestone A replaces the private model-name selector with
+exact runtime/slot/load identity. It does not complete milestone B or enable a
+speech producer. `ModelManager` creates a startup-random full runtime UUID and a
+canonical full UUID encoding of a checked monotonic 128-bit load counter.
+Runtime UUID plus load generation is the complete generation identity. The
+counter consumes failed/unloaded reservations, uses bounded memory, and refuses
+on exhaustion rather than wrapping. Existing short public slot IDs and serialized
+slot fields are preserved; a live slot-ID collision cannot overwrite another slot.
+
+There is exactly one `SpeechOperationOwner` per manager runtime, across all
+models and devices. Closing it does not permit constructing a replacement owner
+inside the same runtime. Private admission now requires `runtime_instance_id`
+and `slot: {slot_id, load_generation}`. Its request digest includes this exact
+identity along with every existing audio/language/request field. Operation refs
+and status retain the exact slot reference. Repeating an old retained request
+returns its original receipt without reacquiring a model; changing a slot or
+load generation under that request ID conflicts. Status/cancel reject a forged
+slot binding even when the runtime and operation IDs match.
+
+Admission captures the exact slot and loaded object and borrows artifact-use
+custody before scheduling the native runner. Immediately before native work,
+`ModelManager.speech_lease` takes the existing shared device lock and checks the
+runtime, slot ID, load generation, READY state, model type, exact slot object,
+loaded object, device and unreleased borrow again. It validates the authority
+receipt under that lock. Authority refusal codes are restricted to a stable
+allowlist at admission and native acquisition; unknown or data-bearing provider
+codes become a fixed unavailable refusal. An unload/reload or replacement in
+the admission-to-worker gap therefore fails the original operation without acquiring a successor,
+even if the successor has the same name or slot ID. The runtime-wide single-
+active policy, independent worker retention, cancellation handling and startup/
+device-cleanup quarantine continue to apply.
+
+#### Artifact authority remains deliberately unavailable
+
+`speech_binding.py` defines only the narrow `ArtifactUseAuthority.acquire(ref)`
+and `ArtifactUseLease.validate(ref)/release()` dependency seam. The production
+default always refuses with `artifact_authority_unavailable`; no route,
+capability, environment variable, readiness flag or production fake can make it
+available. Existing app composition does not supply an authority. Returning a
+private `SpeechSlotRef` supplies identity only, not speech readiness or custody.
+Only test fixtures supply a synthetic authority and explicitly assume synthetic
+evidence for selected references. Those fixtures do not attest actual files or
+qualify a native model/runtime.
+
+A future real authority must retain canonical model and selected-artifact byte-
+content manifests, runtime recipe/code identity, and exact owned profile/process
+generation from load admission through slot unload or confirmed process
+cessation. The operation lease borrows that already-attested slot-lifetime
+custody; a new claim at transcription admission cannot retrospectively attest
+bytes loaded earlier. The synchronous methods operate nonblockingly on retained
+evidence, with no filesystem/DB work or async admission gap. Identity values,
+paths, configuration, READY state and caller assertions are not evidence. The
+interface intentionally does not implement storage, deletion protection,
+manifest attestation, runtime qualification or process-cessation authority.
+
+The admitted operation retains its borrow across scheduling and throughout
+native work. Confirmed worker/device completion allows borrow release while the
+device is still fenced, as part of successful lease exit; cancellation alone
+does not. Proven non-start may also release a borrow. Exceptional context exit
+or generator finalization cannot release the device. A borrow-release exception
+quarantines the operation and retains the device lease. Exceptional native
+startup and unconfirmed native cleanup retain the borrow with the original PCM/conversion buffers and device
+lease, even through cancellation, expiry, drain and orderly loop shutdown.
+Releasing an operation borrow is not slot-lifetime custody release, artifact
+deletion authorization or a secure-erasure claim. Existing external process-
+termination requirements for unresolved quarantine remain unchanged.
+
+Verification of this checkpoint:
+
+- 36 private operation tests passed, including synthetic artifact-release and
+  lease-exit failure subprocesses and retained-borrow assertions in startup/device
+  quarantine.
+- 15 focused binding tests passed: unavailable production default before native
+  work; strict slot envelopes; generation-bound duplicates/conflicts; stale,
+  released and foreign references; real manager unload/reload to a READY
+  successor in the start-to-worker gap; same-ID/object replacement; revalidation
+  during lock acquisition; authority revalidation under the shared lock;
+  cancellation custody; runtime-wide ownership; generation nonreuse/exhaustion,
+  failed-load reservations and slot-ID collisions; bounded provider diagnostic
+  codes; and unchanged name-based text lookup/public slot serialization.
+- Existing Cohere adapter/lease tests: 15 passed. Model manager: 2 passed.
+  Model load lifecycle: 7 passed.
+- Whole Torch Ruff 0.15.2 checks and formatting passed (38 Python files).
+- The broad suite ran 186 tests with the same 7 inherited
+  `_IncludedRouter.path` errors in FastAPI route enumeration. No unrelated route
+  tests were changed or hidden; this is not a full-suite pass.
+- No routes, capability advertisement, Rust DTO/RPC/schema changes, dependencies,
+  runtime recipes, live stores, model downloads or real native ASR qualification.
+
+#### Exception-safe admission and runner-factory review
+
+A correction to the exact-slot checkpoint moves operation UUID, observation
+future, entry and empty binding construction before artifact acquisition.
+`prepare_speech` creates the exact-slot record without borrowing; `bind_speech`
+transfers the borrow directly into that record after the operation registry,
+active owner and independent custodian already retain it. Authority refusal
+without transfer remains a plain admission refusal. A failure after transfer
+but before native launch releases only on confirmed cleanup; uncertain release
+retains the binding/audio with observable `cleanup_unconfirmed` and incomplete
+drain. Construction errors cannot leave an unregistered borrowed authority.
+
+Task-factory exceptions are separately observable through the private
+`owner_startup_diagnostic`, preserving native-startup and operation/cleanup
+failures alongside it. A factory can schedule or eagerly start the actual runner
+and then raise without returning its task. The runner therefore retains its own
+actual task before native acquisition, and an exception latches incomplete
+custody synchronously. A directly owned, cancellation-resistant quarantine guard
+is independent of the failed task factory. Pending coroutines, eager native
+workers, audio, bindings and leases stay owned. Neither factory failure nor late
+native output authorizes release or turns the operation into success. If the
+exact eager runner already settled with confirmed cleanup before the factory
+error, its genuine terminal receipt remains authoritative, with the separate
+fixed startup-failure diagnostic. No unknown startup is inferred to be non-start.
+
+Focused evidence: 37 operation tests and 18 binding tests passed. Deterministic
+cases cover UUID/future/entry/binding construction failure before acquisition;
+post-transfer failure with successful or uncertain borrow release; factories
+failing before scheduling, after scheduling and after eager native startup;
+late output/device cleanup; combined native and owner startup exceptions;
+repeated cancellation; retained custody through orderly asyncio shutdown; and
+an eager, exactly settled pre-native refusal. Existing Cohere (15), manager (2)
+and load-lifecycle (7) tests passed. Whole Torch Ruff checks/formatting passed.
+The broad suite ran 190 tests with only the same 7 inherited FastAPI
+`_IncludedRouter.path` errors. This correction adds no real authority, production
+speech exposure, public schema, runtime qualification or process/drain integration.
+
+#### Await-safe startup fence and embedded import-closure review
+
+An actual `asyncio.Lock` can be unlocked while an awakened earlier waiter has
+not resumed. A following `acquire()` can therefore suspend even after the busy
+check. Runner-factory uncertainty is now checked after successful acquisition,
+before handling a failed/cancelled acquisition, and before every preworker
+borrow-release path. A later cancellation cannot clear that latch, settle the
+operation or report complete drain. The exact binding, PCM, lease reference and
+independent custodian remain retained. A resumed successful acquisition stays
+fenced before native startup. The already-settled exact pre-factory refusal is
+still handled separately. A supervised subprocess fixture uses the real
+`asyncio.Lock` handoff window, with both cancellation and eventual acquisition,
+and checks custody through repeated cancellation and orderly loop shutdown.
+
+The existing image/text runtime embed table now includes `speech_binding.py`,
+which `model_manager.py` imports unconditionally. Its transitive imports are
+standard-library-only. The Rust required-file regression includes the new file;
+no speech owner or Cohere loader is embedded, and locks, dependencies, recipe,
+protocol and advertised capabilities are unchanged. A lightweight Python test
+materializes every Python file from the actual Rust embedded-file table into a
+temporary install tree and imports/creates the existing image/text app in a
+fresh isolated interpreter. Only Torch is substituted. All local imported
+modules must come from that tree. A negative test removes the installed binding
+file and proves that even an offered repository `PYTHONPATH` cannot supply it.
+This proves the staged source import closure, not Rust materialization execution,
+packaged native inference or runtime qualification.
+
+Post-review evidence: 38 operation tests, 18 binding tests and 2 embedded-import
+tests passed, along with existing Cohere (15), manager (2) and load-lifecycle (7)
+coverage. Whole Torch Ruff checks/formatting passed (39 Python files). The broad
+suite ran 193 tests with only the same 7 inherited `_IncludedRouter.path` errors.
+The Rust edits are limited to the required embedded-file entry and its existing
+required-file test. Native Rust build/test execution remains a hosted gate;
+`rustfmt` is not installed in this lightweight environment. No native Rust or
+full packaged-runtime pass is claimed.
+
+The installed-file import-closure regression declares FastAPI 0.128.0,
+Uvicorn 0.40.0 and psutil 7.2.1 in the development test requirements, matching
+`runtime/requirements.lock`. This avoids accidentally relying on packages in
+the developer's ambient interpreter. The managed runtime lock and its existing
+Pydantic/Starlette dependency contract are unchanged; no Torch installation,
+ASR recipe qualification or model inference follows from this source-import test.
+A wheel-only dependency resolution for the repository's Python 3.12.3 target
+succeeded using official PyPI metadata, selecting Pydantic 2.13.5 and Starlette
+0.50.0 as in the current runtime lock. This was dependency resolution without
+package installation or source builds. Windows/macOS dependency installation
+and the full isolated startup tests remain hosted qualification gates.

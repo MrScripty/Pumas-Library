@@ -125,6 +125,7 @@ fn embedded_sidecar_and_lock_materialize_outside_the_checkout() {
         "flux2.py",
         "image_api.py",
         "model_manager.py",
+        "speech_binding.py",
         "openai_api.py",
         "validation.py",
         "loaders/__init__.py",

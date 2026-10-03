@@ -150,8 +150,10 @@ async fn acquisition_integration_copied_readiness_survives_guarded_observation()
                         .unwrap();
                     }
                     "oversized" => {
+                        // set_len requires ordinary write access on Windows;
+                        // append-only handles do not authorize truncation/extension.
                         let file = std::fs::OpenOptions::new()
-                            .append(true)
+                            .write(true)
                             .open(path.join("metadata.json"))
                             .unwrap();
                         file.set_len(
@@ -467,7 +469,14 @@ async fn produce_hf_using(
                         None,
                     )
                     .await?;
-                let lease = service.files_ready(&context, operation, workspace).await?;
+                let lease = service
+                    .files_ready(&context, operation, workspace)
+                    .await
+                    .map_err(|error| {
+                        PumasError::Other(format!(
+                            "Synthetic HF files-ready phase (seal then persist) failed: {error}"
+                        ))
+                    })?;
                 let record = lease.record().clone();
                 if !complete_import {
                     drop(lease);
@@ -502,8 +511,14 @@ async fn produce_hf_using(
         .await
         .unwrap()
         .unwrap();
-    acquisition.shutdown().await?;
-    result
+    let shutdown = acquisition.shutdown().await;
+    match (result, shutdown) {
+        (result, Ok(())) => result,
+        (Ok(_), Err(shutdown)) => Err(shutdown),
+        (Err(error), Err(shutdown)) => Err(PumasError::Other(format!(
+            "Synthetic HF producer failed: {error}; acquisition shutdown failed: {shutdown}"
+        ))),
+    }
 }
 
 fn no_copy_stages(library: &ModelLibrary) -> bool {

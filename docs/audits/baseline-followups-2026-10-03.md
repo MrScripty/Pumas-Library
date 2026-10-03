@@ -30,28 +30,67 @@ Required repair:
 Do not implement this with an ignored `remove_dir_all(temp_dir)` result. No
 existing store is migrated or cleaned merely by tracking this work.
 
-## B2: Discover recoverable shards only under a proven model root
+## B2: Read-only canonical-root shard discovery
 
-Affected owners: `model_library/importer/recovery.rs`, its discovery callers and
-`api/builder.rs`'s startup recovery action. The recovery implementation was
-unchanged by the integration: it enumerates only immediate files. Deeper
-incomplete sets were already invisible to recovery, while the old import path
-could incorrectly accept them. The new recursive all-set validation deliberately
-fails closed instead of publishing an incomplete model.
+Implementation is present; native acceptance remains pending the focused Rust
+suite on Linux, macOS, and Windows. Formatting and source review are supporting
+evidence, not native filesystem or startup execution evidence.
 
-Required repair:
+Owners: `model_library/importer/recovery/shard_discovery`, the public discovery
+DTOs in `importer.rs`, and the shard-only observer in `api/builder.rs`.
 
-- Select an authoritative canonical model root before recursively enumerating
-  files. Do not treat category/family ancestors or arbitrary nested directories
-  as another inferred repository root.
-- Preserve root-relative directory identity while grouping every shard set;
-  reject malformed, ambiguous or unobservable input with a visible diagnostic.
-- Keep discovery separate from download authorization. Current startup recovery
-  guesses a remote repository from path names; do not expand automatic network
-  actions based on newly recursive guesses.
-- Test multiple models under the same family, nested sets sharing a basename,
-  complete and incomplete sets together, legacy/ambiguous layouts, enumeration
-  failure, and absence of unintended download admission.
+`ModelImporter::discover_shard_recovery[_async]` returns a
+`ShardRecoveryDiscovery`. It inspects only the canonical three-component storage
+layout `{model_type}/{family}/{model_or_artifact}`. Category/family names use the
+existing ordinary normalization; model names also permit the existing artifact
+slug separators. Model/index/metadata evidence above the model-root boundary,
+noncanonical names, nested package markers, and symlinks receive diagnostics.
+They are never used to guess another repository root. Metadata-bearing model
+roots are observed too; metadata presence is not a completeness shortcut.
 
-Until this owner boundary is implemented, nested incomplete imports remain
-refused. No new automatic recovery/download capability is claimed by PR22.
+The configured library root may use a canonical platform alias. Discovery binds
+its physical identity, holds the canonical ancestor chain, and reads descendants
+through held no-follow directories. It rechecks observed bindings before/after
+reads and before returning. An observed replacement invalidates the affected
+root's evidence. There is no library-ID initialization, marker, database, cache,
+cleanup, or network write. This is point-in-time evidence, not an immutable
+snapshot or a grant for a later filesystem action. Concurrent in-place changes
+can still require a fresh scan and authoritative package validation.
+
+Every counted set retains its full model-root-relative directory and
+base/extension. Zero, out-of-range, duplicate, inconsistent, overflowing,
+malformed, and uncounted/ambiguous shard names remain diagnostic. Missing
+ordinals are inclusive compact ranges, so the declared total never determines
+allocation size. Weight-map indexes are read through held directories with a
+16 MiB per-index limit; invalid/duplicate maps, unsafe references, absent
+conventional indexes, and unobserved referenced files remain visible. Filename
+coverage never asserts global package completeness or repository identity.
+
+Enumeration/metadata failures, refused layouts, symlinks, the 100,000-entry scan
+budget, the 64-level model traversal budget, and failed blocking workers cannot
+become an empty successful scan. Callers must inspect `enumeration_complete`,
+per-model observations, and diagnostics together.
+
+Startup logs the report and admits **zero downloads from inferred shard
+candidates**. Its observer receives only `ModelImporter`, without an HF client
+or download admission capability. Existing persisted authorized recovery and
+the separate interrupted-download owner are unchanged; this repair makes no
+new safety claim about those owners. Restoring missing orphan shards requires
+an explicit recovery/download workflow with independently established source
+and destination authority.
+
+The old public `recover_incomplete_shards[_async] -> Vec<IncompleteShardRecovery>`
+helpers remain deprecated, lossy projections of this one scanner. They warn on
+incomplete/ambiguous observations and retain unverified path-derived name hints
+only for compatible Rust callers. Their filenames are now root-relative,
+including nested directories. An empty Vec cannot establish completeness, and
+the reconstructed `repo_id` never authorizes a download. There is no second
+legacy scanner or implicit acquisition fallback.
+
+Regression sources cover sibling model roots, nested identical basenames,
+complete and incomplete sets together, legacy/ambiguous layouts, failed
+iterator creation/items/completion, root/ancestor/child rebinding, symlink
+sentinels, malformed ordinals and indexes, missing index evidence, bounded
+missing ranges, read-only observations, and the exact startup shard observer.
+The existing persisted-download recovery tests remain with their unchanged HF
+owner. The incomplete-import validator and B1 copy-staging owner are unchanged.

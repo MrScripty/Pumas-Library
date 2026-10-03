@@ -1,7 +1,8 @@
 """Private, loop-owned finite ASR operations. No routes or capability advertisement.
 
-The constructor's model name is an internal selector, not model/recipe attestation.
-Milestone B must bind that selector and coordinate this owner with Pumas's existing
+Exact slot generations are private identities, not model/recipe attestation.
+The default artifact authority refuses admission. Milestone B must implement
+load-to-unload artifact custody and coordinate this owner with Pumas's existing
 managed process owner. In particular, close/drain is NOT event-loop teardown:
 quarantine deliberately survives task cancellation and prevents orderly asyncio
 shutdown until the external process owner terminates the affected runtime. Never
@@ -20,6 +21,13 @@ from threading import Event, Thread
 import time
 from typing import Any, Callable
 from uuid import UUID, uuid4
+
+from speech_binding import (
+    BINDING_ERROR_CODES,
+    ArtifactUseReleaseUnconfirmed,
+    SpeechBindingError,
+    SpeechSlotRef,
+)
 
 from loaders.cohere_asr_loader import (
     LANGUAGES,
@@ -52,6 +60,7 @@ class SpeechOperationError(ValueError):
 class OperationRef:
     runtime_instance_id: str
     operation_id: str
+    slot_ref: SpeechSlotRef
 
 
 @dataclass(frozen=True)
@@ -112,6 +121,7 @@ class _Entry:
     runner: asyncio.Task | None = field(default=None, repr=False)
     worker: Thread | None = field(default=None, repr=False)
     lease: Any = field(default=None, repr=False)
+    binding: Any = field(default=None, repr=False)
     quarantine: Any = field(default=None, repr=False)
 
 
@@ -119,7 +129,13 @@ _DIAGNOSTIC_MESSAGES = {
     "cancelled": "Speech inference was cancelled.",
     "inference_failed": "Speech inference failed.",
     "runtime_unsupported": "The speech runtime is unsupported.",
-    "model_unavailable": "The speech model is unavailable or ambiguous.",
+    "model_unavailable": "The speech model is unavailable.",
+    "slot_replaced": "The admitted speech slot is no longer current.",
+    "runtime_replaced": "The admitted speech runtime is no longer current.",
+    "invalid_slot_ref": "The speech slot reference is invalid.",
+    "artifact_authority_unavailable": "Artifact-use authority is unavailable.",
+    "artifact_custody_unavailable": "Attested artifact custody is unavailable.",
+    "artifact_cleanup_unconfirmed": "Artifact-use borrow cleanup is unconfirmed.",
     "model_unsupported": "The selected model does not support speech inference.",
     "runtime_busy": "The speech device is busy.",
     "lease_refused": "The speech device lease was refused.",
@@ -179,9 +195,23 @@ def _decode(body: bytes, runtime_id: str):
         if isinstance(error, SpeechOperationError):
             raise
         raise SpeechOperationError("invalid_json") from None
-    _fields(request, {"runtime_instance_id", "request_id", "language", "audio"})
+    _fields(request, {"runtime_instance_id", "slot", "request_id", "language", "audio"})
     if request["runtime_instance_id"] != runtime_id:
         raise SpeechOperationError("runtime_replaced")
+    slot = request["slot"]
+    _fields(slot, {"slot_id", "load_generation"})
+    try:
+        if (
+            type(slot["slot_id"]) is not str
+            or not 1 <= len(slot["slot_id"]) <= 128
+            or not slot["slot_id"].isascii()
+            or type(slot["load_generation"]) is not str
+            or str(UUID(slot["load_generation"])) != slot["load_generation"]
+        ):
+            raise ValueError
+    except (ValueError, AttributeError):
+        raise SpeechOperationError("invalid_slot_ref") from None
+    slot_ref = SpeechSlotRef(runtime_id, slot["slot_id"], slot["load_generation"])
     request_id = request["request_id"]
     try:
         if type(request_id) is not str or str(UUID(request_id)) != request_id:
@@ -219,12 +249,22 @@ def _decode(body: bytes, runtime_id: str):
     digest = hashlib.sha256()
     digest.update(
         json.dumps(
-            [runtime_id, request_id, language, "pcm_s16le", SAMPLE_RATE, 1, audio["sample_count"]],
+            [
+                runtime_id,
+                slot_ref.slot_id,
+                slot_ref.load_generation,
+                request_id,
+                language,
+                "pcm_s16le",
+                SAMPLE_RATE,
+                1,
+                audio["sample_count"],
+            ],
             separators=(",", ":"),
         ).encode("ascii")
     )
     digest.update(pcm)
-    return request_id, language, pcm, digest.digest()
+    return slot_ref, request_id, language, pcm, digest.digest()
 
 
 def _invoke(adapter: Callable, loaded: Any, audio: bytes, language: str, cancel: Event):
@@ -272,7 +312,6 @@ class SpeechOperationOwner:
     def __init__(
         self,
         manager,
-        model_name: str,
         *,
         adapter=transcribe,
         clock=time.monotonic,
@@ -284,9 +323,8 @@ class SpeechOperationOwner:
         if type(receipt_ttl) not in (int, float) or not 0 < receipt_ttl <= RECEIPT_TTL_SECONDS:
             raise ValueError("Receipt lifetime must be between 0 and 600 seconds")
         self._loop = asyncio.get_running_loop()
-        self._runtime_instance_id = str(uuid4())
+        self._runtime_instance_id = manager.runtime_instance_id
         self._manager = manager
-        self._model_name = model_name
         self._adapter = adapter
         self._clock = clock
         self._max_receipts = max_receipts
@@ -297,6 +335,7 @@ class SpeechOperationOwner:
         self._active: _Entry | None = None
         self._closed = False
         self._expiry: asyncio.TimerHandle | None = None
+        manager._claim_speech_owner(self)
 
     @property
     def runtime_instance_id(self) -> str:
@@ -308,7 +347,7 @@ class SpeechOperationOwner:
 
     def start(self, body: bytes) -> OperationStatus:
         self._check_loop()
-        request_id, language, pcm, digest = _decode(body, self.runtime_instance_id)
+        slot_ref, request_id, language, pcm, digest = _decode(body, self.runtime_instance_id)
         self._prune()
         existing = self._requests.get(request_id)
         if existing is not None:
@@ -319,8 +358,19 @@ class SpeechOperationOwner:
             raise SpeechOperationError("admission_closed")
         if self._active is not None:
             raise SpeechOperationError("runtime_busy")
-        ref = OperationRef(self.runtime_instance_id, str(uuid4()))
-        entry = _Entry(ref, request_id, digest, pcm, language, self._loop.create_future())
+        try:
+            binding = self._manager.bind_speech(slot_ref)
+        except SpeechBindingError as error:
+            code = (
+                error.code
+                if type(error.code) is str and error.code in BINDING_ERROR_CODES
+                else "artifact_custody_unavailable"
+            )
+            raise SpeechOperationError(code) from None
+        ref = OperationRef(self.runtime_instance_id, str(uuid4()), slot_ref)
+        entry = _Entry(
+            ref, request_id, digest, pcm, language, self._loop.create_future(), binding=binding
+        )
         self._entries[ref.operation_id] = entry
         self._requests[request_id] = entry
         self._active = entry
@@ -376,9 +426,12 @@ class SpeechOperationOwner:
         if ref.runtime_instance_id != self.runtime_instance_id:
             raise SpeechOperationError("runtime_replaced")
         try:
-            return self._entries[ref.operation_id]
+            entry = self._entries[ref.operation_id]
         except (KeyError, TypeError):
             raise SpeechOperationError("unknown_or_expired_operation") from None
+        if ref != entry.ref:
+            raise SpeechOperationError("invalid_operation_ref")
+        return entry
 
     def _snapshot(self, entry):
         return OperationStatus(
@@ -427,16 +480,22 @@ class SpeechOperationOwner:
 
     async def _run(self, entry):
         if entry.cancel.is_set():
-            self._settle(entry, _Outcome())
+            await self._finish_without_worker(entry, _Outcome())
             return
         try:
-            entry.lease = self._manager.speech_lease(self._model_name)
+            entry.lease = self._manager.speech_lease(entry.binding)
             loaded = await entry.lease.__aenter__()
         except BaseException as error:
             # The real speech_lease is nonqueued and has no suspension between
             # acquiring its device lock and yielding the loaded model.
             entry.lease = None
-            if isinstance(error, KeyError):
+            if isinstance(error, SpeechBindingError):
+                code = (
+                    error.code
+                    if type(error.code) is str and error.code in BINDING_ERROR_CODES
+                    else "artifact_custody_unavailable"
+                )
+            elif isinstance(error, KeyError):
                 code = "model_unavailable"
             elif isinstance(error, ValueError):
                 code = "model_unsupported"
@@ -444,7 +503,7 @@ class SpeechOperationOwner:
                 code = "runtime_busy"
             else:
                 code = "lease_refused"
-            self._settle(entry, _Outcome(diagnostic=_diagnostic(error, code)))
+            await self._finish_without_worker(entry, _Outcome(diagnostic=_diagnostic(error, code)))
             return
         notification = self._loop.create_future()
         result = []
@@ -495,14 +554,36 @@ class SpeechOperationOwner:
             entry.diagnostic = outcome.diagnostic
             entry.cleanup_diagnostic = outcome.cleanup_diagnostic
             await self._hold_quarantine(entry)
+        # The real lease releases its artifact borrow and then the shared device
+        # only on this confirmed-cleanup path. Exceptional exit retains custody.
         try:
             await entry.lease.__aexit__(None, None, None)
         except BaseException as error:
             entry.diagnostic = outcome.diagnostic
-            entry.cleanup_diagnostic = _diagnostic(error, "lease_cleanup_unconfirmed")
+            code = (
+                "artifact_cleanup_unconfirmed"
+                if isinstance(error, ArtifactUseReleaseUnconfirmed)
+                else "lease_cleanup_unconfirmed"
+            )
+            entry.cleanup_diagnostic = _diagnostic(error, code)
             entry.quarantine = error
             await self._hold_quarantine(entry)
         entry.lease = None
+        self._settle(entry, outcome)
+
+    async def _release_artifact(self, entry, outcome):
+        try:
+            entry.binding.release()
+        except BaseException as error:
+            entry.diagnostic = outcome.diagnostic
+            entry.cleanup_diagnostic = _diagnostic(error, "artifact_cleanup_unconfirmed")
+            entry.quarantine = error
+            await self._hold_quarantine(entry)
+
+    async def _finish_without_worker(self, entry, outcome):
+        # No native work was started. Cancellation itself is not our evidence;
+        # these paths establish non-start before releasing the artifact borrow.
+        await self._release_artifact(entry, outcome)
         self._settle(entry, outcome)
 
     async def _hold_quarantine(self, entry):
@@ -532,6 +613,7 @@ class SpeechOperationOwner:
         entry.cleanup = "confirmed"
         entry.audio = None
         entry.worker = None
+        entry.binding = None
         entry.settled_at = self._clock()
         self._active = None
         self._settled[entry.ref.operation_id] = entry
@@ -548,7 +630,8 @@ class SpeechOperationOwner:
             # Cancellation before the owner coroutine's first instruction cannot
             # have started native work or acquired a lease.
             entry.cancel.set()
-            self._settle(entry, _Outcome())
+            entry.runner = self._loop.create_task(self._finish_without_worker(entry, _Outcome()))
+            entry.runner.add_done_callback(lambda task: self._runner_done(entry, task))
             return
         error = task.exception() if not task.cancelled() else asyncio.CancelledError()
         if error is not None:

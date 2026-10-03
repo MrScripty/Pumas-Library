@@ -23,6 +23,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # Reuse the minimal device fallback, not native model execution.
 from test_model_manager import _FakeDeviceManager, _TestModelManager
+from model_manager import ModelSlot, SlotState
+from speech_fixtures import SyntheticArtifactAuthority
 from loaders.cohere_asr_loader import COHERE_ASR, MAX_AUDIO_SAMPLES, SpeechCleanupUnconfirmed
 from speech_operations import (
     MAX_ENVELOPE_BYTES,
@@ -35,9 +37,12 @@ from speech_operations import (
 )
 
 
-def payload(owner, *, request_id=None, pcm=b"\x00\x00", language="en"):
+def payload(owner, *, ref=None, request_id=None, pcm=b"\x00\x00", language="en"):
+    if ref is None:
+        ref = owner._manager.fixture_ref
     return {
-        "runtime_instance_id": owner.runtime_instance_id,
+        "runtime_instance_id": ref.runtime_instance_id,
+        "slot": {"slot_id": ref.slot_id, "load_generation": ref.load_generation},
         "request_id": request_id or str(uuid4()),
         "language": language,
         "audio": {
@@ -54,23 +59,49 @@ def encode(request):
     return json.dumps(request).encode()
 
 
-class Manager:
+class Manager(_TestModelManager):
     def __init__(self):
-        self.lock = asyncio.Lock()
+        authority = SyntheticArtifactAuthority()
+        super().__init__(_FakeDeviceManager(), _speech_artifact_authority=authority)
         self.entered = 0
         self.exited = 0
-        self.loaded = types.SimpleNamespace(model=object(), tokenizer=object())
+        self.slot = ModelSlot(
+            "fixture",
+            "fixture",
+            "/fixture",
+            "cpu",
+            state=SlotState.READY,
+            model_type=COHERE_ASR,
+            _loaded=types.SimpleNamespace(model=object(), tokenizer=object()),
+        )
+        self.slots[self.slot.slot_id] = self.slot
+        self.fixture_ref = authority.attest_fixture(self.speech_slot_ref(self.slot.slot_id))
+        self.lock = self._get_device_lock(self.slot.device)
+
+    @property
+    def loaded(self):
+        return self.slot._loaded
+
+    @loaded.setter
+    def loaded(self, value):
+        self.slot._loaded = value
 
     @contextlib.asynccontextmanager
-    async def speech_lease(self, model_name):
-        if self.lock.locked():
-            raise RuntimeError("Speech runtime is busy")
-        async with self.lock:
+    async def speech_lease(self, binding):
+        async with super().speech_lease(binding) as loaded:
             self.entered += 1
             try:
-                yield self.loaded
+                yield loaded
             finally:
                 self.exited += 1
+
+
+async def loaded_manager():
+    authority = SyntheticArtifactAuthority()
+    manager = _TestModelManager(_FakeDeviceManager(), _speech_artifact_authority=authority)
+    slot = await manager.load("/fixture", "speech", model_type=COHERE_ASR)
+    manager.fixture_ref = authority.attest_fixture(manager.speech_slot_ref(slot.slot_id))
+    return manager, slot
 
 
 class Gate:
@@ -103,7 +134,7 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
     def make_owner(self, adapter=None, **kwargs):
         manager = Manager()
         gate = Gate() if adapter is None else adapter
-        owner = SpeechOperationOwner(manager, "fixture", adapter=gate, **kwargs)
+        owner = SpeechOperationOwner(manager, adapter=gate, **kwargs)
         self.addAsyncCleanup(self.finish_owner, owner, gate)
         return owner, manager, gate
 
@@ -435,7 +466,7 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
         for action in (successor.status, successor.cancel):
             self.assert_code("runtime_replaced", lambda: action(status.operation_ref))
         self.assert_code("runtime_replaced", lambda: successor.start(body))
-        missing = OperationRef(owner.runtime_instance_id, str(uuid4()))
+        missing = OperationRef(owner.runtime_instance_id, str(uuid4()), owner._manager.fixture_ref)
         self.assert_code("unknown_or_expired_operation", lambda: owner.status(missing))
         self.assert_code("invalid_operation_ref", lambda: owner.status({}))
         gate.release.set()
@@ -481,17 +512,16 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.entered, 0)
 
     async def test_real_model_manager_lease_blocks_unload_and_load_during_native_work(self):
-        manager = _TestModelManager(_FakeDeviceManager())
-        slot = await manager.load("/fixture", "speech", model_type=COHERE_ASR)
+        manager, slot = await loaded_manager()
         gate = Gate()
-        owner = SpeechOperationOwner(manager, "speech", adapter=gate)
+        owner = SpeechOperationOwner(manager, adapter=gate)
         self.addAsyncCleanup(self.finish_owner, owner, gate)
         status = owner.start(encode(payload(owner)))
         await eventually(gate.entered.is_set)
         with self.assertRaisesRegex(RuntimeError, "busy"):
             await manager.unload(slot.slot_id)
         with self.assertRaisesRegex(RuntimeError, "busy"):
-            async with manager.speech_lease("speech"):
+            async with manager.speech_lease(owner._active.binding):
                 self.fail("second speech lease admitted")
         queued_load = asyncio.create_task(manager.load("/other", "other", model_type=COHERE_ASR))
         await asyncio.sleep(0)
@@ -532,7 +562,7 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
                 else:
                     model.generate.side_effect = lambda **kwargs: block([[1]])
                 manager.loaded = types.SimpleNamespace(model=model, tokenizer=processor)
-                owner = SpeechOperationOwner(manager, "fixture")
+                owner = SpeechOperationOwner(manager)
                 with (
                     patch(
                         "loaders.cohere_asr_loader._native_api",
@@ -567,14 +597,14 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
             (RuntimeError("device busy"), "runtime_busy"),
         ):
 
-            class RefusingManager:
+            class RefusingManager(Manager):
                 @contextlib.asynccontextmanager
-                async def speech_lease(self, model_name):
+                async def speech_lease(self, binding):
                     raise error
                     yield
 
             gate = Gate()
-            owner = SpeechOperationOwner(RefusingManager(), "fixture", adapter=gate)
+            owner = SpeechOperationOwner(RefusingManager(), adapter=gate)
             self.addAsyncCleanup(self.finish_owner, owner, gate)
             started = owner.start(encode(payload(owner)))
             done = await owner.wait(started.operation_ref)
@@ -587,7 +617,7 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
     async def test_owner_is_retained_independently_of_caller_references(self):
         manager = Manager()
         gate = Gate()
-        owner = SpeechOperationOwner(manager, "fixture", adapter=gate)
+        owner = SpeechOperationOwner(manager, adapter=gate)
         started = owner.start(encode(payload(owner)))
         retained = weakref.ref(owner)
         del owner
@@ -612,7 +642,7 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
             {"receipt_ttl": float("nan")},
         ):
             with self.assertRaises(ValueError):
-                SpeechOperationOwner(Manager(), "fixture", **options)
+                SpeechOperationOwner(Manager(), **options)
         owner, _, _ = self.make_owner()
         for timeout in (float("inf"), float("nan"), -1, True):
             with self.assertRaises(ValueError):
@@ -679,10 +709,9 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(owner._entries)
 
 
-async def quarantine_fixture():
+async def quarantine_fixture(artifact_failure=False, lease_failure=False):
     """This child must remain alive until its external test supervisor kills it."""
-    manager = _TestModelManager(_FakeDeviceManager())
-    slot = await manager.load("/fixture", "speech", model_type=COHERE_ASR)
+    manager, slot = await loaded_manager()
     retained = np.array([0.25], dtype=np.float32)
     now = [1.0]
 
@@ -693,21 +722,50 @@ async def quarantine_fixture():
             retained,
         )
 
+    if artifact_failure:
+        manager._speech_artifact_authority.release_error = RuntimeError("private artifact cleanup")
+    if lease_failure:
+        real_lease = manager.speech_lease
+
+        class UncertainExit:
+            def __init__(self, binding):
+                self.lease = real_lease(binding)
+
+            async def __aenter__(self):
+                return await self.lease.__aenter__()
+
+            async def __aexit__(self, *args):
+                raise RuntimeError("private lease cleanup")
+
+        manager.speech_lease = UncertainExit
     owner = SpeechOperationOwner(
-        manager, "speech", adapter=uncertain, clock=lambda: now[0], max_receipts=1, receipt_ttl=1
+        manager,
+        adapter=(lambda *args: "done") if artifact_failure or lease_failure else uncertain,
+        clock=lambda: now[0],
+        max_receipts=1,
+        receipt_ttl=1,
     )
     request = encode(payload(owner))
     status = owner.start(request)
+    borrow = owner._active.binding.artifact_use
     result = await owner.wait(status.operation_ref)
+    assert not borrow.released
     assert result.state == "cleanup_unconfirmed"
     assert result.cleanup == "unconfirmed"
     assert result.text is None
-    assert result.operation_diagnostic.code == "inference_failed"
-    assert result.operation_diagnostic.exception_type == "ValueError"
-    assert result.cleanup_diagnostic.code == "device_cleanup_unconfirmed"
-    assert result.cleanup_diagnostic.exception_type == "RuntimeError"
-    assert owner._active.quarantine.retained_audio is retained
-    assert retained.tolist() == [0.25]
+    if artifact_failure or lease_failure:
+        assert result.operation_diagnostic is None
+        expected = (
+            "artifact_cleanup_unconfirmed" if artifact_failure else "lease_cleanup_unconfirmed"
+        )
+        assert result.cleanup_diagnostic.code == expected
+    else:
+        assert result.operation_diagnostic.code == "inference_failed"
+        assert result.operation_diagnostic.exception_type == "ValueError"
+        assert result.cleanup_diagnostic.code == "device_cleanup_unconfirmed"
+        assert result.cleanup_diagnostic.exception_type == "RuntimeError"
+        assert owner._active.quarantine.retained_audio is retained
+        assert retained.tolist() == [0.25]
     assert owner._active.audio is not None
     assert manager._get_device_lock(slot.device).locked()
     assert owner in _CUSTODIANS
@@ -746,7 +804,9 @@ async def quarantine_fixture():
     def after_shutdown_cancel():
         assert manager._get_device_lock(slot.device).locked()
         assert not owner._active.runner.done()
-        assert owner._active.quarantine.retained_audio is retained
+        assert not borrow.released
+        if not artifact_failure and not lease_failure:
+            assert owner._active.quarantine.retained_audio is retained
         print("QUARANTINE_SURVIVES_ORDERLY_SHUTDOWN", flush=True)
 
     asyncio.get_running_loop().call_later(0.05, after_shutdown_cancel)
@@ -773,10 +833,12 @@ async def startup_fixture(mode):
                 super().start()
             raise RuntimeError("private startup exception content")
 
-    owner = SpeechOperationOwner(manager, "fixture", adapter=gate)
+    owner = SpeechOperationOwner(manager, adapter=gate)
     with patch("speech_operations.Thread", AmbiguousStartThread):
         started = owner.start(encode(payload(owner)))
+        borrow = owner._active.binding.artifact_use
         result = await owner.wait(started.operation_ref)
+    assert not borrow.released
     assert result.state == "cleanup_unconfirmed", result.state
     assert result.startup_diagnostic.code == "worker_start_unconfirmed"
     assert result.startup_diagnostic.exception_type == "RuntimeError"
@@ -809,6 +871,7 @@ async def startup_fixture(mode):
     owner._active.runner.cancel()
     await asyncio.sleep(0)
     assert manager.lock.locked()
+    assert not borrow.released
     if mode == "delayed":
         # Prove the parent waits for evidence rather than killing at two seconds.
         await asyncio.sleep(2.25)
@@ -872,6 +935,12 @@ class QuarantineProcessTests(unittest.TestCase):
                     ["--startup-fixture", mode], b"AMBIGUOUS_STARTUP_CUSTODY_RETAINED"
                 )
 
+    def test_lease_cleanup_uncertainty_retains_artifact_borrow_through_shutdown(self):
+        self.assert_retained_child(["--lease-fixture"], b"QUARANTINE_SURVIVES_ORDERLY_SHUTDOWN")
+
+    def test_artifact_release_uncertainty_retains_device_and_borrow_through_shutdown(self):
+        self.assert_retained_child(["--artifact-fixture"], b"QUARANTINE_SURVIVES_ORDERLY_SHUTDOWN")
+
     def test_cleanup_unconfirmed_survives_cancellation_expiry_drain_and_orderly_loop_shutdown(self):
         self.assert_retained_child(
             ["--quarantine-fixture"], b"QUARANTINE_SURVIVES_ORDERLY_SHUTDOWN"
@@ -882,6 +951,12 @@ if __name__ == "__main__":
     if "--startup-fixture" in sys.argv:
         asyncio.run(startup_fixture(sys.argv[-1]))
         raise AssertionError("Startup quarantine unexpectedly allowed runtime shutdown")
+    if "--lease-fixture" in sys.argv:
+        asyncio.run(quarantine_fixture(lease_failure=True))
+        raise AssertionError("Lease quarantine unexpectedly allowed orderly runtime shutdown")
+    if "--artifact-fixture" in sys.argv:
+        asyncio.run(quarantine_fixture(artifact_failure=True))
+        raise AssertionError("Artifact quarantine unexpectedly allowed orderly runtime shutdown")
     if "--quarantine-fixture" in sys.argv:
         asyncio.run(quarantine_fixture())
         raise AssertionError("Quarantine unexpectedly allowed orderly runtime shutdown")

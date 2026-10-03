@@ -1196,6 +1196,10 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
             include_str!("../../../../../../torch-server/model_manager.py"),
         ),
         (
+            "speech_binding.py",
+            include_str!("../../../../../../torch-server/speech_binding.py"),
+        ),
+        (
             "openai_api.py",
             include_str!("../../../../../../torch-server/openai_api.py"),
         ),

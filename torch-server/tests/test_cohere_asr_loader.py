@@ -15,6 +15,8 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # Reuse the suite's minimal device fallback; no native runtime is installed here.
 from test_model_manager import _FakeDeviceManager, _TestModelManager
+from speech_binding import SpeechBindingError
+from speech_fixtures import SyntheticArtifactAuthority, bind_fixture
 from loaders.cohere_asr_loader import (
     COHERE_ASR,
     MAX_AUDIO_SAMPLES,
@@ -233,32 +235,47 @@ class TranscriptionTests(unittest.TestCase):
 
 class SpeechLeaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_lease_blocks_cross_model_inference_and_unload(self):
-        manager = _TestModelManager(_FakeDeviceManager())
+        authority = SyntheticArtifactAuthority()
+        manager = _TestModelManager(_FakeDeviceManager(), _speech_artifact_authority=authority)
         slot = await manager.load("/fixture", "speech", model_type=COHERE_ASR)
         other = await manager.load("/fixture2", "speech2", model_type=COHERE_ASR)
-        async with manager.speech_lease("speech") as loaded:
+        binding = bind_fixture(
+            manager, authority.attest_fixture(manager.speech_slot_ref(slot.slot_id))
+        )
+        second = bind_fixture(
+            manager, authority.attest_fixture(manager.speech_slot_ref(other.slot_id))
+        )
+        async with manager.speech_lease(binding) as loaded:
             self.assertIs(loaded, slot._loaded)
             with self.assertRaisesRegex(RuntimeError, "busy"):
-                async with manager.speech_lease("speech2"):
+                async with manager.speech_lease(second):
                     self.fail("device shared")
             with self.assertRaisesRegex(RuntimeError, "busy"):
                 await manager.unload(slot.slot_id)
             with self.assertRaisesRegex(RuntimeError, "busy"):
                 await manager.unload(other.slot_id)
+        self.assertTrue(binding.released)
+        second.release()
         await manager.unload(slot.slot_id)
         await manager.unload(other.slot_id)
 
-    async def test_wrong_model_and_ambiguous_identity_rejected(self):
-        manager = _TestModelManager(_FakeDeviceManager())
-        await manager.load("/fixture", "text", model_type="text-generation")
-        with self.assertRaises(ValueError):
-            async with manager.speech_lease("text"):
-                self.fail("text accepted")
-        await manager.load("/fixture", "duplicate", model_type=COHERE_ASR)
-        await manager.load("/fixture2", "duplicate", model_type=COHERE_ASR)
-        with self.assertRaises(KeyError):
+    async def test_wrong_model_refused_and_duplicate_names_require_exact_identity(self):
+        authority = SyntheticArtifactAuthority()
+        manager = _TestModelManager(_FakeDeviceManager(), _speech_artifact_authority=authority)
+        text = await manager.load("/fixture", "text", model_type="text-generation")
+        with self.assertRaisesRegex(SpeechBindingError, "model_unsupported"):
+            bind_fixture(manager, manager.speech_slot_ref(text.slot_id))
+        first = await manager.load("/fixture", "duplicate", model_type=COHERE_ASR)
+        second = await manager.load("/fixture2", "duplicate", model_type=COHERE_ASR)
+        for slot in (first, second):
+            ref = authority.attest_fixture(manager.speech_slot_ref(slot.slot_id))
+            binding = bind_fixture(manager, ref)
+            async with manager.speech_lease(binding) as loaded:
+                self.assertIs(loaded, slot._loaded)
+            self.assertTrue(binding.released)
+        with self.assertRaisesRegex(SpeechBindingError, "invalid_slot_ref"):
             async with manager.speech_lease("duplicate"):
-                self.fail("ambiguous model accepted")
+                self.fail("name-only model accepted")
 
 
 if __name__ == "__main__":

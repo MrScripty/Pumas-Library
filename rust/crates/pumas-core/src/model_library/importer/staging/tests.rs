@@ -743,7 +743,22 @@ async fn copied_import_native_case_and_unicode_alias_oracle() {
                 b"first"
             );
         } else {
-            assert_eq!(result.unwrap().len(), 2);
+            let (files, evidence) = result.unwrap();
+            assert_eq!(files.len(), 2);
+            assert_eq!(evidence.len(), 2);
+            for (file, name) in files.iter().zip([first, second]) {
+                assert_eq!(file.name, name);
+                let copied = stage.open_import_file(name).unwrap();
+                assert_eq!(
+                    evidence.get(name).unwrap(),
+                    &ImportFileIdentity::copied(
+                        &copied,
+                        file.size.unwrap(),
+                        file.sha256.clone().unwrap(),
+                    )
+                    .unwrap()
+                );
+            }
         }
         stage.remove_model_directory_all().unwrap();
         assert_eq!(std::fs::read(source.join("a")).unwrap(), b"first");

@@ -246,6 +246,91 @@ async fn copied_import_indexed_identity_collision_preserves_existing_asset() {
 }
 
 #[tokio::test]
+async fn copied_import_late_index_collision_survives_projection_and_rebuild() {
+    let mut fixture = Fixture::new().await;
+    let target = fixture.target();
+    let id = fixture.library.get_model_id(&target).unwrap();
+    let old_path = fixture.temp.path().join("recoverable-original");
+    std::fs::create_dir(&old_path).unwrap();
+    std::fs::write(old_path.join("sentinel"), b"recoverable bytes").unwrap();
+    let original = crate::index::ModelRecord {
+        id: id.clone(),
+        path: old_path.display().to_string(),
+        cleaned_name: "original".into(),
+        official_name: "Original".into(),
+        model_type: "vision".into(),
+        tags: vec!["retain-original".into()],
+        hashes: Default::default(),
+        metadata: serde_json::json!({
+            "validation_state": "valid",
+            "import_state": "ready",
+            "sentinel": "unrelated legacy asset"
+        }),
+        updated_at: "2026-10-03T00:00:00Z".into(),
+    };
+    let original_bytes = serde_json::to_vec(&original).unwrap();
+    let sentinel = original.clone();
+    let library = fixture.library.clone();
+    let inserted = Arc::new(AtomicUsize::new(0));
+    let observed = inserted.clone();
+    fixture.importer.import_hook = Some(Arc::new(move |boundary, _| {
+        if boundary == ImportBoundary::DescendantsReleased {
+            assert!(library.index().get(&sentinel.id)?.is_none());
+            library.index().upsert(&sentinel)?;
+            observed.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(())
+    }));
+
+    let error = fixture
+        .importer
+        .import(&fixture.spec)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("was published"), "{error}");
+    assert_eq!(inserted.load(Ordering::SeqCst), 1);
+    assert!(fixture.stages().is_empty());
+    let retained_metadata = std::fs::read(target.join("metadata.json")).unwrap();
+    let retained_receipt = std::fs::read(target.join(RECEIPT_FILENAME)).unwrap();
+    assert_eq!(receipt_at(&target)["state"], "pending");
+    assert_eq!(
+        serde_json::to_vec(&fixture.library.index().get(&id).unwrap().unwrap()).unwrap(),
+        original_bytes
+    );
+
+    // A fresh observation of the sentinel is not authority to replace it with
+    // the unrelated retained publication, even when the CAS row still matches.
+    fixture.library.index_model_dir(&target).await.unwrap();
+    assert_eq!(
+        serde_json::to_vec(&fixture.library.index().get(&id).unwrap().unwrap()).unwrap(),
+        original_bytes
+    );
+    fixture.library.rebuild_index().await.unwrap();
+    assert_eq!(
+        serde_json::to_vec(&fixture.library.index().get(&id).unwrap().unwrap()).unwrap(),
+        original_bytes
+    );
+    assert_eq!(
+        std::fs::read(target.join("metadata.json")).unwrap(),
+        retained_metadata
+    );
+    assert_eq!(
+        std::fs::read(target.join(RECEIPT_FILENAME)).unwrap(),
+        retained_receipt
+    );
+    assert_eq!(
+        std::fs::read(old_path.join("sentinel")).unwrap(),
+        b"recoverable bytes"
+    );
+    assert_eq!(
+        std::fs::read(target.join("model.onnx")).unwrap(),
+        b"synthetic ONNX payload"
+    );
+    assert!(fixture.tasks.shutdown_owned().await.is_err());
+}
+
+#[tokio::test]
 async fn copied_import_orphan_walk_prunes_nested_staging_subtrees() {
     let fixture = Fixture::new().await;
     let hidden = fixture

@@ -65,9 +65,14 @@ impl ModelIndex {
             return Ok(ProjectionCommit::Conflict);
         }
         if let Some(current) = &current {
-            if has_publication(current) {
-                if current.metadata.pointer("/import_publication/id")
-                    != record.metadata.pointer("/import_publication/id")
+            if has_publication(current) || has_publication(record) {
+                // Observing an existing legacy row grants no authority to
+                // replace it with a copied publication. Cold admission needs
+                // an absent row, and every existing protocol row keeps its ID.
+                if !has_publication(current)
+                    || !has_publication(record)
+                    || current.metadata.pointer("/import_publication/id")
+                        != record.metadata.pointer("/import_publication/id")
                 {
                     return Ok(ProjectionCommit::Conflict);
                 }
@@ -206,6 +211,46 @@ mod tests {
             .prune_legacy_projection_if_unchanged(&pending)
             .unwrap());
     }
+    #[test]
+    fn copied_import_conditional_projection_cannot_replace_another_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = ModelIndex::new(temp.path().join("models.db")).unwrap();
+        let mut legacy = record(true);
+        legacy.metadata = serde_json::json!({"sentinel": "unrelated legacy asset"});
+        let mut unrelated = record(false);
+        unrelated.metadata["import_publication"]["id"] =
+            serde_json::json!("061387f9-713d-414e-a919-7ebd924f60f8");
+        for (current, proposed) in [
+            (legacy.clone(), record(false)),
+            (legacy.clone(), record(true)),
+            (record(false), legacy.clone()),
+            (record(true), legacy),
+            (record(false), unrelated),
+        ] {
+            index.upsert(&current).unwrap();
+            let before = serde_json::to_vec(&index.get(&current.id).unwrap().unwrap()).unwrap();
+            let mut events = index.subscribe_model_library_update_events();
+            assert_eq!(
+                index
+                    .upsert_projection_if_unchanged(&proposed, Some(&current))
+                    .unwrap(),
+                ProjectionCommit::Conflict
+            );
+            assert_eq!(
+                serde_json::to_vec(&index.get(&current.id).unwrap().unwrap()).unwrap(),
+                before
+            );
+            assert!(events.try_recv().is_err());
+        }
+        let mut cold = record(true);
+        cold.id = "vision/test/cold".into();
+        cold.path = cold.id.clone();
+        assert_eq!(
+            index.upsert_projection_if_unchanged(&cold, None).unwrap(),
+            ProjectionCommit::Changed
+        );
+    }
+
     #[test]
     fn copied_import_conditional_commit_checks_full_observed_row() {
         let temp = tempfile::tempdir().unwrap();

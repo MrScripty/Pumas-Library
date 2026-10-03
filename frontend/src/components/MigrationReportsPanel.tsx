@@ -118,15 +118,25 @@ export const MigrationReportsPanel: React.FC = () => {
 
       const report = result.report;
       setLastExecutionReport(report);
-      if (report.referential_integrity_ok) {
+      if (!report.referential_integrity_ok) {
+        setMessage({
+          type: 'error',
+          text: `Migration needs attention: ${report.referential_integrity_errors.length} integrity validation issue(s).`,
+        });
+      } else if (
+        report.completed_at
+        && report.error_count === 0
+        && report.skipped_move_count === 0
+        && report.completed_move_count === report.planned_move_count
+      ) {
         setMessage({
           type: 'success',
           text: `Migration complete: ${report.completed_move_count}/${report.planned_move_count} moved or already migrated.`,
         });
       } else {
         setMessage({
-          type: 'error',
-          text: `Migration completed with ${report.referential_integrity_errors.length} integrity validation issue(s).`,
+          type: report.error_count > 0 ? 'error' : 'info',
+          text: `Migration incomplete: ${report.completed_move_count}/${report.planned_move_count} moved or already migrated, ${report.skipped_move_count} skipped, ${report.error_count} errors. Inspect the report for retained work.`,
         });
       }
       await fetchReports();

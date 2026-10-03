@@ -266,6 +266,63 @@ pub enum ImportState {
     Failed,
 }
 
+/// Producer-owned identity of a copied import's durable publication receipt.
+/// Absence preserves the contract of assets created before this protocol.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ImportPublicationIdentity {
+    pub version: u32,
+    pub id: String,
+    pub confirmed: bool,
+}
+
+fn import_publication_ready(
+    identity: Option<&ImportPublicationIdentity>,
+    import_state: Option<ImportState>,
+    validation_state: Option<AssetValidationState>,
+) -> bool {
+    identity.is_none_or(|identity| {
+        identity.version == 1
+            && uuid::Uuid::parse_str(&identity.id).is_ok_and(|id| !id.is_nil())
+            && identity.confirmed
+            && import_state == Some(ImportState::Ready)
+            && validation_state == Some(AssetValidationState::Valid)
+    })
+}
+
+/// Index/cache projections must not let cached facts promote an unconfirmed
+/// copied import. Malformed new identities fail closed; legacy rows are unchanged.
+pub(crate) fn copied_import_ready_value(metadata: &serde_json::Value) -> bool {
+    let Some(value) = metadata
+        .get("import_publication")
+        .filter(|value| !value.is_null())
+    else {
+        return true;
+    };
+    let Ok(identity) = serde_json::from_value::<ImportPublicationIdentity>(value.clone()) else {
+        return false;
+    };
+    import_publication_ready(
+        Some(&identity),
+        metadata
+            .get("import_state")
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        metadata
+            .get("validation_state")
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+    )
+}
+
+impl ModelMetadata {
+    pub(crate) fn copied_import_ready(&self) -> bool {
+        import_publication_ready(
+            self.import_publication.as_ref(),
+            self.import_state,
+            self.validation_state,
+        )
+    }
+}
+
 /// Current validation health of an external asset reference.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -463,6 +520,9 @@ pub struct ModelMetadata {
     /// Current import lifecycle state for this model asset.
     #[serde(default)]
     pub import_state: Option<ImportState>,
+    /// Copied-import publication provenance; only its producing owner confirms it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_publication: Option<ImportPublicationIdentity>,
     /// Current health of the persisted asset reference.
     #[serde(default)]
     pub validation_state: Option<AssetValidationState>,

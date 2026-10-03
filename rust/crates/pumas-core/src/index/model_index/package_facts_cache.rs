@@ -305,6 +305,15 @@ impl ModelIndex {
         limit: usize,
         offset: usize,
     ) -> Result<ModelPackageFactsSummarySnapshot> {
+        self.list_summary_snapshot_with_publication(limit, offset)
+            .map(|(snapshot, _)| snapshot)
+    }
+
+    pub(crate) fn list_summary_snapshot_with_publication(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(ModelPackageFactsSummarySnapshot, Vec<serde_json::Value>)> {
         let conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
@@ -316,7 +325,8 @@ impl ModelIndex {
                 models.id,
                 model_package_facts_cache.selected_artifact_id,
                 model_package_facts_cache.package_facts_contract_version,
-                model_package_facts_cache.facts_json
+                model_package_facts_cache.facts_json,
+                models.metadata_json
              FROM models
              LEFT JOIN model_package_facts_cache
                ON model_package_facts_cache.model_id = models.id
@@ -331,24 +341,38 @@ impl ModelIndex {
                 let selected_artifact_id: Option<String> = row.get(1)?;
                 let package_facts_contract_version: Option<i64> = row.get(2)?;
                 let facts_json: Option<String> = row.get(3)?;
-                let (status, summary) = classify_package_facts_summary_cache_row(
+                let (mut status, mut summary) = classify_package_facts_summary_cache_row(
                     None,
                     selected_artifact_id.as_deref(),
                     package_facts_contract_version,
                     facts_json.as_deref(),
                 );
-                Ok(ModelPackageFactsSummarySnapshotItem {
-                    model_id,
-                    status,
-                    summary,
-                })
+                let metadata_json: String = row.get(4)?;
+                if !crate::models::copied_import_ready_value(
+                    &serde_json::from_str(&metadata_json).unwrap_or_default(),
+                ) {
+                    status = ModelPackageFactsSummaryStatus::Invalid;
+                    summary = None;
+                }
+                Ok((
+                    ModelPackageFactsSummarySnapshotItem {
+                        model_id,
+                        status,
+                        summary,
+                    },
+                    serde_json::from_str(&metadata_json).unwrap_or_default(),
+                ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        let (items, publication): (Vec<_>, Vec<_>) = items.into_iter().unzip();
         let cursor = model_library_update_cursor(
             Self::current_model_library_update_event_id_with_conn(&conn)?,
         );
 
-        Ok(ModelPackageFactsSummarySnapshot { cursor, items })
+        Ok((
+            ModelPackageFactsSummarySnapshot { cursor, items },
+            publication,
+        ))
     }
 }
 

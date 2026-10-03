@@ -73,7 +73,8 @@ fn canonical_models_keep_all_nested_sets_separate_without_writes() {
         .any(|item| item.existing_files.contains(&"standalone.gguf".into())));
     assert!(legacy.iter().any(|item| item
         .existing_files
-        .contains(&"b/weights-1-of-2.gguf".into())));
+        .iter()
+        .any(|file| { Path::new(file) == Path::new("b/weights-1-of-2.gguf") })));
 }
 
 #[test]
@@ -625,7 +626,10 @@ fn junction_child_is_refused_without_reading_its_sentinel_tree() {
     let junction = root.join("llm/family/model/escape");
     let output = std::process::Command::new("cmd.exe")
         .args(["/d", "/c", "mklink", "/j"])
-        .arg(&junction)
+        // cmd's built-in parser interprets slash-containing path components as
+        // switches. Resolve the parent via the native working-directory API.
+        .current_dir(junction.parent().unwrap())
+        .arg(junction.file_name().unwrap())
         .arg(&outside)
         .output()
         .unwrap();

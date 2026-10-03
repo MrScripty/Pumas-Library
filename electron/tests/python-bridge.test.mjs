@@ -114,6 +114,7 @@ async function flushMicrotasks() {
 
 function fakeChild() {
   const child = new EventEmitter();
+  child.pid = 12345;
   child.exitCode = null;
   child.signalCode = null;
   child.stdout = new EventEmitter();
@@ -128,7 +129,7 @@ function fakeChild() {
   return child;
 }
 
-function stopFixture({ platform = 'linux', options = {}, request } = {}) {
+function stopFixture({ platform = 'linux', options = {}, request, server } = {}) {
   const bridgeUrl = new URL('../dist/python-bridge.js', import.meta.url);
   const requireBridge = createRequire(bridgeUrl);
   const exports = {};
@@ -140,6 +141,7 @@ function stopFixture({ platform = 'linux', options = {}, request } = {}) {
     require(specifier) {
       if (specifier === 'electron-log') return { info() {}, warn() {}, error() {} };
       if (specifier === 'http' && request) return { request };
+      if (specifier === 'net' && server) return { createServer: () => server };
       if (specifier === 'child_process') return {
         spawn() {
           const child = fakeChild();
@@ -353,10 +355,10 @@ test('overlapping starts share startup and cancelled readiness cannot publish ru
   await assert.rejects(bridge.start(), /stopping/i);
   rpc.resolve({ status: 'shutting_down' });
   child.exit();
-  await stopped;
   await assert.rejects(bridge.start(), /stopping/i);
   ready.resolve();
   await rejected;
+  await stopped;
   assert.equal(bridge.isRunning(), false);
   assert.equal(timers.pendingCount(), 0);
   assert.equal(children.length, 1);
@@ -380,6 +382,287 @@ test('late exit from a stopped child cannot erase its replacement or readiness',
   const finalStop = bridge.stop();
   current.exit();
   await finalStop;
+  assert.equal(timers.pendingCount(), 0);
+});
+
+for (const autoRestart of [false, true]) {
+  test(`stop preserves failure observed by the startup exit listener (autoRestart=${autoRestart})`, async () => {
+    const { bridge, children, calls, timers } = stopFixture({ options: { autoRestart } });
+    bridge.process = null;
+    bridge.waitForReady = async () => {};
+    await bridge.start();
+    const child = children[0];
+    child.exit(9);
+    assert.equal(bridge.process, null, 'the live process slot is released by its actual exit listener');
+    assert.equal(timers.pendingCount(), autoRestart ? 1 : 0);
+    const stopped = bridge.stop();
+    await assert.rejects(stopped, /code=9.*cleanup failed/i);
+    assert.equal(bridge.stop(), stopped);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(child.signals, []);
+    assert.equal(timers.pendingCount(), 0);
+    assert.equal(child.listenerCount('exit'), 1, 'the temporary shutdown observer is removed');
+  });
+}
+
+test('an unsuccessful restart attempt cannot erase the previous cleanup failure', async () => {
+  const { bridge, children, timers } = stopFixture();
+  bridge.process = null;
+  bridge.waitForReady = async () => {};
+  await bridge.start();
+  children[0].exit(9);
+  const priorStop = bridge.stop();
+  await assert.rejects(priorStop, /code=9.*cleanup failed/i);
+  bridge.options.rustBinaryPath = '/nonexistent/pumas-rpc-for-stop-receipt-test';
+  await assert.rejects(bridge.start(), /Backend binary not found/);
+  assert.equal(bridge.stop(), priorStop);
+  await assert.rejects(bridge.stop(), /code=9.*cleanup failed/i);
+  assert.equal(children.length, 1);
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('stop during restart port allocation retains the previous child receipt', async () => {
+  const { bridge, children, timers } = stopFixture();
+  bridge.process = null;
+  bridge.waitForReady = async () => {};
+  await bridge.start();
+  children[0].exit(9);
+  const allocated = deferred();
+  bridge.options.port = 0;
+  bridge.findAvailablePort = () => allocated.promise;
+  const restarting = bridge.start();
+  const rejected = assert.rejects(restarting, /stopped during startup/);
+  const stopFailed = assert.rejects(bridge.stop(), /code=9.*cleanup failed/i);
+  allocated.resolve(49152);
+  await rejected;
+  await stopFailed;
+  assert.equal(children.length, 1);
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('a new owner replaces the prior failure receipt without accepting stale child exits', async () => {
+  const { bridge, children, timers } = stopFixture();
+  bridge.process = null;
+  bridge.waitForReady = async () => {};
+  await bridge.start();
+  const previous = children[0];
+  previous.exit(9);
+  await assert.rejects(bridge.stop(), /code=9.*cleanup failed/i);
+  await bridge.start();
+  const current = children[1];
+  previous.emit('exit', 11, null);
+  assert.equal(bridge.process, current);
+  current.exit();
+  previous.emit('exit', 13, null);
+  await bridge.stop();
+  assert.equal(timers.pendingCount(), 0);
+});
+
+for (const stopIntervenes of [false, true]) {
+  test(`restart after pending readiness settles re-evaluates ownership (stop=${stopIntervenes})`, async () => {
+    const { bridge, children, timers } = stopFixture();
+    bridge.process = null;
+    const ready = deferred();
+    bridge.waitForReady = () => ready.promise;
+    const starting = bridge.start();
+    const startupFailed = assert.rejects(starting, /stopped during startup/);
+    const oldChild = children[0];
+    oldChild.exit(9);
+    await timers.runNext();
+    assert.equal(children.length, 1, 'restart waits until the predecessor startup settles');
+    const stopped = stopIntervenes ? bridge.stop() : null;
+    const stopFailed = stopped ? assert.rejects(stopped, /code=9.*cleanup failed/i) : null;
+    ready.resolve();
+    await startupFailed;
+    await flushMicrotasks();
+    if (stopIntervenes) {
+      await stopFailed;
+      assert.equal(children.length, 1);
+    } else {
+      assert.equal(children.length, 2, 'one replacement starts after the failed predecessor');
+      assert.equal(bridge.isRunning(), true);
+      const finalStop = bridge.stop();
+      children[1].exit();
+      await finalStop;
+    }
+    assert.equal(timers.pendingCount(), 0);
+  });
+}
+
+test('spawn error followed by close during stop records failed-start without waiting for exit', async () => {
+  const { bridge, children, timers } = stopFixture();
+  bridge.process = null;
+  const ready = deferred();
+  bridge.waitForReady = () => ready.promise;
+  const starting = bridge.start();
+  const startupFailed = assert.rejects(starting, /stopped during startup/);
+  const child = children[0];
+  delete child.pid;
+  const stopped = bridge.stop();
+  const stopFailed = assert.rejects(stopped, /failed to start.*cleanup/i);
+  child.emit('error', new Error('spawn ENOENT'));
+  assert.equal(bridge.process, child, 'an error alone does not establish resource closure');
+  child.emit('close', -2, null);
+  ready.resolve();
+  await startupFailed;
+  await stopFailed;
+  assert.equal(bridge.process, null);
+  assert.equal(bridge.stop(), stopped);
+  assert.deepEqual(child.signals, []);
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('stop does not claim completion while the captured startup is unsettled', async () => {
+  const { bridge, children, timers } = stopFixture();
+  bridge.process = null;
+  const ready = deferred();
+  bridge.waitForReady = () => ready.promise;
+  const starting = bridge.start();
+  const startupFailed = assert.rejects(starting, /stopped during startup/);
+  let stopSettled = false;
+  const stopped = bridge.stop().then(() => { stopSettled = true; });
+  children[0].exit();
+  await flushMicrotasks();
+  assert.equal(stopSettled, false);
+  assert.equal(timers.nextDelay(), 30_000);
+  ready.resolve();
+  await startupFailed;
+  await stopped;
+  assert.equal(bridge.startPromise, null);
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('unsettled startup after child exit yields bounded unconfirmed cleanup', async () => {
+  const { bridge, children, timers } = stopFixture();
+  bridge.process = null;
+  const ready = deferred();
+  bridge.waitForReady = () => ready.promise;
+  const starting = bridge.start();
+  const startupFailed = assert.rejects(starting, /stopped during startup/);
+  const stopped = bridge.stop();
+  const stopFailed = assert.rejects(stopped, /startup.*unconfirmed.*cleanup/i);
+  children[0].exit();
+  await flushMicrotasks();
+  await timers.runNext();
+  await stopFailed;
+  assert.equal(bridge.process, null);
+  assert.notEqual(bridge.startPromise, null);
+  await assert.rejects(bridge.start(), /stopping/);
+  ready.resolve();
+  await startupFailed;
+  assert.equal(timers.pendingCount(), 0);
+});
+
+for (const closeConfirmed of [true, false]) {
+  test(`stop owns port allocation until closure is confirmed (confirmed=${closeConfirmed})`, async () => {
+    const server = new EventEmitter();
+    let allocated;
+    let closeCallback;
+    let closeCalls = 0;
+    Object.assign(server, {
+      listen(_port, _host, callback) { allocated = callback; },
+      address: () => ({ port: 49152 }),
+      close(callback) { closeCalls += 1; closeCallback = callback; },
+    });
+    const { bridge, children, timers } = stopFixture({ options: { port: 0 }, server });
+    bridge.process = null;
+    const starting = bridge.start();
+    const startupFailed = assert.rejects(starting, /stopped during startup/);
+    let stopSettled = false;
+    const stopped = bridge.stop();
+    const stopResult = closeConfirmed
+      ? stopped.then(() => { stopSettled = true; })
+      : assert.rejects(stopped, /startup.*unconfirmed.*cleanup/i);
+    await flushMicrotasks();
+    assert.equal(stopSettled, false);
+    assert.equal(closeCalls, 1);
+    assert.notEqual(bridge.cancelPortAllocation, null);
+    if (!closeConfirmed) {
+      assert.equal(await timers.runNext(), 30_000);
+      await stopResult;
+      assert.notEqual(bridge.startPromise, null);
+      assert.notEqual(bridge.cancelPortAllocation, null);
+      await assert.rejects(bridge.start(), /stopping/);
+    }
+    closeCallback();
+    await startupFailed;
+    await stopResult;
+    allocated();
+    assert.equal(children.length, 0);
+    assert.equal(bridge.startPromise, null);
+    assert.equal(bridge.cancelPortAllocation, null);
+    assert.equal(server.listenerCount('error'), 0);
+    assert.equal(timers.pendingCount(), 0);
+  });
+}
+
+test('a new startup allocation is cancelled even when the previous child has a cached stop outcome', async () => {
+  const server = new EventEmitter();
+  let closeCallback;
+  Object.assign(server, {
+    listen() {},
+    close(callback) { closeCallback = callback; },
+  });
+  const { bridge, children, timers } = stopFixture({ server });
+  bridge.process = null;
+  bridge.waitForReady = async () => {};
+  await bridge.start();
+  children[0].exit();
+  const priorStop = bridge.stop();
+  await priorStop;
+  bridge.options.port = 0;
+  const starting = bridge.start();
+  const startupFailed = assert.rejects(starting, /stopped during startup/);
+  const stopped = bridge.stop();
+  assert.notEqual(stopped, priorStop, 'the new allocation has its own shutdown owner');
+  assert.equal(typeof closeCallback, 'function');
+  closeCallback();
+  await startupFailed;
+  await stopped;
+  assert.equal(children.length, 1);
+  assert.equal(bridge.startPromise, null);
+  assert.equal(bridge.cancelPortAllocation, null);
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('real loopback allocation is closed and startup settled before stop resolves', { timeout: 5_000 }, async () => {
+  const timers = new FakeTimerController();
+  const bridge = createBridge(timers);
+  bridge.options.port = 0;
+  const starting = bridge.start();
+  const startupFailed = assert.rejects(starting, /stopped during startup/);
+  await bridge.stop();
+  await startupFailed;
+  assert.equal(bridge.startPromise, null);
+  assert.equal(bridge.cancelPortAllocation, null);
+  assert.equal(bridge.process, null);
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('spawn failure recorded before stop still waits for close rather than exitCode alone', async () => {
+  const { bridge, children, rpc, timers } = stopFixture();
+  bridge.process = null;
+  const ready = deferred();
+  bridge.waitForReady = () => ready.promise;
+  const starting = bridge.start();
+  const startupFailed = assert.rejects(starting, /stopped during startup/);
+  const child = children[0];
+  delete child.pid;
+  child.exitCode = -2;
+  child.emit('error', new Error('spawn ENOENT'));
+  let settled = false;
+  const stopped = bridge.stop();
+  const stopFailed = assert.rejects(stopped, /failed to start.*cleanup/i).then(() => { settled = true; });
+  rpc.reject(new Error('connection refused'));
+  await flushMicrotasks();
+  assert.equal(settled, false);
+  assert.equal(bridge.process, child);
+  assert.deepEqual(child.signals, []);
+  child.emit('close', -2, null);
+  ready.resolve();
+  await startupFailed;
+  await stopFailed;
+  assert.equal(bridge.process, null);
   assert.equal(timers.pendingCount(), 0);
 });
 

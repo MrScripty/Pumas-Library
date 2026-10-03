@@ -36,7 +36,7 @@ export interface PythonBridgeOptions {
   rustBinaryPath: string;
   /** Launcher root directory */
   launcherRoot: string;
-  /** Total shutdown RPC and natural-exit grace, including HTTP/core drain (default: 30 seconds). */
+  /** Startup cancellation, shutdown RPC and natural-exit grace, including HTTP/core drain (default: 30 seconds). */
   shutdownGraceMs?: number;
   /** Time to observe exit after forced termination (default: 5 seconds). */
   shutdownForceWaitMs?: number;
@@ -305,13 +305,24 @@ class NamedSseStreamOwner {
   }
 }
 
+interface BackendExit {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  startupError?: Error;
+}
+
 export class PythonBridge {
   private options: Required<Omit<PythonBridgeOptions, 'timerController'>>;
   private timerController: PythonBridgeTimerController;
   private process: ChildProcess | null = null;
+  // Releasing the live slot does not discard the previous owner's cleanup receipt.
+  private terminalExit: { child: ChildProcess; outcome: BackendExit } | null = null;
   private startPromise: Promise<void> | null = null;
+  private cancelPortAllocation: (() => void) | null = null;
+  private failedStarts = new WeakMap<ChildProcess, Error>();
   private stopOperation: {
     child: ChildProcess | null;
+    startup: Promise<void> | null;
     promise: Promise<void>;
     settled: boolean;
   } | null = null;
@@ -394,16 +405,51 @@ export class PythonBridge {
   private async findAvailablePort(): Promise<number> {
     return new Promise((resolve, reject) => {
       const server = net.createServer();
-      server.listen(0, '127.0.0.1', () => {
-        const address = server.address();
-        if (address && typeof address === 'object') {
-          const port = address.port;
-          server.close(() => resolve(port));
-        } else {
-          reject(new Error('Failed to get server address'));
+      let closing = false;
+      let settled = false;
+      let cancelled = false;
+      let port: number | null = null;
+      let failure: Error | null = null;
+      const finish = (error?: Error): void => {
+        if (settled) return;
+        settled = true;
+        if (error && (!('code' in error) || error.code !== 'ERR_SERVER_NOT_RUNNING')) {
+          // Retain the cancellation owner when listener closure is unconfirmed.
+          reject(error);
+          return;
         }
-      });
-      server.on('error', reject);
+        server.removeListener('error', onError);
+        if (this.cancelPortAllocation === cancel) this.cancelPortAllocation = null;
+        if (cancelled) reject(new Error('Backend bridge stopped during startup'));
+        else if (failure) reject(failure);
+        else if (port === null) reject(new Error('Failed to get server address'));
+        else resolve(port);
+      };
+      const close = (): void => {
+        if (closing) return;
+        closing = true;
+        server.close(finish);
+      };
+      const onError = (error: Error): void => {
+        failure = error;
+        close();
+      };
+      const cancel = (): void => {
+        cancelled = true;
+        close();
+      };
+      this.cancelPortAllocation = cancel;
+      server.on('error', onError);
+      try {
+        server.listen(0, '127.0.0.1', () => {
+          if (settled || cancelled) return;
+          const address = server.address();
+          if (address && typeof address === 'object') port = address.port;
+          close();
+        });
+      } catch (error) {
+        onError(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -435,11 +481,13 @@ export class PythonBridge {
       return Promise.reject(new Error('Backend bridge stopping; previous cleanup may be unconfirmed'));
     }
     if (this.startPromise) return this.startPromise;
+    if (this.cancelPortAllocation) {
+      return Promise.reject(new Error('Backend startup allocation closure is unconfirmed'));
+    }
     if (this.process) {
       log.warn('Backend process already running');
       return Promise.resolve();
     }
-    this.stopOperation = null;
     const starting = this.startProcess().finally(() => {
       if (this.startPromise === starting) this.startPromise = null;
     });
@@ -480,6 +528,7 @@ export class PythonBridge {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.process = child;
+    this.stopOperation = null;
 
     const backendLabel = 'Rust';
 
@@ -499,11 +548,12 @@ export class PythonBridge {
       }
     });
 
-    // Handle process exit
-    child.on('exit', (code, signal) => {
+    // Exit and failed-spawn close share one terminal receipt owner.
+    const completeExit = (code: number | null, signal: NodeJS.Signals | null, startupError?: Error): void => {
       if (this.process !== child) return;
       log.info(`${backendLabel} process exited: code=${code}, signal=${signal}`);
       this.serverReady = false;
+      this.terminalExit = { child, outcome: { code, signal, startupError } };
       this.process = null;
       this.clearHealthCheckTimer();
       this.closeAllUpdateStreams();
@@ -517,11 +567,17 @@ export class PythonBridge {
       ) {
         this.scheduleRestart(backendLabel);
       }
+    };
+    child.on('exit', (code, signal) => completeExit(code, signal));
+    child.on('close', (code, signal) => {
+      const failure = this.failedStarts.get(child);
+      if (failure) completeExit(code, signal, failure);
     });
 
     // Handle process error
     child.on('error', (error) => {
       if (this.process !== child) return;
+      if (child.pid === undefined) this.failedStarts.set(child, error);
       this.serverReady = false;
       log.error(`${backendLabel} process error:`, error);
     });
@@ -538,6 +594,7 @@ export class PythonBridge {
     // Reset restart counter on successful start
     this.restartCount = 0;
     this.serverReady = true;
+    this.terminalExit = null;
 
     this.resumeListeningUpdateStreams();
 
@@ -605,21 +662,24 @@ export class PythonBridge {
   /**
    * Stop one captured child. The shutdown RPC only acknowledges admission;
    * natural exit code 0 is the backend's receipt for completed owned cleanup.
-   * Keep the same promise/outcome until a new start, including failed cleanup.
+   * Replay the same outcome for the captured child and startup owner, including failure.
    */
   stop(): Promise<void> {
+    const child = this.process ?? this.terminalExit?.child ?? null;
+    const startup = this.startPromise;
     if (this.stopOperation && (!this.stopOperation.settled
-      || this.stopOperation.child === this.process || !this.process)) {
+      || ((this.stopOperation.child === child || !child)
+        && (!startup || this.stopOperation.startup === startup)))) {
       return this.stopOperation.promise;
     }
     let resolve!: () => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
-    const operation = { child: this.process, promise, settled: false };
+    const operation = { child, startup, promise, settled: false };
     this.stopOperation = operation;
     this.isShuttingDown = true;
     this.serverReady = false;
-    void this.stopChild(operation.child).then(() => {
+    void this.stopChild(operation.child, operation.startup).then(() => {
       operation.settled = true;
       resolve();
     }, (error: unknown) => {
@@ -629,19 +689,27 @@ export class PythonBridge {
     return promise;
   }
 
-  private async stopChild(child: ChildProcess | null): Promise<void> {
-    type Exit = { code: number | null; signal: NodeJS.Signals | null };
-    let exit: Exit | null = null;
-    let recordExit!: (code: number | null, signal: NodeJS.Signals | null) => void;
+  private async stopChild(child: ChildProcess | null, starting: Promise<void> | null): Promise<void> {
+    let exit: BackendExit | null = null;
+    let recordExit!: (code: number | null, signal: NodeJS.Signals | null, startupError?: Error) => void;
     const exited = new Promise<'exited'>((resolve) => {
-      recordExit = (code, signal) => {
-        exit = { code, signal };
+      recordExit = (code, signal, startupError) => {
+        exit = { code, signal, startupError };
         resolve('exited');
       };
     });
     // Observe before cancelling requests or sending RPC/signals: each can race exit.
+    const recordFailedStart = (code: number | null, signal: NodeJS.Signals | null): void => {
+      const failure = child ? this.failedStarts.get(child) : undefined;
+      if (failure) recordExit(code, signal, failure);
+    };
     child?.once('exit', recordExit);
-    if (child && (child.exitCode !== null || child.signalCode !== null)) {
+    child?.once('close', recordFailedStart);
+    const terminal = this.terminalExit;
+    if (child && terminal?.child === child) {
+      recordExit(terminal.outcome.code, terminal.outcome.signal, terminal.outcome.startupError);
+    } else if (child && !this.failedStarts.has(child)
+      && (child.exitCode !== null || child.signalCode !== null)) {
       recordExit(child.exitCode, child.signalCode);
     }
     let graceTimer: BridgeTimer | null = null;
@@ -657,12 +725,29 @@ export class PythonBridge {
       this.stopServingStatusUpdateStream();
       this.stopStatusTelemetryUpdateStream();
       for (const cancel of [...this.pendingRpcCalls]) cancel();
-      if (!child) return;
+      this.cancelPortAllocation?.();
+      if (!child && !starting && !this.cancelPortAllocation) return;
 
       log.info('Stopping Rust backend bridge...');
       const graceExpired = new Promise<'expired'>((resolve) => {
         graceTimer = this.timerController.setTimeout(() => resolve('expired'), this.options.shutdownGraceMs);
       });
+      const settleStartup = async (): Promise<void> => {
+        if (starting) {
+          const settled = await Promise.race([
+            starting.then(() => true, () => true),
+            graceExpired.then(() => false),
+          ]);
+          if (!settled) throw new Error('Backend startup settlement unconfirmed; cleanup incomplete');
+        }
+        if (this.cancelPortAllocation) {
+          throw new Error('Backend startup allocation closure unconfirmed; cleanup incomplete');
+        }
+      };
+      if (!child) {
+        await settleStartup();
+        return;
+      }
       if (!exit) {
         const acknowledgement = this.call('shutdown', {}).then((result) => {
           // Coordinated internal RPC contract: no managed-process completion counts.
@@ -679,7 +764,8 @@ export class PythonBridge {
         const first = await Promise.race([exited, graceExpired, acknowledgement]);
         // Unix SIGTERM is a second graceful request. On Windows kill() terminates
         // the process, so leave the remaining grace for an already accepted RPC.
-        if (first === 'rpc-failed' && !exit && process.platform !== 'win32') {
+        if (first === 'rpc-failed' && !exit && !this.failedStarts.has(child)
+          && process.platform !== 'win32') {
           try {
             if (!child.kill('SIGTERM')) signalFailure = new Error('SIGTERM was not delivered');
           } catch (error) {
@@ -688,11 +774,12 @@ export class PythonBridge {
         }
         if (!exit && first !== 'expired') await Promise.race([exited, graceExpired]);
       }
-      if (graceTimer !== null) this.timerController.clearTimeout(graceTimer);
-      graceTimer = null;
       // Cancel a hanging shutdown transport even when exit wins the RPC race.
       for (const cancel of [...this.pendingRpcCalls]) cancel();
       if (!exit) {
+        if (this.failedStarts.has(child)) {
+          throw new Error('Backend failed-start closure unconfirmed; cleanup incomplete', { cause: this.failedStarts.get(child) });
+        }
         forced = true;
         const forceExpired = new Promise<'expired'>((resolve) => {
           forceTimer = this.timerController.setTimeout(() => resolve('expired'), this.options.shutdownForceWaitMs);
@@ -704,13 +791,20 @@ export class PythonBridge {
         }
         await Promise.race([exited, forceExpired]);
       }
+      await settleStartup();
       // The callback owns mutation; read its observed terminal receipt here.
-      const observed = exit as Exit | null;
+      const observed = exit as BackendExit | null;
       if (!observed) {
         throw new Error('Backend exit unconfirmed after forced termination; cleanup incomplete', { cause: signalFailure });
       }
-      if (this.process === child) this.process = null;
+      if (this.process === child) {
+        this.terminalExit = { child, outcome: observed };
+        this.process = null;
+      }
       this.restartCount = 0;
+      if (observed.startupError) {
+        throw new Error('Backend failed to start; cleanup observed after process closure', { cause: observed.startupError });
+      }
       if (forced) {
         throw new Error(`Backend exit observed after forced termination attempt (code=${observed.code}, signal=${observed.signal}); cleanup unconfirmed`, { cause: signalFailure });
       }
@@ -720,6 +814,7 @@ export class PythonBridge {
       log.info('Rust backend bridge stopped');
     } finally {
       child?.removeListener('exit', recordExit);
+      child?.removeListener('close', recordFailedStart);
       if (graceTimer !== null) this.timerController.clearTimeout(graceTimer);
       if (forceTimer !== null) this.timerController.clearTimeout(forceTimer);
       for (const cancel of [...this.pendingRpcCalls]) cancel();
@@ -814,9 +909,14 @@ export class PythonBridge {
     this.restartTimer = this.timerController.setTimeout(() => {
       this.restartTimer = null;
       if (this.isShuttingDown) return;
-      void this.start().catch((error: unknown) => {
-        log.error(`Failed to restart ${backendLabel} process:`, error);
-      });
+      const restart = (): void => {
+        if (this.isShuttingDown || this.process) return;
+        void this.start().catch((error: unknown) => {
+          log.error(`Failed to restart ${backendLabel} process:`, error);
+        });
+      };
+      if (this.startPromise) void this.startPromise.then(restart, restart);
+      else restart();
     }, 1000 * this.restartCount);
   }
 

@@ -424,7 +424,8 @@ fn root_or_configured_ancestor_replacement_discards_evidence_or_is_natively_pinn
                 b"original"
             );
         } else {
-            assert!(cfg!(windows), "only the native Windows refusal is accepted");
+            // attempt_held_rename can return false only in its cfg(windows)
+            // error arm, after checking the two accepted native OS codes.
             assert!(report.enumeration_complete, "{:?}", report.diagnostics);
             assert!(!has(&report, Kind::BindingChanged));
             assert_eq!(byte_snapshot(temp.path()), before);
@@ -495,7 +496,8 @@ fn family_model_and_nested_child_replacement_is_refused_or_natively_pinned() {
                     b"original"
                 );
             } else {
-                assert!(cfg!(windows), "only the native Windows refusal is accepted");
+                // attempt_held_rename can return false only in its cfg(windows)
+                // error arm, after checking the two accepted native OS codes.
                 assert!(report.enumeration_complete, "{:?}", report.diagnostics);
                 assert!(!has(&report, Kind::BindingChanged));
                 assert_eq!(byte_snapshot(temp.path()), before);

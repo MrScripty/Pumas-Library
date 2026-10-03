@@ -10,11 +10,13 @@ use crate::handlers::{
     handle_openai_models, handle_openai_proxy, handle_runtime_profile_update_events,
     handle_serving_status_update_events,
 };
+use crate::http_admission::{enforce_local_request, is_allowed_origin};
 #[cfg(feature = "inference-plugins")]
 use crate::provider_clients::{LlamaCppRouterClient, OllamaClientFactory};
 use axum::{
     extract::DefaultBodyLimit,
-    http::{header, HeaderValue, Method},
+    http::{header, Method},
+    middleware,
     routing::{get, post},
     Router,
 };
@@ -323,7 +325,7 @@ pub async fn start_server(
     // Configure CORS for local development and packaged renderer diagnostics.
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(|origin, _parts| {
-            is_allowed_cors_origin(origin)
+            is_allowed_origin(origin)
         }))
         .allow_methods([Method::GET, Method::POST])
         .allow_headers([header::CONTENT_TYPE]);
@@ -369,6 +371,7 @@ pub async fn start_server(
             shutdown_request.clone(),
             reject_during_shutdown,
         ))
+        .layer(middleware::from_fn(enforce_local_request))
         .with_state(state.clone());
 
     info!(
@@ -524,24 +527,6 @@ fn build_ollama_client_factory() -> anyhow::Result<OllamaClientFactory> {
     Ok(OllamaClientFactory::new(http_clients))
 }
 
-fn is_allowed_cors_origin(origin: &HeaderValue) -> bool {
-    let Ok(origin) = origin.to_str() else {
-        return false;
-    };
-    let Ok(url) = url::Url::parse(origin) else {
-        return false;
-    };
-    if !matches!(url.scheme(), "http" | "https") {
-        return false;
-    }
-    match url.host() {
-        Some(url::Host::Domain("localhost")) => true,
-        Some(url::Host::Ipv4(address)) => address.is_loopback(),
-        Some(url::Host::Ipv6(address)) => address.is_loopback(),
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #[tokio::test]
@@ -563,6 +548,7 @@ mod tests {
     }
 
     use super::*;
+    use axum::http::HeaderValue;
     #[cfg(feature = "inference-plugins")]
     use pumas_library::AppId;
     use std::io::ErrorKind;
@@ -1008,7 +994,7 @@ mod tests {
             "http://[::1]:5173",
         ] {
             let header = HeaderValue::from_str(origin).unwrap();
-            assert!(is_allowed_cors_origin(&header), "{origin}");
+            assert!(is_allowed_origin(&header), "{origin}");
         }
     }
 
@@ -1020,7 +1006,7 @@ mod tests {
             "file:///tmp/index.html",
         ] {
             let header = HeaderValue::from_str(origin).unwrap();
-            assert!(!is_allowed_cors_origin(&header), "{origin}");
+            assert!(!is_allowed_origin(&header), "{origin}");
         }
     }
 

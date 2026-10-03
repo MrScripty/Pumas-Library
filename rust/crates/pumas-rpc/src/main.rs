@@ -6,6 +6,7 @@
 mod catalog_projection;
 mod contract;
 mod handlers;
+mod http_admission;
 mod http_transport;
 #[cfg(feature = "inference-plugins")]
 mod provider_clients;

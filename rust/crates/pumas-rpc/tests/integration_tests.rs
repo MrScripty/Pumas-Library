@@ -785,6 +785,78 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn http_admission_rejects_untrusted_sources_before_rpc_dispatch() {
+        if !can_bind_local_tcp_for_tests() {
+            return;
+        }
+        let env = create_test_env();
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let url = format!("http://127.0.0.1:{}/rpc", server.port);
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let mut results = Vec::new();
+        for (name, value) in [
+            ("origin", "https://untrusted.example"),
+            ("origin", "null"),
+            ("host", "untrusted.example"),
+            ("sec-fetch-site", "cross-site"),
+        ] {
+            let result = client
+                .post(&url)
+                .header(name, value)
+                .header(reqwest::header::CONTENT_TYPE, "text/plain")
+                // If dispatched, malformed JSON would get a JSON-RPC parse
+                // result, so HTTP refusal also proves the handler was bypassed.
+                .body("not json")
+                .send()
+                .await
+                .map(|response| response.status());
+            results.push(result);
+        }
+        let allowed = client
+            .post(&url)
+            .json(&json!({
+                "jsonrpc": "2.0", "id": 1, "method": "health_check", "params": {}
+            }))
+            .send()
+            .await;
+        let allowed = match allowed {
+            Ok(response) => response.json::<Value>().await,
+            Err(error) => Err(error),
+        };
+        let local_browser = client
+            .post(&url)
+            .header("origin", "http://localhost:5173")
+            .header("sec-fetch-site", "cross-site")
+            .json(&json!({"jsonrpc": "2.0", "id": 2, "method": "health_check", "params": {}}))
+            .send()
+            .await;
+        server.stop().await;
+        for result in results {
+            assert_eq!(result.unwrap(), reqwest::StatusCode::FORBIDDEN);
+        }
+        assert_eq!(
+            allowed
+                .unwrap()
+                .pointer("/result/status")
+                .and_then(Value::as_str),
+            Some("ok")
+        );
+        let local_browser = local_browser.unwrap();
+        assert_eq!(local_browser.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            local_browser
+                .headers()
+                .get("access-control-allow-origin")
+                .unwrap(),
+            "http://localhost:5173"
+        );
+    }
+
     #[cfg(feature = "inference-plugins")]
     fn missing_serving_request() -> Value {
         json!({
@@ -2013,6 +2085,41 @@ mod tests {
         assert!(flag_stderr.contains("--allow-lan"), "{flag_stderr}");
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unix_termination_signals_complete_the_owned_shutdown() {
+        if !can_bind_local_tcp_for_tests() {
+            return;
+        }
+        for signal in ["TERM", "INT"] {
+            let env = create_test_env();
+            let mut server = start_rpc_server(env.path()).await.unwrap();
+            let pid = server.child.id().expect("server process must be running");
+            let sent = tokio::process::Command::new("kill")
+                .args(["-s", signal, &pid.to_string()])
+                .status()
+                .await
+                .expect("Unix kill utility must be available");
+            assert!(sent.success(), "failed to send SIG{signal}");
+            let status = tokio::time::timeout(Duration::from_secs(15), server.child.wait())
+                .await
+                .expect("server must finish its owned drain")
+                .unwrap();
+            if let Some(drain) = server.stdout_drain.take() {
+                drain.await.unwrap();
+            }
+            if let Some(drain) = server.stderr_drain.take() {
+                drain.await.unwrap();
+            }
+            let diagnostics = server.diagnostics().await;
+            assert!(status.success(), "SIG{signal}: {status}; {diagnostics}");
+            assert!(
+                diagnostics.contains("RPC shutdown completed"),
+                "{diagnostics}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn rpc_shutdown_exits_after_delivering_acknowledgement_and_ending_sse() {
         let env = create_test_env();
@@ -2105,41 +2212,6 @@ mod tests {
             diagnostics.contains("RPC shutdown completed"),
             "{diagnostics}"
         );
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn unix_termination_signals_complete_the_owned_shutdown() {
-        if !can_bind_local_tcp_for_tests() {
-            return;
-        }
-        for signal in ["TERM", "INT"] {
-            let env = create_test_env();
-            let mut server = start_rpc_server(env.path()).await.unwrap();
-            let pid = server.child.id().expect("server process must be running");
-            let sent = tokio::process::Command::new("kill")
-                .args(["-s", signal, &pid.to_string()])
-                .status()
-                .await
-                .expect("Unix kill utility must be available");
-            assert!(sent.success(), "failed to send SIG{signal}");
-            let status = tokio::time::timeout(Duration::from_secs(15), server.child.wait())
-                .await
-                .expect("server must finish its owned drain")
-                .unwrap();
-            if let Some(drain) = server.stdout_drain.take() {
-                drain.await.unwrap();
-            }
-            if let Some(drain) = server.stderr_drain.take() {
-                drain.await.unwrap();
-            }
-            let diagnostics = server.diagnostics().await;
-            assert!(status.success(), "SIG{signal}: {status}; {diagnostics}");
-            assert!(
-                diagnostics.contains("RPC shutdown completed"),
-                "{diagnostics}"
-            );
-        }
     }
 
     #[tokio::test]

@@ -2618,7 +2618,11 @@ mod tests {
     #[tokio::test]
     async fn test_import_copies_diffusers_bundle_into_library_owned_model_dir() {
         let (temp_dir, library) = setup().await;
-        let importer = ModelImporter::new(library.clone());
+        let mut importer = ModelImporter::new(library.clone());
+        importer.import_hook = Some(Arc::new(|boundary, _| {
+            eprintln!("copied Diffusers boundary: {boundary:?}");
+            Ok(())
+        }));
 
         let source_dir = temp_dir.path().join("external");
         std::fs::create_dir_all(&source_dir).unwrap();

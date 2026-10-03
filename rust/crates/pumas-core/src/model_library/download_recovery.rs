@@ -1981,6 +1981,47 @@ fn invalid_capability_path() -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn windows_import_nested_directory_publication_trace() {
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        let stage = root.create_import_stage().expect("create private stage");
+        stage
+            .create_import_directory("component")
+            .expect("create held child directory");
+        stage
+            .create_import_file("component/weights")
+            .expect("create held child payload")
+            .write_all(b"synthetic weights")
+            .unwrap();
+        stage
+            .sync_import_payload(&["component/weights".into()])
+            .expect("sync nested payload");
+        stage
+            .validate_import_stage_bindings()
+            .expect("validate child binding");
+        let target = root
+            .resolve(std::path::Path::new("vision/family/model"))
+            .unwrap();
+        let first = stage.publish_model_directory_noreplace(&target);
+        eprintln!("publication with held descendant: {first:?}");
+        if first.is_err() {
+            // Diagnostic only, inside a synthetic root with exclusive custody:
+            // distinguish the native descendant-handle restriction from copy,
+            // sync or target admission. This is NOT production recovery logic.
+            stage.file_parents.lock().unwrap().clear();
+            let after_release = stage.publish_model_directory_noreplace(&target);
+            eprintln!("diagnostic publication after descendant release: {after_release:?}");
+        }
+        assert!(
+            matches!(first, Ok(crate::metadata::AtomicPublication::Durable)),
+            "normal nested publication must succeed without a diagnostic retry"
+        );
+    }
+
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn copied_import_publication_retains_output_after_parent_sync_failure() {

@@ -1503,45 +1503,17 @@ impl ModelImporter {
             ))
         })??;
 
-        // Validate shard completeness — reject if any file is part of an incomplete set.
-        // Uses extract_shard_info per file to catch even single-shard-of-set cases
-        // (which detect_sharded_sets would treat as standalone).
-        for file_info in &files {
-            if let Some((base_name, _idx, Some(total))) =
-                sharding::extract_shard_info(&file_info.name)
-            {
-                if total > 1 {
-                    // Count how many shards of this set we actually have
-                    let found_count = files
-                        .iter()
-                        .filter(|f| {
-                            sharding::extract_shard_info(&f.name)
-                                .map(|(b, _, _)| b == base_name)
-                                .unwrap_or(false)
-                        })
-                        .count();
-                    if found_count < total {
-                        tracing::warn!(
-                            "Incomplete shard set '{}': found {}/{} shards",
-                            base_name,
-                            found_count,
-                            total,
-                        );
-                        return Ok(ModelImportResult {
-                            path: model_dir.display().to_string(),
-                            success: false,
-                            model_id: None,
-                            model_path: None,
-                            error: Some(format!(
-                                "Incomplete shard set '{}': have {}/{} shards",
-                                base_name, found_count, total,
-                            )),
-                            security_tier: None,
-                        });
-                    }
-                    break; // Only need to validate once per directory
-                }
-            }
+        if let Err(error) =
+            sharding::validate_explicit_shard_sets(files.iter().map(|file| file.name.as_str()))
+        {
+            return Ok(ModelImportResult {
+                path: model_dir.display().to_string(),
+                success: false,
+                model_id: None,
+                model_path: None,
+                error: Some(error),
+                security_tier: None,
+            });
         }
 
         // Build hashes from known value or compute
@@ -1763,41 +1735,57 @@ impl ModelImporter {
         Ok(model_id)
     }
 
-    /// Enumerate model files already present in a directory (no copy).
+    /// Enumerate model files as root-relative paths without truncating depth.
+    /// Missing metadata or traversal errors cannot establish a complete set.
     fn enumerate_model_files(&self, dir: &Path) -> Result<Vec<ModelFileInfo>> {
         let mut files = Vec::new();
-
-        for entry in WalkDir::new(dir)
-            .min_depth(1)
-            .max_depth(2)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
+        for entry in WalkDir::new(dir).min_depth(1) {
+            let entry = entry.map_err(|error| PumasError::Io {
+                message: "Could not enumerate the complete in-place import".into(),
+                path: error.path().map(Path::to_path_buf),
+                source: error.into_io_error(),
+            })?;
             if !entry.file_type().is_file() {
                 continue;
             }
-
             let filename = entry.file_name().to_string_lossy();
-
-            // Skip metadata and incomplete downloads
-            if filename == "metadata.json" || filename == "overrides.json" {
+            if filename == "metadata.json"
+                || filename == "overrides.json"
+                || filename.ends_with(".part")
+            {
                 continue;
             }
-            if filename.ends_with(".part") {
-                continue;
-            }
-
-            let size = entry.metadata().ok().map(|m| m.len());
-
+            let relative = entry
+                .path()
+                .strip_prefix(dir)
+                .map_err(|_| PumasError::Validation {
+                    field: "import.filename".into(),
+                    message: "Import entry is outside the selected directory".into(),
+                })?;
+            let name = relative
+                .to_str()
+                .ok_or_else(|| PumasError::Validation {
+                    field: "import.filename".into(),
+                    message: "Import filename must be valid UTF-8".into(),
+                })?
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            let size = entry
+                .metadata()
+                .map_err(|error| PumasError::Io {
+                    message: "Could not observe an in-place import file".into(),
+                    path: error.path().map(Path::to_path_buf),
+                    source: error.into_io_error(),
+                })?
+                .len();
             files.push(ModelFileInfo {
-                name: filename.to_string(),
-                original_name: Some(filename.to_string()),
-                size,
+                original_name: Some(name.clone()),
+                name,
+                size: Some(size),
                 sha256: None,
                 blake3: None,
             });
         }
-
+        files.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(files)
     }
 }
@@ -2443,6 +2431,65 @@ mod tests {
         )
         .unwrap();
         bundle_root
+    }
+
+    #[tokio::test]
+    async fn in_place_import_refuses_a_second_incomplete_shard_set_before_publication() {
+        let (_temp, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let directory = library.build_model_path("llm", "fixture", "shards");
+        std::fs::create_dir_all(&directory).unwrap();
+        write_min_safetensors(&directory.join("complete-1-of-2.safetensors"));
+        write_min_safetensors(&directory.join("complete-2-of-2.safetensors"));
+        write_min_safetensors(&directory.join("incomplete-1-of-2.safetensors"));
+        let spec = InPlaceImportSpec {
+            model_dir: directory.clone(),
+            official_name: "shards".into(),
+            family: "fixture".into(),
+            model_type: Some("llm".into()),
+            repo_id: None,
+            download_request: None,
+            known_sha256: None,
+            compute_hashes: false,
+            expected_files: None,
+            pipeline_tag: None,
+            huggingface_evidence: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let result = importer.import_in_place(&spec).await.unwrap();
+        assert!(!result.success);
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("incomplete.safetensors"));
+        assert!(!directory.join("metadata.json").exists());
+        assert!(library.index().get("llm/fixture/shards").unwrap().is_none());
+        assert!(directory.join("complete-1-of-2.safetensors").is_file());
+        assert!(directory.join("complete-2-of-2.safetensors").is_file());
+        assert!(directory.join("incomplete-1-of-2.safetensors").is_file());
+    }
+
+    #[tokio::test]
+    async fn in_place_enumeration_preserves_deep_relative_shard_identity() {
+        let (_temp, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let directory = library.build_model_path("llm", "fixture", "nested");
+        std::fs::create_dir_all(directory.join("left/nested")).unwrap();
+        std::fs::create_dir_all(directory.join("right/nested")).unwrap();
+        write_min_safetensors(&directory.join("left/nested/model-1-of-2.safetensors"));
+        write_min_safetensors(&directory.join("right/nested/model-2-of-2.safetensors"));
+        let files = importer.enumerate_model_files(&directory).unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].name, "left/nested/model-1-of-2.safetensors");
+        assert_eq!(files[1].name, "right/nested/model-2-of-2.safetensors");
+        assert!(sharding::validate_explicit_shard_sets(
+            files.iter().map(|file| file.name.as_str())
+        )
+        .is_err());
     }
 
     #[tokio::test]

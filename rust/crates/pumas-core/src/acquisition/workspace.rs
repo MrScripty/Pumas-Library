@@ -1094,15 +1094,23 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn reserved_windows_cleanup_retains_junction_without_following_it() {
+        use std::os::windows::process::CommandExt;
         let temp = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
+        let outside = tempfile::Builder::new()
+            .prefix("pumas junction target & ! ")
+            .tempdir()
+            .unwrap();
         std::fs::write(outside.path().join("sentinel"), b"outside").unwrap();
         std::fs::create_dir(temp.path().join("stage")).unwrap();
-        let junction = temp.path().join("stage/junction");
+        let junction = temp.path().join("stage").join("junction");
+        // cmd has different quoting from the C runtime. Keep its command text
+        // fixed; pass the dynamic target as a quoted, non-recursively expanded
+        // environment value, with delayed expansion disabled for literal '!'.
         let output = std::process::Command::new("cmd.exe")
-            .args(["/d", "/c", "mklink", "/j"])
-            .arg(&junction)
-            .arg(outside.path())
+            .current_dir(temp.path())
+            .env("PUMAS_TEST_JUNCTION_TARGET", outside.path())
+            .args(["/d", "/v:off", "/c"])
+            .raw_arg(r#"mklink /j "stage\junction" "%PUMAS_TEST_JUNCTION_TARGET%""#)
             .output()
             .unwrap();
         assert!(
@@ -1110,6 +1118,10 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        assert!(std::fs::symlink_metadata(&junction)
+            .unwrap()
+            .file_type()
+            .is_symlink());
         let grant =
             ReservedDirectory::capture(temp.path(), Path::new("stage"), Arc::new(()), || Ok(()))
                 .unwrap();

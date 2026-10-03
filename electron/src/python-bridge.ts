@@ -36,6 +36,10 @@ export interface PythonBridgeOptions {
   rustBinaryPath: string;
   /** Launcher root directory */
   launcherRoot: string;
+  /** Total shutdown RPC and natural-exit grace, including HTTP/core drain (default: 30 seconds). */
+  shutdownGraceMs?: number;
+  /** Time to observe exit after forced termination (default: 5 seconds). */
+  shutdownForceWaitMs?: number;
   /** Timer controller for lifecycle testing */
   timerController?: PythonBridgeTimerController;
 }
@@ -305,6 +309,12 @@ export class PythonBridge {
   private options: Required<Omit<PythonBridgeOptions, 'timerController'>>;
   private timerController: PythonBridgeTimerController;
   private process: ChildProcess | null = null;
+  private startPromise: Promise<void> | null = null;
+  private stopOperation: {
+    child: ChildProcess | null;
+    promise: Promise<void>;
+    settled: boolean;
+  } | null = null;
   private serverReady = false;
   private port = 0;
   private restartCount = 0;
@@ -323,8 +333,15 @@ export class PythonBridge {
     this.options = {
       autoRestart: true,
       maxRestarts: 3,
+      shutdownGraceMs: 30_000,
+      shutdownForceWaitMs: 5_000,
       ...runtimeOptions,
     };
+    for (const duration of [this.options.shutdownGraceMs, this.options.shutdownForceWaitMs]) {
+      if (!Number.isSafeInteger(duration) || duration <= 0 || duration > 2_147_483_647) {
+        throw new Error('Shutdown deadlines must be positive integer milliseconds within the timer range');
+      }
+    }
     this.timerController = timerController ?? NODE_TIMER_CONTROLLER;
 
     const streamRuntime: NamedSseStreamRuntime = {
@@ -412,12 +429,25 @@ export class PythonBridge {
   /**
    * Start the backend sidecar process
    */
-  async start(): Promise<void> {
+  start(): Promise<void> {
+    if ((this.stopOperation && !this.stopOperation.settled)
+      || (this.isShuttingDown && (this.process || this.startPromise))) {
+      return Promise.reject(new Error('Backend bridge stopping; previous cleanup may be unconfirmed'));
+    }
+    if (this.startPromise) return this.startPromise;
     if (this.process) {
       log.warn('Backend process already running');
-      return;
+      return Promise.resolve();
     }
+    this.stopOperation = null;
+    const starting = this.startProcess().finally(() => {
+      if (this.startPromise === starting) this.startPromise = null;
+    });
+    this.startPromise = starting;
+    return starting;
+  }
 
+  private async startProcess(): Promise<void> {
     this.isShuttingDown = false;
     this.serverReady = false;
     this.clearRestartTimer();
@@ -444,16 +474,17 @@ export class PythonBridge {
     }
 
     // Spawn process
-    this.process = spawn(cmd, args, {
+    const child = spawn(cmd, args, {
       cwd,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    this.process = child;
 
     const backendLabel = 'Rust';
 
     // Handle stdout
-    this.process.stdout?.on('data', (data: Buffer) => {
+    child.stdout?.on('data', (data: Buffer) => {
       const output = data.toString().trim();
       if (output) {
         log.info(`[${backendLabel}] ${output}`);
@@ -461,7 +492,7 @@ export class PythonBridge {
     });
 
     // Handle stderr (Rust uses stderr for tracing logs, which is normal)
-    this.process.stderr?.on('data', (data: Buffer) => {
+    child.stderr?.on('data', (data: Buffer) => {
       const output = data.toString().trim();
       if (output) {
         log.info(`[${backendLabel}] ${output}`);
@@ -469,7 +500,8 @@ export class PythonBridge {
     });
 
     // Handle process exit
-    this.process.on('exit', (code, signal) => {
+    child.on('exit', (code, signal) => {
+      if (this.process !== child) return;
       log.info(`${backendLabel} process exited: code=${code}, signal=${signal}`);
       this.serverReady = false;
       this.process = null;
@@ -488,13 +520,17 @@ export class PythonBridge {
     });
 
     // Handle process error
-    this.process.on('error', (error) => {
+    child.on('error', (error) => {
+      if (this.process !== child) return;
       this.serverReady = false;
       log.error(`${backendLabel} process error:`, error);
     });
 
     // Wait for the server to be ready
     await this.waitForReady();
+    if (this.isShuttingDown || this.process !== child) {
+      throw new Error('Backend bridge stopped during startup');
+    }
 
     // Start health check interval
     this.startHealthCheck();
@@ -515,6 +551,9 @@ export class PythonBridge {
     const startTime = Date.now();
 
     while (Date.now() - startTime < timeout) {
+      if (this.isShuttingDown || !this.process) {
+        throw new Error('Backend bridge stopped during startup');
+      }
       try {
         const healthy = await this.healthCheck();
         if (healthy) {
@@ -564,66 +603,127 @@ export class PythonBridge {
   }
 
   /**
-   * Stop the backend sidecar process
+   * Stop one captured child. The shutdown RPC only acknowledges admission;
+   * natural exit code 0 is the backend's receipt for completed owned cleanup.
+   * Keep the same promise/outcome until a new start, including failed cleanup.
    */
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.stopOperation && (!this.stopOperation.settled
+      || this.stopOperation.child === this.process || !this.process)) {
+      return this.stopOperation.promise;
+    }
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
+    const operation = { child: this.process, promise, settled: false };
+    this.stopOperation = operation;
     this.isShuttingDown = true;
     this.serverReady = false;
+    void this.stopChild(operation.child).then(() => {
+      operation.settled = true;
+      resolve();
+    }, (error: unknown) => {
+      operation.settled = true;
+      reject(error);
+    });
+    return promise;
+  }
 
-    // Stop health check interval
-    this.clearHealthCheckTimer();
-    this.clearRestartTimer();
-    this.stopModelLibraryUpdateStream();
-    this.stopModelDownloadUpdateStream();
-    this.stopRuntimeProfileUpdateStream();
-    this.stopServingStatusUpdateStream();
-    this.stopStatusTelemetryUpdateStream();
-    for (const cancel of [...this.pendingRpcCalls]) cancel();
-
-    if (!this.process) {
-      return;
+  private async stopChild(child: ChildProcess | null): Promise<void> {
+    type Exit = { code: number | null; signal: NodeJS.Signals | null };
+    let exit: Exit | null = null;
+    let recordExit!: (code: number | null, signal: NodeJS.Signals | null) => void;
+    const exited = new Promise<'exited'>((resolve) => {
+      recordExit = (code, signal) => {
+        exit = { code, signal };
+        resolve('exited');
+      };
+    });
+    // Observe before cancelling requests or sending RPC/signals: each can race exit.
+    child?.once('exit', recordExit);
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
+      recordExit(child.exitCode, child.signalCode);
     }
-
-    const backendLabel = 'Rust';
-    log.info(`Stopping ${backendLabel} backend bridge...`);
-
-    // Try graceful shutdown first
+    let graceTimer: BridgeTimer | null = null;
+    let forceTimer: BridgeTimer | null = null;
+    let forced = false;
+    let signalFailure: unknown;
     try {
-      await this.call('shutdown', {});
-      await this.delay(1000);
-    } catch {
-      // Ignore errors during shutdown
-    }
+      this.clearHealthCheckTimer();
+      this.clearRestartTimer();
+      this.stopModelLibraryUpdateStream();
+      this.stopModelDownloadUpdateStream();
+      this.stopRuntimeProfileUpdateStream();
+      this.stopServingStatusUpdateStream();
+      this.stopStatusTelemetryUpdateStream();
+      for (const cancel of [...this.pendingRpcCalls]) cancel();
+      if (!child) return;
 
-    // Force kill if still running
-    if (this.process) {
-      this.process.kill('SIGTERM');
-
-      // Wait for process to exit
-      await new Promise<void>((resolve) => {
-        const timeout = this.timerController.setTimeout(() => {
-          if (this.process) {
-            log.warn(`Force killing ${backendLabel} process`);
-            this.process.kill('SIGKILL');
-          }
-          resolve();
-        }, 5000);
-
-        if (this.process) {
-          this.process.once('exit', () => {
-            this.timerController.clearTimeout(timeout);
-            resolve();
-          });
-        } else {
-          this.timerController.clearTimeout(timeout);
-          resolve();
-        }
+      log.info('Stopping Rust backend bridge...');
+      const graceExpired = new Promise<'expired'>((resolve) => {
+        graceTimer = this.timerController.setTimeout(() => resolve('expired'), this.options.shutdownGraceMs);
       });
+      if (!exit) {
+        const acknowledgement = this.call('shutdown', {}).then((result) => {
+          // Coordinated internal RPC contract: no managed-process completion counts.
+          if (!result || typeof result !== 'object' || Array.isArray(result)
+            || !('status' in result) || result.status !== 'shutting_down'
+            || Object.keys(result).length !== 1) {
+            throw new Error('Invalid backend shutdown acknowledgement');
+          }
+          return 'acknowledged' as const;
+        }).catch((error: unknown) => {
+          log.warn('Backend shutdown RPC unavailable:', error);
+          return 'rpc-failed' as const;
+        });
+        const first = await Promise.race([exited, graceExpired, acknowledgement]);
+        // Unix SIGTERM is a second graceful request. On Windows kill() terminates
+        // the process, so leave the remaining grace for an already accepted RPC.
+        if (first === 'rpc-failed' && !exit && process.platform !== 'win32') {
+          try {
+            if (!child.kill('SIGTERM')) signalFailure = new Error('SIGTERM was not delivered');
+          } catch (error) {
+            signalFailure = error;
+          }
+        }
+        if (!exit && first !== 'expired') await Promise.race([exited, graceExpired]);
+      }
+      if (graceTimer !== null) this.timerController.clearTimeout(graceTimer);
+      graceTimer = null;
+      // Cancel a hanging shutdown transport even when exit wins the RPC race.
+      for (const cancel of [...this.pendingRpcCalls]) cancel();
+      if (!exit) {
+        forced = true;
+        const forceExpired = new Promise<'expired'>((resolve) => {
+          forceTimer = this.timerController.setTimeout(() => resolve('expired'), this.options.shutdownForceWaitMs);
+        });
+        try {
+          if (!child.kill('SIGKILL')) signalFailure = new Error('SIGKILL was not delivered');
+        } catch (error) {
+          signalFailure = error;
+        }
+        await Promise.race([exited, forceExpired]);
+      }
+      // The callback owns mutation; read its observed terminal receipt here.
+      const observed = exit as Exit | null;
+      if (!observed) {
+        throw new Error('Backend exit unconfirmed after forced termination; cleanup incomplete', { cause: signalFailure });
+      }
+      if (this.process === child) this.process = null;
+      this.restartCount = 0;
+      if (forced) {
+        throw new Error(`Backend exit observed after forced termination attempt (code=${observed.code}, signal=${observed.signal}); cleanup unconfirmed`, { cause: signalFailure });
+      }
+      if (observed.code !== 0 || observed.signal !== null) {
+        throw new Error(`Backend exited with code=${observed.code}, signal=${observed.signal}; cleanup failed`);
+      }
+      log.info('Rust backend bridge stopped');
+    } finally {
+      child?.removeListener('exit', recordExit);
+      if (graceTimer !== null) this.timerController.clearTimeout(graceTimer);
+      if (forceTimer !== null) this.timerController.clearTimeout(forceTimer);
+      for (const cancel of [...this.pendingRpcCalls]) cancel();
     }
-
-    this.process = null;
-    this.restartCount = 0;
-    log.info(`${backendLabel} backend bridge stopped`);
   }
 
   startModelLibraryUpdateStream(listener: ModelLibraryUpdateListener): void {
@@ -713,6 +813,7 @@ export class PythonBridge {
     log.info(`Restarting ${backendLabel} process (attempt ${this.restartCount}/${this.options.maxRestarts})`);
     this.restartTimer = this.timerController.setTimeout(() => {
       this.restartTimer = null;
+      if (this.isShuttingDown) return;
       void this.start().catch((error: unknown) => {
         log.error(`Failed to restart ${backendLabel} process:`, error);
       });

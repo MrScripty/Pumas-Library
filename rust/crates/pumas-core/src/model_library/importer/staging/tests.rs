@@ -417,7 +417,10 @@ async fn copied_import_dropped_waiter_and_shutdown_wait_for_held_producer() {
         let importer = fixture.importer.clone();
         let spec = fixture.spec.clone();
         let waiter = tokio::spawn(async move { importer.import(&spec).await });
-        entered_rx.await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), entered_rx)
+            .await
+            .unwrap()
+            .unwrap();
         waiter.abort();
         let _ = waiter.await;
         fixture.tasks.close();

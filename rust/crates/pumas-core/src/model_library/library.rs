@@ -681,19 +681,13 @@ impl ModelLibrary {
             None => false,
         };
         if kittentts_metadata_candidate(metadata) || kitten_config {
-            if metadata.inference_settings.is_none() {
-                metadata.inference_settings = Some(kittentts_settings_from_choices(
-                    config
-                        .as_ref()
-                        .map(kittentts_choices_from_config)
-                        .unwrap_or_else(default_kittentts_voice_options),
-                ));
-            }
-            return Ok(self.apply_kittentts_runtime_projection(
-                model_id,
-                stage.display_path(),
-                metadata,
-            ));
+            let settings = kittentts_settings_from_choices(
+                config
+                    .as_ref()
+                    .map(kittentts_choices_from_config)
+                    .unwrap_or_else(default_kittentts_voice_options),
+            );
+            return Ok(self.apply_kittentts_runtime_projection(model_id, metadata, settings));
         }
         if is_diffusers_bundle(metadata) {
             if let Some(index) = stage.read_import_json("model_index.json")? {
@@ -705,11 +699,7 @@ impl ModelLibrary {
                     &index,
                 );
                 if is_sd_turbo_hints(&hints) {
-                    return Ok(self.apply_sd_turbo_runtime_projection(
-                        model_id,
-                        stage.display_path(),
-                        metadata,
-                    ));
+                    return Ok(self.apply_sd_turbo_runtime_projection(model_id, metadata));
                 }
             }
         }
@@ -755,11 +745,15 @@ impl ModelLibrary {
         metadata: &mut ModelMetadata,
     ) -> Option<CustomRuntimeProjection> {
         if is_kittentts_runtime_candidate(model_dir, metadata) {
-            return self.apply_kittentts_runtime_projection(model_id, model_dir, metadata);
+            return self.apply_kittentts_runtime_projection(
+                model_id,
+                metadata,
+                kittentts_inference_settings(model_dir),
+            );
         }
 
         if is_sd_turbo_runtime_candidate(model_dir, metadata) {
-            return self.apply_sd_turbo_runtime_projection(model_id, model_dir, metadata);
+            return self.apply_sd_turbo_runtime_projection(model_id, metadata);
         }
 
         None
@@ -768,8 +762,8 @@ impl ModelLibrary {
     fn apply_kittentts_runtime_projection(
         &self,
         model_id: &str,
-        model_dir: &Path,
         metadata: &mut ModelMetadata,
+        inference_settings: Vec<crate::models::InferenceParamSchema>,
     ) -> Option<CustomRuntimeProjection> {
         let binding_id = kittentts_runtime_binding_id(model_id);
         let mut metadata_changed = false;
@@ -824,7 +818,7 @@ impl ModelLibrary {
         }
 
         if metadata.inference_settings.is_none() {
-            metadata.inference_settings = Some(kittentts_inference_settings(model_dir));
+            metadata.inference_settings = Some(inference_settings);
             metadata_changed = true;
         }
 
@@ -858,7 +852,6 @@ impl ModelLibrary {
     fn apply_sd_turbo_runtime_projection(
         &self,
         model_id: &str,
-        _model_dir: &Path,
         metadata: &mut ModelMetadata,
     ) -> Option<CustomRuntimeProjection> {
         let binding_id = sd_turbo_runtime_binding_id(model_id);

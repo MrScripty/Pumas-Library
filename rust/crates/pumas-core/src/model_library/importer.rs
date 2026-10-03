@@ -2109,39 +2109,134 @@ mod tests {
 
     #[tokio::test]
     async fn custody_guard_refuses_root_and_destination_replacement_at_real_metadata_effect() {
+        #[cfg(windows)]
+        fn directory_identity(path: &Path) -> (u32, u64) {
+            use cap_primitives::fs::_WindowsByHandle;
+            // Drop this observation handle before attempting replacement; the
+            // fixture must not introduce a new long-lived rename blocker.
+            let directory = crate::platform::capability_fs::open_directory(path).unwrap();
+            let metadata = directory.dir_metadata().unwrap();
+            (
+                metadata.volume_serial_number().unwrap(),
+                metadata.file_index().unwrap(),
+            )
+        }
+
         for replace_root in [false, true] {
             let (temp, library, _downloads, tasks, _root) = custody_fixture().await;
+            #[cfg(windows)]
+            let root = _root;
             let model = library.build_model_path("vision", "publisher", "model");
             std::fs::create_dir_all(&model).unwrap();
             std::fs::write(model.join("detector.onnx"), b"data").unwrap();
+            let library_root = library.library_root().to_path_buf();
             let target = if replace_root {
-                library.library_root().to_path_buf()
+                library_root.clone()
             } else {
                 model.clone()
             };
             let displaced = temp.path().join("displaced");
-            let replacement_model = if replace_root {
-                target.join("vision/publisher/model")
+            let retained_model = if replace_root {
+                displaced.join("vision/publisher/model")
             } else {
-                target.clone()
+                displaced.clone()
             };
-            library.set_metadata_write_notifier(Some(Arc::new(move |_| {
-                std::fs::rename(&target, &displaced).unwrap();
-                std::fs::create_dir_all(&replacement_model).unwrap();
-                std::fs::write(replacement_model.join("sentinel"), b"replacement").unwrap();
-            })));
-            let error = ModelImporter::new(library.clone())
-                .finalize_downloaded_directory(&completed_download(&model, false))
-                .await
-                .unwrap_err();
-            assert!(matches!(error, PumasError::Io { .. }), "{error}");
-            assert!(!model.join("metadata.json").exists());
-            assert_eq!(
-                std::fs::read(model.join("sentinel")).unwrap(),
-                b"replacement"
+            let replacement_model = model.clone();
+            #[cfg(windows)]
+            let original_identity = (
+                directory_identity(&library_root),
+                directory_identity(&model),
             );
-            assert!(tasks.shutdown_owned().await.is_err());
+            let replaced = Arc::new(std::sync::Mutex::new(None));
+            let observed = replaced.clone();
+            let displaced_for_hook = displaced.clone();
+            #[cfg(windows)]
+            let root_for_hook = root.clone();
+            library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+                let mut outcome = observed.lock().unwrap();
+                if outcome.is_some() { return; }
+                match std::fs::rename(&target, &displaced_for_hook) {
+                    Ok(()) => {
+                        std::fs::create_dir_all(&replacement_model).unwrap();
+                        std::fs::write(replacement_model.join("sentinel"), b"replacement").unwrap();
+                        *outcome = Some(true);
+                    }
+                    #[cfg(windows)]
+                    Err(error) if matches!(error.raw_os_error(), Some(code)
+                        if code == windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED as i32
+                            || code == windows_sys::Win32::Foundation::ERROR_SHARING_VIOLATION as i32) => {
+                        // Windows can prevent replacement while the real owner
+                        // holds its root/lock handles. Refusal is valid only if
+                        // the original identities and exclusive custody survive.
+                        assert_eq!((directory_identity(&library_root), directory_identity(&replacement_model)), original_identity);
+                        assert!(!displaced_for_hook.exists());
+                        assert!(!replacement_model.join("sentinel").exists());
+                        assert_eq!(std::fs::read(replacement_model.join("detector.onnx")).unwrap(), b"data");
+                        assert!(matches!(root_for_hook.try_acquire_execution_grant(), Err(PumasError::DownloadRootBusy)));
+                        *outcome = Some(false);
+                    }
+                    Err(error) => panic!("unexpected replacement failure: {error:?}"),
+                }
+            })));
+            let result = ModelImporter::new(library.clone())
+                .finalize_downloaded_directory(&completed_download(&model, false))
+                .await;
             library.set_metadata_write_notifier(None);
+            let replaced = replaced
+                .lock()
+                .unwrap()
+                .expect("real metadata effect was not observed");
+            if replaced {
+                let error = result.unwrap_err();
+                assert!(
+                    matches!(&error, PumasError::Io { source: Some(source), .. }
+                    if source.kind() == std::io::ErrorKind::PermissionDenied
+                        && source.to_string() == "download recovery path is outside its verified filesystem authority"),
+                    "{error}"
+                );
+                assert!(!model.join("metadata.json").exists());
+                assert!(!retained_model.join("metadata.json").exists());
+                assert_eq!(
+                    std::fs::read(model.join("sentinel")).unwrap(),
+                    b"replacement"
+                );
+                assert_eq!(
+                    std::fs::read(retained_model.join("detector.onnx")).unwrap(),
+                    b"data"
+                );
+                assert!(library
+                    .index()
+                    .get("vision/publisher/model")
+                    .unwrap()
+                    .is_none());
+                assert!(tasks.shutdown_owned().await.is_err());
+            } else {
+                #[cfg(not(windows))]
+                panic!("only structured Windows refusal is accepted");
+                #[cfg(windows)]
+                {
+                    assert!(result.unwrap().success);
+                    assert!(!displaced.exists());
+                    assert!(!model.join("sentinel").exists());
+                    assert_eq!(
+                        (
+                            directory_identity(library.library_root()),
+                            directory_identity(&model)
+                        ),
+                        original_identity
+                    );
+                    assert_eq!(std::fs::read(model.join("detector.onnx")).unwrap(), b"data");
+                    assert!(model.join("metadata.json").is_file());
+                    assert!(library
+                        .index()
+                        .get("vision/publisher/model")
+                        .unwrap()
+                        .is_some());
+                    assert!(root.try_acquire_execution_grant().is_ok());
+                    tasks.shutdown_owned().await.unwrap();
+                    tasks.shutdown_owned().await.unwrap();
+                }
+            }
         }
     }
 

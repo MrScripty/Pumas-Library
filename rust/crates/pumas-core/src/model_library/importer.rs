@@ -1194,10 +1194,7 @@ impl ModelImporter {
             // Exclusive creation is the final filesystem oracle, including
             // case/Unicode aliases on the destination filesystem. Never truncate
             // an existing file if the mapped name collides at this boundary.
-            let mut output = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&dest_path)?;
+            let mut output = create_exclusive_import_output(&dest_path)?;
             let size = std::io::copy(&mut input, &mut output)?;
             output.set_permissions(input.metadata()?.permissions())?;
             output.sync_all()?;
@@ -1825,6 +1822,19 @@ impl ModelImporter {
     }
 }
 
+/// Create an output exclusively, keeping incomplete Unix copies private even
+/// under a permissive umask. Source permissions are restored only after copying.
+fn create_exclusive_import_output(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
 fn copy_directory_preserving_layout(source: &Path, dest_dir: &Path) -> Result<()> {
     for entry in WalkDir::new(source)
         .min_depth(1)
@@ -1983,6 +1993,55 @@ pub struct ImportProgress {
 
 #[cfg(test)]
 mod tests {
+    /// Execute the permission oracle in a child so the umask never changes in
+    /// the test runner or interferes with parallel filesystem tests.
+    #[cfg(unix)]
+    #[test]
+    fn exclusive_import_creation_is_private_under_permissive_umask() {
+        let root = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new("sh")
+            .args(["-c", "umask 000; exec \"$@\"", "sh"])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "model_library::importer::tests::exclusive_import_mode_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("PUMAS_IMPORT_MODE_FIXTURE_ROOT", root.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            root.path().join("output").exists(),
+            "permission child must actually run"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "invoked only by the permissive-umask subprocess regression"]
+    fn exclusive_import_mode_child() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::var_os("PUMAS_IMPORT_MODE_FIXTURE_ROOT").unwrap();
+        let path = std::path::PathBuf::from(root).join("output");
+        let mut file = super::create_exclusive_import_output(&path).unwrap();
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        file.write_all(b"synthetic partial content").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o077,
+            0
+        );
+        assert!(super::create_exclusive_import_output(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"synthetic partial content");
+    }
+
     use super::*;
     use std::io::Write;
     use tempfile::TempDir;
@@ -2088,7 +2147,28 @@ mod tests {
         std::fs::create_dir_all(&source).unwrap();
         std::fs::write(source.join("Model A.gguf"), b"first input").unwrap();
         std::fs::write(source.join("Model B.gguf"), b"second input").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                source.join("Model A.gguf"),
+                std::fs::Permissions::from_mode(0o440),
+            )
+            .unwrap();
+        }
         let files = importer.copy_files(&source, &destination).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(destination.join("model_a.gguf"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o440
+            );
+        }
         assert_eq!(files.len(), 2);
         assert_eq!(
             std::fs::read(destination.join("model_a.gguf")).unwrap(),

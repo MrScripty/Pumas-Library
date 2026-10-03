@@ -113,6 +113,15 @@ Acceptance remains **verifying**, not accepted: local `rustfmt` parsing and
 of the shared resource budget. Parent-owned hosted CI and independent review
 must qualify the exact proposed commit. Commands from `rust/`:
 
+Independent source review cleared the frozen production implementation at
+`5e9c47ef7e57ff294a57bf1c13aec38aa595af61` after finding and correcting nested
+replacement cleanup, empty-component/staged-validation, generic backend metadata
+and final callback/publication issues. Native CI explicitly runs copied-import,
+held-destination and metadata-projection suites. A Windows-only real open-handle
+fixture forces cleanup failure after copying a read-only source, checking both
+original and cleanup errors, preserved source/output attributes and retained
+workspace/shutdown failure. This is prepared coverage, not yet a native pass.
+
 ```sh
 cargo test -p pumas-library --no-default-features --features hf-client --lib copied_import -- --nocapture
 cargo test -p pumas-library --no-default-features --features hf-client --lib model_library::importer

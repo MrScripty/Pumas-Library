@@ -753,6 +753,70 @@ async fn copied_import_windows_readonly_payload_keeps_source_and_published_attri
     fixture.tasks.shutdown_owned().await.unwrap();
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn copied_import_windows_locked_readonly_cleanup_is_retained_and_reported() {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::sync::Mutex;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+    let mut fixture = Fixture::new().await;
+    let source = Path::new(&fixture.spec.path).join("Model.onnx");
+    let original_bytes = std::fs::read(&source).unwrap();
+    let mut permissions = std::fs::metadata(&source).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&source, permissions).unwrap();
+    let held = Arc::new(Mutex::new(None::<std::fs::File>));
+    let hook_held = held.clone();
+    fixture.importer.import_hook = Some(Arc::new(move |boundary, stage| {
+        if boundary == ImportBoundary::BeforeHash {
+            // A real native handle denies deletion independently of whether
+            // this Windows filesystem permits deleting a read-only file.
+            *hook_held.lock().unwrap() = Some(
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                    .open(stage.display_path().join("model.onnx"))?,
+            );
+            return Err(fault("injected failure after read-only copy"));
+        }
+        Ok(())
+    }));
+    let error = fixture.importer.import(&fixture.spec).await.unwrap_err();
+    let stages = fixture.stages();
+    assert_eq!(stages.len(), 1);
+    let output = stages[0].join("model.onnx");
+    let source_preserved = std::fs::read(&source).unwrap() == original_bytes
+        && std::fs::metadata(&source).unwrap().permissions().readonly();
+    let output_retained = std::fs::read(&output).unwrap() == original_bytes
+        && std::fs::metadata(&output).unwrap().permissions().readonly();
+    let shutdown = fixture
+        .tasks
+        .shutdown_owned()
+        .await
+        .unwrap_err()
+        .to_string();
+    let unpublished = !fixture.target().exists();
+
+    // Settle only this synthetic fixture after observing the production result.
+    // Production deliberately did not clear source/output attributes or retry.
+    drop(held.lock().unwrap().take());
+    for path in [&source, &output] {
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(false);
+        std::fs::set_permissions(path, permissions).unwrap();
+    }
+    std::fs::remove_dir_all(&stages[0]).unwrap();
+
+    assert!(source_preserved && output_retained && unpublished);
+    assert!(error
+        .to_string()
+        .contains("injected failure after read-only copy"));
+    assert!(error.to_string().contains("cleanup failed"));
+    assert!(shutdown.contains("injected failure after read-only copy"));
+    assert!(shutdown.contains("cleanup failed"));
+}
+
 #[tokio::test]
 async fn copied_import_diffusers_preserves_empty_referenced_directories() {
     for progress in [false, true] {

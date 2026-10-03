@@ -1350,6 +1350,7 @@ mod tests {
 
     async fn setup() -> (TempDir, Arc<ModelLibrary>) {
         let temp_dir = TempDir::new().unwrap();
+        std::fs::create_dir(temp_dir.path().join("downloads")).unwrap();
         let library = Arc::new(ModelLibrary::new(temp_dir.path()).await.unwrap());
         library
             .install_mutation_authority(

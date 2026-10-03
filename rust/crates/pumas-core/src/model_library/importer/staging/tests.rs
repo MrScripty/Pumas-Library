@@ -21,6 +21,9 @@ impl Fixture {
                 .unwrap(),
         );
         let tasks = RuntimeTasks::new();
+        // Match composition setup: the strict custody store requires its
+        // configured parent to exist even before downloads.json is created.
+        std::fs::create_dir(temp.path().join("downloads")).unwrap();
         library
             .install_mutation_authority(
                 tasks.clone(),

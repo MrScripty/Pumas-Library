@@ -308,3 +308,15 @@ The Rust edits are limited to the required embedded-file entry and its existing
 required-file test. Native Rust build/test execution remains a hosted gate;
 `rustfmt` is not installed in this lightweight environment. No native Rust or
 full packaged-runtime pass is claimed.
+
+The installed-file import-closure regression declares FastAPI 0.128.0,
+Uvicorn 0.40.0 and psutil 7.2.1 in the development test requirements, matching
+`runtime/requirements.lock`. This avoids accidentally relying on packages in
+the developer's ambient interpreter. The managed runtime lock and its existing
+Pydantic/Starlette dependency contract are unchanged; no Torch installation,
+ASR recipe qualification or model inference follows from this source-import test.
+A wheel-only dependency resolution for the repository's Python 3.12.3 target
+succeeded using official PyPI metadata, selecting Pydantic 2.13.5 and Starlette
+0.50.0 as in the current runtime lock. This was dependency resolution without
+package installation or source builds. Windows/macOS dependency installation
+and the full isolated startup tests remain hosted qualification gates.

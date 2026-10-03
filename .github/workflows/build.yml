@@ -267,6 +267,9 @@ jobs:
       - name: Test Linux router observer shutdown regression
         if: runner.os == 'Linux'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library owned_sse_observes_external_load_unload_reconnect_and_drains_before_replacement
+      - name: Test Linux silent-SSE cleanup regression
+        if: runner.os == 'Linux'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library silent_sse_expires_its_lease_and_retains_rows_without_gateway_authority
       - name: Test Unix managed process-group ownership
         if: runner.os != 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library platform::managed_child

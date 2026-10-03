@@ -94,6 +94,8 @@ pub fn signal_group(pid: u32) -> io::Result<()> {
     killpg(group, Signal::SIGKILL).map_err(Into::into)
 }
 
+/// WouldBlock means a disappearing task prevented a complete observation. It
+/// is never evidence of absence; an owner may retry while retaining its PID pin.
 pub fn group_has_live_members(group: i32) -> io::Result<bool> {
     if group <= 0 {
         return Err(io::Error::new(
@@ -158,7 +160,8 @@ fn scan_group(proc_root: &Path, group: i32) -> io::Result<bool> {
                 if read_stat(&process.join("stat"))?.is_none() {
                     continue;
                 }
-                return Err(io::Error::other(
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
                     "Process remains present but task enumeration is unavailable",
                 ));
             }
@@ -179,7 +182,8 @@ fn scan_group(proc_root: &Path, group: i32) -> io::Result<bool> {
             }
         }
         if (observed_tasks == 0 || missing_task) && read_stat(&process.join("stat"))?.is_some() {
-            return Err(io::Error::other(
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
                 "Incomplete conversion task-state observation",
             ));
         }
@@ -438,10 +442,25 @@ mod tests {
         let process = root.path().join("81");
         std::fs::create_dir(&process).expect("process");
         std::fs::write(process.join("stat"), b"81 (leader) Z 4 81 81").expect("zombie leader");
-        assert!(scan_group(root.path(), 81).is_err());
+        assert_eq!(
+            scan_group(root.path(), 81).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
         let task = process.join("task/82");
         std::fs::create_dir_all(&task).expect("worker task");
         std::fs::write(task.join("stat"), b"82 (worker) S 4 81 81").expect("live worker");
         assert!(scan_group(root.path(), 81).expect("thread scan"));
+        // A task that disappeared during enumeration is still uncertain while
+        // its pinned leader exists; a malformed visible stat is a hard error.
+        std::fs::remove_file(task.join("stat")).unwrap();
+        assert_eq!(
+            scan_group(root.path(), 81).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        std::fs::write(task.join("stat"), b"malformed").unwrap();
+        assert_eq!(
+            scan_group(root.path(), 81).unwrap_err().kind(),
+            io::ErrorKind::Other
+        );
     }
 }

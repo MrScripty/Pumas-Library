@@ -241,6 +241,12 @@ jobs:
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests unix_termination_signals_complete_the_owned_shutdown
       - name: Test native managed Python paths
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library test_venv_python_path
+      - name: Test Linux incomplete process observations
+        if: runner.os == 'Linux'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library platform::linux_group
+      - name: Test Linux router observer shutdown regression
+        if: runner.os == 'Linux'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library owned_sse_observes_external_load_unload_reconnect_and_drains_before_replacement
       - name: Test Unix managed process-group ownership
         if: runner.os != 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library platform::managed_child

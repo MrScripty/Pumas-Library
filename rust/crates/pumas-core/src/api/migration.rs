@@ -259,6 +259,10 @@ pub(crate) fn recompute_execution_report_counts(
             "blocked_collision" | "missing_source" | "skipped_partial_download" => {
                 report.skipped_move_count += 1
             }
+            "blocked_import_publication" => {
+                report.skipped_move_count += 1;
+                report.error_count += 1;
+            }
             _ => report.error_count += 1,
         }
     }
@@ -322,6 +326,44 @@ mod tests {
         );
         assert!(!target.exists());
         assert!(!super::mark_partial_download_moves_unsupported(&mut report));
+    }
+
+    #[test]
+    fn copied_import_blocked_counts_survive_partial_report_rewrite() {
+        let blocked_error = "Retained Pending publication requires manual diagnosis";
+        let mut report = crate::model_library::MigrationExecutionReport {
+            completed_at: None,
+            referential_integrity_ok: true,
+            results: vec![
+                crate::model_library::MigrationExecutionItem {
+                    model_id: "llm/old/partial".into(),
+                    target_model_id: "llm/new/partial".into(),
+                    action: "skipped_partial_download".into(),
+                    error: None,
+                },
+                crate::model_library::MigrationExecutionItem {
+                    model_id: "llm/old/pending".into(),
+                    target_model_id: "llm/new/pending".into(),
+                    action: "blocked_import_publication".into(),
+                    error: Some(blocked_error.into()),
+                },
+                crate::model_library::MigrationExecutionItem {
+                    model_id: "llm/old/complete".into(),
+                    target_model_id: "llm/new/complete".into(),
+                    action: "moved".into(),
+                    error: None,
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(super::mark_partial_download_moves_unsupported(&mut report));
+        super::recompute_execution_report_counts(&mut report);
+        assert_eq!(report.completed_move_count, 1);
+        assert_eq!(report.skipped_move_count, 2);
+        assert_eq!(report.error_count, 1);
+        assert!(report.completed_at.is_none());
+        assert_eq!(report.results[1].action, "blocked_import_publication");
+        assert_eq!(report.results[1].error.as_deref(), Some(blocked_error));
     }
 
     #[test]

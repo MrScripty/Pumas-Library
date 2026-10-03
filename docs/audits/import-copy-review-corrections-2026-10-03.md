@@ -74,3 +74,22 @@ release attribution checks passed. No local monolithic build or native behavior
 claim. New regressions use the existing `copied_import` native test filter.
 Independent source review and fresh exact-head Linux/macOS/Windows Build results
 will be recorded separately before acceptance.
+
+## Combined migration report consumer correction
+
+The integration adds the minimal adjacent consumers required by the new
+`blocked_import_publication` result. API recounting preserves its skipped and
+error counts even when partial-download report wording is rewritten. It never
+changes the incomplete checkpoint timestamp or erases the per-model diagnostic.
+The panel reports success only for an acknowledged completion timestamp, no
+errors/skips, all planned moves completed, and consistent references. A consistent
+reference graph alone cannot make retained work complete. This changes feedback,
+not migration execution or recovery authority.
+
+Local frontend qualification: all seven MigrationReportsPanel tests passed,
+including blocked publication, absent completion timestamp, skipped work and
+execution-error cases. Scoped ESLint and the full frontend TypeScript check
+passed using existing workspace dependencies. The first TypeScript attempt lacked
+the existing Electron dependency link; restoring that local test-environment link
+resolved it. No dependency or lockfile was changed or installed. Rust recounting
+has a `copied_import` regression for fresh native hosted execution.

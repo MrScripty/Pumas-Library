@@ -2118,6 +2118,31 @@ mod tests {
         clear_matching_completed_progress(&mut tracker, AppId::LlamaCpp, ordinary).await;
         assert!(tracker.get_current_state().is_none());
 
+        // A tag-only fence would clear these newer same-tag completions. Vary
+        // each timestamp independently, without relying on wall-clock precision.
+        for old_start in [true, false] {
+            tracker.start_installation("same-tag", None, None, None);
+            tracker.complete_installation(true);
+            let current = tracker.get_current_state().unwrap();
+            let current_identity = CompletedProgressIdentity::capture(&current).unwrap();
+            let mut old_identity = current_identity.clone();
+            if old_start {
+                old_identity.started_at = "1970-01-01T00:00:00+00:00".into();
+            } else {
+                old_identity.completed_at = "1970-01-01T00:00:00+00:00".into();
+            }
+            clear_matching_completed_progress(&mut tracker, AppId::LlamaCpp, Some(old_identity))
+                .await;
+            assert!(tracker.get_current_state().is_some());
+            clear_matching_completed_progress(
+                &mut tracker,
+                AppId::LlamaCpp,
+                Some(current_identity),
+            )
+            .await;
+            assert!(tracker.get_current_state().is_none());
+        }
+
         for old_pending in [false, true] {
             for new_pending in [false, true] {
                 tracker.start_installation("first", None, None, None);

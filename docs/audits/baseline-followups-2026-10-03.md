@@ -122,9 +122,15 @@ lifetimes with a per-scan RAII high-water counter, independent of process-wide
 file-descriptor activity. Its 48-model, 12-component fixture permits only four
 active descendant capabilities above the selected root's ancestor chain and
 requires all of them to be released on return. This counter measures retained
-scanner capabilities; the existing no-follow helper's transient handles are a
-separate bounded implementation window. A real rename during later sibling
-traversal must succeed on Windows as well as Unix, and final identity checks
+scanner capabilities, not a process FD total. Separately, the existing
+no-follow helper owns at most a rolling parent/child pair of temporary
+capabilities. Initial root selection also retains its one configured-source
+handle while building the canonical chain. Final observation checks explicitly
+drop their reopened handle before root re-verification or the next observation.
+Directory iterators and index-file reads have separate single-read scopes;
+platform/library-internal pathname resolution is not measured by this counter.
+A real rename during later sibling traversal must succeed on Windows as well
+as Unix, and final identity checks
 must reject the changed model while preserving unrelated observations. Symlink
 replacement after traversal remains no-follow. These new regression sources
 require native execution; source review and formatting alone do not qualify

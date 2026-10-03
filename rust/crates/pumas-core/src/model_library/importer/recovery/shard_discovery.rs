@@ -242,6 +242,9 @@ impl<F: FnMut(&Path, Phase) -> io::Result<()>> Scanner<F> {
             if directory_identity(&current)? != observed.identity {
                 return Err(binding_changed());
             }
+            // Do not overlap this reopened directory with the root verifier's
+            // temporary parent/child handles or retain it for the next binding.
+            drop(current);
             self.root.verify()
         });
         match result {

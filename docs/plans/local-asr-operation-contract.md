@@ -272,3 +272,39 @@ and load-lifecycle (7) tests passed. Whole Torch Ruff checks/formatting passed.
 The broad suite ran 190 tests with only the same 7 inherited FastAPI
 `_IncludedRouter.path` errors. This correction adds no real authority, production
 speech exposure, public schema, runtime qualification or process/drain integration.
+
+#### Await-safe startup fence and embedded import-closure review
+
+An actual `asyncio.Lock` can be unlocked while an awakened earlier waiter has
+not resumed. A following `acquire()` can therefore suspend even after the busy
+check. Runner-factory uncertainty is now checked after successful acquisition,
+before handling a failed/cancelled acquisition, and before every preworker
+borrow-release path. A later cancellation cannot clear that latch, settle the
+operation or report complete drain. The exact binding, PCM, lease reference and
+independent custodian remain retained. A resumed successful acquisition stays
+fenced before native startup. The already-settled exact pre-factory refusal is
+still handled separately. A supervised subprocess fixture uses the real
+`asyncio.Lock` handoff window, with both cancellation and eventual acquisition,
+and checks custody through repeated cancellation and orderly loop shutdown.
+
+The existing image/text runtime embed table now includes `speech_binding.py`,
+which `model_manager.py` imports unconditionally. Its transitive imports are
+standard-library-only. The Rust required-file regression includes the new file;
+no speech owner or Cohere loader is embedded, and locks, dependencies, recipe,
+protocol and advertised capabilities are unchanged. A lightweight Python test
+materializes every Python file from the actual Rust embedded-file table into a
+temporary install tree and imports/creates the existing image/text app in a
+fresh isolated interpreter. Only Torch is substituted. All local imported
+modules must come from that tree. A negative test removes the installed binding
+file and proves that even an offered repository `PYTHONPATH` cannot supply it.
+This proves the staged source import closure, not Rust materialization execution,
+packaged native inference or runtime qualification.
+
+Post-review evidence: 38 operation tests, 18 binding tests and 2 embedded-import
+tests passed, along with existing Cohere (15), manager (2) and load-lifecycle (7)
+coverage. Whole Torch Ruff checks/formatting passed (39 Python files). The broad
+suite ran 193 tests with only the same 7 inherited `_IncludedRouter.path` errors.
+The Rust edits are limited to the required embedded-file entry and its existing
+required-file test. Native Rust build/test execution remains a hosted gate;
+`rustfmt` is not installed in this lightweight environment. No native Rust or
+full packaged-runtime pass is claimed.

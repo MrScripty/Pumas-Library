@@ -999,6 +999,87 @@ async def admission_failure_fixture(mode):
     loop.call_later(0.05, after_shutdown_cancel)
 
 
+async def lock_handoff_fixture(cancel_runner):
+    """Exercise actual asyncio.Lock's unlocked-but-waiter-owned handoff window."""
+    manager = Manager()
+    assert type(manager.lock) is asyncio.Lock
+    gate = Gate()
+    owner = SpeechOperationOwner(manager, adapter=gate)
+    body = encode(payload(owner))
+    await manager.lock.acquire()
+    prior_entered, release_prior = asyncio.Event(), asyncio.Event()
+
+    async def prior_waiter():
+        async with manager.lock:
+            prior_entered.set()
+            await release_prior.wait()
+
+    prior = asyncio.create_task(prior_waiter())
+    await asyncio.sleep(0)  # The actual earlier waiter now queues on the lock.
+    assert not prior_entered.is_set()
+    manager.lock.release()
+    assert not manager.lock.locked()
+    assert not prior_entered.is_set()  # Awakened, but it has not resumed yet.
+    loop = asyncio.get_running_loop()
+    previous = loop.get_task_factory()
+    tasks = []
+
+    def factory(loop, coroutine, **kwargs):
+        tasks.append(asyncio.Task(coroutine, loop=loop, eager_start=True, **kwargs))
+        raise RuntimeError("private factory failure during actual lock handoff")
+
+    loop.set_task_factory(factory)
+    try:
+        started = owner.start(body)
+    finally:
+        loop.set_task_factory(previous)
+    entry = owner._active
+    binding, lease = entry.binding, entry.lease
+    borrow = binding.artifact_use
+    assert entry.runner is tasks[0]
+    assert lease is not None
+    assert entry.worker is None
+    assert started.owner_startup_diagnostic.code == "owner_start_unconfirmed"
+    if cancel_runner:
+        entry.runner.cancel()
+    await prior_entered.wait()
+    await asyncio.sleep(0)
+    release_prior.set()
+    await prior
+    await asyncio.sleep(0)
+    result = owner.status(started.operation_ref)
+    assert result.state == "cleanup_unconfirmed", result.state
+    assert result.cleanup == "unconfirmed"
+    assert owner._active is entry
+    assert owner in _CUSTODIANS
+    assert entry.binding is binding and not borrow.released
+    assert entry.lease is lease and entry.audio is not None
+    assert not entry.runner.done() and not entry.guard.done()
+    assert gate.calls == 0 and entry.worker is None
+    assert owner.start(body).operation_ref == started.operation_ref
+    assert not (await owner.drain(0.01)).custody_complete
+    if cancel_runner:
+        assert result.operation_diagnostic.code == "cancelled"
+        assert not manager.lock.locked()  # Cancellation never owned this lock.
+    else:
+        assert manager.lock.locked()  # Resumed acquisition retains its exact lease.
+    for _ in range(3):
+        entry.runner.cancel()
+        entry.guard.cancel()
+        await asyncio.sleep(0)
+        assert entry.binding is binding and not borrow.released
+        assert owner.status(started.operation_ref).state == "cleanup_unconfirmed"
+
+    def after_shutdown_cancel():
+        assert owner._active is entry and owner in _CUSTODIANS
+        assert entry.binding is binding and not borrow.released
+        assert entry.lease is lease and entry.audio is not None
+        assert not entry.guard.done() and not entry.runner.done()
+        print("REAL_LOCK_HANDOFF_CUSTODY_RETAINED", flush=True)
+
+    loop.call_later(0.05, after_shutdown_cancel)
+
+
 class QuarantineProcessTests(unittest.TestCase):
     def assert_retained_child(self, fixture_args, marker):
         """Bound marker readiness separately from post-marker custody observation."""
@@ -1049,6 +1130,13 @@ class QuarantineProcessTests(unittest.TestCase):
             self.assertIn(marker, read_log(stdout_path), read_log(stderr_path).decode())
             self.assertNotIn(b"Traceback", read_log(stderr_path))
 
+    def test_real_lock_handoff_preserves_factory_latch_on_cancellation_or_acquisition(self):
+        for mode in ("cancel", "acquire"):
+            with self.subTest(mode=mode):
+                self.assert_retained_child(
+                    ["--lock-handoff-fixture", mode], b"REAL_LOCK_HANDOFF_CUSTODY_RETAINED"
+                )
+
     def test_admission_transfer_and_task_factory_failure_retain_observable_custody(self):
         for mode in (
             "binding_cleanup",
@@ -1083,6 +1171,11 @@ class QuarantineProcessTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if "--lock-handoff-fixture" in sys.argv:
+        asyncio.run(lock_handoff_fixture(cancel_runner=sys.argv[-1] == "cancel"))
+        raise AssertionError(
+            "Lock handoff quarantine unexpectedly allowed orderly runtime shutdown"
+        )
     if "--admission-fixture" in sys.argv:
         asyncio.run(admission_failure_fixture(sys.argv[-1]))
         raise AssertionError("Admission quarantine unexpectedly allowed orderly runtime shutdown")

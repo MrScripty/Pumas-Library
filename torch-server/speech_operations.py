@@ -576,11 +576,13 @@ class SpeechOperationOwner:
             entry.lease = self._manager.speech_lease(entry.binding)
             loaded = await entry.lease.__aenter__()
         except BaseException as error:
-            # The real speech_lease is nonqueued and has no suspension between
-            # acquiring its device lock and yielding the loaded model.
-            entry.lease = None
+            # An unlocked asyncio.Lock may still have an awakened earlier waiter;
+            # acquisition can suspend. A factory-failure latch recorded during
+            # that suspension must survive cancellation/refusal and cleanup.
             if isinstance(error, SpeechBindingError):
                 code = _binding_code(error)
+            elif isinstance(error, asyncio.CancelledError):
+                code = "cancelled"
             elif isinstance(error, KeyError):
                 code = "model_unavailable"
             elif isinstance(error, ValueError):
@@ -589,8 +591,17 @@ class SpeechOperationOwner:
                 code = "runtime_busy"
             else:
                 code = "lease_refused"
-            await self._finish_without_worker(entry, _Outcome(diagnostic=_diagnostic(error, code)))
+            outcome = _Outcome(diagnostic=_diagnostic(error, code))
+            if entry.owner_startup_diagnostic is not None:
+                entry.diagnostic = outcome.diagnostic
+                await self._hold_quarantine(entry)
+            entry.lease = None
+            await self._finish_without_worker(entry, outcome)
             return
+        # Acquisition may have resumed after factory startup was quarantined.
+        # Keep the acquired lease, and never cross into native worker startup.
+        if entry.owner_startup_diagnostic is not None:
+            await self._hold_quarantine(entry)
         notification = self._loop.create_future()
         result = []
 
@@ -668,6 +679,9 @@ class SpeechOperationOwner:
         self._settle(entry, outcome)
 
     async def _release_artifact(self, entry, outcome):
+        if entry.owner_startup_diagnostic is not None:
+            entry.diagnostic = outcome.diagnostic
+            await self._hold_quarantine(entry)
         try:
             entry.binding.release()
         except BaseException as error:
@@ -677,8 +691,12 @@ class SpeechOperationOwner:
             await self._hold_quarantine(entry)
 
     async def _finish_without_worker(self, entry, outcome):
-        # No native work was started. Cancellation itself is not our evidence;
-        # these paths establish non-start before releasing the artifact borrow.
+        # Local preworker cancellation/refusal cannot discharge an already
+        # latched factory-startup uncertainty, even after a suspended acquisition.
+        if entry.owner_startup_diagnostic is not None:
+            entry.diagnostic = outcome.diagnostic
+            await self._hold_quarantine(entry)
+        # Without that uncertainty, these paths establish exact native non-start.
         await self._release_artifact(entry, outcome)
         self._settle(entry, outcome)
 

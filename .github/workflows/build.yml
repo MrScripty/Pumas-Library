@@ -240,6 +240,10 @@ jobs:
       - name: Test Windows locked-stage cleanup ownership
         if: runner.os == 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned
+      - name: Test native owned HTTP shutdown boundaries
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc http_transport::tests
+      - name: Test RPC-owned shutdown on the native host
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests rpc_shutdown_exits_after_delivering_acknowledgement_and_ending_sse
       # Exercise the integrated filesystem and registry repairs on each host;
       # compilation of these modules alone is not native behavioral evidence.
       - name: Test native GGUF file-type inspection

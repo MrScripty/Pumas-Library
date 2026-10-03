@@ -22,9 +22,11 @@ available for inference. Unknown numbers remain UNKNOWN. A label is inspection
 evidence, not a backend-support claim.
 
 GGUF inspection now contributes a parser revision to package source fingerprints.
-Existing GGUF detail/summary caches therefore become stale and must be recomputed
+Existing GGUF detail/summary caches therefore become stale on targeted validation and must be recomputed
 from the current package by the supported resolve_model_package_facts path. No
 model bytes, metadata, user declarations, or SQLite rows are manually rewritten.
+Fast cache snapshots remain explicitly unvalidated Cached projections until targeted
+resolution; this is lazy invalidation, not a database-wide eager rewrite.
 Non-GGUF fingerprints and the public package-facts DTO version remain unchanged.
 The old installed 0.7 binary cannot correct its own enum by reinspection; the
 fixed code must be deployed before a fresh supported inspection is authoritative.
@@ -39,3 +41,10 @@ fixed code must be deployed before a fresh supported inspection is authoritative
 - Native Linux/macOS/Windows workflow steps explicitly run the parser and cache
   regressions. Their exact-head hosted results are required before qualification.
 - No large local source build or live-store migration is part of this repair.
+
+Initial hosted qualification also exposed older intent/package-facts fixtures
+encoding the same wrong enum numbers. Their Q4_K_M/Q5_K_M bytes are corrected to
+15/17 while retaining their assertions. A new composed regression seeds stale
+detail and summary rows, invokes the supported summary resolver, and verifies
+regeneration from the raw header, both refreshed fingerprints, and unchanged
+model/metadata bytes. No live store is edited by that synthetic test.

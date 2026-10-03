@@ -2013,6 +2013,64 @@ mod tests {
         assert!(flag_stderr.contains("--allow-lan"), "{flag_stderr}");
     }
 
+    #[tokio::test]
+    async fn rpc_shutdown_exits_after_delivering_acknowledgement_and_ending_sse() {
+        let env = create_test_env();
+        let mut server = start_rpc_server(env.path()).await.unwrap();
+        let client = reqwest::Client::new();
+        let routes = vec![
+            "/events/model-library-updates",
+            "/events/model-download-updates",
+            "/events/status-telemetry-updates",
+        ];
+        #[cfg(feature = "inference-plugins")]
+        let routes = {
+            let mut routes = routes;
+            routes.extend([
+                "/events/runtime-profile-updates",
+                "/events/serving-status-updates",
+            ]);
+            routes
+        };
+        let mut feeds = Vec::new();
+        for route in routes {
+            let response = client
+                .get(format!("http://127.0.0.1:{}{route}", server.port))
+                .timeout(Duration::from_secs(15))
+                .send()
+                .await
+                .unwrap();
+            assert!(response.status().is_success(), "{route}");
+            feeds.push(response);
+        }
+        let acknowledgement = rpc_call(server.port, "shutdown", json!({})).await.unwrap();
+        assert_eq!(acknowledgement["status"], "shutting_down");
+        assert!(acknowledgement.get("managed_processes_stopped").is_none());
+        for feed in feeds {
+            // A complete HTTP end-of-body, rather than a process-killed socket.
+            tokio::time::timeout(Duration::from_secs(10), feed.bytes())
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let status = tokio::time::timeout(Duration::from_secs(15), server.child.wait())
+            .await
+            .expect("RPC-only shutdown must exit without an OS signal")
+            .unwrap();
+        if let Some(drain) = server.stdout_drain.take() {
+            drain.await.unwrap();
+        }
+        if let Some(drain) = server.stderr_drain.take() {
+            drain.await.unwrap();
+        }
+        let diagnostics = server.diagnostics().await;
+        assert!(status.success(), "{status}; {diagnostics}");
+        assert!(
+            diagnostics.contains("RPC shutdown completed"),
+            "{diagnostics}"
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn unix_termination_signals_complete_the_owned_shutdown() {

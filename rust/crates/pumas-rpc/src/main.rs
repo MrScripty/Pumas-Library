@@ -107,6 +107,11 @@ async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
     #[cfg(unix)]
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
 
+    #[cfg(windows)]
+    let mut interrupt = tokio::signal::windows::ctrl_c()?;
+    #[cfg(windows)]
+    let mut ctrl_break = tokio::signal::windows::ctrl_break()?;
+
     info!("Starting Pumas RPC Server");
 
     // Determine launcher root
@@ -194,24 +199,38 @@ async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
 
     info!("RPC server running on {}", addr);
 
-    // Wait for shutdown signal
-    #[cfg(windows)]
-    {
-        let mut ctrl_break = tokio::signal::windows::ctrl_break()?;
-        tokio::select! {
-            result = tokio::signal::ctrl_c() => result?,
-            Some(()) = ctrl_break.recv() => {}
+    // Both OS signals and RPC admission converge on the same owned receipt.
+    let signal = async {
+        #[cfg(windows)]
+        {
+            tokio::select! {
+                Some(()) = interrupt.recv() => {},
+                Some(()) = ctrl_break.recv() => {}
+            }
         }
-    }
-    #[cfg(unix)]
+        #[cfg(unix)]
+        tokio::select! {
+            _ = interrupt.recv() => {},
+            _ = terminate.recv() => {},
+        }
+        #[cfg(not(any(unix, windows)))]
+        tokio::signal::ctrl_c().await?;
+        Ok::<(), anyhow::Error>(())
+    };
     tokio::select! {
-        _ = interrupt.recv() => {},
-        _ = terminate.recv() => {},
+        result = signal => {
+            info!("Shutdown signal observed, draining owned work");
+            let drained = server.shutdown().await;
+            match (result, drained) {
+                (Ok(()), Ok(())) => {},
+                (Err(error), Ok(())) | (Ok(()), Err(error)) => return Err(error),
+                (Err(signal), Err(drain)) => return Err(anyhow::anyhow!(
+                    "Signal observation failed: {signal}; shutdown failed: {drain}"
+                )),
+            }
+        }
+        result = server.wait() => result?,
     }
-    #[cfg(not(any(unix, windows)))]
-    tokio::signal::ctrl_c().await?;
-    info!("Shutdown signal received, exiting");
-    server.shutdown().await?;
     info!("RPC shutdown completed");
 
     Ok(())

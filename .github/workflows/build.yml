@@ -224,6 +224,8 @@ jobs:
       - name: Test Windows locked-stage cleanup ownership
         if: runner.os == 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned
+      - name: Test RPC-owned shutdown on the native host
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests rpc_shutdown_exits_after_delivering_acknowledgement_and_ending_sse
       - name: Test native managed Python paths
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library test_venv_python_path
       - name: Test Unix managed process-group ownership

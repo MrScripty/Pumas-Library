@@ -78,8 +78,39 @@ impl LoopbackHost {
     }
 }
 
+/// Admission-only handle. Request handlers never receive the completion future,
+/// because it includes completion of their own HTTP response.
+#[derive(Clone)]
+pub(crate) struct ShutdownRequest {
+    signal: watch::Sender<bool>,
+}
+
+impl Default for ShutdownRequest {
+    fn default() -> Self {
+        Self {
+            signal: watch::channel(false).0,
+        }
+    }
+}
+
+impl ShutdownRequest {
+    pub(crate) fn request(&self) {
+        self.signal.send_replace(true);
+    }
+
+    pub(crate) async fn requested(self) {
+        let mut receiver = self.signal.subscribe();
+        while !*receiver.borrow_and_update() {
+            if receiver.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+}
+
 /// Application state shared across handlers.
 pub struct AppState {
+    pub(crate) shutdown_request: ShutdownRequest,
     pub(crate) catalog_projection: CatalogProjection,
     /// Core API (model library, system utilities)
     pub api: PumasApi,
@@ -160,7 +191,17 @@ impl ServerHandle {
     /// Stop serving and observe both owned drains. Cancelling a waiter does not
     /// cancel the supervisor or consume its result; repeated waiters share it.
     pub async fn shutdown(&self) -> anyhow::Result<()> {
+        self.request_shutdown();
+        self.wait().await
+    }
+
+    /// Request cessation without waiting for the requesting HTTP response.
+    pub fn request_shutdown(&self) {
         self.shutdown_signal.send_replace(true);
+    }
+
+    /// Observe the process-owned receipt without initiating shutdown.
+    pub async fn wait(&self) -> anyhow::Result<()> {
         self.completion
             .clone()
             .await
@@ -249,7 +290,10 @@ pub async fn start_server(
     #[cfg(feature = "inference-plugins")]
     let provider_registry = ProviderRegistry::builtin();
     let (catalog_projection, catalog_worker) = CatalogProjection::start(MAX_IN_FLIGHT_RPC_REQUESTS);
+    let shutdown_request = ShutdownRequest::default();
+    let shutdown_signal = shutdown_request.signal.clone();
     let state = Arc::new(AppState {
+        shutdown_request: shutdown_request.clone(),
         catalog_projection,
         api,
         #[cfg(feature = "inference-plugins")]
@@ -335,12 +379,25 @@ pub async fn start_server(
     let downloads_drained = Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(test)]
     let downloads_drain_observed = downloads_drained.clone();
-    let (shutdown_signal, mut shutdown) = watch::channel(false);
     let task = tokio::spawn(async move {
-        let serving = axum::serve(listener, app).into_future();
-        let server_result = tokio::select! {
-            result = serving => result.map_err(anyhow::Error::from),
-            _ = shutdown.changed() => Ok(()),
+        let mut serving = Box::pin(
+            axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown_request.clone().requested())
+                .into_future(),
+        );
+        let early_result = tokio::select! {
+            result = &mut serving => Some(result.map_err(anyhow::Error::from)),
+            _ = shutdown_request.clone().requested() => None,
+        };
+        shutdown_request.request();
+        // Retain accepted connections until their responses settle. Core owners
+        // drain concurrently, so requests awaiting those owners cannot deadlock
+        // behind an HTTP-first shutdown ordering.
+        let http_completion = async move {
+            match early_result {
+                Some(result) => result,
+                None => serving.await.map_err(anyhow::Error::from),
+            }
         };
         let torch_cleanup = async {
             #[cfg(feature = "inference-plugins")]
@@ -358,9 +415,10 @@ pub async fn start_server(
             }
             Ok::<(), anyhow::Error>(())
         };
-        let (owners, runtimes, torch_cleanup) = tokio::join!(
+        let (http, owners, runtimes, torch_cleanup) = tokio::join!(
+            http_completion,
             drain_server_owners(
-                server_result,
+                Ok(()),
                 async {
                     let result = state.api.shutdown_intent().await;
                     #[cfg(test)]
@@ -386,6 +444,14 @@ pub async fn start_server(
                 Err(anyhow::anyhow!(summary.errors.join("; ")))
             }
         });
+        let owners = match (owners, http) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(anyhow::anyhow!("HTTP connections: {error}")),
+            (Err(owners), Err(error)) => {
+                Err(anyhow::anyhow!("{owners}; HTTP connections: {error}"))
+            }
+        };
         let owners = match (owners, torch_cleanup) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) => Err(error),
@@ -455,6 +521,24 @@ fn is_allowed_cors_origin(origin: &HeaderValue) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn shutdown_request_is_idempotent_and_visible_to_late_subscribers() {
+        let request = super::ShutdownRequest::default();
+        let observed = request.clone().requested();
+        tokio::pin!(observed);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), &mut observed)
+                .await
+                .is_err()
+        );
+        request.request();
+        request.request();
+        observed.await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), request.requested())
+            .await
+            .unwrap();
+    }
+
     use super::*;
     #[cfg(feature = "inference-plugins")]
     use pumas_library::AppId;

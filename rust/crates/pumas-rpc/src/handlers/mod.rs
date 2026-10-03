@@ -150,6 +150,7 @@ pub async fn handle_model_library_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ModelLibraryUpdateStreamQuery>,
 ) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+    let shutdown = state.shutdown_request.clone();
     let stream: BoxStream<'static, Result<Event, Infallible>> =
         match build_model_library_update_stream_state(state, query.cursor).await {
             Ok(stream_state) => {
@@ -171,7 +172,7 @@ pub async fn handle_model_library_update_events(
             }
         };
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -247,6 +248,7 @@ pub async fn handle_model_download_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ModelDownloadUpdateStreamQuery>,
 ) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+    let shutdown = state.shutdown_request.clone();
     let stream: BoxStream<'static, Result<Event, Infallible>> =
         match build_model_download_update_stream_state(state, query.cursor).await {
             Ok(stream_state) => {
@@ -268,7 +270,7 @@ pub async fn handle_model_download_update_events(
             }
         };
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
 }
 
 async fn build_model_download_update_stream_state(
@@ -300,10 +302,11 @@ pub async fn handle_runtime_profile_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<RuntimeProfileUpdateStreamQuery>,
 ) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+    let shutdown = state.shutdown_request.clone();
     let stream_state = build_runtime_profile_update_stream_state(state, query.cursor).await;
     let stream = stream::unfold(stream_state, next_runtime_profile_update_event).boxed();
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -350,10 +353,11 @@ pub async fn handle_serving_status_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ServingStatusUpdateStreamQuery>,
 ) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+    let shutdown = state.shutdown_request.clone();
     let stream_state = build_serving_status_update_stream_state(state, query.cursor).await;
     let stream = stream::unfold(stream_state, next_serving_status_update_event).boxed();
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -399,6 +403,7 @@ pub async fn handle_status_telemetry_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<StatusTelemetryUpdateStreamQuery>,
 ) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+    let shutdown = state.shutdown_request.clone();
     let stream: BoxStream<'static, Result<Event, Infallible>> =
         match build_status_telemetry_update_stream_state(state, query.cursor).await {
             Ok(stream_state) => {
@@ -420,7 +425,7 @@ pub async fn handle_status_telemetry_update_events(
             }
         };
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
 }
 
 /// Main JSON-RPC handler.
@@ -440,6 +445,12 @@ pub async fn handle_rpc(State(state): State<Arc<AppState>>, body: Bytes) -> impl
         }
     };
     let id = request.id;
+    if state.shutdown_request.is_requested() && !matches!(request.command, RpcCommand::Shutdown) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(JsonRpcResponse::error(id, PublicError::unavailable())),
+        );
+    }
     let method = request.command.method().to_string();
 
     debug!(
@@ -513,7 +524,7 @@ async fn dispatch_admitted_command(
 ) -> Result<RpcOutcome, RpcDispatchError> {
     let result: pumas_library::Result<RpcOutcome> = match command {
         RpcCommand::HealthCheck => Ok(RpcOutcome::Health(HealthOutcome::ok())),
-        RpcCommand::Shutdown => shutdown_result(state).await,
+        RpcCommand::Shutdown => shutdown_result(state),
         RpcCommand::GetStatus => status::get_status(state)
             .await
             .map(Box::new)
@@ -1011,33 +1022,9 @@ async fn dispatch_admitted_command(
     result.map_err(RpcDispatchError::Domain)
 }
 
-async fn shutdown_result(state: &AppState) -> pumas_library::Result<RpcOutcome> {
-    #[cfg(not(feature = "inference-plugins"))]
-    {
-        let _ = state;
-        Ok(RpcOutcome::Shutdown(ShutdownOutcome::core_only()))
-    }
-
-    #[cfg(feature = "inference-plugins")]
-    {
-        let shutdown_summary = match state.api.stop_all_managed_runtime_profiles().await {
-            Ok(summary) => summary,
-            Err(error) => {
-                let public_error = PublicError::from(&error);
-                warn!(
-                    error_code = public_error.code,
-                    error_class = public_error.class.as_str(),
-                    "managed runtime shutdown failed before backend exit"
-                );
-                return Ok(RpcOutcome::Shutdown(ShutdownOutcome::managed(0, 0, 1)));
-            }
-        };
-        Ok(RpcOutcome::Shutdown(ShutdownOutcome::managed(
-            shutdown_summary.profiles_processed,
-            shutdown_summary.processes_stopped,
-            shutdown_summary.errors.len(),
-        )))
-    }
+fn shutdown_result(state: &AppState) -> pumas_library::Result<RpcOutcome> {
+    state.shutdown_request.request();
+    Ok(RpcOutcome::Shutdown(ShutdownOutcome::acknowledged()))
 }
 
 fn diagnostic_method(method: &str) -> &'static str {
@@ -3411,5 +3398,31 @@ exit 9
                 "error": "The partial download could not be resumed."
             })
         );
+    }
+    #[tokio::test]
+    async fn shutdown_refuses_rpc_commands_after_decoding_but_repeats_acknowledgement() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        state.shutdown_request.request();
+        for (method, expected) in [
+            ("health_check", StatusCode::SERVICE_UNAVAILABLE),
+            ("shutdown", StatusCode::OK),
+        ] {
+            let body = Bytes::from(
+                serde_json::to_vec(&json!({"jsonrpc":"2.0", "id":1, "method":method, "params":{}}))
+                    .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), body).await.into_response();
+            assert_eq!(response.status(), expected);
+            let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            let value: Value = serde_json::from_slice(&bytes).unwrap();
+            if method == "shutdown" {
+                assert_eq!(value["result"]["status"], "shutting_down");
+            } else {
+                assert_eq!(value["error"]["code"], -32000);
+            }
+        }
     }
 }

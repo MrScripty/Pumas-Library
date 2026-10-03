@@ -272,6 +272,27 @@ class ModelManager:
         async with lock:
             yield slot._loaded.model
 
+    @asynccontextmanager
+    async def speech_lease(self, model_name: str):
+        """Hold device/model custody until the caller's synchronous ASR stops."""
+        from loaders.cohere_asr_loader import COHERE_ASR
+
+        candidates = [
+            s
+            for s in self.slots.values()
+            if s.model_name == model_name and s.state == SlotState.READY
+        ]
+        if len(candidates) != 1 or candidates[0]._loaded is None:
+            raise KeyError("Speech model is unavailable or ambiguous")
+        slot = candidates[0]
+        if slot.model_type != COHERE_ASR:
+            raise ValueError("Selected model does not support Cohere transcription")
+        lock = self._get_device_lock(slot.device)
+        if lock.locked():
+            raise RuntimeError("Speech runtime is busy")
+        async with lock:
+            yield slot._loaded
+
     def _load_sync(
         self, model_path: str, device: torch.device, model_type: Optional[str]
     ) -> LoadedModel:

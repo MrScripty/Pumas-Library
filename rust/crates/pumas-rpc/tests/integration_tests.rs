@@ -2121,6 +2121,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rpc_shutdown_exits_after_delivering_acknowledgement_and_ending_sse() {
+        let env = create_test_env();
+        let mut server = start_rpc_server(env.path()).await.unwrap();
+        let client = reqwest::Client::new();
+        let initial_feed = rpc_call(
+            server.port,
+            "list_model_library_updates_since",
+            json!({"cursor": null, "limit": 100}),
+        )
+        .await
+        .unwrap();
+        let library_cursor = initial_feed["cursor"].as_str().unwrap().to_string();
+        create_indexable_test_model(env.path(), "llm/llama/shutdown-feed", "Shutdown Feed");
+        refresh_test_model_index(server.port).await;
+        let routes = vec![
+            "/events/model-library-updates",
+            "/events/model-download-updates",
+            "/events/status-telemetry-updates",
+        ];
+        #[cfg(feature = "inference-plugins")]
+        let routes = {
+            let mut routes = routes;
+            routes.extend([
+                "/events/runtime-profile-updates",
+                "/events/serving-status-updates",
+            ]);
+            routes
+        };
+        let mut feeds = Vec::new();
+        for route in routes {
+            let request = client.get(format!("http://127.0.0.1:{}{route}", server.port));
+            let request = if route == "/events/model-library-updates" {
+                request.query(&[("cursor", library_cursor.as_str())])
+            } else {
+                request
+            };
+            let mut response = request
+                .timeout(Duration::from_secs(15))
+                .send()
+                .await
+                .unwrap();
+            assert!(response.status().is_success(), "{route}");
+            assert_eq!(response.headers()["content-type"], "text/event-stream");
+            let initial = response
+                .chunk()
+                .await
+                .unwrap()
+                .expect("feed must start with data");
+            assert!(
+                !String::from_utf8_lossy(&initial).contains("-error"),
+                "{route}"
+            );
+            if let Ok(next) =
+                tokio::time::timeout(Duration::from_millis(25), response.chunk()).await
+            {
+                let next = next
+                    .unwrap()
+                    .expect("feed must remain live before shutdown");
+                assert!(
+                    !String::from_utf8_lossy(&next).contains("-error"),
+                    "{route}"
+                );
+            }
+            feeds.push(response);
+        }
+        let acknowledgement = rpc_call(server.port, "shutdown", json!({})).await.unwrap();
+        assert_eq!(acknowledgement["status"], "shutting_down");
+        assert!(acknowledgement.get("managed_processes_stopped").is_none());
+        for feed in feeds {
+            // A complete HTTP end-of-body, rather than a process-killed socket.
+            tokio::time::timeout(Duration::from_secs(10), feed.bytes())
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let status = tokio::time::timeout(Duration::from_secs(15), server.child.wait())
+            .await
+            .expect("RPC-only shutdown must exit without an OS signal")
+            .unwrap();
+        if let Some(drain) = server.stdout_drain.take() {
+            drain.await.unwrap();
+        }
+        if let Some(drain) = server.stderr_drain.take() {
+            drain.await.unwrap();
+        }
+        let diagnostics = server.diagnostics().await;
+        assert!(status.success(), "{status}; {diagnostics}");
+        assert!(
+            diagnostics.contains("RPC shutdown completed"),
+            "{diagnostics}"
+        );
+    }
+
+    #[tokio::test]
     async fn debug_rpc_process_does_not_disclose_credentials_or_private_locators() {
         const SENTINEL_TOKEN: &str = "hf_test_rpc_secret_do_not_disclose";
         const SENTINEL_PATH_FRAGMENT: &str = "private-rpc-path-sentinel";

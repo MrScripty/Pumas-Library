@@ -52,6 +52,7 @@ pub(crate) async fn build_test_app_state(launcher_root: &Path) -> AppState {
     #[cfg(not(feature = "inference-plugins"))]
     {
         AppState {
+            shutdown_request: crate::server::ShutdownRequest::default(),
             api,
             catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
         }
@@ -66,6 +67,7 @@ pub(crate) async fn build_test_app_state(launcher_root: &Path) -> AppState {
             OnnxSessionManager::new(OnnxEmbeddingBackendKind::fake(), 2).unwrap();
 
         AppState {
+            shutdown_request: crate::server::ShutdownRequest::default(),
             catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
             api,
             version_managers: Arc::new(RwLock::new(Default::default())),

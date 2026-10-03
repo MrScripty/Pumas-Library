@@ -532,7 +532,9 @@ mod tests {
     fn copied_import_pending_cannot_be_promoted_by_cached_ready_summary() {
         let (index, temp) = create_test_index();
         let id = "llm/example/model";
-        let path = "/models/llm/example/model/model-q4.gguf";
+        let artifact_path = temp.path().join(id).join("model-q4.gguf");
+        assert!(artifact_path.is_absolute());
+        let path = artifact_path.to_str().unwrap();
         let mut record = create_selector_record(
             id,
             "Pending",
@@ -608,10 +610,9 @@ mod tests {
             .items[0]
             .summary
             .is_some());
-        assert!(reader
-            .resolve_model_artifact_load_target(request)
-            .unwrap()
-            .is_ready());
+        let legacy_target = reader.resolve_model_artifact_load_target(request).unwrap();
+        assert!(legacy_target.is_ready());
+        assert_eq!(legacy_target.target.unwrap().local_load_path, path);
     }
 
     #[test]

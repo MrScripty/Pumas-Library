@@ -785,6 +785,78 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn http_admission_rejects_untrusted_sources_before_rpc_dispatch() {
+        if !can_bind_local_tcp_for_tests() {
+            return;
+        }
+        let env = create_test_env();
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let url = format!("http://127.0.0.1:{}/rpc", server.port);
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let mut results = Vec::new();
+        for (name, value) in [
+            ("origin", "https://untrusted.example"),
+            ("origin", "null"),
+            ("host", "untrusted.example"),
+            ("sec-fetch-site", "cross-site"),
+        ] {
+            let result = client
+                .post(&url)
+                .header(name, value)
+                .header(reqwest::header::CONTENT_TYPE, "text/plain")
+                // If dispatched, malformed JSON would get a JSON-RPC parse
+                // result, so HTTP refusal also proves the handler was bypassed.
+                .body("not json")
+                .send()
+                .await
+                .map(|response| response.status());
+            results.push(result);
+        }
+        let allowed = client
+            .post(&url)
+            .json(&json!({
+                "jsonrpc": "2.0", "id": 1, "method": "health_check", "params": {}
+            }))
+            .send()
+            .await;
+        let allowed = match allowed {
+            Ok(response) => response.json::<Value>().await,
+            Err(error) => Err(error),
+        };
+        let local_browser = client
+            .post(&url)
+            .header("origin", "http://localhost:5173")
+            .header("sec-fetch-site", "cross-site")
+            .json(&json!({"jsonrpc": "2.0", "id": 2, "method": "health_check", "params": {}}))
+            .send()
+            .await;
+        server.stop().await;
+        for result in results {
+            assert_eq!(result.unwrap(), reqwest::StatusCode::FORBIDDEN);
+        }
+        assert_eq!(
+            allowed
+                .unwrap()
+                .pointer("/result/status")
+                .and_then(Value::as_str),
+            Some("ok")
+        );
+        let local_browser = local_browser.unwrap();
+        assert_eq!(local_browser.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            local_browser
+                .headers()
+                .get("access-control-allow-origin")
+                .unwrap(),
+            "http://localhost:5173"
+        );
+    }
+
     #[cfg(feature = "inference-plugins")]
     fn missing_serving_request() -> Value {
         json!({

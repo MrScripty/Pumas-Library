@@ -87,7 +87,7 @@ fn invalid_library_id() -> io::Error {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-struct FilesystemIdentity {
+pub(super) struct FilesystemIdentity {
     volume: u64,
     file: u64,
 }
@@ -1497,7 +1497,7 @@ impl DownloadRecoveryDestination {
     }
 }
 
-fn directory_identity(directory: &Dir) -> io::Result<FilesystemIdentity> {
+pub(super) fn directory_identity(directory: &Dir) -> io::Result<FilesystemIdentity> {
     filesystem_identity(&directory.dir_metadata()?).ok_or_else(invalid_capability_path)
 }
 

@@ -92,6 +92,21 @@ recovery state when an operation is interrupted.
 Hugging Face downloads also gain stricter destination validation, resumable
 acquisition handling, and coordination with local metadata and recovery state.
 
+Startup shard inspection is now read-only. It reports nested shard sets beneath
+canonical model roots, missing ordinal ranges, ambiguous names, and unavailable
+or invalid index evidence. It no longer starts new downloads using a repository
+guessed from a shard directory name. Persisted authorized download recovery and
+the separate interrupted-download path retain their existing behavior. An
+orphan shard set needs an explicit recovery/download request with a verified
+source; matching filename counts alone do not prove a complete model package.
+
+Rust consumers can use `ModelImporter::discover_shard_recovery` (or its async
+variant) for the typed report and must retain its incomplete-scan diagnostics.
+The old Vec-returning helpers are deprecated compatibility projections, with
+nested filenames relative to the canonical model root. They cannot prove
+completeness or authorize downloads. Inspection does not migrate or clean up
+existing model directories.
+
 ## Backend-owned conversion
 
 Applications can request conversion independently of the GUI. Pumas manages

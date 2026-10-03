@@ -29,13 +29,30 @@ fn operational_error(error: &PumasError) -> bool {
         } if source.kind() == std::io::ErrorKind::NotFound => false,
         PumasError::Io { .. } | PumasError::Database { .. } => true,
         PumasError::Json { source, .. } => source.as_ref().is_some_and(serde_json::Error::is_io),
+        PumasError::Validation { field, .. }
+            if field == super::super::importer::publication::EVIDENCE_SIZE_FIELD =>
+        {
+            false
+        }
         _ => true,
     }
 }
 
-fn mark_record_unavailable(record: &mut ModelRecord, path: &Path, code: &str, message: &str) {
+fn retain_nonobject_evidence(record: &mut ModelRecord) {
     if !record.metadata.is_object() {
-        record.metadata = serde_json::json!({});
+        let raw = std::mem::replace(&mut record.metadata, serde_json::json!({}));
+        record.metadata["unparsed_index_metadata"] = raw;
+    }
+}
+
+fn mark_record_unavailable(record: &mut ModelRecord, path: &Path, code: &str, message: &str) {
+    retain_nonobject_evidence(record);
+    if !claims_publication(&record.metadata) {
+        // This fallback is reached only for an observed publication claim.
+        // Preserve that claim so later projections cannot treat it as legacy.
+        record.metadata["import_publication"] = serde_json::json!({
+            "version": 0, "id": "", "confirmed": false,
+        });
     }
     record.metadata["import_state"] = serde_json::json!("pending");
     record.metadata["validation_state"] = serde_json::json!("invalid");
@@ -76,9 +93,7 @@ impl ModelLibrary {
             };
             self.observe_import_readiness_with_io_policy(&model_dir, &mut metadata, true)?;
             let observed = serde_json::to_value(&metadata)?;
-            if !record.metadata.is_object() {
-                record.metadata = serde_json::json!({});
-            }
+            retain_nonobject_evidence(record);
             let original = record.metadata.as_object_mut().expect("object projection");
             for field in ["import_state", "validation_state", "validation_errors"] {
                 if let Some(value) = observed.get(field) {
@@ -100,6 +115,21 @@ impl ModelLibrary {
             }
         }
         Ok(())
+    }
+
+    pub(super) async fn refresh_retained_publication_record_async(
+        &self,
+        record: &ModelRecord,
+    ) -> Result<bool> {
+        let library = self.clone();
+        let expected = record.clone();
+        tokio::task::spawn_blocking(move || library.refresh_retained_publication_record(&expected))
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!(
+                    "Failed to join retained publication observation task: {error}"
+                ))
+            })?
     }
 
     pub(super) fn refresh_retained_publication_record(&self, record: &ModelRecord) -> Result<bool> {

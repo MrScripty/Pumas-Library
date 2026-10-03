@@ -433,3 +433,122 @@ async fn copied_import_migration_preserves_unexpected_error_and_checkpoint() {
     assert!(!target.exists());
     assert!(tasks.shutdown_owned().await.is_err());
 }
+
+#[tokio::test]
+async fn copied_import_receipt_only_malformed_gates_remain_unavailable_in_public_queries() {
+    let (_temp, library, tasks) = fixture().await;
+    let id = "llm/review/receipt-only";
+    insert_model(&library, id, pending_metadata(), false);
+    let mut record = library.index.get(id).unwrap().unwrap();
+    record.metadata = serde_json::json!({
+        "import_state": 17,
+        "size_bytes": "old projection",
+        "future_extension": ["keep"],
+    });
+    library.index.upsert(&record).unwrap();
+    let listed = library.list_models().await.unwrap();
+    let searched = library.search_models("receipt-only", 10, 0).await.unwrap();
+    let fetched = library.get_model(id).await.unwrap().unwrap();
+    for observed in [&listed[0], &searched.models[0], &fetched] {
+        assert_eq!(observed.metadata["size_bytes"], "old projection");
+        assert_eq!(
+            observed.metadata["future_extension"],
+            serde_json::json!(["keep"])
+        );
+        assert_eq!(observed.metadata["import_state"], "pending");
+        assert_eq!(observed.metadata["validation_state"], "invalid");
+        assert!(!crate::models::copied_import_ready_value(
+            &observed.metadata
+        ));
+    }
+    assert_eq!(
+        library.index.get(id).unwrap().unwrap().metadata,
+        record.metadata
+    );
+    tasks.shutdown_owned().await.unwrap();
+}
+
+#[tokio::test]
+async fn copied_import_receipt_backed_nonobject_evidence_is_retained_in_diagnostics() {
+    let (_temp, library, tasks) = fixture().await;
+    for (number, raw) in [
+        serde_json::json!("raw scalar"),
+        serde_json::json!([1, {"keep": true}]),
+        Value::Null,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = format!("llm/review/raw-{number}");
+        insert_model(&library, &id, pending_metadata(), false);
+        let mut record = library.index.get(&id).unwrap().unwrap();
+        record.metadata = raw.clone();
+        library.index.upsert(&record).unwrap();
+        let listed = library.list_models().await.unwrap();
+        let searched = library
+            .search_models(&format!("raw-{number}"), 10, 0)
+            .await
+            .unwrap();
+        let fetched = library.get_model(&id).await.unwrap().unwrap();
+        for observed in [
+            listed.iter().find(|row| row.id == id).unwrap(),
+            &searched.models[0],
+            &fetched,
+        ] {
+            assert_eq!(observed.metadata["unparsed_index_metadata"], raw);
+            assert_eq!(observed.metadata["import_state"], "pending");
+            assert!(!crate::models::copied_import_ready_value(
+                &observed.metadata
+            ));
+        }
+        assert_eq!(library.index.get(&id).unwrap().unwrap().metadata, raw);
+    }
+    tasks.shutdown_owned().await.unwrap();
+}
+
+#[tokio::test]
+async fn copied_import_oversized_evidence_is_per_model_unavailable_in_public_queries() {
+    let (_temp, library, tasks) = fixture().await;
+    let oversized = super::super::download_recovery::IMPORT_DOCUMENT_MAX_BYTES + 1;
+    for (number, filename) in [
+        METADATA_FILENAME,
+        super::super::importer::publication::RECEIPT_FILENAME,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = format!("llm/review/oversized-{number}");
+        let mut metadata = pending_metadata();
+        metadata.import_publication.as_mut().unwrap().confirmed = true;
+        metadata.import_state = Some(ImportState::Ready);
+        metadata.validation_state = Some(AssetValidationState::Valid);
+        let path = insert_model(&library, &id, metadata, false);
+        // Sparse synthetic evidence tests the actual bounded readers without
+        // constructing a multi-megabyte parsed document or any model payload.
+        std::fs::File::create(path.join(filename))
+            .unwrap()
+            .set_len(oversized)
+            .unwrap();
+        let listed = library.list_models().await.unwrap();
+        let searched = library
+            .search_models(&format!("oversized-{number}"), 10, 0)
+            .await
+            .unwrap();
+        let fetched = library.get_model(&id).await.unwrap().unwrap();
+        for observed in [
+            listed.iter().find(|row| row.id == id).unwrap(),
+            &searched.models[0],
+            &fetched,
+        ] {
+            assert_eq!(observed.metadata["validation_state"], "invalid");
+            assert!(!crate::models::copied_import_ready_value(
+                &observed.metadata
+            ));
+        }
+        assert_eq!(
+            std::fs::metadata(path.join(filename)).unwrap().len(),
+            oversized
+        );
+    }
+    tasks.shutdown_owned().await.unwrap();
+}

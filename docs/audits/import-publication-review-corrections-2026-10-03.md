@@ -112,3 +112,38 @@ and Git whitespace/diff review. No Rust compilation, test execution, native
 filesystem qualification, real store/model operations, or remote writes are
 performed in this slice. Independent source review and fresh hosted Linux,
 macOS, and Windows gates remain mandatory before acceptance.
+
+
+## Combined review follow-up
+
+The caller corrections identified above are included in the combined branch:
+API recounting preserves skipped plus error counts, and the panel requires
+completed checkpoint evidence and zero outstanding/skipped/error work before its
+completion message. See the adjacent import-copy review correction record for
+local frontend results. This supersedes the caller-pending disposition of the
+isolated source milestone.
+
+Independent review added three record-observation edge regressions. Bounded
+canonical metadata/receipt overflow now has the specific typed field
+`import_publication.evidence_size`; only that known invalid-evidence outcome is
+converted to per-model unavailability. Other operational failures retain their
+errors. Receipt-only malformed gates receive a diagnostic non-confirmed identity
+if none existed, so downstream projection cannot reinterpret them as legacy.
+Receipt-backed non-object index values are retained under the diagnostic-only
+`unparsed_index_metadata` member; the stored row is not rewritten by list/get/
+search. All three public query paths are covered, including scalar, array and
+null evidence. Unknown object members remain in place.
+
+The new retained-publication refresh uses the same awaited blocking-task pattern
+as adjacent library metadata observations. Its original complete row snapshot is
+cloned into the closure and remains the CAS precondition. This does not add a new
+mutation owner or extend the broader library read/projection lifecycle contract.
+
+A retained empty `pending_moves` checkpoint represents **one frozen incomplete
+migration plan**. Later Execute calls preserve its results; they do not retry
+blocked publications or discover newly eligible moves. There is no supported
+checkpoint reset/replan or Pending reconciliation API in this bounded repair.
+Operators must retain the evidence and diagnose the blocked publication; ordinary
+retries cannot advertise completion or manufacture a new plan. Independent moves
+already in the admitted plan still complete. This limitation is explicit, not a
+claim that retained publication recovery has been implemented.

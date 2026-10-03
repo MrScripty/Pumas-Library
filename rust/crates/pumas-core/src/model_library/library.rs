@@ -1482,7 +1482,8 @@ impl ModelLibrary {
         for record in existing {
             if !discovered.contains(&record.id) {
                 if publication_observation::claims_publication(&record.metadata) {
-                    self.refresh_retained_publication_record(&record)?;
+                    self.refresh_retained_publication_record_async(&record)
+                        .await?;
                 } else {
                     // A successful prune removes this snapshot's authority;
                     // a conflict leaves a newer row for its next observation.
@@ -1496,7 +1497,7 @@ impl ModelLibrary {
 
     async fn refresh_external_asset_state(&self, record: &ModelRecord) -> Result<bool> {
         if publication_observation::claims_publication(&record.metadata) {
-            return self.refresh_retained_publication_record(record);
+            return self.refresh_retained_publication_record_async(record).await;
         }
         let model_dir = self.indexed_model_dir(record)?;
         let Some(mut metadata) = load_model_metadata_async(self.clone(), model_dir.clone()).await?

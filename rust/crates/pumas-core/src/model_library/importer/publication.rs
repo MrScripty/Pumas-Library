@@ -13,6 +13,7 @@ use std::io::Read;
 
 use crate::model_library::download_recovery::IMPORT_DOCUMENT_MAX_BYTES;
 pub(crate) use crate::model_library::download_recovery::IMPORT_RECEIPT as RECEIPT_FILENAME;
+pub(crate) const EVIDENCE_SIZE_FIELD: &str = "import_publication.evidence_size";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -59,9 +60,10 @@ pub(crate) fn read_canonical_import_metadata(
     file.take(IMPORT_DOCUMENT_MAX_BYTES + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > IMPORT_DOCUMENT_MAX_BYTES {
-        return Err(PumasError::Other(
-            "Copied-import metadata exceeds its bounded observation limit".into(),
-        ));
+        return Err(PumasError::Validation {
+            field: EVIDENCE_SIZE_FIELD.into(),
+            message: "Copied-import metadata exceeds its bounded observation limit".into(),
+        });
     }
     let metadata = serde_json::from_slice(&bytes)?;
     if !destination.model_directory_exists()? {
@@ -341,9 +343,10 @@ fn read_receipt(destination: &DownloadRecoveryDestination) -> Result<Publication
     file.take(IMPORT_DOCUMENT_MAX_BYTES + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > IMPORT_DOCUMENT_MAX_BYTES {
-        return Err(PumasError::Other(
-            "Copied import publication receipt exceeds the supported size limit".into(),
-        ));
+        return Err(PumasError::Validation {
+            field: EVIDENCE_SIZE_FIELD.into(),
+            message: "Copied import publication receipt exceeds the supported size limit".into(),
+        });
     }
     Ok(serde_json::from_slice(&bytes)?)
 }

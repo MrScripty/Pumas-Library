@@ -86,6 +86,43 @@ use tokio::fs;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{info, warn};
 
+/// The timer belongs to one completion, including repeated attempts of a tag.
+#[derive(Clone, PartialEq, Eq)]
+struct CompletedProgressIdentity {
+    tag: String,
+    started_at: String,
+    completed_at: String,
+}
+
+impl CompletedProgressIdentity {
+    fn capture(progress: &InstallationProgress) -> Option<Self> {
+        Some(Self {
+            tag: progress.tag.clone()?,
+            started_at: progress.started_at.clone()?,
+            completed_at: progress.completed_at.clone()?,
+        })
+    }
+}
+
+async fn clear_matching_completed_progress(
+    tracker: &mut InstallationProgressTracker,
+    app_id: AppId,
+    expected: Option<CompletedProgressIdentity>,
+) {
+    let Some(expected) = expected else {
+        return;
+    };
+    let Some(current) = tracker.get_current_state() else {
+        return;
+    };
+    if CompletedProgressIdentity::capture(&current).as_ref() != Some(&expected)
+        || (app_id == AppId::LlamaCpp && installer::has_native_cleanup_pending(&current))
+    {
+        return;
+    }
+    tracker.clear_completed_state_async().await;
+}
+
 async fn path_exists(path: &Path) -> Result<bool> {
     fs::try_exists(path)
         .await
@@ -1159,6 +1196,12 @@ impl VersionManager {
                 tracker.set_error(&error.to_string());
                 tracker.complete_installation(false);
             }
+            let completed_progress = progress_tracker
+                .read()
+                .await
+                .get_current_state()
+                .as_ref()
+                .and_then(CompletedProgressIdentity::capture);
             let terminal = result.as_ref().map(|_| ()).map_err(ToString::to_string);
             tokio::select! {
                 _ = tx.send(match result {
@@ -1175,7 +1218,10 @@ impl VersionManager {
             let cleanup = tokio::spawn(async move {
                 tokio::select! {
                     _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                        progress_tracker.write().await.clear_completed_state_async().await;
+                        let mut tracker = progress_tracker.write().await;
+                        clear_matching_completed_progress(
+                            &mut tracker, app_id, completed_progress,
+                        ).await;
                     },
                     _ = wait_for_install_cancel(manager.torch_shutting_down.clone()) => {},
                 }
@@ -1354,9 +1400,11 @@ impl VersionManager {
         let removed_tag = tag.to_owned();
         let app_id = self.app_id;
         let versions_for_removal = self.versions_dir();
+        let cleanup_lock = native_versions_lock.clone();
         let remove = move || {
-            if app_id == AppId::LlamaCpp {
-                installer::mark_native_attempt_removed(&versions_for_removal, &removed_tag)?;
+            if let Some(lock) = cleanup_lock {
+                installer::mark_native_attempt_removed(&versions_for_removal, &removed_tag, lock)?
+                    .into_result()?;
             }
             info!("Removing version directory: {}", version_path.display());
             match std::fs::remove_dir_all(&version_path) {
@@ -2057,6 +2105,310 @@ mod tests {
         });
     }
 
+    #[tokio::test]
+    async fn native_completed_progress_clears_only_its_own_nonpending_completion() {
+        let root = TempDir::new().unwrap();
+        let mut tracker = InstallationProgressTracker::new(root.path().to_owned());
+        tracker.start_installation("ordinary", None, None, None);
+        tracker.complete_installation(true);
+        let ordinary = tracker
+            .get_current_state()
+            .as_ref()
+            .and_then(CompletedProgressIdentity::capture);
+        clear_matching_completed_progress(&mut tracker, AppId::LlamaCpp, ordinary).await;
+        assert!(tracker.get_current_state().is_none());
+
+        // A tag-only fence would clear these newer same-tag completions. Vary
+        // each timestamp independently, without relying on wall-clock precision.
+        for old_start in [true, false] {
+            tracker.start_installation("same-tag", None, None, None);
+            tracker.complete_installation(true);
+            let current = tracker.get_current_state().unwrap();
+            let current_identity = CompletedProgressIdentity::capture(&current).unwrap();
+            let mut old_identity = current_identity.clone();
+            if old_start {
+                old_identity.started_at = "1970-01-01T00:00:00+00:00".into();
+            } else {
+                old_identity.completed_at = "1970-01-01T00:00:00+00:00".into();
+            }
+            clear_matching_completed_progress(&mut tracker, AppId::LlamaCpp, Some(old_identity))
+                .await;
+            assert!(tracker.get_current_state().is_some());
+            clear_matching_completed_progress(
+                &mut tracker,
+                AppId::LlamaCpp,
+                Some(current_identity),
+            )
+            .await;
+            assert!(tracker.get_current_state().is_none());
+        }
+
+        for old_pending in [false, true] {
+            for new_pending in [false, true] {
+                tracker.start_installation("first", None, None, None);
+                if old_pending {
+                    tracker.update_stage(
+                        pumas_library::models::InstallationStage::Setup,
+                        100.0,
+                        Some("Installed output verified; staging cleanup pending: first"),
+                    );
+                }
+                tracker.complete_installation(true);
+                let old = tracker
+                    .get_current_state()
+                    .as_ref()
+                    .and_then(CompletedProgressIdentity::capture);
+                if old_pending {
+                    clear_matching_completed_progress(&mut tracker, AppId::LlamaCpp, old.clone())
+                        .await;
+                    assert!(tracker.get_current_state().is_some());
+                }
+                tracker.start_installation("unrelated-newer", None, None, None);
+                if new_pending {
+                    tracker.update_stage(
+                        pumas_library::models::InstallationStage::Setup,
+                        100.0,
+                        Some("Installed output verified; staging cleanup pending: newer"),
+                    );
+                }
+                tracker.complete_installation(true);
+                let newer = tracker.get_current_state().unwrap();
+                let expected = CompletedProgressIdentity::capture(&newer);
+                clear_matching_completed_progress(&mut tracker, AppId::LlamaCpp, old).await;
+                let observed = tracker.get_current_state().unwrap();
+                assert_eq!(observed.tag, newer.tag);
+                assert_eq!(observed.current_item, newer.current_item);
+                clear_matching_completed_progress(&mut tracker, AppId::LlamaCpp, expected).await;
+                assert_eq!(tracker.get_current_state().is_some(), new_pending);
+            }
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_adopted_output_survives_legacy_or_mismatched_cleanup_custody() {
+        for legacy in [false, true] {
+            let root = TempDir::new().unwrap();
+            let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+            let api = pumas_library::PumasApi::builder(root.path())
+                .with_hf_client(false)
+                .with_process_manager(false)
+                .build()
+                .await
+                .unwrap();
+            let mut manager = VersionManager::new_with_acquisition(
+                root.path(),
+                AppId::LlamaCpp,
+                api.acquisition().clone(),
+            )
+            .await
+            .unwrap();
+            manager.github_client = Arc::new(
+                GitHubClient::with_loopback_api(
+                    manager.cache_dir(),
+                    Duration::from_secs(3600),
+                    base_url,
+                )
+                .unwrap(),
+            );
+            let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+            tokio::time::timeout(Duration::from_secs(2), observed)
+                .await
+                .unwrap()
+                .unwrap();
+            release.send(true).unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    match updates.recv().await.unwrap() {
+                        ProgressUpdate::Completed { success: true } => break,
+                        ProgressUpdate::Error { message } => {
+                            panic!("installation failed: {message}")
+                        }
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            server.await.unwrap();
+            manager.shutdown_installations().await.unwrap();
+            api.shutdown_acquisition().await.unwrap();
+            let versions = manager.versions_dir();
+            let output = manager.version_path("b1234+cpu").join("bin/llama-server");
+            let output_before = std::fs::read(&output).unwrap();
+            let store_path = root.path().join("launcher-data/downloads.json");
+            let store_before = std::fs::read(&store_path).unwrap();
+            let store: serde_json::Value = serde_json::from_slice(&store_before).unwrap();
+            let record = store["acquisitions"]
+                .as_object()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap();
+            assert_eq!(record["phase"]["state"], "adopted");
+            let stage = versions.join(record["workspace"]["relative_target"].as_str().unwrap());
+            assert!(!stage.exists());
+            std::fs::create_dir(&stage).unwrap();
+            std::fs::write(stage.join("sentinel"), b"unowned retained stage").unwrap();
+            let identity_path = std::fs::read_dir(&versions)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with(".llama-attempt-")
+                })
+                .unwrap();
+            let mut identity: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&identity_path).unwrap()).unwrap();
+            if legacy {
+                identity["schema_version"] = serde_json::json!(1);
+                identity.as_object_mut().unwrap().remove("binding");
+                identity.as_object_mut().unwrap().remove("cleanup_pending");
+            } else {
+                // Deterministic mismatch even on a filesystem reusing the
+                // removed leaf's inode. This models retained v2 custody loss.
+                identity["binding"]["components"][0][1] = serde_json::json!(0);
+                identity["cleanup_pending"] =
+                    serde_json::json!("retained cleanup requires reconciliation");
+            }
+            std::fs::write(&identity_path, serde_json::to_vec(&identity).unwrap()).unwrap();
+            drop(manager);
+            drop(api);
+            let reopened_api = pumas_library::PumasApi::builder(root.path())
+                .with_hf_client(false)
+                .with_process_manager(false)
+                .build()
+                .await
+                .unwrap();
+            let reopened = VersionManager::new_with_acquisition(
+                root.path(),
+                AppId::LlamaCpp,
+                reopened_api.acquisition().clone(),
+            )
+            .await
+            .unwrap();
+            let progress = reopened
+                .progress_tracker
+                .read()
+                .await
+                .get_current_state()
+                .unwrap();
+            assert_eq!(progress.success, Some(true));
+            assert!(progress.error.is_none());
+            assert!(progress.current_item.unwrap().contains("cleanup pending"));
+            assert!(reopened
+                .metadata_manager
+                .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+                .unwrap()
+                .is_some());
+            assert_eq!(std::fs::read(&output).unwrap(), output_before);
+            assert_eq!(
+                std::fs::read(stage.join("sentinel")).unwrap(),
+                b"unowned retained stage"
+            );
+            assert_eq!(std::fs::read(&store_path).unwrap(), store_before);
+            reopened.shutdown_installations().await.unwrap();
+            reopened_api.shutdown_acquisition().await.unwrap();
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_cancel_failed_clear_keeps_using_and_both_error_causes() {
+        let root = TempDir::new().unwrap();
+        let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
+        let pause = Arc::new(installer::TorchPublicationPause::new());
+        manager.native_receipt_pause = Some(pause.clone());
+        let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        release.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), pause.reached.notified())
+            .await
+            .unwrap();
+        let store_path = root.path().join("launcher-data/downloads.json");
+        let before: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap();
+        let record = before["acquisitions"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap();
+        let stage = manager
+            .versions_dir()
+            .join(record["workspace"]["relative_target"].as_str().unwrap());
+        let input = record["files"][0]["path"].as_str().unwrap();
+        let original_input = std::fs::read(stage.join(input)).unwrap();
+        let retired = root.path().join("retired-stage");
+        std::fs::rename(&stage, &retired).unwrap();
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::write(stage.join("sentinel"), b"replacement").unwrap();
+        assert!(manager.cancel_installation().await.unwrap());
+        pause.resume.add_permits(1);
+        let error = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match updates.recv().await.unwrap() {
+                    ProgressUpdate::Error { message } => break message,
+                    ProgressUpdate::Completed { success } => {
+                        panic!("failed cancellation completed: {success}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(error.to_lowercase().contains("cancel"), "{error}");
+        assert!(error.contains("binding changed"), "{error}");
+        server.await.unwrap();
+        assert!(manager.shutdown_installations().await.is_err());
+        let after: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap();
+        assert_eq!(
+            after["acquisitions"]
+                .as_object()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap()["phase"]["state"],
+            "using"
+        );
+        assert!(after["consumer_receipts"].as_object().unwrap().is_empty());
+        assert_eq!(
+            std::fs::read(stage.join("sentinel")).unwrap(),
+            b"replacement"
+        );
+        assert_eq!(std::fs::read(retired.join(input)).unwrap(), original_input);
+        assert!(!manager.version_path("b1234+cpu").exists());
+        let _ = api.shutdown_acquisition().await;
+    }
+
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
     async fn native_cancel_before_completion_receipt_prevents_publication() {
@@ -2547,12 +2899,12 @@ mod tests {
             serde_json::to_value(orphan_metadata).unwrap()
         );
 
-        // Missing custody is a separate refusal boundary. The native opener
-        // may reserve an empty directory at the exact attempt path, but input
-        // receipts are checked before any consumer callback; the orphan output
-        // and metadata remain untouched.
+        // Missing v2 custody is a separate refusal boundary. Reopening must
+        // not recreate the active attempt's leaf or reach a consumer callback;
+        // orphan output, native attempt proof, and metadata remain untouched.
         std::fs::remove_dir_all(&workspace).unwrap();
         assert!(!workspace.exists());
+        let missing_versions = snapshot(&versions);
         let missing_custody_consumer = Arc::new(
             reopened_api
                 .acquisition()
@@ -2591,7 +2943,7 @@ mod tests {
                     ..
                 } if source.kind() == std::io::ErrorKind::NotFound
             ),
-            "missing custody must fail during input verification: {missing_custody}"
+            "missing custody must fail while reopening the bound stage: {missing_custody}"
         );
         assert!(
             tokio::time::timeout(Duration::from_secs(5), missing_custody_consumer.shutdown())
@@ -2616,7 +2968,11 @@ mod tests {
         assert_eq!(snapshot(&metadata), retained_metadata);
         assert!(!archive.exists());
         assert!(!workspace.join("output").exists());
-        assert_eq!(snapshot(&workspace).len(), 1);
+        assert!(
+            !workspace.exists(),
+            "cold reopen must not manufacture staging"
+        );
+        assert_eq!(snapshot(&versions), missing_versions);
         assert_eq!(
             std::fs::read(versions.join("authored-sentinel")).unwrap(),
             b"preserve authored state"
@@ -3932,6 +4288,53 @@ mod tests {
         drop(reopened_api);
     }
 
+    /// Model a new, unowned leaf appearing after successful owned cleanup.
+    /// Keep the old record unchanged, and avoid accidental inode reuse making
+    /// the replacement appear to have the old attempt's physical binding.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn native_replacement_workspace_fixture(
+        versions: &Path,
+        tag: &str,
+        relative: &str,
+        contents: &[u8],
+    ) -> (PathBuf, PathBuf) {
+        use pumas_library::acquisition::{ReservedDirectory, ReservedDirectoryBinding};
+        use sha2::Digest;
+        let _lock = installer::NativeVersionsLock::try_acquire(versions).unwrap();
+        let digest = format!("{:x}", sha2::Sha256::digest(tag.as_bytes()));
+        let attempt_path = versions.join(format!(".llama-attempt-{}.json", &digest[..24]));
+        let attempt_bytes = std::fs::read(&attempt_path).unwrap();
+        let attempt: serde_json::Value = serde_json::from_slice(&attempt_bytes).unwrap();
+        assert_eq!(attempt["schema_version"], 2);
+        let expected: ReservedDirectoryBinding =
+            serde_json::from_value(attempt["binding"].clone()).unwrap();
+        let workspace = versions.join(relative);
+        assert!(
+            !workspace.exists(),
+            "owned publication cleanup must already have finished"
+        );
+        std::fs::create_dir(&workspace).unwrap();
+        let observe = || {
+            ReservedDirectory::capture(versions, Path::new(relative), Arc::new(()), || Ok(()))
+                .unwrap()
+        };
+        let replacement = observe();
+        if replacement.binding() == &expected {
+            // Reserve the reused inode until its replacement has been created.
+            // This changes only fixture files, never the durable custody proof.
+            let occupied = tempfile::tempdir_in(versions.parent().unwrap()).unwrap();
+            std::fs::rename(&workspace, occupied.path().join("reused-inode")).unwrap();
+            std::fs::create_dir(&workspace).unwrap();
+            let distinct = observe();
+            assert_ne!(distinct.binding(), &expected);
+        }
+        drop(replacement);
+        assert_ne!(observe().binding(), &expected);
+        std::fs::write(workspace.join("stale"), contents).unwrap();
+        assert_eq!(std::fs::read(&attempt_path).unwrap(), attempt_bytes);
+        (workspace, attempt_path)
+    }
+
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
     async fn native_direct_recovery_cancellation_retains_effect_until_shared_shutdown() {
@@ -3982,18 +4385,20 @@ mod tests {
             .into_values()
             .next()
             .unwrap();
-        let attempt = record.demand.operation.rsplit_once(':').unwrap().1;
-        use sha2::Digest;
-        let digest = format!("{:x}", sha2::Sha256::digest(b"b1234+cpu"));
-        let stale_workspace = manager
-            .versions_dir()
-            .join(format!(".llama-install-{}-{attempt}", &digest[..24]));
-        std::fs::create_dir(&stale_workspace).unwrap();
-        std::fs::write(
-            stale_workspace.join("stale"),
+        let (stale_workspace, attempt_path) = native_replacement_workspace_fixture(
+            &manager.versions_dir(),
+            "b1234+cpu",
+            &record.workspace.relative_target,
             b"registered recovery cleanup",
-        )
-        .unwrap();
+        );
+        let before_attempt: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&attempt_path).unwrap()).unwrap();
+        assert!(before_attempt.get("cleanup_pending").is_none());
+        let installed_before = manager
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .unwrap();
         let (pause, resume) = installer::NativeRecoveryPause::new();
         let pause = Arc::new(pause);
         let direct = VersionInstaller::new(
@@ -4028,7 +4433,34 @@ mod tests {
             .unwrap()
             .unwrap()
             .unwrap();
-        assert!(!stale_workspace.exists());
+        assert_eq!(
+            std::fs::read(stale_workspace.join("stale")).unwrap(),
+            b"registered recovery cleanup"
+        );
+        let after_attempt: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&attempt_path).unwrap()).unwrap();
+        assert!(after_attempt["cleanup_pending"]
+            .as_str()
+            .unwrap()
+            .contains("physical binding changed"));
+        let mut expected_attempt = before_attempt;
+        expected_attempt["cleanup_pending"] = after_attempt["cleanup_pending"].clone();
+        assert_eq!(
+            after_attempt, expected_attempt,
+            "joined recovery may update diagnostics, not custody"
+        );
+        assert_eq!(
+            serde_json::to_value(
+                manager
+                    .metadata_manager
+                    .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+                    .unwrap()
+                    .unwrap()
+            )
+            .unwrap(),
+            serde_json::to_value(installed_before).unwrap()
+        );
+        assert!(installer::NativeVersionsLock::try_acquire(&manager.versions_dir()).is_ok());
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -4091,32 +4523,24 @@ mod tests {
                 .unwrap();
         assert!(output.status.success());
         assert_eq!(output.stdout, b"native-fixture");
-        use sha2::Digest;
         let document: serde_json::Value = serde_json::from_slice(
             &std::fs::read(root.path().join("launcher-data/downloads.json")).unwrap(),
         )
         .unwrap();
-        let operation = document["acquisitions"]
+        let record = document["acquisitions"]
             .as_object()
             .unwrap()
             .values()
             .next()
-            .unwrap()["demand"]["operation"]
-            .as_str()
             .unwrap();
-        let attempt = operation.rsplit_once(':').unwrap().1;
-        let tag_digest = format!("{:x}", sha2::Sha256::digest(b"b1234+cpu"));
-        let stale_workspace = manager
-            .versions_dir()
-            .join(format!(".llama-install-{}-{attempt}", &tag_digest[..24]));
-        std::fs::create_dir(&stale_workspace).unwrap();
-        std::fs::write(
-            stale_workspace.join("stale"),
+        let (stale_workspace, attempt_path) = native_replacement_workspace_fixture(
+            &manager.versions_dir(),
+            "b1234+cpu",
+            record["workspace"]["relative_target"].as_str().unwrap(),
             b"retry cleanup after adoption",
-        )
-        .unwrap();
-        // Direct public construction must finish the same retained adopted-use
-        // recovery before it returns an installer that can admit new work.
+        );
+        // Direct public construction must finish adopted-output verification
+        // while preserving this unowned replacement and reporting cleanup pending.
         let direct = VersionInstaller::new(
             root.path().to_path_buf(),
             AppId::LlamaCpp,
@@ -4127,7 +4551,25 @@ mod tests {
         .with_acquisition(api.acquisition().clone())
         .await
         .unwrap();
-        assert!(!stale_workspace.exists());
+        assert_eq!(
+            std::fs::read(stale_workspace.join("stale")).unwrap(),
+            b"retry cleanup after adoption"
+        );
+        let pending: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&attempt_path).unwrap()).unwrap();
+        assert!(pending["cleanup_pending"]
+            .as_str()
+            .unwrap()
+            .contains("physical binding changed"));
+        let progress = manager
+            .progress_tracker
+            .read()
+            .await
+            .get_current_state()
+            .unwrap();
+        assert_eq!(progress.success, Some(true));
+        assert!(progress.error.is_none());
+        assert!(progress.current_item.unwrap().contains("cleanup pending"));
         drop(direct);
         let reopened = VersionManager::new_with_acquisition(
             root.path(),
@@ -4140,6 +4582,19 @@ mod tests {
             reopened.get_installed_versions().await.unwrap(),
             vec!["b1234+cpu"]
         );
+        assert_eq!(
+            std::fs::read(stale_workspace.join("stale")).unwrap(),
+            b"retry cleanup after adoption"
+        );
+        // Remove only the replacement authored by this test, under the native
+        // lock. Production recovery must never gain ownership merely to satisfy
+        // the later explicit-removal/reinstall portion of this test.
+        {
+            let _lock =
+                installer::NativeVersionsLock::try_acquire(&manager.versions_dir()).unwrap();
+            std::fs::remove_file(stale_workspace.join("stale")).unwrap();
+            std::fs::remove_dir(&stale_workspace).unwrap();
+        }
         assert!(std::fs::read_dir(manager.versions_dir())
             .unwrap()
             .all(|entry| {
@@ -4172,6 +4627,9 @@ mod tests {
         )
         .await
         .unwrap();
+        let reconciled_attempt: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&attempt_path).unwrap()).unwrap();
+        assert!(reconciled_attempt.get("cleanup_pending").is_none());
         let mut keep = reinstall
             .get_version_info("b1234+cpu")
             .await

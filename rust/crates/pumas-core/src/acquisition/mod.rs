@@ -32,4 +32,7 @@ pub use service::{
     AcquisitionRecord, AcquisitionRetryPolicy, AcquisitionService,
 };
 pub use store::AcquisitionStore;
-pub use workspace::{AcquisitionWorkspace, VerifiedFile, WorkspaceIdentity};
+pub use workspace::{
+    AcquisitionWorkspace, ReservedDirectory, ReservedDirectoryBinding, VerifiedFile,
+    WorkspaceIdentity,
+};

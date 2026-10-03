@@ -586,7 +586,7 @@ async fn copied_import_diffusers_prepublication_failure_cleans_and_postpublicati
 }
 
 #[tokio::test]
-async fn copied_import_actual_hash_and_metadata_failures_cleanup_workspace() {
+async fn copied_import_payload_and_metadata_mutations_retain_unknown_workspace() {
     for metadata_failure in [false, true] {
         let mut fixture = Fixture::new().await;
         fixture.importer.import_hook = Some(Arc::new(move |boundary, stage| {
@@ -599,15 +599,40 @@ async fn copied_import_actual_hash_and_metadata_failures_cleanup_workspace() {
             }
             Ok(())
         }));
-        assert!(fixture.importer.import(&fixture.spec).await.is_err());
+        let error = fixture.importer.import(&fixture.spec).await.unwrap_err();
+        assert!(matches!(&error, PumasError::ImportFailed { .. }), "{error}");
+        let diagnostic = error.to_string();
+        assert!(diagnostic.contains("custody unknown"), "{diagnostic}");
+        assert!(diagnostic.contains("cleanup failed"), "{diagnostic}");
+        let stages = fixture.stages();
+        assert_eq!(stages.len(), 1);
+        let retained = &stages[0];
+        assert!(
+            diagnostic.contains(retained.to_str().unwrap()),
+            "{diagnostic}"
+        );
         if metadata_failure {
             // A new directory at a metadata-file path is unknown custody.
-            assert_eq!(fixture.stages().len(), 1);
-            assert!(fixture.stages()[0].join("metadata.json").is_dir());
+            assert!(retained.join("metadata.json").is_dir());
+            assert_eq!(
+                std::fs::read(retained.join("model.onnx")).unwrap(),
+                b"synthetic ONNX payload"
+            );
         } else {
-            assert!(fixture.stages().is_empty());
+            // Hashes already came from the copy stream. Removing the copied
+            // file now invalidates namespace evidence before receipt creation;
+            // the producer cannot claim cleanup authority over that mutation.
+            assert!(!retained.join("model.onnx").exists());
+            assert_eq!(std::fs::read(retained.join("metadata.json")).unwrap(), b"");
+            assert_eq!(std::fs::read(retained.join(RECEIPT_FILENAME)).unwrap(), b"");
         }
         assert!(!fixture.target().exists());
+        assert_eq!(fixture.library.model_count().unwrap(), 0);
+        assert_eq!(fixture.library.model_dirs().count(), 0);
+        assert_eq!(
+            std::fs::read(Path::new(&fixture.spec.path).join("Model.onnx")).unwrap(),
+            b"synthetic ONNX payload"
+        );
         assert!(fixture.tasks.shutdown_owned().await.is_err());
     }
 }

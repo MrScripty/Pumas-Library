@@ -486,13 +486,15 @@ async fn copied_import_public_metadata_edits_and_reinspection_cannot_forge_confi
         } else {
             forged.import_publication.as_mut().unwrap().confirmed = true;
         }
-        assert!(fixture
+        let error = fixture
             .library
             .save_metadata(&target, &forged)
             .await
-            .unwrap_err()
-            .to_string()
-            .contains("finalization is incomplete"));
+            .unwrap_err();
+        assert!(
+            matches!(&error, PumasError::Validation { field, .. } if field == "import_publication"),
+            "{error}"
+        );
         assert!(fixture
             .library
             .upsert_index_from_metadata(&target, &forged)
@@ -550,13 +552,11 @@ async fn copied_import_public_metadata_edits_and_reinspection_cannot_forge_confi
         model_card_json: None,
         license_status: None,
     };
-    assert!(fixture
-        .importer
-        .import_in_place(&spec)
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("unconfirmed"));
+    let error = fixture.importer.import_in_place(&spec).await.unwrap_err();
+    assert!(
+        matches!(&error, PumasError::Validation { field, .. } if field == "import_publication"),
+        "{error}"
+    );
     assert_eq!(fixture.importer.adopt_orphans(false).await.adopted, 0);
     assert_eq!(
         std::fs::read(target.join("metadata.json")).unwrap(),

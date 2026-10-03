@@ -64,6 +64,7 @@ async fn serve_connection(
     socket: TcpStream,
     requests: mpsc::Sender<OwnedRequest>,
     mut stopping: watch::Receiver<Option<Instant>>,
+    shutdown: ShutdownRequest,
 ) -> Result<(), &'static str> {
     let service = hyper::service::service_fn(move |request| {
         let requests = requests.clone();
@@ -91,7 +92,11 @@ async fn serve_connection(
             break deadline;
         }
         tokio::select! {
-            _ = &mut connection => return Ok(()),
+            result = &mut connection => return if result.is_err() && shutdown.is_requested() {
+                Err("HTTP response transport failed during shutdown; completion unconfirmed")
+            } else {
+                Ok(())
+            },
             changed = stopping.changed() => {
                 // Only the listener owner holds the sender until all tasks join.
                 if changed.is_err() { return Err("HTTP connection shutdown owner disappeared"); }
@@ -138,7 +143,7 @@ pub(crate) async fn serve(
             Some(request) = receive_request.recv() => spawn_request(&mut requests, app.clone(), request),
             accepted = listener.accept() => match accepted {
                 Ok((socket, _)) => {
-                    connections.spawn(serve_connection(socket, send_request.clone(), stopping.clone()));
+                    connections.spawn(serve_connection(socket, send_request.clone(), stopping.clone(), shutdown.clone()));
                 }
                 Err(error) => {
                     failures.push(format!("HTTP listener failed: {error}"));
@@ -363,5 +368,28 @@ mod tests {
             .unwrap()
             .unwrap()
             .unwrap();
+    }
+    #[tokio::test]
+    async fn connection_error_already_ready_when_shutdown_starts_is_not_success() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (socket, _) = listener.accept().await.unwrap();
+        client.write_all(b"\x00\r\n\r\n").await.unwrap();
+        let shutdown = ShutdownRequest::default();
+        shutdown.request();
+        // The supervisor has not yet published a connection deadline. Even if
+        // Hyper's ready error wins that notification race, its receipt is failed.
+        let (_stop, stopping) = watch::channel(None);
+        let (requests, _received) = mpsc::channel(1);
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            serve_connection(socket, requests, stopping, shutdown),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert!(error.contains("completion unconfirmed"), "{error}");
     }
 }

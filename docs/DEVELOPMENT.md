@@ -121,7 +121,7 @@ release risk requires it.
 Repository hooks provide optional early local feedback when a contributor
 installs them. They can block that local Git operation, but Git bypass remains
 operator authority and the hooks do not establish repository acceptance. CI
-runs on pull requests targeting `main`, pushes to `main`, version-tag pushes,
+runs on pull requests targeting every branch, pushes to `main`, version-tag pushes,
 and manual dispatches. Source quality and contract jobs run for every trigger;
 fully optimized builds, packages, smoke checks, artifact uploads, and candidate
 assembly run only when the selected ref is a `v*` version tag. A failing step

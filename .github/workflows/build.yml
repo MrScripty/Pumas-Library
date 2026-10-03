@@ -226,6 +226,10 @@ jobs:
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned
       # Exercise the integrated filesystem and registry repairs on each host;
       # compilation of these modules alone is not native behavioral evidence.
+      - name: Test native GGUF file-type inspection
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::package_facts::gguf::tests
+      - name: Test native GGUF inspector cache invalidation
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library gguf_inspector_revision_invalidates_legacy_fingerprint_only_for_gguf
       - name: Test native import integrity
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::importer::tests
       - name: Test native shard completeness

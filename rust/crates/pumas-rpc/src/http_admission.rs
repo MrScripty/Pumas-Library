@@ -51,10 +51,12 @@ fn is_allowed_host(value: &HeaderValue) -> bool {
     let Ok(authority) = value.parse::<Authority>() else {
         return false;
     };
-    if authority.port().is_some() && authority.port_u16().is_none() {
+    let host = authority.host();
+    // Authority::port() returns None for both an absent and an invalid port.
+    // Any suffix after the host must therefore be a valid numeric port.
+    if authority.as_str() != host && authority.port_u16().is_none() {
         return false;
     }
-    let host = authority.host();
     let host = host
         .strip_prefix('[')
         .and_then(|host| host.strip_suffix(']'))
@@ -106,6 +108,7 @@ mod tests {
             "localhost:9000",
             "LOCALHOST",
             "[::1]:9000",
+            "[::1]",
         ] {
             let mut headers = local_headers();
             headers.insert(header::HOST, HeaderValue::from_str(host).unwrap());
@@ -151,6 +154,10 @@ mod tests {
             "[::]",
             "user@localhost",
             "localhost:invalid",
+            "localhost:",
+            "localhost:65536",
+            "[::1]:invalid",
+            "[::1]:",
             "localhost/path",
         ] {
             let mut headers = local_headers();

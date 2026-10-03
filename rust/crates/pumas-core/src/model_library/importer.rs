@@ -78,6 +78,8 @@ pub(super) const TEMP_IMPORT_PREFIX: &str = ".tmp_import_";
 
 #[cfg(test)]
 mod acquisition_integration_tests;
+#[cfg(test)]
+mod admission_tests;
 pub(super) mod publication;
 mod recovery;
 mod staging;
@@ -1039,6 +1041,10 @@ impl ModelImporter {
         revision: &DownloadRevision,
     ) -> Result<ModelImportResult> {
         let authority = self.library.mutation_authority()?;
+        // An unavailable copied publication is an ordinary read-only refusal,
+        // not failed owned work. This grants no authority: the guarded effects
+        // still enforce their readiness fence and retain every later failure.
+        self.preflight_in_place_publication(&spec.model_dir).await?;
         let tasks = authority.tasks();
         let importer = self.clone();
         let spec = spec.clone();
@@ -1069,6 +1075,81 @@ impl ModelImporter {
             .await?
     }
 
+    /// Observe only rooted, bounded canonical evidence before owner admission.
+    /// This read-only destination never acquires mutation custody or authorizes
+    /// effects. The admitted guard independently repeats the readiness fence.
+    async fn preflight_in_place_publication(&self, model_dir: &Path) -> Result<()> {
+        let library = self.library.clone();
+        let model_dir = model_dir.to_path_buf();
+        self.library
+            .run_import_blocking("preflight in-place publication readiness", move || {
+                let root = crate::model_library::DownloadDestinationRoot::open_import_read_only(
+                    library.library_root(),
+                )?;
+                let destination = root.resolve(&model_dir)?;
+                let canonical = publication::read_held_canonical_import_metadata(&destination)?;
+                let record = library.index().get(&destination.library_model_id())?;
+                let indexed_identity = record
+                    .as_ref()
+                    .and_then(|record| record.metadata.get("import_publication"))
+                    .filter(|value| !value.is_null());
+                let claimed = indexed_identity.is_some()
+                    || canonical.as_ref().is_some_and(|metadata| metadata.import_publication.is_some())
+                    || destination.import_receipt_claimed()?;
+                if !claimed {
+                    return Ok(());
+                }
+                let ready = match canonical.as_ref() {
+                    Some(metadata) if metadata.import_publication.is_some() => {
+                        metadata.copied_import_ready()
+                            && record.as_ref().is_some_and(|record| {
+                                crate::models::copied_import_ready_value(&record.metadata)
+                            })
+                            && indexed_identity.and_then(|identity| identity.get("id"))
+                                .and_then(serde_json::Value::as_str)
+                                == metadata.import_publication.as_ref().map(|identity| identity.id.as_str())
+                            && publication::held_confirmed_receipt_matches(&destination, metadata, false)?
+                    }
+                    _ => false,
+                };
+                if !ready {
+                    return Err(PumasError::Validation {
+                        field: "import_publication".into(),
+                        message: "An unconfirmed copied import cannot be adopted or finalized in place; retain it for explicit diagnosis".into(),
+                    });
+                }
+                Ok(())
+            })
+            .await?
+    }
+
+    /// Repeat the readiness fence using the already-admitted guard's held
+    /// destination. No preflight observation substitutes for this authority.
+    async fn require_in_place_publication_ready(&self, model_dir: &Path) -> Result<()> {
+        let library = self.library.clone();
+        let model_dir = model_dir.to_path_buf();
+        self.library
+            .run_import_blocking("observe in-place publication readiness", move || {
+                let metadata_path = model_dir.join("metadata.json");
+                if metadata_path
+                    .try_exists()
+                    .map_err(|error| PumasError::io_with_path(error, &metadata_path))?
+                    || publication::receipt_path_claimed(&model_dir)
+                {
+                    let existing = library.load_metadata(&model_dir)?.unwrap_or_default();
+                    library.require_finalized_import_edit(&model_dir, Some(&existing))?;
+                    if !existing.copied_import_ready() {
+                        return Err(PumasError::Validation {
+                            field: "import_publication".into(),
+                            message: "An unconfirmed copied import cannot be adopted or finalized in place; retain it for explicit diagnosis".into(),
+                        });
+                    }
+                }
+                Ok(())
+            })
+            .await?
+    }
+
     /// Runs only on a private library clone carrying the admitted effect lease.
     async fn import_in_place_effects(
         &self,
@@ -1079,19 +1160,7 @@ impl ModelImporter {
         let model_dir = &spec.model_dir;
         let metadata_path = model_dir.join("metadata.json");
 
-        if path_exists(&metadata_path).await? || publication::receipt_path_claimed(model_dir) {
-            let existing =
-                load_model_metadata_or_default(self.library.clone(), model_dir.to_path_buf())
-                    .await?;
-            self.library
-                .require_finalized_import_edit(model_dir, Some(&existing))?;
-            if !existing.copied_import_ready() {
-                return Err(PumasError::Validation {
-                    field: "import_publication".into(),
-                    message: "An unconfirmed copied import cannot be adopted or finalized in place; retain it for explicit diagnosis".into(),
-                });
-            }
-        }
+        self.require_in_place_publication_ready(model_dir).await?;
 
         // Guard: skip if metadata already exists (idempotent)
         if mode == InPlaceImportMode::PreserveExisting && path_exists(&metadata_path).await? {

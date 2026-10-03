@@ -662,9 +662,16 @@ impl AcquisitionWorkspace {
     pub(crate) fn verify_file(&self, file: &ArtifactFile, partial: bool) -> Result<VerifiedFile> {
         let (parent, name) = self.parent(file.logical_path(), false)?;
         let name = if partial { staging_path(&name) } else { name };
-        let mut options = options();
-        options.read(true);
-        let mut handle = parent.open_with(&name, &options)?.into_std();
+        let mut read_options = options();
+        read_options.read(true);
+        let mut verification_options = options();
+        verification_options.read(true);
+        // Windows FlushFileBuffers requires GENERIC_WRITE. Hash and flush the
+        // same held descriptor without creating/truncating or changing access
+        // policy; the later name-binding observation remains read-only.
+        #[cfg(windows)]
+        verification_options.write(true);
+        let mut handle = parent.open_with(&name, &verification_options)?.into_std();
         let before = Metadata::from_file(&handle)?;
         if !before.is_file()
             || file
@@ -686,7 +693,8 @@ impl AcquisitionWorkspace {
         let digest = hex::encode(hash.finalize());
         let after = Metadata::from_file(&handle)?;
         let (current_parent, _) = self.parent(file.logical_path(), false)?;
-        let current = Metadata::from_file(&current_parent.open_with(&name, &options)?.into_std())?;
+        let current =
+            Metadata::from_file(&current_parent.open_with(&name, &read_options)?.into_std())?;
         if identity(&after)? != binding
             || identity(&current)? != binding
             || before.len() != after.len()
@@ -865,6 +873,176 @@ pub(crate) fn write_chunk(file: &mut std::fs::File, bytes: &[u8]) -> Result<()> 
 mod tests {
     use super::*;
     use crate::acquisition::FileVerificationRequirement;
+
+    fn verification_manifest(payload: &[u8]) -> ArtifactManifest {
+        use crate::acquisition::{
+            ArtifactRevisionEvidence, ArtifactSourceIdentity, RevisionStrength, Sha256Evidence,
+        };
+        ArtifactManifest::new(
+            ArtifactSourceIdentity::new(
+                "fixture",
+                "payload",
+                ArtifactRevisionEvidence::new(
+                    "fixture.revision",
+                    "v1",
+                    RevisionStrength::Immutable,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+            vec![ArtifactFile::new(
+                "payload.bin",
+                "payload",
+                Some(payload.len() as u64),
+                Some(
+                    Sha256Evidence::new("fixture.sha256", hex::encode(Sha256::digest(payload)))
+                        .unwrap(),
+                ),
+                FileVerificationRequirement::Sha256,
+            )
+            .unwrap()],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn acquisition_integration_verified_payload_keeps_bytes_and_refusals() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("payload.bin");
+        std::fs::write(&path, b"DATA").unwrap();
+        let original_identity =
+            identity(&Metadata::from_file(&std::fs::File::open(&path).unwrap()).unwrap()).unwrap();
+        let current = Arc::new(AtomicBool::new(true));
+        let observed = current.clone();
+        let workspace = AcquisitionWorkspace::from_capability(
+            crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+            WorkspaceIdentity {
+                root_identity: "verification-fixture".into(),
+                relative_target: "stage".into(),
+            },
+            Arc::new(()),
+            move || {
+                if observed.load(Ordering::Acquire) {
+                    Ok(())
+                } else {
+                    Err(changed())
+                }
+            },
+        )
+        .unwrap();
+        let manifest = verification_manifest(b"DATA");
+        let receipts = workspace.seal(&manifest).unwrap();
+        assert_eq!(
+            receipts,
+            vec![VerifiedFile {
+                path: "payload.bin".into(),
+                bytes: 4,
+                sha256: hex::encode(Sha256::digest(b"DATA"))
+            }]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"DATA");
+        assert_eq!(
+            identity(&Metadata::from_file(&std::fs::File::open(&path).unwrap()).unwrap()).unwrap(),
+            original_identity
+        );
+        workspace.verify_receipts(&manifest, &receipts).unwrap();
+        assert!(workspace.open_part("payload.bin", false).is_err());
+        assert!(!temp.path().join("payload.bin.part").exists());
+        // Reinspection keeps size/digest refusals; no overwrite or truncation is
+        // permitted merely because the Windows descriptor can flush.
+        std::fs::write(&path, b"WRONG-SIZE").unwrap();
+        assert!(matches!(workspace.verify_receipts(&manifest, &receipts),
+            Err(PumasError::Validation { ref field, .. }) if field == "acquisition.workspace"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"WRONG-SIZE");
+        std::fs::write(&path, b"EVIL").unwrap();
+        assert!(matches!(
+            workspace.verify_receipts(&manifest, &receipts),
+            Err(PumasError::HashMismatch { .. })
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), b"EVIL");
+        std::fs::write(&path, b"DATA").unwrap();
+        current.store(false, Ordering::Release);
+        assert!(
+            matches!(workspace.verify_receipts(&manifest, &receipts), Err(PumasError::Validation { ref field, .. }) if field == "acquisition.workspace")
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"DATA");
+    }
+
+    #[test]
+    fn acquisition_integration_verified_partial_publishes_before_seal() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = AcquisitionWorkspace::from_capability(
+            crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+            WorkspaceIdentity {
+                root_identity: "partial-verification-fixture".into(),
+                relative_target: "stage".into(),
+            },
+            Arc::new(()),
+            || Ok(()),
+        )
+        .unwrap();
+        let manifest = verification_manifest(b"DATA");
+        let mut part = workspace.open_part("payload.bin", false).unwrap();
+        part.write_all(b"DATA").unwrap();
+        part.sync_all().unwrap();
+        drop(part);
+        let published = workspace.publish_part(&manifest.files()[0], false).unwrap();
+        assert_eq!(published.sha256, hex::encode(Sha256::digest(b"DATA")));
+        assert_eq!(published.bytes, 4);
+        assert!(!temp.path().join("payload.bin.part").exists());
+        assert_eq!(
+            std::fs::read(temp.path().join("payload.bin")).unwrap(),
+            b"DATA"
+        );
+        assert_eq!(workspace.seal(&manifest).unwrap(), vec![published]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn acquisition_integration_windows_flush_access_is_explicit_and_denial_retained() {
+        use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("payload.bin");
+        std::fs::write(&path, b"DATA").unwrap();
+        // Reproduce the original syscall contract on the actual native host.
+        let readonly = std::fs::File::open(&path).unwrap();
+        let error = readonly.sync_all().unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(ERROR_ACCESS_DENIED as i32));
+        drop(readonly);
+        let writable = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        writable.sync_all().unwrap();
+        drop(writable);
+        assert_eq!(std::fs::read(&path).unwrap(), b"DATA");
+        let workspace = AcquisitionWorkspace::from_capability(
+            crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+            WorkspaceIdentity {
+                root_identity: "windows-flush-fixture".into(),
+                relative_target: "stage".into(),
+            },
+            Arc::new(()),
+            || Ok(()),
+        )
+        .unwrap();
+        let manifest = verification_manifest(b"DATA");
+        let receipts = workspace.seal(&manifest).unwrap();
+        let permissions = std::fs::metadata(&path).unwrap().permissions();
+        let mut denied = permissions.clone();
+        denied.set_readonly(true);
+        std::fs::set_permissions(&path, denied).unwrap();
+        let refusal = workspace.verify_receipts(&manifest, &receipts);
+        // Restore only the fixture's exact original permissions before asserting,
+        // so an unexpected result cannot strand an undeletable temporary file.
+        std::fs::set_permissions(&path, permissions).unwrap();
+        assert!(
+            matches!(refusal, Err(PumasError::Io { source: Some(ref source), .. })
+            if source.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32))
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"DATA");
+    }
 
     #[test]
     fn identity_only_lookup_matches_a_reserved_child_without_creating_it() {

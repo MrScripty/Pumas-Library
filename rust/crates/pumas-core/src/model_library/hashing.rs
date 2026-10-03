@@ -41,14 +41,25 @@ pub fn compute_dual_hash(path: impl AsRef<Path>) -> Result<DualHash> {
     let path = path.as_ref();
     let mut file = std::fs::File::open(path).map_err(|e| PumasError::io_with_path(e, path))?;
 
+    compute_dual_hash_reader(&mut file).map_err(|error| match error {
+        PumasError::Io {
+            message, source, ..
+        } => PumasError::Io {
+            message,
+            path: Some(path.to_path_buf()),
+            source,
+        },
+        error => error,
+    })
+}
+
+pub(super) fn compute_dual_hash_reader(file: &mut impl Read) -> Result<DualHash> {
     let mut sha256_hasher = Sha256::new();
     let mut blake3_hasher = Blake3Hasher::new();
 
     let mut buffer = vec![0u8; CHUNK_SIZE];
     loop {
-        let bytes_read = file
-            .read(&mut buffer)
-            .map_err(|e| PumasError::io_with_path(e, path))?;
+        let bytes_read = file.read(&mut buffer)?;
         if bytes_read == 0 {
             break;
         }

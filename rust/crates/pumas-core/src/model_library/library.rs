@@ -177,7 +177,7 @@ enum CustomRuntimeKind {
 }
 
 #[derive(Debug, Clone)]
-struct CustomRuntimeProjection {
+pub(crate) struct CustomRuntimeProjection {
     kind: CustomRuntimeKind,
     binding_id: String,
     metadata_changed: bool,
@@ -526,6 +526,13 @@ impl ModelLibrary {
         WalkDir::new(&self.library_root)
             .min_depth(1)
             .into_iter()
+            .filter_entry(|entry| {
+                !entry.file_type().is_dir()
+                    || !entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(super::importer::TEMP_IMPORT_PREFIX)
+            })
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file() && e.file_name() == METADATA_FILENAME)
             .map(|e| e.path().parent().unwrap().to_path_buf())
@@ -654,6 +661,90 @@ impl ModelLibrary {
         })?;
         let record = metadata_to_record(&model_id, model_dir, metadata);
         self.index.upsert(&record)?;
+        Ok(())
+    }
+
+    /// Prepare copied-import runtime projections through the held workspace,
+    /// keeping generated binding IDs tied to the intended published identity.
+    pub(crate) fn prepare_import_metadata(
+        &self,
+        model_id: &str,
+        stage: &crate::model_library::DownloadRecoveryDestination,
+        metadata: &mut ModelMetadata,
+    ) -> Result<Option<CustomRuntimeProjection>> {
+        apply_task_projection_from_persisted_evidence(metadata);
+        let config = stage.read_import_json("config.json")?;
+        let kitten_config = match config.as_ref().and_then(kittentts_config_files) {
+            Some((model, voices)) => {
+                stage.file_len(model)?.is_some() && stage.file_len(voices)?.is_some()
+            }
+            None => false,
+        };
+        if kittentts_metadata_candidate(metadata) || kitten_config {
+            if metadata.inference_settings.is_none() {
+                metadata.inference_settings = Some(kittentts_settings_from_choices(
+                    config
+                        .as_ref()
+                        .map(kittentts_choices_from_config)
+                        .unwrap_or_else(default_kittentts_voice_options),
+                ));
+            }
+            return Ok(self.apply_kittentts_runtime_projection(
+                model_id,
+                stage.display_path(),
+                metadata,
+            ));
+        }
+        if is_diffusers_bundle(metadata) {
+            if let Some(index) = stage.read_import_json("model_index.json")? {
+                let hints = super::external_assets::diffusers_bundle_lookup_hints_from_json(
+                    metadata
+                        .cleaned_name
+                        .clone()
+                        .unwrap_or_else(|| model_id.to_string()),
+                    &index,
+                );
+                if is_sd_turbo_hints(&hints) {
+                    return Ok(self.apply_sd_turbo_runtime_projection(
+                        model_id,
+                        stage.display_path(),
+                        metadata,
+                    ));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Complete projections without reacquiring a published pathname. If this
+    /// fails, the caller reports the published identity and never rolls it back.
+    pub(crate) fn index_import_metadata(
+        &self,
+        model_id: &str,
+        target: &crate::model_library::DownloadRecoveryDestination,
+        metadata: &mut ModelMetadata,
+        projection: Option<&CustomRuntimeProjection>,
+    ) -> Result<()> {
+        if !target.model_directory_exists()? {
+            return Err(PumasError::ModelNotFound {
+                model_id: model_id.into(),
+            });
+        }
+        self.index.upsert(&metadata_to_record(
+            model_id,
+            target.display_path(),
+            metadata,
+        ))?;
+        if let Some(projection) = projection {
+            self.ensure_custom_runtime_binding(model_id, projection)?;
+            self.project_active_dependency_refs(model_id, metadata)?;
+            target.write_model_metadata(metadata)?;
+            self.index.upsert(&metadata_to_record(
+                model_id,
+                target.display_path(),
+                metadata,
+            ))?;
+        }
         Ok(())
     }
 
@@ -4673,7 +4764,7 @@ fn sanitize_binding_id_fragment(value: &str) -> String {
         .collect::<String>()
 }
 
-fn is_kittentts_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) -> bool {
+fn kittentts_metadata_candidate(metadata: &ModelMetadata) -> bool {
     let looks_like_kittentts = |value: &str| {
         let token = value.trim().to_lowercase();
         token.contains("kitten-tts") || token.contains("kitten_tts") || token.contains("kittentts")
@@ -4708,6 +4799,13 @@ fn is_kittentts_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) ->
         return true;
     }
 
+    false
+}
+
+fn is_kittentts_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) -> bool {
+    if kittentts_metadata_candidate(metadata) {
+        return true;
+    }
     let config_path = model_dir.join("config.json");
     let Ok(contents) = std::fs::read_to_string(config_path) else {
         return false;
@@ -4716,6 +4814,12 @@ fn is_kittentts_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) ->
         return false;
     };
 
+    kittentts_config_files(&config).is_some_and(|(model, voices)| {
+        model_dir.join(model).is_file() && model_dir.join(voices).is_file()
+    })
+}
+
+fn kittentts_config_files(config: &Value) -> Option<(&str, &str)> {
     let model_file = config
         .get("model_file")
         .and_then(Value::as_str)
@@ -4729,12 +4833,7 @@ fn is_kittentts_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) ->
         .filter(|value| !value.is_empty())
         .filter(|value| value.to_lowercase().ends_with(".npz"));
 
-    match (model_file, voices_file) {
-        (Some(model_file), Some(voices_file)) => {
-            model_dir.join(model_file).is_file() && model_dir.join(voices_file).is_file()
-        }
-        _ => false,
-    }
+    model_file.zip(voices_file)
 }
 
 fn is_sd_turbo_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) -> bool {
@@ -4755,6 +4854,10 @@ fn is_sd_turbo_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) -> 
         return false;
     };
 
+    is_sd_turbo_hints(&hints)
+}
+
+fn is_sd_turbo_hints(hints: &super::external_assets::DiffusersBundleLookupHints) -> bool {
     if hints.pipeline_class.as_deref() != Some("StableDiffusionPipeline") {
         return false;
     }
@@ -4864,6 +4967,10 @@ fn kittentts_voice_choices(model_dir: &Path) -> Vec<KittenTtsVoiceOption> {
         return default_kittentts_voice_options();
     };
 
+    kittentts_choices_from_config(&config)
+}
+
+fn kittentts_choices_from_config(config: &Value) -> Vec<KittenTtsVoiceOption> {
     let mut voices = config
         .get("voice_aliases")
         .and_then(Value::as_object)
@@ -4901,7 +5008,12 @@ fn kittentts_voice_choices(model_dir: &Path) -> Vec<KittenTtsVoiceOption> {
 }
 
 fn kittentts_inference_settings(model_dir: &Path) -> Vec<crate::models::InferenceParamSchema> {
-    let mut allowed_voices = kittentts_voice_choices(model_dir);
+    kittentts_settings_from_choices(kittentts_voice_choices(model_dir))
+}
+
+fn kittentts_settings_from_choices(
+    mut allowed_voices: Vec<KittenTtsVoiceOption>,
+) -> Vec<crate::models::InferenceParamSchema> {
     if allowed_voices.is_empty() {
         allowed_voices.push(KittenTtsVoiceOption {
             label: "Leo".to_string(),

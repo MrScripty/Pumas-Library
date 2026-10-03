@@ -30,6 +30,71 @@ Required repair:
 Do not implement this with an ignored `remove_dir_all(temp_dir)` result. No
 existing store is migrated or cleaned merely by tracking this work.
 
+### B1 implementation and remaining acceptance gates
+
+The copied-import implementation is in `model_library/importer/staging.rs`.
+Ordinary, progress and copied-Diffusers imports share one admitted
+`RuntimeTasks::run_owned` operation with one awaited `run_blocking` producer.
+The root grant and stage capability remain inside that producer through
+preparation, no-replace publication, and cleanup. No cleanup can race a live
+copy/hash waiter. Progress uses nonblocking best-effort delivery.
+
+`DownloadDestinationRoot` exclusively creates a private stage, and
+`DownloadRecoveryDestination` owns its no-follow file operations, physical
+identity checks, publication and deletion. The shared rename helper now records
+successful publication separately from later durability/visibility failure.
+The legacy relocation wrapper preserves its previous error interface. Runtime
+binding projection continues through held metadata with the final model ID.
+
+This excludes competing cooperating Pumas writers through the existing root
+grant. It does not claim protection against arbitrary hostile mutation by
+another process with equal filesystem authority. Observed root, ancestor or
+stage replacement refuses publication/deletion. A renamed original may remain
+outside its original location; neither a nonce scan nor pathname reacquisition
+is recovery authority. Failed cleanup is a terminal explicit retained/unknown
+outcome, not a promised automatic retry. Existing abandoned stages are not
+migrated or deleted.
+
+Consumer disposition:
+
+- Production copied-import calls are `api/models.rs::import_model` and
+  `api/state.rs` dispatch, using the importer composed in `api/builder.rs`.
+- RPC, UniFFI and Rustler route import calls through that owning API. Inspected
+  Pantograph production-dispatch UniFFI/Rustler adapters also call
+  `PumasApi::import_model`; its direct `ModelLibrary::new` fixture is read-only
+  update-feed setup, not copied-import admission.
+- In-repo importer fixtures now install the real `RuntimeTasks`, destination
+  root and `LibraryMutationAuthority` composition. No test-only runtime fallback
+  is exposed to production.
+- The new Config refusal is specifically for copied imports. External-reference
+  registration (`import_external_diffusers_directory`), in-place import,
+  download finalization and recovery retain their existing owners/contracts and
+  require separate ownership review; this slice does not expand or guard them.
+- B2 below is unchanged, including its download-authorization limitation.
+
+Acceptance remains **verifying**, not accepted: local `rustfmt` parsing and
+`git diff --check` passed; no Rust compilation or tests were run locally because
+of the shared resource budget. Parent-owned hosted CI and independent review
+must qualify the exact proposed commit. Commands from `rust/`:
+
+```sh
+cargo test -p pumas-library --no-default-features --features hf-client --lib copied_import -- --nocapture
+cargo test -p pumas-library --no-default-features --features hf-client --lib model_library::importer
+cargo test -p pumas-library --no-default-features --features hf-client --lib model_library::download_recovery
+cargo test -p pumas-library --no-default-features --features hf-client --lib model_library::library
+cargo test -p pumas-library --no-default-features --features hf-client --lib api::runtime_tasks
+cargo clippy -p pumas-library --no-default-features --features hf-client --all-targets -- -D warnings
+```
+
+Run native Linux, macOS and Windows jobs. Capture the case/Unicode equivalence
+oracle output for the actual mounted filesystem; a filesystem reporting distinct
+names does not qualify an equivalent-name refusal claim on another filesystem.
+Required native gates also include Unix mode/umask, no-replace rename, post-rename
+fsync failure, Windows held-handle/reparse replacement and read-only output
+semantics. Source inspection, formatter success, cross-compilation and a native
+Linux pass are not Windows/macOS runtime qualification. Existing generic held
+capability replacement tests and new import integration fixtures both apply.
+
 ## B2: Discover recoverable shards only under a proven model root
 
 Affected owners: `model_library/importer/recovery.rs`, its discovery callers and

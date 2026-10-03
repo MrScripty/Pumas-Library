@@ -31,7 +31,7 @@ struct LibraryIdDocument {
     library_id: String,
 }
 
-fn nofollow_options(options: &mut OpenOptions) {
+pub(super) fn nofollow_options(options: &mut OpenOptions) {
     #[cfg(unix)]
     options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     #[cfg(windows)]
@@ -369,6 +369,40 @@ impl DownloadDestinationRoot {
             root.initialize_library_id()?;
             Ok(Self(Arc::new(root)))
         }
+    }
+
+    /// Exclusively create a private copied-import workspace under this held root.
+    /// A failed bind after mkdir retains the workspace; it must never be recovered
+    /// by scanning names or reacquiring pathname authority.
+    pub(crate) fn create_import_stage(&self) -> Result<DownloadRecoveryDestination> {
+        self.0.require_current()?;
+        let name = format!(
+            "{}{}",
+            super::importer::TEMP_IMPORT_PREFIX,
+            uuid::Uuid::new_v4()
+        );
+        let destination = self.resolve(Path::new(&name))?;
+        let builder = cap_std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        let builder = {
+            use cap_std::fs::DirBuilderExt;
+            let mut builder = builder;
+            builder.mode(0o700);
+            builder
+        };
+        self.0.root.create_dir_with(&name, &builder)?;
+        if let Err(error) = destination
+            .directory(false)
+            .and_then(|_| sync_directory(&self.0.root))
+        {
+            return Err(PumasError::ImportFailed {
+                message: format!(
+                    "Created import workspace {} but could not establish durable custody: {error}; workspace retained, no automatic cleanup retry",
+                    destination.display_path.display()
+                ),
+            });
+        }
+        Ok(destination)
     }
 
     pub(crate) fn resolve(&self, path: &Path) -> io::Result<DownloadRecoveryDestination> {
@@ -723,6 +757,10 @@ impl DownloadRecoveryDestination {
         held.directory.try_clone().map(Some)
     }
 
+    pub(crate) fn model_directory_exists(&self) -> io::Result<bool> {
+        Ok(self.directory_if_present(false)?.is_some())
+    }
+
     pub(crate) fn prepare(&self) -> io::Result<()> {
         self.directory(true).map(|_| ())
     }
@@ -769,9 +807,60 @@ impl DownloadRecoveryDestination {
         }
     }
 
+    /// Exclusive output creation also detects filesystem-equivalent names.
+    /// The returned descriptor owns all writes and permission restoration.
+    pub(crate) fn create_import_file(&self, filename: &str) -> io::Result<std::fs::File> {
+        let (parent, name) = self.file_parent(filename, true)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        nofollow_options(&mut options);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let file = parent.open_with(name, &options)?.into_std();
+        if !file.metadata()?.is_file() {
+            return Err(invalid_capability_path());
+        }
+        Ok(file)
+    }
+
+    pub(crate) fn open_import_file(&self, filename: &str) -> io::Result<std::fs::File> {
+        let (parent, name) = self.file_parent(filename, false)?;
+        let mut options = OpenOptions::new();
+        options.read(true);
+        nofollow_options(&mut options);
+        let file = parent.open_with(name, &options)?.into_std();
+        if !file.metadata()?.is_file() || file.metadata()?.file_type().is_symlink() {
+            return Err(invalid_capability_path());
+        }
+        Ok(file)
+    }
+
+    pub(crate) fn read_import_json(&self, filename: &str) -> Result<Option<Value>> {
+        match self.open_import_file(filename) {
+            Ok(file) => match serde_json::from_reader(file) {
+                Ok(value) => Ok(Some(value)),
+                Err(error) if error.is_io() => Err(error.into()),
+                // Optional runtime-hint JSON historically treats invalid data
+                // as no hint. Filesystem failures must still reach the owner.
+                Err(_) => Ok(None),
+            },
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub(crate) fn sync_import_payload(&self, filenames: &[String]) -> io::Result<()> {
+        for filename in filenames {
+            let (parent, _) = self.file_parent(filename, false)?;
+            sync_directory(&parent)?;
+        }
+        sync_directory(&self.directory(false)?)
+    }
+
     /// Remove only the bound model directory, using held directory-relative
     /// operations. Symlinks inside the payload are unlinked, never traversed.
-    /// The caller retains native exclusion and a durable deletion claim.
+    /// The caller retains native exclusion and either a durable deletion claim
+    /// or exclusive custody of an unpublished import workspace.
     pub(crate) fn remove_model_directory_all(&self) -> Result<()> {
         let directory = self.directory(false)?;
         let parent_relative = self
@@ -804,6 +893,19 @@ impl DownloadRecoveryDestination {
     /// destination. The caller retains grants for both roots; cross-filesystem
     /// copying is not authorized by this capability.
     pub(crate) fn rename_model_directory_noreplace(&self, target: &Self) -> Result<()> {
+        match self.publish_model_directory_noreplace(target)? {
+            crate::metadata::AtomicPublication::Durable => Ok(()),
+            crate::metadata::AtomicPublication::PublishedDurabilityUnknown { error }
+            | crate::metadata::AtomicPublication::VisibilityUnknown { error, .. } => Err(error),
+        }
+    }
+
+    /// An Err guarantees rename was not observed successful. Once the syscall
+    /// succeeds, every later failure is a published outcome, never rollback authority.
+    pub(crate) fn publish_model_directory_noreplace(
+        &self,
+        target: &Self,
+    ) -> Result<crate::metadata::AtomicPublication> {
         #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             let _ = target;
@@ -866,8 +968,6 @@ impl DownloadRecoveryDestination {
                     target_name,
                     false,
                 )?;
-                sync_directory(&source_parent)?;
-                sync_directory(&target_parent)?;
             }
             #[cfg(unix)]
             {
@@ -889,15 +989,38 @@ impl DownloadRecoveryDestination {
                     &target_parent,
                     &target_c,
                 )?;
-                source_parent.sync_all()?;
-                target_parent.sync_all()?;
             }
-            self.authority.require_current()?;
-            target.authority.require_current()?;
-            if directory_identity(&target.directory(false)?)? != expected {
-                return Err(invalid_capability_path().into());
+            // Publication is already visible. Do not turn fsync or identity
+            // confirmation failures into a pre-publication error.
+            let durability = (|| -> Result<()> {
+                #[cfg(test)]
+                if let Some(sync) = &self.cleanup_parent_sync {
+                    sync(&source_parent)?;
+                }
+                sync_directory(&source_parent)?;
+                sync_directory(&target_parent)?;
+                Ok(())
+            })();
+            if let Err(error) = durability {
+                return Ok(
+                    crate::metadata::AtomicPublication::PublishedDurabilityUnknown { error },
+                );
             }
-            Ok(())
+            let confirmation = (|| -> Result<()> {
+                self.authority.require_current()?;
+                target.authority.require_current()?;
+                if directory_identity(&target.directory(false)?)? != expected {
+                    return Err(invalid_capability_path().into());
+                }
+                Ok(())
+            })();
+            Ok(match confirmation {
+                Ok(()) => crate::metadata::AtomicPublication::Durable,
+                Err(error) => crate::metadata::AtomicPublication::VisibilityUnknown {
+                    error,
+                    cleanup: crate::metadata::StagingCleanup::NotRequired,
+                },
+            })
         }
     }
 
@@ -1351,7 +1474,7 @@ fn invalid_download_integrity(message: &str) -> PumasError {
 
 /// Walk one component at a time without following symlinks. Each next operation
 /// is anchored to the held preceding directory, including missing-tail creation.
-fn open_directory_chain(root: &Dir, relative: &Path, create: bool) -> io::Result<Dir> {
+pub(super) fn open_directory_chain(root: &Dir, relative: &Path, create: bool) -> io::Result<Dir> {
     #[cfg(windows)]
     {
         let mut directory = root.try_clone()?;
@@ -1773,6 +1896,95 @@ fn invalid_capability_path() -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[test]
+    fn copied_import_publication_retains_output_after_parent_sync_failure() {
+        use std::io::Write;
+        let temp = tempfile::tempdir().unwrap();
+        let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        let mut stage = root.create_import_stage().unwrap();
+        stage
+            .create_import_file("weights")
+            .unwrap()
+            .write_all(b"published bytes")
+            .unwrap();
+        stage.cleanup_parent_sync = Some(std::sync::Arc::new(|_| {
+            Err(std::io::Error::other("injected publication fsync failure"))
+        }));
+        let target = root
+            .resolve(std::path::Path::new("vision/family/model"))
+            .unwrap();
+        let outcome = stage.publish_model_directory_noreplace(&target).unwrap();
+        assert!(
+            matches!(outcome, crate::metadata::AtomicPublication::PublishedDurabilityUnknown { error } if error.to_string().contains("injected publication fsync failure"))
+        );
+        assert!(!stage.display_path().exists());
+        assert!(stage.remove_model_directory_all().is_err());
+        assert_eq!(
+            std::fs::read(target.display_path().join("weights")).unwrap(),
+            b"published bytes"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copied_import_exclusive_creation_is_private_under_permissive_umask() {
+        let root = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new("sh")
+            .args(["-c", "umask 000; exec \"$@\"", "sh"])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "model_library::download_recovery::tests::copied_import_private_creation_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("PUMAS_IMPORT_MODE_FIXTURE_ROOT", root.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(std::fs::read_dir(root.path()).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(super::super::importer::TEMP_IMPORT_PREFIX)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "invoked by the permissive-umask subprocess test"]
+    fn copied_import_private_creation_child() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let path =
+            std::path::PathBuf::from(std::env::var_os("PUMAS_IMPORT_MODE_FIXTURE_ROOT").unwrap());
+        let root = super::DownloadDestinationRoot::open(&path).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        let stage = root.create_import_stage().unwrap();
+        assert_eq!(
+            std::fs::metadata(stage.display_path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        let mut file = stage.create_import_file("output").unwrap();
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        file.write_all(b"original").unwrap();
+        assert!(stage.create_import_file("output").is_err());
+        assert_eq!(
+            std::fs::read(stage.display_path().join("output")).unwrap(),
+            b"original"
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn windows_root_grant_excludes_competitors_and_pins_lock_file() {

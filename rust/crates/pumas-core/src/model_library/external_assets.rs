@@ -98,7 +98,17 @@ pub(crate) fn get_diffusers_bundle_lookup_hints(
     let model_index_data = std::fs::read_to_string(model_index_path).ok()?;
     let model_index: Value = serde_json::from_str(&model_index_data).ok()?;
 
-    Some(DiffusersBundleLookupHints {
+    Some(diffusers_bundle_lookup_hints_from_json(
+        bundle_name,
+        &model_index,
+    ))
+}
+
+pub(crate) fn diffusers_bundle_lookup_hints_from_json(
+    bundle_name: String,
+    model_index: &Value,
+) -> DiffusersBundleLookupHints {
+    DiffusersBundleLookupHints {
         bundle_name,
         pipeline_class: model_index
             .get("_class_name")
@@ -118,7 +128,7 @@ pub(crate) fn get_diffusers_bundle_lookup_hints(
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string),
-    })
+    }
 }
 
 pub(crate) fn refresh_external_metadata_validation(metadata: &mut ModelMetadata) -> bool {

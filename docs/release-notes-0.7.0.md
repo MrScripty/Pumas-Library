@@ -39,6 +39,25 @@ The RPC operations are `intent_query_models`, `intent_get_model`,
 connects to an existing owner and `PumasReadOnlyLibrary` provides direct read-only
 access. A second owning instance fails when another live process owns the root.
 
+**Copied-import compatibility change:** `ModelImporter::import` and
+`import_with_progress` (including copied Diffusers bundles) now require the
+lifecycle-owned `ModelLibrary` provided by `PumasApi` / `PumasLibraryInstance`.
+Constructing `ModelLibrary` and `ModelImporter` directly no longer admits these
+copy mutations: it returns an actionable `PumasError::Config` before staging.
+Use the existing owning API for imports; standalone read-only access remains
+available. There is no per-call runtime fallback or new standalone mutation API.
+
+Admitted copied imports continue to publication or workspace settlement after
+the initiating caller disconnects. Shutdown rejects new admission and drains
+that work. Unpublished metadata is excluded from model discovery. Copy/name
+collisions preserve source files. Copy, hash, metadata, or rename failures clean
+only the held workspace; observed replacement or failed cleanup reports a
+retained/unknown workspace and the original error, with no automatic cleanup
+retry. A successful rename is never rolled back for a later sync, confirmation,
+or indexing failure; that error identifies the published model for inspection.
+Source symlinks/non-regular entries and payloads colliding with the reserved
+`metadata.json` name are refused rather than followed or overwritten.
+
 Downloads and acquisition now have stronger root-level mutation exclusion,
 durable ownership, restart reconciliation, cancellation, and shutdown handling.
 Admitted work is retained by the backend across initiating-client disconnection.

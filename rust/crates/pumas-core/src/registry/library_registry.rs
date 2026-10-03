@@ -1019,6 +1019,65 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_claim_cannot_overwrite_an_owner_committed_while_waiting() {
+        use std::cell::RefCell;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        // SQLite's busy callback gives a deterministic schedule without sleeps
+        // or production hooks: the contender has reached its first write lock.
+        thread_local! {
+            static BUSY_GATE: RefCell<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> =
+                const { RefCell::new(None) };
+        }
+        fn wait_for_writer(_: i32) -> bool {
+            BUSY_GATE.with(|gate| match gate.borrow_mut().take() {
+                Some((blocked, release)) => {
+                    blocked.send(()).is_ok() && release.recv_timeout(Duration::from_secs(5)).is_ok()
+                }
+                None => false,
+            })
+        }
+
+        let (registry, temp) = create_test_registry();
+        let library = create_library_dir(temp.path(), "competing-startup");
+        registry.register(&library, "Competing startup").unwrap();
+        let contender = LibraryRegistry::open_at(&temp.path().join("test-registry.db")).unwrap();
+        let mut writer = registry.lock_conn().unwrap();
+        let transaction = writer
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let (blocked_tx, blocked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let contender_path = library.clone();
+        let running = std::thread::spawn(move || {
+            BUSY_GATE.with(|gate| *gate.borrow_mut() = Some((blocked_tx, release_rx)));
+            contender
+                .lock_conn()
+                .unwrap()
+                .busy_handler(Some(wait_for_writer))
+                .unwrap();
+            contender.try_claim_instance(&contender_path, std::process::id())
+        });
+        blocked_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        transaction.execute(
+            "INSERT INTO instances (library_path, pid, port, started_at, version, status, claim_token)
+             VALUES (?1, ?2, 0, ?3, ?4, 'claiming', 'original-owner')",
+            params![library.canonicalize().unwrap().to_string_lossy(), std::process::id(),
+                Utc::now().to_rfc3339(), env!("CARGO_PKG_VERSION")],
+        ).unwrap();
+        transaction.commit().unwrap();
+        drop(writer);
+        release_tx.send(()).unwrap();
+        let outcome = running.join().unwrap().unwrap();
+        assert!(matches!(outcome, InstanceClaimResult::Occupied(_)));
+        // The winner's exact token must still be promotable after the contender.
+        registry
+            .mark_instance_ready(&library, "original-owner", 12345)
+            .unwrap();
+    }
+
+    #[test]
     fn test_try_claim_instance_creates_claiming_entry() {
         let (registry, temp_dir) = create_test_registry();
         let lib_dir = create_library_dir(temp_dir.path(), "my-library");

@@ -9,10 +9,11 @@ use pumas_library::models::{PackageArtifactKind, PumasModelRef};
 use pumas_library::registry::{InstanceEntry, LibraryRegistry};
 use pumas_library::{PumasApi, PumasLocalClient};
 use serde::{Deserialize, Serialize};
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -52,13 +53,22 @@ fn ensure_request() -> EnsureModelRequest {
 }
 
 fn write_durable(path: &Path, contents: &[u8]) {
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)
-        .unwrap();
-    file.write_all(contents).unwrap();
-    file.sync_all().unwrap();
+    publish_ready(path, contents, || {}).unwrap();
+}
+
+fn publish_ready(
+    path: &Path,
+    contents: &[u8],
+    before_publish: impl FnOnce(),
+) -> std::io::Result<()> {
+    // Existence is the parent's readiness signal. Publish the complete synced
+    // bytes at once; opening the final name before writing exposes an empty file.
+    let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+    file.write_all(contents)?;
+    file.as_file().sync_all()?;
+    before_publish();
+    file.persist_noclobber(path).map_err(|error| error.error)?;
+    Ok(())
 }
 
 fn seed_available_model(root: &Path) {
@@ -154,6 +164,25 @@ struct RunningPrimary {
     ready: ReadyFixture,
 }
 
+/// Retain the child before readiness parsing can fail or panic. The receipt is
+/// test-local evidence from waiting on this exact child, never a PID probe.
+struct StartingPrimary {
+    child: Option<Child>,
+    exit_observed: Arc<AtomicBool>,
+}
+
+impl Drop for StartingPrimary {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            match child.wait() {
+                Ok(_) => self.exit_observed.store(true, Ordering::Release),
+                Err(error) => eprintln!("test child exit remains unobserved: {error}"),
+            }
+        }
+    }
+}
+
 impl RunningPrimary {
     fn stop(mut self) {
         self.child.kill().unwrap();
@@ -173,10 +202,26 @@ impl Drop for RunningPrimary {
 }
 
 fn start_primary(root: &Path, registry: &Path, ready: &Path) -> RunningPrimary {
-    let mut child = Command::new(std::env::current_exe().unwrap())
+    start_primary_observed(
+        root,
+        registry,
+        ready,
+        CHILD_TEST,
+        Arc::new(AtomicBool::new(false)),
+    )
+}
+
+fn start_primary_observed(
+    root: &Path,
+    registry: &Path,
+    ready: &Path,
+    child_test: &str,
+    exit_observed: Arc<AtomicBool>,
+) -> RunningPrimary {
+    let child = Command::new(std::env::current_exe().unwrap())
         .arg("--ignored")
         .arg("--exact")
-        .arg(CHILD_TEST)
+        .arg(child_test)
         .arg("--nocapture")
         .env(CHILD_ROOT, root)
         .env(CHILD_READY, ready)
@@ -186,20 +231,69 @@ fn start_primary(root: &Path, registry: &Path, ready: &Path) -> RunningPrimary {
         .stderr(Stdio::inherit())
         .spawn()
         .unwrap();
+    let mut owner = StartingPrimary {
+        child: Some(child),
+        exit_observed,
+    };
 
     for _ in 0..1_200 {
         if ready.is_file() {
             let ready = serde_json::from_slice(&std::fs::read(ready).unwrap()).unwrap();
-            return RunningPrimary { child, ready };
+            return RunningPrimary {
+                child: owner.child.take().unwrap(),
+                ready,
+            };
         }
-        if let Some(status) = child.try_wait().unwrap() {
+        if let Some(status) = owner.child.as_mut().unwrap().try_wait().unwrap() {
             panic!("registry-backed IPC fixture exited before ready ({status})");
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    let _ = child.kill();
-    let _ = child.wait();
     panic!("timed out waiting for registry-backed IPC fixture");
+}
+
+#[test]
+fn readiness_publication_never_exposes_partial_json_or_replaces_an_existing_file() {
+    let temp = TempDir::new().unwrap();
+    let ready = temp.path().join("ready.json");
+    let bytes = br#"{"ready":true}"#;
+    publish_ready(&ready, bytes, || assert!(!ready.exists())).unwrap();
+    assert_eq!(std::fs::read(&ready).unwrap(), bytes);
+    assert!(publish_ready(&ready, b"replacement", || {}).is_err());
+    assert_eq!(std::fs::read(&ready).unwrap(), bytes);
+    assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
+}
+
+#[test]
+#[ignore = "owned subprocess for failed-readiness cleanup"]
+fn intent_ipc_waiting_child() {
+    // No Pumas instance, network probe or library mutation is needed here.
+    loop {
+        std::thread::park();
+    }
+}
+
+#[test]
+fn failed_readiness_parsing_still_observes_owned_child_exit() {
+    let temp = TempDir::new().unwrap();
+    let ready = temp.path().join("ready.json");
+    std::fs::write(&ready, b"{").unwrap();
+    let exited = Arc::new(AtomicBool::new(false));
+    let result = std::panic::catch_unwind(|| {
+        start_primary_observed(
+            &temp.path().join("library"),
+            &temp.path().join("registry.db"),
+            &ready,
+            "intent_ipc_waiting_child",
+            exited.clone(),
+        )
+    });
+    assert!(result.is_err());
+    assert!(
+        exited.load(Ordering::Acquire),
+        "exact child exit was not observed"
+    );
+    assert_eq!(std::fs::read(&ready).unwrap(), b"{");
 }
 
 async fn raw_local_ipc_call(port: u16, request: &[u8]) -> serde_json::Value {

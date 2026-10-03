@@ -59,6 +59,15 @@ marker, database, cache, cleanup, or network write. This is point-in-time eviden
 snapshot or a grant for a later filesystem action. Concurrent in-place changes
 can still require a fresh scan and authoritative package validation.
 
+Held descendant directory capabilities live only along the active traversal
+path. Completed bindings retain physical identity and root-relative path, not
+handles; final checks reopen one binding at a time through the existing
+no-follow helper and invalidate overlapping model evidence on mismatch or
+unobservable custody. This bounds retained handles by root-ancestor plus
+traversal depth and allows already-scanned unrelated Windows subtrees to be
+renamed before the entire scan finishes. The bounded entry/depth limits still
+apply; identity observations do not become capabilities for later actions.
+
 Every counted set retains its full model-root-relative directory and
 base/extension. Zero, out-of-range, duplicate, inconsistent, overflowing,
 malformed, and uncounted/ambiguous shard names remain diagnostic. Missing
@@ -107,3 +116,16 @@ still require stale-evidence rejection. The startup observer regression checks
 its actual byte/name effects; zero acquisition authority is established by its
 `ModelImporter`-only input and the reviewed production call boundary, not an
 unconnected test download client.
+
+The broad-tree regression observes the scanner's own `HeldDirectory` capability
+lifetimes with a per-scan RAII high-water counter, independent of process-wide
+file-descriptor activity. Its 48-model, 12-component fixture permits only four
+active descendant capabilities above the selected root's ancestor chain and
+requires all of them to be released on return. This counter measures retained
+scanner capabilities; the existing no-follow helper's transient handles are a
+separate bounded implementation window. A real rename during later sibling
+traversal must succeed on Windows as well as Unix, and final identity checks
+must reject the changed model while preserving unrelated observations. Symlink
+replacement after traversal remains no-follow. These new regression sources
+require native execution; source review and formatting alone do not qualify
+this resource-lifetime correction.

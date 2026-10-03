@@ -27,11 +27,57 @@ mod tests;
 const MAX_ENTRIES: usize = 100_000;
 const MAX_MODEL_DEPTH: usize = 64;
 
+// Per-scan test instrumentation counts owned HeldDirectory capabilities, not
+// process-global descriptors or Arc references to the same capability.
+#[cfg(test)]
+#[derive(Default)]
+struct HeldDirectoryCounts {
+    live: std::sync::atomic::AtomicUsize,
+    high_water: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(test)]
+impl HeldDirectoryCounts {
+    fn live(&self) -> usize {
+        self.live.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn high_water(&self) -> usize {
+        self.high_water.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+struct HeldDirectoryCount {
+    counts: Arc<HeldDirectoryCounts>,
+}
+
+#[cfg(test)]
+impl HeldDirectoryCount {
+    fn acquire(counts: Arc<HeldDirectoryCounts>) -> Self {
+        use std::sync::atomic::Ordering::Relaxed;
+        let live = counts.live.fetch_add(1, Relaxed) + 1;
+        counts.high_water.fetch_max(live, Relaxed);
+        Self { counts }
+    }
+}
+
+#[cfg(test)]
+impl Drop for HeldDirectoryCount {
+    fn drop(&mut self) {
+        self.counts
+            .live
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 struct HeldDirectory {
     directory: Dir,
     identity: FilesystemIdentity,
     parent: Option<Arc<HeldDirectory>>,
     name: OsString,
+    #[cfg(test)]
+    handle_count: HeldDirectoryCount,
 }
 
 impl HeldDirectory {
@@ -42,6 +88,8 @@ impl HeldDirectory {
             directory,
             parent: None,
             name: OsString::new(),
+            #[cfg(test)]
+            handle_count: HeldDirectoryCount::acquire(Arc::new(HeldDirectoryCounts::default())),
         }))
     }
 
@@ -53,6 +101,8 @@ impl HeldDirectory {
             directory,
             parent: Some(self.clone()),
             name: name.to_owned(),
+            #[cfg(test)]
+            handle_count: HeldDirectoryCount::acquire(self.handle_count.counts.clone()),
         });
         child.verify()?;
         Ok(child)
@@ -139,11 +189,18 @@ enum Phase {
     BeforeFinish,
 }
 
+/// An observation to recheck, never a retained directory capability. Completed
+/// subtrees must release their handles before unrelated traversal continues.
+struct ObservedBinding {
+    identity: FilesystemIdentity,
+    relative: PathBuf,
+}
+
 struct Scanner<F> {
     root: RootBinding,
     report: ShardRecoveryDiscovery,
     remaining_entries: usize,
-    bindings: Vec<(Arc<HeldDirectory>, PathBuf)>,
+    bindings: Vec<ObservedBinding>,
     // Private synchronous fault seam; production supplies a no-op. No global
     // state, additional scan path, or filesystem behavior is substituted.
     checkpoint: F,
@@ -170,6 +227,27 @@ impl<F: FnMut(&Path, Phase) -> io::Result<()>> Scanner<F> {
             Ok(()) => true,
             Err(error) => {
                 self.diagnostic(path, Kind::BindingChanged, error, true);
+                false
+            }
+        }
+    }
+
+    fn verify_observed(&mut self, observed: &ObservedBinding) -> bool {
+        let result = self.root.verify().and_then(|()| {
+            // Reopen one saved path at a time from the held root. The existing
+            // helper refuses symlinks and releases each intermediate handle;
+            // neither tree width nor visited-directory count retains handles.
+            let current =
+                open_directory_chain(&self.root.held.directory, &observed.relative, false)?;
+            if directory_identity(&current)? != observed.identity {
+                return Err(binding_changed());
+            }
+            self.root.verify()
+        });
+        match result {
+            Ok(()) => true,
+            Err(error) => {
+                self.diagnostic(&observed.relative, Kind::BindingChanged, error, true);
                 false
             }
         }
@@ -255,7 +333,10 @@ impl<F: FnMut(&Path, Phase) -> io::Result<()>> Scanner<F> {
         if !self.verify(&child, path) {
             return None;
         }
-        self.bindings.push((child.clone(), path.to_owned()));
+        self.bindings.push(ObservedBinding {
+            identity: child.identity,
+            relative: path.to_owned(),
+        });
         Some(child)
     }
 
@@ -501,6 +582,13 @@ fn scan(
             return report;
         }
     };
+    scan_bound(binding, checkpoint)
+}
+
+fn scan_bound(
+    binding: RootBinding,
+    checkpoint: impl FnMut(&Path, Phase) -> io::Result<()>,
+) -> ShardRecoveryDiscovery {
     let mut scanner = Scanner {
         report: empty_report(&binding.canonical),
         root: binding,
@@ -516,11 +604,12 @@ fn scan(
     if let Err(error) = scanner.checkpoint(Path::new(""), Phase::BeforeFinish) {
         scanner.diagnostic(Path::new(""), Kind::EnumerationFailed, error, true);
     }
-    for (held, path) in std::mem::take(&mut scanner.bindings) {
-        if !scanner.verify(&held, &path) {
+    for observed in std::mem::take(&mut scanner.bindings) {
+        let path = &observed.relative;
+        if !scanner.verify_observed(&observed) {
             for model in &mut scanner.report.model_roots {
                 if path.starts_with(&model.library_relative_root)
-                    || model.library_relative_root.starts_with(&path)
+                    || model.library_relative_root.starts_with(path)
                 {
                     model.enumeration_complete = false;
                     model.observed_files.clear();

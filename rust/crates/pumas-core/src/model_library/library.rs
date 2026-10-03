@@ -9,6 +9,9 @@
 
 mod migration;
 mod projection;
+mod publication_observation;
+#[cfg(test)]
+mod review_tests;
 
 use crate::error::{PumasError, Result};
 use crate::index::{
@@ -627,6 +630,15 @@ impl ModelLibrary {
         model_dir: &Path,
         metadata: &mut ModelMetadata,
     ) -> Result<()> {
+        self.observe_import_readiness_with_io_policy(model_dir, metadata, false)
+    }
+
+    fn observe_import_readiness_with_io_policy(
+        &self,
+        model_dir: &Path,
+        metadata: &mut ModelMetadata,
+        preserve_io_errors: bool,
+    ) -> Result<()> {
         use super::importer::publication::{
             confirmed_receipt_matches, read_canonical_import_metadata, receipt_path_claimed,
         };
@@ -645,9 +657,11 @@ impl ModelLibrary {
         {
             return Ok(());
         }
-        let canonical = read_canonical_import_metadata(&self.library_root, model_dir)
-            .ok()
-            .flatten();
+        let canonical = publication_observation::evidence_or_unavailable(
+            read_canonical_import_metadata(&self.library_root, model_dir),
+            None,
+            preserve_io_errors,
+        )?;
         let Some(canonical) = canonical.filter(|metadata| metadata.import_publication.is_some())
         else {
             metadata.import_publication = indexed_identity
@@ -697,13 +711,16 @@ impl ModelLibrary {
             }
         }
         if canonical.copied_import_ready()
-            && !confirmed_receipt_matches(
-                &self.library_root,
-                model_dir,
-                &canonical,
-                record.is_none(),
-            )
-            .unwrap_or(false)
+            && !publication_observation::evidence_or_unavailable(
+                confirmed_receipt_matches(
+                    &self.library_root,
+                    model_dir,
+                    &canonical,
+                    record.is_none(),
+                ),
+                false,
+                preserve_io_errors,
+            )?
         {
             mark_import_unavailable(metadata, model_dir, "import_publication_receipt_unverified", "Confirmed receipt or exact copied payload could not be verified; left unavailable without automatic promotion");
         }
@@ -1464,8 +1481,13 @@ impl ModelLibrary {
         }
         for record in existing {
             if !discovered.contains(&record.id) {
-                self.index.prune_legacy_projection_if_unchanged(&record)?;
-                self.refresh_external_asset_state(&record).await?;
+                if publication_observation::claims_publication(&record.metadata) {
+                    self.refresh_retained_publication_record(&record)?;
+                } else {
+                    // A successful prune removes this snapshot's authority;
+                    // a conflict leaves a newer row for its next observation.
+                    self.index.prune_legacy_projection_if_unchanged(&record)?;
+                }
             }
         }
         self.index.checkpoint_wal()?;
@@ -1473,6 +1495,9 @@ impl ModelLibrary {
     }
 
     async fn refresh_external_asset_state(&self, record: &ModelRecord) -> Result<bool> {
+        if publication_observation::claims_publication(&record.metadata) {
+            return self.refresh_retained_publication_record(record);
+        }
         let model_dir = self.indexed_model_dir(record)?;
         let Some(mut metadata) = load_model_metadata_async(self.clone(), model_dir.clone()).await?
         else {
@@ -2201,21 +2226,6 @@ impl ModelLibrary {
         Ok(review_items)
     }
 
-    fn observe_publication_records(&self, records: &mut [ModelRecord]) -> Result<()> {
-        for record in records {
-            if !super::importer::publication::indexed_publication_ready(
-                &self.library_root,
-                &record.id,
-                &record.metadata,
-            ) {
-                let mut metadata: ModelMetadata = serde_json::from_value(record.metadata.clone())?;
-                self.observe_import_readiness(&self.library_root.join(&record.id), &mut metadata)?;
-                record.metadata = serde_json::to_value(metadata)?;
-            }
-        }
-        Ok(())
-    }
-
     fn list_models_sync(&self) -> Result<Vec<ModelRecord>> {
         let mut models = self.index.list_all()?;
         self.observe_publication_records(&mut models)?;
@@ -2305,6 +2315,13 @@ impl ModelLibrary {
         let active_bindings = self
             .index()
             .list_active_model_dependency_bindings(model_id, None)?;
+        if publication_observation::claims_publication(metadata)
+            && !crate::models::copied_import_ready_value(metadata)
+        {
+            // A diagnostic publication cannot supply runtime facts. Preserve
+            // its raw evidence instead of reparsing it as executable metadata.
+            return Ok(());
+        }
         if !metadata.is_object() {
             *metadata = Value::Object(Default::default());
         }
@@ -4237,10 +4254,19 @@ impl ModelLibrary {
                 continue;
             };
 
-            self.require_finalized_import_edit(&model_dir, Some(&metadata))?;
             let Some(repo_key) = normalized_repo_key_from_metadata(&metadata) else {
                 continue;
             };
+            match self.require_finalized_import_edit(&model_dir, Some(&metadata)) {
+                Ok(()) => {}
+                Err(PumasError::Validation { field, message }) if field == "import_publication" => {
+                    let error = PumasError::Validation { field, message };
+                    tracing::warn!(model_id, path = %model_dir.display(), %error, "Duplicate cleanup retained a blocked copied publication");
+                    report.blocked_models.push((model_id, error.to_string()));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
             let payload_file_count = count_payload_files_in_model_dir(&model_dir);
             let payload_size_bytes = payload_size_bytes_in_model_dir(&model_dir);
             let download_incomplete = metadata.match_source.as_deref() == Some("download_partial")
@@ -4382,6 +4408,9 @@ impl ModelLibrary {
         if mutated {
             self.index.checkpoint_wal()?;
         }
+        report
+            .blocked_models
+            .sort_by(|left, right| left.0.cmp(&right.0));
         Ok(report)
     }
 }
@@ -4944,6 +4973,10 @@ pub struct DuplicateRepoCleanupReport {
     pub unresolved_duplicate_groups: usize,
     /// Number of metadata files whose `model_id` was normalized to on-disk path.
     pub normalized_metadata_ids: usize,
+    /// Eligible model IDs retained because copied publication is not finalized,
+    /// with the actionable per-model refusal. These are not removed duplicates.
+    #[serde(default)]
+    pub blocked_models: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]

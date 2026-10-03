@@ -73,3 +73,12 @@ test('native baseline gates keep each cargo command in its own step', () => {
     assert.ok(native.includes(`      - name: ${name}\n        run: cargo test --locked `), name);
   }
 });
+
+test('RPC qualification output is PR25-only and expires after one day', () => {
+  const headless = job('headless');
+  const gate = "if: github.event_name == 'pull_request' && github.event.pull_request.number == 25";
+  assert.ok(headless.includes(`Package repaired RPC qualification output\n        ${gate}`));
+  assert.ok(headless.includes(`Retain repaired RPC qualification output\n        ${gate}`));
+  assert.match(headless, /retention-days: 1/);
+  assert.match(headless, /fetch-depth: 2/);
+});

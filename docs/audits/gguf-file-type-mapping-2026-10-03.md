@@ -48,3 +48,16 @@ encoding the same wrong enum numbers. Their Q4_K_M/Q5_K_M bytes are corrected to
 detail and summary rows, invokes the supported summary resolver, and verifies
 regeneration from the raw header, both refreshed fingerprints, and unchanged
 model/metadata bytes. No live store is edited by that synthetic test.
+
+## Temporary qualification binary
+
+Only this repair's PR25 headless job may retain its already-tested Linux x86_64
+no-inference RPC output for one day. The archive is explicitly unreleased and
+includes exact source/checkout commits and trees, Rust/Cargo toolchain, build
+command/features, runtime-library listing, transformed/original binary hashes,
+per-file hashes, and unchanged license/notice inventory provenance. It contains
+no model weights, credentials, Python runtime, or runtime userdata. It is not a
+production release or a model-inference executable. Using it against an owned
+library requires the prior process to be observed stopped and the supported
+inspection API; no cache edits or duplicate library owner are authorized by the
+archive. The temporary workflow gate must be removed after qualification.

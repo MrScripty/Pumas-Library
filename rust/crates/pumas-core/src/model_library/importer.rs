@@ -1127,65 +1127,85 @@ impl ModelImporter {
     ///
     /// Returns list of copied file info.
     fn copy_files(&self, source: &Path, dest_dir: &Path) -> Result<Vec<ModelFileInfo>> {
-        let mut files = Vec::new();
-
+        // Resolve the complete mapping before copying anything. Normalization
+        // is not injective, so overwriting by traversal order would lose input.
+        let mut planned = Vec::new();
         if source.is_file() {
-            // Single file
-            let original_name = source
+            let original = source
                 .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("model");
-            let normalized = normalize_filename(original_name);
-            let dest_path = dest_dir.join(&normalized);
-
-            std::fs::copy(source, &dest_path)?;
-
-            let size = std::fs::metadata(&dest_path)?.len();
-
-            files.push(ModelFileInfo {
-                name: normalized,
-                original_name: Some(original_name.to_string()),
-                size: Some(size),
-                sha256: None, // Will be computed later for primary file
-                blake3: None,
-            });
-        } else if source.is_dir() {
-            // Directory - copy all model files
-            for entry in WalkDir::new(source)
-                .min_depth(1)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| PumasError::Validation {
+                    field: "import.filename".into(),
+                    message: "Import filename must be valid UTF-8".into(),
+                })?;
+            planned.push((
+                source.to_path_buf(),
+                original.to_owned(),
+                normalize_filename(original),
+            ));
+        } else {
+            for entry in WalkDir::new(source).min_depth(1) {
+                let entry = entry.map_err(|error| PumasError::Io {
+                    message: "Could not enumerate the complete import source".into(),
+                    path: error.path().map(Path::to_path_buf),
+                    source: error.into_io_error(),
+                })?;
                 if !entry.file_type().is_file() {
                     continue;
                 }
-
-                // Get relative path within source
-                let rel_path = entry.path().strip_prefix(source).unwrap();
-                let original_name = rel_path.to_string_lossy().to_string();
-                let normalized = normalize_filename(&original_name);
-
-                let dest_path = dest_dir.join(&normalized);
-
-                // Create parent directories if needed
-                if let Some(parent) = dest_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-
-                std::fs::copy(entry.path(), &dest_path)?;
-
-                let size = std::fs::metadata(&dest_path)?.len();
-
-                files.push(ModelFileInfo {
-                    name: normalized,
-                    original_name: Some(original_name),
-                    size: Some(size),
-                    sha256: None,
-                    blake3: None,
+                let relative =
+                    entry
+                        .path()
+                        .strip_prefix(source)
+                        .map_err(|_| PumasError::Validation {
+                            field: "import.filename".into(),
+                            message: "Import entry is outside the selected source".into(),
+                        })?;
+                let original = relative
+                    .to_str()
+                    .ok_or_else(|| PumasError::Validation {
+                        field: "import.filename".into(),
+                        message: "Import filename must be valid UTF-8".into(),
+                    })?
+                    .to_owned();
+                let normalized = normalize_filename(&original);
+                planned.push((entry.into_path(), original, normalized));
+            }
+        }
+        let mut names = std::collections::HashSet::new();
+        for (_, _, normalized) in &planned {
+            if !names.insert(normalized) {
+                return Err(PumasError::Validation {
+                    field: "import.filename".into(),
+                    message: "Distinct source files have the same normalized import filename"
+                        .into(),
                 });
             }
         }
 
+        drop(names);
+        let mut files = Vec::with_capacity(planned.len());
+        for (source_path, original_name, normalized) in planned {
+            let dest_path = dest_dir.join(&normalized);
+            if let Some(parent) = dest_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let mut input = std::fs::File::open(&source_path)?;
+            // Exclusive creation is the final filesystem oracle, including
+            // case/Unicode aliases on the destination filesystem. Never truncate
+            // an existing file if the mapped name collides at this boundary.
+            let mut output = create_exclusive_import_output(&dest_path)?;
+            let size = std::io::copy(&mut input, &mut output)?;
+            output.set_permissions(input.metadata()?.permissions())?;
+            output.sync_all()?;
+            files.push(ModelFileInfo {
+                name: normalized,
+                original_name: Some(original_name),
+                size: Some(size),
+                sha256: None,
+                blake3: None,
+            });
+        }
         Ok(files)
     }
 
@@ -1503,45 +1523,17 @@ impl ModelImporter {
             ))
         })??;
 
-        // Validate shard completeness — reject if any file is part of an incomplete set.
-        // Uses extract_shard_info per file to catch even single-shard-of-set cases
-        // (which detect_sharded_sets would treat as standalone).
-        for file_info in &files {
-            if let Some((base_name, _idx, Some(total))) =
-                sharding::extract_shard_info(&file_info.name)
-            {
-                if total > 1 {
-                    // Count how many shards of this set we actually have
-                    let found_count = files
-                        .iter()
-                        .filter(|f| {
-                            sharding::extract_shard_info(&f.name)
-                                .map(|(b, _, _)| b == base_name)
-                                .unwrap_or(false)
-                        })
-                        .count();
-                    if found_count < total {
-                        tracing::warn!(
-                            "Incomplete shard set '{}': found {}/{} shards",
-                            base_name,
-                            found_count,
-                            total,
-                        );
-                        return Ok(ModelImportResult {
-                            path: model_dir.display().to_string(),
-                            success: false,
-                            model_id: None,
-                            model_path: None,
-                            error: Some(format!(
-                                "Incomplete shard set '{}': have {}/{} shards",
-                                base_name, found_count, total,
-                            )),
-                            security_tier: None,
-                        });
-                    }
-                    break; // Only need to validate once per directory
-                }
-            }
+        if let Err(error) =
+            sharding::validate_explicit_shard_sets(files.iter().map(|file| file.name.as_str()))
+        {
+            return Ok(ModelImportResult {
+                path: model_dir.display().to_string(),
+                success: false,
+                model_id: None,
+                model_path: None,
+                error: Some(error),
+                security_tier: None,
+            });
         }
 
         // Build hashes from known value or compute
@@ -1763,43 +1755,72 @@ impl ModelImporter {
         Ok(model_id)
     }
 
-    /// Enumerate model files already present in a directory (no copy).
+    /// Enumerate model files as root-relative paths without truncating depth.
+    /// Missing metadata or traversal errors cannot establish a complete set.
     fn enumerate_model_files(&self, dir: &Path) -> Result<Vec<ModelFileInfo>> {
         let mut files = Vec::new();
-
-        for entry in WalkDir::new(dir)
-            .min_depth(1)
-            .max_depth(2)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
+        for entry in WalkDir::new(dir).min_depth(1) {
+            let entry = entry.map_err(|error| PumasError::Io {
+                message: "Could not enumerate the complete in-place import".into(),
+                path: error.path().map(Path::to_path_buf),
+                source: error.into_io_error(),
+            })?;
             if !entry.file_type().is_file() {
                 continue;
             }
-
             let filename = entry.file_name().to_string_lossy();
-
-            // Skip metadata and incomplete downloads
-            if filename == "metadata.json" || filename == "overrides.json" {
+            if filename == "metadata.json"
+                || filename == "overrides.json"
+                || filename.ends_with(".part")
+            {
                 continue;
             }
-            if filename.ends_with(".part") {
-                continue;
-            }
-
-            let size = entry.metadata().ok().map(|m| m.len());
-
+            let relative = entry
+                .path()
+                .strip_prefix(dir)
+                .map_err(|_| PumasError::Validation {
+                    field: "import.filename".into(),
+                    message: "Import entry is outside the selected directory".into(),
+                })?;
+            let name = relative
+                .to_str()
+                .ok_or_else(|| PumasError::Validation {
+                    field: "import.filename".into(),
+                    message: "Import filename must be valid UTF-8".into(),
+                })?
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            let size = entry
+                .metadata()
+                .map_err(|error| PumasError::Io {
+                    message: "Could not observe an in-place import file".into(),
+                    path: error.path().map(Path::to_path_buf),
+                    source: error.into_io_error(),
+                })?
+                .len();
             files.push(ModelFileInfo {
-                name: filename.to_string(),
-                original_name: Some(filename.to_string()),
-                size,
+                original_name: Some(name.clone()),
+                name,
+                size: Some(size),
                 sha256: None,
                 blake3: None,
             });
         }
-
+        files.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(files)
     }
+}
+
+/// Create an output exclusively, keeping incomplete Unix copies private even
+/// under a permissive umask. Source permissions are restored only after copying.
+fn create_exclusive_import_output(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
 }
 
 fn copy_directory_preserving_layout(source: &Path, dest_dir: &Path) -> Result<()> {
@@ -1960,6 +1981,55 @@ pub struct ImportProgress {
 
 #[cfg(test)]
 mod tests {
+    /// Execute the permission oracle in a child so the umask never changes in
+    /// the test runner or interferes with parallel filesystem tests.
+    #[cfg(unix)]
+    #[test]
+    fn exclusive_import_creation_is_private_under_permissive_umask() {
+        let root = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new("sh")
+            .args(["-c", "umask 000; exec \"$@\"", "sh"])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "model_library::importer::tests::exclusive_import_mode_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("PUMAS_IMPORT_MODE_FIXTURE_ROOT", root.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            root.path().join("output").exists(),
+            "permission child must actually run"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "invoked only by the permissive-umask subprocess regression"]
+    fn exclusive_import_mode_child() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::var_os("PUMAS_IMPORT_MODE_FIXTURE_ROOT").unwrap();
+        let path = std::path::PathBuf::from(root).join("output");
+        let mut file = super::create_exclusive_import_output(&path).unwrap();
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        file.write_all(b"synthetic partial content").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o077,
+            0
+        );
+        assert!(super::create_exclusive_import_output(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"synthetic partial content");
+    }
+
     use super::*;
     use std::io::Write;
     use tempfile::TempDir;
@@ -1968,6 +2038,135 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let library = Arc::new(ModelLibrary::new(temp_dir.path()).await.unwrap());
         (temp_dir, library)
+    }
+
+    #[tokio::test]
+    async fn copy_refuses_normalized_filename_collisions_before_writes() {
+        let (temp, library) = setup().await;
+        let importer = ModelImporter::new(library);
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(source.join("Model A.gguf"), b"first input").unwrap();
+        std::fs::write(source.join("Model_A.gguf"), b"second input").unwrap();
+
+        let result = importer.copy_files(&source, &destination);
+
+        assert!(
+            matches!(result, Err(PumasError::Validation { field, .. }) if field == "import.filename")
+        );
+        assert_eq!(std::fs::read_dir(&destination).unwrap().count(), 0);
+        assert_eq!(
+            std::fs::read(source.join("Model A.gguf")).unwrap(),
+            b"first input"
+        );
+        assert_eq!(
+            std::fs::read(source.join("Model_A.gguf")).unwrap(),
+            b"second input"
+        );
+    }
+
+    #[tokio::test]
+    async fn public_import_refuses_collisions_without_publishing_a_model() {
+        let (temp, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let source = temp.path().join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        write_min_safetensors(&source.join("Model A.safetensors"));
+        write_min_safetensors(&source.join("Model_A.safetensors"));
+        let spec = ModelImportSpec {
+            path: source.to_string_lossy().into_owned(),
+            family: "collision-fixture".into(),
+            official_name: "Collision Fixture".into(),
+            repo_id: None,
+            model_type: Some("llm".into()),
+            subtype: None,
+            tags: None,
+            security_acknowledged: Some(true),
+        };
+
+        let result = importer.import(&spec).await.unwrap();
+
+        assert!(!result.success);
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("normalized import filename"));
+        assert!(result.model_id.is_none());
+        assert!(!library
+            .build_model_path("llm", "collision-fixture", "collision_fixture")
+            .exists());
+        assert!(source.join("Model A.safetensors").is_file());
+        assert!(source.join("Model_A.safetensors").is_file());
+    }
+
+    #[tokio::test]
+    async fn copy_preserves_existing_destination_instead_of_truncating_it() {
+        let (temp, library) = setup().await;
+        let importer = ModelImporter::new(library);
+        let source = temp.path().join("Model.gguf");
+        let destination = temp.path().join("destination");
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(&source, b"new input").unwrap();
+        std::fs::write(destination.join("model.gguf"), b"existing input").unwrap();
+
+        assert!(importer.copy_files(&source, &destination).is_err());
+        assert_eq!(
+            std::fs::read(destination.join("model.gguf")).unwrap(),
+            b"existing input"
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), b"new input");
+    }
+
+    #[tokio::test]
+    async fn copy_refuses_unreadable_source_and_preserves_valid_distinct_inputs() {
+        let (temp, library) = setup().await;
+        let importer = ModelImporter::new(library);
+        let destination = temp.path().join("destination");
+        std::fs::create_dir_all(&destination).unwrap();
+        assert!(importer
+            .copy_files(&temp.path().join("missing"), &destination)
+            .is_err());
+        assert_eq!(std::fs::read_dir(&destination).unwrap().count(), 0);
+
+        let source = temp.path().join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("Model A.gguf"), b"first input").unwrap();
+        std::fs::write(source.join("Model B.gguf"), b"second input").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                source.join("Model A.gguf"),
+                std::fs::Permissions::from_mode(0o440),
+            )
+            .unwrap();
+        }
+        let files = importer.copy_files(&source, &destination).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(destination.join("model_a.gguf"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o440
+            );
+        }
+        assert_eq!(files.len(), 2);
+        assert_eq!(
+            std::fs::read(destination.join("model_a.gguf")).unwrap(),
+            b"first input"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("model_b.gguf")).unwrap(),
+            b"second input"
+        );
+        assert!(files.iter().all(|file| file.original_name.is_some()));
     }
 
     fn completed_download(model_dir: &Path, diffusers: bool) -> DownloadCompletionInfo {
@@ -2443,6 +2642,65 @@ mod tests {
         )
         .unwrap();
         bundle_root
+    }
+
+    #[tokio::test]
+    async fn in_place_import_refuses_a_second_incomplete_shard_set_before_publication() {
+        let (_temp, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let directory = library.build_model_path("llm", "fixture", "shards");
+        std::fs::create_dir_all(&directory).unwrap();
+        write_min_safetensors(&directory.join("complete-1-of-2.safetensors"));
+        write_min_safetensors(&directory.join("complete-2-of-2.safetensors"));
+        write_min_safetensors(&directory.join("incomplete-1-of-2.safetensors"));
+        let spec = InPlaceImportSpec {
+            model_dir: directory.clone(),
+            official_name: "shards".into(),
+            family: "fixture".into(),
+            model_type: Some("llm".into()),
+            repo_id: None,
+            download_request: None,
+            known_sha256: None,
+            compute_hashes: false,
+            expected_files: None,
+            pipeline_tag: None,
+            huggingface_evidence: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let result = importer.import_in_place(&spec).await.unwrap();
+        assert!(!result.success);
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("incomplete.safetensors"));
+        assert!(!directory.join("metadata.json").exists());
+        assert!(library.index().get("llm/fixture/shards").unwrap().is_none());
+        assert!(directory.join("complete-1-of-2.safetensors").is_file());
+        assert!(directory.join("complete-2-of-2.safetensors").is_file());
+        assert!(directory.join("incomplete-1-of-2.safetensors").is_file());
+    }
+
+    #[tokio::test]
+    async fn in_place_enumeration_preserves_deep_relative_shard_identity() {
+        let (_temp, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let directory = library.build_model_path("llm", "fixture", "nested");
+        std::fs::create_dir_all(directory.join("left/nested")).unwrap();
+        std::fs::create_dir_all(directory.join("right/nested")).unwrap();
+        write_min_safetensors(&directory.join("left/nested/model-1-of-2.safetensors"));
+        write_min_safetensors(&directory.join("right/nested/model-2-of-2.safetensors"));
+        let files = importer.enumerate_model_files(&directory).unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].name, "left/nested/model-1-of-2.safetensors");
+        assert_eq!(files[1].name, "right/nested/model-2-of-2.safetensors");
+        assert!(sharding::validate_explicit_shard_sets(
+            files.iter().map(|file| file.name.as_str())
+        )
+        .is_err());
     }
 
     #[tokio::test]

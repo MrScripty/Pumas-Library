@@ -12,7 +12,7 @@
 use crate::model_library::types::LfsFileInfo;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
@@ -283,6 +283,51 @@ pub fn validate_shard_completeness(shard_files: &[PathBuf]) -> ShardValidation {
         missing_shards: missing_indices,
         error: String::new(),
     }
+}
+
+/// Validate every explicitly counted set, preserving relative directories in
+/// its identity. Counts without unique, in-range ordinals are not completeness.
+/// Uncounted naming conventions retain their existing caller-owned semantics.
+pub(crate) fn validate_explicit_shard_sets<'a>(
+    filenames: impl IntoIterator<Item = &'a str>,
+) -> Result<(), String> {
+    let mut sets: BTreeMap<String, (usize, BTreeSet<usize>)> = BTreeMap::new();
+    for filename in filenames {
+        let Some(parts) = PATTERN_WITH_TOTAL.captures(filename) else {
+            continue;
+        };
+        let index: usize = parts[2]
+            .parse()
+            .map_err(|_| "Invalid shard ordinal".to_owned())?;
+        let total: usize = parts[3]
+            .parse()
+            .map_err(|_| "Invalid shard total".to_owned())?;
+        if total == 0 || index == 0 || index > total {
+            return Err("Shard ordinal must be within its positive declared total".into());
+        }
+        let name = format!("{}{}", &parts[1], &parts[4]);
+        let (expected, found) = sets
+            .entry(name.clone())
+            .or_insert_with(|| (total, BTreeSet::new()));
+        if *expected != total {
+            return Err(format!("Inconsistent shard totals for '{name}'"));
+        }
+        if !found.insert(index) {
+            return Err(format!("Duplicate shard ordinal for '{name}'"));
+        }
+    }
+    for (name, (expected, found)) in sets {
+        // Unique indices already lie in 1..=expected; equality proves coverage
+        // without allocating or iterating an untrusted declared-total range.
+        if found.len() != expected {
+            return Err(format!(
+                "Incomplete shard set '{name}': have {}/{} shards",
+                found.len(),
+                expected
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Extract shard information from a filename.
@@ -590,6 +635,42 @@ mod tests {
         // Should assume complete since we can't determine expected total
         assert!(result.is_complete);
         assert_eq!(result.total_shards, 2);
+    }
+
+    #[test]
+    fn explicit_shard_validation_checks_every_set_and_its_directory() {
+        assert!(
+            validate_explicit_shard_sets(["complete-1-of-1.gguf", "incomplete-1-of-2.gguf",])
+                .is_err()
+        );
+        assert!(validate_explicit_shard_sets([
+            "left/model-1-of-2.gguf",
+            "right/model-2-of-2.gguf",
+        ])
+        .is_err());
+        assert!(validate_explicit_shard_sets([
+            "left/model-1-of-2.gguf",
+            "left/model-2-of-2.gguf",
+            "right/model-1-of-1.gguf",
+            "config.json",
+            "standalone.gguf",
+        ])
+        .is_ok());
+    }
+
+    #[test]
+    fn explicit_shard_validation_rejects_duplicate_invalid_and_conflicting_ordinals() {
+        for files in [
+            vec!["model-1-of-2.gguf", "model-01-of-2.gguf"],
+            vec!["model-0-of-1.gguf"],
+            vec!["model-2-of-1.gguf"],
+            vec!["model-1-of-0.gguf"],
+            vec!["model-1-of-1.gguf", "model-2-of-2.gguf"],
+            vec!["model-1-of-18446744073709551615.gguf"],
+            vec!["model-184467440737095516150-of-2.gguf"],
+        ] {
+            assert!(validate_explicit_shard_sets(files).is_err());
+        }
     }
 
     #[test]

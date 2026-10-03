@@ -7,6 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
 /// A registered library entry.
@@ -172,14 +173,47 @@ impl LibraryRegistry {
     }
 
     fn configure_connection(conn: &Connection) -> Result<()> {
-        conn.execute_batch(&format!(
-            "PRAGMA journal_mode=WAL;\n\
-             PRAGMA busy_timeout={};\n\
-             PRAGMA synchronous=NORMAL;\n\
-             PRAGMA temp_store=MEMORY;",
+        Self::configure_wal(
+            conn,
+            Duration::from_millis(u64::from(RegistryConfig::BUSY_TIMEOUT_MS)),
+        )?;
+        conn.busy_timeout(Duration::from_millis(u64::from(
             RegistryConfig::BUSY_TIMEOUT_MS,
-        ))?;
+        )))?;
+        conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY;")?;
         Ok(())
+    }
+
+    /// WAL conversion can return SQLITE_BUSY without invoking SQLite's busy
+    /// handler (lock-upgrade avoidance). Retry that initialization step only,
+    /// within one shared budget; never turn other initialization failures into
+    /// a fallback database or silently continue without the requested mode.
+    fn configure_wal(conn: &Connection, budget: Duration) -> Result<()> {
+        let deadline = Instant::now() + budget;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            conn.busy_timeout(remaining.min(Duration::from_millis(20)))?;
+            let outcome =
+                conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get::<_, String>(0));
+            match outcome {
+                Ok(mode) if mode.eq_ignore_ascii_case("wal") => return Ok(()),
+                Ok(_) => {
+                    return Err(PumasError::Database {
+                        message: "Registry could not establish WAL journal mode".into(),
+                        source: None,
+                    })
+                }
+                Err(error) => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if error.sqlite_error_code() != Some(rusqlite::ErrorCode::DatabaseBusy)
+                        || remaining.is_zero()
+                    {
+                        return Err(error.into());
+                    }
+                    std::thread::sleep(remaining.min(Duration::from_millis(5)));
+                }
+            }
+        }
     }
 
     fn ensure_schema(conn: &Connection) -> Result<()> {
@@ -493,20 +527,24 @@ impl LibraryRegistry {
 
     /// Claim primary ownership for a library path.
     pub fn try_claim_instance(&self, path: &Path, pid: u32) -> Result<InstanceClaimResult> {
-        let conn = self.lock_conn()?;
         let canonical = Self::canonicalize_library_path(path)?;
         let path_str = canonical.to_string_lossy().to_string();
         let now = Utc::now().to_rfc3339();
         let version = env!("CARGO_PKG_VERSION").to_string();
+        let mut conn = self.lock_conn()?;
+        // Serialize observation and replacement across independently opened
+        // registries. A per-connection mutex cannot protect primary admission.
+        let transaction =
+            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
-        if let Some(existing) = Self::read_instance_entry(&conn, &path_str)? {
+        if let Some(existing) = Self::read_instance_entry(&transaction, &path_str)? {
             if crate::platform::is_process_alive(existing.pid) {
                 return Ok(InstanceClaimResult::Occupied(existing));
             }
         }
 
         let claim_token = uuid::Uuid::new_v4().to_string();
-        conn.execute(
+        transaction.execute(
             "INSERT INTO instances (
                  library_path, pid, port, started_at, version, status, claim_token,
                  transport_kind, endpoint, connection_token
@@ -533,11 +571,29 @@ impl LibraryRegistry {
             ],
         )?;
 
+        transaction.commit()?;
+
         Ok(InstanceClaimResult::Claimed(PrimaryInstanceClaim {
             library_path: canonical,
             pid,
             claim_token,
         }))
+    }
+
+    /// Release only this unpromoted startup claim. Stale startup cleanup must
+    /// never remove a successor or a claim already promoted to a ready instance.
+    pub(crate) fn release_instance_claim(&self, claim: &PrimaryInstanceClaim) -> Result<bool> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "DELETE FROM instances WHERE library_path = ?1 AND pid = ?2
+             AND claim_token = ?3 AND status = 'claiming'",
+            params![
+                claim.library_path.to_string_lossy(),
+                claim.pid,
+                claim.claim_token
+            ],
+        )?;
+        Ok(rows > 0)
     }
 
     /// Mark a previously claimed instance row as ready for client attachment.
@@ -745,6 +801,81 @@ mod tests {
         let dir = parent.join(name);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn concurrent_fresh_registry_connections_all_establish_wal() {
+        for _ in 0..8 {
+            let root = TempDir::new().unwrap();
+            let path = root.path().join("concurrent.db");
+            let barrier = Arc::new(std::sync::Barrier::new(16));
+            let workers: Vec<_> = (0..16)
+                .map(|_| {
+                    let path = path.clone();
+                    let barrier = barrier.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        let registry = LibraryRegistry::open_at(&path).unwrap();
+                        let mode: String = registry
+                            .lock_conn()
+                            .unwrap()
+                            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                            .unwrap();
+                        assert_eq!(mode, "wal");
+                    })
+                })
+                .collect();
+            for worker in workers {
+                worker.join().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn wal_contention_exhausts_its_budget_without_swallowing_busy() {
+        let root = TempDir::new().unwrap();
+        let path = root.path().join("locked.db");
+        let owner = Connection::open(&path).unwrap();
+        owner.execute_batch("CREATE TABLE sentinel (value TEXT); BEGIN EXCLUSIVE; INSERT INTO sentinel VALUES ('owned');").unwrap();
+        let contender = Connection::open(&path).unwrap();
+        let began = Instant::now();
+        let error =
+            LibraryRegistry::configure_wal(&contender, Duration::from_millis(40)).unwrap_err();
+        assert!(
+            matches!(error, PumasError::Database { source: Some(error), .. }
+            if error.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy))
+        );
+        assert!(
+            began.elapsed() >= Duration::from_millis(40),
+            "busy failure must consume its retry budget"
+        );
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "busy retry must remain bounded"
+        );
+        owner.execute_batch("COMMIT").unwrap();
+        LibraryRegistry::configure_wal(&contender, Duration::from_secs(1)).unwrap();
+        let value: String = contender
+            .query_row("SELECT value FROM sentinel", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, "owned");
+    }
+
+    #[test]
+    fn wal_initialization_preserves_nonbusy_errors_and_rejects_unsupported_mode() {
+        let root = TempDir::new().unwrap();
+        let path = root.path().join("invalid.db");
+        std::fs::write(&path, b"not a sqlite database").unwrap();
+        let connection = Connection::open(&path).unwrap();
+        let error =
+            LibraryRegistry::configure_wal(&connection, Duration::from_secs(1)).unwrap_err();
+        assert!(
+            matches!(error, PumasError::Database { source: Some(error), .. }
+            if error.sqlite_error_code() == Some(rusqlite::ErrorCode::NotADatabase))
+        );
+        assert_eq!(std::fs::read(path).unwrap(), b"not a sqlite database");
+        let memory = Connection::open_in_memory().unwrap();
+        assert!(LibraryRegistry::configure_wal(&memory, Duration::from_secs(1)).is_err());
     }
 
     #[test]
@@ -1016,6 +1147,65 @@ mod tests {
         assert!(instances
             .iter()
             .any(|instance| instance.port == 22222 && instance.endpoint == "127.0.0.1:22222"));
+    }
+
+    #[test]
+    fn concurrent_claim_cannot_overwrite_an_owner_committed_while_waiting() {
+        use std::cell::RefCell;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        // SQLite's busy callback gives a deterministic schedule without sleeps
+        // or production hooks: the contender has reached its first write lock.
+        thread_local! {
+            static BUSY_GATE: RefCell<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> =
+                const { RefCell::new(None) };
+        }
+        fn wait_for_writer(_: i32) -> bool {
+            BUSY_GATE.with(|gate| match gate.borrow_mut().take() {
+                Some((blocked, release)) => {
+                    blocked.send(()).is_ok() && release.recv_timeout(Duration::from_secs(5)).is_ok()
+                }
+                None => false,
+            })
+        }
+
+        let (registry, temp) = create_test_registry();
+        let library = create_library_dir(temp.path(), "competing-startup");
+        registry.register(&library, "Competing startup").unwrap();
+        let contender = LibraryRegistry::open_at(&temp.path().join("test-registry.db")).unwrap();
+        let mut writer = registry.lock_conn().unwrap();
+        let transaction = writer
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let (blocked_tx, blocked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let contender_path = library.clone();
+        let running = std::thread::spawn(move || {
+            BUSY_GATE.with(|gate| *gate.borrow_mut() = Some((blocked_tx, release_rx)));
+            contender
+                .lock_conn()
+                .unwrap()
+                .busy_handler(Some(wait_for_writer))
+                .unwrap();
+            contender.try_claim_instance(&contender_path, std::process::id())
+        });
+        blocked_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        transaction.execute(
+            "INSERT INTO instances (library_path, pid, port, started_at, version, status, claim_token)
+             VALUES (?1, ?2, 0, ?3, ?4, 'claiming', 'original-owner')",
+            params![library.canonicalize().unwrap().to_string_lossy(), std::process::id(),
+                Utc::now().to_rfc3339(), env!("CARGO_PKG_VERSION")],
+        ).unwrap();
+        transaction.commit().unwrap();
+        drop(writer);
+        release_tx.send(()).unwrap();
+        let outcome = running.join().unwrap().unwrap();
+        assert!(matches!(outcome, InstanceClaimResult::Occupied(_)));
+        // The winner's exact token must still be promotable after the contender.
+        registry
+            .mark_instance_ready(&library, "original-owner", 12345)
+            .unwrap();
     }
 
     #[test]

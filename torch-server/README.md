@@ -153,3 +153,24 @@ The Z-Image adapter includes a narrow Nunchaku 1.2/Diffusers 0.37 forward-call
 compatibility boundary. It keeps packed rotary hooks and passes patch dimensions
 by name. Native dependency imports alone do not establish this compatibility;
 checkpoint kernel and full pipeline qualification are recorded in the plan.
+
+## Model-supplied Python code
+
+Text loaders (standard Hugging Face, Sherry, and DLLM) explicitly pass
+`trust_remote_code=False` to both tokenizer and model loading. Downloading,
+importing, or selecting a model does not authorize executing Python supplied by
+that model repository. [Transformers documents custom-model loading as a separate
+trust decision](https://huggingface.co/docs/transformers/custom_models).
+
+Models supported by the installed framework implementations remain eligible.
+Models that require repository-supplied code now fail through the normal model
+load error path; the server does not retry with elevated trust or prompt in the
+background. This includes custom-code-only Sherry or DLLM models. There is no
+global environment, command-line, or request toggle to bypass this boundary.
+
+Supporting such models later requires a reviewed approval contract bound to an
+immutable code revision/content identity, its provenance and execution scope,
+with invalidation when the code changes. That contract is not implemented yet.
+This restriction is not a general sandbox for model files, framework dependencies,
+or native extensions; existing artifact validation and runtime isolation still
+matter.

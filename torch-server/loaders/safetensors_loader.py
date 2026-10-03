@@ -23,13 +23,13 @@ def load_safetensors(
 
     logger.info("Loading model from %s onto %s", path_str, device)
 
-    tokenizer = AutoTokenizer.from_pretrained(path_str, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(path_str, trust_remote_code=False)
 
     model = AutoModelForCausalLM.from_pretrained(
         path_str,
         torch_dtype="auto",
         device_map=str(device),
-        trust_remote_code=True,
+        trust_remote_code=False,
     )
 
     model.eval()

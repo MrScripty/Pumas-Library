@@ -323,6 +323,7 @@ export class PythonBridge {
   private stopOperation: {
     child: ChildProcess | null;
     startup: Promise<void> | null;
+    allocation: (() => void) | null;
     promise: Promise<void>;
     settled: boolean;
   } | null = null;
@@ -662,20 +663,22 @@ export class PythonBridge {
   /**
    * Stop one captured child. The shutdown RPC only acknowledges admission;
    * natural exit code 0 is the backend's receipt for completed owned cleanup.
-   * Replay the same outcome for the captured child and startup owner, including failure.
+   * Replay the same outcome for captured child, startup and allocation owners, including failure.
    */
   stop(): Promise<void> {
     const child = this.process ?? this.terminalExit?.child ?? null;
     const startup = this.startPromise;
+    const allocation = this.cancelPortAllocation;
     if (this.stopOperation && (!this.stopOperation.settled
       || ((this.stopOperation.child === child || !child)
-        && (!startup || this.stopOperation.startup === startup)))) {
+        && (!startup || this.stopOperation.startup === startup)
+        && (!allocation || this.stopOperation.allocation === allocation)))) {
       return this.stopOperation.promise;
     }
     let resolve!: () => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
-    const operation = { child, startup, promise, settled: false };
+    const operation = { child, startup, allocation, promise, settled: false };
     this.stopOperation = operation;
     this.isShuttingDown = true;
     this.serverReady = false;

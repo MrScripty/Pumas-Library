@@ -625,6 +625,47 @@ test('a new startup allocation is cancelled even when the previous child has a c
   assert.equal(timers.pendingCount(), 0);
 });
 
+for (const previousChild of [false, true]) {
+  test(`exceptional allocation close cannot replay an earlier successful stop (previousChild=${previousChild})`, async () => {
+    const server = new EventEmitter();
+    let allocated;
+    let closeCallback;
+    let closeCalls = 0;
+    Object.assign(server, {
+      listen(_port, _host, callback) { allocated = callback; },
+      address: () => ({ port: 49152 }),
+      close(callback) { closeCalls += 1; closeCallback = callback; },
+    });
+    const { bridge, children, timers } = stopFixture({ server });
+    bridge.process = null;
+    bridge.waitForReady = async () => {};
+    if (previousChild) {
+      await bridge.start();
+      children[0].exit();
+    }
+    const priorStop = bridge.stop();
+    await priorStop;
+    bridge.options.port = 0;
+    const starting = bridge.start();
+    const startupFailed = assert.rejects(starting, /simulated allocation close failure/);
+    allocated();
+    closeCallback(new Error('simulated allocation close failure'));
+    await startupFailed;
+    const allocationOwner = bridge.cancelPortAllocation;
+    assert.equal(bridge.startPromise, null);
+    assert.notEqual(allocationOwner, null, 'an exceptional close retains allocation ownership');
+    const stopped = bridge.stop();
+    assert.notEqual(stopped, priorStop, 'retained allocation ownership invalidates the earlier receipt');
+    await assert.rejects(stopped, /allocation closure unconfirmed.*cleanup incomplete/);
+    assert.equal(bridge.stop(), stopped, 'repeated stop shares the same incomplete outcome');
+    assert.equal(bridge.cancelPortAllocation, allocationOwner);
+    await assert.rejects(bridge.start(), /allocation closure is unconfirmed/);
+    assert.equal(children.length, previousChild ? 1 : 0);
+    assert.equal(closeCalls, 1);
+    assert.equal(timers.pendingCount(), 0);
+  });
+}
+
 test('real loopback allocation is closed and startup settled before stop resolves', { timeout: 5_000 }, async () => {
   const timers = new FakeTimerController();
   const bridge = createBridge(timers);

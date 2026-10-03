@@ -60,6 +60,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
       - name: Install repository Rust toolchain
         run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@v2
@@ -72,6 +74,20 @@ jobs:
       # silently enabling the features this gate is supposed to exclude.
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
+      # Temporary, owner-approved PR25 qualification only. Never a release asset.
+      - name: Package repaired RPC qualification output
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 25
+        env:
+          QUALIFICATION_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/release/package-rpc-qualification.mjs rust/target/debug/pumas-rpc rpc-qualification "$QUALIFICATION_SOURCE_SHA"
+      - name: Retain repaired RPC qualification output
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 25
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: rpc-qualification-${{ github.event.pull_request.head.sha }}
+          path: rpc-qualification/
+          retention-days: 1
+          if-no-files-found: error
       - name: Build inference-disabled release backend
         if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release --no-default-features
@@ -230,6 +246,14 @@ jobs:
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests rpc_shutdown_exits_after_delivering_acknowledgement_and_ending_sse
       # Exercise the integrated filesystem and registry repairs on each host;
       # compilation of these modules alone is not native behavioral evidence.
+      - name: Test native GGUF file-type inspection
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::package_facts::gguf::tests
+      - name: Test native GGUF inspector cache invalidation
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library gguf_inspector_revision_invalidates_legacy_fingerprint_only_for_gguf
+      - name: Test native GGUF intent evidence
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --test intent_api_tests gguf_header_quantization_matches_canonical_label_but_filename_is_not_proof
+      - name: Test native GGUF legacy cache reinspection
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --test package_facts_resolution stale_gguf_detail_and_summary_reinspect_raw_header_before_becoming_fresh
       - name: Test native import integrity
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::importer::tests
       - name: Test native shard completeness

@@ -332,6 +332,11 @@ impl<'a, R: Read + Seek> BoundedGgufReader<'a, R> {
     }
 }
 
+// Persisted numeric values follow llama_ftype, not ggml_type/ggml_ftype.
+// Never compress retired enum slots: 5 and 6 remain unsupported.
+// Source: ggml-org/llama.cpp@99b95488cac0f00ce3f05af113a8c1e287753f87/include/llama.h.
+pub(super) const GGUF_FILE_TYPE_INSPECTOR_REVISION: &str = "llama-ftype-v1";
+
 fn gguf_file_type_label(value: u64) -> &'static str {
     match value {
         0 => "ALL_F32",
@@ -339,37 +344,41 @@ fn gguf_file_type_label(value: u64) -> &'static str {
         2 => "MOSTLY_Q4_0",
         3 => "MOSTLY_Q4_1",
         4 => "MOSTLY_Q4_1_SOME_F16",
-        5 => "MOSTLY_Q8_0",
-        6 => "MOSTLY_Q5_0",
-        7 => "MOSTLY_Q5_1",
-        8 => "MOSTLY_Q2_K",
-        9 => "MOSTLY_Q3_K_S",
-        10 => "MOSTLY_Q3_K_M",
-        11 => "MOSTLY_Q3_K_L",
-        12 => "MOSTLY_Q4_K_S",
-        13 => "MOSTLY_Q4_K_M",
-        14 => "MOSTLY_Q5_K_S",
-        15 => "MOSTLY_Q5_K_M",
-        16 => "MOSTLY_Q6_K",
-        17 => "MOSTLY_IQ2_XXS",
-        18 => "MOSTLY_IQ2_XS",
-        19 => "MOSTLY_Q2_K_S",
-        20 => "MOSTLY_IQ3_XS",
-        21 => "MOSTLY_IQ3_XXS",
-        22 => "MOSTLY_IQ1_S",
-        23 => "MOSTLY_IQ4_NL",
-        24 => "MOSTLY_IQ3_S",
-        25 => "MOSTLY_IQ3_M",
-        26 => "MOSTLY_IQ2_S",
-        27 => "MOSTLY_IQ2_M",
-        28 => "MOSTLY_IQ4_XS",
-        29 => "MOSTLY_IQ1_M",
-        30 => "MOSTLY_BF16",
-        31 => "MOSTLY_Q4_0_4_4",
-        32 => "MOSTLY_Q4_0_4_8",
-        33 => "MOSTLY_Q4_0_8_8",
-        34 => "MOSTLY_TQ1_0",
-        35 => "MOSTLY_TQ2_0",
+        7 => "MOSTLY_Q8_0",
+        8 => "MOSTLY_Q5_0",
+        9 => "MOSTLY_Q5_1",
+        10 => "MOSTLY_Q2_K",
+        11 => "MOSTLY_Q3_K_S",
+        12 => "MOSTLY_Q3_K_M",
+        13 => "MOSTLY_Q3_K_L",
+        14 => "MOSTLY_Q4_K_S",
+        15 => "MOSTLY_Q4_K_M",
+        16 => "MOSTLY_Q5_K_S",
+        17 => "MOSTLY_Q5_K_M",
+        18 => "MOSTLY_Q6_K",
+        19 => "MOSTLY_IQ2_XXS",
+        20 => "MOSTLY_IQ2_XS",
+        21 => "MOSTLY_Q2_K_S",
+        22 => "MOSTLY_IQ3_XS",
+        23 => "MOSTLY_IQ3_XXS",
+        24 => "MOSTLY_IQ1_S",
+        25 => "MOSTLY_IQ4_NL",
+        26 => "MOSTLY_IQ3_S",
+        27 => "MOSTLY_IQ3_M",
+        28 => "MOSTLY_IQ2_S",
+        29 => "MOSTLY_IQ2_M",
+        30 => "MOSTLY_IQ4_XS",
+        31 => "MOSTLY_IQ1_M",
+        32 => "MOSTLY_BF16",
+        33 => "MOSTLY_Q4_0_4_4",
+        34 => "MOSTLY_Q4_0_4_8",
+        35 => "MOSTLY_Q4_0_8_8",
+        36 => "MOSTLY_TQ1_0",
+        37 => "MOSTLY_TQ2_0",
+        38 => "MOSTLY_MXFP4_MOE",
+        39 => "MOSTLY_NVFP4",
+        40 => "MOSTLY_Q1_0",
+        41 => "MOSTLY_Q2_0",
         _ => "UNKNOWN",
     }
 }
@@ -395,6 +404,32 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn file_type_labels_preserve_upstream_numeric_gaps_and_variants() {
+        for (number, expected) in [
+            (5, "UNKNOWN"),
+            (6, "UNKNOWN"),
+            (7, "MOSTLY_Q8_0"),
+            (10, "MOSTLY_Q2_K"),
+            (13, "MOSTLY_Q3_K_L"),
+            (14, "MOSTLY_Q4_K_S"),
+            (15, "MOSTLY_Q4_K_M"),
+            (16, "MOSTLY_Q5_K_S"),
+            (17, "MOSTLY_Q5_K_M"),
+            (18, "MOSTLY_Q6_K"),
+            (32, "MOSTLY_BF16"),
+            (36, "MOSTLY_TQ1_0"),
+            (37, "MOSTLY_TQ2_0"),
+            (38, "MOSTLY_MXFP4_MOE"),
+            (39, "MOSTLY_NVFP4"),
+            (40, "MOSTLY_Q1_0"),
+            (41, "MOSTLY_Q2_0"),
+            (1024, "UNKNOWN"),
+        ] {
+            assert_eq!(gguf_file_type_label(number), expected, "file type {number}");
+        }
+    }
+
+    #[test]
     fn extracts_header_metadata_without_tensor_data() {
         let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("model.gguf");
@@ -402,7 +437,7 @@ mod tests {
             &path,
             &[
                 kv_string("general.architecture", "llama"),
-                kv_u32("general.file_type", 13),
+                kv_u32("general.file_type", 15),
                 kv_string("tokenizer.ggml.model", "llama"),
                 kv_string("tokenizer.chat_template", "{{ messages }}"),
                 kv_u64("llama.context_length", 4096),

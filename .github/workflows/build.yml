@@ -254,6 +254,14 @@ jobs:
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::importer::tests
       - name: Test native shard completeness
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::sharding::tests
+      - name: Test native canonical shard discovery
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib shard_discovery
+      - name: Test read-only startup shard observation
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib shard_startup_tests
+      - name: Test shard recovery compatibility projection
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib test_recover_incomplete_shards_async_detects_missing_shard_set
+      - name: Test unchanged interrupted download discovery
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib test_find_interrupted_downloads_async_detects_partial_download_dir
       - name: Test native registry startup ownership
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library registry::library_registry::tests
       - name: Test native failed-start claim release

@@ -26,6 +26,7 @@ pub(crate) fn unconfirmed_import_response() -> ResolveModelArtifactLoadTargetRes
 
 pub(crate) fn resolve_artifact_load_target_from_index(
     index: &ModelIndex,
+    library_root: &Path,
     request: ResolveModelArtifactLoadTargetRequest,
 ) -> Result<ResolveModelArtifactLoadTargetResponse> {
     if request.model_ref.model_id.trim().is_empty()
@@ -51,10 +52,13 @@ pub(crate) fn resolve_artifact_load_target_from_index(
         ));
     }
 
-    if record
-        .as_ref()
-        .is_some_and(|record| !crate::models::copied_import_ready_value(&record.metadata))
-    {
+    if record.as_ref().is_some_and(|record| {
+        !super::importer::publication::indexed_publication_ready(
+            library_root,
+            &record.id,
+            &record.metadata,
+        )
+    }) {
         return Ok(unconfirmed_import_response());
     }
 

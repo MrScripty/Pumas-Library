@@ -9,8 +9,8 @@ use crate::models::{AssetValidationState, ImportPublicationIdentity, ImportState
 use std::collections::BTreeMap;
 use std::io::Read;
 
+use crate::model_library::download_recovery::IMPORT_DOCUMENT_MAX_BYTES;
 pub(crate) use crate::model_library::download_recovery::IMPORT_RECEIPT as RECEIPT_FILENAME;
-const MAX_RECEIPT_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +38,97 @@ pub(super) struct ImportPublication {
 /// or a dangling link. This probe never follows the receipt entry itself.
 pub(crate) fn receipt_path_claimed(model_dir: &Path) -> bool {
     !matches!(std::fs::symlink_metadata(model_dir.join(RECEIPT_FILENAME)), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+}
+
+/// Read the primary record only. Backups and overlays cannot replace producer
+/// state. Held no-follow observation creates no marker and bounds parsing work.
+pub(crate) fn read_canonical_import_metadata(
+    library_root: &Path,
+    model_dir: &Path,
+) -> Result<Option<ModelMetadata>> {
+    let root = crate::model_library::DownloadDestinationRoot::open_import_read_only(library_root)?;
+    let destination = root.resolve(model_dir)?;
+    let file = match destination.open_import_file("metadata.json") {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let mut bytes = Vec::new();
+    file.take(IMPORT_DOCUMENT_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > IMPORT_DOCUMENT_MAX_BYTES {
+        return Err(PumasError::Other(
+            "Copied-import metadata exceeds its bounded observation limit".into(),
+        ));
+    }
+    let metadata = serde_json::from_slice(&bytes)?;
+    if !destination.model_directory_exists()? {
+        return Ok(None);
+    }
+    Ok(Some(metadata))
+}
+
+/// Public indexed/cache consumers share this bounded observation. The SQLite
+/// snapshot is necessary but cannot replace a missing canonical primary record.
+/// It deliberately does not traverse payloads or hash model files per query.
+pub(crate) fn indexed_publication_ready(
+    library_root: &Path,
+    model_id: &str,
+    indexed: &serde_json::Value,
+) -> bool {
+    let model_dir = library_root.join(model_id);
+    let indexed_identity = indexed
+        .get("import_publication")
+        .filter(|value| !value.is_null());
+    if indexed_identity.is_none() && !receipt_path_claimed(&model_dir) {
+        return true;
+    }
+    if indexed_identity.is_none() || !crate::models::copied_import_ready_value(indexed) {
+        return false;
+    }
+    let Ok(Some(canonical)) = read_canonical_import_metadata(library_root, &model_dir) else {
+        return false;
+    };
+    if !canonical.copied_import_ready()
+        || serde_json::to_value(&canonical.import_publication)
+            .ok()
+            .as_ref()
+            != indexed_identity
+    {
+        return false;
+    }
+    confirmed_receipt_matches(library_root, &model_dir, &canonical, false).unwrap_or(false)
+}
+
+pub(crate) fn observe_selector_snapshot(
+    library_root: &Path,
+    snapshot: &mut crate::models::ModelLibrarySelectorSnapshot,
+    indexed: &[serde_json::Value],
+) {
+    for (row, metadata) in snapshot.rows.iter_mut().zip(indexed) {
+        if !indexed_publication_ready(library_root, &row.model_id, metadata) {
+            row.artifact_state = crate::models::ModelArtifactState::Invalid;
+            row.entry_path_state = crate::models::ModelEntryPathState::Invalid;
+            row.validation_state = Some(AssetValidationState::Invalid);
+            row.package_facts_summary_status =
+                crate::models::ModelPackageFactsSummaryStatus::Invalid;
+            row.package_facts_summary = None;
+            row.detail_state = crate::models::ModelLibrarySelectorDetailState::NeedsValidation;
+        }
+    }
+}
+
+pub(crate) fn observe_summary_snapshot(
+    library_root: &Path,
+    snapshot: &mut crate::models::ModelPackageFactsSummarySnapshot,
+    indexed: &[serde_json::Value],
+) {
+    for (item, metadata) in snapshot.items.iter_mut().zip(indexed) {
+        if !indexed_publication_ready(library_root, &item.model_id, metadata) {
+            item.status = crate::models::ModelPackageFactsSummaryStatus::Invalid;
+            item.summary = None;
+        }
+    }
 }
 
 /// Readiness observations may consume a Confirmed receipt but never create or
@@ -118,11 +209,46 @@ impl ImportPublication {
     /// destination hash pass, consumed by a callback-free finalization owner.
     pub(super) fn verify_for_finalization(
         self,
-        destination: &DownloadRecoveryDestination,
+        destination: DownloadRecoveryDestination,
+        library: ModelLibrary,
+        expected: crate::index::ModelRecord,
+        metadata: ModelMetadata,
     ) -> Result<VerifiedPublication> {
-        self.verify_receipt(destination)?;
+        if metadata.model_id.as_deref() != Some(self.receipt.model_id.as_str())
+            || expected.id != self.receipt.model_id
+            || library.get_model_id(destination.display_path()).as_deref()
+                != Some(expected.id.as_str())
+            || metadata
+                .import_publication
+                .as_ref()
+                .map(|identity| identity.id.as_str())
+                != Some(self.receipt.id.as_str())
+            || expected
+                .metadata
+                .pointer("/import_publication/id")
+                .and_then(serde_json::Value::as_str)
+                != Some(self.receipt.id.as_str())
+            || metadata.import_state != Some(ImportState::Pending)
+            || expected
+                .metadata
+                .get("import_state")
+                .and_then(serde_json::Value::as_str)
+                != Some("pending")
+        {
+            return Err(PumasError::Other(
+                "Final publication proof has mismatched owner, metadata or indexed generation"
+                    .into(),
+            ));
+        }
+        self.verify_receipt(&destination)?;
         destination.verify_import_payload(&self.receipt.payload)?;
-        Ok(VerifiedPublication(self))
+        Ok(VerifiedPublication {
+            publication: self,
+            destination,
+            library,
+            expected,
+            metadata,
+        })
     }
 
     pub(super) fn rebind(&self, destination: &DownloadRecoveryDestination) -> Result<()> {
@@ -171,28 +297,30 @@ impl ImportPublication {
 
 /// The constructor is private to the full held verification above. Neither
 /// callers nor index projections can manufacture or reuse a confirmation proof.
-pub(super) struct VerifiedPublication(ImportPublication);
+pub(super) struct VerifiedPublication {
+    publication: ImportPublication,
+    destination: DownloadRecoveryDestination,
+    library: ModelLibrary,
+    expected: crate::index::ModelRecord,
+    metadata: ModelMetadata,
+}
 
 impl VerifiedPublication {
-    pub(super) fn finalize(
-        mut self,
-        target: &DownloadRecoveryDestination,
-        library: &ModelLibrary,
-        model_id: &str,
-        metadata: &mut ModelMetadata,
-    ) -> Result<()> {
-        self.0.confirm(target)?;
-        self.0.mark_ready(metadata)?;
+    pub(super) fn finalize(mut self) -> Result<()> {
+        self.publication.confirm(&self.destination)?;
+        self.publication.mark_ready(&mut self.metadata)?;
         require_durable_document(
-            target.publish_import_document("metadata.json", metadata)?,
+            self.destination
+                .publish_import_document("metadata.json", &self.metadata)?,
             "Ready metadata finalization",
         )?;
-        library.index_import_metadata(model_id, target, metadata)
+        self.library
+            .finalize_import_index(&self.expected, &self.destination, &self.metadata)
     }
 }
 
 fn require_bounded_receipt(receipt: &PublicationReceipt) -> Result<()> {
-    if serde_json::to_vec_pretty(receipt)?.len() as u64 > MAX_RECEIPT_BYTES {
+    if serde_json::to_vec_pretty(receipt)?.len() as u64 > IMPORT_DOCUMENT_MAX_BYTES {
         return Err(PumasError::Validation {
             field: "import_publication".into(),
             message: "Copied import publication receipt exceeds the supported size limit".into(),
@@ -204,8 +332,9 @@ fn require_bounded_receipt(receipt: &PublicationReceipt) -> Result<()> {
 fn read_receipt(destination: &DownloadRecoveryDestination) -> Result<PublicationReceipt> {
     let file = destination.open_import_file(RECEIPT_FILENAME)?;
     let mut bytes = Vec::new();
-    file.take(MAX_RECEIPT_BYTES + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_RECEIPT_BYTES {
+    file.take(IMPORT_DOCUMENT_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > IMPORT_DOCUMENT_MAX_BYTES {
         return Err(PumasError::Other(
             "Copied import publication receipt exceeds the supported size limit".into(),
         ));

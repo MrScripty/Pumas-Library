@@ -827,6 +827,8 @@ impl ModelImporter {
             let existing =
                 load_model_metadata_or_default(self.library.clone(), model_dir.to_path_buf())
                     .await?;
+            self.library
+                .require_finalized_import_edit(model_dir, Some(&existing))?;
             if !existing.copied_import_ready() {
                 return Err(PumasError::Validation {
                     field: "import_publication".into(),

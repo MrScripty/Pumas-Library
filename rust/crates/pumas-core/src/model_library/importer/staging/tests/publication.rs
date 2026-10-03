@@ -297,7 +297,10 @@ async fn copied_import_receipt_uncertainty_and_ready_metadata_uncertainty_are_di
             "a visible receipt is not proof the producer observed durable confirmation"
         );
         let metadata = fixture.library.load_metadata(&target).unwrap().unwrap();
-        assert_eq!(metadata.copied_import_ready(), ready_write);
+        assert!(
+            !metadata.copied_import_ready(),
+            "Pending index fences both visible document outcomes"
+        );
         let id = fixture.library.get_model_id(&target).unwrap();
         assert!(!crate::models::copied_import_ready_value(
             &fixture.library.index().get(&id).unwrap().unwrap().metadata
@@ -531,9 +534,12 @@ async fn copied_import_unacknowledged_ready_restart_observations_respect_index_f
             std::fs::write(target.join("unknown.payload"), b"unknown after restart").unwrap();
         }
         fixture.library.rebuild_index().await.unwrap();
-        let ready = crate::models::copied_import_ready_value(
-            &fixture.library.index().get(&id).unwrap().unwrap().metadata,
-        );
+        let ready = fixture
+            .library
+            .index()
+            .get(&id)
+            .unwrap()
+            .is_some_and(|record| crate::models::copied_import_ready_value(&record.metadata));
         assert_eq!(ready, outcome == "new_ready");
         assert_eq!(
             fixture
@@ -561,6 +567,18 @@ async fn copied_import_receipt_survives_missing_malformed_or_erased_metadata() {
         );
         let target = fixture.target();
         let id = fixture.library.get_model_id(&target).unwrap();
+        prime_ready_publication_summary(&fixture, &id, &target);
+        let reader_before =
+            crate::model_library::PumasReadOnlyLibrary::open(fixture.library.library_root())
+                .unwrap();
+        assert!(reader_before
+            .resolve_model_artifact_load_target(publication_artifact_request(
+                &id,
+                &target,
+                crate::models::PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed
+            ))
+            .unwrap()
+            .is_ready());
         let metadata_path = target.join("metadata.json");
         // A valid historical backup cannot erase the new protocol or restore
         // Ready when canonical metadata is absent/damaged.
@@ -579,6 +597,68 @@ async fn copied_import_receipt_survives_missing_malformed_or_erased_metadata() {
                 std::fs::write(&metadata_path, serde_json::to_vec(&value).unwrap()).unwrap();
             }
         }
+        assert!(!fixture
+            .library
+            .get_effective_metadata(&id)
+            .unwrap()
+            .unwrap()
+            .copied_import_ready());
+        let reader =
+            crate::model_library::PumasReadOnlyLibrary::open(fixture.library.library_root())
+                .unwrap();
+        for mode in [
+            crate::models::PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            crate::models::PumasArtifactLoadTargetResolutionMode::OwnerFresh,
+        ] {
+            let request = publication_artifact_request(&id, &target, mode);
+            assert!(!fixture
+                .library
+                .resolve_model_artifact_load_target(request.clone())
+                .await
+                .unwrap()
+                .is_ready());
+            if mode == crate::models::PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed {
+                assert!(!reader
+                    .resolve_model_artifact_load_target(request)
+                    .unwrap()
+                    .is_ready());
+            }
+        }
+        let snapshot = reader
+            .model_library_selector_snapshot(Default::default())
+            .unwrap();
+        assert!(!snapshot.rows[0].is_executable_reference_ready());
+        assert!(snapshot.rows[0].package_facts_summary.is_none());
+        let snapshot = fixture
+            .library
+            .model_library_selector_snapshot(Default::default())
+            .await
+            .unwrap();
+        assert!(!snapshot.rows[0].is_executable_reference_ready());
+        let summaries = fixture
+            .library
+            .model_package_facts_summary_snapshot(10, 0)
+            .await
+            .unwrap();
+        assert_eq!(
+            summaries.items[0].status,
+            crate::models::ModelPackageFactsSummaryStatus::Invalid
+        );
+        assert!(
+            crate::models::copied_import_ready_value(
+                &fixture.library.index().get(&id).unwrap().unwrap().metadata
+            ),
+            "bounded public reads did not need reindexing"
+        );
+        assert!(!crate::models::copied_import_ready_value(
+            &fixture
+                .library
+                .get_model(&id)
+                .await
+                .unwrap()
+                .unwrap()
+                .metadata
+        ));
         let bytes_before = std::fs::read(&metadata_path).ok();
         assert!(!fixture
             .library
@@ -817,5 +897,461 @@ async fn copied_import_hashes_destination_once_after_every_callback() {
             .import_hash_pass_count(),
         1
     );
+    fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+fn publication_artifact_request(
+    id: &str,
+    target: &Path,
+    mode: crate::models::PumasArtifactLoadTargetResolutionMode,
+) -> crate::models::ResolveModelArtifactLoadTargetRequest {
+    crate::models::ResolveModelArtifactLoadTargetRequest {
+        model_ref: crate::models::PumasModelRef {
+            model_ref_contract_version: crate::models::PUMAS_MODEL_REF_CONTRACT_VERSION,
+            model_id: id.into(),
+            revision: None,
+            selected_artifact_id: Some("model.onnx".into()),
+            selected_artifact_path: Some(target.join("model.onnx").display().to_string()),
+            migration_diagnostics: vec![],
+        },
+        expected_artifact_kind: None,
+        caller_observed_entry_path: None,
+        caller_observed_package_facts_contract_version: None,
+        resolution_mode: mode,
+        consumer: crate::models::PumasArtifactConsumer {
+            consumer_name: "copied publication regression".into(),
+            task_kind: None,
+            runtime_family: None,
+        },
+    }
+}
+
+fn publication_in_place_spec(directory: PathBuf) -> InPlaceImportSpec {
+    InPlaceImportSpec {
+        model_dir: directory,
+        family: "fixture".into(),
+        official_name: "Owned Import".into(),
+        model_type: Some("vision".into()),
+        repo_id: None,
+        download_request: None,
+        known_sha256: None,
+        compute_hashes: false,
+        expected_files: None,
+        pipeline_tag: None,
+        huggingface_evidence: None,
+        release_date: None,
+        download_url: None,
+        model_card_json: None,
+        license_status: None,
+    }
+}
+
+#[tokio::test]
+async fn copied_import_stale_watcher_projection_preserves_producer_ready() {
+    let mut fixture = Fixture::new().await;
+    let (published_tx, published_rx) = tokio::sync::oneshot::channel();
+    let published_tx = std::sync::Mutex::new(Some(published_tx));
+    let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+    let resume_rx = std::sync::Mutex::new(resume_rx);
+    fixture.importer.import_hook = Some(Arc::new(move |boundary, _| {
+        if boundary == ImportBoundary::Published {
+            let _ = published_tx.lock().unwrap().take().unwrap().send(());
+            resume_rx.lock().unwrap().recv().unwrap();
+        }
+        Ok(())
+    }));
+    let importer = fixture.importer.clone();
+    let spec = fixture.spec.clone();
+    let producer = tokio::spawn(async move { importer.import(&spec).await });
+    published_rx.await.unwrap();
+    let (prepared_tx, prepared_rx) = tokio::sync::oneshot::channel();
+    let (commit_tx, commit_rx) = tokio::sync::oneshot::channel();
+    let library = fixture.library.clone();
+    let target = fixture.target();
+    let watcher = tokio::spawn(async move {
+        library
+            .index_model_dir_paused_projection(&target, prepared_tx, commit_rx)
+            .await
+    });
+    prepared_rx.await.unwrap();
+    resume_tx.send(()).unwrap();
+    assert!(producer.await.unwrap().unwrap().success);
+    commit_tx.send(()).unwrap();
+    watcher.await.unwrap().unwrap();
+    let id = fixture.library.get_model_id(&fixture.target()).unwrap();
+    assert!(crate::models::copied_import_ready_value(
+        &fixture.library.index().get(&id).unwrap().unwrap().metadata
+    ));
+    fixture.library.rebuild_index().await.unwrap();
+    assert!(fixture
+        .library
+        .get_effective_metadata(&id)
+        .unwrap()
+        .unwrap()
+        .copied_import_ready());
+    fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+#[tokio::test]
+async fn copied_import_deep_rebuild_and_in_place_retry_preserve_pending_fence() {
+    let mut fixture = Fixture::new().await;
+    fixture.importer.import_hook = Some(Arc::new(|boundary, target| {
+        if boundary == ImportBoundary::BeforeReady {
+            target.inject_import_document_uncertainty("metadata.json");
+        }
+        Ok(())
+    }));
+    assert!(fixture.importer.import(&fixture.spec).await.is_err());
+    let target = fixture.target();
+    let id = fixture.library.get_model_id(&target).unwrap();
+    let bytes = std::fs::read(target.join("metadata.json")).unwrap();
+    assert!(serde_json::from_slice::<ModelMetadata>(&bytes)
+        .unwrap()
+        .copied_import_ready());
+    assert!(fixture
+        .importer
+        .import_in_place(&publication_in_place_spec(target.clone()))
+        .await
+        .is_err());
+    fixture
+        .library
+        .deep_scan_rebuild(
+            false,
+            None::<fn(crate::model_library::library::DeepScanProgress)>,
+        )
+        .await
+        .unwrap();
+    assert!(!crate::models::copied_import_ready_value(
+        &fixture.library.index().get(&id).unwrap().unwrap().metadata
+    ));
+    assert!(fixture
+        .library
+        .save_overrides(&target, &Default::default())
+        .await
+        .is_err());
+    assert!(!target.join("overrides.json").exists());
+    assert_eq!(std::fs::read(target.join("metadata.json")).unwrap(), bytes);
+    assert!(fixture.tasks.shutdown_owned().await.is_err());
+}
+
+#[tokio::test]
+async fn copied_import_ready_overrides_and_transient_documents_preserve_cold_contract() {
+    let fixture = Fixture::new().await;
+    assert!(
+        fixture
+            .importer
+            .import(&fixture.spec)
+            .await
+            .unwrap()
+            .success
+    );
+    let target = fixture.target();
+    let id = fixture.library.get_model_id(&target).unwrap();
+    fixture
+        .library
+        .save_overrides(
+            &target,
+            &crate::models::ModelOverrides {
+                version_ranges: Some(std::collections::HashMap::from([(
+                    "app".into(),
+                    ">=1".into(),
+                )])),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(!target.join("overrides.json.bak").exists());
+    // Matching Ready observations do not scan transient writer namespace.
+    let transient = target.join("overrides.json.writer.tmp");
+    std::fs::write(&transient, b"in progress").unwrap();
+    fixture
+        .library
+        .deep_scan_rebuild(
+            false,
+            None::<fn(crate::model_library::library::DeepScanProgress)>,
+        )
+        .await
+        .unwrap();
+    assert!(fixture
+        .library
+        .get_effective_metadata(&id)
+        .unwrap()
+        .unwrap()
+        .copied_import_ready());
+    fixture.library.index().delete(&id).unwrap();
+    assert!(fixture
+        .library
+        .save_overrides(&target, &Default::default())
+        .await
+        .is_err());
+    fixture.library.rebuild_index().await.unwrap();
+    assert!(
+        fixture.library.index().get(&id).unwrap().is_none(),
+        "unknown temporary-looking file is not silently excluded or a permanent Pending row"
+    );
+    std::fs::remove_file(transient).unwrap();
+    fixture.library.rebuild_index().await.unwrap();
+    assert!(fixture
+        .library
+        .get_effective_metadata(&id)
+        .unwrap()
+        .unwrap()
+        .copied_import_ready());
+    assert_eq!(
+        fixture
+            .library
+            .load_overrides(&target)
+            .unwrap()
+            .unwrap()
+            .version_ranges
+            .unwrap()["app"],
+        ">=1"
+    );
+    fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+#[tokio::test]
+async fn copied_import_oversized_metadata_refuses_before_publication() {
+    let mut fixture = Fixture::new().await;
+    fixture.spec.official_name =
+        "x".repeat(crate::model_library::download_recovery::IMPORT_DOCUMENT_MAX_BYTES as usize + 1);
+    let result = fixture.importer.import(&fixture.spec).await.unwrap();
+    assert!(!result.success);
+    assert!(fixture.stages().is_empty());
+    assert_eq!(fixture.library.model_count().unwrap(), 0);
+    fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+#[tokio::test]
+async fn copied_import_reserved_original_and_normalized_documents_refuse_before_stage() {
+    for name in [
+        "metadata.json",
+        "metadata.json.bak",
+        "overrides.json",
+        RECEIPT_FILENAME,
+        "metadata_json.bak",
+        "pumas_import_publication.json",
+    ] {
+        let fixture = Fixture::new().await;
+        let source = Path::new(&fixture.spec.path).join(name);
+        std::fs::write(&source, b"preserve source document").unwrap();
+        let result = fixture.importer.import(&fixture.spec).await.unwrap();
+        assert!(!result.success, "{name}");
+        assert!(fixture.stages().is_empty());
+        assert_eq!(std::fs::read(&source).unwrap(), b"preserve source document");
+        fixture.tasks.shutdown_owned().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn copied_import_cross_root_merge_refuses_before_source_effects() {
+    let source = Fixture::new().await;
+    let destination = Fixture::new().await;
+    assert!(source.importer.import(&source.spec).await.unwrap().success);
+    let receipt = std::fs::read(source.target().join(RECEIPT_FILENAME)).unwrap();
+    let metadata = std::fs::read(source.target().join("metadata.json")).unwrap();
+    let result = crate::model_library::LibraryMerger::new(destination.library.clone())
+        .merge_from_library(source.library.clone())
+        .await
+        .unwrap();
+    assert_eq!(result.moved, 0);
+    assert!(result
+        .errors
+        .iter()
+        .any(|error| error.contains("Cross-root merge")));
+    assert_eq!(
+        std::fs::read(source.target().join(RECEIPT_FILENAME)).unwrap(),
+        receipt
+    );
+    assert_eq!(
+        std::fs::read(source.target().join("metadata.json")).unwrap(),
+        metadata
+    );
+    assert_eq!(source.library.model_count().unwrap(), 1);
+    assert_eq!(destination.library.model_count().unwrap(), 0);
+    source.tasks.shutdown_owned().await.unwrap();
+    destination.tasks.shutdown_owned().await.unwrap();
+}
+
+#[tokio::test]
+async fn copied_import_same_root_move_preserves_receipt_physical_identity() {
+    let fixture = Fixture::new().await;
+    assert!(
+        fixture
+            .importer
+            .import(&fixture.spec)
+            .await
+            .unwrap()
+            .success
+    );
+    let old_path = fixture.target();
+    let old_id = fixture.library.get_model_id(&old_path).unwrap();
+    let mut record = fixture.library.index().get(&old_id).unwrap().unwrap();
+    let authority = fixture.library.mutation_authority().unwrap();
+    let _grant = authority.root().try_acquire_execution_grant().unwrap();
+    let new_id = "vision/fixture/renamed";
+    let source = authority.root().resolve(&old_path).unwrap();
+    let target = authority.root().resolve(Path::new(new_id)).unwrap();
+    let mut metadata = source.read_model_metadata().unwrap().unwrap();
+    source.rename_model_directory_noreplace(&target).unwrap();
+    metadata.model_id = Some(new_id.into());
+    target.write_model_metadata(&metadata).unwrap();
+    record.id = new_id.into();
+    record.path = target.display_path().display().to_string();
+    record.metadata = serde_json::to_value(&metadata).unwrap();
+    fixture
+        .library
+        .index()
+        .replace_model_id_preserving_references(&old_id, &record)
+        .unwrap();
+    assert_eq!(receipt_at(target.display_path())["model_id"], old_id);
+    assert!(fixture
+        .library
+        .get_effective_metadata(new_id)
+        .unwrap()
+        .unwrap()
+        .copied_import_ready());
+    assert!(!old_path.exists());
+    drop(_grant);
+    fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+fn prime_ready_publication_summary(fixture: &Fixture, id: &str, target: &Path) {
+    use crate::models::*;
+    let request = publication_artifact_request(
+        id,
+        target,
+        PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+    );
+    let summary = ResolvedModelPackageFactsSummary {
+        package_facts_contract_version: PACKAGE_FACTS_CONTRACT_VERSION,
+        model_ref: request.model_ref,
+        artifact_kind: PackageArtifactKind::Onnx,
+        entry_path: target.join("model.onnx").display().to_string(),
+        storage_kind: StorageKind::LibraryOwned,
+        validation_state: AssetValidationState::Valid,
+        task: TaskEvidence {
+            pipeline_tag: None,
+            task_type_primary: None,
+            input_modalities: vec![],
+            output_modalities: vec![],
+        },
+        backend_hints: BackendHintFacts {
+            accepted: vec![BackendHintLabel::OnnxRuntime],
+            raw: vec![],
+            unsupported: vec![],
+        },
+        requires_custom_code: false,
+        config_status: PackageFactStatus::Present,
+        tokenizer_status: PackageFactStatus::Uninspected,
+        processor_status: PackageFactStatus::Uninspected,
+        generation_config_status: PackageFactStatus::Uninspected,
+        generation_defaults_status: PackageFactStatus::Uninspected,
+        image_generation_family_evidence: vec![],
+        diffusers_pipeline_class: None,
+        gguf_architecture: None,
+        diagnostic_codes: vec![],
+    };
+    for selected in ["", "model.onnx"] {
+        fixture
+            .library
+            .index()
+            .upsert_model_package_facts_cache(&crate::index::ModelPackageFactsCacheRecord {
+                model_id: id.into(),
+                selected_artifact_id: selected.into(),
+                cache_scope: crate::index::ModelPackageFactsCacheScope::Summary,
+                package_facts_contract_version: i64::from(PACKAGE_FACTS_CONTRACT_VERSION),
+                producer_revision: None,
+                source_fingerprint: "fixture".into(),
+                facts_json: serde_json::to_string(&summary).unwrap(),
+                cached_at: "2026-10-03T00:00:00Z".into(),
+                updated_at: "2026-10-03T00:00:00Z".into(),
+            })
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn copied_import_public_reclassification_conditionally_moves_ready_generation() {
+    let fixture = Fixture::new().await;
+    assert!(
+        fixture
+            .importer
+            .import(&fixture.spec)
+            .await
+            .unwrap()
+            .success
+    );
+    let old_path = fixture.target();
+    let old_id = fixture.library.get_model_id(&old_path).unwrap();
+    let mut metadata = fixture.library.load_metadata(&old_path).unwrap().unwrap();
+    metadata.family = Some("relocated".into());
+    fixture
+        .library
+        .save_metadata(&old_path, &metadata)
+        .await
+        .unwrap();
+    let weak = Arc::downgrade(&fixture.library);
+    let old = old_id.clone();
+    let observed = Arc::new(AtomicUsize::new(0));
+    let calls = observed.clone();
+    fixture
+        .library
+        .set_metadata_write_notifier(Some(Arc::new(move |path| {
+            let library = weak.upgrade().unwrap();
+            let target = path.parent().unwrap();
+            if library.get_model_id(target).as_deref() == Some(old.as_str()) {
+                return;
+            }
+            // The moved Ready document cannot be cold-adopted while another model
+            // ID still owns its publication generation.
+            assert!(!library
+                .load_metadata(target)
+                .unwrap()
+                .unwrap()
+                .copied_import_ready());
+            let expected = library.index().get(&old).unwrap().unwrap();
+            let mut stale_damage = expected.clone();
+            stale_damage.metadata["import_state"] = serde_json::json!("pending");
+            stale_damage.metadata["validation_state"] = serde_json::json!("invalid");
+            assert_eq!(
+                library
+                    .index()
+                    .upsert_projection_if_unchanged(&stale_damage, Some(&expected))
+                    .unwrap(),
+                crate::index::ProjectionCommit::Conflict
+            );
+            calls.fetch_add(1, Ordering::SeqCst);
+        })));
+    let new_id = fixture
+        .library
+        .reclassify_model(&old_id)
+        .await
+        .unwrap()
+        .expect("family changes the canonical directory");
+    fixture.library.set_metadata_write_notifier(None);
+    assert_eq!(observed.load(Ordering::SeqCst), 1);
+    assert_ne!(new_id, old_id);
+    assert!(!old_path.exists());
+    assert!(fixture.library.index().get(&old_id).unwrap().is_none());
+    let target = fixture.library.library_root().join(&new_id);
+    assert_eq!(receipt_at(&target)["model_id"], old_id);
+    assert!(fixture
+        .library
+        .get_effective_metadata(&new_id)
+        .unwrap()
+        .unwrap()
+        .copied_import_ready());
+    assert!(fixture
+        .library
+        .resolve_model_execution_descriptor(&new_id)
+        .await
+        .is_ok());
+    assert!(fixture
+        .library
+        .index()
+        .list_intent_model_deletion_claims()
+        .unwrap()
+        .is_empty());
     fixture.tasks.shutdown_owned().await.unwrap();
 }

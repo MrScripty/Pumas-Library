@@ -1537,6 +1537,8 @@ impl ModelLibrary {
                 let grant = Arc::new(migration_authority.root().try_acquire_execution_grant()?);
                 let source = migration_authority.root().resolve(&source_dir)?;
                 let target = migration_authority.root().resolve(&target_dir)?;
+                migration_library.require_finalized_import_edit(&source_dir, source.read_model_metadata()?.as_ref())?;
+                let expected_publication = migration_index.get(&old_model_id)?.filter(|record| record.metadata.get("import_publication").is_some_and(|value| !value.is_null()));
                 let conversion_targets = conversion_candidates
                     .into_iter()
                     .filter_map(|(model_id, path)| {
@@ -1553,6 +1555,7 @@ impl ModelLibrary {
                                     source.source_model_id == old_model_id
                                 }) =>
                             {
+                                if let Err(error) = migration_library.require_finalized_import_edit(&path, Some(&metadata)) { return Some(Err(error)); }
                                 Some(Ok((model_id, path)))
                             }
                             Ok(_) => None,
@@ -1603,11 +1606,17 @@ impl ModelLibrary {
                 }
                 mutation.mark_started();
                 source.rename_model_directory_noreplace(&target)?;
+                migration_library.normalize_owned_move_metadata(&target_for_record, &mut metadata)?;
                 target.write_model_metadata(&metadata)?;
                 let record = metadata_to_record(&target_model_id, &target_for_record, &metadata);
-                migration_index.replace_model_id_preserving_references(&old_model_id, &record)?;
+                if let Some(expected) = expected_publication {
+                    migration_library.project_owned_import_move(&expected, &target, &metadata)?;
+                } else {
+                    migration_index.replace_model_id_preserving_references(&old_model_id, &record)?;
+                }
                 for (conversion_model_id, conversion_path) in conversion_targets {
                     let destination = migration_authority.root().resolve(&conversion_path)?;
+                    let expected_index = migration_index.get(&conversion_model_id)?;
                     let Some(mut conversion_metadata) = destination.read_model_metadata()? else {
                         return Err(PumasError::Validation {
                             field: "model_library.mutation".into(),
@@ -1644,7 +1653,9 @@ impl ModelLibrary {
                         &conversion_path,
                         &conversion_metadata,
                     );
-                    migration_index.upsert(&conversion_record)?;
+                    if migration_index.upsert_projection_if_unchanged(&conversion_record, expected_index.as_ref())? == crate::index::ProjectionCommit::Conflict {
+                        return Err(PumasError::Other("Conversion metadata index changed during migration; newer state preserved".into()));
+                    }
                 }
                 metadata_mutation.finish_success()?;
                 mutation.finish_success()?;

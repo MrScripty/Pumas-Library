@@ -114,65 +114,94 @@ A native Windows diagnostic established that cached descendant directory handles
 caused `AccessDenied(5)` at directory rename; releasing those handles let the same
 held-parent rename succeed. The production correction is import-specific:
 
-1. Capture the configured root/stage physical IDs, all child directory IDs, and
-   every payload file's physical ID, length and SHA-256 in a version-1 receipt.
-   Only root `metadata.json`, `metadata.json.bak` and
-   `.pumas_import_publication.json` are mutable owner documents excluded from
-   payload evidence. Their names are reserved against source collisions, including
-   filesystem-equivalent aliases. Unknown additions are refused.
-2. Persist Pending receipt and Pending/Invalid metadata. Complete the final
-   callback-free proof, release only descendant handles, and perform the native
-   no-replace rename with the stage/root capabilities and execution grant held.
-3. After either successful or failed rename, rebind the exact recorded tree
-   through the held root before use or cleanup. A mismatch leaves both original
-   and replacement data intact. A successful native rename never becomes rollback
-   authority, including failed rebind, sync, receipt or index operations.
-4. Exact payload verification permits durable Confirmed receipt publication.
-   Only then may the final metadata notifier run; another complete payload/receipt
-   proof follows it before held Ready metadata publication and explicit final
-   index commit. Any uncertain document outcome returns a published failure.
+1. Stream SHA-256/BLAKE3 while copying. Retain the configured root/stage IDs,
+   created directory identities (including empty components), output descriptor
+   identities, lengths and digests. Check the complete namespace against that
+   evidence without rereading payload bytes.
+2. Exactly four root documents are mutable owner documents outside payload
+   evidence: `metadata.json`, `metadata.json.bak`, `overrides.json`, and
+   `.pumas_import_publication.json`. Original source names, normalized destination
+   names, and native filesystem-equivalent aliases are refused. Ordinary metadata
+   backup behavior is preserved. Overrides currently use `keep_backup=false`;
+   `overrides.json.bak` is not silently excluded. UUID temporary files created by
+   the atomic writers receive no wildcard exemption.
+3. Persist Pending receipt and Pending/Invalid metadata. Complete structural
+   validation, release only descendants, and perform held no-replace rename.
+   Rebind the exact recorded IDs, sizes and complete namespace after success or
+   failure. A changed binding cannot authorize cleanup. Successful native rename
+   never becomes rollback authority.
+4. Keep receipt and index Pending while dependency projections and the final
+   metadata notifier complete. Then perform **one full destination hash pass**,
+   including exact namespace/binding and bundle-content checks. A private proof
+   is consumed by a callback-free owner: durable Confirmed receipt, durable Ready
+   metadata, and conditional final index commit. Any uncertain outcome reports
+   the retained publication and does not claim success.
 
-Receipt observation is no-follow and bounded to 16 MiB. Pending files are never
-cold-promoted. A visible Ready file after unacknowledged final metadata fsync
-already describes a payload with a durably Confirmed receipt; the caller still
-receives finalization uncertainty, and an existing same-publication Pending index
-remains fenced. Watchers, rebuild, public index projection, effective metadata,
-descriptors and artifact resolution cannot advance that fence. A cold index with
-no row may discover an already Ready file only after its matching Confirmed
-receipt, physical root and entire payload evidence verify; an old Pending file or
-unknown payload stays unavailable. No automatic retry/finalization is provided.
+Primary metadata and receipt share an explicit **16 MiB document limit**, enforced
+both before producer publication and by bounded no-follow observation. There is
+no truncation or fallback to legacy on malformed/oversized protocol evidence.
+Every public readiness decision requires canonical primary metadata, receipt/root
+identity, and matching indexed publication state. A Ready index or cached summary
+cannot conceal missing, malformed, identity-erased, or replaced canonical metadata.
+Backups and effective overlays cannot replace the primary publication gate.
 
-The same readiness predicate gates selector and package-summary snapshots,
-read-only cached artifact resolution, owner descriptors/package reinspection,
-and normal discovery projections. New receipt-owned metadata updates cannot
-create, erase or advance producer publication fields; overlays cannot supersede
-the canonical fields. Their ordinary atomic metadata edits preserve the existing
-`metadata.json.bak` behavior after finalized Ready. While Pending or finalization
-is uncertain, public metadata edits refuse to race the producer. A backup is
-never receipt authority or a restoration path that can erase Pending. Legacy
-assets without publication identity or receipt retain their existing behavior.
+Conditional projections capture the source row before filesystem observation and
+compare it inside a short SQLite transaction. No filesystem operation, callback,
+root-grant acquisition or await occurs under that transaction. Stale Pending
+watcher/rebuild results cannot overwrite producer Ready; only the producer may
+advance its existing Pending row. A canonical-damage observation can invalidate
+only the Ready row it observed. SQL update events are published after commit.
+Deep rebuild preserves all protocol rows and conditionally prunes legacy rows,
+so it cannot erase a Pending fence and subsequently cold-adopt its Ready file.
 
-A receipt with missing, malformed or identity-erased metadata is diagnostic
-Pending data, not a legacy orphan. The existing model-directory traversal also
-recognizes receipt-backed directories, while orphan traversal prunes all
-`.tmp_import_` subtrees and refuses receipt-bearing candidates. In-place refresh
-cannot adopt or confirm them. No database migration or live-store repair occurs.
+A visible Ready file after unacknowledged final metadata durability already has a
+verified durable Confirmed payload receipt. The import still reports uncertainty
+and its existing Pending index remains fenced. With no indexed owner, discovery
+may adopt an **already Ready** primary only after full payload verification.
+A failed cold proof is reported as unadopted, without creating a permanent Pending
+row from a temporary observation. Actual Pending primary/index state never
+advances automatically. Ordinary metadata and override edits require finalized
+index admission first, so legitimate atomic writer temporary files cannot race a
+cold scan. Existing Ready rows use bounded document observations without scanning
+those temporary files; unknown temporary-looking names still fail cold proof.
 
-The receipt proves publication identity and complete bytes at confirmation;
-normal ongoing payload freshness remains owned by existing package inspection.
-Capturing and revalidating SHA-256 adds full payload reads around effect boundaries.
-The healthy import path currently makes **five full staged-payload hash passes**:
-initial receipt capture, final pre-rename proof, exact rebind, Confirmed-receipt
-proof, and final Ready-metadata proof. Ordinary/progress imports additionally
-hash their primary model file for the existing metadata hashes; Diffusers does
-not take that extra primary-file pass. Copying itself reads each source once.
-Failure settlement can add another verification pass. This conservative first
-implementation trades substantial I/O/CPU for explicit byte-level evidence.
-Cold discovery without a matching Ready index row fully hashes the recorded
-payload before accepting an already Ready file, and repeated metadata observations
-before an authoritative Ready index commit may repeat that work. A matching Ready
-row permits bounded receipt/root-identity observation; ongoing file freshness is
-still handled by package inspection. Existing Pending rows remain fenced.
+Readiness integration includes canonical/effective metadata, public list/get/search
+projections, execution descriptors and package reinspection, both artifact
+resolution modes, `PumasReadOnlyLibrary`, public selector/summary snapshots,
+watcher/index projection, startup/ordinary/deep rebuild, metadata/review/override
+edits, in-place import, and owned metadata writers in reclassification, duplicate
+maintenance and migration. Snapshot SQL captures publication fields with each row;
+filesystem checks happen after the connection lock is released. Raw `ModelIndex`
+methods remain trusted index-only primitives, not filesystem readiness observers.
+Plain pathname/file enumeration helpers do not assert execution readiness.
+
+Cross-root merge refuses new protocol assets before moving their files. An
+explicit re-publication workflow is not provided. Same-root reclassification and
+migration retain the receipt identity and use a conditional owned index-ID remap,
+including durable references. Its original `model_id` and stage pathname are
+provenance; physical root/stage identities are authority. A UUID still indexed at
+another model ID blocks cold adoption at a moved path. Passive damage observations
+cannot downgrade a source protected by the existing mutation claim during its
+owned transfer. The public reclassification regression covers this transition.
+
+A receipt with missing, malformed or identity-erased metadata remains diagnostic
+protocol data. It is not adopted as a legacy orphan. Existing traversal recognizes
+receipt-backed directories; orphan traversal prunes `.tmp_import_` subtrees.
+In-place PreserveExisting checks the same Pending index fence before reporting
+idempotent success. No database migration or live-store repair occurs.
+
+Operational cost: successful copied imports hash during the source copy and read
+the destination payload once for final verification. The streamed digests also
+supply ordinary primary-file metadata, eliminating its separate hash read. There
+are multiple inexpensive namespace/identity walks and bounded metadata/config
+reads. Streaming replaces potential kernel copy offload and adds digest CPU work;
+throughput still needs measurement. Exceptional cleanup can add a verification
+pass. Corruption discovered after rename leaves published Pending data instead of
+an unpublished cleaned workspace. Cold adoption/rebuild without a matching Ready
+row hashes the payload; existing Pending rows stay fenced, and matching Ready rows
+use bounded canonical/receipt reads. Public cached snapshots therefore add small
+filesystem observations for protocol evidence, never full payload scans. Ongoing
+payload freshness after successful confirmation remains package inspection's job.
 
 There is **no supported reconciliation/finalization API for retained Pending
 imports in this change**. Only the admitted live producer may finish its own
@@ -180,6 +209,13 @@ transition. Terminal Pending data requires manual diagnosis; retaining a receipt
 is not a promise of automatic repair or a recommendation to delete/reimport it.
 The root grant excludes cooperating writers; no arbitrary equal-authority hostile
 mutation guarantee is claimed across handle release or any later filesystem edit.
+
+Revision regressions cover canonical damage with pre-existing Ready cached facts
+before any reindex; stale watcher and independent-connection conditional writes;
+Pending preservation through deep rebuild and in-place retry; override edits,
+backups and temporary-file cold admission; shared document bounds; original and
+normalized reserved names; source/target generation preservation during the public
+same-root reclassification path; and pre-mutation cross-root merge refusal.
 
 Compile-plausibility audit: in-repo `ModelMetadata` construction uses defaults or
 struct updates; the new optional field requires no exhaustive literal repair.

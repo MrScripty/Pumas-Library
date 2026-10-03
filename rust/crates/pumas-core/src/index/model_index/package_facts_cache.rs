@@ -305,6 +305,15 @@ impl ModelIndex {
         limit: usize,
         offset: usize,
     ) -> Result<ModelPackageFactsSummarySnapshot> {
+        self.list_summary_snapshot_with_publication(limit, offset)
+            .map(|(snapshot, _)| snapshot)
+    }
+
+    pub(crate) fn list_summary_snapshot_with_publication(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(ModelPackageFactsSummarySnapshot, Vec<serde_json::Value>)> {
         let conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
@@ -345,18 +354,25 @@ impl ModelIndex {
                     status = ModelPackageFactsSummaryStatus::Invalid;
                     summary = None;
                 }
-                Ok(ModelPackageFactsSummarySnapshotItem {
-                    model_id,
-                    status,
-                    summary,
-                })
+                Ok((
+                    ModelPackageFactsSummarySnapshotItem {
+                        model_id,
+                        status,
+                        summary,
+                    },
+                    serde_json::from_str(&metadata_json).unwrap_or_default(),
+                ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        let (items, publication): (Vec<_>, Vec<_>) = items.into_iter().unzip();
         let cursor = model_library_update_cursor(
             Self::current_model_library_update_event_id_with_conn(&conn)?,
         );
 
-        Ok(ModelPackageFactsSummarySnapshot { cursor, items })
+        Ok((
+            ModelPackageFactsSummarySnapshot { cursor, items },
+            publication,
+        ))
     }
 }
 

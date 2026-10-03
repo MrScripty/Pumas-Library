@@ -2,8 +2,8 @@
 
 mod import_custody;
 pub(crate) use import_custody::{
-    ImportFileIdentity, ImportPayloadIdentity, IMPORT_METADATA_BACKUP, IMPORT_MUTABLE_DOCUMENTS,
-    IMPORT_RECEIPT,
+    require_import_document_size, ImportFileIdentity, ImportPayloadIdentity,
+    IMPORT_DOCUMENT_MAX_BYTES, IMPORT_METADATA_BACKUP, IMPORT_MUTABLE_DOCUMENTS, IMPORT_RECEIPT,
 };
 
 use crate::platform::capability_fs::{open_directory, sync_directory};
@@ -805,6 +805,9 @@ impl DownloadRecoveryDestination {
         &self,
         metadata: &crate::models::ModelMetadata,
     ) -> Result<()> {
+        if metadata.import_publication.is_some() {
+            require_import_document_size(metadata)?;
+        }
         let directory = self.directory(false)?;
         let expected = directory_identity(&directory)?;
         let destination = self.clone();

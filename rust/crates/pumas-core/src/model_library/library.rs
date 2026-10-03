@@ -442,6 +442,12 @@ impl ModelLibrary {
             }
 
             let target_model_id = self.build_artifact_model_id(model_type, family, artifact_id);
+            self.require_finalized_import_edit(&source_dir, Some(&metadata))?;
+            let expected_publication = if metadata.import_publication.is_some() {
+                self.index.get(&source_model_id)?
+            } else {
+                None
+            };
             let original_metadata = metadata.clone();
             let mut mutation = authority.acquire_under_grant(
                 &self.index,
@@ -500,11 +506,14 @@ impl ModelLibrary {
             metadata.architecture_family = Some(normalize_name(family));
             metadata.cleaned_name = Some(normalize_artifact_path_slug(artifact_id));
             metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+            self.normalize_owned_move_metadata(&target_dir, &mut metadata)?;
             self.notify_metadata_projection_write(&target_dir.join(METADATA_FILENAME));
             target_destination.write_model_metadata(&metadata)?;
 
             let record = metadata_to_record(&target_model_id, &target_dir, &metadata);
-            if self.index.get(&source_model_id)?.is_some() {
+            if let Some(expected) = expected_publication {
+                self.project_owned_import_move(&expected, &target_destination, &metadata)?;
+            } else if self.index.get(&source_model_id)?.is_some() {
                 let _ = self
                     .index
                     .replace_model_id_preserving_references(&source_model_id, &record)?;
@@ -578,8 +587,28 @@ impl ModelLibrary {
     /// * `model_dir` - Path to the model directory
     pub fn load_metadata(&self, model_dir: &Path) -> Result<Option<ModelMetadata>> {
         let path = model_dir.join(METADATA_FILENAME);
-        let claimed = super::importer::publication::receipt_path_claimed(model_dir);
-        let mut metadata = match atomic_read_json::<ModelMetadata>(&path) {
+        let indexed_claim = self
+            .get_model_id(model_dir)
+            .map(|id| self.index.get(&id))
+            .transpose()?
+            .flatten()
+            .is_some_and(|record| {
+                record
+                    .metadata
+                    .get("import_publication")
+                    .is_some_and(|value| !value.is_null())
+            });
+        let claimed =
+            indexed_claim || super::importer::publication::receipt_path_claimed(model_dir);
+        let read = if claimed {
+            super::importer::publication::read_canonical_import_metadata(
+                &self.library_root,
+                model_dir,
+            )
+        } else {
+            atomic_read_json::<ModelMetadata>(&path)
+        };
+        let mut metadata = match read {
             Ok(metadata) => metadata,
             Err(_) if claimed => Some(ModelMetadata::default()),
             Err(error) => return Err(error),
@@ -598,63 +627,85 @@ impl ModelLibrary {
         model_dir: &Path,
         metadata: &mut ModelMetadata,
     ) -> Result<()> {
-        let receipt_claimed = super::importer::publication::receipt_path_claimed(model_dir);
-        if metadata.import_publication.is_none() && !receipt_claimed {
-            return Ok(());
-        }
-        let model_id = self.get_model_id(model_dir);
-        let record = model_id
-            .as_deref()
-            .map(|id| self.index.get(id))
+        use super::importer::publication::{
+            confirmed_receipt_matches, read_canonical_import_metadata, receipt_path_claimed,
+        };
+        let record = self
+            .get_model_id(model_dir)
+            .map(|id| self.index.get(&id))
             .transpose()?
             .flatten();
-        if metadata.import_publication.is_none() && receipt_claimed {
-            // A damaged/missing document with a receipt is not a legacy asset.
-            // Preserve known identity diagnostically, never persist or confirm it.
-            metadata.import_publication = record
-                .as_ref()
-                .and_then(|record| record.metadata.get("import_publication"))
+        let indexed_identity = record
+            .as_ref()
+            .and_then(|record| record.metadata.get("import_publication"))
+            .filter(|value| !value.is_null());
+        if metadata.import_publication.is_none()
+            && indexed_identity.is_none()
+            && !receipt_path_claimed(model_dir)
+        {
+            return Ok(());
+        }
+        let canonical = read_canonical_import_metadata(&self.library_root, model_dir)
+            .ok()
+            .flatten();
+        let Some(canonical) = canonical.filter(|metadata| metadata.import_publication.is_some())
+        else {
+            metadata.import_publication = indexed_identity
                 .and_then(|value| serde_json::from_value(value.clone()).ok())
+                .or_else(|| metadata.import_publication.clone())
                 .or(Some(crate::models::ImportPublicationIdentity {
                     version: 0,
                     id: String::new(),
                     confirmed: false,
                 }));
-            metadata.import_state = Some(crate::models::ImportState::Pending);
-            metadata.validation_state = Some(AssetValidationState::Invalid);
-            metadata.validation_errors = Some(vec![crate::models::AssetValidationError {
-                code: "import_publication_metadata_unavailable".into(),
-                message: "A copied-import receipt exists but its metadata publication identity is missing or unreadable; explicit diagnosis is required".into(),
-                path: Some(model_dir.display().to_string()),
-            }]);
+            mark_import_unavailable(metadata, model_dir, "import_publication_metadata_unavailable", "Canonical copied-import metadata is missing, unreadable, or its identity was erased; retained publication requires manual diagnosis");
+            return Ok(());
+        };
+        // Presentation overlays may customize ordinary fields, never these gates.
+        metadata.import_publication = canonical.import_publication.clone();
+        metadata.import_state = canonical.import_state;
+        metadata.validation_state = canonical.validation_state;
+        metadata.validation_errors = canonical.validation_errors.clone();
+        if let Some(record) = &record {
+            if record
+                .metadata
+                .pointer("/import_publication/id")
+                .and_then(Value::as_str)
+                != canonical
+                    .import_publication
+                    .as_ref()
+                    .map(|identity| identity.id.as_str())
+            {
+                mark_import_unavailable(metadata, model_dir, "import_publication_identity_mismatch", "Canonical and indexed publication identities disagree; neither may replace the other");
+                return Ok(());
+            }
+            if !crate::models::copied_import_ready_value(&record.metadata) {
+                if canonical.copied_import_ready() {
+                    mark_import_unavailable(metadata, model_dir, "import_publication_finalization_pending", "The copied publication has no acknowledged final index commit; no supported recovery API exists, so retain it for manual diagnosis");
+                }
+                return Ok(());
+            }
         }
-        if let Some(identity) = metadata.import_publication.as_ref() {
-            if metadata.copied_import_ready() {
-                let already_verified = record.as_ref().is_some_and(|record| {
-                    crate::models::copied_import_ready_value(&record.metadata)
-                        && record
-                            .metadata
-                            .pointer("/import_publication/id")
-                            .and_then(Value::as_str)
-                            == Some(identity.id.as_str())
-                });
-                if !super::importer::publication::confirmed_receipt_matches(
-                    &self.library_root,
-                    model_dir,
-                    metadata,
-                    !already_verified,
-                )
-                .unwrap_or(false)
-                {
-                    metadata.import_state = Some(crate::models::ImportState::Pending);
-                    metadata.validation_state = Some(AssetValidationState::Invalid);
-                    metadata.validation_errors = Some(vec![crate::models::AssetValidationError {
-                        code: "import_publication_receipt_unverified".into(),
-                        message: "The Confirmed copied-import receipt or its physical payload identity could not be verified; no automatic promotion".into(),
-                        path: Some(model_dir.display().to_string()),
-                            }]);
+        if record.is_none() {
+            if let Some(identity) = &canonical.import_publication {
+                if let Some(owner) = self.index.import_publication_owner(&identity.id)? {
+                    if Some(owner.id) != self.get_model_id(model_dir) {
+                        mark_import_unavailable(metadata, model_dir, "import_publication_move_pending", "This physical publication still belongs to another indexed model ID; only its owned conditional move may transfer that identity");
+                        return Ok(());
+                    }
                 }
             }
+        }
+        if canonical.copied_import_ready()
+            && !confirmed_receipt_matches(
+                &self.library_root,
+                model_dir,
+                &canonical,
+                record.is_none(),
+            )
+            .unwrap_or(false)
+        {
+            mark_import_unavailable(metadata, model_dir, "import_publication_receipt_unverified", "Confirmed receipt or exact copied payload could not be verified; left unavailable without automatic promotion");
         }
         Ok(())
     }
@@ -687,26 +738,44 @@ impl ModelLibrary {
         Ok(())
     }
 
-    fn require_finalized_import_edit(
+    pub(crate) fn require_finalized_import_edit(
         &self,
         model_dir: &Path,
         metadata: Option<&ModelMetadata>,
     ) -> Result<()> {
-        let Some(metadata) = metadata else {
-            return Ok(());
-        };
-        if metadata.import_publication.is_none() {
-            return Ok(());
-        }
-        let mut observed = metadata.clone();
-        if let Some(model_id) = self.get_model_id(model_dir) {
-            self.preserve_pending_import_index(&model_id, &mut observed)?;
-        }
-        if !observed.copied_import_ready() {
-            return Err(PumasError::Validation {
-                field: "import_publication".into(),
-                message: "Copied import finalization is incomplete; ordinary metadata edits are blocked. The active producer must finish; retained terminal publications currently require manual diagnosis, with no supported recovery API".into(),
+        let model_id = self.get_model_id(model_dir);
+        let record = model_id
+            .as_ref()
+            .map(|id| self.index.get(id))
+            .transpose()?
+            .flatten();
+        let primary_claim = metadata.is_none()
+            && super::importer::publication::read_canonical_import_metadata(
+                &self.library_root,
+                model_dir,
+            )
+            .ok()
+            .flatten()
+            .is_some_and(|metadata| metadata.import_publication.is_some());
+        let claimed = primary_claim
+            || metadata.is_some_and(|metadata| metadata.import_publication.is_some())
+            || super::importer::publication::receipt_path_claimed(model_dir)
+            || record.as_ref().is_some_and(|record| {
+                record
+                    .metadata
+                    .get("import_publication")
+                    .is_some_and(|value| !value.is_null())
             });
+        if claimed
+            && !record.as_ref().is_some_and(|record| {
+                super::importer::publication::indexed_publication_ready(
+                    &self.library_root,
+                    &record.id,
+                    &record.metadata,
+                )
+            })
+        {
+            return Err(PumasError::Validation { field: "import_publication".into(), message: format!("Copied publication at {} has no verified, acknowledged Ready index. Edits and in-place retry cannot finalize it; retained terminal publications require manual diagnosis and have no supported recovery API", model_dir.display()) });
         }
         Ok(())
     }
@@ -740,6 +809,7 @@ impl ModelLibrary {
     /// Save user overrides to a model directory.
     pub async fn save_overrides(&self, model_dir: &Path, overrides: &ModelOverrides) -> Result<()> {
         let _lock = self.write_lock.lock().await;
+        self.require_finalized_import_edit(model_dir, None)?;
         save_overrides_projection_async(model_dir.to_path_buf(), overrides.clone()).await
     }
 
@@ -758,6 +828,20 @@ impl ModelLibrary {
         let prepared = self.prepare_index_projection_async(model_dir).await?;
         self.persist_index_projection(model_dir, prepared).await?;
 
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn index_model_dir_paused_projection(
+        &self,
+        model_dir: &Path,
+        prepared_tx: tokio::sync::oneshot::Sender<()>,
+        resume: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<()> {
+        let prepared = self.prepare_index_projection_async(model_dir).await?;
+        let _ = prepared_tx.send(());
+        let _ = resume.await;
+        self.persist_index_projection(model_dir, prepared).await?;
         Ok(())
     }
 
@@ -795,13 +879,22 @@ impl ModelLibrary {
         let model_id = self.get_model_id(model_dir).ok_or_else(|| {
             PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
         })?;
+        let expected = self.index.get(&model_id)?;
         let existing = self.load_metadata(model_dir)?;
         self.require_finalized_import_edit(model_dir, existing.as_ref())?;
         ensure_import_publication_unchanged(existing.as_ref(), metadata)?;
         let mut metadata = metadata.clone();
         self.preserve_pending_import_index(&model_id, &mut metadata)?;
         let record = metadata_to_record(&model_id, model_dir, &metadata);
-        self.index.upsert(&record)?;
+        if self
+            .index
+            .upsert_projection_if_unchanged(&record, expected.as_ref())?
+            == crate::index::ProjectionCommit::Conflict
+        {
+            return Err(PumasError::Other(
+                "Metadata projection changed concurrently; newer index state preserved".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -896,44 +989,95 @@ impl ModelLibrary {
         Ok(())
     }
 
-    /// Publish diagnostic Pending or final Ready index state. Existing unrelated
-    /// identities are never replaced by the import producer.
+    /// Admit this producer's diagnostic Pending index snapshot. Final Ready
+    /// requires the separate conditional commit using this returned snapshot.
     pub(crate) fn index_import_metadata(
         &self,
         model_id: &str,
         target: &crate::model_library::DownloadRecoveryDestination,
         metadata: &ModelMetadata,
-    ) -> Result<()> {
+    ) -> Result<ModelRecord> {
         if !target.model_directory_exists()? {
             return Err(PumasError::ModelNotFound {
                 model_id: model_id.into(),
             });
         }
-        if let Some(existing) = self.index.get(model_id)? {
-            let expected = serde_json::to_value(&metadata.import_publication)?;
-            if expected.is_null() || existing.metadata.get("import_publication") != Some(&expected)
-            {
-                // Pending -> Ready changes confirmed, but the immutable ID must
-                // still be this producer's ID. Watcher projections may coexist.
-                let same_id = existing
-                    .metadata
-                    .pointer("/import_publication/id")
-                    .and_then(Value::as_str)
-                    == metadata
-                        .import_publication
-                        .as_ref()
-                        .map(|identity| identity.id.as_str());
-                if !same_id {
-                    return Err(PumasError::Other("Import model identity is already indexed by another asset; existing record preserved".into()));
-                }
-            }
+        let expected = self.index.get(model_id)?;
+        if expected.as_ref().is_some_and(|current| {
+            current
+                .metadata
+                .pointer("/import_publication/id")
+                .and_then(Value::as_str)
+                != metadata
+                    .import_publication
+                    .as_ref()
+                    .map(|identity| identity.id.as_str())
+        }) {
+            return Err(PumasError::Other(
+                "Import identity is already indexed by another asset; existing record preserved"
+                    .into(),
+            ));
         }
-        self.index.upsert(&metadata_to_record(
-            model_id,
-            target.display_path(),
-            metadata,
-        ))?;
+        let record = metadata_to_record(model_id, target.display_path(), metadata);
+        if self
+            .index
+            .upsert_projection_if_unchanged(&record, expected.as_ref())?
+            == crate::index::ProjectionCommit::Conflict
+        {
+            return Err(PumasError::Other("Import Pending index admission changed concurrently; retained publication requires diagnosis".into()));
+        }
+        Ok(record)
+    }
+
+    pub(crate) fn finalize_import_index(
+        &self,
+        expected: &ModelRecord,
+        target: &crate::model_library::DownloadRecoveryDestination,
+        metadata: &ModelMetadata,
+    ) -> Result<()> {
+        let record = metadata_to_record(&expected.id, target.display_path(), metadata);
+        if self.index.finalize_import_if_unchanged(&record, expected)?
+            == crate::index::ProjectionCommit::Conflict
+        {
+            return Err(PumasError::Other("Import final index commit conflicted with a newer observation; payload and metadata retained, finalization not acknowledged".into()));
+        }
         Ok(())
+    }
+
+    /// Explicit owned same-root move: preserve the receipt's physical identity
+    /// and atomically remap the observed Ready generation and its references.
+    /// Its recorded original model ID is provenance, not pathname authority.
+    pub(crate) fn project_owned_import_move(
+        &self,
+        expected: &ModelRecord,
+        destination: &crate::model_library::DownloadRecoveryDestination,
+        metadata: &ModelMetadata,
+    ) -> Result<()> {
+        if !super::importer::publication::confirmed_receipt_matches(
+            &self.library_root,
+            destination.display_path(),
+            metadata,
+            false,
+        )? {
+            return Err(PumasError::Validation { field: "import_publication".into(), message: format!("Moved copied publication at {} no longer matches its original physical receipt; retain it for manual diagnosis", destination.display_path().display()) });
+        }
+        let id = self
+            .get_model_id(destination.display_path())
+            .ok_or_else(|| PumasError::Other("Moved publication has no model ID".into()))?;
+        let record = metadata_to_record(&id, destination.display_path(), metadata);
+        self.index
+            .replace_import_model_id_if_unchanged(expected, &record)?;
+        Ok(())
+    }
+
+    pub(crate) fn normalize_owned_move_metadata(
+        &self,
+        target: &Path,
+        metadata: &mut ModelMetadata,
+    ) -> Result<()> {
+        metadata.model_id = self.get_model_id(target);
+        normalize_library_owned_bundle_paths(target, metadata);
+        self.normalize_metadata_projection(metadata)
     }
 
     fn apply_custom_runtime_metadata_projection(
@@ -1298,182 +1442,33 @@ impl ModelLibrary {
 
     /// Rebuild the entire index from metadata files.
     ///
-    /// This is a fast operation that reads metadata.json files without
-    /// re-computing hashes.
+    /// Existing finalized copied assets use bounded canonical/receipt checks.
+    /// Cold adoption of an already Ready copied asset verifies its full payload.
     pub async fn rebuild_index(&self) -> Result<usize> {
-        tracing::info!("Rebuilding model index");
-
-        let mut discovered_model_ids: HashSet<String> = HashSet::new();
-        let mut discovered_records = Vec::new();
-        let mut custom_runtime_bindings: Vec<(String, PathBuf, CustomRuntimeProjection)> =
-            Vec::new();
-        let mut mutated = false;
+        let existing = self.index.list_all()?;
+        let mut discovered = HashSet::new();
         let mut count = 0;
-        let existing_ids = self.index.get_all_ids()?;
-        let mut existing_model_types: HashMap<String, String> = HashMap::new();
-        for existing_id in &existing_ids {
-            if let Some(existing_record) = self.index.get(existing_id)? {
-                existing_model_types.insert(existing_id.clone(), existing_record.model_type);
+        for directory in self.model_dirs() {
+            if let Some(id) = self.get_model_id(&directory) {
+                discovered.insert(id);
             }
-        }
-
-        for model_dir in self.model_dirs() {
-            if let Ok(Some(mut metadata)) =
-                load_model_metadata_async(self.clone(), model_dir.clone()).await
-            {
-                if let Some(model_id) = self.get_model_id(&model_dir) {
-                    discovered_model_ids.insert(model_id.clone());
-                    self.preserve_pending_import_index(&model_id, &mut metadata)?;
-                    if !metadata.copied_import_ready() {
-                        discovered_records
-                            .push(metadata_to_record(&model_id, &model_dir, &metadata));
-                        continue;
-                    }
-
-                    let mut metadata_changed =
-                        normalize_library_owned_bundle_paths(&model_dir, &mut metadata);
-                    if is_external_reference(&metadata) {
-                        let (validation_changed, refreshed_metadata) =
-                            refresh_external_metadata_validation_async(metadata).await?;
-                        metadata = refreshed_metadata;
-                        metadata_changed |= validation_changed;
-                    }
-                    metadata_changed |=
-                        apply_task_projection_from_persisted_evidence(&mut metadata);
-
-                    if metadata_changed {
-                        if let Err(err) = self.save_metadata(&model_dir, &metadata).await {
-                            tracing::warn!(
-                                "Failed to persist metadata projection refresh for {}: {}",
-                                model_id,
-                                err
-                            );
-                        }
-                        if let Ok(Some(updated)) =
-                            load_model_metadata_async(self.clone(), model_dir.clone()).await
-                        {
-                            metadata = updated;
-                        }
-                    }
-
-                    if apply_task_projection_from_persisted_evidence(&mut metadata) {
-                        if let Err(err) = self.save_metadata(&model_dir, &metadata).await {
-                            tracing::warn!(
-                                "Failed to persist task projection repair for {}: {}",
-                                model_id,
-                                err
-                            );
-                        }
-                        if let Ok(Some(updated)) =
-                            load_model_metadata_async(self.clone(), model_dir.clone()).await
-                        {
-                            metadata = updated;
-                        }
-                    }
-
-                    let (projection, projected_metadata) =
-                        apply_custom_runtime_metadata_projection_async(
-                            self.clone(),
-                            model_id.clone(),
-                            model_dir.clone(),
-                            metadata,
-                        )
-                        .await?;
-                    metadata = projected_metadata;
-                    if let Some(projection) = projection {
-                        custom_runtime_bindings.push((
-                            model_id.clone(),
-                            model_dir.clone(),
-                            projection.clone(),
-                        ));
-                        if projection.metadata_changed {
-                            if let Err(err) = self.save_metadata(&model_dir, &metadata).await {
-                                tracing::warn!(
-                                    "Failed to persist custom runtime metadata projection for {}: {}",
-                                    model_id,
-                                    err
-                                );
-                            }
-                            if let Ok(Some(updated)) =
-                                load_model_metadata_async(self.clone(), model_dir.clone()).await
-                            {
-                                metadata = updated;
-                            }
-                        }
-                    }
-
-                    let mut record = metadata_to_record(&model_id, &model_dir, &metadata);
-                    let metadata_type_missing = metadata
-                        .model_type
-                        .as_deref()
-                        .map(str::trim)
-                        .map(str::is_empty)
-                        .unwrap_or(true);
-                    if metadata_type_missing {
-                        if let Some(existing_type) = existing_model_types.get(&model_id) {
-                            // SQLite is source-of-truth for classification when metadata omits type.
-                            record.model_type = existing_type.clone();
-                        }
-                    }
-
-                    discovered_records.push(record);
+            match self.prepare_index_projection_async(&directory).await {
+                Ok(prepared) => {
+                    self.persist_index_projection(&directory, prepared).await?;
+                    count += 1;
+                }
+                Err(error) => {
+                    tracing::warn!(path = %directory.display(), %error, "Model projection was not adopted")
                 }
             }
         }
-
-        // Remove stale index rows for models that no longer exist on disk.
-        // Existing rows for still-present model IDs are kept so FK-linked tables
-        // (review overlays, dependency bindings/history) remain intact.
-        for existing_id in existing_ids {
-            if !discovered_model_ids.contains(&existing_id) {
-                mutated |= self.index.delete(&existing_id)?;
+        for record in existing {
+            if !discovered.contains(&record.id) {
+                self.index.prune_legacy_projection_if_unchanged(&record)?;
+                self.refresh_external_asset_state(&record).await?;
             }
         }
-
-        // Upsert current metadata-backed rows.
-        for record in discovered_records {
-            if let Ok(changed) = self.index.upsert(&record) {
-                mutated |= changed;
-                count += 1;
-            }
-        }
-
-        for (model_id, model_dir, projection) in custom_runtime_bindings {
-            match self.ensure_custom_runtime_binding(&model_id, &projection) {
-                Ok(changed) => {
-                    mutated |= changed;
-                    match self
-                        .sync_active_dependency_projection(&model_dir, &model_id)
-                        .await
-                    {
-                        Ok(projection_changed) => {
-                            mutated |= projection_changed;
-                        }
-                        Err(err) => {
-                            tracing::warn!(
-                                "Failed to sync dependency projection for {}: {}",
-                                model_id,
-                                err
-                            );
-                        }
-                    }
-                }
-                Err(err) => {
-                    tracing::warn!(
-                        "Failed to ensure custom runtime binding for {}: {}",
-                        model_id,
-                        err
-                    );
-                }
-            }
-        }
-
-        if mutated {
-            // Avoid checkpoint churn when the projected index is already current.
-            self.index.checkpoint_wal()?;
-        }
-
-        tracing::info!("Rebuilt index with {} models", count);
+        self.index.checkpoint_wal()?;
         Ok(count)
     }
 
@@ -1484,6 +1479,17 @@ impl ModelLibrary {
             return Ok(false);
         };
 
+        if metadata.import_publication.is_some() && !metadata.copied_import_ready() {
+            let diagnostic = metadata_to_record(&record.id, &model_dir, &metadata);
+            let changed = self
+                .index
+                .upsert_projection_if_unchanged(&diagnostic, Some(record))?
+                .changed();
+            if changed {
+                self.index.delete_model_package_facts_cache(&record.id)?;
+            }
+            return Ok(changed);
+        }
         if !metadata.copied_import_ready() || !is_external_reference(&metadata) {
             return Ok(false);
         }
@@ -1617,8 +1623,11 @@ impl ModelLibrary {
             errors: Vec::new(),
         };
 
-        // Clear and rebuild
-        self.index.clear()?;
+        // Preserve copied-publication fences and conditionally prune only the
+        // legacy rows observed before this rebuild. No newly admitted row is lost.
+        for record in self.index.list_all()? {
+            self.index.prune_legacy_projection_if_unchanged(&record)?;
+        }
 
         for (idx, model_dir) in model_dirs.iter().enumerate() {
             // Report progress
@@ -1635,21 +1644,37 @@ impl ModelLibrary {
                 });
             }
 
+            let expected = self
+                .get_model_id(model_dir)
+                .map(|id| self.index.get(&id))
+                .transpose()?
+                .flatten();
             // Load metadata
-            let metadata = match load_model_metadata_async(self.clone(), model_dir.clone()).await {
-                Ok(Some(m)) => m,
-                Ok(None) => {
-                    result
-                        .errors
-                        .push((model_dir.clone(), "No metadata".to_string()));
-                    continue;
-                }
-                Err(e) => {
-                    result.errors.push((model_dir.clone(), e.to_string()));
-                    continue;
-                }
-            };
+            let mut metadata =
+                match load_model_metadata_async(self.clone(), model_dir.clone()).await {
+                    Ok(Some(m)) => m,
+                    Ok(None) => {
+                        result
+                            .errors
+                            .push((model_dir.clone(), "No metadata".to_string()));
+                        continue;
+                    }
+                    Err(e) => {
+                        result.errors.push((model_dir.clone(), e.to_string()));
+                        continue;
+                    }
+                };
 
+            if let Some(id) = self.get_model_id(model_dir) {
+                self.preserve_pending_import_index(&id, &mut metadata)?;
+            }
+            if cold_import_observation_unadoptable(expected.as_ref(), &metadata) {
+                result.errors.push((
+                    model_dir.clone(),
+                    "Copied publication could not be verified; left unadopted".into(),
+                ));
+                continue;
+            }
             // Optionally verify hashes
             if verify_hashes {
                 match verify_model_hash(model_dir, &metadata) {
@@ -1677,8 +1702,15 @@ impl ModelLibrary {
             // Index the model
             if let Some(model_id) = self.get_model_id(model_dir) {
                 let record = metadata_to_record(&model_id, model_dir, &metadata);
-                if self.index.upsert(&record).is_ok() {
-                    result.indexed += 1;
+                match self
+                    .index
+                    .upsert_projection_if_unchanged(&record, expected.as_ref())?
+                {
+                    crate::index::ProjectionCommit::Conflict => result.errors.push((
+                        model_dir.clone(),
+                        "Index changed during rebuild; newer row preserved".into(),
+                    )),
+                    _ => result.indexed += 1,
                 }
             }
         }
@@ -1725,7 +1757,13 @@ impl ModelLibrary {
         let mut updated_models = 0;
 
         for mut record in rows {
-            if cleanup_metadata_projection_record(&mut record) && self.index.upsert(&record)? {
+            let expected = record.clone();
+            if cleanup_metadata_projection_record(&mut record)
+                && self
+                    .index
+                    .upsert_projection_if_unchanged(&record, Some(&expected))?
+                    .changed()
+            {
                 updated_models += 1;
             }
         }
@@ -2163,8 +2201,24 @@ impl ModelLibrary {
         Ok(review_items)
     }
 
+    fn observe_publication_records(&self, records: &mut [ModelRecord]) -> Result<()> {
+        for record in records {
+            if !super::importer::publication::indexed_publication_ready(
+                &self.library_root,
+                &record.id,
+                &record.metadata,
+            ) {
+                let mut metadata: ModelMetadata = serde_json::from_value(record.metadata.clone())?;
+                self.observe_import_readiness(&self.library_root.join(&record.id), &mut metadata)?;
+                record.metadata = serde_json::to_value(metadata)?;
+            }
+        }
+        Ok(())
+    }
+
     fn list_models_sync(&self) -> Result<Vec<ModelRecord>> {
         let mut models = self.index.list_all()?;
+        self.observe_publication_records(&mut models)?;
         self.project_dependency_bindings_for_records(&mut models)?;
         self.project_display_fields_for_records(&mut models);
         annotate_and_dedupe_records_by_artifact(&mut models);
@@ -2176,6 +2230,7 @@ impl ModelLibrary {
             Some(record) => record,
             None => return Ok(None),
         };
+        self.observe_publication_records(std::slice::from_mut(&mut record))?;
         self.project_active_dependency_refs_value(model_id, &mut record.metadata)?;
         project_display_fields_for_record(&mut record);
         Ok(Some(record))
@@ -2194,6 +2249,7 @@ impl ModelLibrary {
         tags: Option<&[String]>,
     ) -> Result<SearchResult> {
         let mut result = self.index.search(query, model_types, tags, limit, offset)?;
+        self.observe_publication_records(&mut result.models)?;
         self.project_dependency_bindings_for_records(&mut result.models)?;
         self.project_display_fields_for_records(&mut result.models);
         annotate_and_dedupe_records_by_artifact(&mut result.models);
@@ -3349,15 +3405,30 @@ impl ModelLibrary {
     /// Return a bounded startup snapshot of cached package-facts summaries.
     ///
     /// This method does not regenerate missing summaries or deserialize detail
-    /// blobs. Missing or invalid cached summaries are surfaced explicitly so
+    /// blobs. Copied-publication gates add bounded canonical/receipt observations.
+    /// Missing or invalid cached summaries are surfaced explicitly so
     /// consumers can decide whether to request targeted summary/detail refresh.
     pub async fn model_package_facts_summary_snapshot(
         &self,
         limit: usize,
         offset: usize,
     ) -> Result<ModelPackageFactsSummarySnapshot> {
-        self.index
-            .list_model_package_facts_summary_snapshot(limit, offset)
+        let library = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let (mut snapshot, indexed) = library
+                .index
+                .list_summary_snapshot_with_publication(limit, offset)?;
+            super::importer::publication::observe_summary_snapshot(
+                &library.library_root,
+                &mut snapshot,
+                &indexed,
+            );
+            Ok(snapshot)
+        })
+        .await
+        .map_err(|error| {
+            PumasError::Other(format!("Summary publication observation failed: {error}"))
+        })?
     }
 
     /// Return a fast selector snapshot from indexed model/cache state.
@@ -3365,12 +3436,28 @@ impl ModelLibrary {
     /// This method does not scan model directories, regenerate package facts,
     /// resolve dependencies, or hydrate per-model details. Missing and invalid
     /// cache facts are represented in each row so consumers can decide whether
-    /// to hydrate a selected model.
+    /// to hydrate a selected model. Copied-publication evidence is checked with
+    /// bounded document reads after the SQL snapshot lock has been released.
     pub async fn model_library_selector_snapshot(
         &self,
         request: crate::models::ModelLibrarySelectorSnapshotRequest,
     ) -> Result<crate::models::ModelLibrarySelectorSnapshot> {
-        self.index.list_model_library_selector_snapshot(&request)
+        let library = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let (mut snapshot, indexed) = library
+                .index
+                .list_selector_snapshot_with_publication(&request)?;
+            super::importer::publication::observe_selector_snapshot(
+                &library.library_root,
+                &mut snapshot,
+                &indexed,
+            );
+            Ok(snapshot)
+        })
+        .await
+        .map_err(|error| {
+            PumasError::Other(format!("Selector publication observation failed: {error}"))
+        })?
     }
 
     /// Resolve a selected artifact into an approved runtime load target.
@@ -3388,8 +3475,8 @@ impl ModelLibrary {
                     .metadata
                     .get("import_publication")
                     .is_some_and(|value| !value.is_null())
-                    && self
-                        .load_effective_metadata_by_id(&record.id)?
+                    && load_effective_metadata_by_id_async(self.clone(), record.id.clone())
+                        .await?
                         .is_none_or(|metadata| !metadata.copied_import_ready())
                 {
                     return Ok(super::artifact_load_target::unconfirmed_import_response());
@@ -3415,7 +3502,15 @@ impl ModelLibrary {
                 }
             }
         }
-        resolve_artifact_load_target_from_index(&self.index, request)
+        let index = self.index.clone();
+        let root = self.library_root.clone();
+        tokio::task::spawn_blocking(move || {
+            resolve_artifact_load_target_from_index(&index, &root, request)
+        })
+        .await
+        .map_err(|error| {
+            PumasError::Other(format!("Artifact publication observation failed: {error}"))
+        })?
     }
 
     /// List model-library update events after a producer cursor.
@@ -3673,6 +3768,7 @@ impl ModelLibrary {
             Some(m) => m,
             None => return Ok(None),
         };
+        self.require_finalized_import_edit(&model_dir, Some(&metadata))?;
         let original_metadata = metadata.clone();
 
         let current_type = metadata.model_type.clone().unwrap_or_default();
@@ -3866,6 +3962,7 @@ impl ModelLibrary {
         metadata: ModelMetadata,
         result: Option<String>,
     ) -> Result<Option<String>> {
+        self.require_finalized_import_edit(&model_dir, Some(&original_metadata))?;
         let authority = self.mutation_authority()?;
         let tasks = authority.tasks();
         let library = self.clone();
@@ -3957,6 +4054,12 @@ impl ModelLibrary {
         authority: LibraryMutationAuthority,
         context: crate::api::RuntimeTaskContext,
     ) -> Result<Option<String>> {
+        self.require_finalized_import_edit(&old_dir, Some(&original_metadata))?;
+        let expected_publication = if original_metadata.import_publication.is_some() {
+            self.index.get(&old_model_id)?
+        } else {
+            None
+        };
         let mutation_index = self.index.clone();
         let claim_targets = [
             (old_model_id.clone(), old_dir.clone()),
@@ -4015,6 +4118,17 @@ impl ModelLibrary {
                 message: "Reclassification paths changed while acquiring custody".into(),
             });
         }
+        if let Some(expected) = &expected_publication {
+            if serde_json::to_value(self.index.get(&old_model_id)?)?
+                != serde_json::to_value(Some(expected))?
+            {
+                mutation.finish_unstarted()?;
+                return Err(PumasError::Validation {
+                    field: "import_publication".into(),
+                    message: "Source publication generation changed before reclassification".into(),
+                });
+            }
+        }
         mutation.mark_started();
 
         let rename_source = source_destination.clone();
@@ -4029,14 +4143,21 @@ impl ModelLibrary {
         metadata.model_type = Some(normalize_name(&new_type));
         metadata.family = Some(normalize_name(&new_family));
         metadata.architecture_family = Some(normalize_name(&new_family));
+        self.normalize_owned_move_metadata(&new_dir, &mut metadata)?;
+        let moved_metadata = metadata.clone();
+        let moved_destination = target_destination.clone();
         self.notify_metadata_projection_write(&new_dir.join(METADATA_FILENAME));
         context
             .run_blocking("write reclassified model metadata", move || {
                 target_destination.write_model_metadata(&metadata)
             })
             .await??;
-        self.index.delete(&old_model_id)?;
-        self.index_model_dir(&new_dir).await?;
+        if let Some(expected) = expected_publication {
+            self.project_owned_import_move(&expected, &moved_destination, &moved_metadata)?;
+        } else {
+            self.index.delete(&old_model_id)?;
+            self.index_model_dir(&new_dir).await?;
+        }
         context
             .run_blocking("settle model reclassification claims", move || {
                 mutation.finish_success()
@@ -4116,6 +4237,7 @@ impl ModelLibrary {
                 continue;
             };
 
+            self.require_finalized_import_edit(&model_dir, Some(&metadata))?;
             let Some(repo_key) = normalized_repo_key_from_metadata(&metadata) else {
                 continue;
             };
@@ -4226,6 +4348,7 @@ impl ModelLibrary {
                         continue;
                     }
                     let destination = authority.root().resolve(&retained.model_dir)?;
+                    let expected_index = self.index.get(&retained.model_id)?;
                     let Some(mut metadata) = destination.read_model_metadata()? else {
                         continue;
                     };
@@ -4242,7 +4365,10 @@ impl ModelLibrary {
                     if retained.model_id == preferred.model_id {
                         let record =
                             metadata_to_record(&retained.model_id, &retained.model_dir, &metadata);
-                        mutated |= self.index.upsert(&record)?;
+                        mutated |= self
+                            .index
+                            .upsert_projection_if_unchanged(&record, expected_index.as_ref())?
+                            .changed();
                     }
                 }
 
@@ -4324,7 +4450,8 @@ async fn save_metadata_projection_async(
         }
         library.normalize_metadata_projection(&mut normalized)?;
         let path = model_dir.join(METADATA_FILENAME);
-        let existing = atomic_read_json::<ModelMetadata>(&path)?;
+        library.require_finalized_import_edit(&model_dir, None)?;
+        let existing = library.load_metadata(&model_dir)?;
         library.require_finalized_import_edit(&model_dir, existing.as_ref())?;
         if super::importer::publication::receipt_path_claimed(&model_dir)
             && existing.as_ref().is_none_or(|value| value.import_publication.is_none())
@@ -4504,21 +4631,29 @@ impl ModelLibrary {
         &self,
         model_dir: &Path,
     ) -> Result<PreparedIndexProjection> {
+        let model_id = self
+            .get_model_id(model_dir)
+            .ok_or_else(|| PumasError::Other("Model directory has no library ID".into()))?;
+        let expected = self.index.get(&model_id)?;
         let mut metadata = load_model_metadata_async(self.clone(), model_dir.to_path_buf())
             .await?
             .ok_or_else(|| PumasError::ModelNotFound {
                 model_id: model_dir.display().to_string(),
             })?;
 
-        let model_id = self.get_model_id(model_dir).ok_or_else(|| {
-            PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
-        })?;
-
         self.preserve_pending_import_index(&model_id, &mut metadata)?;
+        if cold_import_observation_unadoptable(expected.as_ref(), &metadata) {
+            return Err(PumasError::Validation {
+                field: "import_publication".into(),
+                message: "Copied publication could not be verified; left unadopted for diagnosis"
+                    .into(),
+            });
+        }
         if !metadata.copied_import_ready() {
             // Discovery may expose Pending diagnostically, but never promotes it,
             // creates execution bindings or rewrites its producer-owned state.
             return Ok(PreparedIndexProjection {
+                expected,
                 model_id: model_id.clone(),
                 record: metadata_to_record(&model_id, model_dir, &metadata),
                 metadata,
@@ -4561,6 +4696,7 @@ impl ModelLibrary {
         }
 
         Ok(PreparedIndexProjection {
+            expected,
             model_id,
             metadata,
             record,
@@ -4574,6 +4710,22 @@ impl ModelLibrary {
         model_dir: &Path,
         mut prepared: PreparedIndexProjection,
     ) -> Result<bool> {
+        // A cold copied asset must have passed complete receipt verification
+        // and obtained its conditional index admission before ordinary edits.
+        // This preserves normal path/runtime projection for identity-safe moves.
+        if prepared.expected.is_none()
+            && prepared.metadata.import_publication.is_some()
+            && prepared.metadata.copied_import_ready()
+            && prepared.metadata_changed
+        {
+            let admission = self
+                .index
+                .upsert_projection_if_unchanged(&prepared.record, None)?;
+            if admission == crate::index::ProjectionCommit::Conflict {
+                return Ok(false);
+            }
+            prepared.expected = Some(prepared.record.clone());
+        }
         if prepared.metadata_changed {
             self.save_metadata(model_dir, &prepared.metadata).await?;
             if let Some(updated) =
@@ -4596,7 +4748,13 @@ impl ModelLibrary {
             }
         }
 
-        let mut mutated = self.index.upsert(&prepared.record)?;
+        let outcome = self
+            .index
+            .upsert_projection_if_unchanged(&prepared.record, prepared.expected.as_ref())?;
+        if outcome == crate::index::ProjectionCommit::Conflict {
+            return Ok(false);
+        }
+        let mut mutated = outcome.changed();
         if let Some(projection) = prepared.projection.as_ref() {
             mutated |= self.ensure_custom_runtime_binding(&prepared.model_id, projection)?;
             mutated |= self
@@ -4611,6 +4769,7 @@ impl ModelLibrary {
         model_dir: &Path,
         model_id: &str,
     ) -> Result<bool> {
+        let expected = self.index.get(model_id)?;
         let Some(mut metadata) =
             load_model_metadata_async(self.clone(), model_dir.to_path_buf()).await?
         else {
@@ -4638,7 +4797,10 @@ impl ModelLibrary {
             }
         }
 
-        self.index.upsert(&record)
+        Ok(self
+            .index
+            .upsert_projection_if_unchanged(&record, expected.as_ref())?
+            .changed())
     }
 
     fn custom_runtime_binding_is_current(
@@ -4672,6 +4834,9 @@ impl ModelLibrary {
     }
 
     fn write_metadata_projection(&self, path: &Path, metadata: &ModelMetadata) -> Result<()> {
+        if metadata.import_publication.is_some() {
+            super::download_recovery::require_import_document_size(metadata)?;
+        }
         self.notify_metadata_projection_write(path);
         atomic_write_json(path, metadata, true)
     }
@@ -4687,8 +4852,36 @@ impl ModelLibrary {
     }
 }
 
+fn mark_import_unavailable(
+    metadata: &mut ModelMetadata,
+    model_dir: &Path,
+    code: &str,
+    message: &str,
+) {
+    metadata.import_state = Some(crate::models::ImportState::Pending);
+    metadata.validation_state = Some(AssetValidationState::Invalid);
+    metadata.validation_errors = Some(vec![crate::models::AssetValidationError {
+        code: code.into(),
+        message: message.into(),
+        path: Some(model_dir.display().to_string()),
+    }]);
+}
+
+fn cold_import_observation_unadoptable(
+    expected: Option<&ModelRecord>,
+    metadata: &ModelMetadata,
+) -> bool {
+    expected.is_none()
+        && metadata
+            .import_publication
+            .as_ref()
+            .is_some_and(|identity| identity.confirmed)
+        && !metadata.copied_import_ready()
+}
+
 #[derive(Debug, Clone)]
 struct PreparedIndexProjection {
+    expected: Option<ModelRecord>,
     model_id: String,
     metadata: ModelMetadata,
     record: ModelRecord,

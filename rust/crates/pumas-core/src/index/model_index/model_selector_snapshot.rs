@@ -16,6 +16,14 @@ impl ModelIndex {
         &self,
         request: &ModelLibrarySelectorSnapshotRequest,
     ) -> Result<ModelLibrarySelectorSnapshot> {
+        self.list_selector_snapshot_with_publication(request)
+            .map(|(snapshot, _)| snapshot)
+    }
+
+    pub(crate) fn list_selector_snapshot_with_publication(
+        &self,
+        request: &ModelLibrarySelectorSnapshotRequest,
+    ) -> Result<(ModelLibrarySelectorSnapshot, Vec<serde_json::Value>)> {
         let conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
@@ -89,20 +97,30 @@ impl ModelIndex {
                     limit as i64,
                     offset as i64
                 ],
-                row_to_selector_snapshot_row,
+                |row| {
+                    let metadata: String = row.get(25)?;
+                    Ok((
+                        row_to_selector_snapshot_row(row)?,
+                        serde_json::from_str(&metadata).unwrap_or_default(),
+                    ))
+                },
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        let (rows, publication): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
         let cursor = model_library_update_cursor(
             Self::current_model_library_update_event_id_with_conn(&conn)?,
         );
 
-        Ok(ModelLibrarySelectorSnapshot {
-            selector_snapshot_contract_version:
-                crate::models::MODEL_LIBRARY_SELECTOR_SNAPSHOT_CONTRACT_VERSION,
-            cursor,
-            rows,
-            total_count: Some(total_count as u64),
-        })
+        Ok((
+            ModelLibrarySelectorSnapshot {
+                selector_snapshot_contract_version:
+                    crate::models::MODEL_LIBRARY_SELECTOR_SNAPSHOT_CONTRACT_VERSION,
+                cursor,
+                rows,
+                total_count: Some(total_count as u64),
+            },
+            publication,
+        ))
     }
 }
 

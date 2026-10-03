@@ -5,6 +5,18 @@
 use super::*;
 use crate::model_library::hashing::compute_dual_hash_reader;
 
+pub(crate) const IMPORT_DOCUMENT_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+pub(crate) fn require_import_document_size(value: &impl Serialize) -> Result<()> {
+    if serde_json::to_vec_pretty(value)?.len() as u64 > IMPORT_DOCUMENT_MAX_BYTES {
+        return Err(PumasError::Validation {
+            field: "import_publication".into(),
+            message: "Copied-import document exceeds the supported observation size limit".into(),
+        });
+    }
+    Ok(())
+}
+
 pub(crate) const IMPORT_RECEIPT: &str = ".pumas_import_publication.json";
 pub(crate) const IMPORT_METADATA_BACKUP: &str = "metadata.json.bak";
 pub(crate) const IMPORT_MUTABLE_DOCUMENTS: [&str; 4] = [
@@ -175,7 +187,7 @@ impl DownloadRecoveryDestination {
     }
 
     pub(crate) fn verify_import_payload(&self, expected: &ImportPayloadIdentity) -> Result<()> {
-        self.require_import_bound()?;
+        self.verify_import_bindings(expected)?;
         let (observed, _) = self.observe_import_payload(true)?;
         if &observed != expected {
             return Err(io::Error::other(
@@ -279,6 +291,7 @@ impl DownloadRecoveryDestination {
         name: &str,
         value: &T,
     ) -> Result<crate::metadata::AtomicPublication> {
+        require_import_document_size(value)?;
         if !matches!(name, "metadata.json" | IMPORT_RECEIPT) {
             return Err(invalid_capability_path().into());
         }
@@ -386,6 +399,20 @@ fn observe_directory(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn copied_import_document_bounds_apply_before_publication() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = DownloadDestinationRoot::open(temp.path()).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        let stage = root.create_import_stage().unwrap();
+        let oversized = "x".repeat(IMPORT_DOCUMENT_MAX_BYTES as usize);
+        for document in ["metadata.json", IMPORT_RECEIPT] {
+            assert!(stage.publish_import_document(document, &oversized).is_err());
+            assert!(!stage.display_path().join(document).exists());
+        }
+        stage.remove_import_stage_all().unwrap();
+    }
 
     #[test]
     fn copied_import_nested_native_publication_rebinds_exact_payload() {

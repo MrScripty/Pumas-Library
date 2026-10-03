@@ -56,7 +56,9 @@ retained/unknown workspace and the original error, with no automatic cleanup
 retry. A successful rename is never rolled back for a later sync, confirmation,
 or indexing failure; that error identifies the published model for inspection.
 Source symlinks/non-regular entries and payloads colliding with the reserved
-`metadata.json`, `metadata.json.bak` or `.pumas_import_publication.json` names are refused rather than followed or overwritten.
+`metadata.json`, `metadata.json.bak`, `overrides.json` or
+`.pumas_import_publication.json` names are refused, including original names,
+normalized aliases and filesystem-equivalent collisions.
 
 New copied imports persist Pending metadata until a versioned receipt confirms
 the exact published payload. Windows publication releases only child directory
@@ -66,8 +68,19 @@ promoted by watchers, cached package facts, metadata edits or in-place recovery.
 A confirmed payload can still report uncertain final metadata durability; that
 error is not success and does not authorize rollback or an automatic retry.
 There is currently no supported API to resume a retained Pending import; retain
-its payload and receipt for manual diagnosis. Full payload verification adds
-five staged hash passes, plus the existing primary-file hash for ordinary imports.
+its payload and receipt for manual diagnosis. Digests are computed during copying,
+then one full destination hash verifies the payload after the last callback.
+Cold adoption of an already Ready asset also verifies its complete payload.
+
+Canonical metadata damage cannot be hidden by Ready cached facts. Conditional
+index commits protect newer publication state from stale watcher/rebuild results,
+and deep rebuild preserves Pending fences. Metadata/override edits require a
+finalized Ready index; normal metadata backups remain supported. Primary metadata
+and publication receipts have a shared 16 MiB producer/reader limit.
+
+Same-root reclassification preserves publication identity through a conditional
+index-ID transfer. Cross-root merge now refuses copied assets using the new receipt
+before moving them; a supported re-publication workflow is not yet available.
 Legacy assets without the new receipt retain their existing readiness contract.
 
 Downloads and acquisition now have stronger root-level mutation exclusion,

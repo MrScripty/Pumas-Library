@@ -323,7 +323,7 @@ impl ModelImporter {
         // final binding is uncertain. Nothing below can roll back the payload.
         let finalized = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
             publication.rebind(&target)?;
-            self.library
+            let pending_index = self.library
                 .index_import_metadata(&model_id, &target, &metadata)?;
             match publication_outcome {
                 AtomicPublication::Durable => {}
@@ -359,9 +359,9 @@ impl ModelImporter {
             }
             // The private verified owner performs the sole destination hash
             // pass, then consumes its proof without another external callback.
-            publication.verify_for_finalization(&target)?.finalize(
-                &target, &self.library, &model_id, &mut metadata,
-            )?;
+            publication.verify_for_finalization(
+                target.clone(), self.library.as_ref().clone(), pending_index, metadata,
+            )?.finalize()?;
             Ok(())
         })).unwrap_or_else(|payload| {
             let message = payload.downcast_ref::<&str>().map(|text| (*text).to_string())

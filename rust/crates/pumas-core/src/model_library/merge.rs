@@ -214,7 +214,7 @@ impl LibraryMerger {
     ) -> Result<MergeSingleResult> {
         let source_destination = source_authority.root().resolve(source_dir)?;
         let metadata_reader = source_destination.clone();
-        let metadata = context
+        let mut metadata = context
             .run_blocking("read merge source metadata", move || {
                 metadata_reader
                     .read_model_metadata()?
@@ -224,6 +224,25 @@ impl LibraryMerger {
             })
             .await??;
 
+        source.require_finalized_import_edit(source_dir, Some(&metadata))?;
+        if (metadata.import_publication.is_some()
+            || super::importer::publication::receipt_path_claimed(source_dir))
+            && !source_authority
+                .root()
+                .same_physical_root(destination_authority.root())
+        {
+            return Err(PumasError::Validation { field: "import_publication.root".into(), message: format!("Copied publication at {} is bound to its current library root. Cross-root merge cannot preserve that receipt; leave the source in place until a supported re-publication workflow exists", source_dir.display()) });
+        }
+
+        let expected_publication = if metadata.import_publication.is_some() {
+            source
+                .get_model_id(source_dir)
+                .map(|id| source.index().get(&id))
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
         // Check for duplicate by hash
         if let Some(ref hashes) = metadata.hashes {
             let hash_to_check = hashes.sha256.as_deref().or(hashes.blake3.as_deref());
@@ -315,6 +334,18 @@ impl LibraryMerger {
                 message: "Merge paths changed while acquiring custody".into(),
             });
         }
+        if let Some(expected) = &expected_publication {
+            if serde_json::to_value(source.index().get(&expected.id)?)?
+                != serde_json::to_value(Some(expected))?
+            {
+                source_mutation.finish_unstarted()?;
+                destination_mutation.finish_unstarted()?;
+                return Err(PumasError::Validation {
+                    field: "import_publication".into(),
+                    message: "Source publication generation changed before same-root merge".into(),
+                });
+            }
+        }
         source_mutation.mark_started();
         destination_mutation.mark_started();
         let rename_source = source_destination.clone();
@@ -325,6 +356,9 @@ impl LibraryMerger {
             })
             .await??;
 
+        self.destination
+            .normalize_owned_move_metadata(&dest_dir, &mut metadata)?;
+        let moved_metadata = metadata.clone();
         let metadata_writer = target_destination.clone();
         context
             .run_blocking("write merged model metadata", move || {
@@ -332,8 +366,16 @@ impl LibraryMerger {
             })
             .await??;
         // Index the moved model
-        self.destination.index_model_dir(&dest_dir).await?;
-        source.index().delete(&source_delete_model_id)?;
+        if let Some(expected) = expected_publication {
+            self.destination.project_owned_import_move(
+                &expected,
+                &target_destination,
+                &moved_metadata,
+            )?;
+        } else {
+            self.destination.index_model_dir(&dest_dir).await?;
+            source.index().delete(&source_delete_model_id)?;
+        }
         context
             .run_blocking("settle merged model claims", move || {
                 source_mutation.finish_success()?;

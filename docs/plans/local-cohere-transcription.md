@@ -1,12 +1,12 @@
 # Local Cohere transcription
 
-Status: implementation in progress; loader slice under review. Next slice: Pumas-owned operation wrapper and truthful capability discovery. No available end-to-end transcription capability is claimed.
+Status: loader and private Python operation owner (milestone A in `local-asr-operation-contract.md`) are implemented and synthetically tested. Next slice: production shutdown/model custody, Rust ownership and truthful capability discovery. No available end-to-end transcription capability is claimed.
 
 ## Objective and ownership
 
 Support the requested Lanternwake voice-to-text feature through Pumas Library, using an installed local Cohere Transcribe model. Pumas owns model identity, managed runtime, operation admission, inference, cancellation and terminal cleanup. Lanternwake owns consent-triggered bounded capture and editable transcript review before explicit submission.
 
-The isolated Python slice owns `torch-server/loaders/cohere_asr_loader.py`, loader dispatch in `loaders/__init__.py`, `ModelManager.speech_lease`, focused tests and this plan. The Pumas integration owner owns public Rust contracts, RPC handlers, serving capability projection, the Python operation wrapper, runtime recipes and shutdown integration. Acquisition/import/custody implementations are unchanged.
+The isolated Python slice owns `torch-server/loaders/cohere_asr_loader.py`, loader dispatch in `loaders/__init__.py`, `ModelManager.speech_lease`, focused tests and this plan. The private Python operation owner is implemented in `speech_operations.py`; its ownership and verification are recorded in `local-asr-operation-contract.md`. Remaining integration covers public Rust contracts, RPC handlers, serving capability projection, runtime recipes and production shutdown composition. Acquisition/import/custody implementations are unchanged.
 
 ## Internal adapter contract
 
@@ -37,7 +37,7 @@ Loader tests use synthetic classes and PCM to prove local-only loading arguments
 
 The developer test requirements pin NumPy 2.3.5 for actual PCM conversion assertions.
 
-Run `python3 -m unittest discover -s torch-server/tests -p test_cohere_asr_loader.py -v` and the existing model manager/load lifecycle suites. The later operation slice must add observed admitted-work cancellation, repeated cancellation, timeout/disconnect/retry/shutdown and no premature lease release. Finally run a real approved installed-model synthetic speech fixture through Pumas and the game. Physical microphone and speech quality require separate evidence.
+Run `python3 -m unittest discover -s torch-server/tests -p test_cohere_asr_loader.py -v` and the existing model manager/load lifecycle suites. Milestone A evidence in `local-asr-operation-contract.md` covers private admitted-work cancellation, repeated cancellation, observer loss, deduplication, bounded drain and retained unconfirmed custody. Public transport/model identity and production shutdown composition remain separate integration gates. Finally run a real approved installed-model synthetic speech fixture through Pumas and the game. Physical microphone and speech quality require separate evidence.
 
 ### Loader slice checkpoint, 2026-10-03
 

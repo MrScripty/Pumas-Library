@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import types
@@ -808,45 +809,73 @@ async def startup_fixture(mode):
     owner._active.runner.cancel()
     await asyncio.sleep(0)
     assert manager.lock.locked()
+    if mode == "delayed":
+        # Prove the parent waits for evidence rather than killing at two seconds.
+        await asyncio.sleep(2.25)
     print("AMBIGUOUS_STARTUP_CUSTODY_RETAINED", flush=True)
 
 
 class QuarantineProcessTests(unittest.TestCase):
-    def test_exceptional_start_retains_running_or_unknown_native_custody(self):
-        for mode in ("started", "unacknowledged", "cleanup"):
-            with self.subTest(mode=mode):
+    def assert_retained_child(self, fixture_args, marker):
+        """Bound marker readiness separately from post-marker custody observation."""
+        with tempfile.TemporaryDirectory() as directory:
+            stdout_path = Path(directory) / "stdout.log"
+            stderr_path = Path(directory) / "stderr.log"
+
+            def read_log(path):
+                with path.open("rb") as source:
+                    data = source.read(65_537)
+                self.assertLessEqual(len(data), 65_536, "Synthetic fixture log overflow")
+                return data
+
+            # argv contains only this test file, the current interpreter and
+            # fixed fixture selectors below. No request data or shell is used.
+            # File-backed output avoids unowned reader threads and pipe stalls;
+            # observations use separate file descriptions from the child writer.
+            with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
                 process = subprocess.Popen(
-                    [sys.executable, str(Path(__file__).resolve()), "--startup-fixture", mode],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    [sys.executable, str(Path(__file__).resolve()), *fixture_args],
+                    stdout=stdout,
+                    stderr=stderr,
                     env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
                 )
-                try:
-                    with self.assertRaises(subprocess.TimeoutExpired):
-                        process.communicate(timeout=2)
-                finally:
+            try:
+                deadline = time.monotonic() + 30
+                while marker not in read_log(stdout_path):
+                    self.assertIsNone(
+                        process.poll(),
+                        f"Fixture exited before custody marker: {read_log(stderr_path)!r}",
+                    )
+                    self.assertLess(
+                        time.monotonic(),
+                        deadline,
+                        f"Fixture custody marker deadline expired: {read_log(stderr_path)!r}",
+                    )
+                    time.sleep(0.01)
+                # Readiness is established before checking that quarantine still
+                # prevents orderly process exit. This is an observation bound,
+                # not a claim that a delay proves indefinite resource custody.
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    process.wait(timeout=0.25)
+            finally:
+                if process.poll() is None:
                     process.kill()
-                    stdout, stderr = process.communicate(timeout=3)
-                    self.assertIsNotNone(process.returncode)
-                self.assertIn(b"AMBIGUOUS_STARTUP_CUSTODY_RETAINED", stdout, stderr.decode())
-                self.assertNotIn(b"Traceback", stderr)
+                process.wait(timeout=5)
+                self.assertIsNotNone(process.returncode, "Fixture child exit was not observed")
+            self.assertIn(marker, read_log(stdout_path), read_log(stderr_path).decode())
+            self.assertNotIn(b"Traceback", read_log(stderr_path))
+
+    def test_exceptional_start_retains_running_or_unknown_native_custody(self):
+        for mode in ("started", "unacknowledged", "cleanup", "delayed"):
+            with self.subTest(mode=mode):
+                self.assert_retained_child(
+                    ["--startup-fixture", mode], b"AMBIGUOUS_STARTUP_CUSTODY_RETAINED"
+                )
 
     def test_cleanup_unconfirmed_survives_cancellation_expiry_drain_and_orderly_loop_shutdown(self):
-        process = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--quarantine-fixture"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        self.assert_retained_child(
+            ["--quarantine-fixture"], b"QUARANTINE_SURVIVES_ORDERLY_SHUTDOWN"
         )
-        try:
-            with self.assertRaises(subprocess.TimeoutExpired):
-                process.communicate(timeout=2)
-        finally:
-            process.kill()  # The external fixture supervisor is the cessation boundary.
-            stdout, stderr = process.communicate(timeout=3)
-            self.assertIsNotNone(process.returncode, "Fixture child exit was not observed")
-        self.assertIn(b"QUARANTINE_SURVIVES_ORDERLY_SHUTDOWN", stdout, stderr.decode())
-        self.assertNotIn(b"Traceback", stderr)
 
 
 if __name__ == "__main__":

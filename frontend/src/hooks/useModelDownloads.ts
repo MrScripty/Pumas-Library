@@ -260,11 +260,11 @@ export function useModelDownloads() {
     const status = downloadStatusRef.current[downloadKey];
     if (!status || !isAPIAvailable()) return;
 
-    setDownloadStatusByRepo((prev) => {
-      const existing = prev[downloadKey];
-      if (!existing) return prev;
-      return { ...prev, [downloadKey]: { ...existing, status: 'queued' as const, speed: undefined, etaSeconds: undefined } };
-    });
+    const optimisticStatus: DownloadStatus = { ...status, status: 'queued', speed: undefined, etaSeconds: undefined };
+    const operation: DownloadCommand = { previousStatus: status, outcome: 'pending' };
+    downloadCommandsRef.current.set(optimisticStatus, operation);
+    setDownloadStatusByRepo((prev) => prev[downloadKey] === status
+      ? { ...prev, [downloadKey]: optimisticStatus } : prev);
     setDownloadErrors((prev) => {
       if (!prev[downloadKey]) return prev;
       const next = { ...prev };
@@ -277,21 +277,18 @@ export function useModelDownloads() {
       if (!result.success) {
         throw new APIError(result.error || 'Failed to resume download.', 'resume_model_download');
       }
+      operation.outcome = 'succeeded';
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to resume download.';
-      setDownloadStatusByRepo((prev) => {
-        const existing = prev[downloadKey];
-        if (!existing) return prev;
-        return { ...prev, [downloadKey]: { ...existing, status: 'error' as const } };
-      });
-      setDownloadErrors((prev) => ({ ...prev, [downloadKey]: message }));
+      const message = error instanceof Error ? error.message
+        : typeof error === 'string' && error ? error : 'Failed to resume download.';
+      reportCommandFailure(status, optimisticStatus, message || 'Failed to resume download.');
       logger.error('Failed to resume download', {
         error: message,
         downloadKey,
         repoId: status.repoId,
       });
     }
-  }, []);
+  }, [reportCommandFailure]);
 
   const hasActiveDownloads = Object.values(downloadStatusByRepo).some((s) => isActiveStatus(s.status));
 

@@ -486,6 +486,7 @@ describe('useModelDownloads', () => {
   const commands = [
     { action: 'pause', handler: 'pauseDownload', mock: pauseModelDownloadMock, optimistic: 'pausing' },
     { action: 'cancel', handler: 'cancelDownload', mock: cancelModelDownloadMock, optimistic: 'cancelling' },
+    { action: 'resume', handler: 'resumeDownload', mock: resumeModelDownloadMock, optimistic: 'queued' },
   ] as const;
 
   for (const command of commands) {
@@ -512,7 +513,7 @@ describe('useModelDownloads', () => {
         expect(result.current.downloadErrors['artifact-1']).toBe('Command blocked');
       });
 
-      for (const snapshotStatus of ['downloading', command.optimistic] as const) {
+      for (const snapshotStatus of ['downloading', 'completed', 'paused', 'cancelled', command.optimistic] as const) {
         it(`preserves a newer ${snapshotStatus} snapshot after ${command.action} ${failure}`, async () => {
           listModelDownloadsMock.mockResolvedValueOnce({ success: true, downloads: [progressOutcome({})] });
           let fail!: () => void;
@@ -535,10 +536,17 @@ describe('useModelDownloads', () => {
           await act(async () => { fail(); await pending; });
 
           expect(result.current.downloadStatusByRepo['artifact-1']).toEqual(authoritativeStatus);
-          expect(result.current.downloadStatusByRepo['artifact-1']).toMatchObject({
-            downloadId: 'dl-1', status: snapshotStatus, progress: 70, downloadedBytes: 7,
-          });
-          expect(result.current.downloadErrors['artifact-1']).toBe('Command blocked');
+          if (snapshotStatus === 'completed' || snapshotStatus === 'cancelled') {
+            // Terminal activities leave the active projection. A late command
+            // must not recreate the row or attach an error to its former key.
+            expect(result.current.downloadStatusByRepo['artifact-1']).toBeUndefined();
+            expect(result.current.downloadErrors).toEqual({});
+          } else {
+            expect(result.current.downloadStatusByRepo['artifact-1']).toMatchObject({
+              downloadId: 'dl-1', status: snapshotStatus, progress: 70, downloadedBytes: 7,
+            });
+            expect(result.current.downloadErrors['artifact-1']).toBe('Command blocked');
+          }
         });
       }
     }
@@ -703,8 +711,8 @@ describe('useModelDownloads', () => {
     });
   }
 
-  for (const firstCommand of commands) {
-    const secondCommand = firstCommand.action === 'pause' ? commands[1] : commands[0];
+  const commandPairs = commands.flatMap(first => commands.map(second => ({ first, second })));
+  for (const { first: firstCommand, second: secondCommand } of commandPairs) {
     it.each(['earlier first', 'later first'] as const)(
       `returns to the baseline when overlapping ${firstCommand.action}/${secondCommand.action} calls fail (%s)`,
       async (settlementOrder) => {
@@ -792,7 +800,7 @@ describe('useModelDownloads', () => {
     expect(result.current.downloadErrors).toEqual({ 'artifact-1': 'Pause blocked' });
   });
 
-  it('marks resumed downloads as failed when the backend resume request rejects', async () => {
+  it('restores the paused state and reports a rejected resume request', async () => {
     listModelDownloadsMock.mockResolvedValueOnce({
       success: true,
       downloads: [
@@ -827,7 +835,7 @@ describe('useModelDownloads', () => {
     expect(result.current.downloadStatusByRepo['repo-paused']).toEqual(
       expect.objectContaining({
         downloadId: 'dl-paused',
-        status: 'error',
+        status: 'paused',
       })
     );
     expect(result.current.downloadErrors).toEqual({

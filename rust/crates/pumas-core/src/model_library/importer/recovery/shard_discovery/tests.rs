@@ -651,3 +651,151 @@ fn junction_child_is_refused_without_reading_its_sentinel_tree() {
     );
     fs::remove_dir(junction).unwrap();
 }
+
+#[test]
+fn broad_tree_keeps_scanner_held_directory_high_water_on_the_active_path() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("library");
+    const MODELS: usize = 48;
+    const COMPONENTS: usize = 12;
+    for model in 0..MODELS {
+        for component in 0..COMPONENTS {
+            write(
+                &root,
+                &format!("llm/family/model-{model:03}/component-{component:03}/weight-1-of-2.gguf"),
+                b"partial",
+            );
+        }
+    }
+    let before = byte_snapshot(&root);
+    let binding = RootBinding::open(&root).unwrap();
+    let handles = binding.held.handle_count.counts.clone();
+    let root_chain_handles = handles.live();
+    let report = scan_bound(binding, |_, _| Ok(()));
+    assert!(report.enumeration_complete, "{:?}", report.diagnostics);
+    assert_eq!(report.model_roots.len(), MODELS);
+    assert!(report
+        .model_roots
+        .iter()
+        .all(|model| model.shard_sets.len() == COMPONENTS));
+    // A HeldDirectory owns exactly one directory capability. Only category,
+    // family, model and one active component may coexist below the held root.
+    // Temporary capability-helper internals are not process-wide FD sampling.
+    assert!(
+        handles.high_water() <= root_chain_handles + 4,
+        "held {} directory capabilities with an active-path bound of {}",
+        handles.high_water(),
+        root_chain_handles + 4
+    );
+    assert_eq!(
+        handles.live(),
+        0,
+        "the completed scan must release its directory capabilities"
+    );
+    assert_eq!(byte_snapshot(&root), before);
+}
+
+#[test]
+fn completed_sibling_is_unpinned_and_later_rebinding_invalidates_only_its_model() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("library");
+    let first = "llm/a-family/model/component/weight-1-of-2.gguf";
+    let later = "llm/z-family/model/component/weight-1-of-2.gguf";
+    write(&root, first, b"first");
+    write(&root, later, b"later");
+    let target = root.join("llm/a-family");
+    let moved = temp.path().join("scanned-original");
+    rename_control(&target, &moved);
+    let mut changed = false;
+    let mut hook = |path: &Path, phase| {
+        if !changed && phase == Phase::DirectoryBound && path == Path::new("llm/z-family") {
+            // This must succeed on Windows too: the scanner already left the
+            // entire a-family subtree, so no descendant handle should pin it.
+            fs::rename(&target, &moved).expect("already-scanned sibling remained pinned");
+            write(
+                &target,
+                "model/component/sentinel-1-of-1.gguf",
+                b"replacement",
+            );
+            changed = true;
+        }
+        Ok(())
+    };
+    let report = scan(&root, &mut hook);
+    assert!(changed);
+    assert!(!report.enumeration_complete);
+    assert!(has(&report, Kind::BindingChanged));
+    let first_model = report
+        .model_roots
+        .iter()
+        .find(|model| model.library_relative_root == Path::new("llm/a-family/model"))
+        .unwrap();
+    assert!(!first_model.enumeration_complete);
+    assert!(first_model.observed_files.is_empty());
+    assert!(first_model.shard_sets.is_empty());
+    let later_model = report
+        .model_roots
+        .iter()
+        .find(|model| model.library_relative_root == Path::new("llm/z-family/model"))
+        .unwrap();
+    assert!(later_model.enumeration_complete);
+    assert_eq!(later_model.shard_sets[0].status, Status::MissingOrdinals);
+    assert_eq!(
+        fs::read(moved.join("model/component/weight-1-of-2.gguf")).unwrap(),
+        b"first"
+    );
+    assert_eq!(
+        fs::read(target.join("model/component/sentinel-1-of-1.gguf")).unwrap(),
+        b"replacement"
+    );
+    assert_eq!(fs::read(root.join(later)).unwrap(), b"later");
+}
+
+#[cfg(unix)]
+#[test]
+fn completed_child_replaced_with_symlink_is_not_followed_by_final_verification() {
+    use std::os::unix::fs::symlink;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("library");
+    write(
+        &root,
+        "llm/family/model/a-child/weight-1-of-2.gguf",
+        b"original",
+    );
+    write(
+        &root,
+        "llm/family/model/z-child/weight-1-of-2.gguf",
+        b"later",
+    );
+    let outside = temp.path().join("outside");
+    write(&outside, "sentinel-1-of-1.gguf", b"preserve");
+    let target = root.join("llm/family/model/a-child");
+    let moved = temp.path().join("scanned-original");
+    let mut changed = false;
+    let mut hook = |path: &Path, phase| {
+        if !changed
+            && phase == Phase::DirectoryBound
+            && path == Path::new("llm/family/model/z-child")
+        {
+            fs::rename(&target, &moved).unwrap();
+            symlink(&outside, &target).unwrap();
+            changed = true;
+        }
+        Ok(())
+    };
+    let report = scan(&root, &mut hook);
+    assert!(changed);
+    assert!(!report.enumeration_complete);
+    assert!(has(&report, Kind::BindingChanged));
+    assert!(!report.model_roots[0].enumeration_complete);
+    assert!(report.model_roots[0].observed_files.is_empty());
+    assert!(report.model_roots[0].shard_sets.is_empty());
+    assert_eq!(
+        fs::read(outside.join("sentinel-1-of-1.gguf")).unwrap(),
+        b"preserve"
+    );
+    assert_eq!(
+        fs::read(moved.join("weight-1-of-2.gguf")).unwrap(),
+        b"original"
+    );
+}

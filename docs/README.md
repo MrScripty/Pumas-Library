@@ -23,6 +23,8 @@ available through Git history rather than in the working tree.
 
 ## Point-in-Time Audits
 
+- [2026-10-03 development takeover audit](audits/development-takeover-2026-10-03.md) — current code/CI findings and baseline → S3 → restricted networking priorities
+
 - [2026-09-03 current-standards audit](audits/current-standards-2026-09-03/README.md)
 
 Audits describe the named repository and standards commits. They are evidence

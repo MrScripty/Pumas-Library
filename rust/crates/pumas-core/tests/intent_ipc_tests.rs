@@ -268,6 +268,10 @@ fn readiness_publication_never_exposes_partial_json_or_replaces_an_existing_file
 #[ignore = "owned subprocess for failed-readiness cleanup"]
 fn intent_ipc_waiting_child() {
     // No Pumas instance, network probe or library mutation is needed here.
+    // Running the ignored suite manually must not create an unowned waiter.
+    if std::env::var_os(CHILD_ROOT).is_none() {
+        return;
+    }
     loop {
         std::thread::park();
     }

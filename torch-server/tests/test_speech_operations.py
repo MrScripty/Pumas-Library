@@ -878,6 +878,127 @@ async def startup_fixture(mode):
     print("AMBIGUOUS_STARTUP_CUSTODY_RETAINED", flush=True)
 
 
+async def admission_failure_fixture(mode):
+    """Uncertain transfer/launch remains externally supervised until process exit."""
+    manager = Manager()
+    retained = np.array([0.75], dtype=np.float32)
+    gate = Gate(
+        error=SpeechCleanupUnconfirmed(
+            ValueError("private late inference"), RuntimeError("private late cleanup"), retained
+        )
+        if mode == "eager_cleanup"
+        else None
+    )
+    owner = SpeechOperationOwner(manager, adapter=gate)
+    body = encode(payload(owner))
+    loop = asyncio.get_running_loop()
+    previous = loop.get_task_factory()
+    tasks = []
+    if mode == "binding_cleanup":
+        bind = manager.bind_speech
+
+        def fail_after_transfer(binding):
+            bind(binding)
+            raise RuntimeError("private post-transfer failure")
+
+        manager.bind_speech = fail_after_transfer
+        manager._speech_artifact_authority.release_error = RuntimeError("private release failure")
+    else:
+
+        def factory(loop, coroutine, **kwargs):
+            if mode != "before":
+                task = asyncio.Task(
+                    coroutine, loop=loop, eager_start=mode.startswith("eager"), **kwargs
+                )
+                tasks.append(task)
+            raise RuntimeError("private factory startup failure")
+
+        loop.set_task_factory(factory)
+
+    class AmbiguousThreadStart(threading.Thread):
+        def start(self):
+            super().start()
+            raise RuntimeError("private native startup failure")
+
+    try:
+        if mode == "eager_worker":
+            with patch("speech_operations.Thread", AmbiguousThreadStart):
+                started = owner.start(body)
+        else:
+            started = owner.start(body)
+    finally:
+        loop.set_task_factory(previous)
+    assert started.state == "cleanup_unconfirmed"
+    assert started.cleanup == "unconfirmed"
+    entry = owner._active
+    borrow = entry.binding.artifact_use
+    assert not borrow.released
+    assert entry.audio is not None
+    assert entry.guard is not None
+    assert owner in _CUSTODIANS
+    assert owner.start(body).operation_ref == started.operation_ref
+    assert not (await owner.drain(0.01)).custody_complete
+    if mode == "binding_cleanup":
+        assert started.operation_diagnostic.code == "binding_failed"
+        assert started.cleanup_diagnostic.code == "artifact_cleanup_unconfirmed"
+        assert started.owner_startup_diagnostic is None
+        assert entry.launch is None
+        assert gate.calls == 0
+    else:
+        assert started.owner_startup_diagnostic.code == "owner_start_unconfirmed"
+        assert started.owner_startup_diagnostic.exception_type == "RuntimeError"
+        assert entry.launch is not None
+        if mode.startswith("eager"):
+            await eventually(gate.entered.is_set)
+            assert manager.lock.locked()
+            assert manager.exited == 0
+            assert entry.runner is tasks[0]
+            assert entry.lease is not None
+            gate.release.set()
+            await eventually(lambda: not entry.worker.is_alive())
+            await asyncio.sleep(0.01)
+            assert not tasks[0].done()
+            assert manager.lock.locked()
+            assert manager.exited == 0
+        else:
+            await asyncio.sleep(0)
+            assert gate.calls == 0
+    result = owner.status(started.operation_ref)
+    assert result.state == "cleanup_unconfirmed"
+    assert result.text is None
+    assert "private" not in repr(result).lower()
+    assert entry.binding is not None and not borrow.released
+    if mode == "eager_worker":
+        assert result.startup_diagnostic.code == "worker_start_unconfirmed"
+        assert result.owner_startup_diagnostic.code == "owner_start_unconfirmed"
+    if mode == "eager_cleanup":
+        assert result.operation_diagnostic.code == "inference_failed"
+        assert result.cleanup_diagnostic.code == "device_cleanup_unconfirmed"
+        assert entry.quarantine[1].retained_audio is retained
+    for _ in range(3):
+        owner.cancel(started.operation_ref)
+        entry.guard.cancel()
+        if entry.runner is not None:
+            entry.runner.cancel()
+        await asyncio.sleep(0)
+        assert owner.status(started.operation_ref).state == "cleanup_unconfirmed"
+        assert entry.binding is not None and not borrow.released
+        assert entry.audio is not None
+    assert not (await owner.drain(0.01)).custody_complete
+
+    def after_shutdown_cancel():
+        assert owner in _CUSTODIANS
+        assert entry.binding is not None and not borrow.released
+        assert entry.audio is not None
+        assert not entry.guard.done()
+        if mode.startswith("eager"):
+            assert manager.lock.locked()
+            assert entry.lease is not None
+        print("ADMISSION_FAILURE_CUSTODY_RETAINED", flush=True)
+
+    loop.call_later(0.05, after_shutdown_cancel)
+
+
 class QuarantineProcessTests(unittest.TestCase):
     def assert_retained_child(self, fixture_args, marker):
         """Bound marker readiness separately from post-marker custody observation."""
@@ -928,6 +1049,20 @@ class QuarantineProcessTests(unittest.TestCase):
             self.assertIn(marker, read_log(stdout_path), read_log(stderr_path).decode())
             self.assertNotIn(b"Traceback", read_log(stderr_path))
 
+    def test_admission_transfer_and_task_factory_failure_retain_observable_custody(self):
+        for mode in (
+            "binding_cleanup",
+            "before",
+            "scheduled",
+            "eager",
+            "eager_cleanup",
+            "eager_worker",
+        ):
+            with self.subTest(mode=mode):
+                self.assert_retained_child(
+                    ["--admission-fixture", mode], b"ADMISSION_FAILURE_CUSTODY_RETAINED"
+                )
+
     def test_exceptional_start_retains_running_or_unknown_native_custody(self):
         for mode in ("started", "unacknowledged", "cleanup", "delayed"):
             with self.subTest(mode=mode):
@@ -948,6 +1083,9 @@ class QuarantineProcessTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if "--admission-fixture" in sys.argv:
+        asyncio.run(admission_failure_fixture(sys.argv[-1]))
+        raise AssertionError("Admission quarantine unexpectedly allowed orderly runtime shutdown")
     if "--startup-fixture" in sys.argv:
         asyncio.run(startup_fixture(sys.argv[-1]))
         raise AssertionError("Startup quarantine unexpectedly allowed runtime shutdown")

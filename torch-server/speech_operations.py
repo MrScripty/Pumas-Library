@@ -80,6 +80,7 @@ class OperationStatus:
     text: str | None
     operation_diagnostic: Diagnostic | None
     startup_diagnostic: Diagnostic | None
+    owner_startup_diagnostic: Diagnostic | None
     cleanup_diagnostic: Diagnostic | None
     receipt_ttl_seconds: float
     max_settled_receipts: int
@@ -116,12 +117,15 @@ class _Entry:
     text: str | None = None
     diagnostic: Diagnostic | None = None
     startup_diagnostic: Diagnostic | None = None
+    owner_startup_diagnostic: Diagnostic | None = None
     cleanup_diagnostic: Diagnostic | None = None
     settled_at: float | None = None
     runner: asyncio.Task | None = field(default=None, repr=False)
     worker: Thread | None = field(default=None, repr=False)
     lease: Any = field(default=None, repr=False)
     binding: Any = field(default=None, repr=False)
+    launch: Any = field(default=None, repr=False)
+    guard: asyncio.Task | None = field(default=None, repr=False)
     quarantine: Any = field(default=None, repr=False)
 
 
@@ -139,6 +143,9 @@ _DIAGNOSTIC_MESSAGES = {
     "model_unsupported": "The selected model does not support speech inference.",
     "runtime_busy": "The speech device is busy.",
     "lease_refused": "The speech device lease was refused.",
+    "binding_failed": "Speech artifact binding failed before native startup.",
+    "owner_start_unconfirmed": "Operation runner startup is unconfirmed; runtime termination is required.",
+    "owner_start_failed": "Operation runner startup reported an exception after confirmed cleanup.",
     "worker_start_unconfirmed": "Native worker startup is unconfirmed; runtime termination is required.",
     "device_cleanup_unconfirmed": "Speech device cleanup is unconfirmed.",
     "lease_cleanup_unconfirmed": "Speech lease cleanup is unconfirmed.",
@@ -168,6 +175,14 @@ def _diagnostic(error: BaseException, code: str) -> Diagnostic:
     # Keep only an allowlisted category and code-owned, fixed bounded message.
     category = next(kind.__name__ for kind in _SAFE_EXCEPTION_TYPES if isinstance(error, kind))
     return Diagnostic(code, category, _DIAGNOSTIC_MESSAGES[code])
+
+
+def _binding_code(error):
+    return (
+        error.code
+        if type(error.code) is str and error.code in BINDING_ERROR_CODES
+        else "artifact_custody_unavailable"
+    )
 
 
 def _unique_object(pairs):
@@ -359,25 +374,94 @@ class SpeechOperationOwner:
         if self._active is not None:
             raise SpeechOperationError("runtime_busy")
         try:
-            binding = self._manager.bind_speech(slot_ref)
+            # Finish allocating identity, observation and exact-slot state before
+            # any authority can transfer a borrow to this operation.
+            ref = OperationRef(self.runtime_instance_id, str(uuid4()), slot_ref)
+            entry = _Entry(ref, request_id, digest, pcm, language, self._loop.create_future())
+            entry.binding = self._manager.prepare_speech(slot_ref)
         except SpeechBindingError as error:
-            code = (
-                error.code
-                if type(error.code) is str and error.code in BINDING_ERROR_CODES
-                else "artifact_custody_unavailable"
-            )
-            raise SpeechOperationError(code) from None
-        ref = OperationRef(self.runtime_instance_id, str(uuid4()), slot_ref)
-        entry = _Entry(
-            ref, request_id, digest, pcm, language, self._loop.create_future(), binding=binding
-        )
-        self._entries[ref.operation_id] = entry
-        self._requests[request_id] = entry
-        self._active = entry
-        _CUSTODIANS.add(self)
-        entry.runner = self._loop.create_task(self._run(entry))
-        entry.runner.add_done_callback(lambda task: self._runner_done(entry, task))
+            raise SpeechOperationError(_binding_code(error)) from None
+        except BaseException:
+            raise SpeechOperationError("admission_failed") from None
+        try:
+            self._entries[ref.operation_id] = entry
+            self._requests[request_id] = entry
+            self._active = entry
+            _CUSTODIANS.add(self)
+        except BaseException:
+            self._forget_admission(entry)
+            raise SpeechOperationError("admission_failed") from None
+        try:
+            self._manager.bind_speech(entry.binding)
+        except BaseException as error:
+            if entry.binding.artifact_use is None:
+                # acquire's contract transfers nothing on refusal. No native
+                # launch has even been attempted, so this is a plain rejection.
+                self._forget_admission(entry)
+                code = (
+                    _binding_code(error)
+                    if isinstance(error, SpeechBindingError)
+                    else "admission_failed"
+                )
+                raise SpeechOperationError(code) from None
+            # A transfer completed before a later binding failure. Registration
+            # already owns it; release only because native non-start is known.
+            outcome = _Outcome(diagnostic=_diagnostic(error, "binding_failed"))
+            try:
+                entry.binding.release()
+            except BaseException as cleanup:
+                entry.diagnostic = outcome.diagnostic
+                entry.cleanup_diagnostic = _diagnostic(cleanup, "artifact_cleanup_unconfirmed")
+                entry.quarantine = (error, cleanup)
+                self._quarantine_now(entry)
+            else:
+                self._settle(entry, outcome)
+            return self._snapshot(entry)
+        try:
+            entry.launch = self._run(entry)
+            runner = self._loop.create_task(entry.launch)
+            self._retain_runner(entry, runner)
+        except BaseException as error:
+            if entry.settled_at is not None:
+                # An eager runner can genuinely finish before its factory raises.
+                # Its exact cleanup receipt remains authoritative, but do not
+                # erase the separate, bounded factory-startup diagnostic.
+                entry.owner_startup_diagnostic = _diagnostic(error, "owner_start_failed")
+            else:
+                # Factory failure cannot prove non-start, even if it returns no
+                # task. Retain the original coroutine and any eager native work.
+                entry.owner_startup_diagnostic = _diagnostic(error, "owner_start_unconfirmed")
+                entry.quarantine = (entry.quarantine, error)
+                self._quarantine_now(entry)
         return self._snapshot(entry)
+
+    def _forget_admission(self, entry):
+        self._entries.pop(entry.ref.operation_id, None)
+        self._requests.pop(entry.request_id, None)
+        if self._active is entry:
+            self._active = None
+        _CUSTODIANS.discard(self)
+        entry.audio = None
+        entry.binding = None
+
+    def _retain_runner(self, entry, task):
+        if entry.runner is not task:
+            task.add_done_callback(lambda done: self._runner_done(entry, done))
+            entry.runner = task
+
+    def _quarantine_now(self, entry):
+        self._mark_quarantine(entry)
+        if entry.guard is None:
+            # Emergency custody must not depend on the task factory that just
+            # failed. This guard never invokes native work or resolves custody.
+            entry.guard = asyncio.Task(self._hold_quarantine(entry), loop=self._loop)
+            entry.guard.add_done_callback(lambda task: self._guard_done(entry, task))
+
+    def _guard_done(self, entry, task):
+        entry.guard = None
+        if not task.cancelled():
+            task.exception()  # Observe failure without exposing backend text.
+        self._quarantine_now(entry)
 
     def status(self, ref: OperationRef) -> OperationStatus:
         return self._snapshot(self._find(ref))
@@ -443,6 +527,7 @@ class SpeechOperationOwner:
             entry.text,
             entry.diagnostic,
             entry.startup_diagnostic,
+            entry.owner_startup_diagnostic,
             entry.cleanup_diagnostic,
             self._ttl,
             self._max_receipts,
@@ -479,6 +564,11 @@ class SpeechOperationOwner:
                     entry.state = "cancellation_requested"
 
     async def _run(self, entry):
+        # An eager factory can start this coroutine and then raise without ever
+        # returning its task. Retain the actual runner before native acquisition.
+        self._retain_runner(entry, asyncio.current_task())
+        if entry.owner_startup_diagnostic is not None:
+            await self._hold_quarantine(entry)
         if entry.cancel.is_set():
             await self._finish_without_worker(entry, _Outcome())
             return
@@ -490,11 +580,7 @@ class SpeechOperationOwner:
             # acquiring its device lock and yielding the loaded model.
             entry.lease = None
             if isinstance(error, SpeechBindingError):
-                code = (
-                    error.code
-                    if type(error.code) is str and error.code in BINDING_ERROR_CODES
-                    else "artifact_custody_unavailable"
-                )
+                code = _binding_code(error)
             elif isinstance(error, KeyError):
                 code = "model_unavailable"
             elif isinstance(error, ValueError):
@@ -515,7 +601,10 @@ class SpeechOperationOwner:
                 self._loop.call_later(0.001, receive)
             elif not notification.done():
                 outcome = result.pop()
-                if entry.startup_diagnostic is not None:
+                if (
+                    entry.startup_diagnostic is not None
+                    or entry.owner_startup_diagnostic is not None
+                ):
                     # A startup exception already quarantined this operation.
                     # Preserve any later inference/device-cleanup diagnostics and
                     # conversion buffer, but never expose late successful text or
@@ -549,6 +638,13 @@ class SpeechOperationOwner:
             await self._hold_quarantine(entry)
         else:
             outcome = await self._resist_cancellation(notification, entry)
+        if entry.owner_startup_diagnostic is not None:
+            if outcome is not None:
+                entry.diagnostic = outcome.diagnostic
+                entry.cleanup_diagnostic = outcome.cleanup_diagnostic
+                if outcome.quarantine is not None:
+                    entry.quarantine = (entry.quarantine, outcome.quarantine)
+            await self._hold_quarantine(entry)
         if outcome.quarantine is not None:
             entry.quarantine = outcome.quarantine
             entry.diagnostic = outcome.diagnostic
@@ -586,12 +682,15 @@ class SpeechOperationOwner:
         await self._release_artifact(entry, outcome)
         self._settle(entry, outcome)
 
-    async def _hold_quarantine(self, entry):
+    def _mark_quarantine(self, entry):
         entry.state = "cleanup_unconfirmed"
         entry.cleanup = "unconfirmed"
         entry.text = None
         if not entry.observed.done():
             entry.observed.set_result(None)
+
+    async def _hold_quarantine(self, entry):
+        self._mark_quarantine(entry)
         # This live task prevents normal asyncio shutdown from finalizing the
         # speech_lease async generator prematurely. The process owner must stop
         # this runtime; cancellation, timeout and drain cannot resolve quarantine.
@@ -614,6 +713,7 @@ class SpeechOperationOwner:
         entry.audio = None
         entry.worker = None
         entry.binding = None
+        entry.launch = None
         entry.settled_at = self._clock()
         self._active = None
         self._settled[entry.ref.operation_id] = entry
@@ -626,15 +726,21 @@ class SpeechOperationOwner:
         entry.runner = None
         if entry.settled_at is not None:
             return
+        if entry.state == "cleanup_unconfirmed":
+            if not task.cancelled():
+                task.exception()
+            self._quarantine_now(entry)
+            return
         if task.cancelled() and entry.lease is None and entry.worker is None:
             # Cancellation before the owner coroutine's first instruction cannot
             # have started native work or acquired a lease.
             entry.cancel.set()
-            entry.runner = self._loop.create_task(self._finish_without_worker(entry, _Outcome()))
+            entry.runner = asyncio.Task(
+                self._finish_without_worker(entry, _Outcome()), loop=self._loop
+            )
             entry.runner.add_done_callback(lambda task: self._runner_done(entry, task))
             return
         error = task.exception() if not task.cancelled() else asyncio.CancelledError()
         if error is not None:
             entry.cleanup_diagnostic = _diagnostic(error, "owner_cleanup_unconfirmed")
-        entry.runner = self._loop.create_task(self._hold_quarantine(entry))
-        entry.runner.add_done_callback(lambda task: self._runner_done(entry, task))
+        self._quarantine_now(entry)

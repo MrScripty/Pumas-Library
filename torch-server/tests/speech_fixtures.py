@@ -39,3 +39,10 @@ class SyntheticArtifactAuthority:
         borrow = SyntheticArtifactUse(self, ref)
         self.borrows.append(borrow)
         return borrow
+
+
+def bind_fixture(manager, ref):
+    """Test-only convenience; production owner retains state before transfer."""
+    binding = manager.prepare_speech(ref)
+    manager.bind_speech(binding)
+    return binding

@@ -50,7 +50,8 @@ class ArtifactUseLease(Protocol):
     validate raises unless this receipt still covers the exact reference and its
     attested content/recipe/profile/process. release returns only on confirmed
     borrow release; an exception requires quarantine. Neither method performs
-    filesystem/DB work. Releasing this borrow does not release slot custody and
+    filesystem/DB work or invokes callbacks/reenters the operation owner.
+    Releasing this borrow does not release slot custody and
     makes no claim about artifact deletion or process cessation.
     """
 
@@ -63,7 +64,8 @@ class ArtifactUseAuthority(Protocol):
     """Trusted internal dependency, never assembled from caller identity values.
 
     acquire is a synchronous, nonblocking admission over previously retained
-    load-time evidence, without filesystem/DB work or an async admission gap.
+    load-time evidence, without filesystem/DB work, callbacks, owner reentry or
+    an async admission gap.
     It either returns a valid retained borrow, or refuses without transferring
     any custody to its caller. Uncertain internal acquisition remains owned by
     the authority. Values alone, a READY model or a model path do not suffice.
@@ -86,15 +88,17 @@ class _BoundSpeechSlot:
     slot: Any = field(repr=False)
     loaded: Any = field(repr=False)
     device: str
-    artifact_use: ArtifactUseLease = field(repr=False)
+    artifact_use: ArtifactUseLease | None = field(default=None, repr=False)
     released: bool = False
 
     def release(self) -> None:
-        if not self.released:
+        if self.released:
+            return
+        if self.artifact_use is not None:
             try:
                 self.artifact_use.release()
             except BaseException as error:
                 raise ArtifactUseReleaseUnconfirmed(
                     "Artifact borrow release is unconfirmed"
                 ) from error
-            self.released = True
+        self.released = True

@@ -235,3 +235,40 @@ Verification of this checkpoint:
   tests were changed or hidden; this is not a full-suite pass.
 - No routes, capability advertisement, Rust DTO/RPC/schema changes, dependencies,
   runtime recipes, live stores, model downloads or real native ASR qualification.
+
+#### Exception-safe admission and runner-factory review
+
+A correction to the exact-slot checkpoint moves operation UUID, observation
+future, entry and empty binding construction before artifact acquisition.
+`prepare_speech` creates the exact-slot record without borrowing; `bind_speech`
+transfers the borrow directly into that record after the operation registry,
+active owner and independent custodian already retain it. Authority refusal
+without transfer remains a plain admission refusal. A failure after transfer
+but before native launch releases only on confirmed cleanup; uncertain release
+retains the binding/audio with observable `cleanup_unconfirmed` and incomplete
+drain. Construction errors cannot leave an unregistered borrowed authority.
+
+Task-factory exceptions are separately observable through the private
+`owner_startup_diagnostic`, preserving native-startup and operation/cleanup
+failures alongside it. A factory can schedule or eagerly start the actual runner
+and then raise without returning its task. The runner therefore retains its own
+actual task before native acquisition, and an exception latches incomplete
+custody synchronously. A directly owned, cancellation-resistant quarantine guard
+is independent of the failed task factory. Pending coroutines, eager native
+workers, audio, bindings and leases stay owned. Neither factory failure nor late
+native output authorizes release or turns the operation into success. If the
+exact eager runner already settled with confirmed cleanup before the factory
+error, its genuine terminal receipt remains authoritative, with the separate
+fixed startup-failure diagnostic. No unknown startup is inferred to be non-start.
+
+Focused evidence: 37 operation tests and 18 binding tests passed. Deterministic
+cases cover UUID/future/entry/binding construction failure before acquisition;
+post-transfer failure with successful or uncertain borrow release; factories
+failing before scheduling, after scheduling and after eager native startup;
+late output/device cleanup; combined native and owner startup exceptions;
+repeated cancellation; retained custody through orderly asyncio shutdown; and
+an eager, exactly settled pre-native refusal. Existing Cohere (15), manager (2)
+and load-lifecycle (7) tests passed. Whole Torch Ruff checks/formatting passed.
+The broad suite ran 190 tests with only the same 7 inherited FastAPI
+`_IncludedRouter.path` errors. This correction adds no real authority, production
+speech exposure, public schema, runtime qualification or process/drain integration.

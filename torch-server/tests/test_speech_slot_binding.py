@@ -14,6 +14,7 @@ from test_speech_operations import Gate, Manager, encode, eventually, loaded_man
 from loaders.cohere_asr_loader import COHERE_ASR
 from model_manager import LoadedModel, SlotState
 from speech_binding import SpeechBindingError, SpeechSlotRef
+from speech_fixtures import bind_fixture
 from speech_operations import SpeechOperationError, SpeechOperationOwner
 
 
@@ -33,6 +34,88 @@ class SlotBindingTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SpeechOperationError) as raised:
             action()
         self.assertEqual(raised.exception.code, code)
+
+    async def test_admission_construction_failures_transfer_no_borrow(self):
+        for target in (
+            "speech_operations.uuid4",
+            "speech_operations._Entry",
+            "model_manager._BoundSpeechSlot",
+        ):
+            with self.subTest(target=target):
+                manager = Manager()
+                owner, gate = self.owner(manager)
+                body = encode(payload(owner))
+                with patch(target, side_effect=MemoryError("private preparation failure")):
+                    self.assert_code("admission_failed", lambda: owner.start(body))
+                self.assertFalse(manager._speech_artifact_authority.borrows)
+                self.assertFalse(owner._entries)
+                self.assertIsNone(owner._active)
+                self.assertEqual(gate.calls, 0)
+                self.assertTrue(owner.close_admission().custody_complete)
+        manager = Manager()
+        owner, gate = self.owner(manager)
+        body = encode(payload(owner))
+        with patch.object(
+            owner._loop, "create_future", side_effect=MemoryError("private future failure")
+        ):
+            self.assert_code("admission_failed", lambda: owner.start(body))
+        self.assertFalse(manager._speech_artifact_authority.borrows)
+        self.assertTrue(owner.close_admission().custody_complete)
+
+    async def test_post_transfer_binding_failure_releases_only_proven_nonstarted_borrow(self):
+        manager = Manager()
+        owner, gate = self.owner(manager)
+        acquire = manager.bind_speech
+
+        def fail_after_transfer(binding):
+            self.assertIs(owner._active.binding, binding)
+            self.assertIs(owner._entries[owner._active.ref.operation_id], owner._active)
+            acquire(binding)
+            raise RuntimeError("private binding failure")
+
+        manager.bind_speech = fail_after_transfer
+        with patch("speech_operations.Thread") as thread:
+            started = owner.start(encode(payload(owner)))
+            self.assertEqual(started.state, "failed")
+            self.assertEqual(started.operation_diagnostic.code, "binding_failed")
+            self.assertEqual(started.cleanup, "confirmed")
+            self.assertNotIn("private binding failure", repr(started))
+            thread.assert_not_called()
+        self.assertEqual(len(manager._speech_artifact_authority.borrows), 1)
+        self.assertTrue(manager._speech_artifact_authority.borrows[0].released)
+        self.assertTrue(owner.close_admission().custody_complete)
+        self.assertEqual(gate.calls, 0)
+        self.assertIsNone(owner._entries[started.operation_ref.operation_id].binding)
+
+    async def test_eager_completed_refusal_preserves_exact_cleanup_after_factory_error(self):
+        manager = Manager()
+        owner, gate = self.owner(manager)
+        # A device-busy refusal can settle without an actual suspension or worker.
+        await manager.lock.acquire()
+        loop = asyncio.get_running_loop()
+        previous = loop.get_task_factory()
+        tasks = []
+
+        def factory(loop, coroutine, **kwargs):
+            tasks.append(asyncio.Task(coroutine, loop=loop, eager_start=True, **kwargs))
+            raise RuntimeError("private task factory failure")
+
+        body = encode(payload(owner))
+        loop.set_task_factory(factory)
+        try:
+            started = owner.start(body)
+        finally:
+            loop.set_task_factory(previous)
+            manager.lock.release()
+        self.assertTrue(tasks[0].done())
+        self.assertEqual(started.state, "failed")
+        self.assertEqual(started.operation_diagnostic.code, "runtime_busy")
+        self.assertEqual(started.owner_startup_diagnostic.code, "owner_start_failed")
+        self.assertEqual(started.cleanup, "confirmed")
+        self.assertEqual(owner.start(body), started)
+        self.assertTrue(manager._speech_artifact_authority.borrows[0].released)
+        self.assertEqual(gate.calls, 0)
+        self.assertNotIn("private task factory failure", repr(started))
 
     async def test_production_default_refuses_admission_and_native_work(self):
         manager = _TestModelManager(_FakeDeviceManager())
@@ -54,7 +137,7 @@ class SlotBindingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("load_generation", slot.to_dict())
         self.assertNotIn("runtime_instance_id", slot.to_dict())
         with self.assertRaisesRegex(SpeechBindingError, "invalid_slot_ref"):
-            manager.bind_speech("speech")
+            bind_fixture(manager, "speech")
 
     async def test_one_owner_is_runtime_wide_across_models_and_devices(self):
         manager, first = await loaded_manager()
@@ -209,7 +292,11 @@ class SlotBindingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_released_or_foreign_binding_cannot_acquire_a_device(self):
         manager = Manager()
-        binding = manager.bind_speech(manager.fixture_ref)
+        unused = manager.prepare_speech(manager.fixture_ref)
+        unused.release()
+        with self.assertRaisesRegex(SpeechBindingError, "invalid_slot_ref"):
+            manager.bind_speech(unused)
+        binding = bind_fixture(manager, manager.fixture_ref)
         binding.release()
         with self.assertRaisesRegex(SpeechBindingError, "slot_replaced"):
             async with manager.speech_lease(binding):
@@ -342,10 +429,10 @@ class SlotBindingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(gate.calls, 0)
         self.assertFalse(owner._entries)
         with self.assertRaisesRegex(SpeechBindingError, "runtime_replaced"):
-            manager.bind_speech(foreign)
+            bind_fixture(manager, foreign)
         invalid = SpeechSlotRef(manager.runtime_instance_id, "missing", str(uuid4()))
         with self.assertRaisesRegex(SpeechBindingError, "slot_replaced"):
-            manager.bind_speech(invalid)
+            bind_fixture(manager, invalid)
 
 
 if __name__ == "__main__":

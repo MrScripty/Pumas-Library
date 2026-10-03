@@ -335,12 +335,25 @@ class ModelManager:
             raise SpeechBindingError("model_unsupported")
         return slot
 
-    def bind_speech(self, ref: SpeechSlotRef) -> _BoundSpeechSlot:
-        """Borrow existing artifact custody in the synchronous admission turn."""
+    def prepare_speech(self, ref: SpeechSlotRef) -> _BoundSpeechSlot:
+        """Construct exact-slot state before any artifact custody can transfer."""
         slot = self._resolve_speech_slot(ref)
-        loaded = slot._loaded
-        artifact_use = self._speech_artifact_authority.acquire(ref)
-        return _BoundSpeechSlot(ref, self, slot, loaded, slot.device, artifact_use)
+        return _BoundSpeechSlot(ref, self, slot, slot._loaded, slot.device)
+
+    def bind_speech(self, binding: _BoundSpeechSlot) -> None:
+        """Transfer a borrow directly into the caller's already-retained state.
+
+        All allocating construction precedes acquire. The prepared dataclass's
+        existing artifact_use field is the transfer destination, so no binding
+        or wrapper construction can strand a successfully acquired borrow.
+        """
+        if type(binding) is not _BoundSpeechSlot or binding.manager is not self:
+            raise SpeechBindingError("invalid_slot_ref")
+        if binding.artifact_use is not None or binding.released:
+            raise SpeechBindingError("invalid_slot_ref")
+        binding.artifact_use = self._speech_artifact_authority.acquire(binding.ref)
+        if binding.artifact_use is None:
+            raise SpeechBindingError("artifact_custody_unavailable")
 
     @asynccontextmanager
     async def speech_lease(self, binding: _BoundSpeechSlot):
@@ -363,6 +376,7 @@ class ModelManager:
                 or slot._loaded is not binding.loaded
                 or slot.device != binding.device
                 or binding.released
+                or binding.artifact_use is None
             ):
                 raise SpeechBindingError("slot_replaced")
             binding.artifact_use.validate(binding.ref)

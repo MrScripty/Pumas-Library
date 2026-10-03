@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # Reuse the suite's minimal device fallback; no native runtime is installed here.
 from test_model_manager import _FakeDeviceManager, _TestModelManager
 from speech_binding import SpeechBindingError
-from speech_fixtures import SyntheticArtifactAuthority
+from speech_fixtures import SyntheticArtifactAuthority, bind_fixture
 from loaders.cohere_asr_loader import (
     COHERE_ASR,
     MAX_AUDIO_SAMPLES,
@@ -239,11 +239,11 @@ class SpeechLeaseTests(unittest.IsolatedAsyncioTestCase):
         manager = _TestModelManager(_FakeDeviceManager(), _speech_artifact_authority=authority)
         slot = await manager.load("/fixture", "speech", model_type=COHERE_ASR)
         other = await manager.load("/fixture2", "speech2", model_type=COHERE_ASR)
-        binding = manager.bind_speech(
-            authority.attest_fixture(manager.speech_slot_ref(slot.slot_id))
+        binding = bind_fixture(
+            manager, authority.attest_fixture(manager.speech_slot_ref(slot.slot_id))
         )
-        second = manager.bind_speech(
-            authority.attest_fixture(manager.speech_slot_ref(other.slot_id))
+        second = bind_fixture(
+            manager, authority.attest_fixture(manager.speech_slot_ref(other.slot_id))
         )
         async with manager.speech_lease(binding) as loaded:
             self.assertIs(loaded, slot._loaded)
@@ -264,12 +264,12 @@ class SpeechLeaseTests(unittest.IsolatedAsyncioTestCase):
         manager = _TestModelManager(_FakeDeviceManager(), _speech_artifact_authority=authority)
         text = await manager.load("/fixture", "text", model_type="text-generation")
         with self.assertRaisesRegex(SpeechBindingError, "model_unsupported"):
-            manager.bind_speech(manager.speech_slot_ref(text.slot_id))
+            bind_fixture(manager, manager.speech_slot_ref(text.slot_id))
         first = await manager.load("/fixture", "duplicate", model_type=COHERE_ASR)
         second = await manager.load("/fixture2", "duplicate", model_type=COHERE_ASR)
         for slot in (first, second):
             ref = authority.attest_fixture(manager.speech_slot_ref(slot.slot_id))
-            binding = manager.bind_speech(ref)
+            binding = bind_fixture(manager, ref)
             async with manager.speech_lease(binding) as loaded:
                 self.assertIs(loaded, slot._loaded)
             self.assertTrue(binding.released)

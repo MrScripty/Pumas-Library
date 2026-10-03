@@ -236,12 +236,15 @@ async fn copied_import_effect_failures_settle_and_remain_owner_visible() {
 
 #[tokio::test]
 async fn copied_import_parent_creation_failure_cleans_workspace() {
-    let fixture = Fixture::new().await;
-    std::fs::write(
-        fixture.library.library_root().join("vision"),
-        b"parent sentinel",
-    )
-    .unwrap();
+    let mut fixture = Fixture::new().await;
+    let parent_path = fixture.library.library_root().join("vision");
+    fixture.importer.import_hook = Some(Arc::new(move |boundary, stage| {
+        if boundary == ImportBoundary::BeforePublish {
+            assert!(stage.read_model_metadata()?.is_some());
+            std::fs::write(&parent_path, b"parent sentinel")?;
+        }
+        Ok(())
+    }));
     assert!(fixture.importer.import(&fixture.spec).await.is_err());
     assert!(fixture.stages().is_empty());
     assert_eq!(

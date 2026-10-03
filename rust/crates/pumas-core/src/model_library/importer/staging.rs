@@ -133,11 +133,9 @@ impl ModelImporter {
             .protect_metadata_under_grant(&[(model_id.clone(), target_path.clone())], grant)?;
         target.assert_no_intent_deletion_claim()?;
         if target.model_directory_exists()? {
-            return Ok(refused(
-                spec,
-                "Model already exists at this location",
-                security_tier,
-            ));
+            let mut result = refused(spec, "Model already exists at this location", security_tier);
+            result.model_path = Some(target_path.display().to_string());
+            return Ok(result);
         }
         let stage = authority.root().create_import_stage()?;
         let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -264,7 +262,7 @@ impl ModelImporter {
             model_id: Some(model_id.clone()),
             model_path: Some(model_id),
             error: None,
-            security_tier: Some(security_tier),
+            security_tier: validation.is_none().then_some(security_tier),
         })
     }
 

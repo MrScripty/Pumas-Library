@@ -108,3 +108,49 @@ schema-4/5/6 acquisition startup/mutation remains fail-closed, preserving the
 original document. No live store, historical process namespace or credential was
 reconciled or changed. S3, public speech, actual model inference and networked
 node qualification remain separate milestones.
+
+## Hosted qualification corrections
+
+The first combined attempt, Build 37133121619 at `d23100c2`, stopped on two new
+fixture compile errors. The next attempt, Build 37133702169 at `828f6ade`, compiled
+and executed the cross-owner cases, but remained failed. Full core default tests
+reported 1,715 passed / 3 failed / 8 existing ignored cases; no-default reported
+1,691 passed / 3 failed / 8 ignored. The seven cross-owner cases reported 5/2 on
+Linux, 4/3 on macOS and 3/4 on Windows, with none ignored. Workflow/frontend jobs
+and all twelve product/fixture dependency-graph checks passed. These partial
+results do not qualify the branch.
+
+Separate corrective milestones preserve these outcomes:
+
+- Fixture oracles now distinguish held-identity refusal from the public retained
+  Pending/Invalid diagnostic. They check both original and replacement bytes,
+  exact warm/cold hidden queue custody, and the scanner's canonical root.
+- Native fixture setup uses ordinary write access for `set_len`; append-only
+  Windows access is insufficient. Diagnostics retain both the primary producer
+  error and shutdown failure, and identify `files_ready` as seal plus persistence
+  rather than attributing an unobserved syscall.
+- In-place imports now perform a rooted, held, bounded read-only copied-readiness
+  preflight before admitting owned effects. The original guarded readiness fence
+  remains, and late Validation/I/O/panic failures still reach shutdown. No ambient
+  JSON reader, mutation grant or global error exemption is used for preflight.
+  The FIFO refusal probe has an exact owned test child and requires acknowledgment
+  after runtime drainage; timeout kills and reaps that child before failure.
+- Windows verification requests write access on the same no-follow descriptor
+  that is hashed and flushed. The second binding observation remains read-only;
+  there is no creation/truncation, chmod, ACL change, skipped flush or read-only
+  success fallback. Unix and consumer descriptor access remain unchanged.
+
+Rust 1.92 implements Windows `sync_all` through `FlushFileBuffers`, whose documented
+handle contract requires `GENERIC_WRITE`. See [Rust's pinned implementation](https://github.com/rust-lang/rust/blob/1.92.0/library/std/src/sys/fs/windows.rs)
+and [Microsoft's API contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers).
+The original read-only verification descriptor violates that contract. Native
+controls reproduce read-only flush denial and require successful real-payload
+seal/staged publication after correction. The permissions-negative case checks
+open denial, not an injected production flush failure. Existing hosted Windows
+failures are consistent with this defect, but their complete attribution remains
+pending the corrected native run.
+
+Independent source review accepted these corrective boundaries. Fresh exact-head
+hosted compilation and execution remain required. A verification descriptor binds
+one checked operation; serialized path/size/digest receipts do not preserve a live
+file identity or make bytes immutable against same-authority external writers.

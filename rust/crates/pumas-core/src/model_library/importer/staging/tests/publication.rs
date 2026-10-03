@@ -27,14 +27,7 @@ async fn copied_import_pending_confirmed_ready_are_distinct_durable_steps() {
                     .as_ref()
                     .map(|value| value.id.as_str())
             );
-            assert_eq!(
-                receipt["state"],
-                if boundary == ImportBoundary::BeforeReady {
-                    "confirmed"
-                } else {
-                    "pending"
-                }
-            );
+            assert_eq!(receipt["state"], "pending");
             assert!(receipt["payload"]["files"]["model.onnx"]["sha256"]
                 .as_str()
                 .is_some_and(|hash| hash.len() == 64));
@@ -97,7 +90,9 @@ async fn copied_import_release_replacement_is_published_pending_and_never_promot
             .unwrap_err()
             .to_string();
         assert!(error.contains("was published"), "{error}");
-        assert!(error.contains("custody unknown"), "{error}");
+        if mutation != "same_size_bytes" {
+            assert!(error.contains("custody unknown"), "{error}");
+        }
         let target = fixture
             .library
             .build_model_path("diffusion", "fixture", "Owned Import");
@@ -196,14 +191,7 @@ async fn copied_import_pending_and_confirmed_failures_do_not_become_ready_at_sta
         assert!(error.contains("was published"));
         let target = fixture.target();
         let before = std::fs::read(target.join("metadata.json")).unwrap();
-        assert_eq!(
-            receipt_at(&target)["state"],
-            if boundary == ImportBoundary::BeforeReady {
-                "confirmed"
-            } else {
-                "pending"
-            }
-        );
+        assert_eq!(receipt_at(&target)["state"], "pending");
         fixture.library.rebuild_index().await.unwrap();
         fixture.library.index_model_dir(&target).await.unwrap();
         assert_eq!(std::fs::read(target.join("metadata.json")).unwrap(), before);
@@ -355,7 +343,7 @@ async fn copied_import_final_metadata_notifier_cannot_confirm_changed_payload() 
     assert!(error.contains("was published"));
     assert!(error.contains("payload identity, contents or completeness changed"));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert_eq!(receipt_at(&fixture.target())["state"], "confirmed");
+    assert_eq!(receipt_at(&fixture.target())["state"], "pending");
     assert!(!fixture
         .library
         .load_metadata(&fixture.target())
@@ -797,11 +785,37 @@ async fn copied_import_reserved_backup_source_and_native_alias_collisions_are_re
         std::fs::read(stage.display_path().join(IMPORT_METADATA_BACKUP)).unwrap(),
         b""
     );
-    stage.finish_import_backup_reservation(reservation).unwrap();
+    stage
+        .finish_import_document_reservation(IMPORT_METADATA_BACKUP, reservation)
+        .unwrap();
     stage.remove_import_stage_all().unwrap();
     assert_eq!(
         std::fs::read(source.join("b")).unwrap(),
         b"backup collision"
+    );
+    fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+#[tokio::test]
+async fn copied_import_hashes_destination_once_after_every_callback() {
+    let mut fixture = Fixture::new().await;
+    let observed = Arc::new(std::sync::Mutex::new(None));
+    let capture = observed.clone();
+    fixture.importer.import_hook = Some(Arc::new(move |_, destination| {
+        assert_eq!(destination.import_hash_pass_count(), 0);
+        *capture.lock().unwrap() = Some(destination.clone());
+        Ok(())
+    }));
+    let result = fixture.importer.import(&fixture.spec).await.unwrap();
+    assert!(result.success);
+    assert_eq!(
+        observed
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .import_hash_pass_count(),
+        1
     );
     fixture.tasks.shutdown_owned().await.unwrap();
 }

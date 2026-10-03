@@ -7,6 +7,12 @@ use crate::model_library::hashing::compute_dual_hash_reader;
 
 pub(crate) const IMPORT_RECEIPT: &str = ".pumas_import_publication.json";
 pub(crate) const IMPORT_METADATA_BACKUP: &str = "metadata.json.bak";
+pub(crate) const IMPORT_MUTABLE_DOCUMENTS: [&str; 4] = [
+    "metadata.json",
+    IMPORT_METADATA_BACKUP,
+    "overrides.json",
+    IMPORT_RECEIPT,
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -19,10 +25,38 @@ pub(crate) struct ImportPayloadIdentity {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ImportFileIdentity {
+pub(crate) struct ImportFileIdentity {
     identity: FilesystemIdentity,
     size: u64,
     sha256: String,
+}
+
+impl ImportFileIdentity {
+    pub(crate) fn copied(file: &std::fs::File, size: u64, sha256: String) -> Result<Self> {
+        let metadata = Metadata::from_file(file)?;
+        if !metadata.is_file() || metadata.len() != size {
+            return Err(invalid_capability_path().into());
+        }
+        Ok(Self {
+            identity: filesystem_identity(&metadata).ok_or_else(invalid_capability_path)?,
+            size,
+            sha256,
+        })
+    }
+}
+
+impl ImportPayloadIdentity {
+    fn same_bindings(&self, other: &Self) -> bool {
+        self.library_root == other.library_root
+            && self.stage == other.stage
+            && self.directories == other.directories
+            && self.files.len() == other.files.len()
+            && self.files.iter().all(|(name, expected)| {
+                other.files.get(name).is_some_and(|actual| {
+                    actual.identity == expected.identity && actual.size == expected.size
+                })
+            })
+    }
 }
 
 type HeldChildren = BTreeMap<PathBuf, Arc<HeldDestination>>;
@@ -39,11 +73,15 @@ impl DownloadDestinationRoot {
 impl DownloadRecoveryDestination {
     /// Remove only the empty exclusive backup-name reservation we created for
     /// filesystem-equivalent collision checks, before payload evidence capture.
-    pub(crate) fn finish_import_backup_reservation(&self, file: std::fs::File) -> Result<()> {
+    pub(crate) fn finish_import_document_reservation(
+        &self,
+        name: &str,
+        file: std::fs::File,
+    ) -> Result<()> {
         let expected = filesystem_identity(&Metadata::from_file(&file)?)
             .ok_or_else(invalid_capability_path)?;
         let directory = self.directory(false)?;
-        let current = directory.symlink_metadata(IMPORT_METADATA_BACKUP)?;
+        let current = directory.symlink_metadata(name)?;
         if !current.is_file()
             || current.is_symlink()
             || filesystem_identity(&current) != Some(expected)
@@ -51,7 +89,7 @@ impl DownloadRecoveryDestination {
             return Err(invalid_capability_path().into());
         }
         drop(file);
-        directory.remove_file(IMPORT_METADATA_BACKUP)?;
+        directory.remove_file(name)?;
         sync_directory(&directory)?;
         Ok(())
     }
@@ -79,31 +117,66 @@ impl DownloadRecoveryDestination {
         Ok(())
     }
 
-    /// Capture all payload bytes and physical identities before writing Pending.
-    /// Only the three explicitly owned, mutable metadata documents are excluded.
-    pub(crate) fn capture_import_payload(&self, files: &[String]) -> Result<ImportPayloadIdentity> {
+    /// Compare copy-time descriptor evidence with the complete held namespace.
+    /// No payload bytes are reread here; only the final publication proof hashes.
+    pub(crate) fn capture_copied_import_payload(
+        &self,
+        files: BTreeMap<String, ImportFileIdentity>,
+    ) -> Result<ImportPayloadIdentity> {
         self.validate_import_stage_bindings()?;
-        let (identity, _) = self.observe_import_payload()?;
-        if identity.files.keys().cloned().collect::<BTreeSet<_>>()
-            != files.iter().cloned().collect()
-        {
-            // Unknown entries must not become cleanup authority merely because
-            // the first complete inventory observed them.
+        let (mut identity, _) = self.observe_import_payload(false)?;
+        let mut expected = identity.clone();
+        expected.files = files;
+        if !expected.same_bindings(&identity) {
             *self
                 .import_released
                 .lock()
-                .map_err(|_| io::Error::other("Import custody lock poisoned"))? = true;
+                .map_err(|_| invalid_capability_path())? = true;
             return Err(invalid_capability_path().into());
         }
+        identity.files = expected.files;
         self.import_payload
             .set(identity.clone())
-            .map_err(|_| io::Error::other("Import payload identity already captured"))?;
+            .map_err(|_| invalid_capability_path())?;
         Ok(identity)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn capture_import_payload(&self, files: &[String]) -> Result<ImportPayloadIdentity> {
+        let (identity, _) = self.observe_import_payload(true)?;
+        if identity.files.keys().cloned().collect::<BTreeSet<_>>()
+            != files.iter().cloned().collect()
+        {
+            return Err(invalid_capability_path().into());
+        }
+        self.capture_copied_import_payload(identity.files)
+    }
+
+    pub(crate) fn verify_import_bindings(&self, expected: &ImportPayloadIdentity) -> Result<()> {
+        self.require_import_bound()?;
+        let (observed, _) = self.observe_import_payload(false)?;
+        if !expected.same_bindings(&observed) {
+            return Err(invalid_capability_path().into());
+        }
+        Ok(())
+    }
+
+    /// A held lookup against exclusive reserved entries uses native filesystem
+    /// equivalence without copying or adopting the caller's original filename.
+    pub(crate) fn import_reserved_name_claimed(&self, name: &str) -> Result<bool> {
+        if Path::new(name).components().count() != 1 {
+            return Ok(false);
+        }
+        match self.directory(false)?.symlink_metadata(name) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub(crate) fn verify_import_payload(&self, expected: &ImportPayloadIdentity) -> Result<()> {
         self.require_import_bound()?;
-        let (observed, _) = self.observe_import_payload()?;
+        let (observed, _) = self.observe_import_payload(true)?;
         if &observed != expected {
             return Err(io::Error::other(
                 "Copied import payload identity, contents or completeness changed",
@@ -135,8 +208,8 @@ impl DownloadRecoveryDestination {
             .import_released
             .lock()
             .map_err(|_| io::Error::other("Import custody lock poisoned"))? = true;
-        let (observed, children) = self.observe_import_payload()?;
-        if &observed != expected {
+        let (observed, children) = self.observe_import_payload(false)?;
+        if !expected.same_bindings(&observed) {
             return Err(io::Error::other(
                 "Copied import payload changed across descendant handle release; custody unknown",
             )
@@ -162,7 +235,21 @@ impl DownloadRecoveryDestination {
         Ok(())
     }
 
-    fn observe_import_payload(&self) -> Result<(ImportPayloadIdentity, HeldChildren)> {
+    #[cfg(test)]
+    pub(crate) fn import_hash_pass_count(&self) -> usize {
+        self.import_hash_passes
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn observe_import_payload(
+        &self,
+        hash_contents: bool,
+    ) -> Result<(ImportPayloadIdentity, HeldChildren)> {
+        #[cfg(test)]
+        if hash_contents {
+            self.import_hash_passes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         let root = self.directory(false)?;
         let mut identity = ImportPayloadIdentity {
             library_root: self.authority.root_identity,
@@ -171,7 +258,13 @@ impl DownloadRecoveryDestination {
             files: BTreeMap::new(),
         };
         let mut children = BTreeMap::new();
-        observe_directory(&root, Path::new(""), &mut identity, &mut children)?;
+        observe_directory(
+            &root,
+            Path::new(""),
+            &mut identity,
+            &mut children,
+            hash_contents,
+        )?;
         // Confirm the bound root again, without reacquiring ambient authority.
         if directory_identity(&self.directory(false)?)? != identity.stage {
             return Err(invalid_capability_path().into());
@@ -227,6 +320,7 @@ fn observe_directory(
     relative: &Path,
     identity: &mut ImportPayloadIdentity,
     children: &mut HeldChildren,
+    hash_contents: bool,
 ) -> Result<()> {
     for entry in directory.entries()? {
         let name = entry?.file_name();
@@ -243,7 +337,7 @@ fn observe_directory(
             let child = open_directory_chain(directory, Path::new(&name), false)?;
             let child_identity = directory_identity(&child)?;
             identity.directories.insert(portable, child_identity);
-            observe_directory(&child, &path, identity, children)?;
+            observe_directory(&child, &path, identity, children, hash_contents)?;
             children.insert(
                 path,
                 Arc::new(HeldDestination {
@@ -253,10 +347,9 @@ fn observe_directory(
             );
         } else if metadata.is_file() {
             if relative.as_os_str().is_empty()
-                && matches!(
-                    name.to_str(),
-                    Some("metadata.json" | IMPORT_RECEIPT | IMPORT_METADATA_BACKUP)
-                )
+                && name
+                    .to_str()
+                    .is_some_and(|name| IMPORT_MUTABLE_DOCUMENTS.contains(&name))
             {
                 continue;
             }
@@ -269,13 +362,17 @@ fn observe_directory(
                 return Err(invalid_capability_path().into());
             }
             let physical = filesystem_identity(&metadata).ok_or_else(invalid_capability_path)?;
-            let hash = compute_dual_hash_reader(&mut file.into_std())?;
+            let sha256 = if hash_contents {
+                compute_dual_hash_reader(&mut file.into_std())?.sha256
+            } else {
+                String::new()
+            };
             identity.files.insert(
                 portable,
                 ImportFileIdentity {
                     identity: physical,
                     size: metadata.len(),
-                    sha256: hash.sha256,
+                    sha256,
                 },
             );
         } else {

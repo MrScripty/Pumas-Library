@@ -1,7 +1,10 @@
 #![deny(unsafe_code)]
 
 mod import_custody;
-pub(crate) use import_custody::{ImportPayloadIdentity, IMPORT_METADATA_BACKUP, IMPORT_RECEIPT};
+pub(crate) use import_custody::{
+    ImportFileIdentity, ImportPayloadIdentity, IMPORT_METADATA_BACKUP, IMPORT_MUTABLE_DOCUMENTS,
+    IMPORT_RECEIPT,
+};
 
 use crate::platform::capability_fs::{open_directory, sync_directory};
 use crate::{ModelRecord, PumasError, Result};
@@ -204,6 +207,8 @@ pub(crate) struct DownloadRecoveryDestination {
     import_payload: Arc<OnceLock<ImportPayloadIdentity>>,
     #[cfg(test)]
     import_document_uncertainty: Arc<Mutex<Option<String>>>,
+    #[cfg(test)]
+    import_hash_passes: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
     cleanup_parent_sync: Option<Arc<CleanupParentSync>>,
 }
@@ -448,6 +453,8 @@ impl DownloadDestinationRoot {
             #[cfg(test)]
             import_document_uncertainty: Arc::new(Mutex::new(None)),
             #[cfg(test)]
+            import_hash_passes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            #[cfg(test)]
             cleanup_parent_sync: None,
         };
         match destination.directory(false) {
@@ -523,6 +530,8 @@ impl RecoveryRoot {
             import_payload: Arc::new(OnceLock::new()),
             #[cfg(test)]
             import_document_uncertainty: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            import_hash_passes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
             cleanup_parent_sync: None,
         })

@@ -3,9 +3,10 @@
 
 use super::*;
 use crate::metadata::AtomicPublication;
-use crate::model_library::download_recovery::ImportPayloadIdentity;
+use crate::model_library::download_recovery::{ImportFileIdentity, ImportPayloadIdentity};
 use crate::model_library::DownloadRecoveryDestination;
 use crate::models::{AssetValidationState, ImportPublicationIdentity, ImportState};
+use std::collections::BTreeMap;
 use std::io::Read;
 
 pub(crate) use crate::model_library::download_recovery::IMPORT_RECEIPT as RECEIPT_FILENAME;
@@ -71,15 +72,10 @@ impl ImportPublication {
     pub(super) fn prepare(
         stage: &DownloadRecoveryDestination,
         model_id: &str,
-        files: &[ModelFileInfo],
+        files: BTreeMap<String, ImportFileIdentity>,
         metadata: &mut ModelMetadata,
     ) -> Result<Self> {
-        let payload = stage.capture_import_payload(
-            &files
-                .iter()
-                .map(|file| file.name.clone())
-                .collect::<Vec<_>>(),
-        )?;
+        let payload = stage.capture_copied_import_payload(files)?;
         let id = uuid::Uuid::new_v4().to_string();
         metadata.import_state = Some(ImportState::Pending);
         metadata.validation_state = Some(AssetValidationState::Invalid);
@@ -113,10 +109,20 @@ impl ImportPublication {
         )
     }
 
-    /// No callback may run after this proof and before descendant release/rename.
-    pub(super) fn verify(&self, destination: &DownloadRecoveryDestination) -> Result<()> {
+    pub(super) fn verify_bindings(&self, destination: &DownloadRecoveryDestination) -> Result<()> {
         self.verify_receipt(destination)?;
-        destination.verify_import_payload(&self.receipt.payload)
+        destination.verify_import_bindings(&self.receipt.payload)
+    }
+
+    /// All callbacks must have returned. This is the only successful-path
+    /// destination hash pass, consumed by a callback-free finalization owner.
+    pub(super) fn verify_for_finalization(
+        self,
+        destination: &DownloadRecoveryDestination,
+    ) -> Result<VerifiedPublication> {
+        self.verify_receipt(destination)?;
+        destination.verify_import_payload(&self.receipt.payload)?;
+        Ok(VerifiedPublication(self))
     }
 
     pub(super) fn rebind(&self, destination: &DownloadRecoveryDestination) -> Result<()> {
@@ -134,8 +140,7 @@ impl ImportPublication {
         Ok(())
     }
 
-    pub(super) fn confirm(&mut self, target: &DownloadRecoveryDestination) -> Result<()> {
-        self.verify(target)?;
+    fn confirm(&mut self, target: &DownloadRecoveryDestination) -> Result<()> {
         let mut confirmed = self.receipt.clone();
         confirmed.state = ReceiptState::Confirmed;
         require_bounded_receipt(&confirmed)?;
@@ -147,7 +152,7 @@ impl ImportPublication {
         Ok(())
     }
 
-    pub(super) fn mark_ready(&self, metadata: &mut ModelMetadata) -> Result<()> {
+    fn mark_ready(&self, metadata: &mut ModelMetadata) -> Result<()> {
         if self.receipt.state != ReceiptState::Confirmed {
             return Err(PumasError::Other(
                 "Copied import publication is not confirmed".into(),
@@ -161,6 +166,28 @@ impl ImportPublication {
             confirmed: true,
         });
         Ok(())
+    }
+}
+
+/// The constructor is private to the full held verification above. Neither
+/// callers nor index projections can manufacture or reuse a confirmation proof.
+pub(super) struct VerifiedPublication(ImportPublication);
+
+impl VerifiedPublication {
+    pub(super) fn finalize(
+        mut self,
+        target: &DownloadRecoveryDestination,
+        library: &ModelLibrary,
+        model_id: &str,
+        metadata: &mut ModelMetadata,
+    ) -> Result<()> {
+        self.0.confirm(target)?;
+        self.0.mark_ready(metadata)?;
+        require_durable_document(
+            target.publish_import_document("metadata.json", metadata)?,
+            "Ready metadata finalization",
+        )?;
+        library.index_import_metadata(model_id, target, metadata)
     }
 }
 

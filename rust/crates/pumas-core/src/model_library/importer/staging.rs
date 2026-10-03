@@ -3,17 +3,18 @@
 //! Cooperating writers use the grant; arbitrary same-authority hostile mutation
 //! is outside that exclusion contract. Observed replacement always refuses use.
 
-use super::publication::{require_durable_document, ImportPublication, RECEIPT_FILENAME};
+use super::publication::{ImportPublication, RECEIPT_FILENAME};
 use super::*;
 use crate::metadata::AtomicPublication;
 use crate::model_library::download_recovery::{
-    nofollow_options, open_directory_chain, IMPORT_METADATA_BACKUP,
+    nofollow_options, open_directory_chain, ImportFileIdentity, IMPORT_METADATA_BACKUP,
+    IMPORT_MUTABLE_DOCUMENTS,
 };
-use crate::model_library::hashing::compute_dual_hash_reader;
+use crate::model_library::hashing::copy_and_hash;
 use crate::model_library::mutation_authority::LibraryMutationAuthority;
 use crate::model_library::DownloadRecoveryDestination;
 use cap_std::fs::{Dir, OpenOptions};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io;
 
 #[cfg(test)]
@@ -156,8 +157,11 @@ impl ModelImporter {
             drop(stage.create_import_file("metadata.json")?);
             drop(stage.create_import_file(RECEIPT_FILENAME)?);
             let backup_reservation = stage.create_import_file(IMPORT_METADATA_BACKUP)?;
-            let files = plan.copy_to(&stage, self)?;
-            stage.finish_import_backup_reservation(backup_reservation)?;
+            let overrides_reservation = stage.create_import_file("overrides.json")?;
+            plan.validate_reserved_names(&stage)?;
+            let (files, copied_evidence) = plan.copy_to(&stage, self)?;
+            stage.finish_import_document_reservation(IMPORT_METADATA_BACKUP, backup_reservation)?;
+            stage.finish_import_document_reservation("overrides.json", overrides_reservation)?;
             report(progress, ImportStage::Hashing, 0.5, "Computing hashes");
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforeHash, &stage)?;
@@ -206,9 +210,10 @@ impl ModelImporter {
                     .iter()
                     .filter(|file| is_model_file(&file.name))
                     .max_by_key(|file| file.size);
-                let hashes = primary
-                    .map(|file| compute_dual_hash_reader(&mut stage.open_import_file(&file.name)?))
-                    .transpose()?;
+                let hashes = primary.map(|file| DualHash {
+                    sha256: file.sha256.clone().expect("copy-time SHA256"),
+                    blake3: file.blake3.clone().expect("copy-time BLAKE3"),
+                });
                 self.create_metadata(spec, &type_info, &files, hashes)?
             };
             // save_metadata would derive the ID from the stage pathname. Keep
@@ -221,7 +226,8 @@ impl ModelImporter {
                 0.8,
                 "Writing metadata",
             );
-            let publication = ImportPublication::prepare(&stage, &model_id, &files, &mut metadata)?;
+            let publication =
+                ImportPublication::prepare(&stage, &model_id, copied_evidence, &mut metadata)?;
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforeMetadata, &stage)?;
             let projection =
@@ -249,8 +255,7 @@ impl ModelImporter {
                 message: format!("Copied import preparation panicked: {message}"),
             })
         });
-        let (mut metadata, projection, files, bundle_index_bytes, mut publication) = match prepared
-        {
+        let (mut metadata, projection, files, bundle_index_bytes, publication) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => return settle_unpublished(&stage, error, spec, security_tier),
         };
@@ -292,7 +297,7 @@ impl ModelImporter {
                 }
             }
             stage.validate_import_stage_bindings()?;
-            publication.verify(&stage)?;
+            publication.verify_bindings(&stage)?;
             if self.library.index().get(&model_id)?.is_some() {
                 return Err(invalid_filename(
                     "Model identity appeared in the index before publication",
@@ -329,7 +334,6 @@ impl ModelImporter {
             self.import_boundary(ImportBoundary::Published, &target)?;
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforeConfirm, &target)?;
-            publication.confirm(&target)?;
             report(
                 progress,
                 ImportStage::Indexing,
@@ -347,14 +351,17 @@ impl ModelImporter {
             // occurs between this proof and the held Ready metadata write.
             self.library
                 .prepare_import_metadata_write(&target, &mut metadata)?;
-            publication.verify(&target)?;
-            publication.mark_ready(&mut metadata)?;
-            require_durable_document(
-                target.publish_import_document("metadata.json", &metadata)?,
-                "Ready metadata finalization",
+            if let Some(expected_index) = &bundle_index_bytes {
+                let (validation, index) = crate::model_library::external_assets::validate_staged_diffusers_directory(&target, &target_path)?;
+                if validation.validation_state != crate::models::AssetValidationState::Valid || index != *expected_index {
+                    return Err(invalid_filename("Copied bundle changed after metadata preparation"));
+                }
+            }
+            // The private verified owner performs the sole destination hash
+            // pass, then consumes its proof without another external callback.
+            publication.verify_for_finalization(&target)?.finalize(
+                &target, &self.library, &model_id, &mut metadata,
             )?;
-            self.library
-                .index_import_metadata(&model_id, &target, &metadata)?;
             Ok(())
         })).unwrap_or_else(|payload| {
             let message = payload.downcast_ref::<&str>().map(|text| (*text).to_string())
@@ -530,10 +537,9 @@ impl CopyPlan {
             }
             // Metadata is authored by this importer; user payload must not
             // overwrite or be overwritten by its projection.
-            if matches!(
-                normalized.as_str(),
-                "metadata.json" | RECEIPT_FILENAME | IMPORT_METADATA_BACKUP
-            ) {
+            if IMPORT_MUTABLE_DOCUMENTS.iter().any(|name| {
+                original == *name || normalized == *name || normalized == normalize_filename(name)
+            }) {
                 return Err(invalid_filename(
                     "Import source contains a reserved import metadata/receipt filename",
                 ));
@@ -563,11 +569,24 @@ impl CopyPlan {
         })
     }
 
+    fn validate_reserved_names(&self, stage: &DownloadRecoveryDestination) -> Result<()> {
+        for (_, original, normalized) in &self.files {
+            if stage.import_reserved_name_claimed(original)?
+                || stage.import_reserved_name_claimed(normalized)?
+            {
+                return Err(invalid_filename(
+                    "Import source contains a filesystem-equivalent reserved metadata name",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn copy_to(
         &self,
         stage: &DownloadRecoveryDestination,
         importer: &ModelImporter,
-    ) -> Result<Vec<ModelFileInfo>> {
+    ) -> Result<(Vec<ModelFileInfo>, BTreeMap<String, ImportFileIdentity>)> {
         #[cfg(not(test))]
         let _ = importer;
         for directory in &self.directories {
@@ -582,6 +601,7 @@ impl CopyPlan {
             })?;
         }
         let mut files = Vec::with_capacity(self.files.len());
+        let mut evidence = BTreeMap::new();
         for (relative, original, normalized) in &self.files {
             let parent = open_directory_chain(
                 &self.source,
@@ -614,22 +634,26 @@ impl CopyPlan {
                     error.into()
                 }
             })?;
-            let size = io::copy(&mut input, &mut output)?;
+            let (size, hashes) = copy_and_hash(&mut input, &mut output)?;
             // Restore permissions from the held source descriptor, never a
             // pathname that could now identify a different object.
             output.set_permissions(metadata.permissions())?;
             output.sync_all()?;
+            evidence.insert(
+                normalized.clone(),
+                ImportFileIdentity::copied(&output, size, hashes.sha256.clone())?,
+            );
             files.push(ModelFileInfo {
                 name: normalized.clone(),
                 original_name: Some(original.clone()),
                 size: Some(size),
-                sha256: None,
-                blake3: None,
+                sha256: Some(hashes.sha256),
+                blake3: Some(hashes.blake3),
             });
             #[cfg(test)]
             importer.import_boundary(ImportBoundary::FileCopied, stage)?;
         }
-        Ok(files)
+        Ok((files, evidence))
     }
 }
 

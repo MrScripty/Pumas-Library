@@ -8,7 +8,7 @@
 use crate::error::{PumasError, Result};
 use blake3::Hasher as Blake3Hasher;
 use sha2::{Digest, Sha256};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 /// Chunk size for reading files (8MB, optimal for SSDs).
 const CHUNK_SIZE: usize = 8 * 1024 * 1024;
@@ -72,6 +72,35 @@ pub(super) fn compute_dual_hash_reader(file: &mut impl Read) -> Result<DualHash>
     let blake3 = blake3_hasher.finalize().to_hex().to_string();
 
     Ok(DualHash { sha256, blake3 })
+}
+
+/// Hash precisely the bytes written during a copied import, without a second
+/// source read. The caller owns both descriptors and their final synchronization.
+pub(super) fn copy_and_hash(
+    input: &mut impl Read,
+    output: &mut impl Write,
+) -> Result<(u64, DualHash)> {
+    let mut sha256 = Sha256::new();
+    let mut blake3 = Blake3Hasher::new();
+    let mut size = 0_u64;
+    let mut buffer = vec![0_u8; CHUNK_SIZE];
+    loop {
+        let count = input.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        output.write_all(&buffer[..count])?;
+        sha256.update(&buffer[..count]);
+        blake3.update(&buffer[..count]);
+        size += count as u64;
+    }
+    Ok((
+        size,
+        DualHash {
+            sha256: hex::encode(sha256.finalize()),
+            blake3: blake3.finalize().to_hex().to_string(),
+        },
+    ))
 }
 
 /// Compute a fast hash for quick candidate filtering.

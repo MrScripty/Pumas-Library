@@ -362,11 +362,18 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
 
 /// Copied bundles are classified from the held staged bytes and components.
 /// Source validation only selects the copy strategy; it cannot certify the copy.
+/// Return the exact index bytes used by this proof so publication can reject a
+/// later metadata-affecting rewrite, including a still-valid pipeline/index.
 pub(crate) fn validate_staged_diffusers_directory(
     stage: &super::DownloadRecoveryDestination,
     final_path: &Path,
-) -> Result<DiffusersValidationResult> {
-    let model_index: Value = serde_json::from_reader(stage.open_import_file("model_index.json")?)?;
+) -> Result<(DiffusersValidationResult, Vec<u8>)> {
+    use std::io::Read;
+    let mut model_index_bytes = Vec::new();
+    stage
+        .open_import_file("model_index.json")?
+        .read_to_end(&mut model_index_bytes)?;
+    let model_index: Value = serde_json::from_slice(&model_index_bytes)?;
     let mut observation_error = None;
     let manifest = collect_diffusers_component_manifest_with(&model_index, |path| {
         let relative = path
@@ -386,11 +393,9 @@ pub(crate) fn validate_staged_diffusers_directory(
     if let Some(error) = observation_error {
         return Err(error.into());
     }
-    Ok(validate_diffusers_model_index(
-        final_path.to_path_buf(),
-        &model_index,
-        false,
-        manifest,
+    Ok((
+        validate_diffusers_model_index(final_path.to_path_buf(), &model_index, false, manifest),
+        model_index_bytes,
     ))
 }
 

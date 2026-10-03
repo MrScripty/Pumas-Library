@@ -864,12 +864,12 @@ impl DownloadRecoveryDestination {
         }
     }
 
-    /// Import cleanup must not adopt replacement or newly introduced child
-    /// directories. Validate the complete observed tree before deleting any
-    /// payload. The root grant excludes cooperating writers throughout this
+    /// Publication and cleanup must not adopt replacement or newly introduced
+    /// child directories. Validate every observed binding and the complete tree.
+    /// The root grant excludes cooperating writers throughout this
     /// check/use interval; arbitrary hostile equal-authority mutation is not
     /// excluded by a preflight check and is not claimed here.
-    pub(crate) fn remove_import_stage_all(&self) -> Result<()> {
+    pub(crate) fn validate_import_stage_bindings(&self) -> Result<()> {
         let root = self.directory(false)?;
         let known = self
             .file_parents
@@ -886,7 +886,12 @@ impl DownloadRecoveryDestination {
             .into_values()
             .map(|held| (held.identity, held))
             .collect();
-        validate_import_descendants(&root, &identities)?;
+        Ok(validate_import_descendants(&root, &identities)?)
+    }
+
+    /// Validate the complete import tree before deleting any payload.
+    pub(crate) fn remove_import_stage_all(&self) -> Result<()> {
+        self.validate_import_stage_bindings()?;
         self.remove_model_directory_all()
     }
 

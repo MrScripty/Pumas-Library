@@ -149,8 +149,9 @@ impl ModelImporter {
             report(progress, ImportStage::Hashing, 0.5, "Computing hashes");
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforeHash, &stage)?;
+            let mut bundle_index_bytes = None;
             let mut metadata = if validation.is_some() {
-                let staged_validation =
+                let (staged_validation, index_bytes) =
                     crate::model_library::external_assets::validate_staged_diffusers_directory(
                         &stage,
                         &target_path,
@@ -162,6 +163,7 @@ impl ModelImporter {
                         message: join_validation_errors(&staged_validation.validation_errors),
                     });
                 }
+                bundle_index_bytes = Some(index_bytes);
                 let expected_files = files
                     .iter()
                     .map(|file| file.name.clone())
@@ -221,7 +223,7 @@ impl ModelImporter {
             )?;
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforePublish, &stage)?;
-            Ok((metadata, projection))
+            Ok((metadata, projection, files, bundle_index_bytes))
         }))
         .unwrap_or_else(|payload| {
             let message = payload
@@ -233,11 +235,52 @@ impl ModelImporter {
                 message: format!("Copied import preparation panicked: {message}"),
             })
         });
-        let (mut metadata, projection) = match prepared {
+        let (mut metadata, projection, files, bundle_index_bytes) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => return settle_unpublished(&stage, error, spec, security_tier),
         };
         report(progress, ImportStage::Syncing, 0.9, "Publishing model");
+        // All external callbacks (including the write notifier and test hooks)
+        // have returned. Nothing may notify again between this complete proof
+        // and rename. The root grant retains cooperating-writer exclusion.
+        let publication_proof = (|| -> Result<()> {
+            stage.validate_import_stage_bindings()?;
+            for file in &files {
+                if stage.file_len(&file.name)? != file.size {
+                    return Err(PumasError::Validation {
+                        field: "import.payload".into(),
+                        message: format!(
+                            "Copied file {} changed or disappeared before publication",
+                            file.name
+                        ),
+                    });
+                }
+            }
+            if let Some(expected_index) = &bundle_index_bytes {
+                let (final_validation, final_index) =
+                    crate::model_library::external_assets::validate_staged_diffusers_directory(
+                        &stage,
+                        &target_path,
+                    )?;
+                if final_validation.validation_state != crate::models::AssetValidationState::Valid {
+                    return Err(PumasError::Validation {
+                        field: "import.bundle".into(),
+                        message: join_validation_errors(&final_validation.validation_errors),
+                    });
+                }
+                if final_index != *expected_index {
+                    return Err(PumasError::Validation {
+                        field: "import.bundle".into(),
+                        message: "Staged model_index.json changed after metadata preparation"
+                            .into(),
+                    });
+                }
+            }
+            stage.validate_import_stage_bindings()
+        })();
+        if let Err(error) = publication_proof {
+            return settle_unpublished(&stage, error, spec, security_tier);
+        }
         match stage.publish_model_directory_noreplace(&target) {
             Err(PumasError::Io {
                 source: Some(error),

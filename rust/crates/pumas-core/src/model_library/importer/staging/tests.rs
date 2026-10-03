@@ -990,3 +990,124 @@ async fn copied_import_notifier_cannot_redirect_held_metadata_write_to_replaceme
     assert!(!fixture.stages()[0].join("metadata.json").exists());
     assert!(fixture.tasks.shutdown_owned().await.is_err());
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn copied_import_notifier_empty_component_changes_refuse_publication_and_retain_custody() {
+    for replace in [false, true] {
+        let mut fixture = Fixture::new().await;
+        let bundle = crate::model_library::importer::tests::create_external_diffusers_bundle(
+            fixture.temp.path(),
+        );
+        std::fs::remove_file(bundle.join("tokenizer/tokenizer.json")).unwrap();
+        fixture.spec.path = bundle.display().to_string();
+        let original = fixture.temp.path().join("original-empty-tokenizer");
+        let original_for_callback = original.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_callback = calls.clone();
+        fixture
+            .library
+            .set_metadata_write_notifier(Some(Arc::new(move |metadata_path| {
+                calls_for_callback.fetch_add(1, Ordering::SeqCst);
+                let component = metadata_path.parent().unwrap().join("tokenizer");
+                if replace {
+                    std::fs::rename(&component, &original_for_callback).unwrap();
+                    std::fs::create_dir(&component).unwrap();
+                    std::fs::write(component.join("sentinel"), b"replacement empty component")
+                        .unwrap();
+                } else {
+                    std::fs::remove_dir(component).unwrap();
+                }
+            })));
+        let error = fixture
+            .importer
+            .import(&fixture.spec)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(error.contains("cleanup failed"));
+        assert!(error.contains("retained or custody unknown"));
+        assert!(!fixture
+            .library
+            .build_model_path("diffusion", "fixture", "Owned Import")
+            .exists());
+        assert_eq!(fixture.stages().len(), 1);
+        assert!(fixture.stages()[0]
+            .join("unet/diffusion_pytorch_model.safetensors")
+            .is_file());
+        assert!(fixture.library.model_dirs().next().is_none());
+        if replace {
+            assert!(original.is_dir());
+            assert_eq!(std::fs::read_dir(&original).unwrap().count(), 0);
+            assert_eq!(
+                std::fs::read(fixture.stages()[0].join("tokenizer/sentinel")).unwrap(),
+                b"replacement empty component"
+            );
+        } else {
+            assert!(!fixture.stages()[0].join("tokenizer").exists());
+        }
+        assert!(bundle.join("tokenizer").is_dir());
+        assert_eq!(
+            std::fs::read_dir(bundle.join("tokenizer")).unwrap().count(),
+            0
+        );
+        assert!(fixture.tasks.shutdown_owned().await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn copied_import_notifier_valid_same_size_index_rewrite_is_refused_and_cleaned() {
+    let mut fixture = Fixture::new().await;
+    let bundle = crate::model_library::importer::tests::create_external_diffusers_bundle(
+        fixture.temp.path(),
+    );
+    let index_path = bundle.join("model_index.json");
+    let mut index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&index_path).unwrap()).unwrap();
+    index["_name_or_path"] = serde_json::json!("stabilityai/sd-turbo");
+    index["_diffusers_version"] = serde_json::json!("0.32.0");
+    let source_index = serde_json::to_vec(&index).unwrap();
+    std::fs::write(&index_path, &source_index).unwrap();
+    fixture.spec.path = bundle.display().to_string();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_callback = calls.clone();
+    fixture
+        .library
+        .set_metadata_write_notifier(Some(Arc::new(move |metadata_path| {
+            calls_for_callback.fetch_add(1, Ordering::SeqCst);
+            let index_path = metadata_path.parent().unwrap().join("model_index.json");
+            let before = std::fs::read(&index_path).unwrap();
+            let mut index: serde_json::Value = serde_json::from_slice(&before).unwrap();
+            index["_diffusers_version"] = serde_json::json!("0.33.0");
+            let after = serde_json::to_vec(&index).unwrap();
+            assert_eq!(
+                before.len(),
+                after.len(),
+                "file-size proof alone must not qualify this rewrite"
+            );
+            std::fs::write(index_path, after).unwrap();
+            assert_eq!(
+                validate_diffusers_directory_for_import(metadata_path.parent().unwrap())
+                    .validation_state,
+                crate::models::AssetValidationState::Valid,
+                "a still-valid index can disagree with prepared runtime metadata"
+            );
+        })));
+    let result = fixture.importer.import(&fixture.spec).await.unwrap();
+    assert!(!result.success);
+    assert!(result
+        .error
+        .unwrap()
+        .contains("model_index.json changed after metadata preparation"));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(fixture.stages().is_empty());
+    assert!(!fixture
+        .library
+        .build_model_path("diffusion", "fixture", "Owned Import")
+        .exists());
+    assert_eq!(std::fs::read(index_path).unwrap(), source_index);
+    assert_eq!(fixture.library.model_dirs().count(), 0);
+    assert_eq!(fixture.library.model_count().unwrap(), 0);
+    fixture.tasks.shutdown_owned().await.unwrap();
+}

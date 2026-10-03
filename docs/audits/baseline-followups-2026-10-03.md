@@ -84,6 +84,14 @@ Independent review follow-ups:
   descendants retain the workspace and replacement sentinel. Physical identity
   is used when readdir spelling differs on Unicode-normalizing filesystems.
   This is import-specific; generic download deletion retains its prior contract.
+- Publication repeats the complete held-directory and copied-file presence/size
+  proof after the final metadata notifier and test hook. It revalidates staged
+  Diffusers contents and requires exact `model_index.json` bytes to match the
+  snapshot that produced metadata/runtime hints. No external callback occurs
+  between this final proof and rename. A valid, same-size index rewrite is still
+  refused and cleaned; removed/replaced empty components retain unknown custody
+  without deleting replacement sentinels. This is the cooperating-writer grant
+  contract, not protection against arbitrary equal-authority hostile mutation.
 - Copied metadata preserves final model ID, final bundle source/entry paths,
   generic recommended-backend normalization (shared with `save_metadata`), task
   projection, custom runtime bindings and active dependency references. The

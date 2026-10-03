@@ -3,7 +3,9 @@
 
 use super::*;
 use crate::metadata::AtomicPublication;
-use crate::model_library::download_recovery::{ImportFileIdentity, ImportPayloadIdentity};
+use crate::model_library::download_recovery::{
+    ImportDirectoryPermissions, ImportFileIdentity, ImportPayloadIdentity,
+};
 use crate::model_library::DownloadRecoveryDestination;
 use crate::models::{AssetValidationState, ImportPublicationIdentity, ImportState};
 use std::collections::BTreeMap;
@@ -306,7 +308,11 @@ pub(super) struct VerifiedPublication {
 }
 
 impl VerifiedPublication {
-    pub(super) fn finalize(mut self) -> Result<()> {
+    pub(super) fn finalize(mut self, permissions: ImportDirectoryPermissions) -> Result<()> {
+        // Only verified payload may leave its private staging mode. Failure
+        // retains the published Pending receipt/index and never advertises Ready.
+        self.destination
+            .finalize_import_directory_permissions(permissions)?;
         self.publication.confirm(&self.destination)?;
         self.publication.mark_ready(&mut self.metadata)?;
         require_durable_document(

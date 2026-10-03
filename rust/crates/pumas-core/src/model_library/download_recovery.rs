@@ -1,10 +1,12 @@
 #![deny(unsafe_code)]
 
 mod import_custody;
+mod import_permissions;
 pub(crate) use import_custody::{
     require_import_document_size, ImportFileIdentity, ImportPayloadIdentity,
     IMPORT_DOCUMENT_MAX_BYTES, IMPORT_METADATA_BACKUP, IMPORT_MUTABLE_DOCUMENTS, IMPORT_RECEIPT,
 };
+pub(crate) use import_permissions::ImportDirectoryPermissions;
 
 use crate::platform::capability_fs::{open_directory, sync_directory};
 use crate::{ModelRecord, PumasError, Result};
@@ -207,6 +209,8 @@ pub(crate) struct DownloadRecoveryDestination {
     import_payload: Arc<OnceLock<ImportPayloadIdentity>>,
     #[cfg(test)]
     import_document_uncertainty: Arc<Mutex<Option<String>>>,
+    #[cfg(all(test, unix))]
+    import_permission_failure: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(test)]
     import_hash_passes: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
@@ -452,6 +456,8 @@ impl DownloadDestinationRoot {
             import_payload: Arc::new(OnceLock::new()),
             #[cfg(test)]
             import_document_uncertainty: Arc::new(Mutex::new(None)),
+            #[cfg(all(test, unix))]
+            import_permission_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(test)]
             import_hash_passes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
@@ -530,6 +536,8 @@ impl RecoveryRoot {
             import_payload: Arc::new(OnceLock::new()),
             #[cfg(test)]
             import_document_uncertainty: Arc::new(Mutex::new(None)),
+            #[cfg(all(test, unix))]
+            import_permission_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(test)]
             import_hash_passes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]

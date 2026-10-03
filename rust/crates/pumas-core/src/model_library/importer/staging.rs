@@ -151,6 +151,7 @@ impl ModelImporter {
         let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             #[cfg(test)]
             self.import_boundary(ImportBoundary::StageCreated, &stage)?;
+            let directory_permissions = stage.observe_import_directory_permissions()?;
             report(progress, ImportStage::Copying, 0.1, "Copying files");
             // Reserve the metadata basename with the destination filesystem's
             // own equivalence rules before payload copying can claim an alias.
@@ -243,7 +244,14 @@ impl ModelImporter {
             )?;
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforePublish, &stage)?;
-            Ok((metadata, projection, files, bundle_index_bytes, publication))
+            Ok((
+                metadata,
+                projection,
+                files,
+                bundle_index_bytes,
+                publication,
+                directory_permissions,
+            ))
         }))
         .unwrap_or_else(|payload| {
             let message = payload
@@ -255,7 +263,14 @@ impl ModelImporter {
                 message: format!("Copied import preparation panicked: {message}"),
             })
         });
-        let (mut metadata, projection, files, bundle_index_bytes, publication) = match prepared {
+        let (
+            mut metadata,
+            projection,
+            files,
+            bundle_index_bytes,
+            publication,
+            directory_permissions,
+        ) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => return settle_unpublished(&stage, error, spec, security_tier),
         };
@@ -361,7 +376,7 @@ impl ModelImporter {
             // pass, then consumes its proof without another external callback.
             publication.verify_for_finalization(
                 target.clone(), self.library.as_ref().clone(), pending_index, metadata,
-            )?.finalize()?;
+            )?.finalize(directory_permissions)?;
             Ok(())
         })).unwrap_or_else(|payload| {
             let message = payload.downcast_ref::<&str>().map(|text| (*text).to_string())

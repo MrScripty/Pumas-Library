@@ -59,7 +59,7 @@ pub(super) fn compute_dual_hash_reader(file: &mut impl Read) -> Result<DualHash>
 
     let mut buffer = vec![0u8; CHUNK_SIZE];
     loop {
-        let bytes_read = file.read(&mut buffer)?;
+        let bytes_read = read_chunk(file, &mut buffer)?;
         if bytes_read == 0 {
             break;
         }
@@ -85,7 +85,7 @@ pub(super) fn copy_and_hash(
     let mut size = 0_u64;
     let mut buffer = vec![0_u8; CHUNK_SIZE];
     loop {
-        let count = input.read(&mut buffer)?;
+        let count = read_chunk(input, &mut buffer)?;
         if count == 0 {
             break;
         }
@@ -101,6 +101,17 @@ pub(super) fn copy_and_hash(
             blake3: blake3.finalize().to_hex().to_string(),
         },
     ))
+}
+
+// Interrupted reads transfer no bytes. Retrying only that structured OS kind
+// preserves EOF, partial output and all other input errors.
+fn read_chunk(input: &mut impl Read, buffer: &mut [u8]) -> std::io::Result<usize> {
+    loop {
+        match input.read(buffer) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => return result,
+        }
+    }
 }
 
 /// Compute a fast hash for quick candidate filtering.
@@ -230,6 +241,61 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    struct InterruptedInput {
+        input: std::io::Cursor<Vec<u8>>,
+        interrupt_next: bool,
+    }
+
+    impl Read for InterruptedInput {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.interrupt_next = !self.interrupt_next;
+            if self.interrupt_next {
+                return Err(std::io::ErrorKind::Interrupted.into());
+            }
+            let limit = buffer.len().min(3);
+            self.input.read(&mut buffer[..limit])
+        }
+    }
+
+    #[test]
+    fn copied_import_stream_and_verification_retry_interrupted_reads_without_changing_evidence() {
+        let bytes = b"synthetic model bytes";
+        let interrupted = || InterruptedInput {
+            input: std::io::Cursor::new(bytes.to_vec()),
+            interrupt_next: false,
+        };
+        let mut output = Vec::new();
+        let (size, copied) = copy_and_hash(&mut interrupted(), &mut output).unwrap();
+        let verified = compute_dual_hash_reader(&mut interrupted()).unwrap();
+        let expected = compute_dual_hash_reader(&mut bytes.as_slice()).unwrap();
+        assert_eq!(size, bytes.len() as u64);
+        assert_eq!(output, bytes);
+        assert_eq!(copied.sha256, expected.sha256);
+        assert_eq!(copied.blake3, expected.blake3);
+        assert_eq!(verified.sha256, expected.sha256);
+        assert_eq!(verified.blake3, expected.blake3);
+    }
+
+    #[test]
+    fn copied_import_stream_preserves_non_interruption_errors_and_partial_output() {
+        struct FailingInput(bool);
+        impl Read for FailingInput {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                if self.0 {
+                    return Err(std::io::ErrorKind::InvalidData.into());
+                }
+                self.0 = true;
+                buffer[..3].copy_from_slice(b"one");
+                Ok(3)
+            }
+        }
+        let mut output = Vec::new();
+        let error = copy_and_hash(&mut FailingInput(false), &mut output).unwrap_err();
+        assert!(matches!(error, PumasError::Io { source: Some(source), .. }
+            if source.kind() == std::io::ErrorKind::InvalidData));
+        assert_eq!(output, b"one");
+    }
 
     #[test]
     fn test_dual_hash_empty_file() {

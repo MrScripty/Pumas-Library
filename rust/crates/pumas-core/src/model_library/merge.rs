@@ -212,21 +212,35 @@ impl LibraryMerger {
         destination_grant: Arc<crate::model_library::RootExecutionGrant>,
         context: &crate::api::RuntimeTaskContext,
     ) -> Result<MergeSingleResult> {
-        let source_destination = source_authority.root().resolve(source_dir)?;
-        let metadata_reader = source_destination.clone();
-        let mut metadata = context
-            .run_blocking("read merge source metadata", move || {
-                metadata_reader
-                    .read_model_metadata()?
-                    .ok_or_else(|| PumasError::ImportFailed {
-                        message: "Merge source has no metadata.json".into(),
-                    })
+        let metadata_source = source.clone();
+        let metadata_path = source_dir.to_path_buf();
+        let metadata_authority = source_authority.clone();
+        let (source_destination, metadata, claimed_publication, expected_publication) = context
+            .run_blocking("read and validate merge source publication", move || {
+                let destination = metadata_authority.root().resolve(&metadata_path)?;
+                let metadata =
+                    destination
+                        .read_model_metadata()?
+                        .ok_or_else(|| PumasError::ImportFailed {
+                            message: "Merge source has no metadata.json".into(),
+                        })?;
+                metadata_source.require_finalized_import_edit(&metadata_path, Some(&metadata))?;
+                let claimed = metadata.import_publication.is_some()
+                    || super::importer::publication::receipt_path_claimed(&metadata_path);
+                let expected = if metadata.import_publication.is_some() {
+                    metadata_source
+                        .get_model_id(&metadata_path)
+                        .map(|id| metadata_source.index().get(&id))
+                        .transpose()?
+                        .flatten()
+                } else {
+                    None
+                };
+                Ok::<_, PumasError>((destination, metadata, claimed, expected))
             })
             .await??;
 
-        source.require_finalized_import_edit(source_dir, Some(&metadata))?;
-        if (metadata.import_publication.is_some()
-            || super::importer::publication::receipt_path_claimed(source_dir))
+        if claimed_publication
             && !source_authority
                 .root()
                 .same_physical_root(destination_authority.root())
@@ -234,15 +248,6 @@ impl LibraryMerger {
             return Err(PumasError::Validation { field: "import_publication.root".into(), message: format!("Copied publication at {} is bound to its current library root. Cross-root merge cannot preserve that receipt; leave the source in place until a supported re-publication workflow exists", source_dir.display()) });
         }
 
-        let expected_publication = if metadata.import_publication.is_some() {
-            source
-                .get_model_id(source_dir)
-                .map(|id| source.index().get(&id))
-                .transpose()?
-                .flatten()
-        } else {
-            None
-        };
         // Check for duplicate by hash
         if let Some(ref hashes) = metadata.hashes {
             let hash_to_check = hashes.sha256.as_deref().or(hashes.blake3.as_deref());
@@ -301,7 +306,7 @@ impl LibraryMerger {
         let target_destination = destination_authority.root().resolve(&dest_dir)?;
         let acquisition_source = source_authority.clone();
         let acquisition_destination = destination_authority.clone();
-        let (mut source_mutation, mut destination_mutation) = context
+        let (source_mutation, destination_mutation) = context
             .run_blocking("claim merged model relocation", move || {
                 let source_mutation = acquisition_source.acquire_under_grant(
                     &source_index,
@@ -322,30 +327,42 @@ impl LibraryMerger {
                 Ok::<_, PumasError>((source_mutation, destination_mutation))
             })
             .await??;
-        if !source_dir.exists() || dest_dir.exists() {
-            context
-                .run_blocking("release unstarted merge claims", move || {
+        let publication_index = source.index().clone();
+        let expected_check = expected_publication.clone();
+        let source_path = source_dir.to_path_buf();
+        let destination_path = dest_dir.clone();
+        // Snapshot validation and any claim release are synchronous database /
+        // filesystem work. Keep both guards inside one observed blocking task.
+        let (mut source_mutation, mut destination_mutation) = context
+            .run_blocking("validate claimed merge publication", move || {
+                let error = if !source_path.exists() || destination_path.exists() {
+                    Some(PumasError::Validation {
+                        field: "model_library.mutation".into(),
+                        message: "Merge paths changed while acquiring custody".into(),
+                    })
+                } else if let Some(expected) = &expected_check {
+                    if serde_json::to_value(publication_index.get(&expected.id)?)?
+                        != serde_json::to_value(Some(expected))?
+                    {
+                        Some(PumasError::Validation {
+                            field: "import_publication".into(),
+                            message: "Source publication generation changed before same-root merge"
+                                .into(),
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(error) = error {
                     source_mutation.finish_unstarted()?;
-                    destination_mutation.finish_unstarted()
-                })
-                .await??;
-            return Err(PumasError::Validation {
-                field: "model_library.mutation".into(),
-                message: "Merge paths changed while acquiring custody".into(),
-            });
-        }
-        if let Some(expected) = &expected_publication {
-            if serde_json::to_value(source.index().get(&expected.id)?)?
-                != serde_json::to_value(Some(expected))?
-            {
-                source_mutation.finish_unstarted()?;
-                destination_mutation.finish_unstarted()?;
-                return Err(PumasError::Validation {
-                    field: "import_publication".into(),
-                    message: "Source publication generation changed before same-root merge".into(),
-                });
-            }
-        }
+                    destination_mutation.finish_unstarted()?;
+                    return Err(error);
+                }
+                Ok((source_mutation, destination_mutation))
+            })
+            .await??;
         source_mutation.mark_started();
         destination_mutation.mark_started();
         let rename_source = source_destination.clone();
@@ -356,22 +373,29 @@ impl LibraryMerger {
             })
             .await??;
 
-        self.destination
-            .normalize_owned_move_metadata(&dest_dir, &mut metadata)?;
-        let moved_metadata = metadata.clone();
+        let metadata_library = self.destination.clone();
+        let metadata_path = dest_dir.clone();
         let metadata_writer = target_destination.clone();
-        context
+        let moved_metadata = context
             .run_blocking("write merged model metadata", move || {
-                metadata_writer.write_model_metadata(&metadata)
+                let mut metadata = metadata;
+                metadata_library.normalize_owned_move_metadata(&metadata_path, &mut metadata)?;
+                metadata_writer.write_model_metadata(&metadata)?;
+                Ok::<_, PumasError>(metadata)
             })
             .await??;
         // Index the moved model
         if let Some(expected) = expected_publication {
-            self.destination.project_owned_import_move(
-                &expected,
-                &target_destination,
-                &moved_metadata,
-            )?;
+            let projection_library = self.destination.clone();
+            context
+                .run_blocking("project moved import publication", move || {
+                    projection_library.project_owned_import_move(
+                        &expected,
+                        &target_destination,
+                        &moved_metadata,
+                    )
+                })
+                .await??;
         } else {
             self.destination.index_model_dir(&dest_dir).await?;
             source.index().delete(&source_delete_model_id)?;

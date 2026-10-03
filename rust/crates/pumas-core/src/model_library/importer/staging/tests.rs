@@ -1243,3 +1243,175 @@ async fn copied_import_notifier_valid_same_size_index_rewrite_is_refused_and_ret
     assert!(fixture.tasks.shutdown_owned().await.is_err());
 }
 mod publication;
+
+#[tokio::test]
+async fn copied_import_batch_delivers_terminal_receipt_after_owner_settles() {
+    let mut fixture = Fixture::new().await;
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let entered = std::sync::Mutex::new(Some(entered_tx));
+    fixture.importer.import_hook = Some(Arc::new(move |boundary, _| {
+        if boundary == ImportBoundary::StageCreated {
+            if let Some(tx) = entered.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+        }
+        Ok(())
+    }));
+    let (tx, mut rx) = mpsc::channel(1);
+    tx.send(BatchImportProgress::new(99)).await.unwrap();
+    let importer = fixture.importer.clone();
+    let spec = fixture.spec.clone();
+    let batch = tokio::spawn(async move { importer.batch_import(vec![spec], Some(tx)).await });
+    tokio::time::timeout(std::time::Duration::from_secs(10), entered_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    // A full progress channel must not prevent actual producer settlement.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        fixture.tasks.shutdown_owned(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(fixture.target().join("model.onnx").is_file());
+    assert_eq!(rx.recv().await.unwrap().total, 99);
+    let complete = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .unwrap()
+        .expect("terminal batch receipt must not be dropped");
+    assert_eq!(complete.stage, ImportStage::Complete);
+    assert_eq!(complete.results.len(), 1);
+    assert!(complete.results[0].success);
+    assert_eq!(batch.await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn copied_import_batch_returns_results_when_progress_observer_is_closed() {
+    let fixture = Fixture::new().await;
+    let (tx, rx) = mpsc::channel(1);
+    drop(rx);
+    let results = fixture
+        .importer
+        .batch_import(vec![fixture.spec.clone()], Some(tx))
+        .await;
+    assert_eq!(results.len(), 1);
+    assert!(results[0].success);
+    fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn copied_import_final_directory_respects_ordinary_umask() {
+    for (mask, mode) in [
+        ("000", "777"),
+        ("002", "775"),
+        ("022", "755"),
+        ("077", "700"),
+    ] {
+        let output = std::process::Command::new("sh")
+            .args(["-c", &format!("umask {mask}; exec \"$@\""), "sh"])
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "model_library::importer::staging::tests::copied_import_final_mode_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("PUMAS_IMPORT_FINAL_MODE_EXPECTED", mode)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "umask {mask}: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "invoked in isolated subprocesses with specific umasks"]
+async fn copied_import_final_mode_child() {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(expected) = std::env::var("PUMAS_IMPORT_FINAL_MODE_EXPECTED") else {
+        return;
+    };
+    let expected = u32::from_str_radix(&expected, 8).unwrap();
+    let mut fixture = Fixture::new().await;
+    fixture.importer.import_hook = Some(Arc::new(move |boundary, destination| {
+        if matches!(
+            boundary,
+            ImportBoundary::StageCreated | ImportBoundary::BeforeReady
+        ) {
+            assert_eq!(
+                std::fs::metadata(destination.display_path())?
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+        Ok(())
+    }));
+    let result = fixture.importer.import(&fixture.spec).await.unwrap();
+    assert!(result.success);
+    assert_eq!(
+        std::fs::metadata(fixture.target())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        expected
+    );
+    assert!(fixture.stages().is_empty());
+    assert!(fixture
+        .library
+        .load_metadata(&fixture.target())
+        .unwrap()
+        .unwrap()
+        .copied_import_ready());
+    fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn copied_import_permission_finalization_failure_retains_pending_payload() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = Fixture::new().await;
+    fixture.importer.import_hook = Some(Arc::new(move |boundary, destination| {
+        if boundary == ImportBoundary::BeforeReady {
+            destination.inject_import_permission_failure();
+        }
+        Ok(())
+    }));
+    let error = fixture
+        .importer
+        .import(&fixture.spec)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("injected import directory permission failure"));
+    assert!(fixture.target().join("model.onnx").is_file());
+    assert_eq!(
+        std::fs::metadata(fixture.target())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(receipt_at(&fixture.target())["state"], "pending");
+    let metadata = fixture
+        .library
+        .load_metadata(&fixture.target())
+        .unwrap()
+        .unwrap();
+    assert!(!metadata.copied_import_ready());
+    let id = fixture.library.get_model_id(&fixture.target()).unwrap();
+    assert!(!crate::models::copied_import_ready_value(
+        &fixture.library.index().get(&id).unwrap().unwrap().metadata
+    ));
+    assert!(fixture.tasks.shutdown_owned().await.is_err());
+}

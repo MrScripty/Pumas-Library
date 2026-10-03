@@ -582,7 +582,10 @@ impl ModelImporter {
         // Final progress
         progress.update(total, None, ImportStage::Complete);
         if let Some(ref tx) = progress_tx {
-            let _ = tx.try_send(progress);
+            // Every per-item owner has already settled. Backpressure here only
+            // retains this caller's final batch receipt, never payload custody.
+            // Receiver closure is explicit observer loss; results still return.
+            let _ = tx.send(progress).await;
         }
 
         results

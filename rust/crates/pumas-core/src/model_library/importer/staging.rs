@@ -3,9 +3,12 @@
 //! Cooperating writers use the grant; arbitrary same-authority hostile mutation
 //! is outside that exclusion contract. Observed replacement always refuses use.
 
+use super::publication::{require_durable_document, ImportPublication, RECEIPT_FILENAME};
 use super::*;
 use crate::metadata::AtomicPublication;
-use crate::model_library::download_recovery::{nofollow_options, open_directory_chain};
+use crate::model_library::download_recovery::{
+    nofollow_options, open_directory_chain, IMPORT_METADATA_BACKUP,
+};
 use crate::model_library::hashing::compute_dual_hash_reader;
 use crate::model_library::mutation_authority::LibraryMutationAuthority;
 use crate::model_library::DownloadRecoveryDestination;
@@ -22,6 +25,9 @@ pub(super) enum ImportBoundary {
     BeforeMetadata,
     BeforePublish,
     Published,
+    DescendantsReleased,
+    BeforeConfirm,
+    BeforeReady,
 }
 
 #[cfg(test)]
@@ -129,6 +135,9 @@ impl ModelImporter {
         let grant = Arc::new(authority.root().try_acquire_execution_grant()?);
         let target = authority.root().resolve(&target_path)?;
         let model_id = target.library_model_id();
+        if self.library.index().get(&model_id)?.is_some() {
+            return Ok(refused(spec, "Model identity already exists in the index; reconcile the existing asset before importing", security_tier));
+        }
         let guard = authority
             .protect_metadata_under_grant(&[(model_id.clone(), target_path.clone())], grant)?;
         target.assert_no_intent_deletion_claim()?;
@@ -145,7 +154,10 @@ impl ModelImporter {
             // Reserve the metadata basename with the destination filesystem's
             // own equivalence rules before payload copying can claim an alias.
             drop(stage.create_import_file("metadata.json")?);
+            drop(stage.create_import_file(RECEIPT_FILENAME)?);
+            let backup_reservation = stage.create_import_file(IMPORT_METADATA_BACKUP)?;
             let files = plan.copy_to(&stage, self)?;
+            stage.finish_import_backup_reservation(backup_reservation)?;
             report(progress, ImportStage::Hashing, 0.5, "Computing hashes");
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforeHash, &stage)?;
@@ -209,11 +221,13 @@ impl ModelImporter {
                 0.8,
                 "Writing metadata",
             );
+            let publication = ImportPublication::prepare(&stage, &model_id, &files, &mut metadata)?;
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforeMetadata, &stage)?;
             let projection =
                 self.library
                     .prepare_import_metadata(&model_id, &stage, &mut metadata)?;
+            publication.persist_pending(&stage)?;
             self.library.write_import_metadata(&stage, &mut metadata)?;
             stage.sync_import_payload(
                 &files
@@ -223,7 +237,7 @@ impl ModelImporter {
             )?;
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforePublish, &stage)?;
-            Ok((metadata, projection, files, bundle_index_bytes))
+            Ok((metadata, projection, files, bundle_index_bytes, publication))
         }))
         .unwrap_or_else(|payload| {
             let message = payload
@@ -235,7 +249,8 @@ impl ModelImporter {
                 message: format!("Copied import preparation panicked: {message}"),
             })
         });
-        let (mut metadata, projection, files, bundle_index_bytes) = match prepared {
+        let (mut metadata, projection, files, bundle_index_bytes, mut publication) = match prepared
+        {
             Ok(prepared) => prepared,
             Err(error) => return settle_unpublished(&stage, error, spec, security_tier),
         };
@@ -276,40 +291,81 @@ impl ModelImporter {
                     });
                 }
             }
-            stage.validate_import_stage_bindings()
+            stage.validate_import_stage_bindings()?;
+            publication.verify(&stage)?;
+            if self.library.index().get(&model_id)?.is_some() {
+                return Err(invalid_filename(
+                    "Model identity appeared in the index before publication",
+                ));
+            }
+            Ok(())
         })();
         if let Err(error) = publication_proof {
             return settle_unpublished(&stage, error, spec, security_tier);
         }
-        match stage.publish_model_directory_noreplace(&target) {
-            Err(PumasError::Io {
-                source: Some(error),
-                ..
-            }) if error.kind() == io::ErrorKind::AlreadyExists => {
-                return settle_unpublished(
-                    &stage,
-                    invalid_filename("Model already exists at this location"),
-                    spec,
-                    security_tier,
-                );
-            }
-            Err(error) => return settle_unpublished(&stage, error, spec, security_tier),
-            Ok(AtomicPublication::Durable) => {}
-            Ok(AtomicPublication::PublishedDurabilityUnknown { error })
-            | Ok(AtomicPublication::VisibilityUnknown { error, .. }) => {
-                return Err(published_failure(&model_id, &target_path, error));
-            }
+        if let Err(error) = stage.release_import_descendants() {
+            return settle_unpublished(&stage, error, spec, security_tier);
         }
-        // No stage cleanup is reachable from this point, even if observation,
-        // indexing or the caller disappears after the successful rename.
         #[cfg(test)]
-        self.import_boundary(ImportBoundary::Published, &target)
+        if let Err(error) = self.import_boundary(ImportBoundary::DescendantsReleased, &stage) {
+            return settle_released(&publication, &stage, error, spec, security_tier);
+        }
+        let publication_outcome = match stage.publish_model_directory_noreplace(&target) {
+            Err(error) => return settle_released(&publication, &stage, error, spec, security_tier),
+            Ok(outcome) => outcome,
+        };
+        // Any successful rename is publication, even when its durability or
+        // final binding is uncertain. Nothing below can roll back the payload.
+        let finalized = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
+            publication.rebind(&target)?;
+            self.library
+                .index_import_metadata(&model_id, &target, &metadata)?;
+            match publication_outcome {
+                AtomicPublication::Durable => {}
+                AtomicPublication::PublishedDurabilityUnknown { error }
+                | AtomicPublication::VisibilityUnknown { error, .. } => return Err(error),
+            }
+            #[cfg(test)]
+            self.import_boundary(ImportBoundary::Published, &target)?;
+            #[cfg(test)]
+            self.import_boundary(ImportBoundary::BeforeConfirm, &target)?;
+            publication.confirm(&target)?;
+            report(
+                progress,
+                ImportStage::Indexing,
+                0.95,
+                "Finalizing confirmed model",
+            );
+            self.library.prepare_import_index_projection(
+                &model_id,
+                &mut metadata,
+                projection.as_ref(),
+            )?;
+            #[cfg(test)]
+            self.import_boundary(ImportBoundary::BeforeReady, &target)?;
+            // Notify before the last payload/receipt proof. No external callback
+            // occurs between this proof and the held Ready metadata write.
+            self.library
+                .prepare_import_metadata_write(&target, &mut metadata)?;
+            publication.verify(&target)?;
+            publication.mark_ready(&mut metadata)?;
+            require_durable_document(
+                target.publish_import_document("metadata.json", &metadata)?,
+                "Ready metadata finalization",
+            )?;
+            self.library
+                .index_import_metadata(&model_id, &target, &metadata)?;
+            Ok(())
+        })).unwrap_or_else(|payload| {
+            let message = payload.downcast_ref::<&str>().map(|text| (*text).to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "non-string panic payload".into());
+            Err(PumasError::ImportFailed { message: format!("Copied import finalization panicked: {message}; payload publication must not be rolled back") })
+        });
+        finalized.map_err(|error| published_failure(&model_id, &target_path, error))?;
+        guard
+            .finish_success()
             .map_err(|error| published_failure(&model_id, &target_path, error))?;
-        report(progress, ImportStage::Indexing, 0.95, "Indexing model");
-        self.library
-            .index_import_metadata(&model_id, &target, &mut metadata, projection.as_ref())
-            .map_err(|error| published_failure(&model_id, &target_path, error))?;
-        guard.finish_success()?;
         report(progress, ImportStage::Complete, 1.0, "Import complete");
         Ok(ModelImportResult {
             path: spec.path.clone(),
@@ -368,8 +424,32 @@ fn refused(
 
 fn published_failure(model_id: &str, target: &Path, error: PumasError) -> PumasError {
     PumasError::ImportFailed { message: format!(
-        "Model {model_id} was published at {} but confirmation/indexing failed: {error}; output retained, do not repeat the import", target.display()
+        "Model {model_id} was published at {} but confirmation/indexing failed: {error}; output and publication receipt retained, do not repeat the import. Retained Pending imports currently have no supported finalization/recovery API; keep the evidence for manual diagnosis", target.display()
     ) }
+}
+
+fn settle_released(
+    publication: &ImportPublication,
+    stage: &DownloadRecoveryDestination,
+    original: PumasError,
+    spec: &ModelImportSpec,
+    security_tier: SecurityTier,
+) -> Result<ModelImportResult> {
+    if let Err(rebind) = publication.rebind(stage) {
+        return Err(PumasError::ImportFailed { message: format!(
+            "{original}; workspace {} retained; exact identity rebind failed: {rebind}; cleanup not authorized and no automatic retry", stage.display_path().display()
+        ) });
+    }
+    let original = match original {
+        PumasError::Io {
+            source: Some(ref error),
+            ..
+        } if error.kind() == io::ErrorKind::AlreadyExists => {
+            invalid_filename("Model already exists at this location")
+        }
+        other => other,
+    };
+    settle_unpublished(stage, original, spec, security_tier)
 }
 
 fn settle_unpublished(
@@ -450,9 +530,12 @@ impl CopyPlan {
             }
             // Metadata is authored by this importer; user payload must not
             // overwrite or be overwritten by its projection.
-            if normalized == "metadata.json" {
+            if matches!(
+                normalized.as_str(),
+                "metadata.json" | RECEIPT_FILENAME | IMPORT_METADATA_BACKUP
+            ) {
                 return Err(invalid_filename(
-                    "Import source contains reserved metadata.json",
+                    "Import source contains a reserved import metadata/receipt filename",
                 ));
             }
             files.push((path, original, normalized));

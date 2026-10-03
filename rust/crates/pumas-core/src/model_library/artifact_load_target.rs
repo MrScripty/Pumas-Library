@@ -14,6 +14,16 @@ use crate::models::{
 };
 use crate::Result;
 
+pub(crate) fn unconfirmed_import_response() -> ResolveModelArtifactLoadTargetResponse {
+    non_ready_response(
+        ModelArtifactState::Invalid,
+        ModelEntryPathState::Invalid,
+        PumasArtifactLoadTargetDiagnosticCode::InvalidArtifact,
+        Some("import_publication"),
+        "copied import publication is unconfirmed; cached package facts cannot authorize execution",
+    )
+}
+
 pub(crate) fn resolve_artifact_load_target_from_index(
     index: &ModelIndex,
     request: ResolveModelArtifactLoadTargetRequest,
@@ -30,7 +40,8 @@ pub(crate) fn resolve_artifact_load_target_from_index(
         ));
     }
 
-    if index.get(&request.model_ref.model_id)?.is_none() {
+    let record = index.get(&request.model_ref.model_id)?;
+    if record.is_none() {
         return Ok(non_ready_response(
             ModelArtifactState::Missing,
             ModelEntryPathState::Missing,
@@ -38,6 +49,13 @@ pub(crate) fn resolve_artifact_load_target_from_index(
             Some("model_ref.model_id"),
             "model record is not present in the Pumas index",
         ));
+    }
+
+    if record
+        .as_ref()
+        .is_some_and(|record| !crate::models::copied_import_ready_value(&record.metadata))
+    {
+        return Ok(unconfirmed_import_response());
     }
 
     let selected_artifact_path =

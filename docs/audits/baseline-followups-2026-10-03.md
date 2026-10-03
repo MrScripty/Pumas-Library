@@ -89,7 +89,7 @@ Independent review follow-ups:
   Diffusers contents and requires exact `model_index.json` bytes to match the
   snapshot that produced metadata/runtime hints. No external callback occurs
   between this final proof and rename. A valid, same-size index rewrite is still
-  refused and cleaned; removed/replaced empty components retain unknown custody
+  refused and retained after payload evidence was captured; removed/replaced empty components retain unknown custody
   without deleting replacement sentinels. This is the cooperating-writer grant
   contract, not protection against arbitrary equal-authority hostile mutation.
 - Copied metadata preserves final model ID, final bundle source/entry paths,
@@ -100,13 +100,93 @@ Independent review follow-ups:
   not apply to the LibraryOwned copied path.
 - Held metadata writes invoke the existing write notifier using display paths
   solely as watcher observations. They never derive filesystem authority from a
-  callback path. Unchanged post-publication dependency projections skip another
-  write/notification. ONNX persisted/indexed recommendations and notifier
+  callback path. Pending and final Ready metadata writes both notify before their
+  last payload proof. ONNX persisted/indexed recommendations and notifier
   replacement-sentinel regressions cover these compatibility boundaries.
 - New stages have no previous authoritative metadata to back up. Custom metadata
   projection is prepared before publication; an unchanged post-publication
   projection needs no replacement or backup. No existing model metadata is
   overwritten: final directory publication remains exclusive.
+
+### Native Windows publication correction
+
+A native Windows diagnostic established that cached descendant directory handles
+caused `AccessDenied(5)` at directory rename; releasing those handles let the same
+held-parent rename succeed. The production correction is import-specific:
+
+1. Capture the configured root/stage physical IDs, all child directory IDs, and
+   every payload file's physical ID, length and SHA-256 in a version-1 receipt.
+   Only root `metadata.json`, `metadata.json.bak` and
+   `.pumas_import_publication.json` are mutable owner documents excluded from
+   payload evidence. Their names are reserved against source collisions, including
+   filesystem-equivalent aliases. Unknown additions are refused.
+2. Persist Pending receipt and Pending/Invalid metadata. Complete the final
+   callback-free proof, release only descendant handles, and perform the native
+   no-replace rename with the stage/root capabilities and execution grant held.
+3. After either successful or failed rename, rebind the exact recorded tree
+   through the held root before use or cleanup. A mismatch leaves both original
+   and replacement data intact. A successful native rename never becomes rollback
+   authority, including failed rebind, sync, receipt or index operations.
+4. Exact payload verification permits durable Confirmed receipt publication.
+   Only then may the final metadata notifier run; another complete payload/receipt
+   proof follows it before held Ready metadata publication and explicit final
+   index commit. Any uncertain document outcome returns a published failure.
+
+Receipt observation is no-follow and bounded to 16 MiB. Pending files are never
+cold-promoted. A visible Ready file after unacknowledged final metadata fsync
+already describes a payload with a durably Confirmed receipt; the caller still
+receives finalization uncertainty, and an existing same-publication Pending index
+remains fenced. Watchers, rebuild, public index projection, effective metadata,
+descriptors and artifact resolution cannot advance that fence. A cold index with
+no row may discover an already Ready file only after its matching Confirmed
+receipt, physical root and entire payload evidence verify; an old Pending file or
+unknown payload stays unavailable. No automatic retry/finalization is provided.
+
+The same readiness predicate gates selector and package-summary snapshots,
+read-only cached artifact resolution, owner descriptors/package reinspection,
+and normal discovery projections. New receipt-owned metadata updates cannot
+create, erase or advance producer publication fields; overlays cannot supersede
+the canonical fields. Their ordinary atomic metadata edits preserve the existing
+`metadata.json.bak` behavior after finalized Ready. While Pending or finalization
+is uncertain, public metadata edits refuse to race the producer. A backup is
+never receipt authority or a restoration path that can erase Pending. Legacy
+assets without publication identity or receipt retain their existing behavior.
+
+A receipt with missing, malformed or identity-erased metadata is diagnostic
+Pending data, not a legacy orphan. The existing model-directory traversal also
+recognizes receipt-backed directories, while orphan traversal prunes all
+`.tmp_import_` subtrees and refuses receipt-bearing candidates. In-place refresh
+cannot adopt or confirm them. No database migration or live-store repair occurs.
+
+The receipt proves publication identity and complete bytes at confirmation;
+normal ongoing payload freshness remains owned by existing package inspection.
+Capturing and revalidating SHA-256 adds full payload reads around effect boundaries.
+The healthy import path currently makes **five full staged-payload hash passes**:
+initial receipt capture, final pre-rename proof, exact rebind, Confirmed-receipt
+proof, and final Ready-metadata proof. Ordinary/progress imports additionally
+hash their primary model file for the existing metadata hashes; Diffusers does
+not take that extra primary-file pass. Copying itself reads each source once.
+Failure settlement can add another verification pass. This conservative first
+implementation trades substantial I/O/CPU for explicit byte-level evidence.
+Cold discovery without a matching Ready index row fully hashes the recorded
+payload before accepting an already Ready file, and repeated metadata observations
+before an authoritative Ready index commit may repeat that work. A matching Ready
+row permits bounded receipt/root-identity observation; ongoing file freshness is
+still handled by package inspection. Existing Pending rows remain fenced.
+
+There is **no supported reconciliation/finalization API for retained Pending
+imports in this change**. Only the admitted live producer may finish its own
+transition. Terminal Pending data requires manual diagnosis; retaining a receipt
+is not a promise of automatic repair or a recommendation to delete/reimport it.
+The root grant excludes cooperating writers; no arbitrary equal-authority hostile
+mutation guarantee is claimed across handle release or any later filesystem edit.
+
+Compile-plausibility audit: in-repo `ModelMetadata` construction uses defaults or
+struct updates; the new optional field requires no exhaustive literal repair.
+`ModelMetadata` has no UniFFI/contract-schema derive. RPC stored/effective metadata
+is already `serde_json::Value` with `DesktopJsonValue` object properties; the new
+identity contains only a version integer, UUID string and boolean. No generated
+binding enum/schema is changed. Hosted contract generation remains a required gate.
 
 Acceptance remains **verifying**, not accepted: local `rustfmt` parsing and
 `git diff --check` passed; no Rust compilation or tests were run locally because
@@ -127,6 +207,7 @@ cargo test -p pumas-library --no-default-features --features hf-client --lib cop
 cargo test -p pumas-library --no-default-features --features hf-client --lib model_library::importer
 cargo test -p pumas-library --no-default-features --features hf-client --lib model_library::download_recovery
 cargo test -p pumas-library --no-default-features --features hf-client --lib model_library::library
+cargo test -p pumas-library --no-default-features --features hf-client --lib index::model_index::model_selector_snapshot
 cargo test -p pumas-library --no-default-features --features hf-client --lib api::runtime_tasks
 cargo clippy -p pumas-library --no-default-features --features hf-client --all-targets -- -D warnings
 ```

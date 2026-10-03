@@ -1,5 +1,8 @@
 #![deny(unsafe_code)]
 
+mod import_custody;
+pub(crate) use import_custody::{ImportPayloadIdentity, IMPORT_METADATA_BACKUP, IMPORT_RECEIPT};
+
 use crate::platform::capability_fs::{open_directory, sync_directory};
 use crate::{ModelRecord, PumasError, Result};
 #[cfg(unix)]
@@ -80,7 +83,7 @@ fn invalid_library_id() -> io::Error {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 struct FilesystemIdentity {
     volume: u64,
     file: u64,
@@ -196,6 +199,11 @@ pub(crate) struct DownloadRecoveryDestination {
     held: Arc<OnceLock<HeldDestination>>,
     creation_anchor: Arc<CreationAnchor>,
     file_parents: Arc<Mutex<BTreeMap<PathBuf, Arc<HeldDestination>>>>,
+    // A released import cannot silently repopulate its cache from new paths.
+    import_released: Arc<Mutex<bool>>,
+    import_payload: Arc<OnceLock<ImportPayloadIdentity>>,
+    #[cfg(test)]
+    import_document_uncertainty: Arc<Mutex<Option<String>>>,
     #[cfg(test)]
     cleanup_parent_sync: Option<Arc<CleanupParentSync>>,
 }
@@ -435,6 +443,10 @@ impl DownloadDestinationRoot {
             model_relative: relative,
             held: Arc::new(OnceLock::new()),
             file_parents: Arc::new(Mutex::new(BTreeMap::new())),
+            import_released: Arc::new(Mutex::new(false)),
+            import_payload: Arc::new(OnceLock::new()),
+            #[cfg(test)]
+            import_document_uncertainty: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             cleanup_parent_sync: None,
         };
@@ -507,6 +519,10 @@ impl RecoveryRoot {
             display_path,
             held: Arc::new(OnceLock::new()),
             file_parents: Arc::new(Mutex::new(BTreeMap::new())),
+            import_released: Arc::new(Mutex::new(false)),
+            import_payload: Arc::new(OnceLock::new()),
+            #[cfg(test)]
+            import_document_uncertainty: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             cleanup_parent_sync: None,
         })
@@ -870,6 +886,7 @@ impl DownloadRecoveryDestination {
     /// check/use interval; arbitrary hostile equal-authority mutation is not
     /// excluded by a preflight check and is not claimed here.
     pub(crate) fn validate_import_stage_bindings(&self) -> Result<()> {
+        self.require_import_bound()?;
         let root = self.directory(false)?;
         let known = self
             .file_parents
@@ -892,6 +909,9 @@ impl DownloadRecoveryDestination {
     /// Validate the complete import tree before deleting any payload.
     pub(crate) fn remove_import_stage_all(&self) -> Result<()> {
         self.validate_import_stage_bindings()?;
+        if let Some(expected) = self.import_payload.get() {
+            self.verify_import_payload(expected)?;
+        }
         self.remove_model_directory_all()
     }
 
@@ -1151,6 +1171,7 @@ impl DownloadRecoveryDestination {
     }
 
     fn payload_directory_if_present(&self, path: &Path, create: bool) -> io::Result<Option<Dir>> {
+        self.require_import_bound()?;
         let Some(mut directory) = self.directory_if_present(false)? else {
             return Ok(None);
         };
@@ -1981,47 +2002,6 @@ fn invalid_capability_path() -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(windows)]
-    #[test]
-    fn windows_import_nested_directory_publication_trace() {
-        use std::io::Write;
-        let temp = tempfile::tempdir().unwrap();
-        let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
-        let _grant = root.try_acquire_execution_grant().unwrap();
-        let stage = root.create_import_stage().expect("create private stage");
-        stage
-            .create_import_directory("component")
-            .expect("create held child directory");
-        stage
-            .create_import_file("component/weights")
-            .expect("create held child payload")
-            .write_all(b"synthetic weights")
-            .unwrap();
-        stage
-            .sync_import_payload(&["component/weights".into()])
-            .expect("sync nested payload");
-        stage
-            .validate_import_stage_bindings()
-            .expect("validate child binding");
-        let target = root
-            .resolve(std::path::Path::new("vision/family/model"))
-            .unwrap();
-        let first = stage.publish_model_directory_noreplace(&target);
-        eprintln!("publication with held descendant: {first:?}");
-        if first.is_err() {
-            // Diagnostic only, inside a synthetic root with exclusive custody:
-            // distinguish the native descendant-handle restriction from copy,
-            // sync or target admission. This is NOT production recovery logic.
-            stage.file_parents.lock().unwrap().clear();
-            let after_release = stage.publish_model_directory_noreplace(&target);
-            eprintln!("diagnostic publication after descendant release: {after_release:?}");
-        }
-        assert!(
-            matches!(first, Ok(crate::metadata::AtomicPublication::Durable)),
-            "normal nested publication must succeed without a diagnostic retry"
-        );
-    }
-
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn copied_import_publication_retains_output_after_parent_sync_failure() {

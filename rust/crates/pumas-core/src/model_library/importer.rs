@@ -72,6 +72,7 @@ use walkdir::WalkDir;
 /// Prefix for temporary import directories.
 pub(super) const TEMP_IMPORT_PREFIX: &str = ".tmp_import_";
 
+pub(super) mod publication;
 mod recovery;
 mod staging;
 
@@ -821,6 +822,18 @@ impl ModelImporter {
     ) -> Result<ModelImportResult> {
         let model_dir = &spec.model_dir;
         let metadata_path = model_dir.join("metadata.json");
+
+        if path_exists(&metadata_path).await? || publication::receipt_path_claimed(model_dir) {
+            let existing =
+                load_model_metadata_or_default(self.library.clone(), model_dir.to_path_buf())
+                    .await?;
+            if !existing.copied_import_ready() {
+                return Err(PumasError::Validation {
+                    field: "import_publication".into(),
+                    message: "An unconfirmed copied import cannot be adopted or finalized in place; retain it for explicit diagnosis".into(),
+                });
+            }
+        }
 
         // Guard: skip if metadata already exists (idempotent)
         if mode == InPlaceImportMode::PreserveExisting && path_exists(&metadata_path).await? {

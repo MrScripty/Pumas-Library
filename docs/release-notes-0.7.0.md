@@ -56,7 +56,19 @@ retained/unknown workspace and the original error, with no automatic cleanup
 retry. A successful rename is never rolled back for a later sync, confirmation,
 or indexing failure; that error identifies the published model for inspection.
 Source symlinks/non-regular entries and payloads colliding with the reserved
-`metadata.json` name are refused rather than followed or overwritten.
+`metadata.json`, `metadata.json.bak` or `.pumas_import_publication.json` names are refused rather than followed or overwritten.
+
+New copied imports persist Pending metadata until a versioned receipt confirms
+the exact published payload. Windows publication releases only child directory
+handles and verifies their identities after rename. Unknown or replaced content
+remains unavailable and retained. Existing Pending index entries cannot be
+promoted by watchers, cached package facts, metadata edits or in-place recovery.
+A confirmed payload can still report uncertain final metadata durability; that
+error is not success and does not authorize rollback or an automatic retry.
+There is currently no supported API to resume a retained Pending import; retain
+its payload and receipt for manual diagnosis. Full payload verification adds
+five staged hash passes, plus the existing primary-file hash for ordinary imports.
+Legacy assets without the new receipt retain their existing readiness contract.
 
 Downloads and acquisition now have stronger root-level mutation exclusion,
 durable ownership, restart reconciliation, cancellation, and shutdown handling.

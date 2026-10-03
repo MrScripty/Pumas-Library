@@ -4,6 +4,10 @@ use crate::model_library::{DownloadDestinationRoot, DownloadPersistence};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tempfile::TempDir;
 
+fn receipt_at(directory: &Path) -> serde_json::Value {
+    serde_json::from_slice(&std::fs::read(directory.join(RECEIPT_FILENAME)).unwrap()).unwrap()
+}
+
 struct Fixture {
     temp: TempDir,
     library: Arc<ModelLibrary>,
@@ -412,7 +416,10 @@ async fn copied_import_dropped_waiter_and_shutdown_wait_for_held_producer() {
     for boundary in [
         ImportBoundary::FileCopied,
         ImportBoundary::BeforeHash,
+        ImportBoundary::DescendantsReleased,
         ImportBoundary::Published,
+        ImportBoundary::BeforeConfirm,
+        ImportBoundary::BeforeReady,
     ] {
         let mut fixture = Fixture::new().await;
         let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
@@ -446,8 +453,22 @@ async fn copied_import_dropped_waiter_and_shutdown_wait_for_held_producer() {
                 .await
                 .is_err()
         );
-        if boundary == ImportBoundary::Published {
+        if matches!(
+            boundary,
+            ImportBoundary::Published | ImportBoundary::BeforeConfirm | ImportBoundary::BeforeReady
+        ) {
             assert!(fixture.target().is_dir());
+            let mut attempted_edit = fixture
+                .library
+                .load_metadata(&fixture.target())
+                .unwrap()
+                .unwrap();
+            attempted_edit.notes = Some("must not race finalization".into());
+            assert!(fixture
+                .library
+                .save_metadata(&fixture.target(), &attempted_edit)
+                .await
+                .is_err());
         } else {
             assert_eq!(fixture.stages().len(), 1);
         }
@@ -1009,8 +1030,8 @@ async fn copied_import_metadata_notifier_observes_write_paths_without_authorizin
     let paths = notifications.lock().unwrap().clone();
     assert_eq!(
         paths.len(),
-        1,
-        "ordinary import has one metadata projection write"
+        2,
+        "Pending and Ready metadata writes both notify"
     );
     assert_eq!(paths[0].file_name().unwrap(), "metadata.json");
     assert!(paths[0]
@@ -1024,6 +1045,7 @@ async fn copied_import_metadata_notifier_observes_write_paths_without_authorizin
         !paths[0].exists(),
         "notification is the former stage path, not retained filesystem authority"
     );
+    assert_eq!(paths[1], fixture.target().join("metadata.json"));
     assert!(fixture.target().join("metadata.json").is_file());
     fixture.tasks.shutdown_owned().await.unwrap();
 }
@@ -1124,7 +1146,7 @@ async fn copied_import_notifier_empty_component_changes_refuse_publication_and_r
 }
 
 #[tokio::test]
-async fn copied_import_notifier_valid_same_size_index_rewrite_is_refused_and_cleaned() {
+async fn copied_import_notifier_valid_same_size_index_rewrite_is_refused_and_retained() {
     let mut fixture = Fixture::new().await;
     let bundle = crate::model_library::importer::tests::create_external_diffusers_bundle(
         fixture.temp.path(),
@@ -1161,14 +1183,16 @@ async fn copied_import_notifier_valid_same_size_index_rewrite_is_refused_and_cle
                 "a still-valid index can disagree with prepared runtime metadata"
             );
         })));
-    let result = fixture.importer.import(&fixture.spec).await.unwrap();
-    assert!(!result.success);
-    assert!(result
-        .error
-        .unwrap()
-        .contains("model_index.json changed after metadata preparation"));
+    let error = fixture
+        .importer
+        .import(&fixture.spec)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("model_index.json changed after metadata preparation"));
+    assert!(error.contains("cleanup failed"));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert!(fixture.stages().is_empty());
+    assert_eq!(fixture.stages().len(), 1);
     assert!(!fixture
         .library
         .build_model_path("diffusion", "fixture", "Owned Import")
@@ -1176,5 +1200,6 @@ async fn copied_import_notifier_valid_same_size_index_rewrite_is_refused_and_cle
     assert_eq!(std::fs::read(index_path).unwrap(), source_index);
     assert_eq!(fixture.library.model_dirs().count(), 0);
     assert_eq!(fixture.library.model_count().unwrap(), 0);
-    fixture.tasks.shutdown_owned().await.unwrap();
+    assert!(fixture.tasks.shutdown_owned().await.is_err());
 }
+mod publication;

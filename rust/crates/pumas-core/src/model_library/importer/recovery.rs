@@ -370,6 +370,13 @@ impl ModelImporter {
             .min_depth(1)
             .max_depth(3)
             .into_iter()
+            .filter_entry(|entry| {
+                !entry.file_type().is_dir()
+                    || !entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(TEMP_IMPORT_PREFIX)
+            })
             .filter_map(|entry| entry.ok())
         {
             if !entry.file_type().is_dir() {
@@ -383,7 +390,7 @@ impl ModelImporter {
                 continue;
             }
 
-            if dir.join("metadata.json").exists() {
+            if dir.join("metadata.json").exists() || super::publication::receipt_path_claimed(dir) {
                 continue;
             }
 

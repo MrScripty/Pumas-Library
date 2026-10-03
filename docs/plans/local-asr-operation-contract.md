@@ -1,6 +1,6 @@
 # Local ASR operation contract proposal
 
-Status: proposed producer contract, not implemented or advertised. This follows the Cohere loader milestone in `local-cohere-transcription.md`. No consumer should call these proposed methods until the producer implementation and generated contracts exist.
+Status: private Python operation ownership is implemented and synthetically tested; the public producer contract below remains proposed and is not advertised. This follows the Cohere loader milestone in `local-cohere-transcription.md`. No consumer should call these proposed methods until the producer implementation and generated contracts exist.
 
 ## Existing boundaries to reuse
 
@@ -54,3 +54,61 @@ B. Add typed Rust client/DTO/RPC ownership and capability projection, including 
 C. Qualify a separate managed ASR runtime, then acquire the gated model only after approval. Exercise approved local synthetic speech through the actual Pumas producer and the game adapter. Native packaged execution, microphone consent/capture and speech quality require explicit evidence.
 
 Required regressions include strict base64/sample/language bounds, busy admission, repeated/conflicting request IDs, lost acknowledgement without replay, status expiry/runtime replacement, cancellation before/after generation, repeated cancellation, late output discard, device synchronization failure with retained lease, shutdown during preprocessing/generation, and forced/unconfirmed child cleanup. A fixture or unavailable UI does not complete the requested voice feature.
+
+
+### Private ownership checkpoint, 2026-10-03
+
+Milestone A adds only `torch-server/speech_operations.py` and its synthetic tests.
+The owner is bound to one event loop and one startup-random instance identity;
+its synchronous admission turn validates, deduplicates and reserves without an
+await point. Foreign-loop calls are rejected. The private raw-body boundary
+rejects envelopes over 1.5 MiB before JSON/base64 decoding, then validates exact
+fields, canonical request UUIDs/base64, explicit supported language and mono
+PCM16LE sample metadata. A future transport must also enforce the cap while
+reading its stream, before collecting the body.
+
+Each admitted operation independently retains its native thread and
+`ModelManager.speech_lease`. Worker completion is checked against actual thread
+exit; neither caller cancellation nor a cancelled asyncio waiter is a cessation
+receipt. Cooperative/repeated cancellation discards late text. Only confirmed
+cleanup releases the slot and PCM reference. Settled receipts contain bounded
+value diagnostics rather than exception objects/tracebacks, and are expired by
+a timer as well as lookups; the default bounds remain 64 receipts/600 seconds.
+Expiry/restart has no exactly-once or safe automatic replay guarantee.
+
+Unconfirmed device cleanup preserves both diagnostics, the exception-owned
+conversion buffer, original PCM and the live device lease in a retained,
+cancellation-resistant quarantine task. It is never included in settled-cache
+retention or evicted. There is no process-cessation acknowledgement/release API.
+`close_admission` and bounded `drain` report incomplete custody without waiting
+indefinitely on quarantine. A synthetic child-process regression checks that
+ordinary `asyncio.run` shutdown cancellation does not reach async-generator
+finalization and release the real lease; its test-owned external supervisor
+terminates the fixture and observes child exit.
+
+This deliberately does not implement the production process boundary. Milestone
+B must coordinate bounded drain with the existing managed process owner before
+listener/lifespan teardown. Forced loop closure or explicit async-generator
+finalization while custody is incomplete is prohibited. An unconfirmed runtime
+requires external process termination; awaiting its orderly asyncio shutdown
+would hang. No runtime/process cessation claim follows from the private drain.
+Model/content/recipe binding, protocol handshake, routes, Rust DTO/RPC ownership
+and capability projection remain milestone B gates; the internal model-name
+selector alone is not identity attestation. Qualified runtime/model execution
+and speech quality remain milestone C gates.
+
+Verification in the existing environment:
+
+- 31 operation tests passed, including default-adapter shutdown during synthetic
+  preprocessing/generation, concurrent duplicate/conflicting IDs, strict decode
+  limits, cancellation/lost acknowledgements, late-output discard, quarantine,
+  audio/traceback release, cache bounds/expiry, stale identities and bounded drain.
+- Existing Cohere adapter/lease tests: 15 passed. Model manager: 2 passed.
+  Model load lifecycle: 7 passed.
+- Whole Torch Ruff 0.15.2 checks and formatting passed (35 Python files).
+- The broad Torch suite ran 166 tests with 7 errors, all in existing FastAPI
+  route enumeration (`_IncludedRouter.path`), matching the inherited 7-error
+  environment mismatch recorded in the loader checkpoint. This is not a
+  full-suite pass; no existing route test was changed.
+- No route mounting, capability advertisement, Rust changes, dependency/lock
+  changes, model acquisition, real model inference or speech-quality claim.

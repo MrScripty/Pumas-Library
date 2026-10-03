@@ -350,6 +350,57 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
         }
     };
 
+    let component_manifest =
+        collect_diffusers_component_manifest(&canonical_entry_path, &model_index);
+    validate_diffusers_model_index(
+        canonical_entry_path,
+        &model_index,
+        allow_degraded,
+        component_manifest,
+    )
+}
+
+/// Copied bundles are classified from the held staged bytes and components.
+/// Source validation only selects the copy strategy; it cannot certify the copy.
+pub(crate) fn validate_staged_diffusers_directory(
+    stage: &super::DownloadRecoveryDestination,
+    final_path: &Path,
+) -> Result<DiffusersValidationResult> {
+    let model_index: Value = serde_json::from_reader(stage.open_import_file("model_index.json")?)?;
+    let mut observation_error = None;
+    let manifest = collect_diffusers_component_manifest_with(&model_index, |path| {
+        let relative = path
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        match stage.import_component_exists(&relative) {
+            Ok(true) => BundleComponentState::Present,
+            Ok(false) => BundleComponentState::Missing,
+            Err(error) => {
+                if observation_error.is_none() {
+                    observation_error = Some(error);
+                }
+                BundleComponentState::Unreadable
+            }
+        }
+    });
+    if let Some(error) = observation_error {
+        return Err(error.into());
+    }
+    Ok(validate_diffusers_model_index(
+        final_path.to_path_buf(),
+        &model_index,
+        false,
+        manifest,
+    ))
+}
+
+fn validate_diffusers_model_index(
+    canonical_entry_path: PathBuf,
+    model_index: &Value,
+    allow_degraded: bool,
+    component_manifest: Vec<BundleComponentManifestEntry>,
+) -> DiffusersValidationResult {
+    let model_index_path = canonical_entry_path.join("model_index.json");
     let pipeline_class = model_index
         .get("_class_name")
         .and_then(|value| value.as_str())
@@ -393,8 +444,6 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
         };
     }
 
-    let component_manifest =
-        collect_diffusers_component_manifest(&canonical_entry_path, &model_index);
     let validation_errors = collect_component_validation_errors(&component_manifest);
 
     let validation_state = if validation_errors.is_empty() {
@@ -418,6 +467,29 @@ fn collect_diffusers_component_manifest(
     bundle_root: &Path,
     model_index: &Value,
 ) -> Vec<BundleComponentManifestEntry> {
+    collect_diffusers_component_manifest_with(model_index, |path| {
+        let candidate_path = bundle_root.join(path);
+        if !candidate_path.exists() {
+            BundleComponentState::Missing
+        } else {
+            match candidate_path.canonicalize() {
+                Ok(canonical_component) => {
+                    if canonical_component.starts_with(bundle_root) {
+                        BundleComponentState::Present
+                    } else {
+                        BundleComponentState::PathEscape
+                    }
+                }
+                Err(_) => BundleComponentState::Unreadable,
+            }
+        }
+    })
+}
+
+fn collect_diffusers_component_manifest_with(
+    model_index: &Value,
+    mut inspect: impl FnMut(&Path) -> BundleComponentState,
+) -> Vec<BundleComponentManifestEntry> {
     let Some(components) = model_index.as_object() else {
         return Vec::new();
     };
@@ -434,23 +506,7 @@ fn collect_diffusers_component_manifest(
         let (source_library, class_name) = parse_component_signature(component_value);
         let relative_path = component_name.clone();
         let state = match normalized_component_relative_path(component_name) {
-            Ok(path) => {
-                let candidate_path = bundle_root.join(&path);
-                if !candidate_path.exists() {
-                    BundleComponentState::Missing
-                } else {
-                    match candidate_path.canonicalize() {
-                        Ok(canonical_component) => {
-                            if canonical_component.starts_with(bundle_root) {
-                                BundleComponentState::Present
-                            } else {
-                                BundleComponentState::PathEscape
-                            }
-                        }
-                        Err(_) => BundleComponentState::Unreadable,
-                    }
-                }
-            }
+            Ok(path) => inspect(&path),
             Err(_) => BundleComponentState::PathEscape,
         };
 

@@ -568,7 +568,13 @@ async fn copied_import_actual_hash_and_metadata_failures_cleanup_workspace() {
             Ok(())
         }));
         assert!(fixture.importer.import(&fixture.spec).await.is_err());
-        assert!(fixture.stages().is_empty());
+        if metadata_failure {
+            // A new directory at a metadata-file path is unknown custody.
+            assert_eq!(fixture.stages().len(), 1);
+            assert!(fixture.stages()[0].join("metadata.json").is_dir());
+        } else {
+            assert!(fixture.stages().is_empty());
+        }
         assert!(!fixture.target().exists());
         assert!(fixture.tasks.shutdown_owned().await.is_err());
     }
@@ -689,6 +695,7 @@ async fn copied_import_native_case_and_unicode_alias_oracle() {
         // Separate source names make the destination's native equivalence
         // independently observable even on a case-insensitive source volume.
         let plan = CopyPlan {
+            directories: Vec::new(),
             source: crate::platform::capability_fs::open_directory(source).unwrap(),
             files: vec![
                 (PathBuf::from("a"), "a".into(), first.into()),
@@ -736,4 +743,178 @@ async fn copied_import_windows_readonly_payload_keeps_source_and_published_attri
         .permissions()
         .readonly());
     fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+#[tokio::test]
+async fn copied_import_diffusers_preserves_empty_referenced_directories() {
+    for progress in [false, true] {
+        let mut fixture = Fixture::new().await;
+        let bundle = crate::model_library::importer::tests::create_external_diffusers_bundle(
+            fixture.temp.path(),
+        );
+        std::fs::remove_file(bundle.join("tokenizer/tokenizer.json")).unwrap();
+        std::fs::create_dir(bundle.join("scheduler")).unwrap();
+        let index_path = bundle.join("model_index.json");
+        let mut index: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&index_path).unwrap()).unwrap();
+        index["scheduler"] = serde_json::json!(["diffusers", "Scheduler"]);
+        std::fs::write(&index_path, serde_json::to_vec(&index).unwrap()).unwrap();
+        assert_eq!(
+            validate_diffusers_directory_for_import(&bundle).validation_state,
+            crate::models::AssetValidationState::Valid
+        );
+        fixture.spec.path = bundle.display().to_string();
+        let result = if progress {
+            let (tx, _rx) = mpsc::channel(1);
+            fixture
+                .importer
+                .import_with_progress(&fixture.spec, tx)
+                .await
+        } else {
+            fixture.importer.import(&fixture.spec).await
+        }
+        .unwrap();
+        assert!(result.success);
+        let target = fixture
+            .library
+            .library_root()
+            .join(result.model_id.unwrap());
+        for component in ["tokenizer", "scheduler"] {
+            assert!(target.join(component).is_dir());
+            assert_eq!(
+                std::fs::read_dir(target.join(component)).unwrap().count(),
+                0
+            );
+        }
+        // Reopening through the normal reader independently observes the layout.
+        assert_eq!(
+            validate_diffusers_directory_for_import(&target).validation_state,
+            crate::models::AssetValidationState::Valid
+        );
+        let metadata = fixture.library.load_metadata(&target).unwrap().unwrap();
+        assert_eq!(
+            metadata.validation_state,
+            Some(crate::models::AssetValidationState::Valid)
+        );
+        assert_eq!(
+            metadata.import_state,
+            Some(crate::models::ImportState::Ready)
+        );
+        assert!(fixture.stages().is_empty());
+        fixture.tasks.shutdown_owned().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn copied_import_diffusers_validates_staged_index_instead_of_source_result() {
+    let mut fixture = Fixture::new().await;
+    let bundle = crate::model_library::importer::tests::create_external_diffusers_bundle(
+        fixture.temp.path(),
+    );
+    let source_index = std::fs::read(bundle.join("model_index.json")).unwrap();
+    fixture.spec.path = bundle.display().to_string();
+    fixture.importer.import_hook = Some(Arc::new(move |boundary, stage| {
+        if boundary == ImportBoundary::BeforeHash {
+            let mut index: serde_json::Value =
+                serde_json::from_reader(stage.open_import_file("model_index.json")?)?;
+            index["missing_scheduler"] = serde_json::json!(["diffusers", "Scheduler"]);
+            std::fs::write(
+                stage.display_path().join("model_index.json"),
+                serde_json::to_vec(&index)?,
+            )?;
+        }
+        Ok(())
+    }));
+    let result = fixture.importer.import(&fixture.spec).await.unwrap();
+    assert!(!result.success);
+    assert!(result.error.unwrap().contains("missing_scheduler"));
+    assert!(!fixture
+        .library
+        .build_model_path("diffusion", "fixture", "Owned Import")
+        .exists());
+    assert!(fixture.stages().is_empty());
+    assert_eq!(
+        std::fs::read(bundle.join("model_index.json")).unwrap(),
+        source_index
+    );
+    fixture.tasks.shutdown_owned().await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn copied_import_nested_replacement_retains_original_and_replacement_trees() {
+    let mut fixture = Fixture::new().await;
+    let bundle = crate::model_library::importer::tests::create_external_diffusers_bundle(
+        fixture.temp.path(),
+    );
+    fixture.spec.path = bundle.display().to_string();
+    let retained = fixture.temp.path().join("original-unet");
+    let retained_for_hook = retained.clone();
+    fixture.importer.import_hook = Some(Arc::new(move |boundary, stage| {
+        if boundary == ImportBoundary::BeforeHash {
+            std::fs::rename(stage.display_path().join("unet"), &retained_for_hook)?;
+            std::fs::create_dir(stage.display_path().join("unet"))?;
+            std::fs::write(
+                stage.display_path().join("unet/sentinel"),
+                b"replacement tree",
+            )?;
+        }
+        Ok(())
+    }));
+    let error = fixture
+        .importer
+        .import(&fixture.spec)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("cleanup failed"));
+    assert!(retained
+        .join("diffusion_pytorch_model.safetensors")
+        .is_file());
+    assert_eq!(
+        std::fs::read(fixture.stages()[0].join("unet/sentinel")).unwrap(),
+        b"replacement tree"
+    );
+    // Validation precedes all deletion, so unrelated original siblings survive too.
+    assert!(fixture.stages()[0]
+        .join("vae/diffusion_pytorch_model.safetensors")
+        .is_file());
+    assert!(bundle
+        .join("unet/diffusion_pytorch_model.safetensors")
+        .is_file());
+    assert!(!fixture
+        .library
+        .build_model_path("diffusion", "fixture", "Owned Import")
+        .exists());
+    assert!(fixture.tasks.shutdown_owned().await.is_err());
+}
+
+#[tokio::test]
+async fn copied_import_unknown_nested_directory_is_retained_before_any_deletion() {
+    let mut fixture = Fixture::new().await;
+    fixture.importer.import_hook = Some(Arc::new(move |boundary, stage| {
+        if boundary == ImportBoundary::BeforeHash {
+            std::fs::create_dir(stage.display_path().join("unknown"))?;
+            std::fs::write(
+                stage.display_path().join("unknown/sentinel"),
+                b"unknown custody",
+            )?;
+            return Err(fault("original operation failure"));
+        }
+        Ok(())
+    }));
+    let error = fixture
+        .importer
+        .import(&fixture.spec)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("original operation failure"));
+    assert!(error.contains("cleanup failed"));
+    assert_eq!(
+        std::fs::read(fixture.stages()[0].join("unknown/sentinel")).unwrap(),
+        b"unknown custody"
+    );
+    assert!(fixture.stages()[0].join("model.onnx").is_file());
+    assert!(fixture.tasks.shutdown_owned().await.is_err());
 }

@@ -149,7 +149,19 @@ impl ModelImporter {
             report(progress, ImportStage::Hashing, 0.5, "Computing hashes");
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforeHash, &stage)?;
-            let mut metadata = if let Some(validation) = validation.as_ref() {
+            let mut metadata = if validation.is_some() {
+                let staged_validation =
+                    crate::model_library::external_assets::validate_staged_diffusers_directory(
+                        &stage,
+                        &target_path,
+                    )?;
+                if staged_validation.validation_state != crate::models::AssetValidationState::Valid
+                {
+                    return Err(PumasError::Validation {
+                        field: "import.bundle".into(),
+                        message: join_validation_errors(&staged_validation.validation_errors),
+                    });
+                }
                 let expected_files = files
                     .iter()
                     .map(|file| file.name.clone())
@@ -171,7 +183,7 @@ impl ModelImporter {
                     pipeline_tag: Some("text-to-image"),
                 };
                 let mut metadata =
-                    build_diffusers_bundle_metadata(&metadata_spec, validation, &model_id);
+                    build_diffusers_bundle_metadata(&metadata_spec, &staged_validation, &model_id);
                 metadata.entry_path = Some(target_path.display().to_string());
                 metadata.size_bytes = Some(files.iter().filter_map(|file| file.size).sum());
                 metadata
@@ -323,7 +335,7 @@ fn settle_unpublished(
     spec: &ModelImportSpec,
     security_tier: SecurityTier,
 ) -> Result<ModelImportResult> {
-    if let Err(cleanup) = stage.remove_model_directory_all() {
+    if let Err(cleanup) = stage.remove_import_stage_all() {
         return Err(PumasError::ImportFailed { message: format!(
             "{original}; import workspace originally at {} retained or custody unknown; cleanup failed: {cleanup}; no automatic cleanup retry", stage.display_path().display()
         ) });
@@ -347,11 +359,13 @@ fn is_model_file(name: &str) -> bool {
 struct CopyPlan {
     source: Dir,
     files: Vec<(PathBuf, String, String)>,
+    directories: Vec<String>,
 }
 
 impl CopyPlan {
     fn open(path: &Path, preserve_layout: bool) -> Result<Self> {
         let metadata = std::fs::symlink_metadata(path)?;
+        let mut directories = Vec::new();
         let (source, paths) = if metadata.is_file() {
             let parent = path
                 .parent()
@@ -367,7 +381,7 @@ impl CopyPlan {
         } else if metadata.is_dir() {
             let root = crate::platform::capability_fs::open_directory(path)?;
             let mut files = Vec::new();
-            enumerate_source(&root, Path::new(""), &mut files)?;
+            enumerate_source(&root, Path::new(""), &mut files, &mut directories)?;
             (root, files)
         } else {
             return Err(invalid_filename(
@@ -401,7 +415,26 @@ impl CopyPlan {
             files.push((path, original, normalized));
         }
         files.sort_by(|left, right| left.2.cmp(&right.2));
-        Ok(Self { source, files })
+        let mut directories = if preserve_layout {
+            directories
+                .into_iter()
+                .map(|path| {
+                    path.to_str()
+                        .map(|value| value.replace(std::path::MAIN_SEPARATOR, "/"))
+                        .ok_or_else(|| {
+                            invalid_filename("Import directory name must be valid UTF-8")
+                        })
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
+        directories.sort();
+        Ok(Self {
+            source,
+            files,
+            directories,
+        })
     }
 
     fn copy_to(
@@ -411,6 +444,17 @@ impl CopyPlan {
     ) -> Result<Vec<ModelFileInfo>> {
         #[cfg(not(test))]
         let _ = importer;
+        for directory in &self.directories {
+            stage.create_import_directory(directory).map_err(|error| {
+                if error.kind() == io::ErrorKind::AlreadyExists {
+                    invalid_filename(
+                        "Distinct source directories have filesystem-equivalent import names",
+                    )
+                } else {
+                    error.into()
+                }
+            })?;
+        }
         let mut files = Vec::with_capacity(self.files.len());
         for (relative, original, normalized) in &self.files {
             let parent = open_directory_chain(
@@ -463,7 +507,12 @@ impl CopyPlan {
     }
 }
 
-fn enumerate_source(root: &Dir, relative: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+fn enumerate_source(
+    root: &Dir,
+    relative: &Path,
+    files: &mut Vec<PathBuf>,
+    directories: &mut Vec<PathBuf>,
+) -> Result<()> {
     let directory = open_directory_chain(root, relative, false)?;
     for entry in directory.entries()? {
         let entry = entry?;
@@ -471,7 +520,8 @@ fn enumerate_source(root: &Dir, relative: &Path, files: &mut Vec<PathBuf>) -> Re
         let metadata = directory.symlink_metadata(&name)?;
         let path = relative.join(name);
         if metadata.is_dir() && !metadata.is_symlink() {
-            enumerate_source(root, &path, files)?;
+            directories.push(path.clone());
+            enumerate_source(root, &path, files, directories)?;
         } else if metadata.is_file() && !metadata.is_symlink() {
             files.push(path);
         } else {

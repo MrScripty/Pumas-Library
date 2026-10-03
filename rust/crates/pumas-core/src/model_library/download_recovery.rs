@@ -835,6 +835,61 @@ impl DownloadRecoveryDestination {
         Ok(file)
     }
 
+    /// Preserve copied bundle directories, including empty components, without
+    /// merging filesystem-equivalent source names into an existing directory.
+    pub(crate) fn create_import_directory(&self, relative: &str) -> io::Result<()> {
+        let (parent, name) = self.file_parent(relative, true)?;
+        parent.create_dir(&name)?;
+        let directory = self
+            .payload_directory_if_present(Path::new(relative), false)?
+            .ok_or_else(invalid_capability_path)?;
+        sync_directory(&directory)?;
+        sync_directory(&parent)
+    }
+
+    pub(crate) fn import_component_exists(&self, relative: &str) -> io::Result<bool> {
+        let Some((parent, name)) = self.file_parent_if_present(relative, false)? else {
+            return Ok(false);
+        };
+        match parent.symlink_metadata(&name) {
+            Ok(metadata) if metadata.is_dir() && !metadata.is_symlink() => Ok(self
+                .payload_directory_if_present(Path::new(relative), false)?
+                .is_some()),
+            Ok(metadata) if metadata.is_file() && !metadata.is_symlink() => {
+                self.open_import_file(relative).map(|_| true)
+            }
+            Ok(_) => Err(invalid_capability_path()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Import cleanup must not adopt replacement or newly introduced child
+    /// directories. Validate the complete observed tree before deleting any
+    /// payload. The root grant excludes cooperating writers throughout this
+    /// check/use interval; arbitrary hostile equal-authority mutation is not
+    /// excluded by a preflight check and is not claimed here.
+    pub(crate) fn remove_import_stage_all(&self) -> Result<()> {
+        let root = self.directory(false)?;
+        let known = self
+            .file_parents
+            .lock()
+            .map_err(|_| io::Error::other("Import descendant authority lock poisoned"))?
+            .clone();
+        for (relative, held) in &known {
+            if directory_identity(&open_directory_chain(&root, relative, false)?)? != held.identity
+            {
+                return Err(invalid_capability_path().into());
+            }
+        }
+        let identities = known
+            .into_values()
+            .map(|held| (held.identity, held))
+            .collect();
+        validate_import_descendants(&root, &identities)?;
+        self.remove_model_directory_all()
+    }
+
     pub(crate) fn read_import_json(&self, filename: &str) -> Result<Option<Value>> {
         match self.open_import_file(filename) {
             Ok(file) => match serde_json::from_reader(file) {
@@ -1085,11 +1140,17 @@ impl DownloadRecoveryDestination {
             .file_name()
             .and_then(|s| s.to_str())
             .ok_or_else(invalid_capability_path)?;
+        Ok(self
+            .payload_directory_if_present(path.parent().unwrap_or(Path::new("")), create)?
+            .map(|directory| (directory, name.to_owned())))
+    }
+
+    fn payload_directory_if_present(&self, path: &Path, create: bool) -> io::Result<Option<Dir>> {
         let Some(mut directory) = self.directory_if_present(false)? else {
             return Ok(None);
         };
         let mut relative = PathBuf::new();
-        for component in path.parent().unwrap_or(Path::new("")).components() {
+        for component in path.components() {
             let Component::Normal(component) = component else {
                 return Err(invalid_capability_path());
             };
@@ -1131,7 +1192,7 @@ impl DownloadRecoveryDestination {
             }
             directory = held.directory.try_clone()?;
         }
-        Ok(Some((directory, name.to_owned())))
+        Ok(Some(directory))
     }
 
     /// Publish the unchanged object schema through held directory authority.
@@ -1443,6 +1504,25 @@ fn rename_held_directories_noreplace(
     } else {
         Err(io::Error::last_os_error())
     }
+}
+
+fn validate_import_descendants(
+    directory: &Dir,
+    known: &BTreeMap<FilesystemIdentity, Arc<HeldDestination>>,
+) -> io::Result<()> {
+    for entry in directory.entries()? {
+        let name = entry?.file_name();
+        if directory.symlink_metadata(&name)?.is_dir() {
+            let identity =
+                directory_identity(&open_directory_chain(directory, Path::new(&name), false)?)?;
+            // Readdir spelling can differ on a Unicode-normalizing filesystem.
+            // The observed bindings were checked above; match their held
+            // physical identities rather than guessing filename equivalence.
+            let held = known.get(&identity).ok_or_else(invalid_capability_path)?;
+            validate_import_descendants(&held.directory, known)?;
+        }
+    }
+    Ok(())
 }
 
 fn remove_held_directory_contents(directory: &Dir) -> io::Result<()> {

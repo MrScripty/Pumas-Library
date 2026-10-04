@@ -6972,6 +6972,8 @@ mod tests {
         let mut client = configured_download_client(temp.path().join("cache")).unwrap();
         client.configure_download_destination_root(&root).unwrap();
         let head_id = uuid::Uuid::new_v4().to_string();
+        let source = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        client.set_test_download_base_url(format!("http://{}", source.local_addr().unwrap()));
         admit_snapshot_at_root(
             client.persistence.as_ref().unwrap(),
             &PersistedDownload {
@@ -7048,8 +7050,33 @@ mod tests {
         std::fs::remove_file(destination.join(".pumas_download")).unwrap();
         // Known final bytes keep this queue-order oracle independent of HTTP.
         std::fs::write(destination.join("second.gguf"), b"complete").unwrap();
+        let identity = client
+            .downloads
+            .read()
+            .await
+            .get(&successor)
+            .unwrap()
+            .destination
+            .as_ref()
+            .unwrap()
+            .identity();
+        let destination_guard = client.destination_lock(&identity).await.lock_owned().await;
         assert!(client.cancel_download(&head_id).await.unwrap());
-        tokio::time::timeout(Duration::from_secs(2), async {
+        let incumbent = observe_worker_with_local_watchdog(&client, &head_id)
+            .await
+            .unwrap();
+        assert_eq!(incumbent.role, TaskRole::CancelFinalizer);
+        assert_eq!(incumbent.terminal, TaskTerminal::Completed);
+        assert_eq!(incumbent.nested_failures, 0);
+        assert_eq!(
+            client.get_download_status(&head_id).await,
+            Some(DownloadStatus::Cancelled)
+        );
+        // Cancellation releases the queue reservation; successor filesystem work
+        // still has no two-second settlement promise. Demonstrate that distinction
+        // with controlled lock custody rather than a wall-clock sleep.
+        tokio::time::pause();
+        let premature_settlement = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 if client.get_download_status(&head_id).await == Some(DownloadStatus::Cancelled)
                     && client.get_download_status(&successor).await
@@ -7059,10 +7086,40 @@ mod tests {
                 }
                 tokio::task::yield_now().await;
             }
-        })
-        .await
-        .expect("exact incumbent cancellation must release the canonical successor");
+        });
+        tokio::pin!(premature_settlement);
+        assert!(futures::poll!(&mut premature_settlement).is_pending());
+        tokio::time::advance(Duration::from_secs(3)).await;
+        assert!(premature_settlement.await.is_err());
+        tokio::time::resume();
+        assert_eq!(
+            client.get_download_status(&successor).await,
+            Some(DownloadStatus::Queued)
+        );
+        assert!(!client.download_tasks.snapshot(&successor).unwrap().finished);
+        drop(destination_guard);
+        let observation = tokio::select! {
+            biased;
+            request = source.accept() => panic!("byte-complete canonical successor attempted network access: {request:?}"),
+            observation = observe_worker_with_local_watchdog(&client, &successor) => observation.unwrap(),
+        };
+        assert_eq!(observation.role, TaskRole::Worker);
+        assert_eq!(observation.terminal, TaskTerminal::Completed);
+        assert_eq!(observation.nested_failures, 0);
+        assert_eq!(
+            client.get_download_status(&head_id).await,
+            Some(DownloadStatus::Cancelled)
+        );
+        assert_eq!(
+            client.get_download_status(&successor).await,
+            Some(DownloadStatus::Completed)
+        );
         assert!(!destination.join("first.gguf.part").exists());
+        assert_eq!(
+            std::fs::read(destination.join("second.gguf")).unwrap(),
+            b"complete"
+        );
+        assert!(!destination.join("second.gguf.part").exists());
     }
     #[tokio::test]
     async fn queued_pause_preserves_destination_and_restarts_at_its_fifo_position() {
@@ -7969,6 +8026,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let (requested_sender, requested) = tokio::sync::oneshot::channel();
         let (release_sender, release) = tokio::sync::oneshot::channel();
+        let (listener_sender, listener_receiver) = tokio::sync::oneshot::channel();
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut headers = Vec::new();
@@ -7986,19 +8044,21 @@ mod tests {
             let listener = if retry {
                 Some(listener)
             } else {
-                drop(listener);
+                // Retain the source address across pause/restart. Rebinding a
+                // released ephemeral port permits another fixture to claim it.
+                listener_sender.send(listener).unwrap();
                 None
             };
             requested_sender.send(()).unwrap();
             if retry {
                 drop(socket);
                 release.await.unwrap();
-                return tokio::time::timeout(
-                    Duration::from_millis(100),
-                    listener.as_ref().unwrap().accept(),
-                )
-                .await
-                .is_err();
+                let listener = listener.unwrap();
+                let no_extra_request =
+                    tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                        .await
+                        .is_err();
+                return (no_extra_request, Some(listener));
             }
             release.await.unwrap();
             if !stall_body {
@@ -8008,7 +8068,7 @@ mod tests {
                     )
                     .await;
             }
-            true
+            (true, None)
         });
         let mut client = configured_download_client(temp.path().join("cache")).unwrap();
         client.set_test_download_base_url(format!("http://{address}"));
@@ -8038,6 +8098,11 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        let mut resumed_listener = if retry {
+            None
+        } else {
+            Some(listener_receiver.await.unwrap())
+        };
         if stall_body {
             tokio::time::timeout(Duration::from_secs(3), async {
                 while !client.list_downloads().await.iter().any(|entry| {
@@ -8079,7 +8144,7 @@ mod tests {
             );
             continue_sender.send(()).unwrap();
             release_sender.send(()).unwrap();
-            assert!(server.await.unwrap());
+            assert!(server.await.unwrap().0);
             tokio::time::timeout(Duration::from_secs(3), async {
                 while client.get_download_status(&id).await != Some(DownloadStatus::Cancelled)
                     || client
@@ -8116,13 +8181,22 @@ mod tests {
         if paused.is_ok() && matches!(stall, StalledResponse::ImmediateResume) {
             // Do not drain the paused generation first: public Paused is the
             // promise that callers may immediately request a successor.
-            assert_resumed_partial_completes(&mut client, &id, &destination, address).await;
+            assert_resumed_partial_completes(
+                &mut client,
+                &id,
+                &destination,
+                resumed_listener.take().unwrap(),
+            )
+            .await;
             release_sender.send(()).unwrap();
-            assert!(server.await.unwrap());
+            assert!(server.await.unwrap().0);
             return;
         }
         release_sender.send(()).unwrap();
-        let no_extra_request = server.await.unwrap();
+        let (no_extra_request, retry_listener) = server.await.unwrap();
+        if retry {
+            resumed_listener = retry_listener;
+        }
         if paused.is_err() {
             client.cancel_download(&id).await.unwrap();
         }
@@ -8164,7 +8238,13 @@ mod tests {
             Some(DownloadStatus::Paused)
         );
         if stall_body {
-            assert_resumed_partial_completes(&mut restarted, &id, &destination, address).await;
+            assert_resumed_partial_completes(
+                &mut restarted,
+                &id,
+                &destination,
+                resumed_listener.take().unwrap(),
+            )
+            .await;
         }
     }
 
@@ -8172,10 +8252,9 @@ mod tests {
         client: &mut HuggingFaceClient,
         id: &str,
         destination: &Path,
-        address: std::net::SocketAddr,
+        listener: tokio::net::TcpListener,
     ) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind(address).await.unwrap();
         client.set_test_download_base_url(format!("http://{}", listener.local_addr().unwrap()));
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
@@ -15342,11 +15421,101 @@ mod tests {
         assert!(persistence.load_all().is_empty());
     }
 
+    async fn observe_worker_with_local_watchdog(
+        client: &HuggingFaceClient,
+        download_id: &str,
+    ) -> std::result::Result<TaskObservation, String> {
+        // A diagnostic bound for hung local tests, not a settlement SLA.
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(observation) = client.download_tasks.observe_finished(download_id).await {
+                    break observation;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| {
+            // Timeout diagnostics must not wait behind the stalled worker's
+            // state lock. Keep custody intact for the test's shutdown owner.
+            let download = client.downloads.try_read().map(|states| {
+                states.get(download_id).map(|state| {
+                    (state.status, state.files_completed, state.files.len())
+                })
+            });
+            format!(
+                "owned worker {download_id:?} exceeded the 60-second local test watchdog; task={:?}; download={download:?}",
+                client.download_tasks.snapshot(download_id)
+            )
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn worker_watchdog_reports_locked_state_without_releasing_live_custody() {
+        let temp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+        let verified = verified_recovery(
+            &temp.path().join("library"),
+            "acme/model",
+            &["weights.gguf"],
+        );
+        let download_id = "stalled-owned-worker";
+        let state = recovery_test_state(&verified, download_id, DownloadStatus::Queued, false);
+        client
+            .downloads
+            .write()
+            .await
+            .insert(download_id.into(), state);
+        let prepared = client
+            .download_tasks
+            .prepare(download_id.into(), TaskRole::Worker, |_| async {
+                std::future::pending::<()>().await
+            })
+            .unwrap();
+        client
+            .download_tasks
+            .install_gated(prepared)
+            .unwrap()
+            .start();
+
+        let state_guard = client.downloads.write().await;
+        let observation = observe_worker_with_local_watchdog(&client, download_id);
+        tokio::pin!(observation);
+        assert!(futures::poll!(&mut observation).is_pending());
+        tokio::time::advance(Duration::from_secs(59)).await;
+        assert!(futures::poll!(&mut observation).is_pending());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let diagnostic = observation.await.unwrap_err();
+        assert!(diagnostic.contains(download_id));
+        assert!(diagnostic.contains("60-second local test watchdog"));
+        assert!(diagnostic.contains("role: Worker"));
+        assert!(diagnostic.contains("finished: false"));
+        assert!(diagnostic.contains("download=Err"));
+        drop(state_guard);
+        let task = client.download_tasks.snapshot(download_id).unwrap();
+        assert_eq!(task.role, TaskRole::Worker);
+        assert!(!task.finished);
+        assert_eq!(
+            client
+                .downloads
+                .read()
+                .await
+                .get(download_id)
+                .unwrap()
+                .status,
+            DownloadStatus::Queued
+        );
+        client.shutdown_downloads().await.unwrap();
+        assert!(client.download_tasks.is_empty());
+    }
+
     #[tokio::test]
     async fn ordinary_resume_preserves_ambient_callbacks_and_persistence_contract() {
         let temp = TempDir::new().unwrap();
         let library_root = temp.path().join("library");
         let mut client = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+        let source = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        client.set_test_download_base_url(format!("http://{}", source.local_addr().unwrap()));
         let persistence = Arc::new(DownloadPersistence::new(temp.path()));
         client.set_persistence(persistence.clone());
         let completion_called = Arc::new(AtomicBool::new(false));
@@ -15390,31 +15559,77 @@ mod tests {
         .unwrap();
         let mut updates = client.subscribe_download_updates();
 
+        let destination_guard = client
+            .destination_lock(&verified.destination.identity())
+            .await
+            .lock_owned()
+            .await;
         assert!(client.resume_download(download_id).await.unwrap());
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                let update = updates.recv().await.unwrap();
-                if update.snapshot.downloads.iter().any(|download| {
+        // Resume admits an owned worker; it does not promise a filesystem
+        // settlement SLA. Hold execution across the former two-second budget
+        // without sleeping or allowing a request to the download source.
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(3)).await;
+        tokio::time::resume();
+        assert!(
+            !client
+                .download_tasks
+                .snapshot(download_id)
+                .unwrap()
+                .finished
+        );
+        assert_eq!(
+            client
+                .downloads
+                .read()
+                .await
+                .get(download_id)
+                .unwrap()
+                .status,
+            DownloadStatus::Queued
+        );
+        assert!(!persistence.load_all().is_empty());
+        assert!(!completion_called.load(Ordering::SeqCst));
+        drop(destination_guard);
+
+        // Observe the worker and all registered descendants before checking its
+        // effects. This also fails callback/cleanup regressions after worker
+        // exit, instead of polling persistence while the real I/O is pending.
+        let observation = tokio::select! {
+            biased;
+            request = source.accept() => {
+                panic!("byte-complete ordinary resume attempted network access: {request:?}");
+            }
+            observation = observe_worker_with_local_watchdog(&client, download_id) => {
+                observation.unwrap_or_else(|diagnostic| {
+                    panic!("{diagnostic}; completion_callback={}; auxiliary_callback={}",
+                        completion_called.load(Ordering::SeqCst),
+                        aux_called.load(Ordering::SeqCst));
+                })
+            },
+        };
+        assert_eq!(observation.role, TaskRole::Worker);
+        assert_eq!(observation.terminal, TaskTerminal::Completed);
+        assert_eq!(observation.nested_failures, 0);
+        assert!(
+            std::iter::from_fn(|| updates.try_recv().ok()).any(|update| {
+                update.snapshot.downloads.iter().any(|download| {
                     download.download_id == download_id
                         && download.status == DownloadStatus::Completed
-                }) {
-                    break;
-                }
-            }
-        })
-        .await
-        .expect("byte-complete ordinary resume should finish without network access");
-
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                if completion_called.load(Ordering::SeqCst) && persistence.load_all().is_empty() {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("ordinary completion callback and persistence cleanup should finish");
+                })
+            })
+        );
+        assert!(completion_called.load(Ordering::SeqCst));
+        assert!(persistence.load_all().is_empty());
+        assert_eq!(
+            std::fs::read(verified.destination.display_path().join("weights.gguf")).unwrap(),
+            b"done"
+        );
+        assert!(!verified
+            .destination
+            .display_path()
+            .join("weights.gguf.part")
+            .exists());
         assert!(aux_called.load(Ordering::SeqCst));
         let downloads = client.downloads.read().await;
         let state = downloads.get(download_id).unwrap();

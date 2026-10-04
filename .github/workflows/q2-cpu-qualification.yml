@@ -38,6 +38,10 @@ jobs:
           persist-credentials: false
       - name: Check qualification failure oracles without network
         run: python3 -m unittest discover -s qualification/scripts/acceptance -p test_q2_cpu_qualification.py
+      - name: Record exact candidate input identities without network
+        run: |
+          python3 qualification/scripts/acceptance/q2_cpu_qualification.py check-inputs \
+            --repo "$GITHUB_WORKSPACE/candidate" --output "$GITHUB_WORKSPACE/evidence"
       - name: Check existing sandbox, resources and pinned wheel availability
         run: |
           python3 qualification/scripts/acceptance/q2_cpu_qualification.py preflight \

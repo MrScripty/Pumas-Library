@@ -138,6 +138,14 @@ fn live(state: char) -> bool {
 }
 
 fn scan_group(proc_root: &Path, group: i32) -> io::Result<bool> {
+    scan_group_with_tasks(proc_root, group, |path| std::fs::read_dir(path))
+}
+
+fn scan_group_with_tasks(
+    proc_root: &Path,
+    group: i32,
+    mut read_tasks: impl FnMut(&Path) -> io::Result<std::fs::ReadDir>,
+) -> io::Result<bool> {
     for entry in std::fs::read_dir(proc_root)? {
         let entry = entry?;
         if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
@@ -154,9 +162,15 @@ fn scan_group(proc_root: &Path, group: i32) -> io::Result<bool> {
             return Ok(true);
         }
         // A zombie thread-group leader can still have live worker threads.
-        let tasks = match std::fs::read_dir(process.join("task")) {
+        let tasks = match read_tasks(&process.join("task")) {
             Ok(tasks) => tasks,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Err(error)
+                if error.kind() == io::ErrorKind::NotFound
+                    || error.raw_os_error() == Some(nix::libc::ESRCH) =>
+            {
+                // Task-directory resolution can lose its process after the
+                // leader stat was read. Confirm absence; otherwise retry a
+                // complete scan rather than treating uncertainty as drain.
                 if read_stat(&process.join("stat"))?.is_none() {
                     continue;
                 }
@@ -429,6 +443,50 @@ mod tests {
         assert!(read_stat(&retained)
             .expect("disappeared process is absent")
             .is_none());
+    }
+
+    #[test]
+    fn disappearing_task_directory_esrch_is_incomplete_until_reobserved() {
+        use std::os::fd::AsRawFd;
+
+        let mut child = FixtureChild(
+            Command::new("sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .unwrap(),
+        );
+        let group = i32::try_from(child.id()).unwrap();
+        let retained = std::fs::File::open(format!("/proc/{group}")).unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let vanished_tasks =
+            std::path::PathBuf::from(format!("/proc/self/fd/{}/task", retained.as_raw_fd()));
+        let error = std::fs::read_dir(&vanished_tasks).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(nix::libc::ESRCH));
+
+        // Keep a visible zombie leader in the scanner fixture while injecting
+        // the actual procfs task-directory disappearance at its open boundary.
+        let root = tempfile::tempdir().unwrap();
+        let process = root.path().join(group.to_string());
+        std::fs::create_dir(&process).unwrap();
+        let stat = format!("{group} (leader) Z 4 {group} {group}");
+        std::fs::write(process.join("stat"), &stat).unwrap();
+        let observation =
+            scan_group_with_tasks(root.path(), group, |_| std::fs::read_dir(&vanished_tasks));
+        assert_eq!(observation.unwrap_err().kind(), io::ErrorKind::WouldBlock);
+        let task = process.join("task").join(group.to_string());
+        std::fs::create_dir_all(&task).unwrap();
+        std::fs::write(task.join("stat"), &stat).unwrap();
+        assert!(!scan_group(root.path(), group).unwrap());
+
+        // An independently confirmed vanished process may be skipped, but the
+        // scanner must still finish the rest of its group observation.
+        let observation = scan_group_with_tasks(root.path(), group, |_| {
+            std::fs::remove_file(process.join("stat")).unwrap();
+            std::fs::read_dir(&vanished_tasks)
+        });
+        assert!(!observation.unwrap());
     }
 
     #[test]

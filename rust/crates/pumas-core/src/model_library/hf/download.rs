@@ -715,7 +715,7 @@ impl CancellationPersistence {
 }
 
 struct PreparedDownloadTask {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     download_base_url: Option<String>,
     client: crate::acquisition::AcquisitionHttpClient,
     acquisition: Arc<crate::acquisition::AcquisitionService>,
@@ -1666,7 +1666,7 @@ impl PreparedDownloadTask {
                 self.destination_lock,
                 self.start_setup,
                 self.persist_queued_status,
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test-support"))]
                 self.download_base_url,
             ))
             .catch_unwind()
@@ -3982,7 +3982,7 @@ impl HuggingFaceClient {
                 .ok_or_else(|| PumasError::Other("Durable download snapshot unavailable".into()))?;
             let execution_files = files.iter().map(|file| file.filename.clone()).collect();
             let prepared_download = PreparedDownloadTask {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test-support"))]
                 download_base_url: self.download_base_url.clone(),
                 client: self.download_client.clone(),
                 acquisition: self.acquisition.clone(),
@@ -4235,7 +4235,7 @@ impl HuggingFaceClient {
             self.download_importer.clone()
         };
         PreparedDownloadTask {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             download_base_url: self.download_base_url.clone(),
             client: self.download_client.clone(),
             acquisition: self.acquisition.clone(),
@@ -4479,7 +4479,7 @@ impl HuggingFaceClient {
         destination_lock: Arc<TokioMutex<()>>,
         start_setup: Option<DownloadStartSetup>,
         persist_queued_status: bool,
-        #[cfg(test)] download_base_url: Option<String>,
+        #[cfg(any(test, feature = "test-support"))] download_base_url: Option<String>,
     ) -> Result<()> {
         use crate::config::NetworkConfig;
         use crate::network::RetryConfig;
@@ -4903,7 +4903,7 @@ impl HuggingFaceClient {
             .await?;
 
             let download_base = HF_HUB_BASE;
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             let download_base = download_base_url.as_deref().unwrap_or(download_base);
             let url = super::acquisition_source::retrieval_url(
                 download_base,

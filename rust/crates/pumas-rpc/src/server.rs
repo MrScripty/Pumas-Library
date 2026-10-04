@@ -830,7 +830,7 @@ mod tests {
         })
     }
 
-    async fn start_test_server(
+    pub(super) async fn start_test_server(
         api: PumasApi,
         launcher_root: &std::path::Path,
     ) -> anyhow::Result<ServerHandle> {
@@ -2461,3 +2461,6 @@ mod tests {
 
 #[cfg(test)]
 mod acquisition_integration;
+
+#[cfg(test)]
+mod rpc_http_resume;

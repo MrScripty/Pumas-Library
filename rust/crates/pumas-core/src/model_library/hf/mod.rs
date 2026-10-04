@@ -109,7 +109,7 @@ pub struct HuggingFaceClient {
     pub(super) aux_complete_callback: Option<AuxFilesCompleteCallback>,
     /// Authentication token for accessing gated/private models.
     pub(super) auth_token: Arc<RwLock<Option<String>>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     download_base_url: Option<String>,
 }
 
@@ -171,7 +171,7 @@ impl HuggingFaceClient {
     }
 
     pub(super) fn hub_base_url(&self) -> &str {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(base) = self.download_base_url.as_deref() {
             return base;
         }
@@ -179,7 +179,7 @@ impl HuggingFaceClient {
     }
 
     pub(super) fn api_base_url(&self) -> &str {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(base) = self.download_base_url.as_deref() {
             return base;
         }
@@ -207,7 +207,7 @@ impl HuggingFaceClient {
             completion_callback: self.completion_callback.clone(),
             aux_complete_callback: self.aux_complete_callback.clone(),
             auth_token: self.auth_token.clone(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             download_base_url: self.download_base_url.clone(),
         }
     }
@@ -306,6 +306,34 @@ impl HuggingFaceClient {
             token
         });
 
+        Self::from_transport(cache_dir, client, download_client, initial_token)
+    }
+
+    #[cfg(feature = "test-support")]
+    pub(crate) fn new_with_loopback_fixture(
+        cache_dir: PathBuf,
+        source: super::test_support::HfLoopbackFixture,
+    ) -> Result<Self> {
+        let client = source.transport()?;
+        std::fs::create_dir_all(&cache_dir)?;
+        // Unlike ordinary construction, this explicit fixture never invokes
+        // an environment/disk credential loader. Its transport follows no redirect.
+        let mut fixture = Self::from_transport(
+            cache_dir,
+            client.clone(),
+            crate::acquisition::AcquisitionHttpClient::from(client),
+            None,
+        )?;
+        fixture.download_base_url = Some(source.origin().to_owned());
+        Ok(fixture)
+    }
+
+    fn from_transport(
+        cache_dir: PathBuf,
+        client: Client,
+        download_client: crate::acquisition::AcquisitionHttpClient,
+        initial_token: Option<String>,
+    ) -> Result<Self> {
         let downloads = Arc::new(RwLock::new(HashMap::new()));
         let download_revision = Arc::new(AtomicU64::new(0));
         let download_updates = broadcast::channel(64).0;
@@ -345,7 +373,7 @@ impl HuggingFaceClient {
             completion_callback: None,
             aux_complete_callback: None,
             auth_token: Arc::new(RwLock::new(initial_token)),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             download_base_url: None,
         })
     }

@@ -39,6 +39,8 @@ pub struct PumasApiBuilder {
     auto_create_dirs: bool,
     enable_hf_client: bool,
     enable_process_manager: bool,
+    #[cfg(feature = "test-support")]
+    hf_loopback_fixture: Option<model_library::test_support::HfLoopbackFixture>,
 }
 
 struct InstanceClaimGuard {
@@ -215,6 +217,8 @@ impl PumasApiBuilder {
             auto_create_dirs: false,
             enable_hf_client: true,
             enable_process_manager: cfg!(feature = "process-manager"),
+            #[cfg(feature = "test-support")]
+            hf_loopback_fixture: None,
         }
     }
 
@@ -239,6 +243,18 @@ impl PumasApiBuilder {
     /// Default: `true`
     pub fn with_hf_client(mut self, enable: bool) -> Self {
         self.enable_hf_client = enable;
+        self
+    }
+
+    /// Select an explicit, credential-free loopback HF integration fixture.
+    /// Absent from default product builds; normal lifecycle owners are retained.
+    #[cfg(feature = "test-support")]
+    pub fn with_loopback_hf_fixture(
+        mut self,
+        source: model_library::test_support::HfLoopbackFixture,
+    ) -> Self {
+        self.enable_hf_client = true;
+        self.hf_loopback_fixture = Some(source);
         self
     }
 
@@ -436,7 +452,15 @@ impl PumasApiBuilder {
 
             let hf_cache_dir_for_task = hf_cache_dir.clone();
             let model_library_dir_for_task = model_library_dir.clone();
+            #[cfg(feature = "test-support")]
+            let fixture_source = self.hf_loopback_fixture.clone();
             match tokio::task::spawn_blocking(move || {
+                #[cfg(feature = "test-support")]
+                let mut client = match fixture_source {
+                    Some(source) => model_library::HuggingFaceClient::new_with_loopback_fixture(hf_cache_dir_for_task, source)?,
+                    None => model_library::HuggingFaceClient::new(&hf_cache_dir_for_task)?,
+                };
+                #[cfg(not(feature = "test-support"))]
                 let mut client = model_library::HuggingFaceClient::new(&hf_cache_dir_for_task)?;
                 if let Err(error) = client.configure_download_destination_root(&model_library_dir_for_task) {
                     tracing::warn!(%error, "Download destination authority unavailable; HuggingFace search remains enabled");

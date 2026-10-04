@@ -767,6 +767,121 @@ mod tests {
 
         assert!(!manager.is_ollama_running());
     }
+
+    #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+    struct ObserverFixture(Arc<ObservedChild>);
+
+    #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+    impl Drop for ObserverFixture {
+        fn drop(&mut self) {
+            // Fixtures have no descendants. Retain actual Child custody for
+            // cleanup even if an assertion fails before the observer reaps it.
+            let mut slot = self.0.child.lock().unwrap();
+            if let Some(mut child) = slot.take() {
+                if crate::platform::linux_group::observe_exit(child.id()).is_ok() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        }
+    }
+
+    #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+    #[test]
+    fn already_exited_group_observer_reaps_child_and_clears_liveness() {
+        use crate::platform::linux_group;
+        use nix::sys::wait::{waitpid, WaitPidFlag};
+        use nix::unistd::{getpgid, Pid};
+        use std::os::unix::process::CommandExt;
+
+        let temp = TempDir::new().unwrap();
+        let manager = ProcessManager::new(temp.path(), None).unwrap();
+        let child = Command::new("sh")
+            .args(["-c", "exit 7"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let group = Pid::from_raw(i32::try_from(pid).unwrap());
+        let mut fixture = ObserverFixture(Arc::new(ObservedChild {
+            app: "ollama",
+            child: Mutex::new(Some(child)),
+        }));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while linux_group::observe_exit(pid).unwrap().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "fixture terminal status"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            linux_group::observe_exit(pid).unwrap().unwrap().code(),
+            Some(7)
+        );
+        assert!(!linux_group::group_has_live_members(group.as_raw()).unwrap());
+        // No live members does not mean the group identity vanished: the
+        // waitable leader still pins it until the manager performs Child::wait.
+        assert_eq!(getpgid(Some(group)).unwrap(), group);
+        let generation = manager.set_ollama_status(true);
+        let child = fixture.0.child.lock().unwrap().take().unwrap();
+        manager.observe_child_exit(manager.ollama_status.clone(), "ollama", generation, child);
+        fixture.0 = manager
+            .owned_children
+            .lock()
+            .unwrap()
+            .get(&pid)
+            .unwrap()
+            .clone();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while manager.is_ollama_running() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!manager.is_ollama_running());
+        assert_eq!(
+            manager.ollama_status.lock().unwrap().generation,
+            generation + 1
+        );
+        assert!(fixture.0.child.lock().unwrap().is_none());
+        assert_eq!(
+            waitpid(group, Some(WaitPidFlag::WNOHANG)),
+            Err(nix::errno::Errno::ECHILD)
+        );
+        assert!(manager.stop_known_process("ollama", pid, 100).unwrap());
+    }
+
+    #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+    #[test]
+    fn running_group_observer_retains_child_until_owned_stop_reaps_it() {
+        use crate::platform::linux_group;
+        use nix::sys::wait::{waitpid, WaitPidFlag};
+        use nix::unistd::Pid;
+        use std::os::unix::process::CommandExt;
+
+        let child = Command::new("sleep")
+            .arg("60")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let group = Pid::from_raw(i32::try_from(pid).unwrap());
+        let fixture = ObserverFixture(Arc::new(ObservedChild {
+            app: "ollama",
+            child: Mutex::new(Some(child)),
+        }));
+        assert!(!fixture.0.observe_and_drain().unwrap());
+        assert!(fixture.0.child.lock().unwrap().is_some());
+        assert!(!fixture.0.stop("torch", 100).unwrap());
+        assert!(linux_group::group_has_live_members(group.as_raw()).unwrap());
+        assert!(fixture.0.stop("ollama", 100).unwrap());
+        assert!(fixture.0.child.lock().unwrap().is_none());
+        assert_eq!(
+            waitpid(group, Some(WaitPidFlag::WNOHANG)),
+            Err(nix::errno::Errno::ECHILD)
+        );
+        assert!(fixture.0.stop("ollama", 100).unwrap());
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn ollama_stop_and_real_exit_observer_share_child_custody() {

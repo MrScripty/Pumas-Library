@@ -4,6 +4,7 @@
 //! Handles state persistence and validation.
 
 use super::installer::{NativeVersionsLock, TorchVersionsLock};
+use super::operation_receipt::OperationReceipt;
 use crate::version_manager::ValidationResult;
 use futures::FutureExt;
 use pumas_library::config::AppId;
@@ -47,6 +48,7 @@ pub(crate) struct StateMutationTasks {
 struct StateMutationLifecycle {
     closed: bool,
     tasks: super::InstallationTasks,
+    receipts: Vec<OperationReceipt>,
     completion: Option<super::InstallationShutdown>,
 }
 
@@ -80,6 +82,7 @@ impl StateMutationTasks {
         work: impl FnOnce() -> Result<T> + Send + 'static,
     ) -> Result<T> {
         let (sender, receiver) = tokio::sync::oneshot::channel();
+        let receipt = OperationReceipt::default();
         {
             let mut state = self
                 .state
@@ -91,22 +94,28 @@ impl StateMutationTasks {
                 ));
             }
             state.tasks.harvest_finished();
+            state.receipts.retain(OperationReceipt::retain);
+            state.receipts.push(receipt.clone());
+            let worker_receipt = receipt.clone();
             let lease = lock.clone();
             // Register before any suspension. The receiver belongs to this
             // caller; the lifecycle owns the worker's independent receipt.
             let task = tokio::task::spawn_blocking(move || {
                 let result = work();
                 drop(lease);
-                match sender.send(result) {
-                    Ok(()) => Ok(()),
-                    Err(unobserved) => unobserved.map(|_| ()).map_err(|error| error.to_string()),
-                }
+                worker_receipt.complete(&result);
+                let _ = sender.send(result);
+                Ok(())
             });
             state.tasks.tasks.push(task);
         }
-        receiver.await.map_err(|error| {
+        let result = receiver.await.map_err(|error| {
             PumasError::Other(format!("Version metadata task lost its result: {error}"))
-        })?
+        })?;
+        // Only receiver consumption acknowledges the result; a successful send
+        // can still leave an error buffered in an abandoned operation future.
+        receipt.observe();
+        result
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -120,6 +129,7 @@ impl StateMutationTasks {
                 completion.clone()
             } else {
                 let registered = std::mem::take(&mut state.tasks);
+                let receipts = std::mem::take(&mut state.receipts);
                 let supervisor = tokio::spawn(async move {
                     let mut failures = registered.failures;
                     for task in registered.tasks {
@@ -129,6 +139,11 @@ impl StateMutationTasks {
                             Err(error) => failures.push(error.to_string()),
                         }
                     }
+                    failures.extend(
+                        receipts
+                            .iter()
+                            .filter_map(OperationReceipt::unobserved_error),
+                    );
                     if failures.is_empty() {
                         Ok(())
                     } else {
@@ -1189,6 +1204,52 @@ mod tests {
             .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn receipt_review_buffered_state_error_survives_unpolled_waiter_drop() {
+        let owner = StateMutationTasks::default();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let mut operation = Box::pin(owner.leased_transaction(&(), move || {
+            release_rx.recv().unwrap();
+            Err::<(), _>(PumasError::Other("buffered state error".into()))
+        }));
+        assert!(futures::poll!(operation.as_mut()).is_pending());
+        release_tx.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while owner.has_active_tasks() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // The worker has sent its result and finished. Never poll the receiver
+        // again: sending into its buffer is not caller observation.
+        {
+            let state = owner.state.lock().unwrap();
+            assert_eq!(state.tasks.tasks.len(), 1);
+            assert!(state.tasks.tasks[0].is_finished());
+        }
+        // A later admission harvests the finished worker without losing its receipt.
+        owner.leased_transaction(&(), || Ok(())).await.unwrap();
+        drop(operation);
+        let error = owner.shutdown().await.unwrap_err().to_string();
+        assert!(error.contains("buffered state error"));
+        assert_eq!(owner.shutdown().await.unwrap_err().to_string(), error);
+    }
+
+    #[tokio::test]
+    async fn receipt_review_observed_state_error_is_not_reported_again() {
+        let owner = StateMutationTasks::default();
+        let error = owner
+            .leased_transaction(&(), || {
+                Err::<(), _>(PumasError::Other("observed state error".into()))
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("observed state error"));
+        owner.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
     }
 
     #[tokio::test]

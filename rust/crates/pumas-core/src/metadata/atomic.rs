@@ -198,6 +198,40 @@ trait DurablePublicationAdapter {
     fn sync_parent(&self, parent: &File) -> std::io::Result<()>;
 }
 
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct PublicationSyncFault {
+    pub(crate) fail: std::sync::atomic::AtomicBool,
+    pub(crate) attempts: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(test)]
+impl DurablePublicationAdapter for PublicationSyncFault {
+    fn temp_name(&self, target: &OsStr, attempt: u8) -> OsString {
+        OsDurablePublicationAdapter.temp_name(target, attempt)
+    }
+    fn write_and_sync(&self, file: &mut cap_std::fs::File, contents: &[u8]) -> std::io::Result<()> {
+        OsDurablePublicationAdapter.write_and_sync(file, contents)
+    }
+    fn rename(&self, parent: &Dir, source: &OsStr, target: &OsStr) -> std::io::Result<()> {
+        OsDurablePublicationAdapter.rename(parent, source, target)
+    }
+    fn remove_file(&self, parent: &Dir, name: &OsStr) -> std::io::Result<()> {
+        OsDurablePublicationAdapter.remove_file(parent, name)
+    }
+    fn sync_parent(&self, parent: &File) -> std::io::Result<()> {
+        use std::sync::atomic::Ordering;
+        self.attempts.fetch_add(1, Ordering::SeqCst);
+        if self.fail.load(Ordering::SeqCst) {
+            Err(std::io::Error::other(
+                "injected receipt parent-sync failure",
+            ))
+        } else {
+            OsDurablePublicationAdapter.sync_parent(parent)
+        }
+    }
+}
+
 struct OsDurablePublicationAdapter;
 
 impl DurablePublicationAdapter for OsDurablePublicationAdapter {
@@ -386,6 +420,15 @@ impl AtomicJsonTarget {
 
     pub(crate) fn publish_json<T: Serialize>(&self, data: &T) -> AtomicPublishResult {
         self.publish_json_with_adapter(data, &OsDurablePublicationAdapter)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn publish_json_with_sync_fault<T: Serialize>(
+        &self,
+        data: &T,
+        fault: &PublicationSyncFault,
+    ) -> AtomicPublishResult {
+        self.publish_json_with_adapter(data, fault)
     }
 
     fn publish_json_with_adapter<T: Serialize>(

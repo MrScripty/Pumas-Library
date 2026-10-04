@@ -48,6 +48,7 @@ mod installer;
 mod launcher;
 mod managed_python;
 pub mod ollama;
+mod operation_receipt;
 mod progress;
 pub mod size_calculator;
 mod state;

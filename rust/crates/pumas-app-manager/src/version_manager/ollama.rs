@@ -3,6 +3,7 @@
 //! Handles Ollama binary downloads and installation.
 //! since Ollama is a pre-built binary with no Python dependencies.
 
+use super::operation_receipt::OperationReceipt;
 use crate::version_manager::progress::ProgressUpdate;
 use crate::version_manager::state::VersionState;
 use futures::FutureExt;
@@ -58,6 +59,7 @@ pub struct OllamaVersionManager {
 #[derive(Default)]
 struct OllamaActivities {
     tasks: super::InstallationTasks,
+    receipts: Vec<OperationReceipt>,
     completion: Option<super::InstallationShutdown>,
 }
 
@@ -99,6 +101,7 @@ impl OllamaVersionManager {
         operation: impl std::future::Future<Output = Result<()>> + Send + 'static,
     ) -> Result<()> {
         let (sender, receiver) = tokio::sync::oneshot::channel();
+        let receipt = OperationReceipt::default();
         {
             let mut activities = self
                 .activities
@@ -106,18 +109,24 @@ impl OllamaVersionManager {
                 .map_err(|_| PumasError::Other("Ollama activity registry poisoned".into()))?;
             self.ensure_open()?;
             activities.tasks.harvest_finished();
+            activities.receipts.retain(OperationReceipt::retain);
+            activities.receipts.push(receipt.clone());
+            let worker_receipt = receipt.clone();
             let task = tokio::spawn(async move {
                 let result = operation.await;
-                match sender.send(result) {
-                    Ok(()) => Ok(()),
-                    Err(unobserved) => unobserved.map(|_| ()).map_err(|error| error.to_string()),
-                }
+                worker_receipt.complete(&result);
+                let _ = sender.send(result);
+                Ok(())
             });
             activities.tasks.tasks.push(task);
         }
-        receiver.await.map_err(|error| {
+        let result = receiver.await.map_err(|error| {
             PumasError::Other(format!("Ollama activity lost its result: {error}"))
-        })?
+        })?;
+        // Only receiver consumption acknowledges the result; a successful send
+        // can still leave an error buffered in an abandoned operation future.
+        receipt.observe();
+        result
     }
 
     async fn send_progress(&self, sender: &mpsc::Sender<ProgressUpdate>, update: ProgressUpdate) {
@@ -145,6 +154,7 @@ impl OllamaVersionManager {
                 self.shutdown_flag.store(true, Ordering::SeqCst);
                 self.cancel_flag.store(true, Ordering::SeqCst);
                 let registered = std::mem::take(&mut activities.tasks);
+                let receipts = std::mem::take(&mut activities.receipts);
                 let owner = self.clone();
                 let supervisor = tokio::spawn(async move {
                     let mut failures = registered.failures;
@@ -158,6 +168,11 @@ impl OllamaVersionManager {
                     if let Err(error) = owner.state.write().await.shutdown_mutations().await {
                         failures.push(error.to_string());
                     }
+                    failures.extend(
+                        receipts
+                            .iter()
+                            .filter_map(OperationReceipt::unobserved_error),
+                    );
                     if failures.is_empty() {
                         Ok(())
                     } else {
@@ -936,6 +951,53 @@ mod tests {
             )
             .unwrap();
         (manager, root)
+    }
+
+    #[tokio::test]
+    async fn receipt_review_buffered_ollama_error_survives_unpolled_waiter_drop() {
+        let (manager, _root) = test_manager().await;
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let mut operation = Box::pin(manager.owned_activity(async move {
+            release_rx.await.unwrap();
+            Err(PumasError::Other("buffered Ollama error".into()))
+        }));
+        assert!(futures::poll!(operation.as_mut()).is_pending());
+        release_tx.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let finished = {
+                    let activities = manager.activities.lock().unwrap();
+                    assert_eq!(activities.tasks.tasks.len(), 1);
+                    activities.tasks.tasks[0].is_finished()
+                };
+                if finished {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // The tracked worker is finished, but the receiver has not consumed
+        // its buffered error. Cancellation must retain the shutdown receipt.
+        // A later admission harvests the finished worker without losing its receipt.
+        manager.owned_activity(async { Ok(()) }).await.unwrap();
+        drop(operation);
+        let error = manager.shutdown().await.unwrap_err().to_string();
+        assert!(error.contains("buffered Ollama error"));
+        assert_eq!(manager.shutdown().await.unwrap_err().to_string(), error);
+    }
+
+    #[tokio::test]
+    async fn receipt_review_observed_ollama_error_is_not_reported_again() {
+        let (manager, _root) = test_manager().await;
+        let error = manager
+            .owned_activity(async { Err(PumasError::Other("observed Ollama error".into())) })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("observed Ollama error"));
+        manager.shutdown().await.unwrap();
+        manager.shutdown().await.unwrap();
     }
 
     fn single_blocking_worker_runtime() -> tokio::runtime::Runtime {

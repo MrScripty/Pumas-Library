@@ -205,10 +205,14 @@ fn validate_acquisition_records(acquisitions: &BTreeMap<Uuid, AcquisitionRecord>
 pub struct AcquisitionStore {
     path: PathBuf,
     mutation: Mutex<()>,
+    #[cfg(test)]
+    publication_fault: Option<std::sync::Arc<crate::metadata::PublicationSyncFault>>,
 }
 
 pub(crate) struct AcquisitionTransaction<'a> {
     _instance_guard: MutexGuard<'a, ()>,
+    #[cfg(test)]
+    publication_fault: Option<&'a crate::metadata::PublicationSyncFault>,
     target: AtomicJsonTarget,
     _os_lock: Option<File>,
     legacy_read_only: bool,
@@ -278,6 +282,8 @@ impl AcquisitionStore {
         Self {
             path: data_dir.join("downloads.json"),
             mutation: Mutex::new(()),
+            #[cfg(test)]
+            publication_fault: None,
         }
     }
 
@@ -323,6 +329,8 @@ impl AcquisitionStore {
             }
             return Ok(AcquisitionTransaction {
                 _instance_guard: guard,
+                #[cfg(test)]
+                publication_fault: self.publication_fault.as_deref(),
                 target,
                 _os_lock: None,
                 legacy_read_only: true,
@@ -345,6 +353,8 @@ impl AcquisitionStore {
         }
         Ok(AcquisitionTransaction {
             _instance_guard: guard,
+            #[cfg(test)]
+            publication_fault: self.publication_fault.as_deref(),
             target,
             _os_lock: Some(os_lock),
             legacy_read_only: false,
@@ -370,6 +380,8 @@ impl AcquisitionStore {
         lock.lock()?;
         let transaction = AcquisitionTransaction {
             _instance_guard: guard,
+            #[cfg(test)]
+            publication_fault: self.publication_fault.as_deref(),
             target,
             _os_lock: Some(lock),
             legacy_read_only: false,
@@ -545,7 +557,9 @@ impl AcquisitionStore {
         if current == &adopted
             && document.consumer_receipts.get(&expected.id) == Some(&receipt_value)
         {
-            return Ok(());
+            // Equal visible state may follow a rename whose parent sync failed.
+            // Reestablish durability under the same transaction and authority.
+            return require_durable(transaction.publish_document(&document));
         }
         if current != expected
             || !matches!(&expected.phase, super::service::AcquisitionPhase::Using { lease: current_lease } if *current_lease == lease)
@@ -590,7 +604,9 @@ impl AcquisitionStore {
             && matches!(&current.phase, super::service::AcquisitionPhase::Using { lease: current_lease } if *current_lease == lease)
             && document.consumer_receipts.get(&expected.id) == Some(&receipt_value)
         {
-            return Ok(());
+            // Equal visible state may follow a rename whose parent sync failed.
+            // Reestablish durability under the same transaction and authority.
+            return require_durable(transaction.publish_document(&document));
         }
         if current == expected
             && matches!(&current.phase, super::service::AcquisitionPhase::Using { lease: current_lease } if *current_lease == lease)
@@ -646,7 +662,9 @@ impl AcquisitionStore {
             && matches!(&current.phase, super::service::AcquisitionPhase::Adopted { lease: current_lease } if *current_lease == lease)
             && document.consumer_receipts.get(&expected.id) == Some(&receipt_value)
         {
-            return Ok(());
+            // Equal visible state may follow a rename whose parent sync failed.
+            // Reestablish durability under the same transaction and authority.
+            return require_durable(transaction.publish_document(&document));
         }
         Err(invalid_receipt(
             "Consumer settlement does not match the exact active acquisition lease",
@@ -848,6 +866,10 @@ impl AcquisitionTransaction<'_> {
     }
 
     fn publish_document(&self, document: &AcquisitionDocument) -> AtomicPublishResult {
+        #[cfg(test)]
+        if let Some(fault) = self.publication_fault {
+            return self.target.publish_json_with_sync_fault(document, fault);
+        }
         self.target.publish_json(document)
     }
 }
@@ -960,6 +982,101 @@ mod tests {
             payload: serde_json::json!({"fixture": "complete"}),
         })
         .unwrap()
+    }
+
+    fn assert_receipt_retry_durability(mode: &str) {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let lease = Uuid::new_v4();
+        let expected = record(
+            Uuid::new_v4(),
+            "durability",
+            "workspace",
+            AcquisitionPhase::Using { lease },
+        );
+        let receipt: AcquisitionConsumerReceipt =
+            serde_json::from_value(generic_receipt(&expected, lease)).unwrap();
+        let fault = Arc::new(crate::metadata::PublicationSyncFault::default());
+        let mut store = AcquisitionStore::new(temp.path());
+        require_durable(
+            store
+                .transaction(false)
+                .unwrap()
+                .publish_document(&document(vec![expected.clone()])),
+        )
+        .unwrap();
+        if mode == "settle" {
+            store
+                .issue_consumer_receipt(&expected, lease, &receipt)
+                .unwrap();
+        }
+        store.publication_fault = Some(fault.clone());
+        fault.fail.store(true, Ordering::SeqCst);
+        let apply = |store: &AcquisitionStore, expected: &AcquisitionRecord| match mode {
+            "issue" => store.issue_consumer_receipt(expected, lease, &receipt),
+            "combined" => store.settle_consumer_use(expected, lease, receipt.clone()),
+            _ => store.settle_consumer_receipt(expected, lease, &receipt),
+        };
+        assert_parent_sync_failure(apply(&store, &expected).unwrap_err());
+        assert_eq!(fault.attempts.load(Ordering::SeqCst), 1);
+        let visible = store.acquisitions().unwrap().remove(&expected.id).unwrap();
+        assert_eq!(
+            store.consumer_receipt(expected.id).unwrap(),
+            Some(receipt.clone())
+        );
+        assert_eq!(
+            visible.phase,
+            if mode == "issue" {
+                AcquisitionPhase::Using { lease }
+            } else {
+                AcquisitionPhase::Adopted { lease }
+            }
+        );
+        let before = std::fs::read(&store.path).unwrap();
+        // Reopening must not turn visible state into a durability claim.
+        let mut reopened = AcquisitionStore::new(temp.path());
+        reopened.publication_fault = Some(fault.clone());
+        let retry_expected = if mode == "settle" {
+            &visible
+        } else {
+            &expected
+        };
+        assert_parent_sync_failure(apply(&reopened, retry_expected).unwrap_err());
+        assert_eq!(fault.attempts.load(Ordering::SeqCst), 2, "{mode}");
+        assert_eq!(std::fs::read(&store.path).unwrap(), before);
+        fault.fail.store(false, Ordering::SeqCst);
+        apply(&reopened, retry_expected).unwrap();
+        assert_eq!(fault.attempts.load(Ordering::SeqCst), 3, "{mode}");
+        assert_eq!(std::fs::read(&store.path).unwrap(), before);
+    }
+
+    fn assert_parent_sync_failure(error: PumasError) {
+        match error {
+            PumasError::Io {
+                source: Some(source),
+                ..
+            } => {
+                assert_eq!(source.to_string(), "injected receipt parent-sync failure");
+            }
+            error => panic!("Expected parent-sync failure, got {error:?}"),
+        }
+    }
+
+    #[test]
+    fn receipt_retry_durability_issue() {
+        assert_receipt_retry_durability("issue");
+    }
+
+    #[test]
+    fn receipt_retry_durability_combined_settlement() {
+        assert_receipt_retry_durability("combined");
+    }
+
+    #[test]
+    fn receipt_retry_durability_adopted_settlement() {
+        assert_receipt_retry_durability("settle");
     }
 
     fn hf_receipt(record: &AcquisitionRecord, lease: Uuid) -> Value {

@@ -268,10 +268,9 @@ fn terminate_process_windows(pid: u32) -> Result<bool> {
 ///   process PID if no matching group exists
 /// - **Windows**: Uses `taskkill /T` which already handles the tree
 ///
-/// Linux direct-child group leaders remain unreaped until a complete group
-/// observation confirms drainage. Callers must not externally reap that child
-/// during this call. PID-only stops of non-child processes retain best-effort
-/// behavior and do not establish an ownership pin for the process group.
+/// This PID-only interface is best-effort and does not establish exclusive
+/// custody of a Child or its reaper. Managed Linux children use the separate
+/// borrowed-Child stop under their shared observation/stop mutex.
 pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
     #[cfg(not(unix))]
     let _ = timeout_ms;
@@ -291,24 +290,6 @@ pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
         }
 
         let nix_pid = Pid::from_raw(pid as i32);
-
-        #[cfg(target_os = "linux")]
-        if nix::unistd::getpgid(Some(nix_pid)) == Ok(nix_pid) {
-            match super::linux_group::observe_exit(pid) {
-                // The unreaped direct child pins this process group. Keep it
-                // until every live member has drained, including descendants
-                // that outlive a SIGTERM-terminated leader.
-                Ok(_) => return terminate_owned_linux_group(nix_pid, timeout_ms),
-                // PID-only stops of non-child processes retain the legacy
-                // best-effort path; they cannot establish this ownership pin.
-                Err(error) if error.raw_os_error() == Some(libc::ECHILD) => {}
-                Err(error) => {
-                    return Err(PumasError::Other(format!(
-                        "Observing owned process-group leader {pid}: {error}"
-                    )));
-                }
-            }
-        }
 
         send_tree_signal(nix_pid, Signal::SIGTERM)?;
 
@@ -365,14 +346,17 @@ pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
 }
 
 #[cfg(target_os = "linux")]
-fn terminate_owned_linux_group(pid: nix::unistd::Pid, timeout_ms: u64) -> Result<bool> {
+pub(crate) fn terminate_owned_linux_group(
+    child: &mut std::process::Child,
+    timeout_ms: u64,
+) -> Result<bool> {
     use nix::sys::signal::{killpg, Signal};
-    use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
-    use nix::unistd::getpgid;
+    use nix::unistd::{getpgid, Pid};
     use std::thread::sleep;
     use std::time::Duration;
 
-    let raw = u32::try_from(pid.as_raw()).expect("owned PID was range-checked");
+    let raw = child.id();
+    let pid = Pid::from_raw(i32::try_from(raw).expect("Linux child PID fits pid_t"));
     let observe = || {
         super::linux_group::observe_exit(raw).map_err(|error| {
             PumasError::Other(format!(
@@ -407,18 +391,12 @@ fn terminate_owned_linux_group(pid: nix::unistd::Pid, timeout_ms: u64) -> Result
             ))),
         }
     };
-    let reap = || -> Result<bool> {
-        loop {
-            match waitpid(pid, Some(WaitPidFlag::WNOHANG)) {
-                Ok(WaitStatus::Exited(..) | WaitStatus::Signaled(..)) => return Ok(true),
-                Err(nix::errno::Errno::EINTR) => continue,
-                result => {
-                    return Err(PumasError::Other(format!(
-                        "Reaping drained owned process-group leader {raw}: {result:?}"
-                    )));
-                }
-            }
-        }
+    let mut reap = || -> Result<bool> {
+        child.wait().map(|_| true).map_err(|error| {
+            PumasError::Other(format!(
+                "Reaping drained owned process-group leader {raw}: {error}"
+            ))
+        })
     };
 
     signal(Signal::SIGTERM)?;
@@ -657,7 +635,7 @@ mod tests {
             group
         );
         assert!(linux_group::group_has_live_members(group.as_raw()).unwrap());
-        let stopped = terminate_process_tree(pid, 100);
+        let stopped = terminate_owned_linux_group(&mut child, 100);
         let leader_reaped = !is_process_alive(pid);
         let live = linux_group::group_has_live_members(group.as_raw());
         // Its unreaped Child pins the exact worker even when the old helper

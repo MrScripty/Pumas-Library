@@ -7066,20 +7066,29 @@ mod tests {
     }
     #[tokio::test]
     async fn queued_pause_preserves_destination_and_restarts_at_its_fifo_position() {
-        assert_queued_pause_resume_preserves_marker(true, false).await;
+        assert_queued_pause_resume_preserves_marker(true, false, false).await;
     }
 
     #[tokio::test]
     async fn queued_pause_resumes_with_its_marker_in_the_same_client() {
-        assert_queued_pause_resume_preserves_marker(false, false).await;
+        assert_queued_pause_resume_preserves_marker(false, false, false).await;
     }
 
     #[tokio::test]
     async fn restored_implicit_selection_preserves_queued_marker_until_its_turn() {
-        assert_queued_pause_resume_preserves_marker(true, true).await;
+        assert_queued_pause_resume_preserves_marker(true, true, false).await;
     }
 
-    async fn assert_queued_pause_resume_preserves_marker(restart: bool, implicit: bool) {
+    #[tokio::test]
+    async fn queued_pause_waits_for_owned_persistence_without_a_settlement_sla() {
+        assert_queued_pause_resume_preserves_marker(false, false, true).await;
+    }
+
+    async fn assert_queued_pause_resume_preserves_marker(
+        restart: bool,
+        implicit: bool,
+        defer_pause: bool,
+    ) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let temp = TempDir::new().unwrap();
         let destination = temp.path().join("model");
@@ -7131,17 +7140,47 @@ mod tests {
             client.get_download_status(&successor).await,
             Some(DownloadStatus::Queued)
         );
+        let deferred = if defer_pause {
+            let (entered, received) = tokio::sync::oneshot::channel();
+            let entered = std::sync::Mutex::new(Some(entered));
+            let (release, held) = std::sync::mpsc::channel();
+            let held = std::sync::Mutex::new(held);
+            client
+                .download_tasks
+                .set_blocking_observer(Some(Arc::new(move |operation| {
+                    if operation == "persist download pause" {
+                        if let Some(entered) = entered.lock().unwrap().take() {
+                            entered.send(()).unwrap();
+                            held.lock().unwrap().recv().unwrap();
+                        }
+                    }
+                })));
+            Some((received, release))
+        } else {
+            None
+        };
         assert!(client.pause_download(&successor).await.unwrap());
-        let paused = tokio::time::timeout(Duration::from_millis(500), async {
-            while client.get_download_status(&successor).await != Some(DownloadStatus::Paused) {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await;
-        if paused.is_err() {
-            client.cancel_download(&successor).await.unwrap();
-            client.cancel_download(&head).await.unwrap();
+        if let Some((entered, release)) = deferred {
+            tokio::time::timeout(Duration::from_secs(3), entered)
+                .await
+                .unwrap()
+                .unwrap();
+            // The actual persistence closure is held at its entry boundary.
+            // Advancing this runtime's clock does not complete that real I/O,
+            // and accepting a pause does not promise a wall-clock settlement SLA.
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(1)).await;
+            tokio::time::resume();
+            let held_status = client.get_download_status(&successor).await;
+            let held_marker = std::fs::read(destination.join(".pumas_download")).unwrap();
+            release.send(()).unwrap();
+            client.download_tasks.set_blocking_observer(None);
+            assert_eq!(held_status, Some(DownloadStatus::Pausing));
+            assert_eq!(held_marker, marker);
         }
+        // Observe owned worker completion before its terminal state. Keep the
+        // existing completion watchdog; filesystem scheduling is not an
+        // additional 500 ms pause-settlement requirement.
         tokio::time::timeout(Duration::from_secs(3), async {
             while client
                 .download_tasks
@@ -7157,8 +7196,9 @@ mod tests {
         })
         .await
         .unwrap();
-        assert!(
-            paused.is_ok(),
+        assert_eq!(
+            client.get_download_status(&successor).await,
+            Some(DownloadStatus::Paused),
             "queued pause must settle while the dormant head retains its claim"
         );
         assert_eq!(

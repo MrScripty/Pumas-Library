@@ -24,6 +24,56 @@ struct CachedProcessStatus {
     generation: u64,
 }
 
+#[cfg(target_os = "linux")]
+struct ObservedChild {
+    app: &'static str,
+    child: Mutex<Option<Child>>,
+}
+
+#[cfg(target_os = "linux")]
+impl ObservedChild {
+    fn stop(&self, app: &str, timeout_ms: u64) -> Result<bool> {
+        if self.app != app {
+            return Ok(false);
+        }
+        let mut slot = self.child.lock().unwrap();
+        let Some(child) = slot.as_mut() else {
+            return Ok(true);
+        };
+        let stopped = ProcessLauncher::stop_owned_process(child, timeout_ms)?;
+        if stopped {
+            slot.take();
+        }
+        Ok(stopped)
+    }
+
+    fn observe_and_drain(&self) -> Result<bool> {
+        let mut slot = self.child.lock().unwrap();
+        let Some(child) = slot.as_mut() else {
+            return Ok(true);
+        };
+        if crate::platform::linux_group::observe_exit(child.id())?.is_none() {
+            return Ok(false);
+        }
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap());
+        let group = nix::unistd::getpgid(Some(pid)).map_err(|error| {
+            PumasError::Other(format!(
+                "Identifying observed {} process group {pid}: {error}",
+                self.app
+            ))
+        })?;
+        let drained = if group == pid {
+            ProcessLauncher::stop_owned_process(child, 2000)?
+        } else {
+            child.wait().map(|_| true)?
+        };
+        if drained {
+            slot.take();
+        }
+        Ok(drained)
+    }
+}
+
 /// Process manager for inference runtimes.
 #[derive(Clone)]
 pub struct ProcessManager {
@@ -39,6 +89,10 @@ pub struct ProcessManager {
     ollama_status: Arc<Mutex<CachedProcessStatus>>,
     /// Cached Torch liveness from startup, launch, stop, or explicit refresh.
     torch_status: Arc<Mutex<CachedProcessStatus>>,
+    /// One actual Child/reaper owner shared by observation and stop. Completed
+    /// slots prevent known managed PID files falling back to numeric signals.
+    #[cfg(target_os = "linux")]
+    owned_children: Arc<Mutex<HashMap<u32, Arc<ObservedChild>>>>,
 }
 
 impl ProcessManager {
@@ -69,6 +123,8 @@ impl ProcessManager {
             last_launch_error: Arc::new(Mutex::new(None)),
             ollama_status: Arc::new(Mutex::new(ollama_status)),
             torch_status: Arc::new(Mutex::new(torch_status)),
+            #[cfg(target_os = "linux")]
+            owned_children: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -129,7 +185,7 @@ impl ProcessManager {
             *log = result.log_path.clone();
             let generation = self.set_ollama_status(true);
             if let Some(child) = result.process.take() {
-                Self::observe_child_exit(self.ollama_status.clone(), "ollama", generation, child);
+                self.observe_child_exit(self.ollama_status.clone(), "ollama", generation, child);
             }
         } else if let Some(ref error) = result.error {
             let mut last_error = self.last_launch_error.lock().unwrap();
@@ -159,14 +215,14 @@ impl ProcessManager {
                         if let Ok(pid_str) = fs::read_to_string(&pid_file) {
                             if let Ok(pid) = pid_str.trim().parse::<u32>() {
                                 info!("Stopping Ollama process {} from {:?}", pid, pid_file);
-                                if ProcessLauncher::stop_process(pid, timeout_ms)? {
+                                if self.stop_known_process("ollama", pid, timeout_ms)? {
                                     stopped_any = true;
-                                }
-                                // Remove PID file
-                                if let Err(e) = ProcessLauncher::remove_pid_file(&pid_file) {
-                                    warn!("Failed to remove PID file {:?}: {}", pid_file, e);
-                                } else {
-                                    info!("Removed Ollama PID file: {:?}", pid_file);
+                                    // Remove PID file
+                                    if let Err(e) = ProcessLauncher::remove_pid_file(&pid_file) {
+                                        warn!("Failed to remove PID file {:?}: {}", pid_file, e);
+                                    } else {
+                                        info!("Removed Ollama PID file: {:?}", pid_file);
+                                    }
                                 }
                             }
                         }
@@ -176,17 +232,13 @@ impl ProcessManager {
         }
 
         // Also cleanup any orphaned Ollama processes by pattern
-        let orphaned = ProcessLauncher::stop_processes_by_pattern("ollama serve", timeout_ms)?;
+        let orphaned = self.stop_matching_processes("ollama", "ollama serve", timeout_ms)?;
         if orphaned > 0 {
             info!("Stopped {} orphaned ollama processes", orphaned);
             stopped_any = true;
         }
 
-        if stopped_any {
-            self.set_ollama_status(false);
-        } else {
-            self.refresh_ollama_running();
-        }
+        self.refresh_ollama_running();
 
         info!("stop_ollama completed, stopped_any={}", stopped_any);
         Ok(stopped_any)
@@ -311,7 +363,7 @@ impl ProcessManager {
             *log = result.log_path.clone();
             let generation = self.set_torch_status(true);
             if let Some(child) = result.process.take() {
-                Self::observe_child_exit(self.torch_status.clone(), "torch", generation, child);
+                self.observe_child_exit(self.torch_status.clone(), "torch", generation, child);
             }
         } else if let Some(ref error) = result.error {
             let mut last_error = self.last_launch_error.lock().unwrap();
@@ -346,13 +398,13 @@ impl ProcessManager {
                         if let Ok(pid_str) = fs::read_to_string(&pid_file) {
                             if let Ok(pid) = pid_str.trim().parse::<u32>() {
                                 info!("Stopping Torch process {} from {:?}", pid, pid_file);
-                                if ProcessLauncher::stop_process(pid, timeout_ms)? {
+                                if self.stop_known_process("torch", pid, timeout_ms)? {
                                     stopped_any = true;
-                                }
-                                if let Err(e) = ProcessLauncher::remove_pid_file(&pid_file) {
-                                    warn!("Failed to remove PID file {:?}: {}", pid_file, e);
-                                } else {
-                                    info!("Removed Torch PID file: {:?}", pid_file);
+                                    if let Err(e) = ProcessLauncher::remove_pid_file(&pid_file) {
+                                        warn!("Failed to remove PID file {:?}: {}", pid_file, e);
+                                    } else {
+                                        info!("Removed Torch PID file: {:?}", pid_file);
+                                    }
                                 }
                             }
                         }
@@ -362,17 +414,13 @@ impl ProcessManager {
         }
 
         // Also cleanup any orphaned torch serve processes by pattern
-        let orphaned = ProcessLauncher::stop_processes_by_pattern("serve.py", timeout_ms)?;
+        let orphaned = self.stop_matching_processes("torch", "serve.py", timeout_ms)?;
         if orphaned > 0 {
             info!("Stopped {} orphaned torch server processes", orphaned);
             stopped_any = true;
         }
 
-        if stopped_any {
-            self.set_torch_status(false);
-        } else {
-            self.refresh_torch_running();
-        }
+        self.refresh_torch_running();
 
         info!("stop_torch completed, stopped_any={}", stopped_any);
         Ok(stopped_any)
@@ -427,18 +475,78 @@ impl ProcessManager {
         status.generation
     }
 
+    fn stop_known_process(&self, app: &str, pid: u32, timeout_ms: u64) -> Result<bool> {
+        #[cfg(target_os = "linux")]
+        {
+            let owned = self.owned_children.lock().unwrap().get(&pid).cloned();
+            if let Some(owned) = owned {
+                return owned.stop(app, timeout_ms);
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = app;
+        ProcessLauncher::stop_process(pid, timeout_ms)
+    }
+
+    fn stop_matching_processes(&self, app: &str, pattern: &str, timeout_ms: u64) -> Result<u32> {
+        let mut stopped = 0;
+        for (pid, _) in crate::platform::find_processes_by_cmdline(pattern) {
+            #[cfg(target_os = "linux")]
+            let owned = self.owned_children.lock().unwrap().contains_key(&pid);
+            #[cfg(not(target_os = "linux"))]
+            let owned = false;
+            let complete = if owned {
+                self.stop_known_process(app, pid, timeout_ms)?
+            } else {
+                // Preserve the legacy single-PID orphan fallback. Never route
+                // it through inferred exclusive group ownership.
+                crate::platform::terminate_process(pid, timeout_ms)?
+            };
+            if complete {
+                stopped += 1;
+            }
+        }
+        Ok(stopped)
+    }
+
     fn observe_child_exit(
+        &self,
         status_cache: Arc<Mutex<CachedProcessStatus>>,
         label: &'static str,
         generation: u64,
-        mut child: Child,
+        child: Child,
     ) {
         let pid = child.id();
+        #[cfg(target_os = "linux")]
+        let owned = {
+            let owned = Arc::new(ObservedChild {
+                app: label,
+                child: Mutex::new(Some(child)),
+            });
+            self.owned_children
+                .lock()
+                .unwrap()
+                .insert(pid, owned.clone());
+            owned
+        };
         let thread_name = format!("pumas-{label}-wait");
         if let Err(error) = thread::Builder::new().name(thread_name).spawn(move || {
-            match child.wait() {
-                Ok(status) => info!("{label} process {pid} exited with {status}"),
-                Err(error) => warn!("failed waiting for {label} process {pid}: {error}"),
+            #[cfg(target_os = "linux")]
+            loop {
+                match owned.observe_and_drain() {
+                    Ok(true) => break,
+                    Ok(false) => {}
+                    Err(error) => warn!("failed observing/draining {label} process {pid}: {error}"),
+                }
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                let mut child = child;
+                match child.wait() {
+                    Ok(status) => info!("{label} process {pid} exited with {status}"),
+                    Err(error) => warn!("failed waiting for {label} process {pid}: {error}"),
+                }
             }
 
             let mut cached = status_cache.lock().unwrap();
@@ -645,7 +753,7 @@ mod tests {
         let generation = manager.set_ollama_status(true);
         let child = Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap();
 
-        ProcessManager::observe_child_exit(
+        manager.observe_child_exit(
             manager.ollama_status.clone(),
             "ollama-test",
             generation,
@@ -658,5 +766,107 @@ mod tests {
         }
 
         assert!(!manager.is_ollama_running());
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ollama_stop_and_real_exit_observer_share_child_custody() {
+        assert_stop_with_exit_observer("ollama", false);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn torch_stop_and_real_exit_observer_share_child_custody() {
+        assert_stop_with_exit_observer("torch", false);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pattern_cleanup_uses_the_same_owned_child_slot() {
+        assert_stop_with_exit_observer("ollama", true);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn assert_stop_with_exit_observer(label: &'static str, pattern_stop: bool) {
+        use crate::platform::linux_group;
+        use std::os::unix::fs::PermissionsExt;
+
+        struct ReleaseWorker {
+            release: PathBuf,
+            group: i32,
+        }
+        impl Drop for ReleaseWorker {
+            fn drop(&mut self) {
+                let _ = fs::write(&self.release, b"release");
+                let until = std::time::Instant::now() + Duration::from_secs(3);
+                while !linux_group::group_has_live_members(self.group).is_ok_and(|live| !live)
+                    && std::time::Instant::now() < until
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+
+        let temp = TempDir::new().unwrap();
+        let manager = ProcessManager::new(temp.path(), None).unwrap();
+        let binary = temp.path().join("owned-fixture");
+        fs::write(
+            &binary,
+            "#!/bin/bash\nbash -c 'trap \"\" TERM; echo $$ > worker.pid; for i in $(seq 1 300); do [ -f release ] && break; sleep .01; done' &\nwait\n",
+        ).unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut config = BinaryLaunchConfig::ollama("owned-fixture", temp.path());
+        config.binary_path = binary;
+        config.command = None;
+        config.health_check_url = None;
+        let mut launched = ProcessLauncher::launch_binary(&config).unwrap();
+        assert!(launched.success);
+        let child = launched.process.take().unwrap();
+        let group = i32::try_from(child.id()).unwrap();
+        let release = ReleaseWorker {
+            release: temp.path().join("release"),
+            group,
+        };
+        let until = std::time::Instant::now() + Duration::from_secs(3);
+        while !temp.path().join("worker.pid").exists() {
+            assert!(
+                std::time::Instant::now() < until,
+                "fixture worker readiness"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let status = if label == "ollama" {
+            manager.ollama_status.clone()
+        } else {
+            manager.torch_status.clone()
+        };
+        let generation = ProcessManager::set_cached_status(&status, true);
+        manager.observe_child_exit(status, label, generation, child);
+        let pid = u32::try_from(group).unwrap();
+        let other_app = if label == "ollama" { "torch" } else { "ollama" };
+        assert!(!manager.stop_known_process(other_app, pid, 200).unwrap());
+        assert!(linux_group::group_has_live_members(group).unwrap());
+        let stopping = manager.clone();
+        let stopped = if pattern_stop {
+            stopping
+                .stop_matching_processes(label, temp.path().to_str().unwrap(), 200)
+                .map(|count| count > 0)
+        } else {
+            stopping.stop_known_process(label, pid, 200)
+        };
+        let live_before_release = linux_group::group_has_live_members(group).unwrap();
+        // Only our cooperative worker sees this private release file. Never
+        // signal a numeric PGID after the old observer may have reaped its pin.
+        drop(release);
+        assert!(
+            stopped.unwrap(),
+            "managed stop must retain exclusive child custody"
+        );
+        assert!(
+            !live_before_release,
+            "managed stop must drain the TERM-ignoring worker"
+        );
+        // The completed slot remains recognizable without signalling a stale
+        // numeric PID after the observer or stopper performed the sole reap.
+        assert!(stopping.stop_known_process(label, pid, 200).unwrap());
     }
 }

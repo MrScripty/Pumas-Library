@@ -220,24 +220,6 @@ pub(crate) struct DownloadRecoveryDestination {
 #[cfg(test)]
 type CleanupParentSync = dyn Fn(&Dir) -> io::Result<()> + Send + Sync;
 
-impl super::partial_download::PartialDownloadFiles for DownloadRecoveryDestination {
-    fn file_len(&self, filename: &str) -> Result<Option<u64>> {
-        Ok(self.file_len(filename)?)
-    }
-    fn part_len(&self, filename: &str) -> Result<Option<u64>> {
-        Ok(self.part_len(filename)?)
-    }
-    fn rename_part_to_file(&self, filename: &str) -> Result<()> {
-        Ok(self.rename_part_to_file(filename)?)
-    }
-    fn remove_part(&self, filename: &str) -> Result<()> {
-        Ok(self.remove_part(filename)?)
-    }
-    fn remove_marker(&self) -> Result<()> {
-        Ok(self.remove_marker()?)
-    }
-}
-
 struct CreationAnchor {
     directory: Dir,
     relative: PathBuf,
@@ -279,6 +261,10 @@ pub(crate) struct DestinationIdentity {
     root: FilesystemIdentity,
     relative: String,
 }
+
+/// Equality key for one configured physical root; it grants no filesystem access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct DestinationRootIdentity(FilesystemIdentity);
 
 /// One configured root opened by the composition owner after directory setup.
 #[derive(Clone)]
@@ -322,6 +308,13 @@ impl RootExecutionGrant {
 }
 
 impl DownloadDestinationRoot {
+    /// Equality identity for the configured physical root. This is only a key
+    /// for shared in-process grant bookkeeping; the held capability remains
+    /// the authority for every filesystem effect.
+    pub(crate) fn grant_identity(&self) -> DestinationRootIdentity {
+        DestinationRootIdentity(self.0.root_identity)
+    }
+
     pub(crate) fn same_physical_root(&self, other: &Self) -> bool {
         self.0.root_identity == other.0.root_identity
     }
@@ -726,6 +719,32 @@ impl DownloadRecoveryDestination {
         })
     }
 
+    /// Transfer already-held directory authority into the neutral workspace.
+    /// The model root and destination chain remain revalidated on every effect.
+    pub(crate) fn acquisition_workspace(
+        &self,
+        execution_lease: Arc<dyn Send + Sync>,
+    ) -> Result<crate::acquisition::AcquisitionWorkspace> {
+        let directory = self.directory(false)?;
+        let destination = self.clone();
+        let expected = directory_identity(&directory)?;
+        let locator = self.persisted_identity()?;
+        crate::acquisition::AcquisitionWorkspace::from_capability(
+            directory,
+            crate::acquisition::WorkspaceIdentity {
+                root_identity: locator.library_root,
+                relative_target: locator.relative_target,
+            },
+            execution_lease,
+            move || {
+                if directory_identity(&destination.directory(false)?)? != expected {
+                    return Err(invalid_capability_path().into());
+                }
+                Ok(())
+            },
+        )
+    }
+
     pub(crate) fn identity(&self) -> DestinationIdentity {
         DestinationIdentity {
             root: self.authority.root_identity,
@@ -790,6 +809,19 @@ impl DownloadRecoveryDestination {
         held.directory.try_clone().map(Some)
     }
 
+    pub(crate) fn import_receipt_claimed(&self) -> io::Result<bool> {
+        let Some(directory) = self.directory_if_present(false)? else {
+            return Ok(false);
+        };
+        let claimed = match directory.symlink_metadata(IMPORT_RECEIPT) {
+            Ok(_) => true,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error),
+        };
+        self.directory(false)?;
+        Ok(claimed)
+    }
+
     pub(crate) fn model_directory_exists(&self) -> io::Result<bool> {
         Ok(self.directory_if_present(false)?.is_some())
     }
@@ -809,13 +841,58 @@ impl DownloadRecoveryDestination {
         Ok(metadata)
     }
 
+    pub(crate) fn read_model_metadata_value(&self) -> Result<Option<Value>> {
+        let Some(directory) = self.directory_if_present(false)? else {
+            return Ok(None);
+        };
+        let metadata = Self::read_provenance_file(&directory, "metadata.json")?;
+        self.directory(false)?;
+        Ok(metadata)
+    }
+
     pub(crate) fn write_model_metadata(
         &self,
         metadata: &crate::models::ModelMetadata,
     ) -> Result<()> {
-        if metadata.import_publication.is_some() {
-            require_import_document_size(metadata)?;
+        self.write_model_metadata_value(&serde_json::to_value(metadata)?)
+    }
+
+    /// Only the copied producer uses this publication primitive to establish
+    /// its initial Pending identity. Ordinary typed/raw edits preserve gates.
+    pub(crate) fn write_copied_import_metadata(
+        &self,
+        metadata: &crate::models::ModelMetadata,
+    ) -> Result<()> {
+        require_import_document_size(metadata)?;
+        self.publish_model_metadata_value(&serde_json::to_value(metadata)?)
+    }
+
+    /// Raw re-publication is used by the HF completion owner. It cannot erase
+    /// or alter a copied producer's gates, including malformed raw identity.
+    pub(crate) fn write_model_metadata_value(&self, metadata: &Value) -> Result<()> {
+        require_import_document_size(metadata)?;
+        let existing = self.read_model_metadata_value()?;
+        let previous = existing
+            .as_ref()
+            .and_then(|value| value.get("import_publication"));
+        let next = metadata.get("import_publication");
+        if self.import_receipt_claimed()? && previous.is_none_or(|value| value.is_null())
+            || previous.filter(|value| !value.is_null()) != next.filter(|value| !value.is_null())
+            || previous.is_some_and(|value| !value.is_null())
+                && ["import_state", "validation_state"].iter().any(|field| {
+                    existing.as_ref().and_then(|value| value.get(*field)) != metadata.get(*field)
+                })
+        {
+            return Err(PumasError::Validation {
+                field: "import_publication".into(),
+                message: "Metadata publication cannot replace copied-import identity or readiness"
+                    .into(),
+            });
         }
+        self.publish_model_metadata_value(metadata)
+    }
+
+    fn publish_model_metadata_value(&self, metadata: &Value) -> Result<()> {
         let directory = self.directory(false)?;
         let expected = directory_identity(&directory)?;
         let destination = self.clone();
@@ -1150,7 +1227,16 @@ impl DownloadRecoveryDestination {
         if !file.metadata()?.is_file() {
             return Err(invalid_capability_path().into());
         }
-        let value: Value = serde_json::from_reader(file).map_err(|source| PumasError::Json {
+        let mut bytes = Vec::new();
+        file.take(IMPORT_DOCUMENT_MAX_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > IMPORT_DOCUMENT_MAX_BYTES {
+            return Err(PumasError::Validation {
+                field: "import_publication.evidence_size".into(),
+                message: "Held metadata/provenance exceeds its bounded observation limit".into(),
+            });
+        }
+        let value: Value = serde_json::from_slice(&bytes).map_err(|source| PumasError::Json {
             message: "Download provenance is not valid JSON".to_string(),
             source: Some(source),
         })?;
@@ -1297,6 +1383,7 @@ impl DownloadRecoveryDestination {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn create_parent(&self, file: &str) -> io::Result<()> {
         self.file_parent(file, true).map(|_| ())
     }
@@ -1388,6 +1475,7 @@ impl DownloadRecoveryDestination {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn open_part(&self, file: &str, append: bool) -> io::Result<std::fs::File> {
         let (parent, name) = self.file_parent(file, true)?;
         let name = format!(
@@ -1424,6 +1512,7 @@ impl DownloadRecoveryDestination {
         self.remove_file_durable(&parent, &name)
     }
 
+    #[cfg(test)]
     pub(crate) fn rename_part_to_file(&self, file: &str) -> io::Result<()> {
         let (parent, name) = self.file_parent(file, false)?;
         let part = format!(

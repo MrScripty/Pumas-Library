@@ -30,6 +30,7 @@
 #[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();
 
+pub mod acquisition;
 pub mod cache;
 pub mod cancel;
 pub mod config;
@@ -142,6 +143,16 @@ impl PumasApi {
     /// Access transport-independent local model intent operations.
     pub fn intent(&self) -> intent::IntentApi<'_> {
         intent::IntentApi::new(&self.primary().intent_service)
+    }
+
+    /// Shared source-neutral artifact acquisition owner used by local consumers.
+    pub fn acquisition(&self) -> &Arc<acquisition::AcquisitionService> {
+        &self.primary().acquisition
+    }
+
+    /// Close the shared acquisition supervisor after consumer-specific shutdown.
+    pub async fn shutdown_acquisition(&self) -> Result<()> {
+        self.primary().acquisition.shutdown().await
     }
 
     /// Close local intent admission, drain admitted local effects, then drain downloads.

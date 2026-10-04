@@ -201,7 +201,7 @@ describe('Header Component', () => {
   it('keeps concurrent model and Torch runtime counts and speed alongside the Torch phase', () => {
     render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0"
       activeModelDownload={{
-        downloadId: 'model-1', repoId: 'org/model', status: 'downloading', progress: 42,
+        downloadId: 'model-1', repoId: 'org/model', status: 'downloading', progress: 0.42,
         downloadedBytes: 1024, totalBytes: 4096, speed: 4 * 1024 * 1024, etaSeconds: 30,
       }}
       activeModelDownloadCount={1}
@@ -216,10 +216,22 @@ describe('Header Component', () => {
     expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('Creating managed Python environment');
   });
 
+  it('shows the model progress fraction as a whole percent in the header status', () => {
+    render(<Header {...defaultProps}
+      activeModelDownload={{
+        downloadId: 'model-1', repoId: 'org/model', status: 'downloading', progress: 0.42,
+        downloadedBytes: 420, totalBytes: 1000, speed: null, etaSeconds: null,
+      }}
+      activeModelDownloadCount={0}
+    />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Downloading model · 42%');
+  });
+
   it('keeps download status when Torch resolution overlaps a model transfer', () => {
     render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0"
       activeModelDownload={{
-        downloadId: 'model-1', repoId: 'org/model', status: 'downloading', progress: 42,
+        downloadId: 'model-1', repoId: 'org/model', status: 'downloading', progress: 0.42,
         downloadedBytes: 1024, totalBytes: 4096, speed: 4 * 1024 * 1024, etaSeconds: 30,
       }}
       activeModelDownloadCount={1}
@@ -237,7 +249,7 @@ describe('Header Component', () => {
   it('keeps model download status when another runtime installation has not reported progress yet', () => {
     render(<Header {...defaultProps} appId="ollama" installingTag="v0.6.0"
       activeModelDownload={{
-        downloadId: 'model-1', repoId: 'org/model', status: 'downloading', progress: 42,
+        downloadId: 'model-1', repoId: 'org/model', status: 'downloading', progress: 0.42,
         downloadedBytes: 1024, totalBytes: 4096, speed: 4 * 1024 * 1024, etaSeconds: 30,
       }}
       activeModelDownloadCount={1}
@@ -249,7 +261,7 @@ describe('Header Component', () => {
   it('shows Torch download speed alongside a queued model download', () => {
     render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0"
       activeModelDownload={{
-        downloadId: 'model-1', repoId: 'org/model', status: 'queued', progress: 42,
+        downloadId: 'model-1', repoId: 'org/model', status: 'queued', progress: 0.42,
         downloadedBytes: 1024, totalBytes: 4096, speed: 0, etaSeconds: null,
       }}
       activeModelDownloadCount={1}
@@ -276,7 +288,7 @@ describe('Header Component', () => {
   ] as const)('keeps the %s model state while Torch installation is pending', (status, label) => {
     render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0"
       activeModelDownload={{
-        downloadId: 'model-1', repoId: 'org/model', status, progress: 42,
+        downloadId: 'model-1', repoId: 'org/model', status, progress: 0.42,
         downloadedBytes: 1024, totalBytes: 4096, speed: 0, etaSeconds: null,
       }}
       activeModelDownloadCount={1}
@@ -290,7 +302,7 @@ describe('Header Component', () => {
       downloadId: 'dl-1',
       repoId: 'meta-llama/Llama-3.2-1B-Instruct',
       status: 'downloading' as const,
-      progress: 42,
+      progress: 0.42,
       downloadedBytes: 2 * 1024 * 1024 * 1024,
       totalBytes: 5 * 1024 * 1024 * 1024,
       speed: 4 * 1024 * 1024,
@@ -346,7 +358,7 @@ describe('Header Component', () => {
       downloadId: 'dl-1',
       repoId: 'meta-llama/Llama-3.2-1B-Instruct',
       status: 'downloading' as const,
-      progress: 42,
+      progress: 0.42,
       downloadedBytes: 2 * 1024 * 1024 * 1024,
       totalBytes: 5 * 1024 * 1024 * 1024,
       speed: 10 * 1024 * 1024,
@@ -369,7 +381,7 @@ describe('Header Component', () => {
       downloadId: 'dl-1',
       repoId: 'meta-llama/Llama-3.2-1B-Instruct',
       status: 'downloading' as const,
-      progress: 42,
+      progress: 0.42,
       downloadedBytes: 2 * 1024 * 1024 * 1024,
       totalBytes: 5 * 1024 * 1024 * 1024,
       speed: 10 * 1024 * 1024,

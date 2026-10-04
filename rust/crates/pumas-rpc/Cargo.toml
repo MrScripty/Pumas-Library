@@ -54,6 +54,8 @@ reqwest = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 
 [features]
+# Weak forwarding preserves the inference-disabled dependency boundary.
+test-support = ["pumas-app-manager?/test-support"]
 export-contract = ["dep:schemars", "dep:tempfile", "pumas-library/contract-schema"]
 default = ["inference-plugins"]
 inference-plugins = [

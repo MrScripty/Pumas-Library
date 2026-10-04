@@ -63,6 +63,58 @@ test('partial recovery admits model tickets and rejects retired recovery request
   }
 });
 
+for (const method of [
+  'get_model_download_status',
+  'pause_model_download',
+  'resume_model_download',
+  'cancel_model_download',
+]) {
+  test(`${method} IPC validates download IDs without changing valid values`, () => {
+    for (const download_id of [
+      'download-123',
+      ' \t download λ \n ',
+      'a'.repeat(4096),
+      'λ'.repeat(2048),
+      '😀'.repeat(1024),
+    ]) {
+      const params = { download_id };
+      const decoded = validateApiCallPayload(method, params);
+      assert.equal(decoded.method, method);
+      assert.deepEqual(JSON.parse(JSON.stringify(decoded.params)), params);
+      assert.equal(decoded.params.download_id, download_id);
+      assert.notEqual(decoded.params, params);
+      assert.ok(Object.isFrozen(decoded.params));
+    }
+
+    for (const params of [
+      undefined,
+      null,
+      {},
+      [],
+      true,
+      42,
+      'download-123',
+      { download_id: '' },
+      { download_id: ' ' },
+      { download_id: '\t\n\r' },
+      { download_id: '\u00a0\u2003' },
+      { download_id: 'a'.repeat(4097) },
+      { download_id: 'λ'.repeat(2049) },
+      { download_id: '😀'.repeat(1025) },
+      { download_id: undefined },
+      { download_id: null },
+      { download_id: true },
+      { download_id: 42 },
+      { download_id: [] },
+      { download_id: {} },
+      { download_id: 'download-123', extra: true },
+      { downloadId: 'download-123' },
+    ]) {
+      assert.throws(() => validateApiCallPayload(method, params), /Invalid API params/);
+    }
+  });
+}
+
 test('validateApiCallPayload rejects unknown methods and non-record params', () => {
   assert.deepEqual(validateApiCallPayload('get_status', undefined), {
     method: 'get_status',

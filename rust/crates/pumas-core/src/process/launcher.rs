@@ -399,6 +399,13 @@ impl ProcessLauncher {
         platform::terminate_process_tree(pid, timeout_ms)
     }
 
+    /// Stop an exclusively borrowed Linux child while retaining its PID pin.
+    /// The manager holds the same child mutex for observation and final reap.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn stop_owned_process(child: &mut Child, timeout_ms: u64) -> Result<bool> {
+        platform::process::terminate_owned_linux_group(child, timeout_ms)
+    }
+
     /// Stop all processes matching a pattern in their command line.
     ///
     /// This is useful for cleaning up orphaned processes that weren't tracked via PID files.

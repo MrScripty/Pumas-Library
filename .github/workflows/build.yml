@@ -4,9 +4,8 @@ on:
   push:
     branches: [main]
     tags: ['v*']
-  pull_request:
-    # Temporary review bases for the three-part Torch PR stack.
-    branches: [main, prep/torch-managed-foundation, prep/torch-install-flow]
+  # Qualify every review branch, including stacked acquisition repairs.
+  pull_request: {}
   workflow_dispatch:
 
 permissions:
@@ -71,6 +70,7 @@ jobs:
       # Separate package invocations prevent workspace feature unification from
       # silently enabling the features this gate is supposed to exclude.
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
+      - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features hf-client
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
       - name: Build inference-disabled release backend
         if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
@@ -224,6 +224,22 @@ jobs:
       - name: Test Windows locked-stage cleanup ownership
         if: runner.os == 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned
+      - name: Self-test acquisition qualification oracles
+        run: python scripts/release/test_acquisition_qualification.py
+      - name: Test cross-owner core acquisition joins
+        run: python scripts/release/test-acquisition-integration.py --package pumas-library --minimum 5
+      - name: Test cross-owner core joins with HF-only features
+        run: python scripts/release/test-acquisition-integration.py --package pumas-library --no-default-features --features hf-client --minimum 5
+      - name: Test cross-owner RPC and native acquisition shutdown
+        run: python scripts/release/test-acquisition-integration.py --package pumas-rpc --features test-support --minimum 2
+      - name: Test cross-owner inference-disabled RPC shutdown
+        run: python scripts/release/test-acquisition-integration.py --package pumas-rpc --no-default-features --features test-support --minimum 1
+      - name: Test inference-disabled native HTTP drainage
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features http_transport::tests
+      - name: Test reserved acquisition workspace custody
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library acquisition::workspace::tests
+      - name: Test native acquisition workspace cleanup
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager native_
       - name: Test native owned HTTP shutdown boundaries
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc http_transport::tests
       - name: Test RPC-owned shutdown on the native host

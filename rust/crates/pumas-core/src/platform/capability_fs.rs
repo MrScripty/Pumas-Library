@@ -56,6 +56,72 @@ pub(crate) fn open_directory(path: &std::path::Path) -> io::Result<Dir> {
     }
 }
 
+/// Private reservation opener: unlike rename-capable handles, Windows denies
+/// FILE_SHARE_DELETE so the held directory cannot move during cleanup.
+pub(crate) fn open_pinned_directory(path: &std::path::Path) -> io::Result<Dir> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+            FILE_SHARE_WRITE,
+        };
+        options
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
+    }
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "reserved directory is not a non-link directory",
+        ));
+    }
+    Ok(Dir::from_std_file(file))
+}
+
+pub(crate) fn open_pinned_directory_at(parent: &Dir, name: &std::ffi::OsStr) -> io::Result<Dir> {
+    use cap_std::fs::{OpenOptions, OpenOptionsExt};
+    let observed = parent.symlink_metadata(name)?;
+    if !observed.is_dir() || observed.is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "reserved directory name is not a non-link directory",
+        ));
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY | libc::O_NONBLOCK);
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+            FILE_SHARE_WRITE,
+        };
+        options
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
+    }
+    let directory = Dir::from_std_file(parent.open_with(name, &options)?.into_std());
+    let metadata = directory.dir_metadata()?;
+    if !metadata.is_dir() || metadata.is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "reserved directory is not a non-link directory",
+        ));
+    }
+    Ok(directory)
+}
+
 #[cfg(windows)]
 pub(crate) fn open_directory_nofollow(parent: &Dir, name: &std::ffi::OsStr) -> io::Result<Dir> {
     use cap_std::fs::{OpenOptions, OpenOptionsExt};

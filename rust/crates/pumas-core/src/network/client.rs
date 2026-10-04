@@ -86,13 +86,39 @@ impl HttpClient {
                 cause: Some(e.to_string()),
             })?;
 
-        Ok(Self {
+        Ok(Self::from_client(client))
+    }
+
+    /// Fixture traffic never consults ambient proxy configuration or follows a
+    /// redirect away from its independently validated literal-loopback source.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn loopback_fixture() -> Result<Self> {
+        let client = Self::loopback_fixture_builder(Client::builder())
+            .build()
+            .map_err(|error| PumasError::Network {
+                message: "Failed to construct loopback fixture HTTP client".into(),
+                cause: Some(error.to_string()),
+            })?;
+        Ok(Self::from_client(client))
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    fn loopback_fixture_builder(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+        builder
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(NetworkConfig::REQUEST_TIMEOUT)
+            .user_agent("Pumas-Library/1.0")
+    }
+
+    fn from_client(client: Client) -> Self {
+        Self {
             client,
             rate_limit_remaining: AtomicI64::new(-1),
             rate_limit_limit: AtomicU64::new(0),
             rate_limit_reset: AtomicU64::new(0),
             throttle_delay: Duration::from_secs(2), // Increased from 500ms for more effective throttling
-        })
+        }
     }
 
     /// Get a reference to the underlying reqwest client.
@@ -421,5 +447,64 @@ mod tests {
     async fn test_client_with_timeout() {
         let client = HttpClient::with_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(client.rate_limit_state().remaining, None);
+    }
+}
+
+#[cfg(test)]
+mod loopback_fixture_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn acquisition_integration_fixture_transport_clears_proxy_and_redirects() {
+        let origin = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let redirect = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/metadata", origin.local_addr().unwrap());
+        // This proxy is entirely synthetic and supplied directly to the builder;
+        // no real credential or shared process environment is read or changed.
+        let builder = Client::builder()
+            .proxy(reqwest::Proxy::all(format!("http://{}", proxy.local_addr().unwrap())).unwrap());
+        let client = HttpClient::loopback_fixture_builder(builder)
+            .build()
+            .unwrap();
+        let redirect_url = format!("http://{}/unexpected", redirect.local_addr().unwrap());
+        let serving = async {
+            let (mut stream, _) = tokio::time::timeout(Duration::from_secs(3), origin.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut byte = [0];
+                tokio::time::timeout(Duration::from_secs(3), stream.read_exact(&mut byte))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                request.push(byte[0]);
+                assert!(request.len() < 8192);
+                if request.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8(request).unwrap().to_ascii_lowercase();
+            assert!(!request.contains("authorization:"));
+            stream.write_all(format!("HTTP/1.1 302 Found\r\nLocation: {redirect_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+        };
+        let requesting = client.get(&url).timeout(Duration::from_secs(3)).send();
+        let (response, ()) = tokio::join!(requesting, serving);
+        let response = response.unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::FOUND);
+        assert_eq!(response.url().as_str(), url);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), proxy.accept())
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), redirect.accept())
+                .await
+                .is_err()
+        );
     }
 }

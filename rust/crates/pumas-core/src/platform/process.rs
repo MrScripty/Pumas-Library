@@ -267,6 +267,10 @@ fn terminate_process_windows(pid: u32) -> Result<bool> {
 /// - **Linux/macOS**: Signals the process group first, then falls back to the
 ///   process PID if no matching group exists
 /// - **Windows**: Uses `taskkill /T` which already handles the tree
+///
+/// This PID-only interface is best-effort and does not establish exclusive
+/// custody of a Child or its reaper. Managed Linux children use the separate
+/// borrowed-Child stop under their shared observation/stop mutex.
 pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
     #[cfg(not(unix))]
     let _ = timeout_ms;
@@ -338,6 +342,78 @@ pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
     {
         // Fall back to single process termination
         terminate_process(pid, timeout_ms)
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn terminate_owned_linux_group(
+    child: &mut std::process::Child,
+    timeout_ms: u64,
+) -> Result<bool> {
+    use nix::sys::signal::{killpg, Signal};
+    use nix::unistd::{getpgid, Pid};
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    let raw = child.id();
+    let pid = Pid::from_raw(i32::try_from(raw).expect("Linux child PID fits pid_t"));
+    let observe = || {
+        super::linux_group::observe_exit(raw).map_err(|error| {
+            PumasError::Other(format!(
+                "Observing owned process-group leader {raw}: {error}"
+            ))
+        })
+    };
+    let signal = |signal| -> Result<()> {
+        observe()?;
+        let group = getpgid(Some(pid)).map_err(|error| {
+            PumasError::Other(format!("Identifying owned process group {raw}: {error}"))
+        })?;
+        if group != pid {
+            return Err(PumasError::Other(format!(
+                "Owned process {raw} no longer identifies its process group"
+            )));
+        }
+        killpg(pid, signal).map_err(|error| {
+            PumasError::Other(format!("Signalling owned process group {raw}: {error}"))
+        })
+    };
+    let drained = || -> Result<bool> {
+        if observe()?.is_none() {
+            return Ok(false);
+        }
+        match super::linux_group::group_has_live_members(pid.as_raw()) {
+            Ok(live) => Ok(!live),
+            // Uncertainty keeps the leader unreaped for the next observation.
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(false),
+            Err(error) => Err(PumasError::Other(format!(
+                "Observing owned process group {raw}: {error}"
+            ))),
+        }
+    };
+    let mut reap = || -> Result<bool> {
+        child.wait().map(|_| true).map_err(|error| {
+            PumasError::Other(format!(
+                "Reaping drained owned process-group leader {raw}: {error}"
+            ))
+        })
+    };
+
+    signal(Signal::SIGTERM)?;
+    let interval = Duration::from_millis(100);
+    for _ in 0..(timeout_ms / 100).max(1) {
+        sleep(interval);
+        if drained()? {
+            return reap();
+        }
+    }
+    signal(Signal::SIGKILL)?;
+    sleep(interval);
+    if drained()? {
+        reap()
+    } else {
+        // A caller may retry while the owned child continues to pin PGID.
+        Ok(false)
     }
 }
 
@@ -505,6 +581,76 @@ mod tests {
         assert!(!is_process_alive(4_000_000_000));
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn exited_owned_child_pins_its_pid_until_its_parent_reaps_it() {
+        use super::super::linux_group;
+        use std::time::Duration;
+
+        let mut command = Command::new("bash");
+        command.args(["-c", "exit 0"]);
+        configure_detached_command(&mut command);
+        let mut child = command.spawn().unwrap();
+        let pid = child.id();
+        wait_until(Duration::from_secs(5), || {
+            linux_group::observe_exit(pid).unwrap().is_some()
+        });
+        assert!(linux_group::observe_exit(pid).unwrap().unwrap().success());
+        // Signal zero observes PID existence, including an unreaped zombie.
+        // This conservative ownership check must not release the PID pin.
+        assert!(is_process_alive(pid));
+        assert!(!linux_group::group_has_live_members(i32::try_from(pid).unwrap()).unwrap());
+        assert!(child.wait().unwrap().success());
+        assert!(!is_process_alive(pid));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owned_tree_does_not_report_stopped_with_a_live_term_ignoring_member() {
+        use super::super::linux_group;
+        use nix::unistd::{getpgid, Pid};
+        use std::os::unix::process::CommandExt;
+        use std::time::Duration;
+
+        let temp = tempfile::tempdir().unwrap();
+        let ready = temp.path().join("ready");
+        let mut child = Command::new("sleep")
+            .arg("60")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let group = Pid::from_raw(i32::try_from(pid).unwrap());
+        // Own both direct children so this regression never depends on PID1
+        // reaping an orphan. The worker cooperates with the same owned group.
+        let mut worker = Command::new("bash")
+            .args(["-c", "trap '' TERM; touch \"$READY_FILE\"; exec sleep 60"])
+            .env("READY_FILE", &ready)
+            .process_group(group.as_raw())
+            .spawn()
+            .unwrap();
+        wait_until(Duration::from_secs(5), || ready.exists());
+        assert_eq!(
+            getpgid(Some(Pid::from_raw(i32::try_from(worker.id()).unwrap()))).unwrap(),
+            group
+        );
+        assert!(linux_group::group_has_live_members(group.as_raw()).unwrap());
+        let stopped = terminate_owned_linux_group(&mut child, 100);
+        let leader_reaped = !is_process_alive(pid);
+        let live = linux_group::group_has_live_members(group.as_raw());
+        // Its unreaped Child pins the exact worker even when the old helper
+        // already reaped the leader. Reap both before reporting an assertion.
+        let _ = worker.kill();
+        worker.wait().unwrap();
+        let _ = child.wait();
+        assert!(stopped.unwrap());
+        assert!(leader_reaped);
+        assert!(
+            !live.unwrap(),
+            "an exited leader is not evidence that its owned process group stopped"
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn exited_process_with_retained_handle_is_not_alive() {
@@ -526,6 +672,23 @@ mod tests {
         let result = terminate_process(4_000_000_000, 1000);
         assert!(result.is_ok());
         assert!(result.unwrap());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pid_only_stop_preserves_another_owned_child_in_the_callers_group() {
+        let mut child = Command::new("sleep").arg("60").spawn().unwrap();
+        let mut sibling = Command::new("sleep").arg("60").spawn().unwrap();
+        let result = terminate_process_tree(child.id(), 100);
+        let sibling_running = sibling.try_wait().unwrap().is_none();
+        if super::super::linux_group::observe_exit(child.id()).is_ok() {
+            let _ = child.kill();
+        }
+        let _ = child.wait();
+        let _ = sibling.kill();
+        sibling.wait().unwrap();
+        assert!(result.unwrap());
+        assert!(sibling_running);
     }
 
     #[test]
@@ -550,7 +713,9 @@ mod tests {
         let mut command = Command::new("bash");
         command
             .arg("-c")
-            .arg("sleep 60 & echo $! > \"$CHILD_PID_FILE\"; touch \"$READY_FILE\"; wait")
+            // Reap the owned descendant on TERM instead of delegating its
+            // zombie to container PID1, which need not be a reaping init.
+            .arg("trap 'wait' TERM; sleep 60 & echo $! > \"$CHILD_PID_FILE\"; touch \"$READY_FILE\"; wait")
             .env("CHILD_PID_FILE", &child_pid_file)
             .env("READY_FILE", &ready_file)
             .stdout(Stdio::null())
@@ -574,6 +739,11 @@ mod tests {
         let _ = child.wait();
 
         assert!(stopped);
+        #[cfg(target_os = "linux")]
+        assert!(!super::super::linux_group::group_has_live_members(
+            i32::try_from(parent_pid).unwrap()
+        )
+        .unwrap());
         wait_until(Duration::from_secs(5), || !is_process_alive(worker_pid));
         assert!(!is_process_alive(worker_pid));
     }

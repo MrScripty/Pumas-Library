@@ -653,6 +653,17 @@ impl Drop for OwnedChild {
 }
 
 fn terminate(child: &mut std::process::Child) -> Outcome {
+    terminate_with_observation(
+        child,
+        #[cfg(target_os = "linux")]
+        super::linux_group::group_has_live_members,
+    )
+}
+
+fn terminate_with_observation(
+    child: &mut std::process::Child,
+    #[cfg(target_os = "linux")] mut observe: impl FnMut(i32) -> std::io::Result<bool>,
+) -> Outcome {
     let mut first_failure = None;
     #[cfg(target_os = "linux")]
     {
@@ -661,9 +672,13 @@ fn terminate(child: &mut std::process::Child) -> Outcome {
         let group = i32::try_from(child.id()).expect("Linux PID fits pid_t");
         loop {
             match super::linux_group::signal_group(child.id()) {
-                Ok(()) => match super::linux_group::group_has_live_members(group) {
+                Ok(()) => match observe(group) {
                     Ok(false) => break,
                     Ok(true) => {}
+                    // An incomplete procfs scan is resolved only by another
+                    // complete observation while the owned leader remains
+                    // unreaped. It is not a permanent cleanup failure.
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
                     Err(error) => {
                         first_failure.get_or_insert_with(|| {
                             failed("Observing setup process-group cleanup", error)
@@ -1402,6 +1417,52 @@ mod tests {
         })
         .await
         .expect("join controlled command tests");
+    }
+
+    #[test]
+    fn transient_group_observation_does_not_poison_completed_cleanup() {
+        assert_observation_cleanup(std::io::ErrorKind::WouldBlock, false);
+    }
+
+    #[test]
+    fn hard_group_observation_failure_survives_completed_cleanup() {
+        assert_observation_cleanup(std::io::ErrorKind::PermissionDenied, true);
+    }
+
+    fn assert_observation_cleanup(kind: std::io::ErrorKind, fails: bool) {
+        use std::os::unix::process::CommandExt;
+
+        let child = Command::new("sh")
+            .args(["-c", "sleep 30 & wait"])
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let mut child = OwnedChild(Some(child));
+        let mut observations = 0;
+        let mut pin_retained = true;
+        let outcome = terminate_with_observation(child.0.as_mut().unwrap(), |group| {
+            observations += 1;
+            pin_retained &= Path::new(&format!("/proc/{pid}")).exists();
+            match observations {
+                1 => Err(std::io::Error::new(kind, "controlled group observation")),
+                // Even after an error, a live/uncertain group cannot be reaped.
+                2 => Ok(true),
+                _ => group_has_live_members(group),
+            }
+        });
+        child.0 = None; // terminate reaped the owned leader after group drain.
+        assert!(pin_retained);
+        assert!(observations >= 3);
+        assert!(!Path::new(&format!("/proc/{pid}")).exists());
+        assert!(!group_has_live_members(i32::try_from(pid).unwrap()).unwrap());
+        if fails {
+            assert!(
+                matches!(outcome, Err(Failure::Failed(message)) if message.contains("controlled group observation"))
+            );
+        } else {
+            outcome.expect("a complete later group observation resolves transient uncertainty");
+        }
     }
 
     #[test]

@@ -43,6 +43,9 @@ tempfile = { workspace = true }
 walkdir = { workspace = true }
 fs2 = { workspace = true }
 
+# Portable logical-path collision comparison
+unicode-normalization = "=0.1.25"
+
 # Archive extraction
 flate2 = { workspace = true }
 tar = { workspace = true }
@@ -113,7 +116,13 @@ libc = { workspace = true }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }
 
+# Safe FIFO construction for isolated Unix test children; no product feature change.
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["fs"] }
+
 [dev-dependencies]
+# Loopback TLS redirect regression only; already locked by reqwest.
+native-tls = "=0.2.14"
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
 
 [features]

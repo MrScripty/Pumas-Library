@@ -9,11 +9,8 @@ const workflow = fs.readFileSync(path.join(root, '.github/workflows/build.yml'),
 const versionTagGuard = "github.ref_type == 'tag' && startsWith(github.ref_name, 'v')";
 const escapedVersionTagGuard = versionTagGuard.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-test('Build runs for every current Torch review base', () => {
-  assert.match(
-    workflow,
-    /^  pull_request:\n(?:    #.*\n)*    branches: \[main, prep\/torch-managed-foundation, prep\/torch-install-flow\]$/m,
-  );
+test('Build runs for pull requests against every review base', () => {
+  assert.match(workflow, /^  pull_request: \{\}$/m);
 });
 
 function job(name) {
@@ -59,4 +56,61 @@ test('release builds and frontend artifact upload are guarded inside shared jobs
     frontend,
     new RegExp(`uses: actions/upload-artifact@v7\\.0\\.1\\n        if: ${escapedVersionTagGuard}`),
   );
+});
+
+
+test('native workspace custody and cleanup run on every native QA platform', () => {
+  const native = job('torch-quality');
+  assert.match(native, /os: \[ubuntu-24\.04, windows-2025, macos-15\]/);
+  for (const [name, command] of [
+    ['Test reserved acquisition workspace custody', 'cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library acquisition::workspace::tests'],
+    ['Test native acquisition workspace cleanup', 'cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager native_'],
+  ]) {
+    assert.ok(native.includes(`      - name: ${name}\n        run: ${command}\n`),
+      `${name} must run without a platform-specific skip`);
+  }
+});
+// PowerShell's final native exit code must not mask a preceding failing test.
+test('native baseline gates keep each cargo command in its own step', () => {
+  const native = job('torch-quality');
+  for (const name of [
+    'Test native import integrity',
+    'Test native shard completeness',
+    'Test native registry startup ownership',
+    'Test native failed-start claim release',
+  ]) {
+    assert.ok(native.includes(`      - name: ${name}\n        run: cargo test --locked `), name);
+  }
+});
+
+test('completed RPC qualification has no persistent PR-specific publication gate', () => {
+  assert.doesNotMatch(workflow, /github\.event\.pull_request\.number == 25/);
+  assert.doesNotMatch(job('headless'), /package-rpc-qualification\.mjs|rpc-qualification\//);
+});
+
+
+test('cross-owner acquisition gates reject zero matches on every native host', () => {
+  const native = job('torch-quality');
+  for (const args of [
+    '--package pumas-library --minimum 5',
+    '--package pumas-library --no-default-features --features hf-client --minimum 5',
+    '--package pumas-rpc --features test-support --minimum 2',
+    '--package pumas-rpc --no-default-features --features test-support --minimum 1',
+  ]) {
+    assert.ok(native.includes(`        run: python scripts/release/test-acquisition-integration.py ${args}\n`));
+  }
+  assert.ok(job('headless').includes('-p pumas-library --no-default-features --features hf-client'));
+});
+
+test('release build commands never enable test-support or all-features', () => {
+  for (const name of ['headless-rpc', 'build-rust', 'windows-release', 'windows-no-inference']) {
+    for (const line of job(name).split('\n').filter(line => line.includes('cargo build'))) {
+      assert.doesNotMatch(line, /--all-features|test-support/);
+    }
+  }
+  const manager = fs.readFileSync(path.join(root, 'rust/crates/pumas-app-manager/Cargo.toml'), 'utf8');
+  const rpc = fs.readFileSync(path.join(root, 'rust/crates/pumas-rpc/Cargo.toml'), 'utf8');
+  assert.match(manager, /^default = \[\]$/m);
+  assert.match(rpc, /^test-support = \["pumas-app-manager\?\/test-support"\]$/m);
+  assert.match(rpc, /^default = \["inference-plugins"\]$/m);
 });

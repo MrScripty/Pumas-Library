@@ -10,11 +10,13 @@ use crate::handlers::{
     handle_openai_models, handle_openai_proxy, handle_runtime_profile_update_events,
     handle_serving_status_update_events,
 };
+use crate::http_admission::{enforce_local_request, is_allowed_origin};
 #[cfg(feature = "inference-plugins")]
 use crate::provider_clients::{LlamaCppRouterClient, OllamaClientFactory};
 use axum::{
     extract::DefaultBodyLimit,
-    http::{header, HeaderValue, Method},
+    http::{header, Method},
+    middleware,
     routing::{get, post},
     Router,
 };
@@ -30,7 +32,6 @@ use pumas_library::{
 };
 #[cfg(feature = "inference-plugins")]
 use std::collections::HashMap;
-use std::future::IntoFuture;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -78,8 +79,43 @@ impl LoopbackHost {
     }
 }
 
+/// Admission-only handle. Request handlers never receive the completion future,
+/// because it includes completion of their own HTTP response.
+#[derive(Clone)]
+pub(crate) struct ShutdownRequest {
+    signal: watch::Sender<bool>,
+}
+
+impl Default for ShutdownRequest {
+    fn default() -> Self {
+        Self {
+            signal: watch::channel(false).0,
+        }
+    }
+}
+
+impl ShutdownRequest {
+    pub(crate) fn is_requested(&self) -> bool {
+        *self.signal.borrow()
+    }
+
+    pub(crate) fn request(&self) {
+        self.signal.send_replace(true);
+    }
+
+    pub(crate) async fn requested(self) {
+        let mut receiver = self.signal.subscribe();
+        while !*receiver.borrow_and_update() {
+            if receiver.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+}
+
 /// Application state shared across handlers.
 pub struct AppState {
+    pub(crate) shutdown_request: ShutdownRequest,
     pub(crate) catalog_projection: CatalogProjection,
     /// Core API (model library, system utilities)
     pub api: PumasApi,
@@ -160,7 +196,17 @@ impl ServerHandle {
     /// Stop serving and observe both owned drains. Cancelling a waiter does not
     /// cancel the supervisor or consume its result; repeated waiters share it.
     pub async fn shutdown(&self) -> anyhow::Result<()> {
+        self.request_shutdown();
+        self.wait().await
+    }
+
+    /// Request cessation without waiting for the requesting HTTP response.
+    pub fn request_shutdown(&self) {
         self.shutdown_signal.send_replace(true);
+    }
+
+    /// Observe the process-owned receipt without initiating shutdown.
+    pub async fn wait(&self) -> anyhow::Result<()> {
         self.completion
             .clone()
             .await
@@ -227,6 +273,7 @@ pub async fn start_server(
     #[cfg(feature = "inference-plugins")] plugin_loader: PluginLoader,
     host: LoopbackHost,
     port: u16,
+    http_policy: crate::http_transport::HttpShutdownPolicy,
 ) -> anyhow::Result<ServerHandle> {
     #[cfg(feature = "inference-plugins")]
     let gateway_http_client = build_gateway_http_client()?;
@@ -249,7 +296,10 @@ pub async fn start_server(
     #[cfg(feature = "inference-plugins")]
     let provider_registry = ProviderRegistry::builtin();
     let (catalog_projection, catalog_worker) = CatalogProjection::start(MAX_IN_FLIGHT_RPC_REQUESTS);
+    let shutdown_request = ShutdownRequest::default();
+    let shutdown_signal = shutdown_request.signal.clone();
     let state = Arc::new(AppState {
+        shutdown_request: shutdown_request.clone(),
         catalog_projection,
         api,
         #[cfg(feature = "inference-plugins")]
@@ -275,7 +325,7 @@ pub async fn start_server(
     // Configure CORS for local development and packaged renderer diagnostics.
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(|origin, _parts| {
-            is_allowed_cors_origin(origin)
+            is_allowed_origin(origin)
         }))
         .allow_methods([Method::GET, Method::POST])
         .allow_headers([header::CONTENT_TYPE]);
@@ -317,6 +367,11 @@ pub async fn start_server(
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))
         .layer(cors)
+        .layer(axum::middleware::from_fn_with_state(
+            shutdown_request.clone(),
+            reject_during_shutdown,
+        ))
+        .layer(middleware::from_fn(enforce_local_request))
         .with_state(state.clone());
 
     info!(
@@ -335,20 +390,40 @@ pub async fn start_server(
     let downloads_drained = Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(test)]
     let downloads_drain_observed = downloads_drained.clone();
-    let (shutdown_signal, mut shutdown) = watch::channel(false);
     let task = tokio::spawn(async move {
-        let serving = axum::serve(listener, app).into_future();
-        let server_result = tokio::select! {
-            result = serving => result.map_err(anyhow::Error::from),
-            _ = shutdown.changed() => Ok(()),
+        let mut serving = Box::pin(crate::http_transport::serve(
+            listener,
+            app,
+            shutdown_request.clone(),
+            http_policy,
+        ));
+        let early_result = tokio::select! {
+            result = &mut serving => Some(result),
+            _ = shutdown_request.clone().requested() => None,
         };
-        let torch_cleanup = async {
+        shutdown_request.request();
+        // Retain accepted connections until their responses settle. Core owners
+        // drain concurrently, so requests awaiting those owners cannot deadlock
+        // behind an HTTP-first shutdown ordering.
+        let http_completion = async move {
+            match early_result {
+                Some(result) => result,
+                None => serving.await,
+            }
+        };
+        let installation_cleanup = async {
             #[cfg(feature = "inference-plugins")]
             {
                 let managers = state.version_managers.read().await;
                 let mut errors = Vec::new();
-                for manager in managers.values() {
-                    if let Err(error) = manager.shutdown_torch_cleanup().await {
+                let outcomes = futures::future::join_all(
+                    managers
+                        .values()
+                        .map(VersionManager::shutdown_installations),
+                )
+                .await;
+                for outcome in outcomes {
+                    if let Err(error) = outcome {
                         errors.push(error.to_string());
                     }
                 }
@@ -358,9 +433,10 @@ pub async fn start_server(
             }
             Ok::<(), anyhow::Error>(())
         };
-        let (owners, runtimes, torch_cleanup) = tokio::join!(
+        let (http, owners, runtimes, installation_cleanup) = tokio::join!(
+            http_completion,
             drain_server_owners(
-                server_result,
+                Ok(()),
                 async {
                     let result = state.api.shutdown_intent().await;
                     #[cfg(test)]
@@ -377,7 +453,7 @@ pub async fn start_server(
                 state.api.shutdown_conversions(),
             ),
             state.api.stop_all_managed_runtime_profiles(),
-            torch_cleanup,
+            installation_cleanup,
         );
         let runtimes = runtimes.map_err(anyhow::Error::from).and_then(|summary| {
             if summary.errors.is_empty() {
@@ -386,11 +462,32 @@ pub async fn start_server(
                 Err(anyhow::anyhow!(summary.errors.join("; ")))
             }
         });
-        let owners = match (owners, torch_cleanup) {
+        // Consumer owners must finish draining before the shared supervisor
+        // closes admission. Always observe its settlement, including failures.
+        let acquisition_cleanup = state.api.shutdown_acquisition().await;
+        let owners = match (owners, http) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) => Err(error),
-            (Ok(()), Err(error)) => Err(anyhow::anyhow!("Torch cleanup: {error}")),
-            (Err(owners), Err(error)) => Err(anyhow::anyhow!("{owners}; Torch cleanup: {error}")),
+            (Ok(()), Err(error)) => Err(anyhow::anyhow!("HTTP connections: {error}")),
+            (Err(owners), Err(error)) => {
+                Err(anyhow::anyhow!("{owners}; HTTP connections: {error}"))
+            }
+        };
+        let installation_cleanup = match (installation_cleanup, acquisition_cleanup) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(anyhow::anyhow!("Acquisition cleanup: {error}")),
+            (Err(installation), Err(acquisition)) => Err(anyhow::anyhow!(
+                "{installation}; Acquisition cleanup: {acquisition}"
+            )),
+        };
+        let owners = match (owners, installation_cleanup) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(anyhow::anyhow!("Installation cleanup: {error}")),
+            (Err(owners), Err(error)) => {
+                Err(anyhow::anyhow!("{owners}; Installation cleanup: {error}"))
+            }
         };
         match (owners, runtimes) {
             (Ok(()), Ok(())) => Ok(()),
@@ -411,6 +508,20 @@ pub async fn start_server(
         handle
     };
     Ok(handle)
+}
+
+async fn reject_during_shutdown(
+    axum::extract::State(shutdown): axum::extract::State<ShutdownRequest>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    // RPC rechecks after decoding so a repeated shutdown can acknowledge without
+    // admitting other commands. Other routes stop at the header boundary.
+    if shutdown.is_requested() && request.uri().path() != "/rpc" {
+        return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    next.run(request).await
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -435,27 +546,28 @@ fn build_ollama_client_factory() -> anyhow::Result<OllamaClientFactory> {
     Ok(OllamaClientFactory::new(http_clients))
 }
 
-fn is_allowed_cors_origin(origin: &HeaderValue) -> bool {
-    let Ok(origin) = origin.to_str() else {
-        return false;
-    };
-    let Ok(url) = url::Url::parse(origin) else {
-        return false;
-    };
-    if !matches!(url.scheme(), "http" | "https") {
-        return false;
-    }
-    match url.host() {
-        Some(url::Host::Domain("localhost")) => true,
-        Some(url::Host::Ipv4(address)) => address.is_loopback(),
-        Some(url::Host::Ipv6(address)) => address.is_loopback(),
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn shutdown_request_is_idempotent_and_visible_to_late_subscribers() {
+        let request = super::ShutdownRequest::default();
+        let observed = request.clone().requested();
+        tokio::pin!(observed);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), &mut observed)
+                .await
+                .is_err()
+        );
+        request.request();
+        request.request();
+        observed.await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), request.requested())
+            .await
+            .unwrap();
+    }
+
     use super::*;
+    use axum::http::HeaderValue;
     #[cfg(feature = "inference-plugins")]
     use pumas_library::AppId;
     use std::io::ErrorKind;
@@ -718,7 +830,7 @@ mod tests {
         })
     }
 
-    async fn start_test_server(
+    pub(super) async fn start_test_server(
         api: PumasApi,
         launcher_root: &std::path::Path,
     ) -> anyhow::Result<ServerHandle> {
@@ -751,8 +863,1361 @@ mod tests {
             plugin_loader,
             LoopbackHost::parse("127.0.0.1").unwrap(),
             0,
+            crate::http_transport::HttpShutdownPolicy::default(),
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn retained_paused_download_status_round_trips_through_http_json_rpc() {
+        let temp = TempDir::new().unwrap();
+        let launcher_root = temp.path();
+        let model_dir = launcher_root.join("shared-resources/models/llm/acme/partial-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::create_dir_all(launcher_root.join("launcher-data")).unwrap();
+        std::fs::write(model_dir.join("weights.gguf.part"), b"partial").unwrap();
+
+        let snapshot = serde_json::from_value::<
+            pumas_library::model_library::download_store::PersistedDownload,
+        >(serde_json::json!({
+            "download_id": "tracked-partial-1",
+            "repo_id": "acme/model",
+            "revision": null,
+            "filename": "weights.gguf",
+            "filenames": ["weights.gguf"],
+            "dest_dir": model_dir,
+            "total_bytes": 100,
+            "status": "paused",
+            "download_request": {
+                "repo_id": "acme/model",
+                "family": "acme",
+                "official_name": "Partial Model",
+                "model_type": "llm",
+                "filenames": ["weights.gguf"]
+            },
+            "created_at": "2026-09-03T00:00:00Z",
+            "known_sha256": null
+        }))
+        .unwrap();
+        pumas_library::model_library::test_support::admit_paused_download(launcher_root, &snapshot)
+            .unwrap();
+
+        let api = crate::handlers::test_support::build_test_api_with_hf(launcher_root).await;
+        let server = match start_test_server(api, launcher_root).await {
+            Ok(server) => server,
+            Err(error) if is_socket_bind_permission_error(&error) => {
+                eprintln!(
+                    "Skipping retained download status RPC test: local TCP bind not permitted"
+                );
+                return;
+            }
+            Err(error) => {
+                panic!("failed to start retained download status RPC test server: {error:#}")
+            }
+        };
+        let address = server.addr();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        async fn status_call(
+            client: &reqwest::Client,
+            address: std::net::SocketAddr,
+            request_id: u64,
+        ) -> Result<serde_json::Value, &'static str> {
+            tokio::time::timeout(std::time::Duration::from_secs(6), async {
+                client
+                    .post(format!("http://{address}/rpc"))
+                    .json(&serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": "get_model_download_status",
+                        "params": {"downloadId": "tracked-partial-1"},
+                        "id": request_id
+                    }))
+                    .send()
+                    .await
+                    .map_err(|_| "HTTP request failed")?
+                    .error_for_status()
+                    .map_err(|_| "HTTP status was not successful")?
+                    .json::<serde_json::Value>()
+                    .await
+                    .map_err(|_| "HTTP response body was not valid JSON")
+            })
+            .await
+            .map_err(|_| "HTTP status request exceeded its deadline")?
+        }
+
+        let first = status_call(&client, address, 61).await;
+        let second = status_call(&client, address, 62).await;
+        let shutdown =
+            tokio::time::timeout(std::time::Duration::from_secs(5), server.shutdown()).await;
+
+        assert!(
+            shutdown.is_ok(),
+            "RPC server shutdown exceeded its deadline"
+        );
+        assert!(
+            shutdown.unwrap().is_ok(),
+            "RPC server shutdown did not observe all owner drains"
+        );
+        let first = first.expect("first status request must complete with a bounded response");
+        let second = second.expect("second status request must complete with a bounded response");
+
+        assert_eq!(first["jsonrpc"], "2.0");
+        assert_eq!(first["id"], 61);
+        assert!(
+            first.get("error").is_none(),
+            "unexpected JSON-RPC error response"
+        );
+        assert_eq!(second["jsonrpc"], "2.0");
+        assert_eq!(second["id"], 62);
+        assert!(
+            second.get("error").is_none(),
+            "unexpected JSON-RPC error response"
+        );
+
+        let first_result = &first["result"];
+        let second_result = &second["result"];
+        assert_eq!(first_result["success"], true);
+        assert_eq!(first_result["downloadId"], "tracked-partial-1");
+        assert_eq!(first_result["libraryModelId"], "llm/acme/partial-model");
+        assert_eq!(first_result["repoId"], "acme/model");
+        assert_eq!(
+            first_result["selectedArtifactId"],
+            "acme--model__files_971f5ccbb554"
+        );
+        assert_eq!(first_result["status"], "paused");
+        assert_eq!(first_result["downloadedBytes"], 7);
+        assert_eq!(first_result["totalBytes"], 100);
+        let progress = first_result["progress"].as_f64().unwrap();
+        assert!((0.0..=1.0).contains(&progress));
+        assert!(
+            (progress - 0.07).abs() < 0.001,
+            "unexpected retained progress fraction"
+        );
+        assert_eq!(
+            first_result.get("etaSeconds"),
+            Some(&serde_json::Value::Null)
+        );
+        assert_eq!(first_result, second_result);
+    }
+
+    #[tokio::test]
+    async fn retained_paused_download_cancellation_cleans_only_target_through_http_json_rpc_and_reopens(
+    ) {
+        const TARGET_ID: &str = "tracked-cancelled-1";
+        const KEEPER_ID: &str = "tracked-paused-2";
+        const SELECTED_ARTIFACT_ID: &str = "acme--model__files_971f5ccbb554";
+
+        fn paused_snapshot(
+            download_id: &str,
+            official_name: &str,
+            destination: &std::path::Path,
+        ) -> pumas_library::model_library::download_store::PersistedDownload {
+            serde_json::from_value(serde_json::json!({
+                "download_id": download_id,
+                "repo_id": "acme/model",
+                "revision": null,
+                "filename": "weights.gguf",
+                "filenames": ["weights.gguf"],
+                "dest_dir": destination,
+                "total_bytes": 100,
+                "status": "paused",
+                "download_request": {
+                    "repo_id": "acme/model",
+                    "family": "acme",
+                    "official_name": official_name,
+                    "model_type": "llm",
+                    "filenames": ["weights.gguf"]
+                },
+                "created_at": "2026-09-03T00:00:00Z",
+                "known_sha256": null
+            }))
+            .expect("paused download fixture must have the current persisted shape")
+        }
+
+        fn seed_paused_download(
+            launcher_root: &std::path::Path,
+            relative_destination: &str,
+            download_id: &str,
+            official_name: &str,
+            partial_bytes: &[u8],
+            sentinel_bytes: &[u8],
+        ) -> std::path::PathBuf {
+            let destination = launcher_root.join(relative_destination);
+            std::fs::create_dir_all(&destination).unwrap();
+            std::fs::write(destination.join("weights.gguf.part"), partial_bytes).unwrap();
+            std::fs::write(
+                destination.join(".pumas_download"),
+                serde_json::to_vec(&serde_json::json!({
+                    "repo_id": "acme/model",
+                    "files": ["weights.gguf"]
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            std::fs::write(destination.join("sentinel.txt"), sentinel_bytes).unwrap();
+            let snapshot = paused_snapshot(download_id, official_name, &destination);
+            pumas_library::model_library::test_support::admit_paused_download(
+                launcher_root,
+                &snapshot,
+            )
+            .unwrap();
+            destination
+        }
+
+        async fn rpc_call(
+            client: &reqwest::Client,
+            address: std::net::SocketAddr,
+            method: &str,
+            params: serde_json::Value,
+            request_id: u64,
+        ) -> Result<serde_json::Value, &'static str> {
+            let response = tokio::time::timeout(std::time::Duration::from_secs(6), async {
+                client
+                    .post(format!("http://{address}/rpc"))
+                    .json(&serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": method,
+                        "params": params,
+                        "id": request_id
+                    }))
+                    .send()
+                    .await
+                    .map_err(|_| "HTTP request failed")?
+                    .error_for_status()
+                    .map_err(|_| "HTTP status was not successful")?
+                    .json::<serde_json::Value>()
+                    .await
+                    .map_err(|_| "HTTP response body was not valid JSON")
+            })
+            .await
+            .map_err(|_| "HTTP JSON-RPC request exceeded its deadline")??;
+            if response["jsonrpc"] != "2.0" {
+                return Err("response did not identify JSON-RPC 2.0");
+            }
+            if response["id"] != request_id {
+                return Err("response request ID did not match the request");
+            }
+            if response.get("error").is_some() {
+                return Err("response contained a JSON-RPC error envelope");
+            }
+            Ok(response)
+        }
+
+        async fn wait_until_cancelled(
+            client: &reqwest::Client,
+            address: std::net::SocketAddr,
+            download_id: &str,
+            first_request_id: u64,
+        ) -> Result<serde_json::Value, &'static str> {
+            tokio::time::timeout(std::time::Duration::from_secs(8), async {
+                let mut request_id = first_request_id;
+                loop {
+                    let response = rpc_call(
+                        client,
+                        address,
+                        "get_model_download_status",
+                        serde_json::json!({"downloadId": download_id}),
+                        request_id,
+                    )
+                    .await?;
+                    request_id = request_id.wrapping_add(1);
+                    if response["result"]["status"] == "cancelled" {
+                        return Ok(response);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .map_err(|_| "terminal cancellation status exceeded its deadline")?
+        }
+
+        fn inventory_has_download(inventory: &serde_json::Value, download_id: &str) -> bool {
+            inventory["downloads"].as_array().is_some_and(|downloads| {
+                downloads
+                    .iter()
+                    .any(|download| download["download_id"] == download_id)
+            })
+        }
+
+        fn object_has_id(inventory: &serde_json::Value, field: &str, download_id: &str) -> bool {
+            inventory[field]
+                .as_object()
+                .is_some_and(|entries| entries.contains_key(download_id))
+        }
+
+        let temp = TempDir::new().unwrap();
+        let launcher_root = temp.path();
+        std::fs::create_dir_all(launcher_root.join("launcher-data")).unwrap();
+        let target_directory = seed_paused_download(
+            launcher_root,
+            "shared-resources/models/llm/acme/cancelled-model",
+            TARGET_ID,
+            "Cancelled Model",
+            b"TARGET-PARTIAL",
+            b"target sentinel",
+        );
+        let keeper_directory = seed_paused_download(
+            launcher_root,
+            "shared-resources/models/llm/acme/retained-model",
+            KEEPER_ID,
+            "Retained Model",
+            b"KEEP-PARTIAL",
+            b"keeper sentinel",
+        );
+        let target_marker_before = std::fs::read(target_directory.join(".pumas_download")).unwrap();
+        let keeper_marker_before = std::fs::read(keeper_directory.join(".pumas_download")).unwrap();
+        let inventory_before: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(launcher_root.join("launcher-data/downloads.json")).unwrap(),
+        )
+        .unwrap();
+
+        let api = crate::handlers::test_support::build_test_api_with_hf(launcher_root).await;
+        let server = match start_test_server(api, launcher_root).await {
+            Ok(server) => server,
+            Err(error) if is_socket_bind_permission_error(&error) => {
+                eprintln!(
+                    "Skipping retained paused cancellation RPC test: local TCP bind not permitted"
+                );
+                return;
+            }
+            Err(_) => panic!("failed to start retained paused cancellation RPC server"),
+        };
+        let address = server.addr();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        let target_before = rpc_call(
+            &client,
+            address,
+            "get_model_download_status",
+            serde_json::json!({"downloadId": TARGET_ID}),
+            71,
+        )
+        .await;
+        let keeper_before = rpc_call(
+            &client,
+            address,
+            "get_model_download_status",
+            serde_json::json!({"downloadId": KEEPER_ID}),
+            72,
+        )
+        .await;
+        let cancel_response = rpc_call(
+            &client,
+            address,
+            "cancel_model_download",
+            serde_json::json!({"downloadId": TARGET_ID}),
+            73,
+        )
+        .await;
+        let target_cancelled = wait_until_cancelled(&client, address, TARGET_ID, 74).await;
+        let keeper_after_cancel = rpc_call(
+            &client,
+            address,
+            "get_model_download_status",
+            serde_json::json!({"downloadId": KEEPER_ID}),
+            75,
+        )
+        .await;
+        let repeated_cancel = rpc_call(
+            &client,
+            address,
+            "cancel_model_download",
+            serde_json::json!({"downloadId": TARGET_ID}),
+            76,
+        )
+        .await;
+        let first_shutdown =
+            tokio::time::timeout(std::time::Duration::from_secs(6), server.shutdown()).await;
+        assert!(
+            first_shutdown.is_ok(),
+            "first RPC server shutdown exceeded its deadline"
+        );
+        assert!(
+            first_shutdown.unwrap().is_ok(),
+            "first RPC server did not observe all owner drains"
+        );
+        drop(server);
+        drop(client);
+
+        let first_inventory: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(launcher_root.join("launcher-data/downloads.json")).unwrap(),
+        )
+        .unwrap();
+        let target_partial_removed = !target_directory.join("weights.gguf.part").exists();
+        let target_marker_removed = !target_directory.join(".pumas_download").exists();
+        let target_sentinel_after = std::fs::read(target_directory.join("sentinel.txt")).unwrap();
+        let keeper_partial_after =
+            std::fs::read(keeper_directory.join("weights.gguf.part")).unwrap();
+        let keeper_marker_after = std::fs::read(keeper_directory.join(".pumas_download")).unwrap();
+        let keeper_sentinel_after = std::fs::read(keeper_directory.join("sentinel.txt")).unwrap();
+
+        let reopened_api =
+            crate::handlers::test_support::build_test_api_with_hf(launcher_root).await;
+        let reopened_server = start_test_server(reopened_api, launcher_root)
+            .await
+            .expect("reopened RPC server must bind after the first server drained");
+        let reopened_address = reopened_server.addr();
+        let reopened_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let reopened_target = rpc_call(
+            &reopened_client,
+            reopened_address,
+            "get_model_download_status",
+            serde_json::json!({"downloadId": TARGET_ID}),
+            77,
+        )
+        .await;
+        let reopened_keeper = rpc_call(
+            &reopened_client,
+            reopened_address,
+            "get_model_download_status",
+            serde_json::json!({"downloadId": KEEPER_ID}),
+            78,
+        )
+        .await;
+        let reopened_shutdown = tokio::time::timeout(
+            std::time::Duration::from_secs(6),
+            reopened_server.shutdown(),
+        )
+        .await;
+        assert!(
+            reopened_shutdown.is_ok(),
+            "reopened RPC server shutdown exceeded its deadline"
+        );
+        assert!(
+            reopened_shutdown.unwrap().is_ok(),
+            "reopened RPC server did not observe all owner drains"
+        );
+
+        let target_partial_after_reopen = target_directory.join("weights.gguf.part").exists();
+        let target_marker_after_reopen = target_directory.join(".pumas_download").exists();
+        let target_sentinel_after_reopen =
+            std::fs::read(target_directory.join("sentinel.txt")).unwrap();
+        let keeper_partial_after_reopen =
+            std::fs::read(keeper_directory.join("weights.gguf.part")).unwrap();
+        let keeper_marker_after_reopen =
+            std::fs::read(keeper_directory.join(".pumas_download")).unwrap();
+        let keeper_sentinel_after_reopen =
+            std::fs::read(keeper_directory.join("sentinel.txt")).unwrap();
+        let reopened_inventory: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(launcher_root.join("launcher-data/downloads.json")).unwrap(),
+        )
+        .unwrap();
+
+        let inventory_has_keeper = inventory_has_download(&inventory_before, KEEPER_ID);
+        assert!(inventory_has_keeper);
+        assert!(object_has_id(
+            &inventory_before,
+            "queue_admissions",
+            TARGET_ID
+        ));
+        assert!(object_has_id(
+            &inventory_before,
+            "queue_admissions",
+            KEEPER_ID
+        ));
+
+        let target_before = target_before.expect("target paused status request must complete");
+        let keeper_before = keeper_before.expect("keeper paused status request must complete");
+        let cancel_response = cancel_response.expect("cancel mutation request must complete");
+        let target_cancelled =
+            target_cancelled.expect("target must reach terminal cancellation by deadline");
+        let keeper_after_cancel =
+            keeper_after_cancel.expect("keeper status after target cancellation must complete");
+        let repeated_cancel = repeated_cancel.expect("repeat cancellation request must complete");
+        let reopened_target =
+            reopened_target.expect("reopened target status request must complete");
+        let reopened_keeper =
+            reopened_keeper.expect("reopened keeper status request must complete");
+
+        for (response, expected_id) in [(&target_before, 71), (&keeper_before, 72)] {
+            assert_eq!(response["jsonrpc"], "2.0");
+            assert_eq!(response["id"], expected_id);
+            assert!(response.get("error").is_none());
+            assert_eq!(response["result"]["success"], true);
+            assert_eq!(response["result"]["status"], "paused");
+            assert_eq!(response["result"]["repoId"], "acme/model");
+            assert_eq!(
+                response["result"]["selectedArtifactId"],
+                SELECTED_ARTIFACT_ID
+            );
+            assert_eq!(response["result"]["totalBytes"], 100);
+        }
+        assert_eq!(target_before["result"]["downloadId"], TARGET_ID);
+        assert_eq!(
+            target_before["result"]["libraryModelId"],
+            "llm/acme/cancelled-model"
+        );
+        assert_eq!(target_before["result"]["downloadedBytes"], 14);
+        assert_eq!(keeper_before["result"]["downloadId"], KEEPER_ID);
+        assert_eq!(
+            keeper_before["result"]["libraryModelId"],
+            "llm/acme/retained-model"
+        );
+        assert_eq!(keeper_before["result"]["downloadedBytes"], 12);
+        assert_eq!(keeper_after_cancel["result"], keeper_before["result"]);
+
+        assert_eq!(cancel_response["jsonrpc"], "2.0");
+        assert_eq!(cancel_response["id"], 73);
+        assert!(cancel_response.get("error").is_none());
+        assert_eq!(cancel_response["result"]["success"], true);
+        assert!(cancel_response["result"].get("error").is_none());
+        assert_eq!(target_cancelled["jsonrpc"], "2.0");
+        assert!(target_cancelled.get("error").is_none());
+        assert_eq!(target_cancelled["result"]["success"], true);
+        assert_eq!(target_cancelled["result"]["downloadId"], TARGET_ID);
+        assert_eq!(target_cancelled["result"]["repoId"], "acme/model");
+        assert_eq!(
+            target_cancelled["result"]["selectedArtifactId"],
+            SELECTED_ARTIFACT_ID
+        );
+        assert_eq!(
+            target_cancelled["result"]["libraryModelId"],
+            serde_json::Value::Null
+        );
+
+        assert_eq!(repeated_cancel["jsonrpc"], "2.0");
+        assert_eq!(repeated_cancel["id"], 76);
+        assert!(repeated_cancel.get("error").is_none());
+        assert_eq!(repeated_cancel["result"]["success"], false);
+        assert_eq!(repeated_cancel["result"]["error"], "Download not found");
+
+        assert!(target_partial_removed);
+        assert!(target_marker_removed);
+        assert_eq!(target_sentinel_after, b"target sentinel");
+        assert!(!target_marker_before.is_empty());
+        assert_eq!(
+            keeper_partial_after, b"KEEP-PARTIAL",
+            "target cleanup must preserve the other paused partial"
+        );
+        assert_eq!(keeper_marker_after, keeper_marker_before);
+        assert_eq!(keeper_sentinel_after, b"keeper sentinel");
+        assert!(!target_partial_after_reopen);
+        assert!(!target_marker_after_reopen);
+        assert_eq!(target_sentinel_after_reopen, b"target sentinel");
+        assert_eq!(keeper_partial_after_reopen, b"KEEP-PARTIAL");
+        assert_eq!(keeper_marker_after_reopen, keeper_marker_before);
+        assert_eq!(keeper_sentinel_after_reopen, b"keeper sentinel");
+
+        for inventory in [&first_inventory, &reopened_inventory] {
+            assert!(!inventory_has_download(inventory, TARGET_ID));
+            assert!(inventory_has_download(inventory, KEEPER_ID));
+            assert!(!object_has_id(inventory, "queue_admissions", TARGET_ID));
+            assert!(object_has_id(inventory, "queue_admissions", KEEPER_ID));
+            assert!(inventory["lifecycle_quarantines"]
+                .get(TARGET_ID)
+                .is_none_or(|quarantine| quarantine["disposition"] != "pending"));
+            assert!(inventory["lifecycle_quarantines"]
+                .get(KEEPER_ID)
+                .is_none_or(|quarantine| quarantine["disposition"] != "pending"));
+        }
+
+        assert_eq!(reopened_target["jsonrpc"], "2.0");
+        assert_eq!(reopened_target["id"], 77);
+        assert!(reopened_target.get("error").is_none());
+        assert_eq!(reopened_target["result"]["success"], false);
+        assert_eq!(reopened_target["result"]["error"], "Download not found");
+        assert_eq!(reopened_keeper["jsonrpc"], "2.0");
+        assert_eq!(reopened_keeper["id"], 78);
+        assert!(reopened_keeper.get("error").is_none());
+        assert_eq!(reopened_keeper["result"], keeper_before["result"]);
+    }
+
+    #[tokio::test]
+    async fn retained_weak_selection_resume_refusal_preserves_paused_state_through_http_json_rpc_and_reopens(
+    ) {
+        const DOWNLOAD_ID: &str = "tracked-weak-resume-3";
+        const SELECTED_ARTIFACT_ID: &str = "acme--model__files_971f5ccbb554";
+        const PARTIAL_BYTES: &[u8] = b"WEAK-PARTIAL";
+        const MARKER_BYTES: &[u8] = br#"{"repo_id":"acme/model","files":["weights.gguf"]}"#;
+        const SENTINEL_BYTES: &[u8] = b"weak-selection-sentinel";
+
+        async fn rpc_call(
+            client: &reqwest::Client,
+            address: std::net::SocketAddr,
+            method: &str,
+            params: serde_json::Value,
+            request_id: u64,
+        ) -> Result<serde_json::Value, &'static str> {
+            let response = tokio::time::timeout(std::time::Duration::from_secs(6), async {
+                client
+                    .post(format!("http://{address}/rpc"))
+                    .json(&serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": method,
+                        "params": params,
+                        "id": request_id
+                    }))
+                    .send()
+                    .await
+                    .map_err(|_| "HTTP request failed")?
+                    .error_for_status()
+                    .map_err(|_| "HTTP status was not successful")?
+                    .json::<serde_json::Value>()
+                    .await
+                    .map_err(|_| "HTTP response body was not valid JSON")
+            })
+            .await
+            .map_err(|_| "HTTP JSON-RPC request exceeded its deadline")??;
+            if response["jsonrpc"] != "2.0" {
+                return Err("response did not identify JSON-RPC 2.0");
+            }
+            if response["id"] != request_id {
+                return Err("response request ID did not match the request");
+            }
+            Ok(response)
+        }
+
+        fn read_inventory(
+            launcher_root: &std::path::Path,
+        ) -> Result<serde_json::Value, &'static str> {
+            let bytes = std::fs::read(launcher_root.join("launcher-data/downloads.json"))
+                .map_err(|_| "download inventory could not be read")?;
+            serde_json::from_slice(&bytes).map_err(|_| "download inventory was not valid JSON")
+        }
+
+        fn assert_paused_status(
+            response: &serde_json::Value,
+            expected_id: u64,
+            expected_bytes: usize,
+        ) {
+            assert_eq!(response["jsonrpc"], "2.0");
+            assert_eq!(response["id"], expected_id);
+            assert!(response.get("error").is_none());
+            assert_eq!(response["result"]["success"], true);
+            assert_eq!(response["result"]["downloadId"], DOWNLOAD_ID);
+            assert_eq!(
+                response["result"]["libraryModelId"],
+                "llm/acme/weak-resume-model"
+            );
+            assert_eq!(response["result"]["repoId"], "acme/model");
+            assert_eq!(
+                response["result"]["selectedArtifactId"],
+                SELECTED_ARTIFACT_ID
+            );
+            assert_eq!(response["result"]["status"], "paused");
+            assert_eq!(response["result"]["downloadedBytes"], expected_bytes);
+            assert_eq!(response["result"]["totalBytes"], 100);
+        }
+
+        fn assert_resume_refusal(response: &serde_json::Value, expected_id: u64) {
+            assert_eq!(
+                response,
+                &serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": expected_id,
+                    "error": {
+                        "code": -32005,
+                        "message": "Request parameters are invalid.",
+                        "data": {"class": "invalid_request"}
+                    }
+                })
+            );
+            assert!(response.get("result").is_none());
+        }
+
+        let temp = TempDir::new().unwrap();
+        let launcher_root = temp.path();
+        std::fs::create_dir_all(launcher_root.join("launcher-data")).unwrap();
+        let destination = launcher_root.join("shared-resources/models/llm/acme/weak-resume-model");
+        std::fs::create_dir_all(&destination).unwrap();
+        let partial_path = destination.join("weights.gguf.part");
+        let marker_path = destination.join(".pumas_download");
+        let sentinel_path = destination.join("sentinel.txt");
+        std::fs::write(&partial_path, PARTIAL_BYTES).unwrap();
+        std::fs::write(&marker_path, MARKER_BYTES).unwrap();
+        std::fs::write(&sentinel_path, SENTINEL_BYTES).unwrap();
+        let snapshot = serde_json::from_value::<
+            pumas_library::model_library::download_store::PersistedDownload,
+        >(serde_json::json!({
+            "download_id": DOWNLOAD_ID,
+            "repo_id": "acme/model",
+            "revision": null,
+            "filename": "weights.gguf",
+            "filenames": ["weights.gguf"],
+            "dest_dir": destination,
+            "total_bytes": 100,
+            "status": "paused",
+            "download_request": {
+                "repo_id": "acme/model",
+                "family": "acme",
+                "official_name": "Weak Resume Model",
+                "model_type": "llm",
+                "filenames": ["weights.gguf"]
+            },
+            "created_at": "2026-09-03T00:00:00Z",
+            "known_sha256": null
+        }))
+        .unwrap();
+        pumas_library::model_library::test_support::admit_paused_download(launcher_root, &snapshot)
+            .unwrap();
+
+        let api = crate::handlers::test_support::build_test_api_with_hf(launcher_root).await;
+        let server = match start_test_server(api, launcher_root).await {
+            Ok(server) => server,
+            Err(error) if is_socket_bind_permission_error(&error) => {
+                eprintln!("Skipping weak resume RPC test: local TCP bind not permitted");
+                return;
+            }
+            Err(_) => panic!("failed to start weak resume RPC test server"),
+        };
+        let address = server.addr();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        let status_before = rpc_call(
+            &client,
+            address,
+            "get_model_download_status",
+            serde_json::json!({"downloadId": DOWNLOAD_ID}),
+            81,
+        )
+        .await;
+        let inventory_before_resume = read_inventory(launcher_root);
+        let resume_response = rpc_call(
+            &client,
+            address,
+            "resume_model_download",
+            serde_json::json!({"downloadId": DOWNLOAD_ID}),
+            82,
+        )
+        .await;
+        let status_after = rpc_call(
+            &client,
+            address,
+            "get_model_download_status",
+            serde_json::json!({"downloadId": DOWNLOAD_ID}),
+            83,
+        )
+        .await;
+        let inventory_after_resume_refusal = read_inventory(launcher_root);
+        let first_shutdown =
+            tokio::time::timeout(std::time::Duration::from_secs(6), server.shutdown()).await;
+        assert!(
+            first_shutdown.is_ok(),
+            "first weak resume RPC server shutdown exceeded its deadline"
+        );
+        assert!(
+            first_shutdown.unwrap().is_ok(),
+            "first weak resume RPC server did not observe all owner drains"
+        );
+        drop(server);
+        drop(client);
+
+        let first_inventory_after_shutdown = read_inventory(launcher_root);
+        let partial_after_shutdown = std::fs::read(&partial_path).unwrap();
+        let marker_after_shutdown = std::fs::read(&marker_path).unwrap();
+        let sentinel_after_shutdown = std::fs::read(&sentinel_path).unwrap();
+
+        let reopened_api =
+            crate::handlers::test_support::build_test_api_with_hf(launcher_root).await;
+        let reopened_server = start_test_server(reopened_api, launcher_root)
+            .await
+            .expect("reopened weak resume RPC server must bind after the first server drained");
+        let reopened_address = reopened_server.addr();
+        let reopened_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let reopened_status = rpc_call(
+            &reopened_client,
+            reopened_address,
+            "get_model_download_status",
+            serde_json::json!({"downloadId": DOWNLOAD_ID}),
+            84,
+        )
+        .await;
+        let reopened_resume_response = rpc_call(
+            &reopened_client,
+            reopened_address,
+            "resume_model_download",
+            serde_json::json!({"downloadId": DOWNLOAD_ID}),
+            85,
+        )
+        .await;
+        let reopened_status_after = rpc_call(
+            &reopened_client,
+            reopened_address,
+            "get_model_download_status",
+            serde_json::json!({"downloadId": DOWNLOAD_ID}),
+            86,
+        )
+        .await;
+        let reopened_shutdown = tokio::time::timeout(
+            std::time::Duration::from_secs(6),
+            reopened_server.shutdown(),
+        )
+        .await;
+        assert!(
+            reopened_shutdown.is_ok(),
+            "reopened weak resume RPC server shutdown exceeded its deadline"
+        );
+        assert!(
+            reopened_shutdown.unwrap().is_ok(),
+            "reopened weak resume RPC server did not observe all owner drains"
+        );
+        drop(reopened_server);
+        drop(reopened_client);
+
+        let inventory_after_reopen = read_inventory(launcher_root);
+        let partial_after_reopen = std::fs::read(&partial_path).unwrap();
+        let marker_after_reopen = std::fs::read(&marker_path).unwrap();
+        let sentinel_after_reopen = std::fs::read(&sentinel_path).unwrap();
+
+        let status_before = status_before.expect("initial paused status request must complete");
+        let resume_response = resume_response.expect("resume request must have a bounded response");
+        let status_after = status_after.expect("post-resume paused status request must complete");
+        let reopened_status =
+            reopened_status.expect("reopened paused status request must complete");
+        let reopened_resume_response =
+            reopened_resume_response.expect("reopened resume request must have a bounded response");
+        let reopened_status_after =
+            reopened_status_after.expect("reopened post-resume status request must complete");
+        let inventory_before_resume = inventory_before_resume
+            .expect("pre-resume download inventory must be readable and valid");
+        let inventory_after_resume_refusal = inventory_after_resume_refusal
+            .expect("post-refusal download inventory must be readable and valid");
+        let first_inventory_after_shutdown = first_inventory_after_shutdown
+            .expect("post-shutdown download inventory must be readable and valid");
+        let inventory_after_reopen =
+            inventory_after_reopen.expect("reopened download inventory must be readable and valid");
+
+        assert_paused_status(&status_before, 81, PARTIAL_BYTES.len());
+        assert_paused_status(&status_after, 83, PARTIAL_BYTES.len());
+        assert_eq!(status_after["result"], status_before["result"]);
+        assert_resume_refusal(&resume_response, 82);
+        assert_paused_status(&reopened_status, 84, PARTIAL_BYTES.len());
+        assert_paused_status(&reopened_status_after, 86, PARTIAL_BYTES.len());
+        assert_eq!(reopened_status["result"], status_before["result"]);
+        assert_eq!(reopened_status_after["result"], status_before["result"]);
+        assert_resume_refusal(&reopened_resume_response, 85);
+
+        for inventory in [
+            &inventory_after_resume_refusal,
+            &first_inventory_after_shutdown,
+            &inventory_after_reopen,
+        ] {
+            assert_eq!(inventory, &inventory_before_resume);
+            assert!(inventory["downloads"].as_array().is_some_and(|downloads| {
+                downloads
+                    .iter()
+                    .any(|download| download["download_id"] == DOWNLOAD_ID)
+            }));
+            assert!(inventory["queue_admissions"]
+                .as_object()
+                .is_some_and(|admissions| admissions.contains_key(DOWNLOAD_ID)));
+        }
+        let persisted_download = inventory_before_resume["downloads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|download| download["download_id"] == DOWNLOAD_ID)
+            .unwrap();
+        assert_eq!(persisted_download["revision"], serde_json::Value::Null);
+        assert_eq!(persisted_download["known_sha256"], serde_json::Value::Null);
+        assert_eq!(partial_after_shutdown, PARTIAL_BYTES);
+        assert_eq!(marker_after_shutdown, MARKER_BYTES);
+        assert_eq!(sentinel_after_shutdown, SENTINEL_BYTES);
+        assert_eq!(partial_after_reopen, PARTIAL_BYTES);
+        assert_eq!(marker_after_reopen, MARKER_BYTES);
+        assert_eq!(sentinel_after_reopen, SENTINEL_BYTES);
+    }
+
+    #[tokio::test]
+    async fn retained_digest_resume_status_waits_for_import_settlement_through_http_json_rpc() {
+        use std::path::Path;
+        use std::sync::{mpsc, Arc, Mutex};
+        use std::time::Duration;
+
+        const DOWNLOAD_ID: &str = "tracked-digest-resume-4";
+        const SELECTED_ARTIFACT_ID: &str = "acme--model__files_971f5ccbb554";
+        const MODEL_ID: &str = "llm/acme/digest-resume-model";
+        const PARTIAL_BYTES: &[u8] = b"GGUF\x02\x00\x00\x00";
+        const SHA256: &str = "69cb86ffffe1039003092edf0dc9415a36b5016eae5f93b7300f97e7fe67dcd9";
+        const MARKER_BYTES: &[u8] = br#"{"repo_id":"acme/model","files":["weights.gguf"]}"#;
+        const SENTINEL_BYTES: &[u8] = b"digest-resume-sentinel";
+        const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+        struct ReleaseOnDrop(Option<mpsc::Sender<()>>);
+        impl ReleaseOnDrop {
+            fn release(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                self.release();
+            }
+        }
+
+        fn fixture_gguf() -> Vec<u8> {
+            let mut bytes = b"GGUF".to_vec();
+            bytes.extend_from_slice(&2_u32.to_le_bytes());
+            bytes.extend_from_slice(&0_u64.to_le_bytes());
+            bytes.extend_from_slice(&0_u64.to_le_bytes());
+            bytes
+        }
+
+        fn read_store_document(root: &Path) -> Result<serde_json::Value, &'static str> {
+            let bytes = std::fs::read(root.join("launcher-data/downloads.json"))
+                .map_err(|_| "download store could not be read")?;
+            serde_json::from_slice(&bytes).map_err(|_| "download store was not valid JSON")
+        }
+
+        async fn rpc_call(
+            client: &reqwest::Client,
+            address: std::net::SocketAddr,
+            method: &str,
+            download_id: &str,
+            request_id: u64,
+        ) -> Result<serde_json::Value, &'static str> {
+            let response = tokio::time::timeout(Duration::from_secs(5), async {
+                client
+                    .post(format!("http://{address}/rpc"))
+                    .json(&serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "method": method,
+                        "params": {"downloadId": download_id},
+                        "id": request_id
+                    }))
+                    .send()
+                    .await
+                    .map_err(|_| "HTTP request failed")?
+                    .error_for_status()
+                    .map_err(|_| "HTTP status was not successful")?
+                    .json::<serde_json::Value>()
+                    .await
+                    .map_err(|_| "HTTP response body was not valid JSON")
+            })
+            .await
+            .map_err(|_| "HTTP JSON-RPC request exceeded its deadline")??;
+            if response["jsonrpc"] != "2.0" {
+                return Err("response did not identify JSON-RPC 2.0");
+            }
+            if response["id"] != request_id {
+                return Err("response request ID did not match the request");
+            }
+            if response.get("error").is_some() {
+                return Err("response contained a JSON-RPC error envelope");
+            }
+            Ok(response)
+        }
+
+        async fn wait_for_completed(
+            client: &reqwest::Client,
+            address: std::net::SocketAddr,
+            download_id: &str,
+            first_request_id: u64,
+        ) -> Result<serde_json::Value, &'static str> {
+            tokio::time::timeout(TEST_TIMEOUT, async {
+                let mut request_id = first_request_id;
+                loop {
+                    let response = rpc_call(
+                        client,
+                        address,
+                        "get_model_download_status",
+                        download_id,
+                        request_id,
+                    )
+                    .await?;
+                    let status = response["result"]["status"]
+                        .as_str()
+                        .ok_or("status response omitted its status")?;
+                    if status == "completed" {
+                        return Ok(response);
+                    }
+                    if status == "cancelled" || status == "error" {
+                        return Err("resumed download reached a non-completed terminal state");
+                    }
+                    request_id = request_id.wrapping_add(1);
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .map_err(|_| "completed status exceeded its deadline")?
+        }
+
+        let complete_bytes = fixture_gguf();
+        assert_eq!(complete_bytes.len(), 24);
+        let temp = TempDir::new().unwrap();
+        let launcher_root = temp.path();
+        std::fs::create_dir_all(launcher_root.join("launcher-data")).unwrap();
+        let destination =
+            launcher_root.join("shared-resources/models/llm/acme/digest-resume-model");
+        std::fs::create_dir_all(&destination).unwrap();
+        let partial_path = destination.join("weights.gguf.part");
+        let payload_path = destination.join("weights.gguf");
+        let marker_path = destination.join(".pumas_download");
+        let sentinel_path = destination.join("sentinel.txt");
+        std::fs::write(&partial_path, PARTIAL_BYTES).unwrap();
+        std::fs::write(&marker_path, MARKER_BYTES).unwrap();
+        std::fs::write(&sentinel_path, SENTINEL_BYTES).unwrap();
+        let snapshot = serde_json::from_value::<
+            pumas_library::model_library::download_store::PersistedDownload,
+        >(serde_json::json!({
+            "download_id": DOWNLOAD_ID,
+            "repo_id": "acme/model",
+            "revision": null,
+            "filename": "weights.gguf",
+            "filenames": ["weights.gguf"],
+            "dest_dir": destination,
+            "total_bytes": 24,
+            "status": "paused",
+            "download_request": {
+                "repo_id": "acme/model",
+                "family": "acme",
+                "official_name": "Digest Resume Model",
+                "model_type": "llm",
+                "filenames": ["weights.gguf"]
+            },
+            "created_at": "2026-09-03T00:00:00Z",
+            "known_sha256": SHA256
+        }))
+        .unwrap();
+        pumas_library::model_library::test_support::admit_paused_download(launcher_root, &snapshot)
+            .unwrap();
+
+        let api = crate::handlers::test_support::build_test_api_with_hf(launcher_root).await;
+        let library = api.model_library().clone();
+        let acquisition_store = api.acquisition().store().clone();
+        let library_model_id = library
+            .get_model_id(&destination)
+            .expect("fixture destination must be inside the model library");
+        let server = match start_test_server(api, launcher_root).await {
+            Ok(server) => server,
+            Err(error) if is_socket_bind_permission_error(&error) => {
+                eprintln!("Skipping digest resume RPC test: local TCP bind not permitted");
+                return;
+            }
+            Err(_) => panic!("failed to start digest resume RPC test server"),
+        };
+        let address = server.addr();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        let status_before = rpc_call(
+            &client,
+            address,
+            "get_model_download_status",
+            DOWNLOAD_ID,
+            91,
+        )
+        .await;
+        let partial_replacement = std::fs::write(&partial_path, &complete_bytes);
+
+        let (import_started_tx, import_started_rx) = tokio::sync::oneshot::channel();
+        let import_started_tx = Mutex::new(Some(import_started_tx));
+        let (release_import_tx, release_import_rx) = mpsc::channel();
+        let release_import_rx = Mutex::new(Some(release_import_rx));
+        let mut release_guard = ReleaseOnDrop(Some(release_import_tx));
+        let import_destination = destination.clone();
+        library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+            if import_destination.join(".pumas_download").exists()
+                || !import_destination.join("weights.gguf").is_file()
+            {
+                return;
+            }
+            if let Some(sender) = import_started_tx.lock().unwrap().take() {
+                let _ = sender.send(());
+                let receiver = release_import_rx.lock().unwrap().take();
+                if let Some(receiver) = receiver {
+                    let _ = receiver.recv();
+                }
+            }
+        })));
+
+        let resume_response = if partial_replacement.is_ok() {
+            Some(rpc_call(&client, address, "resume_model_download", DOWNLOAD_ID, 92).await)
+        } else {
+            None
+        };
+        let resume_succeeded = resume_response
+            .as_ref()
+            .and_then(|response| response.as_ref().ok())
+            .is_some_and(|response| response["result"]["success"] == true);
+        let import_gate_observed = if resume_succeeded {
+            tokio::time::timeout(TEST_TIMEOUT, import_started_rx)
+                .await
+                .is_ok_and(|result| result.is_ok())
+        } else {
+            false
+        };
+
+        let status_at_import = if import_gate_observed {
+            Some(
+                rpc_call(
+                    &client,
+                    address,
+                    "get_model_download_status",
+                    DOWNLOAD_ID,
+                    93,
+                )
+                .await,
+            )
+        } else {
+            None
+        };
+        let acquisitions_at_import = if import_gate_observed {
+            let store = acquisition_store.clone();
+            Some(
+                tokio::task::spawn_blocking(move || store.acquisitions())
+                    .await
+                    .map_err(|_| "acquisition snapshot task failed")
+                    .and_then(|result| {
+                        result.map_err(|_| "acquisition snapshot could not be read")
+                    }),
+            )
+        } else {
+            None
+        };
+        let document_at_import = if import_gate_observed {
+            Some(read_store_document(launcher_root))
+        } else {
+            None
+        };
+        let payload_at_import = if import_gate_observed {
+            Some(std::fs::read(&payload_path))
+        } else {
+            None
+        };
+        let partial_exists_at_import = partial_path.exists();
+
+        release_guard.release();
+        let completed_response = if resume_succeeded {
+            Some(wait_for_completed(&client, address, DOWNLOAD_ID, 100).await)
+        } else {
+            None
+        };
+        let repeated_completed_response = if completed_response
+            .as_ref()
+            .is_some_and(|result| result.is_ok())
+        {
+            Some(
+                rpc_call(
+                    &client,
+                    address,
+                    "get_model_download_status",
+                    DOWNLOAD_ID,
+                    150,
+                )
+                .await,
+            )
+        } else {
+            None
+        };
+
+        library.set_metadata_write_notifier(None);
+        let shutdown = tokio::time::timeout(Duration::from_secs(8), server.shutdown()).await;
+        drop(client);
+        drop(server);
+
+        let final_document = read_store_document(launcher_root);
+        let final_acquisitions = {
+            let store = acquisition_store.clone();
+            tokio::task::spawn_blocking(move || store.acquisitions())
+                .await
+                .map_err(|_| "final acquisition snapshot task failed")
+                .and_then(|result| {
+                    result.map_err(|_| "final acquisition snapshot could not be read")
+                })
+        };
+        let final_payload = std::fs::read(&payload_path);
+        let final_partial_exists = partial_path.exists();
+        let final_marker_exists = marker_path.exists();
+        let final_sentinel = std::fs::read(&sentinel_path);
+        let final_metadata = library.load_metadata(&destination);
+        let final_index = library.index().get(&library_model_id);
+
+        assert!(
+            shutdown.is_ok(),
+            "RPC server shutdown exceeded its deadline"
+        );
+        assert!(
+            shutdown.unwrap().is_ok(),
+            "RPC server did not observe all owner drains"
+        );
+        assert!(
+            partial_replacement.is_ok(),
+            "complete retained fixture bytes must be written before resume"
+        );
+        let status_before = status_before.expect("initial paused status request must complete");
+        let resume_response = resume_response
+            .expect("successful fixture replacement must issue the resume request")
+            .expect("resume request must have a bounded response");
+        assert_eq!(status_before["result"]["success"], true);
+        assert_eq!(status_before["result"]["downloadId"], DOWNLOAD_ID);
+        assert_eq!(status_before["result"]["libraryModelId"], MODEL_ID);
+        assert_eq!(status_before["result"]["repoId"], "acme/model");
+        assert_eq!(
+            status_before["result"]["selectedArtifactId"],
+            SELECTED_ARTIFACT_ID
+        );
+        assert_eq!(status_before["result"]["status"], "paused");
+        assert_eq!(
+            status_before["result"]["downloadedBytes"],
+            PARTIAL_BYTES.len()
+        );
+        assert_eq!(status_before["result"]["totalBytes"], complete_bytes.len());
+        assert_eq!(resume_response["result"]["success"], true);
+        assert!(import_gate_observed);
+
+        let status_at_import = status_at_import
+            .expect("import barrier must be reached before observing RPC status")
+            .expect("status request at import barrier must complete");
+        assert_eq!(status_at_import["result"]["success"], true);
+        assert_eq!(status_at_import["result"]["downloadId"], DOWNLOAD_ID);
+        assert_eq!(status_at_import["result"]["libraryModelId"], MODEL_ID);
+        assert_eq!(status_at_import["result"]["repoId"], "acme/model");
+        assert_eq!(
+            status_at_import["result"]["selectedArtifactId"],
+            SELECTED_ARTIFACT_ID
+        );
+        assert_eq!(status_at_import["result"]["status"], "downloading");
+        assert_eq!(
+            status_at_import["result"]["downloadedBytes"],
+            complete_bytes.len()
+        );
+        assert_eq!(
+            status_at_import["result"]["totalBytes"],
+            complete_bytes.len()
+        );
+        let import_progress = status_at_import["result"]["progress"]
+            .as_f64()
+            .expect("complete-byte import status must include numeric progress");
+        assert!(import_progress.is_finite() && (0.0..=1.0).contains(&import_progress));
+        assert!(!partial_exists_at_import);
+        assert_eq!(
+            payload_at_import
+                .expect("payload must be captured at the import barrier")
+                .expect("completed source bytes must be readable at the import barrier"),
+            complete_bytes
+        );
+        let acquisitions_at_import = acquisitions_at_import
+            .expect("acquisition snapshot must be captured at the import barrier")
+            .expect("acquisition snapshot must complete successfully");
+        assert_eq!(acquisitions_at_import.len(), 1);
+        let using = acquisitions_at_import
+            .values()
+            .next()
+            .expect("one resumed HF acquisition must be retained");
+        assert_eq!(using.demand.consumer, "hf.model");
+        assert_eq!(using.manifest.source().source_id(), "acme/model");
+        assert!(matches!(
+            &using.phase,
+            pumas_library::acquisition::AcquisitionPhase::Using { .. }
+        ));
+        assert_eq!(using.files.len(), 1);
+        assert_eq!(using.files[0].path, "weights.gguf");
+        assert_eq!(using.files[0].bytes, complete_bytes.len() as u64);
+        assert_eq!(using.files[0].sha256, SHA256);
+        let using_id = using.id.to_string();
+        let document_at_import = document_at_import
+            .expect("durable document must be captured at the import barrier")
+            .expect("durable document must be readable at the import barrier");
+        assert!(document_at_import["queue_admissions"]
+            .as_object()
+            .is_some_and(|admissions| admissions.contains_key(DOWNLOAD_ID)));
+        assert!(document_at_import["consumer_receipts"]
+            .as_object()
+            .is_some_and(|receipts| !receipts.contains_key(&using_id)));
+
+        let completed_response = completed_response
+            .expect("successful resume must be polled to settlement")
+            .expect("resumed import must reach Completed within its deadline");
+        let repeated_completed_response = repeated_completed_response
+            .expect("settled status must be polled a second time")
+            .expect("repeated terminal status request must complete");
+        assert_eq!(completed_response["result"]["status"], "completed");
+        assert_eq!(completed_response["result"]["downloadId"], DOWNLOAD_ID);
+        assert_eq!(completed_response["result"]["repoId"], "acme/model");
+        assert_eq!(
+            completed_response["result"]["selectedArtifactId"],
+            SELECTED_ARTIFACT_ID
+        );
+        assert_eq!(
+            completed_response["result"]["downloadedBytes"],
+            complete_bytes.len()
+        );
+        assert_eq!(
+            completed_response["result"],
+            repeated_completed_response["result"]
+        );
+        assert!(
+            completed_response["result"]["libraryModelId"].is_null()
+                || completed_response["result"]["libraryModelId"] == MODEL_ID
+        );
+        assert_eq!(
+            final_payload.expect("completed model bytes must be readable"),
+            complete_bytes
+        );
+        assert!(!final_partial_exists);
+        assert!(!final_marker_exists);
+        assert_eq!(
+            final_sentinel.expect("sentinel must remain readable"),
+            SENTINEL_BYTES
+        );
+        let final_metadata = final_metadata
+            .expect("completed model metadata lookup must succeed")
+            .expect("completed resume must publish model metadata");
+        assert_eq!(final_metadata.repo_id.as_deref(), Some("acme/model"));
+        assert!(final_index
+            .expect("completed model index lookup must succeed")
+            .is_some());
+
+        let final_document =
+            final_document.expect("final durable store document must be readable and valid JSON");
+        let final_acquisitions =
+            final_acquisitions.expect("final acquisition snapshot must complete successfully");
+        assert_eq!(final_acquisitions.len(), 1);
+        let adopted = final_acquisitions
+            .values()
+            .next()
+            .expect("settled HF acquisition must remain retained");
+        assert_eq!(adopted.id.to_string(), using_id);
+        assert!(matches!(
+            &adopted.phase,
+            pumas_library::acquisition::AcquisitionPhase::Adopted { .. }
+        ));
+        assert!(!final_document["queue_admissions"]
+            .as_object()
+            .is_some_and(|admissions| admissions.contains_key(DOWNLOAD_ID)));
+        assert!(final_document["released_queue_admissions"]
+            .as_object()
+            .is_some_and(|admissions| admissions.contains_key(DOWNLOAD_ID)));
+        let receipt = final_document["consumer_receipts"]
+            .get(&using_id)
+            .expect("settled acquisition must have a completion receipt");
+        let receipt_payload = if receipt["receipt_kind"] == "pumas.consumer-completion" {
+            &receipt["payload"]
+        } else {
+            receipt
+        };
+        assert_eq!(receipt_payload["acquisition_id"], using_id);
+        assert_eq!(receipt_payload["download_id"], DOWNLOAD_ID);
+        assert_eq!(receipt_payload["model_id"], MODEL_ID);
+        assert_eq!(receipt_payload["verified_files"][0]["path"], "weights.gguf");
+        assert_eq!(
+            receipt_payload["verified_files"][0]["bytes"],
+            complete_bytes.len()
+        );
+        assert_eq!(receipt_payload["verified_files"][0]["sha256"], SHA256);
+        if let pumas_library::acquisition::AcquisitionPhase::Adopted { lease } = &adopted.phase {
+            assert_eq!(receipt_payload["use_lease"], lease.to_string());
+        }
     }
 
     #[tokio::test]
@@ -873,6 +2338,49 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "inference-plugins")]
+    #[tokio::test]
+    async fn real_server_shutdown_closes_native_installation_admission() {
+        let root = TempDir::new().unwrap();
+        let api = crate::handlers::test_support::build_test_api_with_hf(root.path()).await;
+        let manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        let managers = HashMap::from([("llama-cpp".into(), manager.clone())]);
+        let sizes = SizeCalculator::new_with_cache(root.path().join("launcher-data/cache")).await;
+        let plugins = PluginLoader::new_async(root.path().join("launcher-data/plugins"))
+            .await
+            .unwrap();
+        let server = match start_server(
+            api,
+            managers,
+            sizes,
+            plugins,
+            LoopbackHost::parse("127.0.0.1").unwrap(),
+            0,
+            crate::http_transport::HttpShutdownPolicy::default(),
+        )
+        .await
+        {
+            Ok(server) => server,
+            Err(error) if is_socket_bind_permission_error(&error) => {
+                eprintln!(
+                    "Native shutdown integration unavailable: socket bind not permitted ({error})"
+                );
+                return;
+            }
+            Err(error) => panic!("Native shutdown server failed: {error:#}"),
+        };
+        server.shutdown().await.unwrap();
+        server.shutdown().await.unwrap();
+        let error = manager.install_version("b1234").await.unwrap_err();
+        assert!(error.to_string().contains("shutting down"));
+    }
+
     #[tokio::test]
     async fn test_server_starts() {
         let temp_dir = TempDir::new().unwrap();
@@ -900,7 +2408,7 @@ mod tests {
             "http://[::1]:5173",
         ] {
             let header = HeaderValue::from_str(origin).unwrap();
-            assert!(is_allowed_cors_origin(&header), "{origin}");
+            assert!(is_allowed_origin(&header), "{origin}");
         }
     }
 
@@ -912,7 +2420,7 @@ mod tests {
             "file:///tmp/index.html",
         ] {
             let header = HeaderValue::from_str(origin).unwrap();
-            assert!(!is_allowed_cors_origin(&header), "{origin}");
+            assert!(!is_allowed_origin(&header), "{origin}");
         }
     }
 
@@ -921,4 +2429,38 @@ mod tests {
     fn gateway_http_client_builds_with_configured_policy() {
         build_gateway_http_client().unwrap();
     }
+    #[tokio::test]
+    async fn shutdown_rejects_health_events_and_gateway_before_handlers() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use tower::ServiceExt;
+        let shutdown = ShutdownRequest::default();
+        let app = Router::new()
+            .fallback(|| async { axum::http::StatusCode::IM_A_TEAPOT })
+            .layer(axum::middleware::from_fn_with_state(
+                shutdown.clone(),
+                reject_during_shutdown,
+            ));
+        shutdown.request();
+        for path in [
+            "/health",
+            "/events/model-library-updates",
+            "/v1/completions",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        }
+    }
 }
+
+#[cfg(test)]
+mod acquisition_integration;
+
+#[cfg(test)]
+mod rpc_http_resume;

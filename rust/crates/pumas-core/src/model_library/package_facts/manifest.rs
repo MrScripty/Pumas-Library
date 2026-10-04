@@ -66,6 +66,24 @@ impl PackageInspectionManifest {
         metadata: &ModelMetadata,
         dependency_bindings: &[ModelDependencyBindingRecord],
     ) -> Result<String> {
+        self.source_fingerprint_with_gguf_revision(
+            model_dir,
+            descriptor,
+            metadata,
+            dependency_bindings,
+            Some(super::gguf::GGUF_FILE_TYPE_INSPECTOR_REVISION),
+        )
+        .await
+    }
+
+    async fn source_fingerprint_with_gguf_revision(
+        &self,
+        model_dir: &Path,
+        descriptor: &ModelExecutionDescriptor,
+        metadata: &ModelMetadata,
+        dependency_bindings: &[ModelDependencyBindingRecord],
+        gguf_revision: Option<&'static str>,
+    ) -> Result<String> {
         let model_dir = model_dir.to_path_buf();
         let descriptor_json = serde_json::to_string(descriptor)?;
         let metadata_json = serde_json::to_string(metadata)?;
@@ -84,6 +102,20 @@ impl PackageInspectionManifest {
                 "contract_version",
                 &PACKAGE_FACTS_CONTRACT_VERSION.to_string(),
             );
+            if fingerprint_files
+                .iter()
+                .any(|path| path.to_ascii_lowercase().ends_with(".gguf"))
+            {
+                if let Some(revision) = gguf_revision {
+                    // Old inspector output must be re-observed, never relabelled
+                    // in place from cached text or a filename guess.
+                    update_package_facts_hash_part(
+                        &mut hasher,
+                        "gguf_inspector_revision",
+                        revision,
+                    );
+                }
+            }
             update_package_facts_hash_part(&mut hasher, "descriptor", &descriptor_json);
             update_package_facts_hash_part(&mut hasher, "metadata", &metadata_json);
             update_package_facts_hash_part(
@@ -747,5 +779,38 @@ mod tests {
             .unwrap();
 
         assert_ne!(first, second);
+    }
+    #[tokio::test]
+    async fn gguf_inspector_revision_invalidates_legacy_fingerprint_only_for_gguf() {
+        for filename in ["model.gguf", "model.safetensors"] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path();
+            std::fs::write(root.join(filename), b"synthetic unchanged bytes").unwrap();
+            let metadata = ModelMetadata::default();
+            let manifest = PackageInspectionManifest::build(root, &metadata)
+                .await
+                .unwrap();
+            let descriptor = test_descriptor(root);
+            let legacy = manifest
+                .source_fingerprint_with_gguf_revision(root, &descriptor, &metadata, &[], None)
+                .await
+                .unwrap();
+            let current = manifest
+                .source_fingerprint(root, &descriptor, &metadata, &[])
+                .await
+                .unwrap();
+            assert_eq!(legacy != current, filename.ends_with(".gguf"));
+            assert_eq!(
+                current,
+                manifest
+                    .source_fingerprint(root, &descriptor, &metadata, &[])
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(
+                std::fs::read(root.join(filename)).unwrap(),
+                b"synthetic unchanged bytes"
+            );
+        }
     }
 }

@@ -6,6 +6,8 @@
 mod catalog_projection;
 mod contract;
 mod handlers;
+mod http_admission;
+mod http_transport;
 #[cfg(feature = "inference-plugins")]
 mod provider_clients;
 mod server;
@@ -53,6 +55,10 @@ struct Args {
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
 
+    /// Grace for accepted HTTP connections after shutdown; not a request timeout
+    #[arg(long, default_value_t = http_transport::DEFAULT_HTTP_SHUTDOWN_GRACE_MS)]
+    http_shutdown_grace_ms: u64,
+
     /// Enable debug logging
     #[arg(short, long)]
     debug: bool,
@@ -75,6 +81,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let host = server::LoopbackHost::parse(&args.host)?;
+    let http_policy = http_transport::HttpShutdownPolicy::from_millis(args.http_shutdown_grace_ms)?;
 
     // Set up logging
     let log_level = if args.debug {
@@ -96,10 +103,26 @@ fn main() -> Result<()> {
         .thread_name("pumas-rpc")
         .build()?;
 
-    runtime.block_on(run(args, host))
+    runtime.block_on(run(args, host, http_policy))
 }
 
-async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
+async fn run(
+    args: Args,
+    host: server::LoopbackHost,
+    http_policy: http_transport::HttpShutdownPolicy,
+) -> Result<()> {
+    // Install Unix handlers before readiness is published. Electron and service
+    // managers use SIGTERM, which must enter the same owned drain as SIGINT.
+    #[cfg(unix)]
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    #[cfg(unix)]
+    let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+
+    #[cfg(windows)]
+    let mut interrupt = tokio::signal::windows::ctrl_c()?;
+    #[cfg(windows)]
+    let mut ctrl_break = tokio::signal::windows::ctrl_break()?;
+
     info!("Starting Pumas RPC Server");
 
     // Determine launcher root
@@ -139,7 +162,7 @@ async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
         .await?;
 
     #[cfg(feature = "inference-plugins")]
-    let version_managers = initialize_version_managers(&launcher_root).await;
+    let version_managers = initialize_version_managers(&launcher_root, &api).await;
     #[cfg(feature = "inference-plugins")]
     info!("Initialized {} version manager(s)", version_managers.len());
 
@@ -177,6 +200,7 @@ async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
         plugin_loader,
         host,
         args.port,
+        http_policy,
     )
     .await?;
     let addr = server.addr();
@@ -187,29 +211,58 @@ async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
 
     info!("RPC server running on {}", addr);
 
-    // Wait for shutdown signal
-    #[cfg(windows)]
-    {
-        let mut ctrl_break = tokio::signal::windows::ctrl_break()?;
-        tokio::select! {
-            result = tokio::signal::ctrl_c() => result?,
-            Some(()) = ctrl_break.recv() => {}
+    // Both OS signals and RPC admission converge on the same owned receipt.
+    let signal = async {
+        #[cfg(windows)]
+        {
+            tokio::select! {
+                Some(()) = interrupt.recv() => {},
+                Some(()) = ctrl_break.recv() => {}
+            }
         }
+        #[cfg(unix)]
+        tokio::select! {
+            _ = interrupt.recv() => {},
+            _ = terminate.recv() => {},
+        }
+        #[cfg(not(any(unix, windows)))]
+        tokio::signal::ctrl_c().await?;
+        Ok::<(), anyhow::Error>(())
+    };
+    tokio::select! {
+        result = signal => {
+            info!("Shutdown signal observed, draining owned work");
+            let drained = server.shutdown().await;
+            match (result, drained) {
+                (Ok(()), Ok(())) => {},
+                (Err(error), Ok(())) | (Ok(()), Err(error)) => return Err(error),
+                (Err(signal), Err(drain)) => return Err(anyhow::anyhow!(
+                    "Signal observation failed: {signal}; shutdown failed: {drain}"
+                )),
+            }
+        }
+        result = server.wait() => result?,
     }
-    #[cfg(not(windows))]
-    tokio::signal::ctrl_c().await?;
-    info!("Shutdown signal received, exiting");
-    server.shutdown().await?;
+    info!("RPC shutdown completed");
 
     Ok(())
 }
 
 #[cfg(feature = "inference-plugins")]
-async fn initialize_version_managers(launcher_root: &Path) -> HashMap<String, VersionManager> {
+async fn initialize_version_managers(
+    launcher_root: &Path,
+    api: &pumas_library::PumasApi,
+) -> HashMap<String, VersionManager> {
     let mut version_managers = HashMap::new();
 
     for app_id in VERSION_MANAGED_APPS {
-        match VersionManager::new(launcher_root, *app_id).await {
+        let initialized = if *app_id == AppId::LlamaCpp {
+            VersionManager::new_with_acquisition(launcher_root, *app_id, api.acquisition().clone())
+                .await
+        } else {
+            VersionManager::new(launcher_root, *app_id).await
+        };
+        match initialized {
             Ok(manager) => {
                 info!("{app_id} version manager initialized successfully");
                 version_managers.insert(app_id.as_str().to_string(), manager);

@@ -3,14 +3,17 @@
 //! Manages the state of installed, active, and default versions.
 //! Handles state persistence and validation.
 
-use super::installer::TorchVersionsLock;
+use super::installer::{NativeVersionsLock, TorchVersionsLock};
+use super::operation_receipt::OperationReceipt;
 use crate::version_manager::ValidationResult;
+use futures::FutureExt;
 use pumas_library::config::AppId;
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
 use pumas_library::{PumasError, Result};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use tokio::fs;
 use tracing::{debug, info, warn};
 
@@ -36,21 +39,143 @@ fn legacy_llama_cpp_sycl_replacements(
         .collect()
 }
 
-async fn torch_metadata_transaction<T: Send + 'static>(
-    lock: &TorchVersionsLock,
-    work: impl FnOnce() -> Result<T> + Send + 'static,
-) -> Result<T> {
-    let lease = lock.clone();
-    tokio::task::spawn_blocking(move || {
-        let _lease = lease;
-        work()
-    })
-    .await
-    .map_err(|error| PumasError::Other(format!("Torch metadata task failed: {error}")))?
+#[derive(Default)]
+pub(crate) struct StateMutationTasks {
+    state: StdMutex<StateMutationLifecycle>,
+}
+
+#[derive(Default)]
+struct StateMutationLifecycle {
+    closed: bool,
+    tasks: super::InstallationTasks,
+    receipts: Vec<OperationReceipt>,
+    completion: Option<super::InstallationShutdown>,
+}
+
+impl StateMutationTasks {
+    #[cfg(test)]
+    pub(crate) fn has_active_tasks(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .tasks
+            .tasks
+            .iter()
+            .any(|task| !task.is_finished())
+    }
+    fn ensure_open(&self) -> Result<()> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| PumasError::Other("State mutation registry poisoned".into()))?;
+        if state.closed {
+            return Err(PumasError::Other(
+                "Version state mutation admission closed".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn leased_transaction<T: Send + 'static, L: Clone + Send + 'static>(
+        &self,
+        lock: &L,
+        work: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let receipt = OperationReceipt::default();
+        {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| PumasError::Other("State mutation registry poisoned".into()))?;
+            if state.closed {
+                return Err(PumasError::Other(
+                    "Version state mutation admission closed".into(),
+                ));
+            }
+            state.tasks.harvest_finished();
+            state.receipts.retain(OperationReceipt::retain);
+            state.receipts.push(receipt.clone());
+            let worker_receipt = receipt.clone();
+            let lease = lock.clone();
+            // Register before any suspension. The receiver belongs to this
+            // caller; the lifecycle owns the worker's independent receipt.
+            let task = tokio::task::spawn_blocking(move || {
+                let result = work();
+                drop(lease);
+                worker_receipt.complete(&result);
+                let _ = sender.send(result);
+                Ok(())
+            });
+            state.tasks.tasks.push(task);
+        }
+        let result = receiver.await.map_err(|error| {
+            PumasError::Other(format!("Version metadata task lost its result: {error}"))
+        })?;
+        // Only receiver consumption acknowledges the result; a successful send
+        // can still leave an error buffered in an abandoned operation future.
+        receipt.observe();
+        result
+    }
+
+    async fn shutdown(&self) -> Result<()> {
+        let completion = {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| PumasError::Other("State mutation registry poisoned".into()))?;
+            state.closed = true;
+            if let Some(completion) = &state.completion {
+                completion.clone()
+            } else {
+                let registered = std::mem::take(&mut state.tasks);
+                let receipts = std::mem::take(&mut state.receipts);
+                let supervisor = tokio::spawn(async move {
+                    let mut failures = registered.failures;
+                    for task in registered.tasks {
+                        match task.await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(error)) => failures.push(error),
+                            Err(error) => failures.push(error.to_string()),
+                        }
+                    }
+                    failures.extend(
+                        receipts
+                            .iter()
+                            .filter_map(OperationReceipt::unobserved_error),
+                    );
+                    if failures.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(Arc::new(failures.join("; ")))
+                    }
+                });
+                let completion = async move {
+                    supervisor
+                        .await
+                        .unwrap_or_else(|error| Err(Arc::new(error.to_string())))
+                }
+                .boxed()
+                .shared();
+                state.completion = Some(completion.clone());
+                completion
+            }
+        };
+        completion.await.map_err(|error| {
+            PumasError::Other(format!("Version state mutation drain failed: {error}"))
+        })
+    }
 }
 
 /// Tracks the state of all versions.
+///
+/// Native llama.cpp mutations and legacy normalization share the installation
+/// lease. A competing mutation returns an error; started blocking workers keep
+/// their lease if the caller stops waiting. Cached read accessors are snapshots.
+/// Direct owners must retain this state and await `shutdown_mutations` before
+/// dropping it or stopping its runtime. Construction must be awaited to completion.
 pub struct VersionState {
+    mutation_tasks: Arc<StateMutationTasks>,
     /// Root directory for launcher.
     launcher_root: PathBuf,
     /// Application ID.
@@ -68,6 +193,16 @@ pub struct VersionState {
 }
 
 impl VersionState {
+    pub(crate) fn mutation_tasks(&self) -> Arc<StateMutationTasks> {
+        self.mutation_tasks.clone()
+    }
+
+    /// Close mutation admission and observe registered mutation workers, including workers
+    /// whose callers stopped waiting. Repeated calls retain the same outcome.
+    pub async fn shutdown_mutations(&mut self) -> Result<()> {
+        self.mutation_tasks.shutdown().await
+    }
+
     fn torch_versions_lock(&self) -> Result<Option<TorchVersionsLock>> {
         if self.app_id != AppId::Torch {
             return Ok(None);
@@ -78,6 +213,15 @@ impl VersionState {
             TorchVersionsLock::try_acquire(&versions_dir).map_err(PumasError::from)?,
         ))
     }
+    async fn native_versions_lock(&self) -> Result<Option<NativeVersionsLock>> {
+        if self.app_id != AppId::LlamaCpp {
+            return Ok(None);
+        }
+        NativeVersionsLock::acquire(self.launcher_root.join(self.app_id.versions_dir_name()))
+            .await
+            .map(Some)
+    }
+
     async fn load_versions_metadata(&self) -> Result<pumas_library::metadata::VersionsMetadata> {
         let metadata_manager = self.metadata_manager.clone();
         let app_id = self.app_id;
@@ -91,34 +235,14 @@ impl VersionState {
             })?
     }
 
-    async fn set_last_selected_version_metadata(&self, tag: Option<String>) -> Result<()> {
-        let metadata_manager = self.metadata_manager.clone();
-        let app_id = self.app_id;
-        tokio::task::spawn_blocking(move || {
-            metadata_manager.set_last_selected_version(tag.as_deref(), Some(app_id))
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join version-state last-selected write task: {}",
-                err
-            ))
-        })?
-    }
-
     async fn set_default_version_metadata(&self, tag: Option<String>) -> Result<()> {
         let metadata_manager = self.metadata_manager.clone();
         let app_id = self.app_id;
-        tokio::task::spawn_blocking(move || {
-            metadata_manager.set_default_version(tag.as_deref(), Some(app_id))
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join version-state default-version write task: {}",
-                err
-            ))
-        })?
+        self.mutation_tasks
+            .leased_transaction(&(), move || {
+                metadata_manager.set_default_version(tag.as_deref(), Some(app_id))
+            })
+            .await
     }
 
     /// Create a new version state tracker.
@@ -128,6 +252,7 @@ impl VersionState {
         metadata_manager: Arc<MetadataManager>,
     ) -> Result<Self> {
         let mut state = Self {
+            mutation_tasks: Arc::new(StateMutationTasks::default()),
             launcher_root: launcher_root.to_path_buf(),
             app_id,
             metadata_manager,
@@ -143,6 +268,7 @@ impl VersionState {
 
     /// Initialize state from metadata and filesystem.
     async fn initialize(&mut self) -> Result<()> {
+        let native_lock = self.native_versions_lock().await?;
         if self.app_id == AppId::Torch {
             let versions_dir = self.launcher_root.join(self.app_id.versions_dir_name());
             let metadata = self.metadata_manager.clone();
@@ -156,7 +282,8 @@ impl VersionState {
                 Err(error) => warn!(%error, "Torch cleanup recovery task failed"),
             }
         }
-        self.normalize_llama_cpp_legacy_sycl_variants().await?;
+        self.normalize_llama_cpp_legacy_sycl_variants(native_lock.as_ref())
+            .await?;
 
         // A selection writes the marker before its metadata commit. Startup
         // must not accept that marker while another backend owns the write.
@@ -278,17 +405,32 @@ impl VersionState {
 
     /// Refresh state from disk.
     pub async fn refresh(&mut self) -> Result<()> {
+        self.mutation_tasks.ensure_open()?;
+        let native_lock = self.native_versions_lock().await?;
         let lock = self.torch_versions_lock()?;
-        self.refresh_inner(lock.as_ref()).await
+        self.refresh_inner(lock.as_ref(), native_lock.as_ref())
+            .await
     }
 
     pub(crate) async fn refresh_with_lock(&mut self, lock: &TorchVersionsLock) -> Result<()> {
         debug_assert_eq!(self.app_id, AppId::Torch);
-        self.refresh_inner(Some(lock)).await
+        self.refresh_inner(Some(lock), None).await
     }
 
-    async fn refresh_inner(&mut self, _lock: Option<&TorchVersionsLock>) -> Result<()> {
-        self.normalize_llama_cpp_legacy_sycl_variants().await?;
+    pub(crate) async fn refresh_with_native_lock(
+        &mut self,
+        lock: &NativeVersionsLock,
+    ) -> Result<()> {
+        self.refresh_inner(None, Some(lock)).await
+    }
+
+    async fn refresh_inner(
+        &mut self,
+        _lock: Option<&TorchVersionsLock>,
+        native_lock: Option<&NativeVersionsLock>,
+    ) -> Result<()> {
+        self.normalize_llama_cpp_legacy_sycl_variants(native_lock)
+            .await?;
 
         let versions = self.load_versions_metadata().await?;
         let installed_tags: HashSet<String> = versions.installed.keys().cloned().collect();
@@ -317,123 +459,72 @@ impl VersionState {
         Ok(())
     }
 
-    async fn normalize_llama_cpp_legacy_sycl_variants(&self) -> Result<()> {
+    async fn normalize_llama_cpp_legacy_sycl_variants(
+        &self,
+        native_lock: Option<&NativeVersionsLock>,
+    ) -> Result<()> {
         if self.app_id != AppId::LlamaCpp {
             return Ok(());
         }
-
+        let lock = native_lock.ok_or_else(|| PumasError::InstallationFailed {
+            message: "Native metadata mutation lease absent".into(),
+        })?;
         let metadata_manager = self.metadata_manager.clone();
-        let versions = tokio::task::spawn_blocking(move || {
-            let mut versions = metadata_manager.load_versions(Some(AppId::LlamaCpp))?;
-            let replacements = legacy_llama_cpp_sycl_replacements(&versions.installed);
-            if replacements.is_empty() {
-                return Ok::<_, PumasError>((versions, replacements));
-            }
-
-            for (old_tag, new_tag) in &replacements {
-                let Some(mut metadata) = versions.installed.remove(old_tag) else {
-                    continue;
-                };
-                metadata.path = new_tag.clone();
-                metadata.release_tag = new_tag.clone();
-                versions
-                    .installed
-                    .entry(new_tag.clone())
-                    .or_insert(metadata);
-                if versions.last_selected_version.as_ref() == Some(old_tag) {
-                    versions.last_selected_version = Some(new_tag.clone());
-                }
-                if versions.default_version.as_ref() == Some(old_tag) {
-                    versions.default_version = Some(new_tag.clone());
-                }
-            }
-            metadata_manager.save_versions(&versions, Some(AppId::LlamaCpp))?;
-            Ok((versions, replacements))
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join llama.cpp SYCL metadata migration task: {}",
-                err
-            ))
-        })??;
-
-        let (_versions, replacements) = versions;
-        for (old_tag, new_tag) in replacements {
-            self.rename_version_dir_if_needed(&old_tag, &new_tag)
-                .await?;
-            self.rewrite_active_version_if_needed(&old_tag, &new_tag)
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    async fn rename_version_dir_if_needed(&self, old_tag: &str, new_tag: &str) -> Result<()> {
         let versions_dir = self.launcher_root.join(self.app_id.versions_dir_name());
-        let old_path = versions_dir.join(old_tag);
-        let new_path = versions_dir.join(new_tag);
-        if !fs::try_exists(&old_path)
-            .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to check legacy version directory: {}", e),
-                path: Some(old_path.clone()),
-                source: Some(e),
-            })?
-            || fs::try_exists(&new_path)
-                .await
-                .map_err(|e| PumasError::Io {
-                    message: format!("Failed to check replacement version directory: {}", e),
-                    path: Some(new_path.clone()),
-                    source: Some(e),
-                })?
-        {
-            return Ok(());
-        }
-
-        fs::rename(&old_path, &new_path)
-            .await
-            .map_err(|e| PumasError::Io {
-                message: format!(
-                    "Failed to rename legacy llama.cpp SYCL version directory: {}",
-                    e
-                ),
-                path: Some(old_path),
-                source: Some(e),
-            })
-    }
-
-    async fn rewrite_active_version_if_needed(&self, old_tag: &str, new_tag: &str) -> Result<()> {
         let active_file = super::active_version_path(&self.launcher_root, self.app_id);
-        if !fs::try_exists(&active_file)
-            .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to check active version file: {}", e),
-                path: Some(active_file.clone()),
-                source: Some(e),
-            })?
-        {
-            return Ok(());
-        }
-
-        let active_tag = fs::read_to_string(&active_file)
-            .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to read active version file: {}", e),
-                path: Some(active_file.clone()),
-                source: Some(e),
-            })?;
-        if active_tag.trim() != old_tag {
-            return Ok(());
-        }
-
-        fs::write(&active_file, new_tag)
-            .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to update active version file: {}", e),
-                path: Some(active_file),
-                source: Some(e),
+        self.mutation_tasks
+            .leased_transaction(lock, move || {
+                let mut versions = metadata_manager.load_versions(Some(AppId::LlamaCpp))?;
+                let replacements = legacy_llama_cpp_sycl_replacements(&versions.installed);
+                if replacements.is_empty() {
+                    return Ok(());
+                }
+                for (old_tag, new_tag) in &replacements {
+                    let Some(mut metadata) = versions.installed.remove(old_tag) else {
+                        continue;
+                    };
+                    metadata.path = new_tag.clone();
+                    metadata.release_tag = new_tag.clone();
+                    versions
+                        .installed
+                        .entry(new_tag.clone())
+                        .or_insert(metadata);
+                    if versions.last_selected_version.as_ref() == Some(old_tag) {
+                        versions.last_selected_version = Some(new_tag.clone());
+                    }
+                    if versions.default_version.as_ref() == Some(old_tag) {
+                        versions.default_version = Some(new_tag.clone());
+                    }
+                }
+                for (old_tag, new_tag) in replacements {
+                    let old_path = versions_dir.join(&old_tag);
+                    let new_path = versions_dir.join(&new_tag);
+                    if old_path
+                        .try_exists()
+                        .map_err(|error| PumasError::io_with_path(error, &old_path))?
+                        && !new_path
+                            .try_exists()
+                            .map_err(|error| PumasError::io_with_path(error, &new_path))?
+                    {
+                        std::fs::rename(&old_path, &new_path)
+                            .map_err(|error| PumasError::io_with_path(error, &old_path))?;
+                    }
+                    match std::fs::read_to_string(&active_file) {
+                        Ok(active) if active.trim() == old_tag => {
+                            std::fs::write(&active_file, new_tag)
+                                .map_err(|error| PumasError::io_with_path(error, &active_file))?;
+                        }
+                        Ok(_) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(PumasError::io_with_path(error, &active_file)),
+                    }
+                }
+                // Keep the old tags durable until every rename and active
+                // pointer update succeeds, so a partial migration can retry.
+                metadata_manager.save_versions(&versions, Some(AppId::LlamaCpp))?;
+                Ok(())
             })
+            .await
     }
 
     // ========================================
@@ -486,11 +577,15 @@ impl VersionState {
 
     /// Set the active version.
     pub async fn set_active_version(&mut self, tag: &str) -> Result<bool> {
+        self.mutation_tasks.ensure_open()?;
+        let native_lock = self.native_versions_lock().await?;
         let lock = self.torch_versions_lock()?;
-        if lock.is_some() {
-            self.refresh_inner(lock.as_ref()).await?;
+        if lock.is_some() || native_lock.is_some() {
+            self.refresh_inner(lock.as_ref(), native_lock.as_ref())
+                .await?;
         }
-        self.set_active_version_inner(tag, lock.as_ref()).await
+        self.set_active_version_inner(tag, lock.as_ref(), native_lock.as_ref())
+            .await
     }
 
     pub(crate) async fn set_active_version_with_lock(
@@ -498,13 +593,14 @@ impl VersionState {
         tag: &str,
         lock: &TorchVersionsLock,
     ) -> Result<bool> {
-        self.set_active_version_inner(tag, Some(lock)).await
+        self.set_active_version_inner(tag, Some(lock), None).await
     }
 
     async fn set_active_version_inner(
         &mut self,
         tag: &str,
         lock: Option<&TorchVersionsLock>,
+        native_lock: Option<&NativeVersionsLock>,
     ) -> Result<bool> {
         if !self.is_installed(tag) {
             return Err(PumasError::VersionNotFound {
@@ -515,35 +611,51 @@ impl VersionState {
         if self.app_id == AppId::Torch {
             let metadata = self.metadata_manager.clone();
             let selected = tag.to_owned();
-            torch_metadata_transaction(lock.expect("Torch selection lock required"), move || {
-                let previous = match std::fs::read(&active_file) {
-                    Ok(bytes) => Some(bytes),
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                    Err(error) => return Err(PumasError::io_with_path(error, &active_file)),
-                };
-                std::fs::write(&active_file, &selected)
-                    .map_err(|error| PumasError::io_with_path(error, &active_file))?;
-                if let Err(error) =
-                    metadata.set_last_selected_version(Some(&selected), Some(AppId::Torch))
-                {
-                    match previous {
-                        Some(bytes) => {
-                            let _ = std::fs::write(&active_file, bytes);
+            self.mutation_tasks
+                .leased_transaction(lock.expect("Torch selection lock required"), move || {
+                    let previous = match std::fs::read(&active_file) {
+                        Ok(bytes) => Some(bytes),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                        Err(error) => return Err(PumasError::io_with_path(error, &active_file)),
+                    };
+                    std::fs::write(&active_file, &selected)
+                        .map_err(|error| PumasError::io_with_path(error, &active_file))?;
+                    if let Err(error) =
+                        metadata.set_last_selected_version(Some(&selected), Some(AppId::Torch))
+                    {
+                        match previous {
+                            Some(bytes) => {
+                                let _ = std::fs::write(&active_file, bytes);
+                            }
+                            None => {
+                                let _ = std::fs::remove_file(&active_file);
+                            }
                         }
-                        None => {
-                            let _ = std::fs::remove_file(&active_file);
-                        }
+                        return Err(error);
                     }
-                    return Err(error);
-                }
-                Ok(())
-            })
-            .await?;
+                    Ok(())
+                })
+                .await?;
+        } else if let Some(lock) = native_lock {
+            let metadata = self.metadata_manager.clone();
+            let selected = tag.to_owned();
+            self.mutation_tasks
+                .leased_transaction(lock, move || {
+                    std::fs::write(&active_file, &selected)
+                        .map_err(|error| PumasError::io_with_path(error, &active_file))?;
+                    metadata.set_last_selected_version(Some(&selected), Some(AppId::LlamaCpp))
+                })
+                .await?;
         } else {
-            fs::write(&active_file, tag)
-                .await
-                .map_err(|error| PumasError::io_with_path(error, &active_file))?;
-            self.set_last_selected_version_metadata(Some(tag.to_string()))
+            let selected = tag.to_owned();
+            let metadata = self.metadata_manager.clone();
+            let app_id = self.app_id;
+            self.mutation_tasks
+                .leased_transaction(&(), move || {
+                    std::fs::write(&active_file, &selected)
+                        .map_err(|error| PumasError::io_with_path(error, &active_file))?;
+                    metadata.set_last_selected_version(Some(&selected), Some(app_id))
+                })
                 .await?;
         }
         self.active_version = Some(tag.to_string());
@@ -554,11 +666,15 @@ impl VersionState {
 
     /// Set the default version.
     pub async fn set_default_version(&mut self, tag: Option<&str>) -> Result<bool> {
+        self.mutation_tasks.ensure_open()?;
+        let native_lock = self.native_versions_lock().await?;
         let lock = self.torch_versions_lock()?;
-        if lock.is_some() {
-            self.refresh_inner(lock.as_ref()).await?;
+        if lock.is_some() || native_lock.is_some() {
+            self.refresh_inner(lock.as_ref(), native_lock.as_ref())
+                .await?;
         }
-        self.set_default_version_inner(tag, lock.as_ref()).await
+        self.set_default_version_inner(tag, lock.as_ref(), native_lock.as_ref())
+            .await
     }
 
     pub(crate) async fn set_default_version_with_lock(
@@ -566,13 +682,14 @@ impl VersionState {
         tag: Option<&str>,
         lock: &TorchVersionsLock,
     ) -> Result<bool> {
-        self.set_default_version_inner(tag, Some(lock)).await
+        self.set_default_version_inner(tag, Some(lock), None).await
     }
 
     async fn set_default_version_inner(
         &mut self,
         tag: Option<&str>,
         lock: Option<&TorchVersionsLock>,
+        native_lock: Option<&NativeVersionsLock>,
     ) -> Result<bool> {
         if let Some(t) = tag {
             if !self.is_installed(t) {
@@ -583,10 +700,19 @@ impl VersionState {
         if self.app_id == AppId::Torch {
             let metadata = self.metadata_manager.clone();
             let selected = tag.map(str::to_owned);
-            torch_metadata_transaction(lock.expect("Torch selection lock required"), move || {
-                metadata.set_default_version(selected.as_deref(), Some(AppId::Torch))
-            })
-            .await?;
+            self.mutation_tasks
+                .leased_transaction(lock.expect("Torch selection lock required"), move || {
+                    metadata.set_default_version(selected.as_deref(), Some(AppId::Torch))
+                })
+                .await?;
+        } else if let Some(lock) = native_lock {
+            let metadata = self.metadata_manager.clone();
+            let selected = tag.map(str::to_owned);
+            self.mutation_tasks
+                .leased_transaction(lock, move || {
+                    metadata.set_default_version(selected.as_deref(), Some(AppId::LlamaCpp))
+                })
+                .await?;
         } else {
             self.set_default_version_metadata(tag.map(String::from))
                 .await?;
@@ -604,27 +730,28 @@ impl VersionState {
         debug_assert_eq!(self.app_id, AppId::Torch);
         let marker = super::active_version_path(&self.launcher_root, self.app_id);
         let metadata = self.metadata_manager.clone();
-        torch_metadata_transaction(lock, move || {
-            let previous = match std::fs::read(&marker) {
-                Ok(bytes) => Some(bytes),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                Err(error) => return Err(PumasError::io_with_path(error, &marker)),
-            };
-            match std::fs::remove_file(&marker) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(PumasError::io_with_path(error, &marker)),
-            }
-            if let Err(error) = metadata.set_last_selected_version(None, Some(AppId::Torch)) {
-                if let Some(bytes) = previous {
-                    let _ = std::fs::write(&marker, bytes);
+        self.mutation_tasks
+            .leased_transaction(lock, move || {
+                let previous = match std::fs::read(&marker) {
+                    Ok(bytes) => Some(bytes),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => return Err(PumasError::io_with_path(error, &marker)),
+                };
+                match std::fs::remove_file(&marker) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(PumasError::io_with_path(error, &marker)),
                 }
-                return Err(error);
-            }
-            Ok(())
-        })
-        .await?;
-        self.refresh_inner(Some(lock)).await
+                if let Err(error) = metadata.set_last_selected_version(None, Some(AppId::Torch)) {
+                    if let Some(bytes) = previous {
+                        let _ = std::fs::write(&marker, bytes);
+                    }
+                    return Err(error);
+                }
+                Ok(())
+            })
+            .await?;
+        self.refresh_inner(Some(lock), None).await
     }
 
     /// Add a new installed version.
@@ -633,9 +760,17 @@ impl VersionState {
         tag: &str,
         metadata: InstalledVersionMetadata,
     ) -> Result<()> {
+        self.mutation_tasks.ensure_open()?;
         let _lock = self.torch_versions_lock()?;
-        if self.app_id == AppId::Torch {
-            let versions = self.metadata_manager.load_versions(Some(AppId::Torch))?;
+        let _native_lock = if self.app_id == AppId::LlamaCpp {
+            Some(NativeVersionsLock::try_acquire(
+                &self.launcher_root.join(self.app_id.versions_dir_name()),
+            )?)
+        } else {
+            None
+        };
+        if matches!(self.app_id, AppId::Torch | AppId::LlamaCpp) {
+            let versions = self.metadata_manager.load_versions(Some(self.app_id))?;
             self.installed_tags = versions.installed.keys().cloned().collect();
             self.installed_metadata = versions.installed;
             self.default_version = versions.default_version;
@@ -652,11 +787,14 @@ impl VersionState {
 
     /// Remove an installed version.
     pub async fn remove_installed_version(&mut self, tag: &str) -> Result<()> {
+        self.mutation_tasks.ensure_open()?;
+        let native_lock = self.native_versions_lock().await?;
         let lock = self.torch_versions_lock()?;
-        if lock.is_some() {
-            self.refresh_inner(lock.as_ref()).await?;
+        if lock.is_some() || native_lock.is_some() {
+            self.refresh_inner(lock.as_ref(), native_lock.as_ref())
+                .await?;
         }
-        self.remove_installed_version_inner(tag, lock.as_ref())
+        self.remove_installed_version_inner(tag, lock.as_ref(), native_lock.as_ref())
             .await
     }
 
@@ -664,9 +802,30 @@ impl VersionState {
         &mut self,
         tag: &str,
         _lock: Option<&TorchVersionsLock>,
+        native_lock: Option<&NativeVersionsLock>,
     ) -> Result<()> {
-        self.metadata_manager
-            .remove_installed_version(tag, Some(self.app_id))?;
+        if let Some(lock) = native_lock {
+            let metadata = self.metadata_manager.clone();
+            let removed = tag.to_owned();
+            let marker = super::active_version_path(&self.launcher_root, self.app_id);
+            let remove_marker = self.active_version.as_deref() == Some(tag);
+            self.mutation_tasks
+                .leased_transaction(lock, move || {
+                    metadata.remove_installed_version(&removed, Some(AppId::LlamaCpp))?;
+                    if remove_marker {
+                        match std::fs::remove_file(&marker) {
+                            Ok(()) => {}
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(error) => return Err(PumasError::io_with_path(error, &marker)),
+                        }
+                    }
+                    Ok(())
+                })
+                .await?;
+        } else {
+            self.metadata_manager
+                .remove_installed_version(tag, Some(self.app_id))?;
+        }
         self.installed_tags.remove(tag);
         self.installed_metadata.remove(tag);
 
@@ -675,17 +834,22 @@ impl VersionState {
             self.active_version = None;
             // Clear .active-version file
             let active_file = super::active_version_path(&self.launcher_root, self.app_id);
-            if self.app_id == AppId::Torch {
+            if native_lock.is_some() {
+                // Marker removal settled in the leased metadata worker.
+            } else if self.app_id == AppId::Torch {
                 match std::fs::remove_file(&active_file) {
                     Ok(()) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                     Err(error) => return Err(PumasError::io_with_path(error, &active_file)),
                 }
-            } else if fs::try_exists(&active_file)
-                .await
-                .map_err(|error| PumasError::io_with_path(error, &active_file))?
-            {
-                let _ = fs::remove_file(&active_file).await;
+            } else {
+                self.mutation_tasks
+                    .leased_transaction(&(), move || match std::fs::remove_file(&active_file) {
+                        Ok(()) => Ok(()),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                        Err(error) => Err(PumasError::io_with_path(error, &active_file)),
+                    })
+                    .await?;
             }
         }
 
@@ -704,16 +868,21 @@ impl VersionState {
 
     /// Validate all installations and remove incomplete ones.
     pub async fn validate_installations(&mut self) -> Result<ValidationResult> {
+        self.mutation_tasks.ensure_open()?;
+        let native_lock = self.native_versions_lock().await?;
         let lock = self.torch_versions_lock()?;
-        if lock.is_some() {
-            self.refresh_inner(lock.as_ref()).await?;
+        if lock.is_some() || native_lock.is_some() {
+            self.refresh_inner(lock.as_ref(), native_lock.as_ref())
+                .await?;
         }
-        self.validate_installations_inner(lock.as_ref()).await
+        self.validate_installations_inner(lock.as_ref(), native_lock.as_ref())
+            .await
     }
 
     async fn validate_installations_inner(
         &mut self,
         lock: Option<&TorchVersionsLock>,
+        native_lock: Option<&NativeVersionsLock>,
     ) -> Result<ValidationResult> {
         let versions_dir = self.launcher_root.join(self.app_id.versions_dir_name());
         let mut removed_tags = Vec::new();
@@ -754,7 +923,8 @@ impl VersionState {
                 "Removing stale metadata entry for incomplete installation: {}",
                 tag
             );
-            self.remove_installed_version_inner(tag, lock).await?;
+            self.remove_installed_version_inner(tag, lock, native_lock)
+                .await?;
             // NOTE: We no longer delete files automatically to prevent data loss
             // Orphaned directories will be reported but not deleted
         }
@@ -980,6 +1150,242 @@ mod tests {
 
     async fn create_test_state() -> (VersionState, TempDir) {
         create_test_state_for_app(AppId::Torch).await
+    }
+
+    #[tokio::test]
+    async fn native_public_state_mutations_share_installation_admission() {
+        let (mut state, root) = create_test_state_for_app(AppId::LlamaCpp).await;
+        let versions = root.path().join(AppId::LlamaCpp.versions_dir_name());
+        std::fs::create_dir(versions.join("b1234+cpu")).unwrap();
+        std::fs::write(versions.join("b1234+cpu/llama-server"), "complete").unwrap();
+        let metadata = InstalledVersionMetadata {
+            path: "b1234+cpu".into(),
+            release_tag: "b1234".into(),
+            ..Default::default()
+        };
+        state
+            .add_installed_version("b1234+cpu", metadata.clone())
+            .unwrap();
+        state.set_active_version("b1234+cpu").await.unwrap();
+        state.set_default_version(Some("b1234+cpu")).await.unwrap();
+        let before = state
+            .metadata_manager
+            .load_versions(Some(AppId::LlamaCpp))
+            .unwrap();
+        let marker = super::super::active_version_path(root.path(), AppId::LlamaCpp);
+        let before_marker = std::fs::read(&marker).unwrap();
+        let lease = NativeVersionsLock::try_acquire(&versions).unwrap();
+        assert!(
+            VersionState::new(root.path(), AppId::LlamaCpp, state.metadata_manager.clone())
+                .await
+                .is_err()
+        );
+        assert!(state.refresh().await.is_err());
+        assert!(state.set_active_version("b1234+cpu").await.is_err());
+        assert!(state.set_default_version(None).await.is_err());
+        assert!(state.add_installed_version("b1235+cpu", metadata).is_err());
+        assert!(state.remove_installed_version("b1234+cpu").await.is_err());
+        assert!(state.validate_installations().await.is_err());
+        let after = state
+            .metadata_manager
+            .load_versions(Some(AppId::LlamaCpp))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(before).unwrap(),
+            serde_json::to_value(after).unwrap()
+        );
+        assert_eq!(std::fs::read(&marker).unwrap(), before_marker);
+        assert!(versions.join("b1234+cpu/llama-server").exists());
+        drop(lease);
+        state.set_default_version(None).await.unwrap();
+        state.remove_installed_version("b1234+cpu").await.unwrap();
+        assert!(state
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn receipt_review_buffered_state_error_survives_unpolled_waiter_drop() {
+        let owner = StateMutationTasks::default();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let mut operation = Box::pin(owner.leased_transaction(&(), move || {
+            release_rx.recv().unwrap();
+            Err::<(), _>(PumasError::Other("buffered state error".into()))
+        }));
+        assert!(futures::poll!(operation.as_mut()).is_pending());
+        release_tx.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while owner.has_active_tasks() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // The worker has sent its result and finished. Never poll the receiver
+        // again: sending into its buffer is not caller observation.
+        {
+            let state = owner.state.lock().unwrap();
+            assert_eq!(state.tasks.tasks.len(), 1);
+            assert!(state.tasks.tasks[0].is_finished());
+        }
+        // A later admission harvests the finished worker without losing its receipt.
+        owner.leased_transaction(&(), || Ok(())).await.unwrap();
+        drop(operation);
+        let error = owner.shutdown().await.unwrap_err().to_string();
+        assert!(error.contains("buffered state error"));
+        assert_eq!(owner.shutdown().await.unwrap_err().to_string(), error);
+    }
+
+    #[tokio::test]
+    async fn receipt_review_observed_state_error_is_not_reported_again() {
+        let owner = StateMutationTasks::default();
+        let error = owner
+            .leased_transaction(&(), || {
+                Err::<(), _>(PumasError::Other("observed state error".into()))
+            })
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("observed state error"));
+        owner.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_metadata_worker_holds_lease_after_waiter_is_cancelled() {
+        let root = TempDir::new().unwrap();
+        let versions = root.path().join(AppId::LlamaCpp.versions_dir_name());
+        let lease = NativeVersionsLock::try_acquire(&versions).unwrap();
+        let metadata = Arc::new(MetadataManager::new(root.path()));
+        metadata.ensure_directories().unwrap();
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let owner = Arc::new(StateMutationTasks::default());
+        let worker_owner = owner.clone();
+        let waiter = tokio::spawn(async move {
+            worker_owner
+                .leased_transaction(&lease, move || {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    metadata.update_installed_version(
+                        "b1234+cpu",
+                        InstalledVersionMetadata::default(),
+                        Some(AppId::LlamaCpp),
+                    )?;
+                    finished_tx.send(()).unwrap();
+                    Ok(())
+                })
+                .await
+        });
+        entered_rx.await.unwrap();
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        assert!(NativeVersionsLock::try_acquire(&versions).is_err());
+        release_tx.send(()).unwrap();
+        finished_rx.await.unwrap();
+        owner.shutdown().await.unwrap();
+        // The notification precedes lease release; await actual admission.
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Ok(lease) = NativeVersionsLock::try_acquire(&versions) {
+                    drop(lease);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(MetadataManager::new(root.path())
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn state_mutation_shutdown_does_not_replay_delivered_errors() {
+        let owner = StateMutationTasks::default();
+        for _ in 0..3 {
+            let error = owner
+                .leased_transaction(&(), || -> Result<()> {
+                    Err(PumasError::Other("delivered mutation error".into()))
+                })
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("delivered mutation error"));
+        }
+        owner.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn state_mutation_shutdown_drains_cancelled_waiters_and_retains_failures() {
+        for terminal in ["success", "error", "panic"] {
+            let (mut state, root) = create_test_state_for_app(AppId::LlamaCpp).await;
+            let versions = root.path().join(AppId::LlamaCpp.versions_dir_name());
+            let lease = NativeVersionsLock::try_acquire(&versions).unwrap();
+            let owner = state.mutation_tasks();
+            let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let effect = root.path().join("terminal-effect");
+            let worker_effect = effect.clone();
+            let waiter = tokio::spawn(async move {
+                owner
+                    .leased_transaction(&lease, move || {
+                        entered_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                        std::fs::write(worker_effect, terminal).unwrap();
+                        match terminal {
+                            "error" => Err(PumasError::Other("owned mutation failure".into())),
+                            "panic" => panic!("owned mutation panic"),
+                            _ => Ok(()),
+                        }
+                    })
+                    .await
+            });
+            entered_rx.await.unwrap();
+            waiter.abort();
+            assert!(waiter.await.unwrap_err().is_cancelled());
+            let outcome = {
+                let drain = state.shutdown_mutations();
+                tokio::pin!(drain);
+                assert!(
+                    tokio::time::timeout(std::time::Duration::from_millis(30), &mut drain)
+                        .await
+                        .is_err()
+                );
+                assert!(!effect.exists());
+                assert!(NativeVersionsLock::try_acquire(&versions).is_err());
+                release_tx.send(()).unwrap();
+                drain.await.map_err(|error| error.to_string())
+            };
+            assert_eq!(
+                state
+                    .shutdown_mutations()
+                    .await
+                    .map_err(|error| error.to_string()),
+                outcome
+            );
+            assert!(state.set_default_version(None).await.is_err());
+            assert!(state
+                .add_installed_version("after-close", InstalledVersionMetadata::default())
+                .is_err());
+            assert_eq!(std::fs::read_to_string(&effect).unwrap(), terminal);
+            if terminal == "success" {
+                outcome.unwrap();
+            } else {
+                assert!(outcome
+                    .unwrap_err()
+                    .to_string()
+                    .contains(if terminal == "error" {
+                        "owned mutation failure"
+                    } else {
+                        "owned mutation panic"
+                    }));
+            }
+        }
     }
 
     #[tokio::test]
@@ -1225,6 +1631,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_llama_cpp_legacy_sycl_tag_migrates_to_precision_variant() {
+        assert_legacy_sycl_migration(false).await;
+    }
+
+    #[tokio::test]
+    async fn legacy_sycl_migration_retries_after_renames_before_metadata_save() {
+        assert_legacy_sycl_migration(true).await;
+    }
+
+    async fn assert_legacy_sycl_migration(interrupt_after_rename: bool) {
         let temp_dir = TempDir::new().unwrap();
         std::fs::create_dir_all(temp_dir.path().join("launcher-data/metadata")).unwrap();
         std::fs::create_dir_all(temp_dir.path().join("launcher-data/cache")).unwrap();
@@ -1257,6 +1672,32 @@ mod tests {
         metadata_manager
             .set_default_version(Some("b9090+sycl"), Some(AppId::LlamaCpp))
             .unwrap();
+
+        if interrupt_after_rename {
+            let active = temp_dir.path().join(".active-version");
+            std::fs::remove_file(&active).unwrap();
+            std::fs::create_dir(&active).unwrap();
+            assert!(
+                VersionState::new(temp_dir.path(), AppId::LlamaCpp, metadata_manager.clone())
+                    .await
+                    .is_err()
+            );
+            let retained = metadata_manager
+                .load_versions(Some(AppId::LlamaCpp))
+                .unwrap();
+            assert!(retained.installed.contains_key("b9090+sycl"));
+            assert!(!retained.installed.contains_key("b9090+sycl-fp16"));
+            assert!(!temp_dir
+                .path()
+                .join("llama-cpp-versions/b9090+sycl")
+                .exists());
+            assert!(temp_dir
+                .path()
+                .join("llama-cpp-versions/b9090+sycl-fp16/bin/llama-server")
+                .exists());
+            std::fs::remove_dir(&active).unwrap();
+            std::fs::write(&active, "b9090+sycl").unwrap();
+        }
 
         let state = VersionState::new(temp_dir.path(), AppId::LlamaCpp, metadata_manager.clone())
             .await

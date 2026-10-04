@@ -14,6 +14,7 @@
 //! - [`download`] - Download management with pause/resume/cancel
 //! - [`auth`] - Authentication token management
 
+mod acquisition_source;
 mod auth;
 mod bundles;
 mod download;
@@ -73,7 +74,7 @@ pub struct HuggingFaceClient {
     /// HTTP client for API requests (has total timeout)
     pub(super) client: Client,
     /// HTTP client for downloads (connect timeout only, no total timeout)
-    pub(super) download_client: Client,
+    pub(super) download_client: crate::acquisition::AcquisitionHttpClient,
     /// Cache directory for LFS file info (legacy JSON cache)
     pub(super) cache_dir: PathBuf,
     /// Active downloads
@@ -86,6 +87,7 @@ pub struct HuggingFaceClient {
     pub(super) download_publications: Arc<DownloadPublicationOwner>,
     /// Owner of background download tasks and their blocking filesystem work.
     download_tasks: Arc<DownloadTaskOwner>,
+    pub(crate) acquisition: Arc<crate::acquisition::AcquisitionService>,
     /// Only the public client requests closure on Drop; invocation snapshots
     /// borrow its configuration while their work belongs to `download_tasks`.
     owns_lifecycle: bool,
@@ -107,7 +109,7 @@ pub struct HuggingFaceClient {
     pub(super) aux_complete_callback: Option<AuxFilesCompleteCallback>,
     /// Authentication token for accessing gated/private models.
     pub(super) auth_token: Arc<RwLock<Option<String>>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     download_base_url: Option<String>,
 }
 
@@ -169,7 +171,7 @@ impl HuggingFaceClient {
     }
 
     pub(super) fn hub_base_url(&self) -> &str {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(base) = self.download_base_url.as_deref() {
             return base;
         }
@@ -177,7 +179,7 @@ impl HuggingFaceClient {
     }
 
     pub(super) fn api_base_url(&self) -> &str {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(base) = self.download_base_url.as_deref() {
             return base;
         }
@@ -195,6 +197,7 @@ impl HuggingFaceClient {
             download_updates: self.download_updates.clone(),
             download_publications: self.download_publications.clone(),
             download_tasks: self.download_tasks.clone(),
+            acquisition: self.acquisition.clone(),
             owns_lifecycle: false,
             destination_executions: self.destination_executions.clone(),
             dest_locks: self.dest_locks.clone(),
@@ -204,7 +207,7 @@ impl HuggingFaceClient {
             completion_callback: self.completion_callback.clone(),
             aux_complete_callback: self.aux_complete_callback.clone(),
             auth_token: self.auth_token.clone(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             download_base_url: self.download_base_url.clone(),
         }
     }
@@ -277,20 +280,61 @@ impl HuggingFaceClient {
         // Separate client for downloads: connect timeout only, no total timeout.
         // The total timeout would kill multi-gigabyte downloads that take longer
         // than 30 seconds. The stream loop handles progress and cancellation.
-        let download_client = Client::builder()
-            .connect_timeout(Duration::from_secs(30))
-            .user_agent("pumas-library/1.0")
-            .build()
-            .map_err(|e| PumasError::Network {
-                message: format!("Failed to create download HTTP client: {}", e),
-                cause: None,
-            })?;
+        let download_client = crate::acquisition::AcquisitionHttpClient::https(
+            Client::builder()
+                .connect_timeout(Duration::from_secs(30))
+                .user_agent("pumas-library/1.0"),
+        )
+        .map_err(|e| PumasError::Network {
+            message: format!("Failed to create download HTTP client: {}", e),
+            cause: None,
+        })?;
+
+        #[cfg(test)]
+        let download_client = download_client.with_loopback_fixture(
+            Client::builder()
+                .connect_timeout(Duration::from_secs(30))
+                .user_agent("pumas-library/1.0")
+                .build()
+                .map_err(|error| {
+                    PumasError::Other(format!("Fixture HTTP client failed: {error}"))
+                })?,
+        );
 
         let initial_token = auth::resolve_token_from_disk().map(|(token, source)| {
             info!("HuggingFace auth token found from {}", source);
             token
         });
 
+        Self::from_transport(cache_dir, client, download_client, initial_token)
+    }
+
+    #[cfg(feature = "test-support")]
+    pub(crate) fn new_with_loopback_fixture(
+        cache_dir: PathBuf,
+        source: super::test_support::HfLoopbackFixture,
+    ) -> Result<Self> {
+        let client = source.api_transport()?;
+        let download_client = source.transport()?;
+        std::fs::create_dir_all(&cache_dir)?;
+        // Unlike ordinary construction, this explicit fixture never invokes
+        // an environment/disk credential loader. Its transport follows no redirect.
+        let mut fixture = Self::from_transport(
+            cache_dir,
+            client,
+            crate::acquisition::AcquisitionHttpClient::from(download_client),
+            None,
+        )?;
+        fixture.download_base_url = Some(source.origin().to_owned());
+        Ok(fixture)
+    }
+
+    fn from_transport(
+        cache_dir: PathBuf,
+        client: Client,
+        download_client: crate::acquisition::AcquisitionHttpClient,
+        initial_token: Option<String>,
+    ) -> Result<Self> {
         let downloads = Arc::new(RwLock::new(HashMap::new()));
         let download_revision = Arc::new(AtomicU64::new(0));
         let download_updates = broadcast::channel(64).0;
@@ -300,16 +344,27 @@ impl HuggingFaceClient {
             download_updates.clone(),
         ));
 
+        let acquisition = Arc::new(crate::acquisition::AcquisitionService::new(Arc::new(
+            crate::acquisition::AcquisitionStore::new(&cache_dir),
+        )));
         Ok(Self {
             destination_root: None,
             client,
             download_client,
             cache_dir,
-            downloads,
+            downloads: downloads.clone(),
             download_revision,
             download_updates,
-            download_publications,
-            download_tasks: Arc::new(DownloadTaskOwner::new()),
+            download_publications: download_publications.clone(),
+            acquisition: acquisition.clone(),
+            download_tasks: Arc::new(DownloadTaskOwner::with_supervisor(
+                acquisition.supervisor(),
+                {
+                    let downloads = downloads.clone();
+                    let publications = download_publications.clone();
+                    move || download::project_download_shutdown(downloads, publications)
+                },
+            )?),
             owns_lifecycle: true,
             destination_executions: Arc::new(DestinationExecutionOwner::new()),
             dest_locks: Arc::new(RwLock::new(HashMap::new())),
@@ -319,7 +374,7 @@ impl HuggingFaceClient {
             completion_callback: None,
             aux_complete_callback: None,
             auth_token: Arc::new(RwLock::new(initial_token)),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             download_base_url: None,
         })
     }
@@ -351,7 +406,24 @@ impl HuggingFaceClient {
 
     /// Set the download persistence store.
     pub fn set_persistence(&mut self, persistence: Arc<DownloadPersistence>) {
+        self.acquisition = Arc::new(self.acquisition.with_store(persistence.acquisition_store()));
         self.persistence = Some(persistence);
+    }
+
+    pub(crate) fn set_acquisition_service(
+        &mut self,
+        acquisition: Arc<crate::acquisition::AcquisitionService>,
+    ) -> Result<()> {
+        self.download_tasks = Arc::new(DownloadTaskOwner::with_supervisor(
+            acquisition.supervisor(),
+            {
+                let downloads = self.downloads.clone();
+                let publications = self.download_publications.clone();
+                move || download::project_download_shutdown(downloads, publications)
+            },
+        )?);
+        self.acquisition = acquisition;
+        Ok(())
     }
 
     pub(crate) fn set_download_importer(&mut self, importer: Arc<super::ModelImporter>) {
@@ -492,11 +564,7 @@ impl HuggingFaceClient {
 impl Drop for HuggingFaceClient {
     fn drop(&mut self) {
         if self.owns_lifecycle {
-            let downloads = self.downloads.clone();
-            let publications = self.download_publications.clone();
-            self.download_tasks.request_shutdown(move || {
-                download::project_download_shutdown(downloads, publications)
-            });
+            self.download_tasks.request_shutdown();
         }
     }
 }
@@ -571,6 +639,116 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let client = HuggingFaceClient::new(temp_dir.path()).unwrap();
         (temp_dir, client)
+    }
+
+    #[cfg(feature = "test-support")]
+    #[tokio::test]
+    async fn fixture_api_timeout_preserves_connect_only_downloads() {
+        use futures::FutureExt;
+        use std::panic::AssertUnwindSafe;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        use tokio::sync::oneshot;
+
+        let root = TempDir::new().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let fixture = super::super::test_support::HfLoopbackFixture::parse(&origin).unwrap();
+        let client =
+            HuggingFaceClient::new_with_loopback_fixture(root.path().into(), fixture).unwrap();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let mut release = Some(release_tx);
+        let mut server = tokio::spawn(async move {
+            let mut peers = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    assert!(request.len() < 8192);
+                    request.push(stream.read_u8().await.unwrap());
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(!request.to_ascii_lowercase().contains("authorization:"));
+                let download = request.starts_with("GET /payload ");
+                if download {
+                    // Headers and first byte arrive; hold the rest of the body.
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nA",
+                        )
+                        .await
+                        .unwrap();
+                } else {
+                    assert!(request
+                        .starts_with("GET /api/models/fixture/model/tree/main?recursive=true "));
+                    // Keep the accepted API connection open without any response.
+                }
+                peers.push((stream, download));
+            }
+            ready_tx.send(()).unwrap();
+            let _ = release_rx.await;
+            for (mut stream, download) in peers {
+                if download {
+                    let _ = stream.write_all(b"B").await;
+                }
+            }
+        });
+
+        // Observe failures after dropping request futures and draining both owners.
+        let outcome = AssertUnwindSafe(async {
+            assert!(client.auth_token.read().await.is_none());
+            let api = client.get_repo_files("fixture/model");
+            let url = format!("{origin}/payload");
+            let download = async {
+                client.download_client.for_request(&url, false).unwrap()
+                    .get(&url).send().await.unwrap().bytes().await
+            };
+            tokio::pin!(api, download);
+            tokio::time::timeout(Duration::from_secs(5), async {
+                tokio::select! {
+                    result = &mut api => panic!("API settled before its held response: {result:?}"),
+                    result = &mut download => panic!("Download settled before its held body: {result:?}"),
+                    ready = ready_rx => ready.unwrap(),
+                }
+            }).await.expect("both literal-loopback peers must accept requests");
+            // A real 31-second body hold proves absence of the 30-second total
+            // download deadline. Do not shorten the fixture API's real deadline.
+            let body_release_at = tokio::time::Instant::now() + Duration::from_secs(31);
+            let refusal = tokio::time::timeout(Duration::from_secs(45), async {
+                tokio::select! {
+                    result = &mut api => result,
+                    result = &mut download => panic!("Download acquired a total transfer deadline: {result:?}"),
+                }
+            }).await.expect("stalled fixture API must obey its total request deadline");
+            assert!(matches!(refusal, Err(PumasError::Network { .. })), "{refusal:?}");
+            tokio::select! {
+                result = &mut download => panic!("Download body settled before release: {result:?}"),
+                _ = tokio::time::sleep_until(body_release_at) => {},
+            }
+            release.take().unwrap().send(()).unwrap();
+            let bytes = tokio::time::timeout(Duration::from_secs(5), &mut download)
+                .await.unwrap().unwrap();
+            assert_eq!(bytes.as_ref(), b"AB");
+        }).catch_unwind().await;
+
+        if let Some(release) = release.take() {
+            let _ = release.send(());
+        }
+        let source_cleanup = tokio::time::timeout(Duration::from_secs(5), &mut server).await;
+        if source_cleanup.is_err() {
+            server.abort();
+            let _ = server.await;
+        }
+        let owner_cleanup =
+            tokio::time::timeout(Duration::from_secs(5), client.shutdown_downloads()).await;
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
+        }
+        source_cleanup.expect("loopback peer must drain").unwrap();
+        owner_cleanup
+            .expect("fixture download owner must drain")
+            .unwrap();
     }
 
     #[tokio::test]

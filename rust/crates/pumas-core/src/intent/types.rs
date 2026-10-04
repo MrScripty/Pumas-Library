@@ -497,7 +497,7 @@ fn valid_repository_id(value: &str) -> bool {
     matches!((parts.next(), parts.next(), parts.next()), (Some(owner), Some(name), None) if valid_segment(owner) && valid_segment(name))
 }
 
-fn valid_relative_identity(value: &str) -> bool {
+pub(crate) fn valid_relative_identity(value: &str) -> bool {
     !value.is_empty()
         && !value.starts_with('/')
         && !value.ends_with('/')

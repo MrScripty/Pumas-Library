@@ -12,7 +12,7 @@ use crate::models::{
     ModelLibrarySelectorSnapshot, ModelLibrarySelectorSnapshotRequest,
     ModelLibraryUpdateNotification, ModelLibraryUpdateSubscription,
     ModelPackageFactsSummaryBatchItem, ResolveModelArtifactLoadTargetRequest,
-    ResolveModelArtifactLoadTargetResponse,
+    ResolveModelArtifactLoadTargetResponse, ResolvedModelPackageFacts,
 };
 use crate::registry::{InstanceEntry, InstanceStatus, LibraryRegistry, LocalInstanceTransportKind};
 use crate::{PumasError, Result};
@@ -92,6 +92,18 @@ impl PumasLocalClient {
         self.call_owner_method(
             LocalIpcOperation::ResolveModelArtifactLoadTarget,
             serde_json::json!({ "request": request }),
+        )
+        .await
+    }
+
+    /// Resolve the owner's full versioned package facts without selecting a runtime.
+    pub async fn resolve_model_package_facts(
+        &self,
+        model_id: &str,
+    ) -> Result<ResolvedModelPackageFacts> {
+        self.call_owner_method(
+            LocalIpcOperation::ResolveModelPackageFacts,
+            serde_json::json!({ "model_id": model_id }),
         )
         .await
     }
@@ -520,6 +532,278 @@ mod tests {
             started_at: "2026-05-06T00:00:00Z".to_string(),
             version: Some(env!("CARGO_PKG_VERSION").to_string()),
             status: InstanceStatus::Ready,
+        }
+    }
+
+    async fn full_facts_wire_request(addr: SocketAddr, params: serde_json::Value) -> IpcResponse {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let mut stream = TcpStream::connect(addr).await.unwrap();
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "resolve_model_package_facts",
+                "params": params,
+                "id": 17,
+            });
+            write_frame(&mut stream, &serde_json::to_vec(&request).unwrap())
+                .await
+                .unwrap();
+            let bytes = read_frame(&mut stream).await.unwrap().unwrap();
+            let response: IpcResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(response.id, Some(serde_json::json!(17)));
+            response
+        })
+        .await
+        .expect("framed full-facts request must settle")
+    }
+
+    #[tokio::test]
+    async fn local_client_full_package_facts_matches_owner_and_preserves_refusals() {
+        use crate::api::PrimaryState;
+        use crate::models::{ModelImportSpec, PACKAGE_FACTS_CONTRACT_VERSION};
+        use futures::FutureExt;
+        use std::panic::AssertUnwindSafe;
+        use std::time::Duration;
+
+        let root = TempDir::new().unwrap();
+        let owner = PrimaryState::package_facts_test_owner(root.path()).await;
+        let source = root.path().join("source.gguf");
+        let mut bytes = [0_u8; 24];
+        bytes[..4].copy_from_slice(b"GGUF");
+        bytes[4..8].copy_from_slice(&2_u32.to_le_bytes());
+        std::fs::write(&source, bytes).unwrap();
+        let imported = owner
+            .model_importer
+            .import(&ModelImportSpec {
+                path: source.display().to_string(),
+                family: "fixture".to_string(),
+                official_name: "Package Facts".to_string(),
+                repo_id: None,
+                model_type: Some("llm".to_string()),
+                subtype: None,
+                tags: None,
+                security_acknowledged: Some(true),
+            })
+            .await
+            .unwrap();
+        assert!(imported.success, "import failed: {:?}", imported.error);
+        let model_id = imported.model_id.unwrap();
+        let registry = owner.registry.as_ref().unwrap();
+        registry
+            .register(root.path(), "Full facts fixture")
+            .unwrap();
+        let mut server = IpcServer::start(owner.clone()).await.unwrap();
+        registry
+            .register_instance(root.path(), std::process::id(), server.port)
+            .unwrap();
+        let instance = registry.get_instance(root.path()).unwrap().unwrap();
+        let token = instance.connection_token.clone().unwrap();
+
+        // Observe test failures only after shutting down the disposable owners.
+        let outcome = AssertUnwindSafe(async {
+            let expected = owner
+                .model_library
+                .resolve_model_package_facts(&model_id)
+                .await
+                .unwrap();
+            assert_eq!(
+                expected.package_facts_contract_version,
+                PACKAGE_FACTS_CONTRACT_VERSION
+            );
+            assert_eq!(PACKAGE_FACTS_CONTRACT_VERSION, 3);
+            assert_eq!(expected.model_ref.model_id, model_id);
+            assert_eq!(expected.model_ref.model_ref_contract_version, 1);
+            assert!(
+                expected.gguf.is_some(),
+                "producer GGUF evidence is required"
+            );
+            let client = PumasLocalClient::connect(instance.clone()).await.unwrap();
+            let actual = tokio::time::timeout(
+                Duration::from_secs(10),
+                client.resolve_model_package_facts(&model_id),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                actual, expected,
+                "full DTO, identities, evidence and diagnostics must agree"
+            );
+            assert_eq!(
+                serde_json::to_value(&actual).unwrap(),
+                serde_json::to_value(&expected).unwrap()
+            );
+
+            let missing_token =
+                full_facts_wire_request(server.addr(), serde_json::json!({"model_id": model_id}))
+                    .await;
+            assert!(missing_token.result.is_none());
+            assert_eq!(missing_token.error.unwrap().code, -32602);
+            let wrong_token = full_facts_wire_request(
+                server.addr(),
+                serde_json::json!({"model_id": model_id, "connection_token": "wrong"}),
+            )
+            .await;
+            assert!(wrong_token.result.is_none());
+            assert_eq!(wrong_token.error.unwrap().code, -32602);
+            let mut wrong_instance = instance.clone();
+            wrong_instance.connection_token = Some("wrong".to_string());
+            let wrong_client = PumasLocalClient::connect(wrong_instance).await.unwrap();
+            assert!(matches!(
+                wrong_client.resolve_model_package_facts(&model_id).await,
+                Err(PumasError::InvalidParams { .. })
+            ));
+            let mut missing_instance = instance.clone();
+            missing_instance.connection_token = None;
+            assert!(matches!(
+                PumasLocalClient::connect(missing_instance).await,
+                Err(PumasError::InvalidParams { .. })
+            ));
+
+            for invalid in [
+                serde_json::Value::Null,
+                serde_json::json!(5),
+                serde_json::json!([]),
+                serde_json::json!(""),
+                serde_json::json!(" \t"),
+                serde_json::json!("/absolute/model"),
+                serde_json::json!("C:/outside/model"),
+                serde_json::json!("llm\\fixture\\model"),
+                serde_json::json!("a/../b"),
+                serde_json::json!("a/./b"),
+                serde_json::json!("a//b"),
+                serde_json::json!("a/"),
+                serde_json::json!("a\u{0}b"),
+                serde_json::json!("a b"),
+                serde_json::json!("a".repeat(4097)),
+            ] {
+                let response = full_facts_wire_request(
+                    server.addr(),
+                    serde_json::json!({
+                        "model_id": invalid, "connection_token": token,
+                    }),
+                )
+                .await;
+                assert!(response.result.is_none(), "malformed ID returned facts");
+                assert_eq!(response.error.unwrap().code, -32602);
+            }
+            for params in [
+                serde_json::json!({"connection_token": token}),
+                serde_json::json!({"model_id": model_id, "connection_token": token, "extra": true}),
+            ] {
+                assert_eq!(
+                    full_facts_wire_request(server.addr(), params)
+                        .await
+                        .error
+                        .unwrap()
+                        .code,
+                    -32602
+                );
+            }
+
+            // A real outside model lives entirely within this disposable fixture.
+            let outside = root.path().join("outside/model");
+            std::fs::create_dir_all(&outside).unwrap();
+            let published = owner.model_library.library_root().join(&model_id);
+            let metadata = std::fs::read(published.join("metadata.json")).unwrap();
+            std::fs::write(outside.join("metadata.json"), &metadata).unwrap();
+            std::fs::write(outside.join("source.gguf"), bytes).unwrap();
+            assert!(
+                owner
+                    .model_library
+                    .get_effective_metadata("../../outside/model")
+                    .unwrap()
+                    .is_some(),
+                "the baseline disk fallback must make this an actual outside-model fixture"
+            );
+            for escape in [
+                "../../outside/model".to_string(),
+                outside.display().to_string(),
+            ] {
+                let response = full_facts_wire_request(
+                    server.addr(),
+                    serde_json::json!({
+                        "model_id": escape, "connection_token": token,
+                    }),
+                )
+                .await;
+                assert!(response.result.is_none());
+                assert_eq!(response.error.unwrap().code, -32602);
+                assert!(matches!(
+                    client.resolve_model_package_facts(&escape).await,
+                    Err(PumasError::InvalidParams { .. })
+                ));
+                // Direct dispatch also authenticates and rejects the same identity.
+                assert!(matches!(
+                    owner
+                        .dispatch(
+                            "resolve_model_package_facts",
+                            serde_json::json!({
+                                "model_id": escape, "connection_token": token,
+                            })
+                        )
+                        .await,
+                    Err(PumasError::InvalidParams { .. })
+                ));
+            }
+            assert_eq!(
+                std::fs::read(outside.join("metadata.json")).unwrap(),
+                metadata
+            );
+
+            let missing = "llm/fixture/not-present";
+            assert!(matches!(
+                owner
+                    .model_library
+                    .resolve_model_package_facts(missing)
+                    .await,
+                Err(PumasError::ModelNotFound { .. })
+            ));
+            let response = full_facts_wire_request(
+                server.addr(),
+                serde_json::json!({
+                    "model_id": missing, "connection_token": token,
+                }),
+            )
+            .await;
+            assert!(response.result.is_none());
+            assert_eq!(response.error.unwrap().code, -32002);
+            assert!(matches!(
+                client.resolve_model_package_facts(missing).await,
+                Err(PumasError::Other(_))
+            ));
+
+            server.shutdown();
+            let lost = tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    match client.resolve_model_package_facts(&model_id).await {
+                        Err(PumasError::SharedInstanceLost { pid, port }) => break (pid, port),
+                        Ok(_) => tokio::task::yield_now().await,
+                        other => panic!("owner loss changed its transport error: {other:?}"),
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(lost, (instance.pid, instance.port));
+        })
+        .catch_unwind()
+        .await;
+        server.shutdown();
+        drop(server);
+        let drained = tokio::time::timeout(Duration::from_secs(10), async {
+            owner.runtime_tasks.shutdown_owned().await?;
+            owner.acquisition.shutdown().await
+        })
+        .await;
+        registry.unregister_instance(root.path()).unwrap();
+        assert!(
+            matches!(drained, Ok(Ok(()))),
+            "fixture owner failed to drain: {drained:?}"
+        );
+        drop(owner);
+        root.close().unwrap();
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
         }
     }
 

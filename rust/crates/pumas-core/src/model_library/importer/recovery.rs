@@ -1,11 +1,12 @@
 use super::{
     InPlaceImportSpec, IncompleteShardRecovery, InterruptedDownload, ModelImporter,
-    OrphanScanResult, TEMP_IMPORT_PREFIX,
+    OrphanScanResult, ShardRecoveryDiscovery, TEMP_IMPORT_PREFIX,
 };
-use crate::model_library::sharding;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+
+mod shard_discovery;
 
 impl ModelImporter {
     /// Scan the library tree for orphan model directories and adopt them.
@@ -110,128 +111,38 @@ impl ModelImporter {
             .unwrap_or(false)
     }
 
-    /// Scan for incomplete sharded models that need recovery downloads.
-    ///
-    /// Finds directories where:
-    /// - No `metadata.json` (shard validation rejected adoption)
-    /// - At least one file matches a shard pattern with a known total (e.g. `-00001-of-00004.`)
-    /// - Fewer files present than the total indicates
-    ///
-    /// Returns a list of recovery descriptors with the reconstructed repo_id
-    /// derived from the directory path (`{family}/{name}` -> HF repo).
-    pub fn recover_incomplete_shards(&self) -> Vec<IncompleteShardRecovery> {
-        let library_root = self.library.library_root();
-        let model_extensions: &[&str] =
-            &["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"];
-        let mut results = Vec::new();
-
-        for entry in WalkDir::new(library_root)
-            .min_depth(1)
-            .max_depth(3)
-            .into_iter()
-            .filter_map(|entry| entry.ok())
-        {
-            if !entry.file_type().is_dir() {
-                continue;
-            }
-
-            let dir = entry.path();
-            let dir_name = dir.file_name().and_then(|name| name.to_str()).unwrap_or("");
-
-            if dir_name.starts_with(TEMP_IMPORT_PREFIX) || dir_name.starts_with('.') {
-                continue;
-            }
-
-            if dir.join("metadata.json").exists() {
-                continue;
-            }
-
-            let file_entries: Vec<_> = match std::fs::read_dir(dir) {
-                Ok(reader) => reader.filter_map(|entry| entry.ok()).collect(),
-                Err(_) => continue,
-            };
-
-            let model_files: Vec<String> = file_entries
-                .iter()
-                .filter(|entry| entry.file_type().ok().is_some_and(|ty| ty.is_file()))
-                .filter_map(|entry| {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if name.ends_with(".part")
-                        || name == "metadata.json"
-                        || name == "overrides.json"
-                    {
-                        return None;
-                    }
-
-                    let extension = entry
-                        .path()
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .unwrap_or("")
-                        .to_lowercase();
-                    if model_extensions.contains(&extension.as_str()) {
-                        Some(name)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            if model_files.is_empty() {
-                continue;
-            }
-
-            for filename in &model_files {
-                if let Some((base_name, _idx, Some(total))) = sharding::extract_shard_info(filename)
-                {
-                    if total > 1 {
-                        let found_count = model_files
-                            .iter()
-                            .filter(|candidate| {
-                                sharding::extract_shard_info(candidate)
-                                    .map(|(base, _, _)| base == base_name)
-                                    .unwrap_or(false)
-                            })
-                            .count();
-
-                        if found_count < total {
-                            if let Some(inferred) = self.infer_spec_from_path(dir) {
-                                let repo_id =
-                                    format!("{}/{}", inferred.family, inferred.official_name);
-                                tracing::info!(
-                                    "Found incomplete shard set in {}: {}/{} shards of '{}', \
-                                     candidate repo: {}",
-                                    dir.display(),
-                                    found_count,
-                                    total,
-                                    base_name,
-                                    repo_id,
-                                );
-                                results.push(IncompleteShardRecovery {
-                                    model_dir: dir.to_path_buf(),
-                                    repo_id,
-                                    family: inferred.family,
-                                    official_name: inferred.official_name,
-                                    model_type: inferred.model_type,
-                                    existing_files: model_files.clone(),
-                                });
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        results
+    /// Inspect canonical model roots for shard and index evidence, without writes
+    /// or network actions. Failures and ambiguous layouts remain in the report.
+    pub fn discover_shard_recovery(&self) -> ShardRecoveryDiscovery {
+        shard_discovery::discover(self.library.library_root())
     }
 
-    /// Async wrapper for shard recovery discovery used on startup paths.
-    pub async fn recover_incomplete_shards_async(&self) -> Vec<IncompleteShardRecovery> {
+    /// Blocking filesystem discovery on the runtime's blocking pool. A failed
+    /// worker returns an explicit diagnostic rather than an apparently empty scan.
+    pub async fn discover_shard_recovery_async(&self) -> ShardRecoveryDiscovery {
         let importer = self.clone();
-        tokio::task::spawn_blocking(move || importer.recover_incomplete_shards())
-            .await
-            .unwrap_or_default()
+        match tokio::task::spawn_blocking(move || importer.discover_shard_recovery()).await {
+            Ok(report) => report,
+            Err(error) => shard_discovery::worker_failed(self.library.library_root(), error),
+        }
+    }
+
+    /// Lossy compatibility projection of `discover_shard_recovery`.
+    ///
+    /// This cannot establish completeness, repository identity, or authorization.
+    /// An empty Vec is not proof of a complete scan. Incomplete/ambiguous discovery
+    /// emits warnings; use the typed report to retain its diagnostics.
+    #[deprecated(note = "use discover_shard_recovery; path guesses never authorize downloads")]
+    pub fn recover_incomplete_shards(&self) -> Vec<IncompleteShardRecovery> {
+        shard_discovery::legacy_projection(self.discover_shard_recovery())
+    }
+
+    /// Async compatibility projection with the same limitations as the sync helper.
+    #[deprecated(
+        note = "use discover_shard_recovery_async; path guesses never authorize downloads"
+    )]
+    pub async fn recover_incomplete_shards_async(&self) -> Vec<IncompleteShardRecovery> {
+        shard_discovery::legacy_projection(self.discover_shard_recovery_async().await)
     }
 
     /// Find directories with interrupted downloads (`.part` files) that have
@@ -370,6 +281,13 @@ impl ModelImporter {
             .min_depth(1)
             .max_depth(3)
             .into_iter()
+            .filter_entry(|entry| {
+                !entry.file_type().is_dir()
+                    || !entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(TEMP_IMPORT_PREFIX)
+            })
             .filter_map(|entry| entry.ok())
         {
             if !entry.file_type().is_dir() {
@@ -383,7 +301,7 @@ impl ModelImporter {
                 continue;
             }
 
-            if dir.join("metadata.json").exists() {
+            if dir.join("metadata.json").exists() || super::publication::receipt_path_claimed(dir) {
                 continue;
             }
 
@@ -458,4 +376,60 @@ struct InferredSpec {
     model_type: Option<String>,
     family: String,
     official_name: String,
+}
+
+#[cfg(test)]
+mod custody_tests {
+    use super::super::tests::{completed_download, custody_fixture, orphan_spec, real_admission};
+    use super::*;
+    use crate::PumasError;
+    #[tokio::test]
+    async fn custody_guard_rechecks_a_real_stale_orphan_scan_after_admission() {
+        let (_temp, library, downloads, tasks, root) = custody_fixture().await;
+        let model = library.build_model_path("vision", "publisher", "model");
+        std::fs::create_dir_all(&model).unwrap();
+        std::fs::write(model.join("detector.onnx"), b"data").unwrap();
+        let importer = ModelImporter::new(library.clone());
+        let (scanned_tx, scanned) = tokio::sync::oneshot::channel();
+        let (admitted_tx, admitted) = tokio::sync::oneshot::channel();
+        let candidate_importer = importer.clone();
+        let scan = tokio::spawn(async move {
+            let candidates = candidate_importer
+                .find_orphan_dirs(candidate_importer.library.library_root(), false);
+            scanned_tx.send(candidates.clone()).unwrap();
+            admitted.await.unwrap();
+            candidate_importer
+                .import_in_place(&orphan_spec(&candidates[0]))
+                .await
+        });
+        assert_eq!(scanned.await.unwrap(), vec![model.clone()]);
+        // The competing queue admission commits before the stale scan reaches
+        // the actual common importer boundary, while no download can yet write.
+        real_admission(
+            &downloads,
+            &root,
+            &completed_download(&model, false),
+            "racing-download",
+        );
+        admitted_tx.send(()).unwrap();
+        assert!(matches!(
+            scan.await.unwrap(),
+            Err(PumasError::DownloadRootBusy)
+        ));
+        assert!(!model.join("metadata.json").exists());
+        assert!(library
+            .index()
+            .get("vision/publisher/model")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            downloads
+                .load_lifecycle_inventory_strict()
+                .unwrap()
+                .queue_admissions
+                .len(),
+            1
+        );
+        tasks.shutdown_owned().await.unwrap();
+    }
 }

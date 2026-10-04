@@ -229,6 +229,7 @@ pub(crate) struct PrimaryState {
     pub(crate) system_utils: Arc<system::SystemUtils>,
     pub(crate) model_library: Arc<model_library::ModelLibrary>,
     pub(crate) hf_client: Option<Arc<model_library::HuggingFaceClient>>,
+    pub(crate) acquisition: Arc<crate::acquisition::AcquisitionService>,
     pub(crate) intent_service: Arc<crate::intent::IntentService>,
     pub(crate) model_importer: model_library::ModelImporter,
     pub(crate) conversion_manager: Arc<conversion::ConversionManager>,
@@ -571,15 +572,20 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(descriptors)?)
             }
             "resolve_model_package_facts" => {
-                let model_id =
-                    params["model_id"]
-                        .as_str()
-                        .ok_or_else(|| PumasError::InvalidParams {
-                            message: "model_id is required".to_string(),
-                        })?;
+                validate_local_client_connection_token(self, &params)?;
+                let object = params
+                    .as_object()
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "model_id is required".to_string(),
+                    })?;
+                let model_id = ipc::protocol::bounded_model_id(object).map_err(|_| {
+                    PumasError::InvalidParams {
+                        message: "model_id must be a bounded relative model identity".to_string(),
+                    }
+                })?;
                 let facts = self
                     .model_library
-                    .resolve_model_package_facts(model_id)
+                    .resolve_model_package_facts(&model_id)
                     .await?;
                 Ok(serde_json::to_value(facts)?)
             }
@@ -1531,6 +1537,79 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 .subscribe_model_library_update_stream_since(cursor)
                 .await?,
         ))
+    }
+}
+
+#[cfg(test)]
+impl PrimaryState {
+    /// Disposable owner composition without ambient credentials or background probes.
+    pub(crate) async fn package_facts_test_owner(root: &Path) -> Arc<Self> {
+        use super::{ReconciliationCoordinator, RuntimeTasks, WatcherWriteSuppressor};
+        use std::time::Duration;
+        use tokio::sync::Mutex;
+
+        let library = Arc::new(
+            model_library::ModelLibrary::new(root.join("shared-resources/models"))
+                .await
+                .unwrap(),
+        );
+        let tasks = RuntimeTasks::new();
+        std::fs::create_dir_all(root.join("state")).unwrap();
+        let persistence = Arc::new(model_library::DownloadPersistence::new(&root.join("state")));
+        library
+            .install_mutation_authority(
+                tasks.clone(),
+                model_library::DownloadDestinationRoot::open(library.library_root()).unwrap(),
+                persistence,
+            )
+            .unwrap();
+        let acquisition = Arc::new(crate::acquisition::AcquisitionService::new(Arc::new(
+            crate::acquisition::AcquisitionStore::new(&root.join("state")),
+        )));
+        let provider_registry = crate::providers::ProviderRegistry::builtin();
+        Arc::new(Self {
+            _state: Arc::new(RwLock::new(ApiState {
+                background_fetch_completed: false,
+            })),
+            network_manager: Arc::new(network::NetworkManager::new().unwrap()),
+            process_manager: Arc::new(RwLock::new(None)),
+            resource_tracker: Arc::new(system::ResourceTracker::default()),
+            status_telemetry: Arc::new(super::status_telemetry::StatusTelemetryService::default()),
+            system_utils: Arc::new(system::SystemUtils::new(root)),
+            model_importer: model_library::ModelImporter::new(library.clone()),
+            conversion_manager: Arc::new(conversion::ConversionManager::new(
+                root.to_path_buf(),
+                library.clone(),
+                Arc::new(model_library::ModelImporter::new(library.clone())),
+            )),
+            runtime_profile_service: Arc::new(
+                crate::runtime_profiles::RuntimeProfileService::with_provider_registry_and_adapters(
+                    root,
+                    provider_registry.clone(),
+                    crate::runtime_profiles::RuntimeProviderAdapters::builtin(),
+                ),
+            ),
+            serving_service: Arc::new(crate::serving::ServingService::with_provider_registry(
+                provider_registry,
+            )),
+            intent_service: Arc::new(crate::intent::IntentService::new(
+                library.clone(),
+                None,
+                tasks.clone(),
+            )),
+            model_library: library,
+            acquisition,
+            hf_client: None,
+            runtime_tasks: tasks,
+            reconciliation: Arc::new(ReconciliationCoordinator::new(
+                Duration::ZERO,
+                Duration::ZERO,
+            )),
+            watcher_write_suppressor: Arc::new(WatcherWriteSuppressor::new(Duration::from_secs(1))),
+            server_handle: Mutex::new(None),
+            registry: Some(registry::LibraryRegistry::open_at(&root.join("registry.db")).unwrap()),
+            instance_claim: Mutex::new(None),
+        })
     }
 }
 

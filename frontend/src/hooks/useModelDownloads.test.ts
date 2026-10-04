@@ -483,7 +483,324 @@ describe('useModelDownloads', () => {
     );
   });
 
-  it('marks resumed downloads as failed when the backend resume request rejects', async () => {
+  const commands = [
+    { action: 'pause', handler: 'pauseDownload', mock: pauseModelDownloadMock, optimistic: 'pausing' },
+    { action: 'cancel', handler: 'cancelDownload', mock: cancelModelDownloadMock, optimistic: 'cancelling' },
+    { action: 'resume', handler: 'resumeDownload', mock: resumeModelDownloadMock, optimistic: 'queued' },
+  ] as const;
+
+  for (const command of commands) {
+    for (const failure of ['false response', 'rejection'] as const) {
+      it(`rolls back ${command.action} after a ${failure} and reports the failure`, async () => {
+        listModelDownloadsMock.mockResolvedValueOnce({ success: true, downloads: [progressOutcome({})] });
+        let fail!: () => void;
+        command.mock.mockReturnValueOnce(new Promise((resolve, reject) => {
+          fail = () => failure === 'false response'
+            ? resolve({ success: false, error: 'Command blocked' })
+            : reject(new Error('Command blocked'));
+        }));
+        const { result } = renderHook(() => useModelDownloads());
+        await flushMicrotasks();
+        const beforeCommand = result.current.downloadStatusByRepo['artifact-1'];
+        let pending!: Promise<void>;
+        act(() => { pending = result.current[command.handler]('artifact-1'); });
+        expect(result.current.downloadStatusByRepo['artifact-1']?.status).toBe(command.optimistic);
+
+        await act(async () => { fail(); await pending; });
+
+        expect(command.mock).toHaveBeenCalledWith('dl-1');
+        expect(result.current.downloadStatusByRepo['artifact-1']).toEqual(beforeCommand);
+        expect(result.current.downloadErrors['artifact-1']).toBe('Command blocked');
+      });
+
+      for (const snapshotStatus of ['downloading', 'completed', 'paused', 'cancelled', command.optimistic] as const) {
+        it(`preserves a newer ${snapshotStatus} snapshot after ${command.action} ${failure}`, async () => {
+          listModelDownloadsMock.mockResolvedValueOnce({ success: true, downloads: [progressOutcome({})] });
+          let fail!: () => void;
+          command.mock.mockReturnValueOnce(new Promise((resolve, reject) => {
+            fail = () => failure === 'false response'
+              ? resolve({ success: false, error: 'Command blocked' })
+              : reject(new Error('Command blocked'));
+          }));
+          const { result } = renderHook(() => useModelDownloads());
+          await flushMicrotasks();
+          let pending!: Promise<void>;
+          act(() => { pending = result.current[command.handler]('artifact-1'); });
+          act(() => downloadUpdateCallback?.({
+            cursor: 'download:2', snapshot: { cursor: 'download:2', revision: 2, downloads: [
+              progressOutcome({ status: snapshotStatus, progress: 70, downloadedBytes: 7 }),
+            ] }, stale_cursor: false, snapshot_required: false,
+          }));
+          const authoritativeStatus = result.current.downloadStatusByRepo['artifact-1'];
+
+          await act(async () => { fail(); await pending; });
+
+          expect(result.current.downloadStatusByRepo['artifact-1']).toEqual(authoritativeStatus);
+          if (snapshotStatus === 'completed' || snapshotStatus === 'cancelled') {
+            // Terminal activities leave the active projection. A late command
+            // must not recreate the row or attach an error to its former key.
+            expect(result.current.downloadStatusByRepo['artifact-1']).toBeUndefined();
+            expect(result.current.downloadErrors).toEqual({});
+          } else {
+            expect(result.current.downloadStatusByRepo['artifact-1']).toMatchObject({
+              downloadId: 'dl-1', status: snapshotStatus, progress: 70, downloadedBytes: 7,
+            });
+            expect(result.current.downloadErrors['artifact-1']).toBe('Command blocked');
+          }
+        });
+      }
+    }
+
+    it.each(['false response', 'rejection'] as const)(
+      `reports an action-specific fallback for ${command.action} %s without a message`, async (failure) => {
+        listModelDownloadsMock.mockResolvedValueOnce({ success: true, downloads: [progressOutcome({})] });
+        if (failure === 'false response') command.mock.mockResolvedValueOnce({ success: false });
+        else command.mock.mockRejectedValueOnce(undefined);
+        const { result } = renderHook(() => useModelDownloads());
+        await flushMicrotasks();
+
+        await act(async () => { await result.current[command.handler]('artifact-1'); });
+
+        expect(result.current.downloadStatusByRepo['artifact-1']?.status).toBe('downloading');
+        expect(result.current.downloadErrors['artifact-1']).toBe(`Failed to ${command.action} download.`);
+      }
+    );
+
+    it.each(['retained command', 'new authoritative push'] as const)(
+      `handles ${command.action} failure after late startup recovery with %s`, async (owner) => {
+        let resolveList!: (value: { success: true; downloads: DownloadProgressOutcome[] }) => void;
+        listModelDownloadsMock.mockReturnValueOnce(new Promise(resolve => { resolveList = resolve; }));
+        let fail!: (value: { success: false; error: string }) => void;
+        command.mock.mockReturnValueOnce(new Promise(resolve => { fail = resolve; }));
+        const { result } = renderHook(() => useModelDownloads());
+        act(() => result.current.startDownload('org/model', 'dl-1'));
+        const baseline = result.current.downloadStatusByRepo['org/model'];
+        expect(baseline).toBeDefined();
+        if (!baseline) return;
+        let pending!: Promise<void>;
+        act(() => { pending = result.current[command.handler]('org/model'); });
+
+        await act(async () => {
+          resolveList({ success: true, downloads: [progressOutcome({ status: 'downloading', libraryModelId: 'llm/org/model' })] });
+        });
+        expect(Object.keys(result.current.downloadStatusByRepo)).toEqual(['artifact-1']);
+        expect(result.current.downloadStatusByRepo['artifact-1']?.status).toBe(command.optimistic);
+        let expectedStatus: typeof baseline = { ...baseline, libraryModelId: 'llm/org/model' };
+        if (owner === 'new authoritative push') {
+          act(() => downloadUpdateCallback?.({
+            cursor: 'download:2', snapshot: { cursor: 'download:2', revision: 2, downloads: [
+              progressOutcome({ status: command.optimistic, downloadedBytes: 7 }),
+            ] }, stale_cursor: false, snapshot_required: false,
+          }));
+          const pushedStatus = result.current.downloadStatusByRepo['artifact-1'];
+          expect(pushedStatus).toBeDefined();
+          if (!pushedStatus) return;
+          expectedStatus = pushedStatus;
+        }
+
+        await act(async () => { fail({ success: false, error: 'Command blocked' }); await pending; });
+
+        expect(result.current.downloadStatusByRepo['artifact-1']).toEqual(expectedStatus);
+        expect(result.current.downloadErrors).toEqual({ 'artifact-1': 'Command blocked' });
+      }
+    );
+
+    it(`rolls back ${command.action} after a late same-ID start acknowledgement adds the catalog ID`, async () => {
+      listModelDownloadsMock.mockResolvedValueOnce({ success: true, downloads: [progressOutcome({})] });
+      let reject!: (reason: Error) => void;
+      command.mock.mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+      const { result } = renderHook(() => useModelDownloads());
+      await flushMicrotasks();
+      const baseline = result.current.downloadStatusByRepo['artifact-1'];
+      expect(baseline).toBeDefined();
+      if (!baseline) return;
+      let pending!: Promise<void>;
+      act(() => { pending = result.current[command.handler]('artifact-1'); });
+      act(() => result.current.startDownload('late-ack-key', 'dl-1', { libraryModelId: 'llm/org/model' }));
+      expect(Object.keys(result.current.downloadStatusByRepo)).toEqual(['artifact-1']);
+      expect(result.current.downloadStatusByRepo['artifact-1']).toMatchObject({
+        status: command.optimistic, libraryModelId: 'llm/org/model',
+      });
+
+      await act(async () => { reject(new Error('Command blocked')); await pending; });
+
+      expect(result.current.downloadStatusByRepo['artifact-1']).toEqual({
+        ...baseline, libraryModelId: 'llm/org/model',
+      });
+      expect(result.current.downloadErrors).toEqual({ 'artifact-1': 'Command blocked' });
+    });
+
+    it.each(['same-ID rekey', 'different-ID replacement'] as const)(
+      `handles a snapshot and ${command.action} failure in the same React batch for %s`, async (change) => {
+        listModelDownloadsMock.mockResolvedValueOnce({ success: true, downloads: [progressOutcome({})] });
+        let reject!: (reason: Error) => void;
+        command.mock.mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+        const { result } = renderHook(() => useModelDownloads());
+        await flushMicrotasks();
+        let pending!: Promise<void>;
+        act(() => { pending = result.current[command.handler]('artifact-1'); });
+
+        await act(async () => {
+          downloadUpdateCallback?.({
+            cursor: 'download:2', snapshot: { cursor: 'download:2', revision: 2, downloads:
+              change === 'same-ID rekey' ? [
+                progressOutcome({ selectedArtifactId: 'artifact-new', status: command.optimistic, downloadedBytes: 7 }),
+                progressOutcome({ downloadId: 'dl-new', downloadedBytes: 8 }),
+              ] : [progressOutcome({ downloadId: 'dl-new', downloadedBytes: 8 })],
+            }, stale_cursor: false, snapshot_required: false,
+          });
+          reject(new Error('Command blocked'));
+          await pending;
+        });
+
+        expect(result.current.downloadStatusByRepo['artifact-1']).toMatchObject({
+          downloadId: 'dl-new', status: 'downloading', downloadedBytes: 8,
+        });
+        if (change === 'same-ID rekey') {
+          expect(result.current.downloadStatusByRepo['artifact-new']).toMatchObject({
+            downloadId: 'dl-1', status: command.optimistic, downloadedBytes: 7,
+          });
+          expect(result.current.downloadErrors).toEqual({ 'artifact-new': 'Command blocked' });
+        } else {
+          expect(result.current.downloadErrors).toEqual({});
+        }
+      }
+    );
+
+    it(`keeps a replacement download intact after ${command.action} fails`, async () => {
+      listModelDownloadsMock.mockResolvedValueOnce({ success: true, downloads: [progressOutcome({})] });
+      let resolve!: (value: { success: false; error: string }) => void;
+      command.mock.mockReturnValueOnce(new Promise(settle => { resolve = settle; }));
+      const { result } = renderHook(() => useModelDownloads());
+      await flushMicrotasks();
+      let pending!: Promise<void>;
+      act(() => { pending = result.current[command.handler]('artifact-1'); });
+      act(() => downloadUpdateCallback?.({
+        cursor: 'download:2', snapshot: { cursor: 'download:2', revision: 2, downloads: [
+          progressOutcome({ downloadId: 'dl-new', progress: 80, downloadedBytes: 8 }),
+        ] }, stale_cursor: false, snapshot_required: false,
+      }));
+      const replacement = result.current.downloadStatusByRepo['artifact-1'];
+
+      await act(async () => { resolve({ success: false, error: 'Old command failed' }); await pending; });
+
+      expect(result.current.downloadStatusByRepo['artifact-1']).toEqual(replacement);
+      expect(result.current.downloadErrors).toEqual({});
+    });
+
+    it(`reports ${command.action} failure at the current key after the same download is rekeyed`, async () => {
+      listModelDownloadsMock.mockResolvedValueOnce({ success: true, downloads: [progressOutcome({})] });
+      let reject!: (reason: Error) => void;
+      command.mock.mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail; }));
+      const { result } = renderHook(() => useModelDownloads());
+      await flushMicrotasks();
+      let pending!: Promise<void>;
+      act(() => { pending = result.current[command.handler]('artifact-1'); });
+      act(() => downloadUpdateCallback?.({
+        cursor: 'download:2', snapshot: { cursor: 'download:2', revision: 2, downloads: [
+          progressOutcome({ selectedArtifactId: 'artifact-new', status: command.optimistic }),
+          progressOutcome({ downloadId: 'dl-new' }),
+        ] }, stale_cursor: false, snapshot_required: false,
+      }));
+      const authoritativeStatuses = result.current.downloadStatusByRepo;
+
+      await act(async () => { reject(new Error('Command blocked')); await pending; });
+
+      expect(result.current.downloadStatusByRepo).toEqual(authoritativeStatuses);
+      expect(result.current.downloadErrors).toEqual({ 'artifact-new': 'Command blocked' });
+    });
+  }
+
+  const commandPairs = commands.flatMap(first => commands.map(second => ({ first, second })));
+  for (const { first: firstCommand, second: secondCommand } of commandPairs) {
+    it.each(['earlier first', 'later first'] as const)(
+      `returns to the baseline when overlapping ${firstCommand.action}/${secondCommand.action} calls fail (%s)`,
+      async (settlementOrder) => {
+        listModelDownloadsMock.mockResolvedValueOnce({ success: true, downloads: [progressOutcome({})] });
+        let failEarlier!: () => void;
+        let failLater!: () => void;
+        firstCommand.mock.mockReturnValueOnce(new Promise((resolve) => {
+          failEarlier = () => resolve({ success: false, error: 'Earlier command failed' });
+        }));
+        secondCommand.mock.mockReturnValueOnce(new Promise((_resolve, reject) => {
+          failLater = () => reject(new Error('Later command failed'));
+        }));
+        const { result } = renderHook(() => useModelDownloads());
+        await flushMicrotasks();
+        const baseline = result.current.downloadStatusByRepo['artifact-1'];
+        let earlier!: Promise<void>;
+        let later!: Promise<void>;
+        act(() => { earlier = result.current[firstCommand.handler]('artifact-1'); });
+        act(() => { later = result.current[secondCommand.handler]('artifact-1'); });
+        expect(result.current.downloadStatusByRepo['artifact-1']?.status).toBe(secondCommand.optimistic);
+
+        if (settlementOrder === 'earlier first') {
+          await act(async () => { failEarlier(); await earlier; });
+          expect(result.current.downloadStatusByRepo['artifact-1']?.status).toBe(secondCommand.optimistic);
+          await act(async () => { failLater(); await later; });
+          expect(result.current.downloadErrors['artifact-1']).toBe('Later command failed');
+        } else {
+          await act(async () => { failLater(); await later; });
+          expect(result.current.downloadStatusByRepo['artifact-1']?.status).toBe(firstCommand.optimistic);
+          await act(async () => { failEarlier(); await earlier; });
+          expect(result.current.downloadErrors['artifact-1']).toBe('Earlier command failed');
+        }
+
+        expect(result.current.downloadStatusByRepo['artifact-1']).toEqual(baseline);
+      }
+    );
+
+    it(`preserves successful ${firstCommand.action} when overlapping ${secondCommand.action} fails`, async () => {
+      listModelDownloadsMock.mockResolvedValueOnce({ success: true, downloads: [progressOutcome({})] });
+      const { result } = renderHook(() => useModelDownloads());
+      await flushMicrotasks();
+      await act(async () => { await result.current[firstCommand.handler]('artifact-1'); });
+      secondCommand.mock.mockRejectedValueOnce(new Error('Later command failed'));
+
+      await act(async () => { await result.current[secondCommand.handler]('artifact-1'); });
+
+      expect(result.current.downloadStatusByRepo['artifact-1']?.status).toBe(firstCommand.optimistic);
+      expect(result.current.downloadErrors['artifact-1']).toBe('Later command failed');
+    });
+  }
+
+  it('preserves earlier command ownership when later rollback retains a recovered catalog ID', async () => {
+    let resolveList!: (value: { success: true; downloads: DownloadProgressOutcome[] }) => void;
+    listModelDownloadsMock.mockReturnValueOnce(new Promise(resolve => { resolveList = resolve; }));
+    let failPause!: (value: { success: false; error: string }) => void;
+    let failCancel!: (reason: Error) => void;
+    pauseModelDownloadMock.mockReturnValueOnce(new Promise(resolve => { failPause = resolve; }));
+    cancelModelDownloadMock.mockReturnValueOnce(new Promise((_resolve, reject) => { failCancel = reject; }));
+    const { result } = renderHook(() => useModelDownloads());
+    act(() => result.current.startDownload('org/model', 'dl-1'));
+    const baseline = result.current.downloadStatusByRepo['org/model'];
+    expect(baseline).toBeDefined();
+    if (!baseline) return;
+    let pausePending!: Promise<void>;
+    let cancelPending!: Promise<void>;
+    act(() => { pausePending = result.current.pauseDownload('org/model'); });
+    act(() => { cancelPending = result.current.cancelDownload('org/model'); });
+
+    await act(async () => {
+      resolveList({ success: true, downloads: [progressOutcome({ libraryModelId: 'llm/org/model' })] });
+    });
+    expect(result.current.downloadStatusByRepo['artifact-1']).toMatchObject({
+      status: 'cancelling', libraryModelId: 'llm/org/model',
+    });
+
+    await act(async () => { failCancel(new Error('Cancel blocked')); await cancelPending; });
+    expect(result.current.downloadStatusByRepo['artifact-1']).toMatchObject({
+      status: 'pausing', libraryModelId: 'llm/org/model',
+    });
+
+    await act(async () => { failPause({ success: false, error: 'Pause blocked' }); await pausePending; });
+    expect(result.current.downloadStatusByRepo['artifact-1']).toEqual({
+      ...baseline, libraryModelId: 'llm/org/model',
+    });
+    expect(result.current.downloadErrors).toEqual({ 'artifact-1': 'Pause blocked' });
+  });
+
+  it('restores the paused state and reports a rejected resume request', async () => {
     listModelDownloadsMock.mockResolvedValueOnce({
       success: true,
       downloads: [
@@ -518,7 +835,7 @@ describe('useModelDownloads', () => {
     expect(result.current.downloadStatusByRepo['repo-paused']).toEqual(
       expect.objectContaining({
         downloadId: 'dl-paused',
-        status: 'error',
+        status: 'paused',
       })
     );
     expect(result.current.downloadErrors).toEqual({

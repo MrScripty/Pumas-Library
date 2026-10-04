@@ -1,7 +1,8 @@
 //! Explicit integration-fixture support, absent from default production builds.
 //!
 //! This adapter exercises current configured-root admission. It does not import
-//! legacy stores, bypass the durable publisher, or start network workers.
+//! legacy stores or bypass the durable publisher. Explicit loopback fixtures
+//! exercise real network workers without ambient source credentials.
 //! Owned blocking fixtures exercise shutdown through the real HF task owner.
 
 use super::download_recovery::DownloadDestinationRoot;
@@ -13,6 +14,67 @@ use crate::{PumasError, Result};
 use std::path::Path;
 
 pub use super::download_store::PersistedDownload;
+
+/// An explicit caller-owned literal-loopback origin for HF integration tests.
+/// No production environment setting selects this non-default adapter.
+#[derive(Clone)]
+pub struct HfLoopbackFixture {
+    origin: String,
+}
+
+impl HfLoopbackFixture {
+    pub fn parse(origin: &str) -> Result<Self> {
+        let refused = || {
+            PumasError::Validation {
+            field: "fixture.hf_origin".into(),
+            message: "HF fixtures require an HTTP literal-loopback origin with an explicit port and no access material or path".into(),
+        }
+        };
+        let url = reqwest::Url::parse(origin).map_err(|_| refused())?;
+        if url.scheme() != "http"
+            || !url.host().is_some_and(|host| match host {
+                url::Host::Ipv4(ip) => ip.is_loopback(),
+                url::Host::Ipv6(ip) => ip.is_loopback(),
+                url::Host::Domain(_) => false,
+            })
+            || url.port().is_none_or(|port| port == 0)
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || url.path() != "/"
+        {
+            return Err(refused());
+        }
+        Ok(Self {
+            origin: url.origin().ascii_serialization(),
+        })
+    }
+
+    pub(crate) fn origin(&self) -> &str {
+        &self.origin
+    }
+
+    pub(crate) fn transport(&self) -> Result<reqwest::Client> {
+        self.transport_builder()
+            .build()
+            .map_err(|error| PumasError::Other(format!("HF fixture transport: {error}")))
+    }
+
+    pub(crate) fn api_transport(&self) -> Result<reqwest::Client> {
+        self.transport_builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|error| PumasError::Other(format!("HF fixture API transport: {error}")))
+    }
+
+    fn transport_builder(&self) -> reqwest::ClientBuilder {
+        reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_secs(30))
+    }
+}
 
 /// Run isolated fixture work through the real download invocation/effect owner.
 ///

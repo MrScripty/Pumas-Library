@@ -817,27 +817,13 @@ pub(crate) struct ShutdownOutcome {
 }
 
 impl ShutdownOutcome {
-    #[cfg(not(feature = "inference-plugins"))]
-    pub(crate) const fn core_only() -> Self {
+    /// Acknowledges admission only; successful process exit is the final receipt.
+    pub(crate) const fn acknowledged() -> Self {
         Self {
             status: "shutting_down",
             managed_profiles_processed: None,
             managed_processes_stopped: None,
             errors: Vec::new(),
-        }
-    }
-
-    #[cfg(feature = "inference-plugins")]
-    pub(crate) fn managed(
-        profiles_processed: usize,
-        processes_stopped: usize,
-        error_count: usize,
-    ) -> Self {
-        Self {
-            status: "shutting_down",
-            managed_profiles_processed: Some(profiles_processed),
-            managed_processes_stopped: Some(processes_stopped),
-            errors: vec!["A managed runtime could not be stopped."; error_count],
         }
     }
 }

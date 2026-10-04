@@ -4,9 +4,8 @@ on:
   push:
     branches: [main]
     tags: ['v*']
-  pull_request:
-    # Temporary review bases for the three-part Torch PR stack.
-    branches: [main, prep/torch-managed-foundation, prep/torch-install-flow]
+  # Qualify every review branch, including stacked acquisition repairs.
+  pull_request: {}
   workflow_dispatch:
 
 permissions:
@@ -71,6 +70,7 @@ jobs:
       # Separate package invocations prevent workspace feature unification from
       # silently enabling the features this gate is supposed to exclude.
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
+      - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features hf-client
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
       - name: Build inference-disabled release backend
         if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
@@ -224,8 +224,79 @@ jobs:
       - name: Test Windows locked-stage cleanup ownership
         if: runner.os == 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned
+      - name: Self-test acquisition qualification oracles
+        run: python scripts/release/test_acquisition_qualification.py
+      - name: Test cross-owner core acquisition joins
+        run: python scripts/release/test-acquisition-integration.py --package pumas-library --minimum 5
+      - name: Test cross-owner core joins with HF-only features
+        run: python scripts/release/test-acquisition-integration.py --package pumas-library --no-default-features --features hf-client --minimum 5
+      - name: Test cross-owner RPC and native acquisition shutdown
+        run: python scripts/release/test-acquisition-integration.py --package pumas-rpc --features test-support --minimum 2
+      - name: Test cross-owner inference-disabled RPC shutdown
+        run: python scripts/release/test-acquisition-integration.py --package pumas-rpc --no-default-features --features test-support --minimum 1
+      - name: Test inference-disabled native HTTP drainage
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features http_transport::tests
+      - name: Test reserved acquisition workspace custody
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library acquisition::workspace::tests
+      - name: Test native acquisition workspace cleanup
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager native_
+      - name: Test native owned HTTP shutdown boundaries
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc http_transport::tests
+      - name: Test RPC-owned shutdown on the native host
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests rpc_shutdown_exits_after_delivering_acknowledgement_and_ending_sse
+      # Exercise the integrated filesystem and registry repairs on each host;
+      # compilation of these modules alone is not native behavioral evidence.
+      - name: Test native Windows nested import publication
+        if: runner.os == 'Windows'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library copied_import_nested_native_publication_rebinds_exact_payload -- --nocapture
+      - name: Test native GGUF file-type inspection
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::package_facts::gguf::tests
+      - name: Test native GGUF inspector cache invalidation
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library gguf_inspector_revision_invalidates_legacy_fingerprint_only_for_gguf
+      - name: Test native GGUF intent evidence
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --test intent_api_tests gguf_header_quantization_matches_canonical_label_but_filename_is_not_proof
+      - name: Test native GGUF legacy cache reinspection
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --test package_facts_resolution stale_gguf_detail_and_summary_reinspect_raw_header_before_becoming_fresh
+      - name: Test native import integrity
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::importer::tests
+      - name: Test native copied import custody and settlement
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib copied_import -- --nocapture
+      - name: Test native held destination publication and cleanup
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib model_library::download_recovery::tests
+      - name: Test native import metadata projection compatibility
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib model_library::library::tests
+      - name: Test native shard completeness
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::sharding::tests
+      - name: Test native canonical shard discovery
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib shard_discovery
+      - name: Test read-only startup shard observation
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib shard_startup_tests
+      - name: Test shard recovery compatibility projection
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib test_recover_incomplete_shards_async_detects_missing_shard_set
+      - name: Test unchanged interrupted download discovery
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib test_find_interrupted_downloads_async_detects_partial_download_dir
+      - name: Test native registry startup ownership
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library registry::library_registry::tests
+      - name: Test native failed-start claim release
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library startup_guard_cannot_delete_a_successor_or_promoted_instance
+      - name: Test native intent IPC readiness and lifecycle
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --test intent_ipc_tests
+      - name: Test native local RPC request admission
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests http_admission_rejects_untrusted_sources_before_rpc_dispatch
+      - name: Test native Unix RPC signal drain
+        if: runner.os != 'Windows'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests unix_termination_signals_complete_the_owned_shutdown
       - name: Test native managed Python paths
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library test_venv_python_path
+      - name: Test Linux incomplete process observations
+        if: runner.os == 'Linux'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library platform::linux_group
+      - name: Test Linux router observer shutdown regression
+        if: runner.os == 'Linux'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library owned_sse_observes_external_load_unload_reconnect_and_drains_before_replacement
+      - name: Test Linux silent-SSE cleanup regression
+        if: runner.os == 'Linux'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library silent_sse_expires_its_lease_and_retains_rows_without_gateway_authority
       - name: Test Unix managed process-group ownership
         if: runner.os != 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library platform::managed_child

@@ -275,7 +275,7 @@ async fn ticket_recovery_refuses_busy_before_index_or_download_mutation() {
 }
 
 #[tokio::test]
-async fn builder_retains_failed_download_import_and_retries_before_completion() {
+async fn acquisition_integration_startup_retains_separate_pending_custody() {
     use crate::model_library::download_store::{
         DownloadAdmissionDomain, DownloadAdmissionRequest, DownloadPersistence,
         PersistedDestinationIdentity, PersistedDownload,
@@ -287,7 +287,37 @@ async fn builder_retains_failed_download_import_and_retries_before_completion() 
     let library_root = temp.path().join("shared-resources/models");
     let destination = library_root.join("vision/idea-research/grounding-dino-base");
     std::fs::create_dir_all(&destination).unwrap();
+    // A separately authored retained B1 fixture coexists with HF custody.
+    // It is deliberately unconfirmed; startup cannot manufacture a receipt.
+    let copied_pending = library_root.join("llm/local/copied-pending");
+    std::fs::create_dir_all(&copied_pending).unwrap();
+    let copied_metadata = serde_json::to_vec(&serde_json::json!({
+        "model_id": "llm/local/copied-pending", "model_type": "llm",
+        "family": "local", "cleaned_name": "copied-pending",
+        "import_state": "pending", "validation_state": "invalid",
+        "import_publication": {
+            "version": 1, "id": uuid::Uuid::new_v4().to_string(), "confirmed": false
+        }
+    }))
+    .unwrap();
+    std::fs::write(copied_pending.join("metadata.json"), &copied_metadata).unwrap();
+    std::fs::write(
+        copied_pending.join("weights.gguf"),
+        b"retained copied payload",
+    )
+    .unwrap();
+    let shards = library_root.join("llm/guessed/incomplete-shards");
+    std::fs::create_dir_all(&shards).unwrap();
+    std::fs::write(
+        shards.join("weights-00001-of-00002.gguf"),
+        b"retained shard",
+    )
+    .unwrap();
     let payload = b"not-a-real-model";
+    let known_sha256 = {
+        use sha2::Digest;
+        Some(hex::encode(sha2::Sha256::digest(payload)))
+    };
     std::fs::write(destination.join("detector.onnx.part"), payload).unwrap();
     std::fs::write(destination.join(".pumas_download"), b"{}").unwrap();
     // Structurally valid provenance passes destination admission, while an
@@ -322,7 +352,7 @@ async fn builder_retains_failed_download_import_and_retries_before_completion() 
             license_status: Some("apache-2.0".into()),
         },
         created_at: chrono::Utc::now().to_rfc3339(),
-        known_sha256: None,
+        known_sha256,
         huggingface_evidence: None,
     };
     let mut client = HuggingFaceClient::new(temp.path().join("fixture-cache")).unwrap();
@@ -380,7 +410,21 @@ async fn builder_retains_failed_download_import_and_retries_before_completion() 
         std::fs::read(destination.join("detector.onnx")).unwrap(),
         payload
     );
-    assert!(api.model_library().index().list_all().unwrap().is_empty());
+    assert_startup_retained_evidence(&api, &copied_pending, &copied_metadata, &shards).await;
+    let acquisitions = store.acquisition_store().acquisitions().unwrap();
+    let using = acquisitions
+        .values()
+        .find(|record| record.demand.consumer == "hf.model")
+        .expect("failed import retains its exact managed acquisition");
+    let acquisition_id = using.id;
+    assert!(matches!(
+        using.phase,
+        crate::acquisition::AcquisitionPhase::Using { .. }
+    ));
+    assert!(store
+        .read_hf_completion_receipt(acquisition_id)
+        .unwrap()
+        .is_none());
     // Shutdown reports the retained importer failure, but must drain before
     // the fixture repairs the obstruction and opens a fresh owning instance.
     assert!(matches!(
@@ -396,29 +440,35 @@ async fn builder_retains_failed_download_import_and_retries_before_completion() 
             .with_process_manager(false)
             .build()
             .await
-            .unwrap();
-        let metadata = api
-            .model_library()
-            .load_metadata(&destination)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            metadata.repo_id.as_deref(),
-            Some("IDEA-Research/grounding-dino-base")
-        );
-        assert_eq!(metadata.match_source.as_deref(), Some("download"));
-        let model_id = metadata.model_id.as_ref().unwrap();
-        assert!(api.model_library().index().get(model_id).unwrap().is_some());
-        assert_eq!(api.model_library().index().count().unwrap(), 1);
-        assert!(api.list_hf_downloads().await.unwrap().is_empty());
+            .expect("unrelated API services start with retained recovery custody");
+        let downloads = api.list_hf_downloads().await.unwrap();
+        assert_eq!(downloads.len(), 1);
+        assert_eq!(downloads[0].status, DownloadStatus::Error);
         let inventory = store.load_lifecycle_inventory_strict().unwrap();
-        assert!(inventory.downloads.is_empty());
-        assert!(inventory.queue_admissions.is_empty());
+        assert_eq!(inventory.downloads.len(), 1);
+        assert!(inventory
+            .queue_admissions
+            .contains_key("builder-import-retry"));
+        assert_eq!(
+            serde_json::to_value(&inventory.queue_admissions["builder-import-retry"]).unwrap(),
+            original_admission,
+            "reopen must preserve exact queue custody without an issued receipt"
+        );
+        assert!(std::fs::read(destination.join("metadata.json")).is_err());
+        assert_startup_retained_evidence(&api, &copied_pending, &copied_metadata, &shards).await;
+        assert!(store
+            .read_hf_completion_receipt(acquisition_id)
+            .unwrap()
+            .is_none());
+        assert!(matches!(
+            store.acquisition_store().acquisitions().unwrap()[&acquisition_id].phase,
+            crate::acquisition::AcquisitionPhase::Using { .. }
+        ));
         assert_eq!(
             std::fs::read(destination.join("detector.onnx")).unwrap(),
             payload
         );
-        api.shutdown_downloads().await.unwrap();
+        let _ = api.shutdown_downloads().await;
         drop(api);
     }
 }
@@ -722,3 +772,6 @@ async fn test_execute_migration_notifies_model_library_refresh_even_when_no_move
         Some("migration_execution")
     );
 }
+
+mod acquisition_integration;
+use acquisition_integration::assert_startup_retained_evidence;

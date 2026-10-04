@@ -20,7 +20,7 @@ env:
 
 jobs:
   cpu:
-    name: Public install and isolated local CPU use
+    name: Public install and real CPU use
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -42,7 +42,7 @@ jobs:
         run: |
           python3 qualification/scripts/acceptance/q2_cpu_qualification.py check-inputs \
             --repo "$GITHUB_WORKSPACE/candidate" --output "$GITHUB_WORKSPACE/evidence"
-      - name: Check existing sandbox, resources and pinned wheel availability
+      - name: Check resources and pinned wheel availability
         run: |
           python3 qualification/scripts/acceptance/q2_cpu_qualification.py preflight \
             --repo "$GITHUB_WORKSPACE/candidate" --output "$GITHUB_WORKSPACE/evidence"

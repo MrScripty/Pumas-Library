@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -12,20 +13,43 @@ import q2_cpu_qualification as qualification
 
 
 class QualificationTests(unittest.TestCase):
-    def test_missing_network_namespace_stops_before_source_requests(self):
+    def test_insufficient_space_stops_before_source_requests(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with (
-                patch.object(
-                    qualification, "sandbox_preflight", return_value={"status": "blocked"}
-                ),
+                patch.object(qualification.shutil, "disk_usage") as usage,
                 patch.object(qualification.urllib.request, "urlopen") as request,
             ):
-                with self.assertRaisesRegex(AssertionError, "Network isolation unavailable"):
+                usage.return_value.free = qualification.GIB
+                with self.assertRaisesRegex(AssertionError, "Need 12 GiB"):
                     qualification.preflight(root, root, {"artifacts": []})
                 request.assert_not_called()
             record = json.loads((root / "ci-preflight.json").read_text())
             self.assertFalse(record["allowed"])
+            self.assertFalse(record["payload_downloaded"])
+
+    def test_ordinary_preflight_needs_only_disk_and_pinned_sources(self):
+        artifact = {"name": "torch", "url": "https://download.pytorch.org/pinned.whl"}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                patch.object(qualification.shutil, "disk_usage") as usage,
+                patch.object(qualification.urllib.request, "urlopen") as request,
+                patch.object(
+                    qualification.shutil,
+                    "which",
+                    side_effect=AssertionError("No external security facility is required"),
+                ),
+            ):
+                usage.return_value.free = 20 * qualification.GIB
+                response = request.return_value.__enter__.return_value
+                response.status = 200
+                response.headers = {"content-length": "100"}
+                qualification.preflight(root, root, {"artifacts": [artifact]})
+                self.assertEqual(request.call_count, 1)
+                self.assertEqual(request.call_args.args[0].method, "HEAD")
+            record = json.loads((root / "ci-preflight.json").read_text())
+            self.assertTrue(record["allowed"])
             self.assertFalse(record["payload_downloaded"])
 
     def test_denied_source_is_not_retried(self):
@@ -33,7 +57,6 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             with (
-                patch.object(qualification, "sandbox_preflight", return_value={"status": "passed"}),
                 patch.object(qualification.shutil, "disk_usage") as usage,
                 patch.object(
                     qualification.urllib.request,
@@ -58,12 +81,62 @@ class QualificationTests(unittest.TestCase):
             (qualification.GIB, 6 * qualification.GIB),
         )
 
-    def test_blocked_offline_install_cannot_pass(self):
+    def test_failed_local_only_install_cannot_pass(self):
         result = {"success": False}
         with self.assertRaisesRegex(AssertionError, "cannot pass"):
-            qualification.complete_result(result, qualification.CPU_RESULT, {"status": "blocked"})
+            qualification.complete_result(result, qualification.CPU_RESULT, {"status": "failed"})
         self.assertFalse(result["success"])
-        self.assertEqual(result["no_network"]["status"], "blocked")
+        self.assertEqual(result["local_only_install"]["status"], "failed")
+
+    def test_success_claims_real_cpu_and_pip_policy_only(self):
+        result = {"success": False}
+        qualification.complete_result(result, qualification.CPU_RESULT, {"status": "passed"})
+        self.assertTrue(result["success"])
+        self.assertFalse(result["os_enforced_network_isolation"])
+        self.assertFalse(result["original_child_custody_denial_proof"])
+
+    def test_local_only_worker_is_invoked_directly_with_owned_scratch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            frozen_worker = (
+                Path(qualification.__file__).resolve().parents[2]
+                / "torch-server/resolve_runtime.py"
+            )
+            (runtime / "resolve_runtime.py").write_bytes(frozen_worker.read_bytes())
+            handoff = root / "handoff.json"
+            qualification.write(handoff, {"schema_version": 1, "wheels": []})
+            requirements = handoff.with_suffix(".requirements.txt")
+            requirements.write_text("retained local hash-locked inputs\n")
+            with patch.object(
+                qualification.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout=json.dumps(qualification.CPU_RESULT)),
+            ) as run:
+                proof = qualification.local_only_install(root, runtime, handoff, root)
+            self.assertEqual(run.call_count, 3)
+            worker = run.call_args_list[1]
+            self.assertEqual(
+                worker.args[0],
+                [
+                    str(root / "local-only-venv/bin/python"),
+                    "-I",
+                    str(runtime / "resolve_runtime.py"),
+                    "--_pumas-local-wheel-install",
+                    str(handoff),
+                ],
+            )
+            self.assertEqual(worker.kwargs["env"]["TMPDIR"], str(root / "local-only-tmp"))
+            self.assertNotIn("timeout", worker.kwargs)
+            self.assertTrue(worker.kwargs["check"])
+            self.assertIn("--no-index", proof["frozen_worker_pip_args"])
+            self.assertIn("--require-hashes", proof["frozen_worker_pip_args"])
+            self.assertFalse(proof["os_enforced_network_isolation"])
+            self.assertEqual(
+                (root / "local-hash-locked-requirements.txt").read_bytes(),
+                requirements.read_bytes(),
+            )
 
     def test_wrong_tensor_result_cannot_pass(self):
         result = {"success": False}

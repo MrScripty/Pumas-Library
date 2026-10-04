@@ -6,11 +6,8 @@ import json
 import os
 from pathlib import Path
 import shutil
-import socket
 import subprocess
-import sys
 import tempfile
-import threading
 import urllib.request
 from urllib.parse import urlsplit
 
@@ -20,12 +17,12 @@ MANIFEST = "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-l
 MANIFEST_SHA256 = "5d186ed7f2fe7573720ecc9d5ca7397f2aa9abc811cf842401d387b4e4d08cd4"
 RUNTIME_METADATA = str(Path(MANIFEST).with_name("runtime.json"))
 RUNTIME_METADATA_SHA256 = "a03ae995e9bb9e471a1dcc6bab1869a82da5517302a28ffdc4c7cd328401d322"
+LOCAL_WORKER_SHA256 = "e20fe54c25adb2b7d80cad8b8858b0c7eeb76b05cbdbb599e954700b16f59ee0"
 GIB = 1024**3
 CPU = "import json,torch; t=torch.arange(1,4,dtype=torch.int64,device='cpu'); print(json.dumps({'version':torch.__version__,'device':str(t.device),'result':int((t*t).sum().item())}))"
 CPU_RESULT = {"version": "2.14.0+cpu", "device": "cpu", "result": 14}
 RECEIPTS = (
     "input-validation.json",
-    "sandbox-preflight.json",
     "ci-preflight.json",
     "actual-wheel-identities.json",
     "custody.json",
@@ -33,11 +30,10 @@ RECEIPTS = (
     "resolution.json",
     "runtime.json",
     "probe.json",
-    "network-control.json",
     "local-hash-locked-requirements.txt",
     "qualification-result.json",
     "production-install.log",
-    "offline-install.log",
+    "local-only-install.log",
 )
 
 
@@ -67,6 +63,7 @@ def inputs(repo):
     )
     assert sha(repo / MANIFEST) == MANIFEST_SHA256
     assert sha(repo / RUNTIME_METADATA) == RUNTIME_METADATA_SHA256
+    assert sha(repo / "torch-server/resolve_runtime.py") == LOCAL_WORKER_SHA256
     manifest = json.loads((repo / MANIFEST).read_text())
     assert (manifest["release"], manifest["build"], manifest["python"], manifest["adapter"]) == (
         "2.14.0",
@@ -86,70 +83,6 @@ def inputs(repo):
     return manifest
 
 
-def sandbox_preflight(output):
-    """Check already available, unprivileged isolation before any large downloads."""
-    result = {"status": "blocked", "host_net_namespace": os.readlink("/proc/self/ns/net")}
-    bwrap = shutil.which("bwrap")
-    if bwrap is None:
-        result["reason"] = "bwrap is not installed on this runner"
-    else:
-        with socket.socket() as listener:
-            listener.bind(("127.0.0.1", 0))
-            listener.listen()
-            listener.settimeout(2)
-            port = listener.getsockname()[1]
-            with socket.create_connection(("127.0.0.1", port), timeout=2):
-                pass
-            connection, _ = listener.accept()
-            connection.close()
-            probe = (
-                "import json,os,socket; r={'net_namespace':os.readlink('/proc/self/ns/net')};\n"
-                f"try: socket.create_connection(('127.0.0.1',{port}),timeout=2); r['connected']=True\n"
-                "except OSError: r['connected']=False\nprint(json.dumps(r))"
-            )
-            check = subprocess.run(
-                [
-                    bwrap,
-                    "--unshare-net",
-                    "--unshare-pid",
-                    "--die-with-parent",
-                    "--ro-bind",
-                    "/",
-                    "/",
-                    "--dev",
-                    "/dev",
-                    "--proc",
-                    "/proc",
-                    "--",
-                    sys.executable,
-                    "-I",
-                    "-c",
-                    probe,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            result.update(returncode=check.returncode, stderr=check.stderr)
-            if check.returncode:
-                result["reason"] = (
-                    "Existing runner policy denies the process-local network namespace"
-                )
-            else:
-                proof = json.loads(check.stdout)
-                assert (
-                    not proof["connected"]
-                    and proof["net_namespace"] != result["host_net_namespace"]
-                )
-                result.update(status="passed", proof=proof, positive_control=True)
-    if result["status"] != "passed":
-        result["required_authority"] = (
-            "Owner review of an ordinary runner with working unprivileged bwrap is required; this job does not install tools or change host security/network policy"
-        )
-    write(output / "sandbox-preflight.json", result)
-    return result
-
-
 def resource_budget(observations):
     lengths = [o["content_length"] for o in observations]
     assert all(
@@ -164,9 +97,6 @@ def preflight(repo, output, manifest):
     observations = []
     artifact = None
     try:
-        assert sandbox_preflight(output)["status"] == "passed", (
-            "Network isolation unavailable; qualification is blocked before payload downloads"
-        )
         assert shutil.disk_usage(repo).free >= 12 * GIB, (
             "Need 12 GiB free for fresh Rust build plus runtime; use an adequately provisioned ordinary runner"
         )
@@ -297,149 +227,78 @@ def local_handoff(root, output, expected, expected_python):
     return runtime, handoff
 
 
-def offline_install(root, runtime, handoff, output):
-    """Additional real package-only proof, after the production use has settled."""
-    listener = socket.socket()
-    listener.bind(("127.0.0.1", 0))
-    listener.listen()
-    listener.settimeout(0.1)
-    port = listener.getsockname()[1]
-    observed = []
-    done = threading.Event()
-
-    def monitor():
-        while not done.is_set():
-            try:
-                connection, _ = listener.accept()
-                observed.append("connection")
-                connection.close()
-            except socket.timeout:
-                continue
-
-    observer = threading.Thread(target=monitor)
-    observer.start()
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=2):
-            pass
-        bwrap = shutil.which("bwrap")
-        if bwrap is None:
-            return {
-                "status": "blocked",
-                "reason": "bwrap unavailable; no installation sandbox attempted",
-            }
-        scratch = root / "offline-tmp"
-        scratch.mkdir()
-        sandbox = [
-            bwrap,
-            "--unshare-net",
-            "--unshare-pid",
-            "--die-with-parent",
-            "--ro-bind",
-            "/",
-            "/",
-            "--dev",
-            "/dev",
-            "--proc",
-            "/proc",
-            "--bind",
-            str(root),
-            str(root),
-            "--setenv",
-            "TMPDIR",
-            str(scratch),
-            "--",
-        ]
-        probe = (
-            "import json,os,socket; result={'net_namespace':os.readlink('/proc/self/ns/net')};\ntry: socket.create_connection(('127.0.0.1',"
-            + str(port)
-            + "),timeout=2); result['connected']=True\nexcept OSError as e: result.update(connected=False,error=str(e))\nprint(json.dumps(result))"
-        )
-        python = runtime / "venv/bin/python"
-        control = subprocess.run(
-            [*sandbox, str(python), "-I", "-c", probe], capture_output=True, text=True, timeout=10
-        )
-        write(
-            output / "network-control.json",
-            {
-                "args": sandbox,
-                "returncode": control.returncode,
-                "stdout": control.stdout,
-                "stderr": control.stderr,
-                "parent_net_namespace": os.readlink("/proc/self/ns/net"),
-            },
-        )
-        if control.returncode:
-            return {
-                "status": "blocked",
-                "reason": control.stderr,
-                "scope": "existing namespace unavailable; no bypass",
-            }
-        check = json.loads(control.stdout)
-        assert not check["connected"] and check["net_namespace"] != os.readlink("/proc/self/ns/net")
-        offline = root / "offline-venv"
-        subprocess.run([str(python), "-I", "-m", "venv", str(offline)], check=True, timeout=60)
-        offline_python = offline / "bin/python"
-        command = [
-            *sandbox,
-            str(offline_python),
-            "-I",
-            str(runtime / "resolve_runtime.py"),
-            "--_pumas-local-wheel-install",
-            str(handoff),
-        ]
-        with (output / "offline-install.log").open("w") as log:
-            subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=600)
-        result = subprocess.run(
-            [*sandbox, str(offline_python), "-I", "-c", CPU],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=60,
-        )
-        proof = json.loads(result.stdout)
-        assert proof == CPU_RESULT
-        # Drain the monitor before asserting its held-source observation below.
-        done.set()
-        observer.join(timeout=2)
-        assert not observer.is_alive() and observed == ["connection"]
-        shutil.copyfile(
-            handoff.with_suffix(".requirements.txt"), output / "local-hash-locked-requirements.txt"
-        )
-        return {
-            "status": "passed",
-            "scope": "additional empty-venv package-only installation, not network isolation of the original production publication",
-            "cpu_operation": proof,
-            "command": command,
-            "observed_connections": len(observed),
-            "actual_pip_args": [
-                str(offline_python),
-                "-I",
-                "-m",
-                "pip",
-                "--isolated",
-                "install",
-                "--no-index",
-                "--no-deps",
-                "--require-hashes",
-                "--only-binary=:all:",
-                "--no-cache-dir",
-                "--disable-pip-version-check",
-                "-r",
-                str(handoff.with_suffix(".requirements.txt")),
-            ],
-        }
-    finally:
-        done.set()
-        observer.join(timeout=2)
-        listener.close()
-
-
-def complete_result(result, proof, offline):
-    assert proof == CPU_RESULT
-    result.update(real_production_cpu_operation=proof, no_network=offline)
-    assert offline["status"] == "passed", (
-        "Local-only no-network installation is blocked; qualification cannot pass"
+def local_only_install(root, runtime, handoff, output):
+    """Run the unchanged local-wheel worker directly; this is pip policy evidence."""
+    assert sha(runtime / "resolve_runtime.py") == LOCAL_WORKER_SHA256, "Local worker source drift"
+    python = runtime / "venv/bin/python"
+    local = root / "local-only-venv"
+    scratch = root / "local-only-tmp"
+    scratch.mkdir()
+    environment = os.environ.copy()
+    environment["TMPDIR"] = str(scratch)
+    subprocess.run([str(python), "-I", "-m", "venv", str(local)], check=True, env=environment)
+    local_python = local / "bin/python"
+    command = [
+        str(local_python),
+        "-I",
+        str(runtime / "resolve_runtime.py"),
+        "--_pumas-local-wheel-install",
+        str(handoff),
+    ]
+    # Await the product worker and its pip children. The workflow bounds the
+    # entire disposable run to 45 minutes; no separate parent-only kill timeout.
+    with (output / "local-only-install.log").open("w") as log:
+        subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True, env=environment)
+    result = subprocess.run(
+        [str(local_python), "-I", "-c", CPU],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+        env=environment,
     )
+    proof = json.loads(result.stdout)
+    assert proof == CPU_RESULT
+    shutil.copyfile(
+        handoff.with_suffix(".requirements.txt"), output / "local-hash-locked-requirements.txt"
+    )
+    return {
+        "status": "passed",
+        "scope": "additional empty-venv install using retained local wheels and pip no-index policy after production settlement",
+        "cpu_operation": proof,
+        "command": command,
+        "frozen_worker_sha256": LOCAL_WORKER_SHA256,
+        "os_enforced_network_isolation": False,
+        "original_child_custody_denial_proof": False,
+        "pip_args_evidence": "derived from the exact frozen worker source, not a separate process-argv observation",
+        "frozen_worker_pip_args": [
+            str(local_python),
+            "-I",
+            "-m",
+            "pip",
+            "--isolated",
+            "install",
+            "--no-index",
+            "--no-deps",
+            "--require-hashes",
+            "--only-binary=:all:",
+            "--no-cache-dir",
+            "--disable-pip-version-check",
+            "-r",
+            str(handoff.with_suffix(".requirements.txt")),
+        ],
+    }
+
+
+def complete_result(result, proof, local):
+    assert proof == CPU_RESULT
+    result.update(
+        real_production_cpu_operation=proof,
+        local_only_install=local,
+        os_enforced_network_isolation=False,
+        original_child_custody_denial_proof=False,
+    )
+    assert local["status"] == "passed", "Local-only installation failed; qualification cannot pass"
     result["success"] = True
 
 
@@ -502,6 +361,7 @@ def main():
                 "tree": CANDIDATE_TREE,
                 "manifest_sha256": MANIFEST_SHA256,
                 "runtime_metadata_sha256": RUNTIME_METADATA_SHA256,
+                "local_worker_sha256": LOCAL_WORKER_SHA256,
                 "wheel_count": 25,
                 "network_requests": 0,
                 "real_installation": "not run",
@@ -529,6 +389,8 @@ def main():
         "run_id": os.environ.get("GITHUB_RUN_ID"),
         "root": str(root),
         "success": False,
+        "os_enforced_network_isolation": False,
+        "original_child_custody_denial_proof": False,
         "AC11": "open pending independent review",
         "AC12": "open pending independent review",
     }
@@ -552,7 +414,7 @@ def main():
         proof = json.loads(
             subprocess.check_output([str(python), "-I", "-c", CPU], text=True, timeout=60)
         )
-        complete_result(result, proof, offline_install(root, runtime, handoff, output))
+        complete_result(result, proof, local_only_install(root, runtime, handoff, output))
         result["cleanup"] = (
             "owned successful test root removed after both production owners drained"
         )

@@ -2,14 +2,17 @@
 
 import argparse
 import hashlib
+from http import HTTPStatus
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
+from urllib.error import HTTPError
 import urllib.request
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 CANDIDATE = "1e83cfc95f9bc0f9f0e37d514371bd1f4364f9d8"
 CANDIDATE_TREE = "bfe9937961b43feb77e50cfb25c83a45236f0f98"
@@ -19,6 +22,32 @@ RUNTIME_METADATA = str(Path(MANIFEST).with_name("runtime.json"))
 RUNTIME_METADATA_SHA256 = "a03ae995e9bb9e471a1dcc6bab1869a82da5517302a28ffdc4c7cd328401d322"
 LOCAL_WORKER_SHA256 = "e20fe54c25adb2b7d80cad8b8858b0c7eeb76b05cbdbb599e954700b16f59ee0"
 GIB = 1024**3
+HTTP_BODY_LIMIT = 4096
+HTTP_HEADER_LIMIT = 512
+HTTP_HEADERS = (
+    "date",
+    "server",
+    "content-type",
+    "content-length",
+    "via",
+    "retry-after",
+    "cf-ray",
+    "cf-mitigated",
+    "x-amz-request-id",
+    "x-amz-id-2",
+    "x-cache",
+    "x-served-by",
+    "x-request-id",
+    "x-correlation-id",
+    "x-mitmproxy-blocked-reason",
+)
+# Retain only public failure phrases; arbitrary error pages can echo credentials.
+HTTP_BODY_MESSAGES = re.compile(
+    r"(?:Forbidden|Access\s*Denied|Unauthorized|Not Found|Method Not Allowed|"
+    r"ROBOTS_DENIED|Request blocked by (?:network|access|security) policy|"
+    r"Blocked: (?:ROBOTS_DENIED|Only HTTPS requests are allowed))\.?",
+    re.IGNORECASE,
+)
 CPU = "import json,torch; t=torch.arange(1,4,dtype=torch.int64,device='cpu'); print(json.dumps({'version':torch.__version__,'device':str(t.device),'result':int((t*t).sum().item())}))"
 CPU_RESULT = {"version": "2.14.0+cpu", "device": "cpu", "result": 14}
 RECEIPTS = (
@@ -92,6 +121,51 @@ def resource_budget(observations):
     return known_bytes, max(3 * GIB, 5 * known_bytes + GIB)
 
 
+def sanitized_url(value):
+    url = urlsplit(value)
+    return urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, "", ""))
+
+
+def http_error_diagnostic(error):
+    reason = str(error.reason)
+    diagnostic = {
+        "status": error.code,
+        "reason": (
+            reason
+            if reason in {status.phrase for status in HTTPStatus}
+            or HTTP_BODY_MESSAGES.fullmatch(reason)
+            else "[omitted]"
+        ),
+        "url": sanitized_url(error.url),
+        "method": "HEAD",
+        "headers": {},
+        "body_limit_bytes": HTTP_BODY_LIMIT,
+    }
+    for name in HTTP_HEADERS:
+        value = error.headers.get(name) if error.headers is not None else None
+        # These headers contain public routing metadata, never auth or cookies.
+        if value is not None:
+            value = str(value)
+            if len(value) <= HTTP_HEADER_LIMIT and re.fullmatch(r"[\w .,:;/=+()-]+", value):
+                diagnostic["headers"][name] = value
+    try:
+        body = error.read(HTTP_BODY_LIMIT + 1) if error.fp is not None else b""
+        diagnostic["body_bytes_read"] = len(body)
+        diagnostic["body_truncated"] = len(body) > HTTP_BODY_LIMIT
+        message = body[:HTTP_BODY_LIMIT].decode("utf-8", errors="replace").strip()
+        if not body:
+            diagnostic["body"] = ""
+        elif not diagnostic["body_truncated"] and HTTP_BODY_MESSAGES.fullmatch(message):
+            diagnostic["body"] = message
+        else:
+            diagnostic["body_omitted"] = "Not an allowlisted public failure message"
+    except (OSError, ValueError):
+        diagnostic["body_omitted"] = "Error body unavailable"
+    finally:
+        error.close()
+    return diagnostic
+
+
 def preflight(repo, output, manifest):
     # A normal hosted runner needs separate build headroom; never free its unrelated caches.
     observations = []
@@ -118,6 +192,7 @@ def preflight(repo, output, manifest):
             "Insufficient fresh build plus measured runtime headroom"
         )
     except Exception as error:
+        diagnostic = http_error_diagnostic(error) if isinstance(error, HTTPError) else None
         write(
             output / "ci-preflight.json",
             {
@@ -125,7 +200,12 @@ def preflight(repo, output, manifest):
                 "manifest_sha256": MANIFEST_SHA256,
                 "observations": observations,
                 "blocked_artifact": artifact,
-                "error": str(error),
+                "error": (
+                    f"HTTP Error {diagnostic['status']}: {diagnostic['reason']}"
+                    if diagnostic
+                    else str(error)
+                ),
+                **({"http_error": diagnostic} if diagnostic else {}),
                 "payload_downloaded": False,
             },
         )

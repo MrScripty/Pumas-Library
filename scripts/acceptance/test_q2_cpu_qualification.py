@@ -1,6 +1,7 @@
 """Offline failure oracles for the bounded hosted qualification job."""
 
 import hashlib
+from io import BytesIO
 import json
 from pathlib import Path
 import tempfile
@@ -71,6 +72,104 @@ class QualificationTests(unittest.TestCase):
             record = json.loads((root / "ci-preflight.json").read_text())
             self.assertFalse(record["allowed"])
             self.assertEqual(record["blocked_artifact"], artifact)
+
+    def test_http_failure_retains_public_diagnostics_and_original_exception(self):
+        artifact = {"name": "torch", "url": "https://download-r2.pytorch.org/pinned.whl"}
+        body = BytesIO(b"Request blocked by network policy")
+        error = HTTPError(
+            artifact["url"],
+            403,
+            "Forbidden",
+            {
+                "server": "example-cdn",
+                "x-request-id": "1234-abcd",
+                "x-mitmproxy-blocked-reason": "ROBOTS_DENIED",
+                "set-cookie": "private-session",
+                "authorization": "private-token",
+            },
+            body,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                patch.object(qualification.shutil, "disk_usage") as usage,
+                patch.object(qualification.urllib.request, "urlopen", side_effect=error) as request,
+            ):
+                usage.return_value.free = 20 * qualification.GIB
+                with self.assertRaises(HTTPError) as caught:
+                    qualification.preflight(root, root, {"artifacts": [artifact, artifact]})
+                self.assertIs(caught.exception, error)
+                request.assert_called_once()
+                self.assertEqual(request.call_args.args[0].full_url, artifact["url"])
+                self.assertEqual(request.call_args.args[0].method, "HEAD")
+                self.assertEqual(request.call_args.kwargs["timeout"], 20)
+            record = json.loads((root / "ci-preflight.json").read_text())
+            diagnostic = record["http_error"]
+            self.assertFalse(record["allowed"])
+            self.assertFalse(record["payload_downloaded"])
+            self.assertEqual(diagnostic["status"], 403)
+            self.assertEqual(diagnostic["reason"], "Forbidden")
+            self.assertEqual(diagnostic["url"], artifact["url"])
+            self.assertEqual(diagnostic["body"], "Request blocked by network policy")
+            self.assertEqual(
+                diagnostic["headers"],
+                {
+                    "server": "example-cdn",
+                    "x-request-id": "1234-abcd",
+                    "x-mitmproxy-blocked-reason": "ROBOTS_DENIED",
+                },
+            )
+            self.assertNotIn("private-", json.dumps(record))
+            self.assertTrue(body.closed)
+
+    def test_http_diagnostics_omit_sensitive_and_oversized_content(self):
+        for content in (b"Forbidden token=private", b"x" * 10000):
+            with self.subTest(content_length=len(content)):
+                body = BytesIO(content)
+                error = HTTPError(
+                    "https://user:password@download-r2.pytorch.org/pinned.whl?token=secret#secret",
+                    403,
+                    "secret-token-value",
+                    {
+                        "x-request-id": "x" * 10000,
+                        "location": "https://example.invalid/?token=secret",
+                    },
+                    body,
+                )
+                with patch.object(body, "read", wraps=body.read) as read:
+                    diagnostic = qualification.http_error_diagnostic(error)
+                    read.assert_called_once_with(qualification.HTTP_BODY_LIMIT + 1)
+                self.assertEqual(diagnostic["url"], "https://download-r2.pytorch.org/pinned.whl")
+                self.assertEqual(diagnostic["headers"], {})
+                self.assertLessEqual(
+                    diagnostic["body_bytes_read"], qualification.HTTP_BODY_LIMIT + 1
+                )
+                self.assertEqual(
+                    diagnostic["body_truncated"], len(content) > qualification.HTTP_BODY_LIMIT
+                )
+                self.assertIn("body_omitted", diagnostic)
+                self.assertNotIn("body", diagnostic)
+                self.assertNotIn("secret", json.dumps(diagnostic))
+                self.assertNotIn("private", json.dumps(diagnostic))
+                self.assertTrue(body.closed)
+
+    def test_http_diagnostics_accept_empty_head_body(self):
+        diagnostic = qualification.http_error_diagnostic(
+            HTTPError("https://download-r2.pytorch.org/pinned.whl", 403, "Forbidden", None, None)
+        )
+        self.assertEqual(diagnostic["body"], "")
+        self.assertEqual(diagnostic["body_bytes_read"], 0)
+        self.assertFalse(diagnostic["body_truncated"])
+
+    def test_unreadable_error_body_does_not_replace_http_failure(self):
+        body = BytesIO(b"Forbidden")
+        error = HTTPError("https://download-r2.pytorch.org/pinned.whl", 403, "Forbidden", {}, body)
+        with patch.object(body, "read", side_effect=OSError("private diagnostic")):
+            diagnostic = qualification.http_error_diagnostic(error)
+        self.assertEqual(diagnostic["status"], 403)
+        self.assertEqual(diagnostic["body_omitted"], "Error body unavailable")
+        self.assertNotIn("private", json.dumps(diagnostic))
+        self.assertTrue(body.closed)
 
     def test_missing_lengths_cannot_authorize_unbounded_downloads(self):
         for length in (None, "", "unknown", "0", "-1"):

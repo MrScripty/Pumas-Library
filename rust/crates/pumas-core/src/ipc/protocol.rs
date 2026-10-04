@@ -16,7 +16,7 @@ use crate::models::{
     ModelExecutionDescriptorBatchItem, ModelInferenceSettingsBatchItem,
     ModelLibrarySelectorSnapshot, ModelLibrarySelectorSnapshotRequest,
     ModelPackageFactsSummaryBatchItem, ResolveModelArtifactLoadTargetRequest,
-    ResolveModelArtifactLoadTargetResponse,
+    ResolveModelArtifactLoadTargetResponse, ResolvedModelPackageFacts,
 };
 use crate::{PumasError, Result};
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,7 @@ const MAX_SELECTOR_LIMIT: u32 = 1_000;
 pub(crate) enum LocalIpcOperation {
     ModelLibrarySelectorSnapshot,
     ResolveModelArtifactLoadTarget,
+    ResolveModelPackageFacts,
     ResolveModelPackageFactsSummaries,
     ResolveModelExecutionDescriptorsBatch,
     GetInferenceSettingsBatch,
@@ -52,6 +53,7 @@ impl LocalIpcOperation {
         match name {
             "model_library_selector_snapshot" => Some(Self::ModelLibrarySelectorSnapshot),
             "resolve_model_artifact_load_target" => Some(Self::ResolveModelArtifactLoadTarget),
+            "resolve_model_package_facts" => Some(Self::ResolveModelPackageFacts),
             "resolve_model_package_facts_summaries" => {
                 Some(Self::ResolveModelPackageFactsSummaries)
             }
@@ -77,6 +79,7 @@ impl LocalIpcOperation {
         match self {
             Self::ModelLibrarySelectorSnapshot => "model_library_selector_snapshot",
             Self::ResolveModelArtifactLoadTarget => "resolve_model_artifact_load_target",
+            Self::ResolveModelPackageFacts => "resolve_model_package_facts",
             Self::ResolveModelPackageFactsSummaries => "resolve_model_package_facts_summaries",
             Self::ResolveModelExecutionDescriptorsBatch => {
                 "resolve_model_execution_descriptors_batch"
@@ -108,6 +111,9 @@ impl LocalIpcOperation {
                     diagnostic.message = "Artifact load target is not available".to_string();
                 }
                 serde_json::to_value(outcome).map_err(|_| IpcError::internal())
+            }
+            Self::ResolveModelPackageFacts => {
+                validate_typed_outcome::<ResolvedModelPackageFacts>(value)
             }
             Self::ResolveModelPackageFactsSummaries => {
                 let mut outcome: Vec<ModelPackageFactsSummaryBatchItem> =
@@ -172,6 +178,10 @@ pub(crate) enum LocalIpcCommand {
         request: ResolveModelArtifactLoadTargetRequest,
         connection_token: String,
     },
+    ResolveModelPackageFacts {
+        model_id: String,
+        connection_token: String,
+    },
     ResolveModelPackageFactsSummaries {
         model_ids: Vec<String>,
         connection_token: String,
@@ -230,6 +240,7 @@ impl LocalIpcCommand {
                 | LocalIpcOperation::ResolveModelArtifactLoadTarget => {
                     &["request", "connection_token"]
                 }
+                LocalIpcOperation::ResolveModelPackageFacts => &["model_id", "connection_token"],
                 LocalIpcOperation::ResolveModelPackageFactsSummaries
                 | LocalIpcOperation::ResolveModelExecutionDescriptorsBatch
                 | LocalIpcOperation::GetInferenceSettingsBatch => {
@@ -275,6 +286,10 @@ impl LocalIpcCommand {
                     connection_token,
                 })
             }
+            LocalIpcOperation::ResolveModelPackageFacts => Ok(Self::ResolveModelPackageFacts {
+                model_id: bounded_model_id(object)?,
+                connection_token,
+            }),
             LocalIpcOperation::ResolveModelPackageFactsSummaries => {
                 Ok(Self::ResolveModelPackageFactsSummaries {
                     model_ids: bounded_model_ids(object)?,
@@ -359,6 +374,7 @@ impl LocalIpcCommand {
             Self::ResolveModelArtifactLoadTarget { .. } => {
                 LocalIpcOperation::ResolveModelArtifactLoadTarget
             }
+            Self::ResolveModelPackageFacts { .. } => LocalIpcOperation::ResolveModelPackageFacts,
             Self::ResolveModelPackageFactsSummaries { .. } => {
                 LocalIpcOperation::ResolveModelPackageFactsSummaries
             }
@@ -393,6 +409,13 @@ impl LocalIpcCommand {
                 connection_token,
             } => serde_json::json!({
                 "request": request,
+                "connection_token": connection_token,
+            }),
+            Self::ResolveModelPackageFacts {
+                model_id,
+                connection_token,
+            } => serde_json::json!({
+                "model_id": model_id,
                 "connection_token": connection_token,
             }),
             Self::ResolveModelPackageFactsSummaries {
@@ -559,6 +582,16 @@ fn validate_intent_ensure_request(value: &Value) -> std::result::Result<(), IpcE
 fn validate_intent_reference(value: &Value) -> std::result::Result<(), IpcError> {
     exact_object(value, &["consumer_key", "declaration_id", "generation"])?;
     Ok(())
+}
+
+pub(crate) fn bounded_model_id(
+    object: &Map<String, Value>,
+) -> std::result::Result<String, IpcError> {
+    let model_id = required_bounded_string(object, "model_id")?;
+    if !crate::intent::valid_relative_identity(&model_id) {
+        return Err(IpcError::invalid_params());
+    }
+    Ok(model_id)
 }
 
 fn bounded_model_ids(object: &Map<String, Value>) -> std::result::Result<Vec<String>, IpcError> {

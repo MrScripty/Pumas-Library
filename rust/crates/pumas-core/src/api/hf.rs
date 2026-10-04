@@ -1832,6 +1832,768 @@ fn partial_download_error(error: &PumasError) -> models::PartialDownloadAction {
 pub(super) mod tests {
     use super::*;
 
+    // Explicit fixture support avoids ambient credentials and transport settings.
+    #[cfg(all(target_os = "linux", feature = "test-support"))]
+    mod large_transfer_measurement {
+        use super::*;
+        use sha2::{Digest, Sha256};
+        use std::collections::{BTreeMap, BTreeSet};
+        use std::io::Read;
+        use std::os::unix::fs::MetadataExt;
+        use std::path::Path;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::{Duration, Instant};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
+        use tokio::sync::oneshot;
+
+        const BYTES: u64 = 512 * 1024 * 1024;
+        const CHUNK: usize = 64 * 1024;
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        type Check<T> = std::result::Result<T, String>;
+
+        fn require(condition: bool, message: &str) -> Check<()> {
+            if condition {
+                Ok(())
+            } else {
+                Err(message.to_owned())
+            }
+        }
+
+        fn chunk(buffer: &mut [u8; CHUNK], offset: u64) {
+            buffer.fill(0);
+            if offset == 0 {
+                buffer[..4].copy_from_slice(b"GGUF");
+                buffer[4..8].copy_from_slice(&2_u32.to_le_bytes());
+            }
+        }
+
+        fn source_digest() -> String {
+            let mut buffer = [0; CHUNK];
+            let mut hash = Sha256::new();
+            for offset in (0..BYTES).step_by(CHUNK) {
+                chunk(&mut buffer, offset);
+                hash.update(buffer);
+            }
+            hex::encode(hash.finalize())
+        }
+
+        fn file_digest(path: &Path) -> Check<String> {
+            let mut file = std::fs::File::open(path).map_err(|_| "final file open failed")?;
+            let mut buffer = [0; CHUNK];
+            let mut hash = Sha256::new();
+            loop {
+                let size = file
+                    .read(&mut buffer)
+                    .map_err(|_| "final hash read failed")?;
+                if size == 0 {
+                    return Ok(hex::encode(hash.finalize()));
+                }
+                hash.update(&buffer[..size]);
+            }
+        }
+
+        #[derive(Clone, serde::Serialize)]
+        struct FileSample {
+            device: u64,
+            inode: u64,
+            bytes: u64,
+            allocated_bytes: u64,
+        }
+
+        fn sample(path: &Path) -> Check<FileSample> {
+            let meta = std::fs::symlink_metadata(path).map_err(|_| "file observation failed")?;
+            require(meta.is_file(), "observed payload must be a regular file")?;
+            Ok(FileSample {
+                device: meta.dev(),
+                inode: meta.ino(),
+                bytes: meta.len(),
+                allocated_bytes: meta.blocks() * 512,
+            })
+        }
+
+        fn inventory(root: &Path) -> Check<BTreeMap<String, FileSample>> {
+            fn visit(
+                root: &Path,
+                path: &Path,
+                files: &mut BTreeMap<String, FileSample>,
+            ) -> Check<()> {
+                for entry in
+                    std::fs::read_dir(path).map_err(|_| "inventory directory read failed")?
+                {
+                    let path = entry.map_err(|_| "inventory entry read failed")?.path();
+                    let kind = std::fs::symlink_metadata(&path)
+                        .map_err(|_| "inventory metadata failed")?
+                        .file_type();
+                    if kind.is_dir() {
+                        visit(root, &path, files)?;
+                    } else if kind.is_file() {
+                        let relative = path
+                            .strip_prefix(root)
+                            .map_err(|_| "inventory escaped root")?;
+                        files.insert(relative.to_string_lossy().into_owned(), sample(&path)?);
+                    }
+                    // Neither descend into nor count symbolic-link targets.
+                }
+                Ok(())
+            }
+            let mut files = BTreeMap::new();
+            visit(root, root, &mut files)?;
+            Ok(files)
+        }
+
+        fn proc_fields(path: &str, fields: &[&str]) -> Check<BTreeMap<String, u64>> {
+            let text = std::fs::read_to_string(path).map_err(|_| "process counters unreadable")?;
+            let mut values = BTreeMap::new();
+            for line in text.lines() {
+                if let Some((name, value)) = line.split_once(':') {
+                    if fields.contains(&name) {
+                        let number = value
+                            .split_whitespace()
+                            .next()
+                            .ok_or("process counter missing")?
+                            .parse()
+                            .map_err(|_| "process counter invalid")?;
+                        values.insert(name.to_owned(), number);
+                    }
+                }
+            }
+            require(
+                values.len() == fields.len(),
+                "required process counters unavailable",
+            )?;
+            Ok(values)
+        }
+
+        fn filesystem(root: &Path) -> Check<serde_json::Value> {
+            let root = root
+                .canonicalize()
+                .map_err(|_| "fixture root canonicalization failed")?;
+            let mounts = std::fs::read_to_string("/proc/self/mountinfo")
+                .map_err(|_| "mount inventory unreadable")?;
+            let mut selected = None;
+            for line in mounts.lines() {
+                if let Some((mount, detail)) = line.split_once(" - ") {
+                    if let (Some(point), Some(kind)) = (
+                        mount.split_whitespace().nth(4),
+                        detail.split_whitespace().next(),
+                    ) {
+                        let point = point.replace("\\040", " ").replace("\\134", "\\");
+                        if root.starts_with(&point)
+                            && selected
+                                .as_ref()
+                                .is_none_or(|(old, _): &(String, String)| point.len() > old.len())
+                        {
+                            selected = Some((point, kind.to_owned()));
+                        }
+                    }
+                }
+            }
+            let (mount, kind) = selected.ok_or("fixture filesystem not found")?;
+            Ok(serde_json::json!({"mount":mount, "type":kind}))
+        }
+
+        #[derive(Debug, Default, serde::Serialize)]
+        struct SourceSample {
+            requests: u64,
+            payload_bytes: u64,
+            sha256: Option<String>,
+            transfer_elapsed_ms: Option<u64>,
+            error: Option<String>,
+        }
+
+        async fn accept(
+            listener: &TcpListener,
+            expected: &str,
+            count: &mut u64,
+        ) -> Check<TcpStream> {
+            let (mut socket, _) = tokio::time::timeout(Duration::from_secs(15), listener.accept())
+                .await
+                .map_err(|_| "source accept watchdog")?
+                .map_err(|_| "source accept failed")?;
+            *count += 1;
+            let header = tokio::time::timeout(Duration::from_secs(15), async {
+                let mut bytes = Vec::new();
+                while !bytes.ends_with(b"\r\n\r\n") {
+                    require(bytes.len() < 8192, "source request exceeded header bound")?;
+                    bytes.push(
+                        socket
+                            .read_u8()
+                            .await
+                            .map_err(|_| "source request read failed")?,
+                    );
+                }
+                String::from_utf8(bytes).map_err(|_| "source request was not UTF-8".to_owned())
+            })
+            .await
+            .map_err(|_| "source header watchdog")??;
+            require(
+                header.lines().next() == Some(expected),
+                "unexpected source route",
+            )?;
+            let lower = header.to_ascii_lowercase();
+            require(
+                !lower.contains("authorization:"),
+                "fixture received ambient credentials",
+            )?;
+            require(
+                !lower.contains("range:"),
+                "fresh transfer must request full representation",
+            )?;
+            Ok(socket)
+        }
+
+        async fn write(socket: &mut TcpStream, bytes: &[u8]) -> Check<()> {
+            tokio::time::timeout(Duration::from_secs(15), socket.write_all(bytes))
+                .await
+                .map_err(|_| "source write watchdog")?
+                .map_err(|_| "source write failed".into())
+        }
+
+        async fn source_monitor(
+            listener: TcpListener,
+            sha256: String,
+            first: oneshot::Sender<()>,
+            release: oneshot::Receiver<()>,
+            finished: oneshot::Sender<Check<()>>,
+            mut stop: oneshot::Receiver<()>,
+        ) -> SourceSample {
+            let mut observed = SourceSample::default();
+            let result = async {
+                let metadata = format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}","tags":["gguf"]}}"#);
+                let tree = format!(r#"[{{"path":"weights.gguf","type":"file","lfs":{{"oid":"{sha256}","size":{BYTES}}}}}]"#);
+                for (route, body) in [
+                    ("GET /api/models/acme/model/revision/main HTTP/1.1".to_owned(), metadata.clone()),
+                    (format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"), metadata),
+                    (format!("GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"), tree),
+                ] {
+                    let mut socket = accept(&listener, &route, &mut observed.requests).await?;
+                    write(&mut socket, format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await?;
+                    write(&mut socket, body.as_bytes()).await?;
+                }
+                let route = format!("GET /acme/model/resolve/{COMMIT}/weights.gguf HTTP/1.1");
+                let mut socket = accept(&listener, &route, &mut observed.requests).await?;
+                write(&mut socket, format!("HTTP/1.1 200 OK\r\nContent-Length: {BYTES}\r\nETag: \"ac10-v1\"\r\nConnection: close\r\n\r\n").as_bytes()).await?;
+                let mut buffer = [0; CHUNK];
+                let mut hash = Sha256::new();
+                chunk(&mut buffer, 0);
+                write(&mut socket, &buffer).await?;
+                hash.update(buffer);
+                observed.payload_bytes += CHUNK as u64;
+                first.send(()).map_err(|_| "first-chunk observer left")?;
+                tokio::time::timeout(Duration::from_secs(30), release)
+                    .await.map_err(|_| "stream gate watchdog")?
+                    .map_err(|_| "stream gate disconnected")?;
+                let clock = Instant::now();
+                tokio::time::timeout(Duration::from_secs(300), async {
+                    for offset in (CHUNK as u64..BYTES).step_by(CHUNK) {
+                        chunk(&mut buffer, offset);
+                        write(&mut socket, &buffer).await?;
+                        hash.update(buffer);
+                        observed.payload_bytes += CHUNK as u64;
+                    }
+                    Ok::<_, String>(())
+                }).await.map_err(|_| "source transfer watchdog")??;
+                observed.sha256 = Some(hex::encode(hash.finalize()));
+                observed.transfer_elapsed_ms = Some(clock.elapsed().as_millis() as u64);
+                Ok::<_, String>(())
+            }.await;
+            observed.error = result.as_ref().err().cloned();
+            let _ = finished.send(result);
+            // Remain available through actual owner shutdown, not a quiet-time guess.
+            loop {
+                tokio::select! {
+                    biased;
+                    accepted = listener.accept() => {
+                        match accepted {
+                            Ok((socket, _)) => {
+                                observed.requests += 1;
+                                observed.error.get_or_insert("unexpected additional source request".into());
+                                drop(socket);
+                            }
+                            Err(_) => { observed.error.get_or_insert("source monitor accept failed".into()); break; }
+                        }
+                    }
+                    _ = &mut stop => break,
+                }
+            }
+            observed
+        }
+
+        async fn status(
+            api: &PumasApi,
+            id: &str,
+            bytes: u64,
+            terminal: bool,
+        ) -> Check<models::ModelDownloadProgress> {
+            let seconds = if terminal { 60 } else { 30 };
+            tokio::time::timeout(Duration::from_secs(seconds), async {
+                loop {
+                    let progress = api
+                        .get_hf_download_progress(id)
+                        .await
+                        .map_err(|_| "public status failed")?
+                        .ok_or("download disappeared")?;
+                    require(
+                        !matches!(
+                            progress.status,
+                            models::DownloadStatus::Error | models::DownloadStatus::Cancelled
+                        ),
+                        "download failed before measurement",
+                    )?;
+                    let wanted = if terminal {
+                        models::DownloadStatus::Completed
+                    } else {
+                        models::DownloadStatus::Downloading
+                    };
+                    if progress.downloaded_bytes == Some(bytes) && progress.status == wanted {
+                        return Ok(progress);
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .map_err(|_| "public status watchdog".to_owned())?
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        #[ignore = "explicit 512 MiB Linux measurement; enable test-support"]
+        async fn public_hf_large_transfer_preserves_file_identity_and_records_resource_usage() {
+            // Fixture hashing occurs outside live acquisition/consumer ownership.
+            let expected_hash = source_digest();
+            let root = tempfile::TempDir::new().unwrap();
+            let root_path = root.path().to_path_buf();
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let origin = format!("http://{}", listener.local_addr().unwrap());
+            let source = model_library::test_support::HfLoopbackFixture::parse(&origin).unwrap();
+            let api = recovery_api_fixture_with_client(root.path(), Some(origin), |cache| {
+                model_library::HuggingFaceClient::new_with_loopback_fixture(cache, source).unwrap()
+            })
+            .await;
+            let library = api.primary().model_library.clone();
+            let sentinel = root.path().join("unrelated.bin");
+            std::fs::write(&sentinel, b"unrelated AC10 fixture bytes").unwrap();
+            let before = inventory(root.path()).unwrap();
+            let memory_before = proc_fields("/proc/self/status", &["VmRSS", "VmHWM"]).unwrap();
+            let fs = filesystem(root.path()).unwrap();
+            let (first_tx, first_rx) = oneshot::channel();
+            let (release_stream_tx, release_stream_rx) = oneshot::channel();
+            let mut release_stream = Some(release_stream_tx);
+            let (finished_tx, finished_rx) = oneshot::channel();
+            let (stop_tx, stop_rx) = oneshot::channel();
+            let mut monitor = tokio::spawn(source_monitor(
+                listener,
+                expected_hash.clone(),
+                first_tx,
+                release_stream_rx,
+                finished_tx,
+                stop_rx,
+            ));
+            let (import_tx, import_rx) = oneshot::channel();
+            let import_tx = std::sync::Mutex::new(Some(import_tx));
+            let (release_import_tx, release_import_rx) = std::sync::mpsc::channel();
+            let mut release_import = Some(release_import_tx);
+            let release_import_rx = std::sync::Mutex::new(release_import_rx);
+            let expired = Arc::new(AtomicBool::new(false));
+            let import_expired = expired.clone();
+            let observed_root = library.library_root().to_path_buf();
+            library.set_metadata_write_notifier(Some(Arc::new(move |path| {
+                let Some(destination) = path.parent() else {
+                    return;
+                };
+                if !destination.starts_with(&observed_root)
+                    || destination.join(".pumas_download").exists()
+                    || !destination.join("weights.gguf").is_file()
+                {
+                    return;
+                }
+                if let Some(sender) = import_tx.lock().unwrap().take() {
+                    let _ = sender.send(());
+                    if release_import_rx
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(30))
+                        .is_err()
+                    {
+                        import_expired.store(true, Ordering::SeqCst);
+                    }
+                }
+            })));
+            let mut download_id = None;
+            let mut payload = None;
+            let capacity = crate::acquisition::AcquisitionCapacity::default();
+            let mut measurements = serde_json::json!({
+                "artifact_bytes":BYTES, "buffer_bytes":CHUNK, "filesystem":fs,
+                "memory_before_kb":memory_before, "inventory_before":before,
+                "source_expected_sha256":expected_hash,
+                "capacity":{"workers":capacity.workers,"blocking":capacity.blocking,"rescue_workers":capacity.rescue_workers,"rescue_blocking":capacity.rescue_blocking,"scopes":capacity.scopes},
+                "limits":"one synthetic Linux workload; VmHWM is process-lifetime; I/O includes source and downloader; block accounting is not physical-media writes"
+            });
+            let result: Check<()> = async {
+                let request = model_library::DownloadRequest {
+                    repo_id: "acme/model".into(),
+                    family: "acme".into(),
+                    official_name: "model".into(),
+                    model_type: Some("llm".into()),
+                    filename: Some("weights.gguf".into()),
+                    pipeline_tag: Some("text-generation".into()),
+                    quant: None,
+                    filenames: None,
+                    bundle_format: None,
+                    pipeline_class: None,
+                    release_date: None,
+                    download_url: None,
+                    model_card_json: None,
+                    license_status: None,
+                };
+                let id =
+                    tokio::time::timeout(Duration::from_secs(60), api.start_hf_download(&request))
+                        .await
+                        .map_err(|_| "start watchdog")?
+                        .map_err(|_| "public start failed")?;
+                download_id = Some(id.clone());
+                tokio::time::timeout(Duration::from_secs(30), first_rx)
+                    .await
+                    .map_err(|_| "first-chunk watchdog")?
+                    .map_err(|_| "source did not send first chunk")?;
+                let partial_progress = status(&api, &id, CHUNK as u64, false).await?;
+                let model_id = partial_progress
+                    .library_model_id
+                    .clone()
+                    .ok_or("bound model identity absent")?;
+                let destination = library.library_root().join(&model_id);
+                let partial = destination.join("weights.gguf.part");
+                let final_path = destination.join("weights.gguf");
+                let partial_file = sample(&partial)?;
+                require(
+                    partial_file.bytes == CHUNK as u64,
+                    "first chunk did not settle to partial",
+                )?;
+                measurements["partial"] = serde_json::to_value(&partial_file)
+                    .map_err(|_| "partial sample encode failed")?;
+                measurements["io_first_chunk_bytes"] = serde_json::to_value(proc_fields(
+                    "/proc/self/io",
+                    &["rchar", "wchar", "read_bytes", "write_bytes"],
+                )?)
+                .map_err(|_| "I/O sample encode failed")?;
+                let clock = Instant::now();
+                release_stream
+                    .take()
+                    .ok_or("stream release absent")?
+                    .send(())
+                    .map_err(|_| "source gate left")?;
+                tokio::time::timeout(Duration::from_secs(300), finished_rx)
+                    .await
+                    .map_err(|_| "transfer completion watchdog")?
+                    .map_err(|_| "source completion absent")??;
+                measurements["source_completion_observed_elapsed_ms"] =
+                    serde_json::json!(clock.elapsed().as_millis() as u64);
+                // Source EOF precedes consumer verification, promotion and sealing.
+                // Keep those transfer effects inside the original 300 s budget;
+                // the importer-entry budget begins at the verified-use handoff.
+                tokio::time::timeout(
+                    Duration::from_secs(300).saturating_sub(clock.elapsed()),
+                    async {
+                        loop {
+                            if tokio::fs::try_exists(&final_path)
+                                .await
+                                .map_err(|_| "promotion observation failed")?
+                                && !tokio::fs::try_exists(destination.join(".pumas_download"))
+                                    .await
+                                    .map_err(|_| "handoff observation failed")?
+                            {
+                                return Ok::<_, String>(());
+                            }
+                            let progress = api
+                                .get_hf_download_progress(&id)
+                                .await
+                                .map_err(|_| "handoff status failed")?
+                                .ok_or("handoff download disappeared")?;
+                            require(
+                                !matches!(
+                                    progress.status,
+                                    models::DownloadStatus::Error
+                                        | models::DownloadStatus::Cancelled
+                                ),
+                                "download failed before verified-use handoff",
+                            )?;
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                    },
+                )
+                .await
+                .map_err(|_| "consumer transfer completion watchdog")??;
+                measurements["transfer_observation_elapsed_ms"] =
+                    serde_json::json!(clock.elapsed().as_millis() as u64);
+                tokio::time::timeout(Duration::from_secs(30), import_rx)
+                    .await
+                    .map_err(|_| "importer entry watchdog")?
+                    .map_err(|_| "importer entry absent")?;
+                let at_import = status(&api, &id, BYTES, false).await?;
+                require(
+                    at_import.total_bytes == Some(BYTES),
+                    "total bytes changed at import",
+                )?;
+                require(
+                    at_import.selected_artifact_id == partial_progress.selected_artifact_id,
+                    "selected identity changed",
+                )?;
+                let promoted = sample(&final_path)?;
+                require(
+                    promoted.bytes == BYTES
+                        && (promoted.device, promoted.inode)
+                            == (partial_file.device, partial_file.inode),
+                    "promotion lost size or inode continuity",
+                )?;
+                require(!partial.exists(), "partial survived promotion")?;
+                measurements["promoted"] = serde_json::to_value(&promoted)
+                    .map_err(|_| "promotion sample encode failed")?;
+                measurements["memory_at_import_kb"] =
+                    serde_json::to_value(proc_fields("/proc/self/status", &["VmRSS", "VmHWM"])?)
+                        .map_err(|_| "memory sample encode failed")?;
+                measurements["io_at_import_before_final_hash_bytes"] =
+                    serde_json::to_value(proc_fields(
+                        "/proc/self/io",
+                        &["rchar", "wchar", "read_bytes", "write_bytes"],
+                    )?)
+                    .map_err(|_| "I/O sample encode failed")?;
+                let client = api
+                    .primary()
+                    .hf_client
+                    .as_ref()
+                    .ok_or("fixture HF owner absent")?;
+                let persistence = client.persistence().ok_or("persistence absent")?;
+                let store = persistence.acquisition_store();
+                let records = store.acquisitions().map_err(|_| "using inventory failed")?;
+                require(records.len() == 1, "exactly one acquisition required")?;
+                let using = records.values().next().ok_or("using record absent")?;
+                require(
+                    matches!(
+                        using.phase,
+                        crate::acquisition::AcquisitionPhase::Using { .. }
+                    ),
+                    "acquisition settled before importer release",
+                )?;
+                require(
+                    persistence
+                        .read_hf_completion_receipt(using.id)
+                        .map_err(|_| "receipt read failed")?
+                        .is_none(),
+                    "receipt published before import settlement",
+                )?;
+                let admission = persistence
+                    .load_lifecycle_inventory_strict()
+                    .map_err(|_| "admission inventory failed")?
+                    .queue_admissions
+                    .get(&id)
+                    .cloned()
+                    .ok_or("queue admission released early")?;
+                release_import
+                    .take()
+                    .ok_or("import release absent")?
+                    .send(())
+                    .map_err(|_| "import gate left")?;
+                let completed = status(&api, &id, BYTES, true).await?;
+                let repeated = tokio::time::timeout(
+                    Duration::from_secs(60),
+                    api.get_hf_download_progress(&id),
+                )
+                .await
+                .map_err(|_| "repeat status watchdog")?
+                .map_err(|_| "repeat status failed")?
+                .ok_or("terminal status absent")?;
+                require(
+                    serde_json::to_value(&completed).map_err(|_| "terminal encode failed")?
+                        == serde_json::to_value(&repeated).map_err(|_| "repeat encode failed")?,
+                    "terminal projection was not stable",
+                )?;
+                let receipt = persistence
+                    .read_hf_completion_receipt(using.id)
+                    .map_err(|_| "final receipt read failed")?
+                    .ok_or("completion receipt absent")?;
+                require(
+                    receipt.download_id == id
+                        && receipt.model_id == model_id
+                        && receipt.verified_files.len() == 1,
+                    "receipt identities changed",
+                )?;
+                require(
+                    receipt.verified_files[0].sha256 == expected_hash
+                        && receipt.verified_files[0].bytes == BYTES,
+                    "receipt bytes or digest mismatch",
+                )?;
+                let settled = store
+                    .acquisitions()
+                    .map_err(|_| "settled inventory failed")?;
+                require(
+                    matches!(
+                        settled.get(&using.id).map(|record| &record.phase),
+                        Some(crate::acquisition::AcquisitionPhase::Adopted { .. })
+                    ),
+                    "acquisition was not adopted",
+                )?;
+                let final_admissions = persistence
+                    .load_lifecycle_inventory_strict()
+                    .map_err(|_| "settled admission read failed")?;
+                require(
+                    !final_admissions.queue_admissions.contains_key(&id)
+                        && receipt.queue_admission == admission,
+                    "exact admission did not settle",
+                )?;
+                let document: serde_json::Value = serde_json::from_slice(
+                    &std::fs::read(root_path.join("state/downloads.json"))
+                        .map_err(|_| "settled document read failed")?,
+                )
+                .map_err(|_| "settled document decode failed")?;
+                require(
+                    document["released_queue_admissions"][&id]
+                        == serde_json::to_value(&admission)
+                            .map_err(|_| "admission encode failed")?,
+                    "released admission identity changed",
+                )?;
+                require(
+                    library
+                        .load_metadata(&destination)
+                        .map_err(|_| "metadata read failed")?
+                        .is_some()
+                        && library
+                            .index()
+                            .get(&model_id)
+                            .map_err(|_| "index read failed")?
+                            .is_some(),
+                    "model metadata/index absent",
+                )?;
+                require(
+                    !destination.join(".pumas_download").exists(),
+                    "marker survived settlement",
+                )?;
+                require(
+                    std::fs::read(&sentinel).map_err(|_| "sentinel read failed")?
+                        == b"unrelated AC10 fixture bytes",
+                    "unrelated bytes changed",
+                )?;
+                measurements["consumer_receipt"] =
+                    serde_json::to_value(receipt).map_err(|_| "receipt encode failed")?;
+                payload = Some(final_path);
+                Ok(())
+            }
+            .await;
+
+            // Every returned failure takes the same owned cleanup path before assertions.
+            if let Some(sender) = release_stream.take() {
+                let _ = sender.send(());
+            }
+            if let Some(sender) = release_import.take() {
+                let _ = sender.send(());
+            }
+            let cancel = if result.is_err() {
+                if let Some(id) = &download_id {
+                    Some(
+                        tokio::time::timeout(Duration::from_secs(15), api.cancel_hf_download(id))
+                            .await,
+                    )
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let mut shutdown =
+                tokio::time::timeout(Duration::from_secs(30), api.shutdown_downloads()).await;
+            if !matches!(&shutdown, Ok(Ok(()))) {
+                shutdown =
+                    tokio::time::timeout(Duration::from_secs(30), api.shutdown_downloads()).await;
+            }
+            let _ = stop_tx.send(());
+            let joined = tokio::time::timeout(Duration::from_secs(15), &mut monitor).await;
+            let source = match joined {
+                Ok(Ok(observed)) => Ok(observed),
+                outcome => {
+                    monitor.abort();
+                    let aborted = tokio::time::timeout(Duration::from_secs(15), &mut monitor).await;
+                    Err(format!(
+                        "source join failed: {outcome:?}; abort join: {aborted:?}"
+                    ))
+                }
+            };
+            library.set_metadata_write_notifier(None);
+            measurements["operation_error"] = serde_json::json!(result.as_ref().err());
+            measurements["cleanup"] = serde_json::json!({"cancellation":format!("{cancel:?}"),"shutdown":format!("{shutdown:?}")});
+            measurements["source"] = serde_json::json!(source.as_ref().ok());
+            measurements["source_join_error"] = serde_json::json!(source.as_ref().err());
+            let verification: Check<()> = (|| {
+                result?;
+                require(matches!(&shutdown, Ok(Ok(()))), "owner shutdown failed")?;
+                require(
+                    !expired.load(Ordering::SeqCst),
+                    "import barrier expired instead of release",
+                )?;
+                let observed = source.as_ref().map_err(Clone::clone)?;
+                require(
+                    observed.error.is_none()
+                        && observed.requests == 4
+                        && observed.payload_bytes == BYTES
+                        && observed.sha256.as_deref() == Some(&expected_hash),
+                    "source bytes, digest or request accounting mismatch",
+                )?;
+                let final_path = payload.as_ref().ok_or("final payload path absent")?;
+                let digest = file_digest(final_path)?;
+                require(digest == expected_hash, "independent final digest mismatch")?;
+                measurements["independent_final_sha256"] = serde_json::json!(digest);
+                let after = inventory(&root_path)?;
+                let final_relative = final_path
+                    .strip_prefix(&root_path)
+                    .map_err(|_| "final payload escaped root")?
+                    .to_string_lossy();
+                let large: Vec<_> = after
+                    .iter()
+                    .filter(|(_, file)| file.bytes >= BYTES)
+                    .collect();
+                require(
+                    large.len() == 1 && large[0].0 == final_relative.as_ref(),
+                    "fixture retained another artifact-sized file",
+                )?;
+                let before_ids: BTreeSet<_> = before
+                    .values()
+                    .map(|file| (file.device, file.inode))
+                    .collect();
+                let mut new_ids = BTreeSet::new();
+                let mut other_logical = 0;
+                let mut other_allocated = 0;
+                for (name, file) in &after {
+                    if name != final_relative.as_ref()
+                        && !before_ids.contains(&(file.device, file.inode))
+                        && new_ids.insert((file.device, file.inode))
+                    {
+                        other_logical += file.bytes;
+                        other_allocated += file.allocated_bytes;
+                    }
+                }
+                measurements["inventory_after"] =
+                    serde_json::to_value(after).map_err(|_| "final inventory encode failed")?;
+                measurements["other_new_unique_files"] = serde_json::json!({"count":new_ids.len(),"logical_bytes":other_logical,"allocated_bytes":other_allocated});
+                Ok(())
+            })();
+            drop(library);
+            drop(api);
+            if shutdown.is_ok() && source.is_ok() {
+                let cleanup = root.close();
+                measurements["fixture_removed"] =
+                    serde_json::json!(cleanup.is_ok() && !root_path.exists());
+                println!("AC10_MEASUREMENT {}", measurements);
+                assert!(cleanup.is_ok(), "owned fixture cleanup failed");
+            } else {
+                let retained = root.keep();
+                measurements["fixture_retained_unconfirmed_cleanup"] = serde_json::json!(retained);
+                println!("AC10_MEASUREMENT {}", measurements);
+            }
+            assert!(
+                verification.is_ok(),
+                "AC10 observation failed: {verification:?}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn shutdown_without_hf_client_is_repeatable() {
         let root = tempfile::TempDir::new().unwrap();
@@ -2982,6 +3744,17 @@ pub(super) mod tests {
         root: &std::path::Path,
         download_base_url: Option<String>,
     ) -> PumasApi {
+        recovery_api_fixture_with_client(root, download_base_url, |cache| {
+            model_library::HuggingFaceClient::new(cache).unwrap()
+        })
+        .await
+    }
+
+    async fn recovery_api_fixture_with_client(
+        root: &std::path::Path,
+        download_base_url: Option<String>,
+        make_client: impl FnOnce(std::path::PathBuf) -> model_library::HuggingFaceClient,
+    ) -> PumasApi {
         use crate::api::{
             PrimaryState, ReconciliationCoordinator, RuntimeTasks, WatcherWriteSuppressor,
         };
@@ -2993,7 +3766,7 @@ pub(super) mod tests {
                 .await
                 .unwrap(),
         );
-        let mut client = model_library::HuggingFaceClient::new(root.join("cache")).unwrap();
+        let mut client = make_client(root.join("cache"));
         client
             .configure_download_destination_root(library.library_root())
             .unwrap();

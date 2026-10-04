@@ -6,9 +6,13 @@ import hashlib
 import json
 import pathlib
 import re
+import subprocess
+import sys
 import tempfile
+import textwrap
 import time
 import unittest
+import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from types import SimpleNamespace
@@ -19,6 +23,142 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("resolve_runtime", ROOT / "resolve_runtime.py")
 resolver = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(resolver)
+
+
+class LocalWheelInstallTests(unittest.TestCase):
+    """Real pip children, denied Python socket access, and retained wheel bytes."""
+
+    def setUp(self):
+        self.workspace = tempfile.TemporaryDirectory()
+        self.addCleanup(self.workspace.cleanup)
+        self.root = pathlib.Path(self.workspace.name)
+        subprocess.run([sys.executable, "-m", "venv", str(self.root / "venv")], check=True)
+        self.python = (
+            self.root / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+        )
+        self.events = self.root / "network-events.txt"
+        self.guard = self.root / "denied-pip.py"
+        self.guard.write_text(
+            textwrap.dedent(f"""
+            import pathlib, runpy, socket, sys
+            def deny(*args, **kwargs):
+                with pathlib.Path({str(self.events)!r}).open('a') as events:
+                    events.write('denied\\n')
+                raise OSError('test-owned socket access denied')
+            socket.socket.connect = deny
+            socket.socket.connect_ex = deny
+            socket.create_connection = deny
+            socket.getaddrinfo = deny
+            if sys.argv[1:] == ['--denial-control']:
+                try:
+                    socket.create_connection(('127.0.0.1', 1))
+                except OSError:
+                    raise SystemExit(0)
+                raise SystemExit(1)
+            sys.argv = ['pip', *sys.argv[1:]]
+            runpy.run_module('pip', run_name='__main__')
+        """),
+            encoding="utf-8",
+        )
+        subprocess.run([str(self.python), "-I", str(self.guard), "--denial-control"], check=True)
+        self.assertEqual(self.events.read_text(), "denied\n")
+        self.events.unlink()
+
+    def wheel(self, name="handoff_fixture", dependency=None):
+        wheel = self.root / f"{name}-1.0-py3-none-any.whl"
+        info = f"{name}-1.0.dist-info"
+        metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n"
+        if dependency:
+            metadata += f"Requires-Dist: {dependency}\n"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            archive.writestr(f"{name}.py", "PAYLOAD = 'retained exact bytes'\n")
+            archive.writestr(f"{info}/METADATA", metadata)
+            archive.writestr(
+                f"{info}/WHEEL",
+                "Wheel-Version: 1.0\nGenerator: Pumas-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+            )
+            archive.writestr(f"{info}/RECORD", "")
+        return {
+            "name": name.replace("_", "-"),
+            "version": "1.0",
+            "path": str(wheel),
+            "sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
+        }
+
+    def install(self, wheels):
+        manifest = self.root / "local-wheels.json"
+        manifest.write_text(json.dumps({"schema_version": 1, "wheels": wheels}), encoding="utf-8")
+        # The product worker still supplies the actual pip CLI arguments. This
+        # fixture wraps only its child interpreter to deny/observe socket calls.
+        runner = self.root / "run-worker.py"
+        runner.write_text(
+            textwrap.dedent(f"""
+            import importlib.util, pathlib, subprocess, sys
+            spec = importlib.util.spec_from_file_location('resolver', {str(ROOT / "resolve_runtime.py")!r})
+            worker = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(worker)
+            original = subprocess.run
+            def guarded(command, **kwargs):
+                assert command[:4] == [sys.executable, '-I', '-m', 'pip']
+                return original([sys.executable, '-I', {str(self.guard)!r}, *command[4:]], **kwargs)
+            worker.subprocess.run = guarded
+            raise SystemExit(worker.install_local_wheels(pathlib.Path({str(manifest)!r})))
+        """),
+            encoding="utf-8",
+        )
+        return subprocess.run(
+            [str(self.python), "-I", str(runner)], capture_output=True, text=True, timeout=30
+        )
+
+    def test_local_install_uses_retained_bytes_with_socket_access_denied(self):
+        wheel = self.wheel()
+        original = pathlib.Path(wheel["path"]).read_bytes()
+        result = self.install([wheel])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        observed = subprocess.run(
+            [
+                str(self.python),
+                "-I",
+                "-c",
+                "import handoff_fixture; print(handoff_fixture.PAYLOAD)",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(observed.stdout.strip(), "retained exact bytes")
+        self.assertEqual(pathlib.Path(wheel["path"]).read_bytes(), original)
+        self.assertFalse(self.events.exists(), "local installation attempted network access")
+        local = (self.root / "local-wheels.requirements.txt").read_text()
+        self.assertIn(pathlib.Path(wheel["path"]).as_uri(), local)
+        self.assertNotIn("https:", local)
+
+    def test_same_name_and_version_with_wrong_bytes_refuses_before_install(self):
+        wheel = self.wheel()
+        with pathlib.Path(wheel["path"]).open("ab") as stream:
+            stream.write(b"different same-name/version bytes")
+        result = self.install([wheel])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("retained SHA-256", result.stderr)
+        self.assertFalse((self.root / "local-wheels.requirements.txt").exists())
+        self.assertFalse(self.events.exists())
+
+    def test_absent_dependency_refuses_without_resolution_or_network(self):
+        result = self.install([self.wheel(dependency="missing-handoff-dependency==9.8.7")])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing-handoff-dependency", result.stdout + result.stderr)
+        self.assertFalse(self.events.exists())
+
+    def test_duplicate_and_remote_inputs_refuse(self):
+        wheel = self.wheel()
+        result = self.install([wheel, wheel])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("duplicate", result.stderr)
+        remote = dict(wheel, path="https://example.invalid/same-wheel.whl")
+        result = self.install([remote])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ordinary absolute local file", result.stderr)
+        self.assertFalse(self.events.exists())
 
 
 def entry(name, version="1.0", url=None, digest="b"):

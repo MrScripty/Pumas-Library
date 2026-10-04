@@ -143,6 +143,25 @@ The durable provider decision is recorded in
 boundary split is recorded in
 [ADR 0002](adr/0002-torch-image-provider-protocol.md).
 
+For a retained, unqualified Linux x86_64 CPU Torch preview with adapter `none`,
+the manager uses the application's shared acquisition owner to fetch the exact
+approved wheel closure. The staged installer consumes hash-locked local files
+with pip indexes, dependency resolution and cache disabled, checks installed
+distributions and dependency completeness, and runs the existing CPU probe.
+The original resolver report and remote requirements remain provenance. Other
+Torch selections, bundled recipes, resolver metadata and managed-Python
+bootstrap retain their existing traffic paths.
+
+The existing managed-child stage lease also retains the verified wheel use, so
+caller loss cannot reclaim inputs before actual child cleanup. Torch publishes
+through its existing destination and metadata boundary before issuing the
+consumer receipt and settling acquisition. An interruption before receipt
+issuance retains `Using` and the wheel directory; construction and subsequent
+retained-wheel installs refuse unresolved uses before cleanup. This initial
+fresh-install path provides no automatic replay, wheel eviction, or recovery of
+an uncertain publication. Its isolated development admission does not accept
+the broader acquisition or package qualification gates.
+
 ## Build Variants
 
 The default `pumas-rpc` build enables inference plugins. The library-only

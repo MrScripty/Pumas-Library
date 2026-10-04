@@ -3,7 +3,7 @@ use super::*;
 use std::os::unix::fs::PermissionsExt;
 use tokio::process::Command;
 
-fn fixture_installer() -> (VersionInstaller, tempfile::TempDir) {
+pub(super) fn fixture_installer() -> (VersionInstaller, tempfile::TempDir) {
     let root = tempfile::TempDir::new().unwrap();
     let metadata = Arc::new(MetadataManager::new(root.path()));
     metadata.ensure_directories().unwrap();
@@ -20,7 +20,7 @@ fn fixture_installer() -> (VersionInstaller, tempfile::TempDir) {
     (installer, root)
 }
 
-fn upstream_release() -> GitHubRelease {
+pub(super) fn upstream_release() -> GitHubRelease {
     GitHubRelease {
         tag_name: "v2.9.1".to_string(),
         name: "PyTorch 2.9.1".to_string(),
@@ -39,7 +39,7 @@ fn upstream_release() -> GitHubRelease {
     }
 }
 
-fn mock_runtime(staging: &Path) -> Result<PathBuf> {
+pub(super) fn mock_runtime(staging: &Path) -> Result<PathBuf> {
     let runtime = staging.join("runtime");
     std::fs::create_dir_all(runtime.join("venv/bin")).map_err(PumasError::from)?;
     let python = runtime.join("venv/bin/python");

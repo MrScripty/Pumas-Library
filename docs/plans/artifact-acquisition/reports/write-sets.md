@@ -123,7 +123,23 @@ No arbitrary adapter registry or new host/task API is needed for this prerequisi
 
 ### Q2 next-slice proposal — retained resolved preview to local wheels
 
-**Status:** proposed, blocked on AQ-HTTP; no Q2 implementation or admission is claimed. This proposal is based on producer commit `5be6d967dbd5c0ff7449f342e77f05f9cd645a8e`, tree `8e693fe410dac9142e6213430638e7180e5643c7`, whose parent is `2c490db5190a9c2ee1d0a116b93062e886585002`. Keep that producer milestone frozen for independent review. The [dependency-gate record](dependency-gates.md) still marks AQ-HTTP not ready, and [the acquisition plan](../plan.md#milestones-and-release-gates) requires it for both Q2 and Q3. Recent bounded Q1 evidence does not itself accept this prerequisite. The serial integrator owns acceptance and any resulting gate-record update; this proposal changes neither.
+**Subsequent isolated development admission:** the integrator authorized a
+separate descendant of proposal commit `9b3bef466314d448f15fb4d3d239dfa7149b5374`
+for the fresh-install Linux CPU/adapter-none path below, contingent on eventual
+AQ-HTTP integration. The original proposal and producer milestone remain
+frozen; AQ-HTTP and aggregate Q2 acceptance remain with the integrator. The
+implementation uses the existing shared consumer and managed-child custody,
+keeps uncertain inputs, and refuses retained-use replay. Its receipt follows
+existing Torch publication, so a publication interrupted before receipt remains
+uncertain rather than being replayed. Controlled Rust transfer/publication and
+actual-child fixtures plus real pip fixture-wheel tests do not qualify a real
+Torch CPU closure or kernel-enforced network denial. The adjacent write set is
+the existing manager construction and RPC composition, existing Torch tests,
+and API/architecture documentation; no shared contract, DTO, dependency,
+lockfile, generator, gate-state or real-installation migration changes are
+included.
+
+**Original proposal status (before the isolated admission above):** proposed, blocked on AQ-HTTP; no Q2 implementation or admission was claimed. This proposal is based on producer commit `5be6d967dbd5c0ff7449f342e77f05f9cd645a8e`, tree `8e693fe410dac9142e6213430638e7180e5643c7`, whose parent is `2c490db5190a9c2ee1d0a116b93062e886585002`. Keep that producer milestone frozen for independent review. The [dependency-gate record](dependency-gates.md) still marks AQ-HTTP not ready, and [the acquisition plan](../plan.md#milestones-and-release-gates) requires it for both Q2 and Q3. Recent bounded Q1 evidence does not itself accept this prerequisite. The serial integrator owns acceptance and any resulting gate-record update; this proposal changes neither.
 
 **Exactly one next implementation slice after admission:** on Linux x86_64, acquire the retained exact wheel closure for an existing resolved Torch preview and feed only verified local wheels to the existing staged installer. Start with the `stage_resolved_torch_runtime` route selected by `stage_torch_runtime` for an unqualified retained preview, using a retained CPU selection with adapter `none`. This is a useful existing installation workflow, independent of runtime R1/R2 and a new adapter registry. It is a first Q2 slice, not acceptance of all package routes or supported targets.
 

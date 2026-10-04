@@ -256,7 +256,7 @@ async fn initialize_version_managers(
     let mut version_managers = HashMap::new();
 
     for app_id in VERSION_MANAGED_APPS {
-        let initialized = if *app_id == AppId::LlamaCpp {
+        let initialized = if matches!(*app_id, AppId::LlamaCpp | AppId::Torch) {
             VersionManager::new_with_acquisition(launcher_root, *app_id, api.acquisition().clone())
                 .await
         } else {

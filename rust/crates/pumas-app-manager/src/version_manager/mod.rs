@@ -223,6 +223,7 @@ pub struct VersionManager {
     github_client: Arc<GitHubClient>,
     /// Native release consumers share PumasApi's single acquisition service.
     acquisition_consumer: Option<Arc<AcquisitionConsumer>>,
+    torch_acquisition_store: Option<Arc<pumas_library::acquisition::AcquisitionStore>>,
     /// Version state tracker.
     state: Arc<RwLock<VersionState>>,
     /// Installation progress tracker.
@@ -386,6 +387,7 @@ impl VersionManager {
             metadata_manager,
             github_client,
             acquisition_consumer: None,
+            torch_acquisition_store: None,
             state,
             progress_tracker,
             cancel_flag: Arc::new(AtomicBool::new(false)),
@@ -461,8 +463,10 @@ impl VersionManager {
         Ok(manager)
     }
 
-    /// Construct the llama.cpp manager with the application's existing shared
-    /// acquisition owner. A second service/store is never created here.
+    /// Construct the llama.cpp or Torch manager with the application's existing
+    /// shared acquisition owner. A second service/store is never created here.
+    /// Torch refuses unresolved retained wheel uses before installer cleanup;
+    /// automatic replay is outside the fresh-install CPU wheel slice.
     pub async fn new_with_acquisition(
         launcher_root: impl Into<PathBuf>,
         app_id: AppId,
@@ -477,9 +481,42 @@ impl VersionManager {
         acquisition: Arc<AcquisitionService>,
         configured_client: Option<Arc<GitHubClient>>,
     ) -> Result<Self> {
+        if app_id == AppId::Torch {
+            let consumer = Arc::new(acquisition.open_consumer("runtime.torch")?);
+            // This first package slice deliberately has no retained-use replay.
+            // Inspect before construction can retry old installer cleanup.
+            let store = acquisition.store().clone();
+            let unresolved = consumer
+                .run_blocking("check retained Torch wheel custody", move || {
+                    Ok(store.acquisitions()?.into_values().any(|record| {
+                        record.demand.consumer == "runtime.torch"
+                            && !matches!(
+                                record.phase,
+                                pumas_library::acquisition::AcquisitionPhase::Adopted { .. }
+                            )
+                    }))
+                })
+                .await;
+            if !matches!(unresolved, Ok(false)) {
+                let settlement = consumer.shutdown().await;
+                return Err(match settlement {
+                    Err(error) => error,
+                    Ok(()) => unresolved.err().unwrap_or_else(|| PumasError::Config {
+                        message:
+                            "Retained Torch wheel use requires explicit recovery; refusing replay"
+                                .into(),
+                    }),
+                });
+            }
+            let mut manager =
+                Self::new_with_github_client(launcher_root, app_id, configured_client).await?;
+            manager.acquisition_consumer = Some(consumer);
+            manager.torch_acquisition_store = Some(acquisition.store().clone());
+            return Ok(manager);
+        }
         if app_id != AppId::LlamaCpp {
             return Err(PumasError::Config {
-                message: "Shared artifact acquisition is currently required for llama.cpp".into(),
+                message: "Shared artifact acquisition is supported for llama.cpp and Torch".into(),
             });
         }
         let mut manager =
@@ -1156,7 +1193,8 @@ impl VersionManager {
         .with_torch_cleanup(self.torch_cleanup.clone())
         .with_shutdown_flag(self.torch_shutting_down.clone())
         .with_github_client(self.github_client.clone())
-        .with_acquisition_consumer(self.acquisition_consumer.clone());
+        .with_acquisition_consumer(self.acquisition_consumer.clone())
+        .with_torch_acquisition_store(self.torch_acquisition_store.clone());
         #[cfg(test)]
         let installer = if let Some(pause) = &self.native_receipt_pause {
             installer.with_native_receipt_pause(pause.clone())

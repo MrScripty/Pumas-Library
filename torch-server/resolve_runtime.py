@@ -10,6 +10,7 @@ import csv
 from email.parser import Parser
 from concurrent.futures import ThreadPoolExecutor, wait
 import hashlib
+import importlib.metadata
 from html.parser import HTMLParser
 import json
 import os
@@ -32,6 +33,89 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 CORE = ("fastapi", "uvicorn", "psutil", "pillow", "safetensors")
 DOWNLOAD_PROGRESS_INTERVAL_SECONDS = 0.25
+
+
+def install_local_wheels(manifest_path: Path) -> int:
+    """Install one retained closure without indexes, resolution or remote inputs."""
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict) or set(manifest) != {"schema_version", "wheels"}:
+        raise ValueError("Invalid local wheel handoff")
+    wheels = manifest["wheels"]
+    if manifest["schema_version"] != 1 or not isinstance(wheels, list) or not wheels:
+        raise ValueError("Empty or unsupported local wheel handoff")
+    names = set()
+    requirements = []
+    verified = []
+    compatible = set(packaging_tags.sys_tags())
+    for wheel in wheels:
+        if not isinstance(wheel, dict) or set(wheel) != {"name", "version", "path", "sha256"}:
+            raise ValueError("Invalid local wheel entry")
+        name, version, digest = wheel["name"], wheel["version"], wheel["sha256"]
+        if (
+            not isinstance(name, str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9.-]*", name)
+            or canonicalize_name(name) in names
+            or not isinstance(version, str)
+            or not isinstance(digest, str)
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", digest)
+            or not isinstance(wheel["path"], str)
+        ):
+            raise ValueError("Invalid or duplicate local wheel identity")
+        names.add(canonicalize_name(name))
+        path = Path(wheel["path"])
+        if not path.is_absolute() or path.is_symlink() or not path.is_file():
+            raise ValueError("Wheel input must be an ordinary absolute local file")
+        parsed_name, parsed_version, _, wheel_tags = parse_wheel_filename(path.name)
+        if (
+            parsed_name != canonicalize_name(name)
+            or parsed_version != Version(version)
+            or not compatible.intersection(wheel_tags)
+        ):
+            raise ValueError("Wheel filename differs from the retained identity or interpreter")
+        observed = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(64 * 1024), b""):
+                observed.update(chunk)
+        if observed.hexdigest() != digest.lower():
+            raise ValueError("Local wheel differs from the retained SHA-256")
+        requirements.append(f"{name} @ {path.as_uri()} --hash=sha256:{digest}")
+        verified.append((path, digest.lower(), name, version))
+    local_requirements = manifest_path.with_suffix(".requirements.txt")
+    local_requirements.write_text("\n".join(requirements) + "\n", encoding="utf-8", newline="\n")
+    command = [
+        sys.executable,
+        "-I",
+        "-m",
+        "pip",
+        "--isolated",
+        "install",
+        "--no-index",
+        "--no-deps",
+        "--require-hashes",
+        "--only-binary=:all:",
+        "--no-cache-dir",
+        "--disable-pip-version-check",
+        "-r",
+        str(local_requirements),
+    ]
+    installed = subprocess.run(command, check=False)
+    if installed.returncode:
+        return installed.returncode
+    checked = subprocess.run(
+        [sys.executable, "-I", "-m", "pip", "--isolated", "check"], check=False
+    )
+    if checked.returncode:
+        return checked.returncode
+    for path, digest, name, version in verified:
+        if Version(importlib.metadata.version(name)) != Version(version):
+            raise ValueError("Installed distribution differs from the retained wheel")
+        observed = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(64 * 1024), b""):
+                observed.update(chunk)
+        if observed.hexdigest() != digest:
+            raise ValueError("Wheel input changed during installation")
+    return 0
 
 
 def copyable_download_source(url: str) -> str | None:
@@ -1343,6 +1427,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--_pumas-local-wheel-install"]:
+        if len(sys.argv) != 3:
+            raise SystemExit(2)
+        raise SystemExit(install_local_wheels(Path(sys.argv[2])))
     if sys.argv[1:2] == ["--_pumas-pip-progress-worker"]:
         if len(sys.argv) < 3:
             raise SystemExit(2)

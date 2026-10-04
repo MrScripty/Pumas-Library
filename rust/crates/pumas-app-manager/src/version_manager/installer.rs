@@ -9,6 +9,7 @@ use super::managed_python::ManagedPythonIdentity;
 pub(crate) use torch::is_torch_runtime_release;
 pub(crate) use torch::retry_pending_torch_cleanup;
 pub(crate) use torch::TorchVersionsLock;
+#[derive(Clone)]
 pub(crate) struct TorchInstallPlan {
     pub(crate) preview: crate::version_manager::TorchPreview,
     pub(crate) requirements: String,
@@ -1198,6 +1199,7 @@ impl TorchInstallControl {
 pub(crate) type TorchStageOverride = Arc<dyn Fn(&Path) -> Result<PathBuf> + Send + Sync>;
 
 /// Handles version installation.
+#[derive(Clone)]
 pub struct VersionInstaller {
     /// Root directory for launcher.
     launcher_root: PathBuf,
@@ -1212,9 +1214,12 @@ pub struct VersionInstaller {
     shutdown_flag: Arc<AtomicBool>,
     github_client: Option<Arc<GitHubClient>>,
     acquisition_consumer: Option<Arc<AcquisitionConsumer>>,
+    torch_acquisition_store: Option<Arc<pumas_library::acquisition::AcquisitionStore>>,
+    #[cfg(test)]
+    torch_wheel_sources: Option<(Vec<AcquisitionHttpSource>, reqwest::Client)>,
     torch_control: Arc<TorchInstallControl>,
     torch_cleanup: Arc<TorchCleanupTasks>,
-    torch_attempt_lock: Mutex<()>,
+    torch_attempt_lock: Arc<Mutex<()>>,
     #[cfg(test)]
     native_receipt_pause: Option<Arc<TorchPublicationPause>>,
     #[cfg(test)]
@@ -1284,9 +1289,12 @@ impl VersionInstaller {
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             github_client: None,
             acquisition_consumer: None,
+            torch_acquisition_store: None,
+            #[cfg(test)]
+            torch_wheel_sources: None,
             torch_control: Arc::new(TorchInstallControl::new()),
             torch_cleanup: Arc::new(TorchCleanupTasks::default()),
-            torch_attempt_lock: Mutex::new(()),
+            torch_attempt_lock: Arc::new(Mutex::new(())),
             #[cfg(test)]
             native_receipt_pause: None,
             #[cfg(test)]
@@ -1304,21 +1312,30 @@ impl VersionInstaller {
         }
     }
 
-    /// Configure direct llama.cpp installation with the existing shared
-    /// acquisition capability. Initializes the GitHub metadata client from this
+    /// Configure llama.cpp or retained Linux CPU Torch installation with the
+    /// existing shared acquisition capability. For llama.cpp, initializes the
+    /// GitHub metadata client from this
     /// installer's cache; creates no acquisition store, service, or downloader.
     /// Reads retained records from that same store and reconciles native uses
     /// before returning an installer that can admit new work. Recovery failure
     /// drains this consumer scope before returning the error; the caller retains
     /// the shared service's shutdown responsibility.
+    /// Torch retains uncertain input uses and refuses replay before cleanup;
+    /// this first slice does not reconcile retained Torch installations.
     /// External customer compatibility acceptance remains pending.
     pub async fn with_acquisition(
         mut self,
         acquisition: Arc<pumas_library::acquisition::AcquisitionService>,
     ) -> Result<Self> {
+        if self.app_id == AppId::Torch {
+            let consumer = Arc::new(acquisition.open_consumer("runtime.torch")?);
+            self.torch_acquisition_store = Some(acquisition.store().clone());
+            self.acquisition_consumer = Some(consumer);
+            return Ok(self);
+        }
         if self.app_id != AppId::LlamaCpp {
             return Err(PumasError::Config {
-                message: "Shared artifact acquisition is currently supported for llama.cpp".into(),
+                message: "Shared artifact acquisition is supported for llama.cpp and Torch".into(),
             });
         }
         let cache = self
@@ -1384,6 +1401,14 @@ impl VersionInstaller {
         consumer: Option<Arc<AcquisitionConsumer>>,
     ) -> Self {
         self.acquisition_consumer = consumer;
+        self
+    }
+
+    pub(crate) fn with_torch_acquisition_store(
+        mut self,
+        store: Option<Arc<pumas_library::acquisition::AcquisitionStore>>,
+    ) -> Self {
+        self.torch_acquisition_store = store;
         self
     }
 

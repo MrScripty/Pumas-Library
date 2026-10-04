@@ -1296,6 +1296,150 @@ fn managed_python_record(plan: &super::TorchInstallPlan) -> serde_json::Value {
     managed_python_identity_record(&plan.managed_python, &plan.interpreter_hash)
 }
 
+/// Validate the staged Torch output against its retained interpreter before
+/// publication. A Linux venv deliberately links to that managed executable and
+/// may link lib64 to lib; those are not native-archive link permissions.
+fn hash_torch_runtime_tree(root: &Path, plan: &TorchInstallPlan) -> Result<String> {
+    if !std::fs::symlink_metadata(root)?.is_dir()
+        || std::fs::symlink_metadata(root)?.file_type().is_symlink()
+        || !std::fs::symlink_metadata(root.join("venv"))?.is_dir()
+        || std::fs::symlink_metadata(root.join("venv"))?
+            .file_type()
+            .is_symlink()
+    {
+        return Err(failed(
+            "Torch runtime and venv must be ordinary directories",
+        ));
+    }
+    let interpreter = &plan.managed_python.executable;
+    if &plan.interpreter_path != interpreter
+        || !interpreter.is_absolute()
+        || std::fs::canonicalize(interpreter)? != *interpreter
+        || hash_regular_file(interpreter)? != plan.interpreter_hash
+    {
+        return Err(failed(
+            "Torch receipt interpreter differs from the retained preview",
+        ));
+    }
+    hash_regular_file(&root.join("runtime.json"))?;
+    let recipe: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("runtime.json"))?)?;
+    if recipe["managed_python"] != managed_python_record(plan) {
+        return Err(failed(
+            "Torch runtime interpreter provenance differs from the retained preview",
+        ));
+    }
+    let cfg_path = root.join("venv/pyvenv.cfg");
+    hash_regular_file(&cfg_path)?;
+    let cfg = std::fs::read_to_string(cfg_path)?;
+    let fields: std::collections::BTreeMap<_, _> = cfg
+        .lines()
+        .filter_map(|line| {
+            line.split_once('=')
+                .map(|(key, value)| (key.trim(), value.trim()))
+        })
+        .collect();
+    if fields.get("home").map(Path::new) != interpreter.parent()
+        || fields.get("version").copied() != Some(plan.managed_python.version.as_str())
+        || fields.get("include-system-site-packages").copied() != Some("false")
+        || fields
+            .get("executable")
+            .is_some_and(|value| Path::new(value) != interpreter)
+    {
+        return Err(failed(
+            "Torch venv configuration differs from the retained interpreter",
+        ));
+    }
+    let minor = plan
+        .managed_python
+        .python
+        .strip_prefix("python")
+        .ok_or_else(|| failed("Torch receipt Python selection is invalid"))?;
+    let aliases = [
+        "python".to_owned(),
+        "python3".to_owned(),
+        format!("python{minor}"),
+    ];
+    for alias in &aliases {
+        let path = root.join("venv/bin").join(alias);
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            if std::fs::canonicalize(&path)? != *interpreter {
+                return Err(failed(
+                    "Torch venv executable link differs from the retained interpreter",
+                ));
+            }
+        } else if hash_regular_file(&path)? != plan.interpreter_hash {
+            return Err(failed(
+                "Torch venv executable copy differs from the retained interpreter",
+            ));
+        }
+    }
+    let canonical_root = root.canonicalize()?;
+    let mut digest = Sha256::new();
+    for entry in walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .sort_by_file_name()
+    {
+        let entry =
+            entry.map_err(|error| failed(format!("Could not hash Torch runtime: {error}")))?;
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(|error| failed(error.to_string()))?;
+        let name = relative
+            .to_str()
+            .ok_or_else(|| failed("Torch output name is not UTF-8"))?;
+        digest.update((name.len() as u64).to_le_bytes());
+        digest.update(name.as_bytes());
+        let metadata = std::fs::symlink_metadata(entry.path())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            digest.update(metadata.permissions().mode().to_le_bytes());
+        }
+        if metadata.file_type().is_symlink() {
+            let link = std::fs::read_link(entry.path())?;
+            let target = entry.path().canonicalize()?;
+            let alias = relative.parent() == Some(Path::new("venv/bin"))
+                && aliases
+                    .iter()
+                    .any(|alias| relative.file_name() == Some(std::ffi::OsStr::new(alias)));
+            let accepted = if alias {
+                target == *interpreter
+                    && (link == *interpreter
+                        || (link.components().count() == 1
+                            && aliases.iter().any(|alias| link == Path::new(alias))))
+            } else if relative == Path::new("venv/lib64") {
+                link == Path::new("lib")
+                    && target == canonical_root.join("venv/lib")
+                    && std::fs::symlink_metadata(root.join("venv/lib"))?.is_dir()
+            } else {
+                !link.is_absolute() && target.starts_with(&canonical_root) && target.is_file()
+            };
+            if !accepted {
+                return Err(failed(
+                    "Torch runtime contains a link outside its expected venv provenance",
+                ));
+            }
+            let link = link
+                .to_str()
+                .ok_or_else(|| failed("Torch link target is not UTF-8"))?;
+            digest.update(b"link");
+            digest.update((link.len() as u64).to_le_bytes());
+            digest.update(link.as_bytes());
+        } else if metadata.is_file() {
+            digest.update(b"file");
+            digest.update(hash_regular_file(entry.path())?.as_bytes());
+        } else if metadata.is_dir() {
+            digest.update(b"directory");
+        } else {
+            return Err(failed("Torch runtime contains a special file"));
+        }
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
 fn record_managed_python(runtime: &Path, plan: &super::TorchInstallPlan) -> Result<()> {
     let path = runtime.join("runtime.json");
     let bytes = std::fs::read(&path).map_err(PumasError::from)?;
@@ -1986,27 +2130,30 @@ impl VersionInstaller {
                     if let Some(stage) = &installer.torch_stage_override { return stage(staging.path()); }
                     installer.stage_resolved_torch_runtime(&plan, &staging, &log_path, &progress_tx, Some(&handoff)).await
                 })?;
-                grant.validate()?;
-                executor.block_on(installer.publish_staged_torch_runtime(
-                    runtime, &tag, &release, &progress_tx, staging.clone(),
-                    Some(format!("Python {}", plan.managed_python.version)),
-                ))?;
-                let destination = installer.versions_dir().join(&tag);
-                // Publication precedes this receipt. A crash before receipt
-                // issuance retains Using and inputs; replay is not supported.
+                // Prepare and validate the exact Torch output while it is still
+                // private. Output validation and hashing finish before metadata
+                // can advertise this runtime as successfully installed.
+                let output_tree_sha256 = hash_torch_runtime_tree(&runtime, &plan)?;
                 let mut directories = Vec::new();
-                for entry in walkdir::WalkDir::new(&destination).follow_links(false) {
+                for entry in walkdir::WalkDir::new(&runtime).follow_links(false) {
                     let entry = entry.map_err(|error| failed(error.to_string()))?;
                     if entry.file_type().is_file() { sync_native_file(entry.path())?; }
                     else if entry.file_type().is_dir() { directories.push(entry.path().to_owned()); }
                 }
                 directories.reverse();
                 for directory in directories { sync_native_directory(&directory)?; }
+                grant.validate()?;
+                executor.block_on(installer.publish_staged_torch_runtime(
+                    runtime, &tag, &release, &progress_tx, staging.clone(),
+                    Some(format!("Python {}", plan.managed_python.version)),
+                ))?;
+                // Publication precedes receipt issuance. An interrupted durable
+                // settlement still retains Using and inputs without replay.
                 sync_native_directory(&installer.versions_dir())?;
                 sync_native_metadata(&installer.versions_dir(), AppId::Torch)?;
                 let metadata = installer.metadata_manager.get_installed_version(&tag, Some(AppId::Torch))?
                     .ok_or_else(|| failed("Torch publication has no installed metadata"))?;
-                let payload = serde_json::json!({"schema_version":1,"tag":tag,"output_tree_sha256":hash_native_tree(&destination)?,"metadata_sha256":hash_metadata(&metadata)?,"interpreter_sha256":plan.interpreter_hash});
+                let payload = serde_json::json!({"schema_version":1,"tag":tag,"output_tree_sha256":output_tree_sha256,"metadata_sha256":hash_metadata(&metadata)?,"interpreter_sha256":plan.interpreter_hash});
                 Ok((staging, payload))
             }).await
         }, move |_stage, _receipt| async move { Ok(()) }).await
@@ -3554,6 +3701,87 @@ mod retained_wheel_tests {
         )
     }
 
+    fn bind_real_interpreter(plan: &mut TorchInstallPlan) {
+        let observed = std::process::Command::new("python3")
+            .args(["-I", "-c", "import json,pathlib,sys; print(json.dumps({'path':str(pathlib.Path(sys.executable).resolve()),'version':'.'.join(map(str,sys.version_info[:3])),'minor':'.'.join(map(str,sys.version_info[:2]))}))"])
+            .output().unwrap();
+        assert!(observed.status.success());
+        let observed: serde_json::Value = serde_json::from_slice(&observed.stdout).unwrap();
+        let interpreter = PathBuf::from(observed["path"].as_str().unwrap());
+        let minor = observed["minor"].as_str().unwrap();
+        plan.interpreter_path = interpreter.clone();
+        plan.interpreter_hash = hash_regular_file(&interpreter).unwrap();
+        plan.managed_python.executable = interpreter.clone();
+        plan.managed_python.version = observed["version"].as_str().unwrap().into();
+        plan.managed_python.python = format!("python{minor}");
+        plan.preview.python = minor.into();
+        let mut resolution: serde_json::Value = serde_json::from_str(&plan.resolution).unwrap();
+        resolution["interpreter"] = serde_json::json!(interpreter);
+        resolution["python"] = serde_json::json!(minor);
+        plan.resolution = resolution.to_string();
+    }
+
+    fn real_venv_runtime(stage: &Path, plan: &TorchInstallPlan) -> Result<PathBuf> {
+        let runtime = stage.join("runtime");
+        std::fs::create_dir_all(&runtime)?;
+        let created = std::process::Command::new(&plan.interpreter_path)
+            .args(["-I", "-m", "venv"])
+            .arg(runtime.join("venv"))
+            .output()?;
+        if !created.status.success() {
+            return Err(failed(format!(
+                "Real venv fixture failed: {}",
+                String::from_utf8_lossy(&created.stderr)
+            )));
+        }
+        std::fs::write(
+            runtime.join("runtime.json"),
+            serde_json::to_vec(&serde_json::json!({"managed_python":managed_python_record(plan)}))?,
+        )?;
+        Ok(runtime)
+    }
+
+    #[test]
+    fn real_venv_receipt_accepts_only_retained_interpreter_and_lib64_links() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let (mut plan, _) = plan(root.path());
+        bind_real_interpreter(&mut plan);
+        let runtime = real_venv_runtime(root.path(), &plan).unwrap();
+        assert!(runtime.join("venv/bin/python").is_symlink());
+        assert_eq!(
+            std::fs::read_link(runtime.join("venv/lib64")).unwrap(),
+            Path::new("lib")
+        );
+        assert!(hash_native_tree(&runtime)
+            .unwrap_err()
+            .to_string()
+            .contains("unsafe link"));
+        let prepared = hash_torch_runtime_tree(&runtime, &plan).unwrap();
+        let published = root.path().join("published");
+        std::fs::rename(&runtime, &published).unwrap();
+        assert_eq!(
+            hash_torch_runtime_tree(&published, &plan).unwrap(),
+            prepared
+        );
+        let link = published.join("unexpected-interpreter-link");
+        symlink(&plan.interpreter_path, &link).unwrap();
+        assert!(hash_torch_runtime_tree(&published, &plan).is_err());
+        std::fs::remove_file(link).unwrap();
+        let lib64 = published.join("venv/lib64");
+        std::fs::remove_file(&lib64).unwrap();
+        symlink(root.path(), &lib64).unwrap();
+        assert!(hash_torch_runtime_tree(&published, &plan).is_err());
+        std::fs::remove_file(&lib64).unwrap();
+        symlink("lib", &lib64).unwrap();
+        let alias = published.join("venv/bin/python");
+        std::fs::remove_file(&alias).unwrap();
+        let other = root.path().join("other-python");
+        std::fs::write(&other, b"unapproved interpreter").unwrap();
+        symlink(&other, &alias).unwrap();
+        assert!(hash_torch_runtime_tree(&published, &plan).is_err());
+    }
+
     async fn source(
         payloads: Vec<Vec<u8>>,
     ) -> (
@@ -3667,7 +3895,10 @@ mod retained_wheel_tests {
         let mut installer = installer.with_acquisition(service.clone()).await.unwrap();
         let metadata = installer.metadata_manager.clone();
         let versions = installer.versions_dir();
-        let (plan, payloads) = plan(root.path());
+        let (mut plan, payloads) = plan(root.path());
+        bind_real_interpreter(&mut plan);
+        let expected_plan = plan.clone();
+        let stage_plan = plan.clone();
         let original_requirements = plan.requirements.clone();
         let original_resolution = plan.resolution.clone();
         let expected = payloads.clone();
@@ -3677,7 +3908,7 @@ mod retained_wheel_tests {
             for (input, bytes) in inputs["wheels"].as_array().unwrap().iter().zip(&expected) {
                 assert_eq!(std::fs::read(input["path"].as_str().unwrap())?, *bytes);
             }
-            let runtime = mock_runtime(stage)?;
+            let runtime = real_venv_runtime(stage, &stage_plan)?;
             std::fs::write(runtime.join("requirements.txt"), &original_requirements)?;
             std::fs::write(runtime.join("resolution.json"), &original_resolution)?;
             Ok(runtime)
@@ -3734,7 +3965,7 @@ mod retained_wheel_tests {
         assert_eq!(receipt.payload["tag"], "v2.14.0");
         assert_eq!(
             receipt.payload["output_tree_sha256"],
-            hash_native_tree(&versions.join("v2.14.0")).unwrap()
+            hash_torch_runtime_tree(&versions.join("v2.14.0"), &expected_plan).unwrap()
         );
         assert_eq!(
             receipt.payload["metadata_sha256"],
@@ -3748,6 +3979,89 @@ mod retained_wheel_tests {
         );
         assert!(versions.join("v2.14.0/runtime.json").exists());
         assert_eq!(record.files.len(), 6);
+    }
+
+    #[tokio::test]
+    async fn invalid_real_venv_receipt_refuses_publication_and_retains_using_inputs() {
+        let (installer, root) = fixture_installer();
+        let service = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
+            root.path(),
+        ))));
+        let mut installer = installer.with_acquisition(service.clone()).await.unwrap();
+        let metadata = installer.metadata_manager.clone();
+        let tracker = installer.progress_tracker.clone();
+        let versions = installer.versions_dir();
+        let (mut plan, payloads) = plan(root.path());
+        bind_real_interpreter(&mut plan);
+        let stage_plan = plan.clone();
+        let expected = payloads.clone();
+        installer.torch_stage_override = Some(Arc::new(move |stage| {
+            let runtime = real_venv_runtime(stage, &stage_plan)?;
+            std::os::unix::fs::symlink(
+                &stage_plan.interpreter_path,
+                runtime.join("unexpected-external-link"),
+            )?;
+            Ok(runtime)
+        }));
+        let (url, count, stop, server) = source(payloads).await;
+        installer.torch_wheel_sources = Some(sources(&url, 6));
+        let mut release = upstream_release();
+        release.tag_name = "v2.14.0".into();
+        let (tx, _rx) = mpsc::channel(64);
+        let failed_install = installer
+            .install_torch_runtime(
+                "v2.14.0",
+                &release,
+                tx,
+                Some(TorchInstallInput::Resolved(Box::new(plan.clone()))),
+            )
+            .await;
+        let snapshot = std::fs::read(root.path().join("downloads.json")).unwrap();
+        let (tx, _rx) = mpsc::channel(64);
+        let retry = installer
+            .install_torch_runtime(
+                "v2.14.0",
+                &release,
+                tx,
+                Some(TorchInstallInput::Resolved(Box::new(plan))),
+            )
+            .await;
+        let settled_owner = tokio::time::timeout(Duration::from_secs(5), service.shutdown()).await;
+        let _ = stop.send(());
+        let joined_source = tokio::time::timeout(Duration::from_secs(5), server).await;
+        // A failed preparation may produce a truthful failed shutdown receipt.
+        let _owner_outcome = settled_owner.unwrap();
+        joined_source.unwrap().unwrap();
+        assert!(failed_install
+            .unwrap_err()
+            .to_string()
+            .contains("expected venv provenance"));
+        assert!(retry.unwrap_err().to_string().contains("explicit recovery"));
+        assert_eq!(
+            std::fs::read(root.path().join("downloads.json")).unwrap(),
+            snapshot
+        );
+        assert_eq!(
+            tracker.read().await.get_current_state().unwrap().success,
+            Some(false)
+        );
+        assert!(metadata
+            .get_installed_version("v2.14.0", Some(AppId::Torch))
+            .unwrap()
+            .is_none());
+        assert!(!versions.join("v2.14.0").exists());
+        assert_eq!(count.load(Ordering::SeqCst), 6);
+        let records = service.store().acquisitions().unwrap();
+        let record = records.values().next().unwrap();
+        assert!(matches!(record.phase, AcquisitionPhase::Using { .. }));
+        assert!(service.consumer_receipt(record.id).unwrap().is_none());
+        let input_directory = versions.join(&record.workspace.relative_target);
+        for (file, bytes) in record.manifest.files().iter().zip(expected) {
+            assert_eq!(
+                std::fs::read(input_directory.join(file.logical_path())).unwrap(),
+                bytes
+            );
+        }
     }
 
     #[tokio::test]

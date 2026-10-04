@@ -153,9 +153,12 @@ Torch selections, bundled recipes, resolver metadata and managed-Python
 bootstrap retain their existing traffic paths.
 
 The existing managed-child stage lease also retains the verified wheel use, so
-caller loss cannot reclaim inputs before actual child cleanup. Torch publishes
-through its existing destination and metadata boundary before issuing the
-consumer receipt and settling acquisition. An interruption before receipt
+caller loss cannot reclaim inputs before actual child cleanup. Torch validates
+and hashes its staged output before publication. Standard venv interpreter
+links must resolve to the exact retained managed executable, and `lib64` may
+link only to the venv's `lib`; the separate native-archive link restrictions
+remain unchanged. Torch publishes through its existing destination and metadata
+boundary before issuing the consumer receipt and settling acquisition. An interruption before receipt
 issuance retains `Using` and the wheel directory; construction and subsequent
 retained-wheel installs refuse unresolved uses before cleanup. This initial
 fresh-install path provides no automatic replay, wheel eviction, or recovery of

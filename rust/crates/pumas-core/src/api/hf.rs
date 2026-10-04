@@ -252,13 +252,19 @@ impl PumasApi {
         client: Arc<model_library::HuggingFaceClient>,
         request: &model_library::DownloadRequest,
     ) -> Result<String> {
-        Self::start_hf_download_owned_at_revision(
-            library,
-            client,
-            request,
-            DownloadRevision::legacy_main(),
-        )
-        .await
+        let resolution_client = client.clone();
+        let repo_id = request.repo_id.clone();
+        let revision_result = client
+            .run_download_invocation(move |_context| async move {
+                Ok::<_, PumasError>(
+                    resolution_client
+                        .resolve_download_revision(&repo_id, None)
+                        .await,
+                )
+            })
+            .await?;
+        let revision = revision_result?;
+        Self::start_hf_download_owned_at_revision(library, client, request, revision).await
     }
 
     pub(crate) async fn prepare_hf_download_owned_at_revision(
@@ -296,9 +302,7 @@ impl PumasApi {
                         })
                         .await
                         .map_err(|error| {
-                            PumasError::Other(format!(
-                                "Download metadata observation failed: {error}"
-                            ))
+                            error.into_pumas_error("Download metadata observation failed")
                         })??;
                     let mut huggingface_evidence = match snapshot {
                         Ok((model, evidence)) => {
@@ -344,9 +348,7 @@ impl PumasApi {
                             )
                             .await
                             .map_err(|error| {
-                                PumasError::Other(format!(
-                                    "Download model type observation failed: {error}"
-                                ))
+                                error.into_pumas_error("Download model type observation failed")
                             })??;
                         (resolved.model_type != model_library::ModelType::Unknown)
                             .then(|| resolved.model_type.as_str().to_string())
@@ -370,9 +372,9 @@ impl PumasApi {
                                     )
                                     .await
                                     .map_err(|error| {
-                                        PumasError::Other(format!(
-                                            "Download repository observation failed: {error}"
-                                        ))
+                                        error.into_pumas_error(
+                                            "Download repository observation failed",
+                                        )
                                     })??,
                             );
                         }
@@ -399,9 +401,7 @@ impl PumasApi {
                                 )
                                 .await
                                 .map_err(|error| {
-                                    PumasError::Other(format!(
-                                        "Download model type observation failed: {error}"
-                                    ))
+                                    error.into_pumas_error("Download model type observation failed")
                                 })??;
                         }
                     }
@@ -435,9 +435,7 @@ impl PumasApi {
                             )
                             .await
                             .map_err(|error| {
-                                PumasError::Other(format!(
-                                    "Download classification observation failed: {error}"
-                                ))
+                                error.into_pumas_error("Download classification observation failed")
                             })??;
                         match classification {
                             Ok(Some(bundle)) => {
@@ -550,6 +548,13 @@ impl PumasApi {
         client
             .run_download_invocation(move |context| async move {
                 validate_prepared_download(&library, &prepared, expected.as_ref())?;
+                let selection = invocation_client
+                    .resolve_download_selection_in_invocation(
+                        &context,
+                        &prepared.request,
+                        prepared.revision.clone(),
+                    )
+                    .await?;
                 let destination_type = prepared.model_type.clone();
                 let architecture_family = prepared.architecture_family.clone();
                 let artifact_id = prepared.selected_artifact.artifact_id.clone();
@@ -566,9 +571,7 @@ impl PumasApi {
                     })
                     .await
                     .map_err(|error| {
-                        PumasError::Other(format!(
-                            "Download destination preparation observation failed: {error}"
-                        ))
+                        error.into_pumas_error("Download destination preparation observation failed")
                     })??;
                 if prepared.model_type == "unknown" {
                     warn!(
@@ -578,11 +581,11 @@ impl PumasApi {
                     );
                 }
                 invocation_client
-                    .start_download_at_revision(
-                        &prepared.request,
+                    .start_download_with_selection_in_invocation(
+                        &context,
+                        selection,
                         &dest_dir,
                         prepared.evidence,
-                        prepared.revision,
                     )
                     .await
             })
@@ -728,9 +731,7 @@ impl PumasApi {
                 validate_existing_local_directory_lookup_path(&dest_dir, "dest_dir").await
             })
             .await
-            .map_err(|error| {
-                PumasError::Other(format!("Recovery directory observation failed: {error}"))
-            })??;
+            .map_err(|error| error.into_pumas_error("Recovery directory observation failed"))??;
 
         // Determine model_type from directory path relative to library root
         let library_root = library.library_root();
@@ -747,9 +748,7 @@ impl PumasApi {
                 Ok::<_, PumasError>(library.load_metadata(&metadata_dest)?.unwrap_or_default())
             })
             .await
-            .map_err(|error| {
-                PumasError::Other(format!("Recovery metadata observation failed: {error}"))
-            })??;
+            .map_err(|error| error.into_pumas_error("Recovery metadata observation failed"))??;
         let recovery_filenames = metadata
             .selected_artifact_files
             .clone()
@@ -814,9 +813,8 @@ impl PumasApi {
                         library.get_model(&record_id).await
                     })
                     .await
-                    .map_err(|error| {
-                        PumasError::Other(format!("Recovery model observation failed: {error}"))
-                    })? {
+                    .map_err(|error| error.into_pumas_error("Recovery model observation failed"))?
+                {
                     Ok(Some(record)) => record,
                     Ok(None) => return Ok(partial_download_unavailable("model_not_found")),
                     Err(error) => return Ok(partial_download_error(&error)),
@@ -842,9 +840,7 @@ impl PumasApi {
                         library.index_model_dir(&model_dir).await
                     })
                     .await
-                    .map_err(|error| {
-                        PumasError::Other(format!("Recovery index observation failed: {error}"))
-                    })?
+                    .map_err(|error| error.into_pumas_error("Recovery index observation failed"))?
                 {
                     return Ok(partial_download_error(&error));
                 }
@@ -855,9 +851,8 @@ impl PumasApi {
                         library.get_model(&record_id).await
                     })
                     .await
-                    .map_err(|error| {
-                        PumasError::Other(format!("Recovery model observation failed: {error}"))
-                    })? {
+                    .map_err(|error| error.into_pumas_error("Recovery model observation failed"))?
+                {
                     Ok(Some(record)) => record,
                     Ok(None) => return Ok(partial_download_unavailable("model_not_found")),
                     Err(error) => return Ok(partial_download_error(&error)),
@@ -999,7 +994,7 @@ impl PumasApi {
                     )
                     .await
                     .map_err(|error| {
-                        PumasError::Other(format!("Partial directory observation failed: {error}"))
+                        error.into_pumas_error("Partial directory observation failed")
                     })? {
                     Ok(dest) => dest,
                     Err(PumasError::InvalidParams { .. } | PumasError::NotFound { .. }) => {
@@ -1799,6 +1794,7 @@ pub(crate) fn partial_download_reason_code(err: &PumasError) -> &'static str {
         PumasError::ModelNotFound { .. } => "repo_not_found",
         PumasError::RateLimited { .. } => "rate_limited",
         PumasError::DownloadRootBusy => "download_root_busy",
+        PumasError::AcquisitionCapacityExhausted { .. } => "acquisition_capacity_exhausted",
         PumasError::PermissionDenied(_) => "permission_denied",
         PumasError::Network { message, .. } if message.contains("404 Not Found") => {
             "repo_not_found"
@@ -1893,6 +1889,931 @@ pub(super) mod tests {
             .library_root()
             .join("llm")
             .exists());
+        api.shutdown_downloads().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn public_hf_download_pins_default_main_before_metadata_tree_and_payload() {
+        use sha2::Digest;
+        use tokio::sync::oneshot;
+
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        let payload = b"pinned fixture payload";
+        let payload_sha256 = format!("{:x}", sha2::Sha256::digest(payload));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (payload_started, payload_request) = oneshot::channel();
+        let (release_payload, wait_for_release) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let mut request_lines = Vec::new();
+            for (expected, body) in [
+                (
+                    "GET /api/models/acme/model/revision/main HTTP/1.1".to_string(),
+                    format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}"}}"#),
+                ),
+                (
+                    format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"),
+                    format!(
+                        r#"{{"modelId":"acme/model","sha":"{COMMIT}","pipeline_tag":"text-generation"}}"#
+                    ),
+                ),
+                (
+                    format!("GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"),
+                    format!(
+                        r#"[{{"path":"weights.gguf","type":"file","lfs":{{"oid":"{payload_sha256}","size":{}}}}}]"#,
+                        payload.len()
+                    ),
+                ),
+            ] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = read_intent_test_request(&mut socket).await;
+                assert_eq!(request, expected);
+                request_lines.push(request);
+                write_intent_test_response(&mut socket, "200 OK", &body).await;
+            }
+
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_intent_test_request(&mut socket).await;
+            payload_started.send(request.clone()).unwrap();
+            request_lines.push(request);
+            wait_for_release.await.unwrap();
+            request_lines
+        });
+
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: Some("weights.gguf".into()),
+            filenames: None,
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+
+        let download_id = api.start_hf_download(&request).await.unwrap();
+        let payload_request =
+            tokio::time::timeout(std::time::Duration::from_secs(5), payload_request)
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            payload_request,
+            format!("GET /acme/model/resolve/{COMMIT}/weights.gguf HTTP/1.1")
+        );
+        assert!(api.cancel_hf_download(&download_id).await.unwrap());
+        release_payload.send(()).unwrap();
+        assert_eq!(
+            server.await.unwrap(),
+            vec![
+                "GET /api/models/acme/model/revision/main HTTP/1.1".to_string(),
+                format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"),
+                format!("GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"),
+                format!("GET /acme/model/resolve/{COMMIT}/weights.gguf HTTP/1.1"),
+            ]
+        );
+        assert!(!api
+            .primary()
+            .model_library
+            .library_root()
+            .join("llm/acme/model/weights.gguf")
+            .exists());
+        api.shutdown_downloads().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn public_hf_explicit_file_selection_refuses_missing_member_before_payload_or_admission()
+    {
+        use std::time::Duration;
+        use tokio::sync::oneshot;
+
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        const EXPECTED_CALLS: usize = 4;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop_server, mut stop_server_rx) = oneshot::channel::<()>();
+        let mut server_task = tokio::spawn(async move {
+            let mut observed = Vec::new();
+            for expected in [
+                format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"),
+                "GET /api/models/acme/model/revision/main HTTP/1.1".to_string(),
+                format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"),
+                format!("GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"),
+            ] {
+                let (mut socket, _) =
+                    tokio::time::timeout(Duration::from_secs(4), listener.accept())
+                        .await
+                        .expect("pinned metadata/tree source call must be bounded")
+                        .unwrap();
+                let request = read_intent_test_request(&mut socket).await;
+                assert_eq!(request, expected);
+                observed.push(request.clone());
+                let body = if request.ends_with(
+                    "/tree/0123456789abcdef0123456789abcdef01234567?recursive=true HTTP/1.1",
+                ) {
+                    format!(
+                        r#"[{{"path":"weights-a.gguf","type":"file","lfs":{{"oid":"{}","size":7}}}}]"#,
+                        "a".repeat(64)
+                    )
+                } else if request.ends_with("revision/main HTTP/1.1") {
+                    format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}"}}"#)
+                } else {
+                    format!(
+                        r#"{{"modelId":"acme/model","sha":"{COMMIT}","pipeline_tag":"text-generation","tags":["gguf"]}}"#
+                    )
+                };
+                write_intent_test_response(&mut socket, "200 OK", &body).await;
+            }
+
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut stop_server_rx => break,
+                    accepted = listener.accept() => {
+                        let (mut socket, _) = accepted.unwrap();
+                        let request = read_intent_test_request(&mut socket).await;
+                        observed.push(request);
+                        write_intent_test_response(&mut socket, "404 Not Found", "{}").await;
+                    }
+                }
+            }
+            observed
+        });
+
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let library = api.primary().model_library.clone();
+        let client = api.primary().hf_client.as_ref().unwrap().clone();
+        let revision = DownloadRevision::from_commit(COMMIT).unwrap();
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: None,
+            filenames: Some(vec!["weights-a.gguf".into(), "weights-b.gguf".into()]),
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let prepared = PumasApi::prepare_hf_download_owned_at_revision(
+            library.clone(),
+            client.clone(),
+            &request,
+            revision.clone(),
+        )
+        .await
+        .unwrap();
+        let artifact_id = prepared.selected_artifact.artifact_id.clone();
+        let unknown_model_id = format!("unknown/{}/{artifact_id}", prepared.architecture_family);
+        let unknown_dir = library.build_artifact_model_path(
+            "unknown",
+            &prepared.architecture_family,
+            &artifact_id,
+        );
+        let destination = library.build_artifact_model_path(
+            &prepared.model_type,
+            &prepared.architecture_family,
+            &artifact_id,
+        );
+        std::fs::create_dir_all(&unknown_dir).unwrap();
+        std::fs::write(unknown_dir.join("weights-a.gguf.part"), b"retained partial").unwrap();
+        let partial_metadata = models::ModelMetadata {
+            model_id: Some(unknown_model_id.clone()),
+            family: Some(prepared.architecture_family.clone()),
+            model_type: Some("unknown".into()),
+            cleaned_name: Some(artifact_id.clone()),
+            official_name: Some("model".into()),
+            repo_id: Some("acme/model".into()),
+            match_source: Some("download_partial".into()),
+            selected_artifact_id: Some(artifact_id.clone()),
+            selected_artifact_files: Some(vec!["weights-a.gguf".into(), "weights-b.gguf".into()]),
+            expected_files: Some(vec!["weights-a.gguf".into(), "weights-b.gguf".into()]),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&unknown_dir, &partial_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&unknown_dir).await.unwrap();
+
+        let partial_path = unknown_dir.join("weights-a.gguf.part");
+        let metadata_path = unknown_dir.join("metadata.json");
+        let partial_bytes_before = std::fs::read(&partial_path).unwrap();
+        let metadata_bytes_before = std::fs::read(&metadata_path).unwrap();
+        let unknown_index_before =
+            serde_json::to_value(library.index().get(&unknown_model_id).unwrap().unwrap()).unwrap();
+        let destination_model_id = library.build_artifact_model_id(
+            &prepared.model_type,
+            &prepared.architecture_family,
+            &artifact_id,
+        );
+        let destination_index_before =
+            serde_json::to_value(library.index().get(&destination_model_id).unwrap()).unwrap();
+        let persistence = client.persistence().unwrap();
+        let acquisitions_before = persistence.acquisition_store().acquisitions().unwrap();
+        let lifecycle_before = persistence.load_lifecycle_inventory_strict().unwrap();
+        let result =
+            tokio::time::timeout(Duration::from_secs(8), api.start_hf_download(&request)).await;
+        if let Ok(Ok(download_id)) = &result {
+            let _ =
+                tokio::time::timeout(Duration::from_secs(3), api.cancel_hf_download(download_id))
+                    .await;
+        }
+        let mut shutdown =
+            tokio::time::timeout(Duration::from_secs(5), api.shutdown_downloads()).await;
+        if !matches!(&shutdown, Ok(Ok(()))) {
+            shutdown = tokio::time::timeout(Duration::from_secs(5), api.shutdown_downloads()).await;
+        }
+        let _ = stop_server.send(());
+        let observed = match tokio::time::timeout(Duration::from_secs(4), &mut server_task).await {
+            Ok(Ok(observed)) => observed,
+            outcome => {
+                server_task.abort();
+                let _ = server_task.await;
+                panic!("pinned source monitor failed to join after shutdown: {outcome:?}");
+            }
+        };
+
+        assert!(
+            matches!(&result, Ok(Err(PumasError::ModelNotFound { .. }))),
+            "incomplete explicit list must be refused with ModelNotFound: {result:?}"
+        );
+        assert!(
+            matches!(&shutdown, Ok(Ok(()))),
+            "API owner shutdown must complete: {shutdown:?}"
+        );
+        assert!(acquisitions_before.is_empty());
+        assert!(lifecycle_before.downloads.is_empty());
+        assert!(lifecycle_before.quarantines.is_empty());
+        assert!(lifecycle_before.hidden_admissions.is_empty());
+        assert!(lifecycle_before.queue_admissions.is_empty());
+        assert_eq!(
+            observed.len(),
+            EXPECTED_CALLS,
+            "only revision and pinned-tree resolution are allowed: {observed:?}"
+        );
+        assert!(
+            unknown_dir.is_dir(),
+            "retained partial directory must stay in place"
+        );
+        assert!(
+            !destination.exists(),
+            "relocation/destination creation is forbidden"
+        );
+        assert_eq!(std::fs::read(&partial_path).unwrap(), partial_bytes_before);
+        assert_eq!(
+            std::fs::read(&metadata_path).unwrap(),
+            metadata_bytes_before
+        );
+        assert_eq!(
+            serde_json::to_value(library.index().get(&unknown_model_id).unwrap().unwrap()).unwrap(),
+            unknown_index_before
+        );
+        assert_eq!(
+            serde_json::to_value(library.index().get(&destination_model_id).unwrap()).unwrap(),
+            destination_index_before
+        );
+        assert!(client.list_downloads().await.is_empty());
+        assert!(api
+            .get_hf_download_progress("unadmitted")
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            persistence.acquisition_store().acquisitions().unwrap(),
+            acquisitions_before
+        );
+        let lifecycle_after = persistence.load_lifecycle_inventory_strict().unwrap();
+        assert!(lifecycle_after.downloads.is_empty());
+        assert!(lifecycle_after.quarantines.is_empty());
+        assert!(lifecycle_after.hidden_admissions.is_empty());
+        assert!(lifecycle_after.queue_admissions.is_empty());
+        assert!(!destination.join(".pumas_download").exists());
+        assert!(!destination.join("weights-a.gguf.part").exists());
+    }
+
+    #[tokio::test]
+    async fn public_hf_explicit_complete_file_selection_is_admitted_intact() {
+        use std::time::Duration;
+        use tokio::sync::oneshot;
+
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (payload_started, payload_request) = oneshot::channel();
+        let (release_payload, wait_for_release) = oneshot::channel();
+        let mut server_task = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for (expected, body) in [
+                (
+                    "GET /api/models/acme/model/revision/main HTTP/1.1".to_string(),
+                    format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}"}}"#),
+                ),
+                (
+                    format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"),
+                    format!(
+                        r#"{{"modelId":"acme/model","sha":"{COMMIT}","pipeline_tag":"text-generation","tags":["gguf"]}}"#
+                    ),
+                ),
+                (
+                    format!("GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"),
+                    format!(
+                        r#"[{{"path":"weights-a.gguf","type":"file","lfs":{{"oid":"{}","size":4}}}},{{"path":"weights-b.gguf","type":"file","lfs":{{"oid":"{}","size":5}}}}]"#,
+                        "a".repeat(64),
+                        "b".repeat(64)
+                    ),
+                ),
+            ] {
+                let (mut socket, _) =
+                    tokio::time::timeout(Duration::from_secs(4), listener.accept())
+                        .await
+                        .expect("metadata/tree source call must be bounded")
+                        .unwrap();
+                let request = read_intent_test_request(&mut socket).await;
+                assert_eq!(request, expected);
+                requests.push(request);
+                write_intent_test_response(&mut socket, "200 OK", &body).await;
+            }
+            let (mut socket, _) = tokio::time::timeout(Duration::from_secs(4), listener.accept())
+                .await
+                .expect("accepted complete selection must reach its payload source")
+                .unwrap();
+            let request = read_intent_test_request(&mut socket).await;
+            let _ = payload_started.send(request.clone());
+            requests.push(request);
+            tokio::time::timeout(Duration::from_secs(5), wait_for_release)
+                .await
+                .expect("payload monitor release must be bounded")
+                .expect("test must release the payload monitor");
+            drop(socket);
+            requests
+        });
+
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: None,
+            filenames: Some(vec!["weights-a.gguf".into(), "weights-b.gguf".into()]),
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let start =
+            tokio::time::timeout(Duration::from_secs(8), api.start_hf_download(&request)).await;
+        let download_id = start
+            .as_ref()
+            .ok()
+            .and_then(|result| result.as_ref().ok())
+            .cloned();
+        let payload_request = tokio::time::timeout(Duration::from_secs(4), payload_request).await;
+        let cancellation = if let Some(download_id) = download_id.as_deref() {
+            Some(
+                tokio::time::timeout(Duration::from_secs(3), api.cancel_hf_download(download_id))
+                    .await,
+            )
+        } else {
+            None
+        };
+        let mut shutdown =
+            tokio::time::timeout(Duration::from_secs(5), api.shutdown_downloads()).await;
+        if !matches!(&shutdown, Ok(Ok(()))) {
+            shutdown = tokio::time::timeout(Duration::from_secs(5), api.shutdown_downloads()).await;
+        }
+        let _ = release_payload.send(());
+        let observed = match tokio::time::timeout(Duration::from_secs(5), &mut server_task).await {
+            Ok(Ok(observed)) => observed,
+            outcome => {
+                server_task.abort();
+                let _ = server_task.await;
+                panic!("complete-list source monitor did not join: {outcome:?}");
+            }
+        };
+
+        assert!(
+            matches!(&start, Ok(Ok(_))),
+            "public complete-list start must settle successfully: {start:?}"
+        );
+        let download_id = download_id.expect("successful start must return its download id");
+        assert!(
+            matches!(cancellation, Some(Ok(Ok(true)))),
+            "accepted complete-list download must be cancellable: {cancellation:?}"
+        );
+        assert!(
+            matches!(&shutdown, Ok(Ok(()))),
+            "API owner shutdown must complete: {shutdown:?}"
+        );
+        assert!(
+            matches!(&payload_request, Ok(Ok(_))),
+            "accepted complete selection must start a payload request: {payload_request:?}"
+        );
+        let payload_request = payload_request.unwrap().unwrap();
+        assert_eq!(
+            payload_request,
+            format!("GET /acme/model/resolve/{COMMIT}/weights-a.gguf HTTP/1.1")
+        );
+        let client = api.primary().hf_client.as_ref().unwrap();
+        let inventory = client
+            .persistence()
+            .unwrap()
+            .load_lifecycle_inventory_strict()
+            .unwrap();
+        let admission = inventory
+            .queue_admissions
+            .get(&download_id)
+            .expect("durable admission must be visible");
+        assert_eq!(
+            admission.requested_payload_files,
+            vec!["weights-a.gguf", "weights-b.gguf"]
+        );
+        assert_eq!(
+            admission.execution_files,
+            vec!["weights-a.gguf", "weights-b.gguf"]
+        );
+        assert_eq!(observed.len(), 4);
+        assert!(observed[3].contains("/resolve/"));
+    }
+
+    #[tokio::test]
+    async fn public_hf_status_poll_tracks_mixed_size_download_through_receipt_settlement() {
+        use sha2::{Digest, Sha256};
+        use std::time::Duration;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
+        use tokio::sync::oneshot;
+
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        const PROGRESS_CHUNK: usize = 48;
+        const IO_TIMEOUT: Duration = Duration::from_secs(3);
+        const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+        async fn read_request_line(
+            stream: &mut TcpStream,
+        ) -> std::result::Result<String, &'static str> {
+            let header = tokio::time::timeout(IO_TIMEOUT, async {
+                let mut bytes = Vec::new();
+                while !bytes.ends_with(b"\r\n\r\n") {
+                    if bytes.len() >= 8192 {
+                        return Err("local fixture request header exceeded its bound");
+                    }
+                    bytes.push(
+                        stream
+                            .read_u8()
+                            .await
+                            .map_err(|_| "local fixture request read failed")?,
+                    );
+                }
+                Ok::<_, &'static str>(bytes)
+            })
+            .await
+            .map_err(|_| "local fixture request read timed out")??;
+            let header = std::str::from_utf8(&header)
+                .map_err(|_| "local fixture request header was not UTF-8")?;
+            header
+                .lines()
+                .next()
+                .map(str::to_owned)
+                .ok_or("local fixture request line was missing")
+        }
+
+        async fn write_bytes(
+            stream: &mut TcpStream,
+            bytes: &[u8],
+        ) -> std::result::Result<(), &'static str> {
+            tokio::time::timeout(IO_TIMEOUT, stream.write_all(bytes))
+                .await
+                .map_err(|_| "local fixture response write timed out")?
+                .map_err(|_| "local fixture response write failed")
+        }
+
+        async fn accept_request(
+            listener: &TcpListener,
+            expected: &str,
+        ) -> std::result::Result<TcpStream, &'static str> {
+            let (mut stream, _) = tokio::time::timeout(IO_TIMEOUT, listener.accept())
+                .await
+                .map_err(|_| "local fixture accept timed out")?
+                .map_err(|_| "local fixture accept failed")?;
+            let observed = read_request_line(&mut stream).await?;
+            if observed != expected {
+                return Err("local fixture received an unexpected request");
+            }
+            Ok(stream)
+        }
+
+        async fn write_json(
+            stream: &mut TcpStream,
+            body: &str,
+        ) -> std::result::Result<(), &'static str> {
+            let header = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            );
+            write_bytes(stream, header.as_bytes()).await?;
+            write_bytes(stream, body.as_bytes()).await
+        }
+
+        let weight_payload = intent_test_gguf();
+        let auxiliary_payload =
+            br#"{"fixture":"status-poll","padding":"abcdefghijklmnopqrstuvwx"}"#.to_vec();
+        assert!(PROGRESS_CHUNK > weight_payload.len());
+        assert!(PROGRESS_CHUNK < auxiliary_payload.len());
+        let weight_sha256 = hex::encode(Sha256::digest(&weight_payload));
+        let source_weight_payload = weight_payload.clone();
+        let source_auxiliary_payload = auxiliary_payload.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (progress_started_tx, progress_started_rx) = oneshot::channel();
+        let (release_auxiliary_tx, release_auxiliary_rx) = oneshot::channel();
+        let server_task = tokio::spawn(async move {
+            let result = async {
+                let main_route = "GET /api/models/acme/model/revision/main HTTP/1.1";
+                let pinned_route = format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1");
+                let tree_route = format!(
+                    "GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"
+                );
+                let auxiliary_route = format!(
+                    "GET /acme/model/resolve/{COMMIT}/config.json HTTP/1.1"
+                );
+                let weight_route = format!(
+                    "GET /acme/model/resolve/{COMMIT}/weights.gguf HTTP/1.1"
+                );
+
+                let mut stream = accept_request(&listener, main_route).await?;
+                write_json(
+                    &mut stream,
+                    &format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}","tags":["gguf"]}}"#),
+                )
+                .await?;
+
+                let mut stream = accept_request(&listener, &pinned_route).await?;
+                write_json(
+                    &mut stream,
+                    &format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}","tags":["gguf"]}}"#),
+                )
+                .await?;
+
+                let mut stream = accept_request(&listener, &tree_route).await?;
+                let tree = format!(
+                    r#"[{{"path":"weights.gguf","type":"file","lfs":{{"oid":"{weight_sha256}","size":{}}}}},{{"path":"config.json","type":"file"}}]"#,
+                    source_weight_payload.len()
+                );
+                write_json(&mut stream, &tree).await?;
+
+                let mut stream = accept_request(&listener, &auxiliary_route).await?;
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    source_auxiliary_payload.len()
+                );
+                write_bytes(&mut stream, header.as_bytes()).await?;
+                write_bytes(&mut stream, &source_auxiliary_payload[..PROGRESS_CHUNK]).await?;
+                progress_started_tx
+                    .send(())
+                    .map_err(|_| "status observer left before source delay")?;
+                tokio::time::timeout(TEST_TIMEOUT, release_auxiliary_rx)
+                    .await
+                    .map_err(|_| "source delay release timed out")?
+                    .map_err(|_| "source delay release sender was dropped")?;
+                write_bytes(&mut stream, &source_auxiliary_payload[PROGRESS_CHUNK..]).await?;
+
+                let mut stream = accept_request(&listener, &weight_route).await?;
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/octet-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    source_weight_payload.len()
+                );
+                write_bytes(&mut stream, header.as_bytes()).await?;
+                write_bytes(&mut stream, &source_weight_payload).await?;
+                Ok::<_, &'static str>(())
+            }
+            .await;
+            result
+        });
+
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let library = api.primary().model_library.clone();
+
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: Some("weights.gguf".into()),
+            filenames: None,
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let download_id = tokio::time::timeout(TEST_TIMEOUT, api.start_hf_download(&request))
+            .await
+            .expect("public start must settle within its bound")
+            .unwrap();
+        tokio::time::timeout(TEST_TIMEOUT, progress_started_rx)
+            .await
+            .expect("the auxiliary source must reach its held response")
+            .expect("the local source must retain the progress observer");
+
+        let partial = tokio::time::timeout(TEST_TIMEOUT, async {
+            loop {
+                let Some(progress) = api.get_hf_download_progress(&download_id).await.unwrap()
+                else {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    continue;
+                };
+                if progress.downloaded_bytes == Some(PROGRESS_CHUNK as u64) {
+                    break progress;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("public status must observe the held auxiliary bytes");
+        assert_eq!(
+            partial.download_id, download_id,
+            "status identity must remain stable"
+        );
+        assert_eq!(partial.repo_id.as_deref(), Some("acme/model"));
+        assert!(partial.selected_artifact_id.is_some());
+        let library_model_id = partial
+            .library_model_id
+            .clone()
+            .expect("admitted status must expose its bound library identity");
+        assert_eq!(partial.status, models::DownloadStatus::Downloading);
+        assert_eq!(partial.downloaded_bytes, Some(PROGRESS_CHUNK as u64));
+        assert!(partial.downloaded_bytes.unwrap() > weight_payload.len() as u64);
+        assert_eq!(partial.total_bytes, None);
+        assert_eq!(partial.eta_seconds, None);
+        let partial_fraction = partial
+            .progress
+            .expect("public progress fraction is present");
+        assert!(partial_fraction.is_finite() && (0.0..=1.0).contains(&partial_fraction));
+        let partial_json = serde_json::to_value(&partial).unwrap();
+        assert_eq!(partial_json["downloadId"], download_id);
+        assert_eq!(partial_json["status"], "downloading");
+        assert_eq!(partial_json["downloadedBytes"], PROGRESS_CHUNK as u64);
+        assert_eq!(partial_json["totalBytes"], serde_json::Value::Null);
+        assert_eq!(partial_json["etaSeconds"], serde_json::Value::Null);
+        assert_eq!(
+            partial_json["progress"],
+            serde_json::json!(partial_fraction)
+        );
+
+        let destination = library.library_root().join(&library_model_id);
+        let (import_started_tx, import_started_rx) = oneshot::channel();
+        let import_started_tx = std::sync::Mutex::new(Some(import_started_tx));
+        let (release_import_tx, release_import_rx) = std::sync::mpsc::channel();
+        let release_import_rx = std::sync::Mutex::new(release_import_rx);
+        let import_destination = destination.clone();
+        library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+            if import_destination.join(".pumas_download").exists()
+                || !import_destination.join("weights.gguf").is_file()
+            {
+                return;
+            }
+            if let Some(sender) = import_started_tx.lock().unwrap().take() {
+                let _ = sender.send(());
+                let _ = release_import_rx.lock().unwrap().recv();
+            }
+        })));
+
+        release_auxiliary_tx
+            .send(())
+            .expect("local source should still hold the auxiliary response");
+        tokio::time::timeout(TEST_TIMEOUT, import_started_rx)
+            .await
+            .expect("the real importer must reach its metadata write barrier")
+            .expect("the metadata barrier observer must remain connected");
+
+        let full_bytes = (auxiliary_payload.len() + weight_payload.len()) as u64;
+        let at_import = tokio::time::timeout(TEST_TIMEOUT, async {
+            loop {
+                let progress = api
+                    .get_hf_download_progress(&download_id)
+                    .await
+                    .unwrap()
+                    .expect("the admitted download must remain observable during import");
+                if progress.downloaded_bytes == Some(full_bytes) {
+                    break progress;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("public status must observe complete source bytes at the import barrier");
+        assert_eq!(at_import.status, models::DownloadStatus::Downloading);
+        assert_eq!(at_import.download_id, partial.download_id);
+        assert_eq!(at_import.repo_id, partial.repo_id);
+        assert_eq!(at_import.selected_artifact_id, partial.selected_artifact_id);
+        assert_eq!(at_import.library_model_id, partial.library_model_id);
+        assert_eq!(at_import.downloaded_bytes, Some(full_bytes));
+        assert_eq!(at_import.total_bytes, None);
+        assert_eq!(at_import.eta_seconds, None);
+        let import_fraction = at_import
+            .progress
+            .expect("public progress fraction remains present during import");
+        assert!(import_fraction.is_finite() && (0.0..=1.0).contains(&import_fraction));
+        assert_eq!(
+            std::fs::read(destination.join("config.json")).unwrap(),
+            auxiliary_payload
+        );
+        assert_eq!(
+            std::fs::read(destination.join("weights.gguf")).unwrap(),
+            weight_payload
+        );
+
+        let client = api.primary().hf_client.as_ref().unwrap();
+        let persistence = client.persistence().unwrap();
+        let acquisition_store = persistence.acquisition_store();
+        let matching_acquisitions: Vec<_> = acquisition_store
+            .acquisitions()
+            .unwrap()
+            .into_values()
+            .filter(|record| record.manifest.source().source_id() == "acme/model")
+            .collect();
+        assert_eq!(
+            matching_acquisitions.len(),
+            1,
+            "one exact source acquisition must be retained"
+        );
+        let acquisition = matching_acquisitions.into_iter().next().unwrap();
+        assert!(matches!(
+            acquisition.phase,
+            crate::acquisition::AcquisitionPhase::Using { .. }
+        ));
+        assert_eq!(acquisition.files.len(), 2);
+        assert!(persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&download_id));
+        assert!(persistence
+            .read_hf_completion_receipt(acquisition.id)
+            .unwrap()
+            .is_none());
+
+        release_import_tx
+            .send(())
+            .expect("importer should still be waiting at its metadata barrier");
+        let completed = tokio::time::timeout(TEST_TIMEOUT, async {
+            loop {
+                let progress = api
+                    .get_hf_download_progress(&download_id)
+                    .await
+                    .unwrap()
+                    .expect("settled download status must remain available");
+                if progress.status == models::DownloadStatus::Completed {
+                    break progress;
+                }
+                assert!(!matches!(
+                    progress.status,
+                    models::DownloadStatus::Cancelled | models::DownloadStatus::Error
+                ));
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("receipt-backed import must settle within its bound");
+        assert_eq!(completed.download_id, partial.download_id);
+        assert_eq!(completed.repo_id, partial.repo_id);
+        assert_eq!(completed.selected_artifact_id, partial.selected_artifact_id);
+        assert_eq!(completed.downloaded_bytes, Some(full_bytes));
+        let receipt = persistence
+            .read_hf_completion_receipt(acquisition.id)
+            .unwrap()
+            .expect("completion must have its consumer receipt");
+        assert_eq!(receipt.download_id, download_id);
+        let model_id = receipt.model_id.clone();
+        assert!(completed
+            .library_model_id
+            .as_deref()
+            .is_none_or(|completed_model_id| completed_model_id == model_id.as_str()));
+        assert!(tokio::time::timeout(TEST_TIMEOUT, api.get_model(&model_id))
+            .await
+            .expect("terminal model projection must settle within its bound")
+            .unwrap()
+            .is_some());
+        assert!(library.index().get(&model_id).unwrap().is_some());
+        assert_eq!(receipt.model_id, model_id);
+        assert!(matches!(
+            acquisition_store
+                .acquisitions()
+                .unwrap()
+                .get(&acquisition.id)
+                .map(|record| &record.phase),
+            Some(crate::acquisition::AcquisitionPhase::Adopted { .. })
+        ));
+        assert!(!persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&download_id));
+        let repeated =
+            tokio::time::timeout(TEST_TIMEOUT, api.get_hf_download_progress(&download_id))
+                .await
+                .expect("repeated terminal status must settle within its bound")
+                .unwrap()
+                .expect("terminal status must remain available for repeated polling");
+        assert_eq!(repeated.status, models::DownloadStatus::Completed);
+        assert_eq!(repeated.download_id, completed.download_id);
+        assert_eq!(repeated.library_model_id, completed.library_model_id);
+        assert_eq!(repeated.repo_id, completed.repo_id);
+        assert_eq!(
+            repeated.selected_artifact_id,
+            completed.selected_artifact_id
+        );
+        assert_eq!(repeated.downloaded_bytes, completed.downloaded_bytes);
+
+        library.set_metadata_write_notifier(None);
+        tokio::time::timeout(TEST_TIMEOUT, api.shutdown_downloads())
+            .await
+            .expect("download owners must drain within their bound")
+            .unwrap();
+        tokio::time::timeout(TEST_TIMEOUT, server_task)
+            .await
+            .expect("local source task must drain within its bound")
+            .expect("local source task must not panic")
+            .expect("local source must complete its bounded request sequence");
+    }
+
+    #[tokio::test]
+    async fn public_hf_download_requires_commit_evidence_before_mutation() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_intent_test_request(&mut socket).await;
+            write_intent_test_response(&mut socket, "200 OK", r#"{"modelId":"acme/model"}"#).await;
+            request
+        });
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: Some("weights.gguf".into()),
+            filenames: None,
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+
+        let result = api.start_hf_download(&request).await;
+        assert!(matches!(
+            result,
+            Err(PumasError::Validation { ref field, .. }) if field == "revision"
+        ));
+        assert_eq!(
+            server.await.unwrap(),
+            "GET /api/models/acme/model/revision/main HTTP/1.1"
+        );
+        assert!(!api
+            .primary()
+            .model_library
+            .library_root()
+            .join("llm")
+            .exists());
+        assert!(api
+            .primary()
+            .hf_client
+            .as_ref()
+            .unwrap()
+            .list_downloads()
+            .await
+            .is_empty());
         api.shutdown_downloads().await.unwrap();
     }
 
@@ -2126,6 +3047,7 @@ pub(super) mod tests {
                 provider_registry,
             )),
             model_library: library,
+            acquisition: client.acquisition.clone(),
             hf_client: Some(client),
             intent_service,
             runtime_tasks: tasks.clone(),
@@ -2291,8 +3213,15 @@ pub(super) mod tests {
             }
             let header = String::from_utf8(header).unwrap();
             assert!(header.starts_with("GET /acme/model/resolve/main/weights.gguf HTTP/1.1"));
-            assert!(header.to_ascii_lowercase().contains("range: bytes=7-"));
-            socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 7-11/12\r\nConnection: close\r\n\r\n").await.unwrap();
+            // This directly created partial has no live service checkpoint;
+            // ticket admission must restart the transfer at byte zero.
+            let header = header.to_ascii_lowercase();
+            assert!(!header.contains("\r\nrange:"));
+            assert!(!header.contains("\r\nif-match:"));
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
             requested.send(()).unwrap();
             let mut byte = [0_u8; 1];
             assert_eq!(
@@ -2344,6 +3273,16 @@ pub(super) mod tests {
     }
     use crate::models::HuggingFaceModel;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_partial_download_reason_code_preserves_acquisition_capacity() {
+        assert_eq!(
+            partial_download_reason_code(&PumasError::AcquisitionCapacityExhausted {
+                resource: "workers",
+            }),
+            "acquisition_capacity_exhausted"
+        );
+    }
 
     #[test]
     fn test_partial_download_reason_code_preserves_root_contention() {

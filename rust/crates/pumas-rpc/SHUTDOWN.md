@@ -76,3 +76,16 @@ all applicable SSE end-of-body results, and successful process exit without any
 OS signal. It runs explicitly on native Linux, macOS and Windows CI. The owned-transport unit regressions also execute explicitly on all three native
 hosts. These deterministic local-process tests do not qualify a distributed
 cluster, packaged Electron, or real model execution.
+
+
+## Shared acquisition integration
+
+The RPC supervisor drains local intent/copied imports and HF downloads, accepted
+HTTP responses, conversion owners, managed runtimes and native installation
+consumers concurrently. Each native manager retains installation work through
+cancellation and cleanup. Only after these consumer drains settle does RPC close
+the shared source-neutral acquisition supervisor. Consumer failure does not skip
+that final observation; both errors remain in the repeated shutdown receipt.
+HTTP grace controls transport cessation, not a deadline that abandons native or
+blocking filesystem owners. No acquisition receipt substitutes for copied model
+publication or native workspace cleanup evidence.

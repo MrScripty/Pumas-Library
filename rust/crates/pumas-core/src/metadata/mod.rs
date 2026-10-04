@@ -14,3 +14,6 @@ pub(crate) use atomic::{
     AtomicPublishResult, AtomicPublishStage, StagingCleanup,
 };
 pub use manager::{InstalledVersionMetadata, MetadataManager, VersionConfig, VersionsMetadata};
+
+#[cfg(test)]
+pub(crate) use atomic::PublicationSyncFault;

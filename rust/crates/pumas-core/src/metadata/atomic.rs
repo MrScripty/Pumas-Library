@@ -10,8 +10,10 @@
 
 use crate::{PumasError, Result};
 use cap_std::fs::{Dir, OpenOptions as CapOpenOptions};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::de::{DeserializeOwned, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Serialize};
 use std::ffi::{OsStr, OsString};
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -196,6 +198,40 @@ trait DurablePublicationAdapter {
     fn sync_parent(&self, parent: &File) -> std::io::Result<()>;
 }
 
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct PublicationSyncFault {
+    pub(crate) fail: std::sync::atomic::AtomicBool,
+    pub(crate) attempts: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(test)]
+impl DurablePublicationAdapter for PublicationSyncFault {
+    fn temp_name(&self, target: &OsStr, attempt: u8) -> OsString {
+        OsDurablePublicationAdapter.temp_name(target, attempt)
+    }
+    fn write_and_sync(&self, file: &mut cap_std::fs::File, contents: &[u8]) -> std::io::Result<()> {
+        OsDurablePublicationAdapter.write_and_sync(file, contents)
+    }
+    fn rename(&self, parent: &Dir, source: &OsStr, target: &OsStr) -> std::io::Result<()> {
+        OsDurablePublicationAdapter.rename(parent, source, target)
+    }
+    fn remove_file(&self, parent: &Dir, name: &OsStr) -> std::io::Result<()> {
+        OsDurablePublicationAdapter.remove_file(parent, name)
+    }
+    fn sync_parent(&self, parent: &File) -> std::io::Result<()> {
+        use std::sync::atomic::Ordering;
+        self.attempts.fetch_add(1, Ordering::SeqCst);
+        if self.fail.load(Ordering::SeqCst) {
+            Err(std::io::Error::other(
+                "injected receipt parent-sync failure",
+            ))
+        } else {
+            OsDurablePublicationAdapter.sync_parent(parent)
+        }
+    }
+}
+
 struct OsDurablePublicationAdapter;
 
 impl DurablePublicationAdapter for OsDurablePublicationAdapter {
@@ -343,7 +379,14 @@ impl AtomicJsonTarget {
         })
     }
 
-    pub(crate) fn read_json<T: DeserializeOwned>(&self) -> Result<Option<T>> {
+    /// Strict read for the canonical `downloads.json` document.
+    ///
+    /// `serde_json::Value` normally collapses repeated object keys before
+    /// receipt validation runs. This reader uses Serde's JSON parser with a
+    /// visitor that rejects repeated names before the value reaches domain
+    /// consumers. Unrelated JSON readers keep the permissive
+    /// [`atomic_read_json`] path unchanged.
+    pub(crate) fn read_downloads_json_value(&self) -> Result<Option<serde_json::Value>> {
         let mut file = match self.parent.open(&self.name) {
             Ok(file) => file.into_std(),
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -355,7 +398,7 @@ impl AtomicJsonTarget {
                 });
             }
         };
-        read_json_file(&mut file, &self.display_path).map(Some)
+        read_downloads_json_file(&mut file, &self.display_path).map(Some)
     }
 
     pub(crate) fn open_lock_file(&self, name: &str) -> Result<File> {
@@ -377,6 +420,15 @@ impl AtomicJsonTarget {
 
     pub(crate) fn publish_json<T: Serialize>(&self, data: &T) -> AtomicPublishResult {
         self.publish_json_with_adapter(data, &OsDurablePublicationAdapter)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn publish_json_with_sync_fault<T: Serialize>(
+        &self,
+        data: &T,
+        fault: &PublicationSyncFault,
+    ) -> AtomicPublishResult {
+        self.publish_json_with_adapter(data, fault)
     }
 
     fn publish_json_with_adapter<T: Serialize>(
@@ -673,6 +725,130 @@ fn read_json_file<T: DeserializeOwned>(file: &mut File, path: &Path) -> Result<T
         message: format!("Failed to parse {}: {source}", path.display()),
         source: Some(source),
     })
+}
+
+fn duplicate_member_error(path: &Path) -> PumasError {
+    PumasError::Validation {
+        field: "downloads.duplicate_member".into(),
+        message: format!(
+            "Refusing {} with repeated JSON object member names",
+            path.display()
+        ),
+    }
+}
+
+const DUPLICATE_JSON_MEMBER_MARKER: &str = "duplicate downloads JSON object member";
+
+struct UniqueJsonValue(serde_json::Value);
+
+impl<'de> Deserialize<'de> for UniqueJsonValue {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct UniqueJsonValueVisitor;
+
+        impl<'de> Visitor<'de> for UniqueJsonValueVisitor {
+            type Value = UniqueJsonValue;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a JSON value with unique object member names")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> std::result::Result<Self::Value, E> {
+                Ok(UniqueJsonValue(serde_json::Value::Bool(value)))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> std::result::Result<Self::Value, E> {
+                Ok(UniqueJsonValue(serde_json::Value::Number(value.into())))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> std::result::Result<Self::Value, E> {
+                Ok(UniqueJsonValue(serde_json::Value::Number(value.into())))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> std::result::Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                serde_json::Number::from_f64(value)
+                    .map(serde_json::Value::Number)
+                    .map(UniqueJsonValue)
+                    .ok_or_else(|| E::custom("invalid JSON number"))
+            }
+
+            fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E> {
+                Ok(UniqueJsonValue(serde_json::Value::String(value.to_owned())))
+            }
+
+            fn visit_string<E>(self, value: String) -> std::result::Result<Self::Value, E> {
+                Ok(UniqueJsonValue(serde_json::Value::String(value)))
+            }
+
+            fn visit_unit<E>(self) -> std::result::Result<Self::Value, E> {
+                Ok(UniqueJsonValue(serde_json::Value::Null))
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut values = Vec::new();
+                while let Some(value) = sequence.next_element::<UniqueJsonValue>()? {
+                    values.push(value.0);
+                }
+                Ok(UniqueJsonValue(serde_json::Value::Array(values)))
+            }
+
+            fn visit_map<A>(self, mut object: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut values = serde_json::Map::new();
+                while let Some(key) = object.next_key::<String>()? {
+                    if values.contains_key(&key) {
+                        return Err(serde::de::Error::custom(DUPLICATE_JSON_MEMBER_MARKER));
+                    }
+                    let value = object.next_value::<UniqueJsonValue>()?;
+                    values.insert(key, value.0);
+                }
+                Ok(UniqueJsonValue(serde_json::Value::Object(values)))
+            }
+        }
+
+        deserializer.deserialize_any(UniqueJsonValueVisitor)
+    }
+}
+
+fn parse_downloads_json(contents: &str, path: &Path) -> Result<serde_json::Value> {
+    let mut deserializer = serde_json::Deserializer::from_str(contents);
+    let value = UniqueJsonValue::deserialize(&mut deserializer).map_err(|source| {
+        let message = source.to_string();
+        if message.starts_with(DUPLICATE_JSON_MEMBER_MARKER) {
+            duplicate_member_error(path)
+        } else {
+            PumasError::Json {
+                message: format!("Failed to parse {}: {source}", path.display()),
+                source: Some(source),
+            }
+        }
+    })?;
+    deserializer.end().map_err(|source| PumasError::Json {
+        message: format!("Failed to parse {}: {source}", path.display()),
+        source: Some(source),
+    })?;
+    Ok(value.0)
+}
+
+fn read_downloads_json_file(file: &mut File, path: &Path) -> Result<serde_json::Value> {
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)
+        .map_err(|source| PumasError::Io {
+            message: format!("Failed to read {}", path.display()),
+            path: Some(path.to_path_buf()),
+            source: Some(source),
+        })?;
+    parse_downloads_json(&contents, path)
 }
 
 trait LegacyPublicationAdapter {
@@ -987,6 +1163,67 @@ mod tests {
         let error = atomic_read_json::<TestData>(&non_directory.join("test.json")).unwrap_err();
 
         assert!(error.to_string().contains("Failed to open"), "{error}");
+    }
+
+    #[test]
+    fn downloads_reader_rejects_duplicate_members() {
+        let path = Path::new("downloads.json");
+        for raw in [
+            r#"{"schema_version":7,"schema_version":7}"#,
+            r#"{"schema_version":7,"consumer_receipts":{"id":{"demand":1,"demand":2}}}"#,
+            r#"{"consumer_receipts":{"a":1,"a":2}}"#,
+        ] {
+            let error = parse_downloads_json(raw, path).unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    PumasError::Validation { ref field, .. } if field == "downloads.duplicate_member"
+                ),
+                "{error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn downloads_reader_treats_escaped_member_aliases_as_duplicates() {
+        let error = parse_downloads_json(
+            "{\"acquisitions\":{\"\\u0041\":1,\"A\":2}}",
+            Path::new("downloads.json"),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                PumasError::Validation { ref field, .. } if field == "downloads.duplicate_member"
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn downloads_reader_accepts_distinct_members_and_repeated_sibling_objects() {
+        let raw = r#"{"schema_version":7,"acquisitions":{},"consumer_receipts":{},"list":[{"id":1},{"id":1}]}"#;
+        parse_downloads_json(raw, Path::new("downloads.json")).unwrap();
+    }
+
+    #[test]
+    fn downloads_reader_preserves_syntax_errors_without_misclassifying_duplicate_keys() {
+        for raw in [r#"{"schema_version": "#, r#"{"schema_version":7} trailing"#] {
+            assert!(matches!(
+                parse_downloads_json(raw, Path::new("downloads.json")),
+                Err(PumasError::Json { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn permissive_reader_keeps_collapsing_duplicates_outside_downloads_scope() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("other.json");
+        fs::write(&path, br#"{"value":1,"value":2}"#).unwrap();
+
+        let read: Option<serde_json::Value> = atomic_read_json(&path).unwrap();
+        assert_eq!(read, Some(serde_json::json!({"value": 2})));
     }
 
     #[test]

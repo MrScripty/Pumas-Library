@@ -392,6 +392,9 @@ impl PumasApiBuilder {
         let download_persistence = Arc::new(model_library::DownloadPersistence::new(
             &self.launcher_root.join("launcher-data"),
         ));
+        let acquisition = Arc::new(crate::acquisition::AcquisitionService::new(
+            download_persistence.acquisition_store(),
+        ));
         let mutation_root = model_library::DownloadDestinationRoot::open(&model_library_dir)?;
         model_library.install_mutation_authority(
             runtime_tasks.clone(),
@@ -478,6 +481,7 @@ impl PumasApiBuilder {
         // Import mutation belongs to the download lifecycle, not an external
         // notification callback. Configure it before restoring completed bytes.
         if let Some(ref mut client) = hf_client {
+            client.set_acquisition_service(acquisition.clone())?;
             client.set_download_importer(Arc::new(model_importer.clone()));
             client.restore_persisted_downloads().await?;
         }
@@ -534,6 +538,7 @@ impl PumasApiBuilder {
             system_utils,
             model_library,
             hf_client,
+            acquisition,
             intent_service,
             model_importer,
             conversion_manager,

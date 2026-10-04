@@ -377,3 +377,59 @@ struct InferredSpec {
     family: String,
     official_name: String,
 }
+
+#[cfg(test)]
+mod custody_tests {
+    use super::super::tests::{completed_download, custody_fixture, orphan_spec, real_admission};
+    use super::*;
+    use crate::PumasError;
+    #[tokio::test]
+    async fn custody_guard_rechecks_a_real_stale_orphan_scan_after_admission() {
+        let (_temp, library, downloads, tasks, root) = custody_fixture().await;
+        let model = library.build_model_path("vision", "publisher", "model");
+        std::fs::create_dir_all(&model).unwrap();
+        std::fs::write(model.join("detector.onnx"), b"data").unwrap();
+        let importer = ModelImporter::new(library.clone());
+        let (scanned_tx, scanned) = tokio::sync::oneshot::channel();
+        let (admitted_tx, admitted) = tokio::sync::oneshot::channel();
+        let candidate_importer = importer.clone();
+        let scan = tokio::spawn(async move {
+            let candidates = candidate_importer
+                .find_orphan_dirs(candidate_importer.library.library_root(), false);
+            scanned_tx.send(candidates.clone()).unwrap();
+            admitted.await.unwrap();
+            candidate_importer
+                .import_in_place(&orphan_spec(&candidates[0]))
+                .await
+        });
+        assert_eq!(scanned.await.unwrap(), vec![model.clone()]);
+        // The competing queue admission commits before the stale scan reaches
+        // the actual common importer boundary, while no download can yet write.
+        real_admission(
+            &downloads,
+            &root,
+            &completed_download(&model, false),
+            "racing-download",
+        );
+        admitted_tx.send(()).unwrap();
+        assert!(matches!(
+            scan.await.unwrap(),
+            Err(PumasError::DownloadRootBusy)
+        ));
+        assert!(!model.join("metadata.json").exists());
+        assert!(library
+            .index()
+            .get("vision/publisher/model")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            downloads
+                .load_lifecycle_inventory_strict()
+                .unwrap()
+                .queue_admissions
+                .len(),
+            1
+        );
+        tasks.shutdown_owned().await.unwrap();
+    }
+}

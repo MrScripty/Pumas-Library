@@ -141,7 +141,7 @@ function getActiveDownloadStatus(
     };
   }
 
-  const progress = Math.max(0, Math.min(100, Math.round(activeModelDownload.progress)));
+  const progress = Math.max(0, Math.min(100, Math.round(activeModelDownload.progress * 100)));
   const modelName = getActiveDownloadName(activeModelDownload);
 
   if (activeModelDownload.status === 'downloading') {

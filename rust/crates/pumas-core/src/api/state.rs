@@ -229,6 +229,7 @@ pub(crate) struct PrimaryState {
     pub(crate) system_utils: Arc<system::SystemUtils>,
     pub(crate) model_library: Arc<model_library::ModelLibrary>,
     pub(crate) hf_client: Option<Arc<model_library::HuggingFaceClient>>,
+    pub(crate) acquisition: Arc<crate::acquisition::AcquisitionService>,
     pub(crate) intent_service: Arc<crate::intent::IntentService>,
     pub(crate) model_importer: model_library::ModelImporter,
     pub(crate) conversion_manager: Arc<conversion::ConversionManager>,

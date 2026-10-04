@@ -162,7 +162,7 @@ async fn run(
         .await?;
 
     #[cfg(feature = "inference-plugins")]
-    let version_managers = initialize_version_managers(&launcher_root).await;
+    let version_managers = initialize_version_managers(&launcher_root, &api).await;
     #[cfg(feature = "inference-plugins")]
     info!("Initialized {} version manager(s)", version_managers.len());
 
@@ -249,11 +249,20 @@ async fn run(
 }
 
 #[cfg(feature = "inference-plugins")]
-async fn initialize_version_managers(launcher_root: &Path) -> HashMap<String, VersionManager> {
+async fn initialize_version_managers(
+    launcher_root: &Path,
+    api: &pumas_library::PumasApi,
+) -> HashMap<String, VersionManager> {
     let mut version_managers = HashMap::new();
 
     for app_id in VERSION_MANAGED_APPS {
-        match VersionManager::new(launcher_root, *app_id).await {
+        let initialized = if *app_id == AppId::LlamaCpp {
+            VersionManager::new_with_acquisition(launcher_root, *app_id, api.acquisition().clone())
+                .await
+        } else {
+            VersionManager::new(launcher_root, *app_id).await
+        };
+        match initialized {
             Ok(manager) => {
                 info!("{app_id} version manager initialized successfully");
                 version_managers.insert(app_id.as_str().to_string(), manager);

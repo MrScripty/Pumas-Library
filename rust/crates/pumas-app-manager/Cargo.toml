@@ -6,6 +6,11 @@ authors.workspace = true
 license.workspace = true
 description = "Application version and custom node management for Pumas Library"
 
+[features]
+# Explicit integration fixtures only; ordinary/release builds leave this disabled.
+default = []
+test-support = ["pumas-library/test-support"]
+
 [dependencies]
 # Internal crates
 pumas-library = { workspace = true }
@@ -59,6 +64,7 @@ bytes = { workspace = true }
 nix = { workspace = true }
 
 [dev-dependencies]
+pumas-library = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 
 [target.'cfg(windows)'.dev-dependencies]

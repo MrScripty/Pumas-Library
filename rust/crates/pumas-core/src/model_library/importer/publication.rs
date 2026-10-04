@@ -51,6 +51,14 @@ pub(crate) fn read_canonical_import_metadata(
 ) -> Result<Option<ModelMetadata>> {
     let root = crate::model_library::DownloadDestinationRoot::open_import_read_only(library_root)?;
     let destination = root.resolve(model_dir)?;
+    read_held_canonical_import_metadata(&destination)
+}
+
+/// The guarded importer observes the same canonical evidence without reopening
+/// authority from a pathname. The caller retains its import guard throughout.
+pub(crate) fn read_held_canonical_import_metadata(
+    destination: &DownloadRecoveryDestination,
+) -> Result<Option<ModelMetadata>> {
     let file = match destination.open_import_file("metadata.json") {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -144,15 +152,29 @@ pub(crate) fn confirmed_receipt_matches(
     metadata: &ModelMetadata,
     verify_payload: bool,
 ) -> Result<bool> {
+    if metadata.import_publication.is_none() {
+        return Ok(true);
+    }
+    if !metadata.copied_import_ready() {
+        return Ok(false);
+    }
+    let root = crate::model_library::DownloadDestinationRoot::open_import_read_only(library_root)?;
+    let destination = root.resolve(model_dir)?;
+    held_confirmed_receipt_matches(&destination, metadata, verify_payload)
+}
+
+pub(crate) fn held_confirmed_receipt_matches(
+    destination: &DownloadRecoveryDestination,
+    metadata: &ModelMetadata,
+    verify_payload: bool,
+) -> Result<bool> {
     let Some(identity) = metadata.import_publication.as_ref() else {
         return Ok(true);
     };
     if !metadata.copied_import_ready() {
         return Ok(false);
     }
-    let root = crate::model_library::DownloadDestinationRoot::open_import_read_only(library_root)?;
-    let destination = root.resolve(model_dir)?;
-    let receipt = read_receipt(&destination)?;
+    let receipt = read_receipt(destination)?;
     let matches = receipt.version == 1
         && receipt.id == identity.id
         && receipt.state == ReceiptState::Confirmed

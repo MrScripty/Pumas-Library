@@ -413,10 +413,12 @@ async fn exercise_resume() {
         .await
         .unwrap()
         .unwrap();
+    // The fixture closes after its scripted requests; this count cannot
+    // exclude later HTTP attempts.
     assert_eq!(
         requests.len(),
         5,
-        "active/completed repeat resumes must not create extra HTTP attempts"
+        "the five scripted HTTP requests must reach the fixture"
     );
 
     let final_document = document(root);

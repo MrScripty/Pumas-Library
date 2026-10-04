@@ -223,6 +223,51 @@ impl ModelImporter {
         self.import_owned(spec, None).await
     }
 
+    /// Copy one verified GGUF input into the model library under the current
+    /// acquisition worker. `spec.path` must be its exact selected logical path,
+    /// not a filesystem location. Input bytes come only from the verified
+    /// descriptor, and the existing copied-import owner settles model readiness.
+    /// Call from the acquisition publish callback after receipt issuance, with
+    /// its payload equal to this serialized spec. The current issued receipt is
+    /// checked before effects; the caller still owns output reconciliation.
+    pub async fn import_acquired_gguf(
+        &self,
+        acquired: &crate::acquisition::AcquiredArtifactUse,
+        receipt: &crate::acquisition::AcquisitionConsumerReceipt,
+        spec: &ModelImportSpec,
+    ) -> Result<ModelImportResult> {
+        let record = acquired.record();
+        if record.manifest.files().len() != 1
+            || record.files.len() != 1
+            || record.manifest.files()[0].logical_path() != spec.path
+            || record.manifest.files()[0].expected_sha256().is_none()
+            || !Path::new(&spec.path)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
+        {
+            return Err(PumasError::Validation { field: "import.acquired".into(),
+                message: "Acquired GGUF import requires one digest-verified file and its exact logical path".into() });
+        }
+        if receipt.payload != serde_json::to_value(spec)? {
+            return Err(PumasError::Validation {
+                field: "import.acquired".into(),
+                message: "Model publication receipt must bind the exact import specification"
+                    .into(),
+            });
+        }
+        acquired.require_issued_receipt(receipt).await?;
+        let result = self.import_acquired_owned(acquired, spec).await?;
+        if result.success {
+            Ok(result)
+        } else {
+            Err(PumasError::ImportFailed {
+                message: result
+                    .error
+                    .unwrap_or_else(|| "Acquired GGUF model import was refused".into()),
+            })
+        }
+    }
+
     /// Register an existing external diffusers bundle without copying its contents.
     pub async fn import_external_diffusers_directory(
         &self,

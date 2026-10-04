@@ -753,7 +753,9 @@ async fn copied_import_native_case_and_unicode_alias_oracle() {
         // independently observable even on a case-insensitive source volume.
         let plan = CopyPlan {
             directories: Vec::new(),
-            source: crate::platform::capability_fs::open_directory(source).unwrap(),
+            source: CopySource::Directory(
+                crate::platform::capability_fs::open_directory(source).unwrap(),
+            ),
             files: vec![
                 (PathBuf::from("a"), "a".into(), first.into()),
                 (PathBuf::from("b"), "b".into(), second.into()),

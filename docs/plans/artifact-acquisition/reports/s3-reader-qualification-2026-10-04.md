@@ -5,6 +5,12 @@ Base: `c70a78f7232f46dfb3a6b73db8bcc75fa9293acf`, tree
 Branch: `feat/acquisition-s3-reader-c70a78f7`. The coordinator owns PR creation,
 independent review, integration, and final gate decisions.
 
+This records the reader candidate `2c7d6014658ef44575f3724f0ff6e7395f1fd7d8`.
+Its later [dispatch/import successor](s3-dispatch-import-qualification-2026-10-04.md)
+implements shared service use and one-file GGUF import; those claims do not
+retroactively extend this reader-only evidence. The optional license inventory
+is refreshed for the successor's manifest/lock inputs, retaining exact texts.
+
 **Status: implemented reader milestone; independent review and hosted
 qualification pending.** The coordinator resumed this slice after the separately
 committed PR37 repair. Addressing style now participates in stable source identity;

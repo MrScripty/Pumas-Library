@@ -5013,10 +5013,10 @@
     }
   ],
   "input_sha256": {
-    "rust/Cargo.lock": "2d60e89504c1dbed7f12cddb1d9ffce63f3cb517ac7c4335427fa1df751cb996",
-    "rust/crates/pumas-core/Cargo.toml": "4d57b1eb6027987a0a403c41c48f7dd44d026be0c6ad89d67e1eec54a41ad748",
+    "rust/Cargo.lock": "9fcefac5230e9b94b3a731e004184ff2ddb110621b79844563d8d6a58b082b41",
+    "rust/crates/pumas-core/Cargo.toml": "c49a56e7d94263755bcc12a0ec1c74505611f5d5b6327cfa7b80a331bd48bf92",
     "scripts/release/generate-notices.py": "27765a62c7e3919bd5d2a5219053e2bf783f647d2931fedf8036f57816d83c1e",
-    "docs/release-attribution/0.7.0/inventory.json": "654536580c2a213f25e2b6dd3fb717b6c9f5f1d07c62dbc4e0458a80f3a11c68"
+    "docs/release-attribution/0.7.0/inventory.json": "aecb3b4e065a159b9b8d204b5f8049623307eb64548a94976acfca1fa5fbabba"
   },
   "notices_sha256": "338b215fec4e2efbb07ba5bdcbf21fe361fb6176dd744ea8270f91ed5d9d8152"
 }

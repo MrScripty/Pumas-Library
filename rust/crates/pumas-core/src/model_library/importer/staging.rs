@@ -36,6 +36,23 @@ pub(super) type ImportHook =
     Arc<dyn Fn(ImportBoundary, &DownloadRecoveryDestination) -> Result<()> + Send + Sync>;
 
 impl ModelImporter {
+    pub(super) async fn import_acquired_owned(
+        &self,
+        acquired: &crate::acquisition::AcquiredArtifactUse,
+        spec: &ModelImportSpec,
+    ) -> Result<ModelImportResult> {
+        let authority = self.library.mutation_authority()?;
+        let receipt = acquired.record().files[0].clone();
+        let file = acquired.open_file(0).await?;
+        let importer = self.clone();
+        let spec = spec.clone();
+        acquired
+            .run_blocking("copy and settle acquired GGUF model", move || {
+                importer.import_staged(&spec, &authority, None, Some((file, receipt)))
+            })
+            .await
+    }
+
     pub(super) async fn import_owned(
         &self,
         spec: &ModelImportSpec,
@@ -53,7 +70,7 @@ impl ModelImporter {
             .run_owned("copied model import", move |context| async move {
                 let result = context
                     .run_blocking("prepare and settle copied import", move || {
-                        importer.import_staged(&spec, &authority, progress.as_ref())
+                        importer.import_staged(&spec, &authority, progress.as_ref(), None)
                     })
                     .await?;
                 // Ordinary input/collision refusals are results, not owner failures.
@@ -74,6 +91,7 @@ impl ModelImporter {
         spec: &ModelImportSpec,
         authority: &LibraryMutationAuthority,
         progress: Option<&mpsc::Sender<ImportProgress>>,
+        acquired: Option<(std::fs::File, crate::acquisition::VerifiedFile)>,
     ) -> Result<ModelImportResult> {
         report(
             progress,
@@ -82,14 +100,35 @@ impl ModelImporter {
             "Inspecting import source",
         );
         let source_path = PathBuf::from(&spec.path);
-        let source_metadata = std::fs::metadata(&source_path).map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                PumasError::FileNotFound(source_path.clone())
-            } else {
-                PumasError::io_with_path(error, &source_path)
+        let source_metadata = if let Some((file, _)) = &acquired {
+            file.metadata()?
+        } else {
+            std::fs::metadata(&source_path).map_err(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    PumasError::FileNotFound(source_path.clone())
+                } else {
+                    PumasError::io_with_path(error, &source_path)
+                }
+            })?
+        };
+        let (type_info, acquired) = if let Some((mut file, verified)) = acquired {
+            use std::io::{Read, Seek, SeekFrom};
+            let mut magic = [0; 4];
+            file.read_exact(&mut magic)?;
+            if magic != *b"GGUF" {
+                return Err(PumasError::Validation {
+                    field: "import.acquired".into(),
+                    message: "Acquired model import currently supports GGUF content only".into(),
+                });
             }
-        })?;
-        let type_info = self.detect_type(&source_path)?;
+            file.seek(SeekFrom::Start(0))?;
+            let info =
+                crate::model_library::identifier::identify_model_reader(&mut file, &source_path)?;
+            file.seek(SeekFrom::Start(0))?;
+            (info, Some((file, verified)))
+        } else {
+            (self.detect_type(&source_path)?, None)
+        };
         let security_tier = type_info.format.security_tier();
         if security_tier == SecurityTier::Pickle && !spec.security_acknowledged.unwrap_or(false) {
             return Ok(refused(
@@ -127,7 +166,11 @@ impl ModelImporter {
             &normalize_name(&spec.official_name),
         );
         // Preflight the whole filename mapping before a stage is created.
-        let plan = match CopyPlan::open(&source_path, validation.is_some()) {
+        let plan = match if let Some((file, verified)) = acquired {
+            CopyPlan::verified(file, verified)
+        } else {
+            CopyPlan::open(&source_path, validation.is_some())
+        } {
             Err(PumasError::Validation { message, .. }) => {
                 return Ok(refused(spec, &message, security_tier))
             }
@@ -502,12 +545,38 @@ fn is_model_file(name: &str) -> bool {
 }
 
 struct CopyPlan {
-    source: Dir,
+    source: CopySource,
     files: Vec<(PathBuf, String, String)>,
     directories: Vec<String>,
 }
 
+enum CopySource {
+    Directory(Dir),
+    Verified {
+        file: std::fs::File,
+        receipt: crate::acquisition::VerifiedFile,
+    },
+}
+
 impl CopyPlan {
+    fn verified(file: std::fs::File, receipt: crate::acquisition::VerifiedFile) -> Result<Self> {
+        let original = receipt.path.clone();
+        let normalized = normalize_filename(&original);
+        if IMPORT_MUTABLE_DOCUMENTS
+            .iter()
+            .any(|name| normalized == normalize_filename(name))
+        {
+            return Err(invalid_filename(
+                "Acquired payload uses a reserved import filename",
+            ));
+        }
+        Ok(Self {
+            source: CopySource::Verified { file, receipt },
+            files: vec![(PathBuf::from(&original), original, normalized)],
+            directories: Vec::new(),
+        })
+    }
+
     fn open(path: &Path, preserve_layout: bool) -> Result<Self> {
         let metadata = std::fs::symlink_metadata(path)?;
         let mut directories = Vec::new();
@@ -578,7 +647,7 @@ impl CopyPlan {
         };
         directories.sort();
         Ok(Self {
-            source,
+            source: CopySource::Directory(source),
             files,
             directories,
         })
@@ -618,22 +687,27 @@ impl CopyPlan {
         let mut files = Vec::with_capacity(self.files.len());
         let mut evidence = BTreeMap::new();
         for (relative, original, normalized) in &self.files {
-            let parent = open_directory_chain(
-                &self.source,
-                relative.parent().unwrap_or(Path::new("")),
-                false,
-            )?;
-            let mut options = OpenOptions::new();
-            options.read(true);
-            nofollow_options(&mut options);
-            let mut input = parent
-                .open_with(
-                    relative
-                        .file_name()
-                        .ok_or_else(|| invalid_filename("Import source has no filename"))?,
-                    &options,
-                )?
-                .into_std();
+            let mut input = match &self.source {
+                CopySource::Verified { file, .. } => file.try_clone()?,
+                CopySource::Directory(source) => {
+                    let parent = open_directory_chain(
+                        source,
+                        relative.parent().unwrap_or(Path::new("")),
+                        false,
+                    )?;
+                    let mut options = OpenOptions::new();
+                    options.read(true);
+                    nofollow_options(&mut options);
+                    parent
+                        .open_with(
+                            relative
+                                .file_name()
+                                .ok_or_else(|| invalid_filename("Import source has no filename"))?,
+                            &options,
+                        )?
+                        .into_std()
+                }
+            };
             let metadata = input.metadata()?;
             if !metadata.is_file() || metadata.file_type().is_symlink() {
                 return Err(invalid_filename(
@@ -650,6 +724,14 @@ impl CopyPlan {
                 }
             })?;
             let (size, hashes) = copy_and_hash(&mut input, &mut output)?;
+            if let CopySource::Verified { receipt, .. } = &self.source {
+                if receipt.bytes != size || receipt.sha256 != hashes.sha256 {
+                    return Err(PumasError::HashMismatch {
+                        expected: receipt.sha256.clone(),
+                        actual: hashes.sha256.clone(),
+                    });
+                }
+            }
             // Restore permissions from the held source descriptor, never a
             // pathname that could now identify a different object.
             output.set_permissions(metadata.permissions())?;

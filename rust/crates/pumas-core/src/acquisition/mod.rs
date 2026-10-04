@@ -18,6 +18,8 @@ mod workspace;
 pub use http::{AcquisitionHttpClient, HttpAttemptHost};
 #[cfg(feature = "s3")]
 pub use s3::{S3Addressing, S3ObjectSelection, S3Reader, S3ReaderConfig, S3ReaderError};
+#[cfg(feature = "s3")]
+pub use service::AcquisitionS3Request;
 pub use task_custody::AcquisitionCapacity;
 
 pub(crate) use github_release::{select_github_release_asset, GitHubReleaseAssetMetadata};

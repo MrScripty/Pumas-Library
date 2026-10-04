@@ -1,5 +1,41 @@
 # Acquisition execution ledger
 
+## 2026-10-04 — delegated S3 dispatch and GGUF import successor
+
+The coordinator resumed a separate successor to reader `2c7d6014`, then required
+accepted main `96c2dca9` in its ancestry and explicitly enabled hosted S3 checks.
+Local composition `74ea1823` preserves both parents and the exact accepted HF
+and speech-test bytes. The worker did not edit either protected reader or PR37
+branch and did not create a PR, request external review or merge an external PR.
+
+The existing acquisition owner now dispatches its ephemeral HTTP/S3 sources
+through one transfer/checkpoint/retry/file-verification/receipt lifecycle.
+The single-GGUF importer checks an actual issued receipt, consumes a verified
+descriptor, checks the copied digest before model publication, and uses existing
+model confirmation/indexing. Refusals retain Using rather than adopting failure.
+Source deadlines drain registered writes before retry; no second task/store,
+schema, signer, credential path or model-publication protocol was introduced.
+
+The local fixture observes a Ready indexed model and exact durable acquisition
+receipts. Negative/control fixtures cover changed source/digest, unsupported
+input, model collision, forged unissued receipt, pause/resume, cancellation,
+elapsed retry budget and dropped waiters. Reader and HTTP integration regressions
+remain required. See [qualification](reports/s3-dispatch-import-qualification-2026-10-04.md)
+for exact commands, final check results, initial disk/fixture/lint failures and
+limits. Only identified task-generated/superseded build outputs were retired.
+Final source passed 12 dispatch/import, 11 reader and five HTTP integration
+tests, strict all-target core Clippy, the headless compile, 12 feature graphs,
+six SDK-isolation graphs, canonical/optional attribution, 20 release/workflow
+contract tests, dependency ownership, rustfmt and diff checks. These local
+results do not imply a full unit suite, native build or hosted acceptance.
+
+The headless hosted job now runs explicit `s3` reader/dispatch tests and strict
+all-target Clippy after locked fetch. The worker claims no hosted result,
+credential/provider qualification, full default/native suite, real inference,
+desktop source workflow or automatic interrupted-model recovery. AQ-S3 remains
+not ready. Source-facing composition and exact model-output reconciliation are
+the next bounded slice; credentials and live providers stay separate.
+
 ## 2026-10-04 — delegated optional S3 reader milestone
 
 The coordinator admitted and resumed a separate reader development slice on

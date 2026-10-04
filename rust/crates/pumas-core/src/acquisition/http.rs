@@ -2,7 +2,7 @@
 
 use super::{ArtifactManifest, ManifestValidationError};
 use crate::error::{PumasError, Result};
-use futures::StreamExt;
+use futures::{stream::BoxStream, StreamExt};
 use reqwest::header::{
     ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_RANGE, ETAG, IF_MATCH, RANGE,
 };
@@ -88,13 +88,36 @@ impl From<reqwest::Client> for AcquisitionHttpClient {
 
 /// A checked response to one whole-file or suffix-range artifact request.
 /// Body transfer remains owned by the caller's supervised acquisition attempt.
-#[derive(Debug)]
 pub(crate) struct HttpArtifactResponse {
-    pub(crate) body: Response,
+    pub(crate) body: BoxStream<'static, Result<bytes::Bytes>>,
     pub(crate) resumed: bool,
     pub(crate) total_size: Option<u64>,
     pub(crate) resource: String,
     pub(crate) strong_etag: Option<String>,
+    pub(crate) deadline: Option<tokio::time::Instant>,
+}
+
+impl std::fmt::Debug for HttpArtifactResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpArtifactResponse")
+            .field("resumed", &self.resumed)
+            .field("total_size", &self.total_size)
+            .field("resource", &self.resource)
+            .field("strong_etag", &self.strong_etag)
+            .finish_non_exhaustive()
+    }
+}
+
+fn http_body(response: Response) -> BoxStream<'static, Result<bytes::Bytes>> {
+    response
+        .bytes_stream()
+        .map(|chunk| {
+            chunk.map_err(|error| PumasError::Network {
+                message: "HTTP artifact stream failed".into(),
+                cause: Some(error.without_url().to_string()),
+            })
+        })
+        .boxed()
 }
 
 /// Opaque validator scoped to the exact effective HTTP resource. Only the
@@ -213,11 +236,12 @@ pub(crate) async fn open_http_artifact(
                 ));
             }
             Ok(HttpArtifactResponse {
-                body: response,
+                body: http_body(response),
                 resumed: true,
                 total_size: Some(total),
                 resource,
                 strong_etag,
+                deadline: None,
             })
         }
         (_, StatusCode::OK) => {
@@ -244,7 +268,7 @@ pub(crate) async fn open_http_artifact(
                 ));
             }
             Ok(HttpArtifactResponse {
-                body: response,
+                body: http_body(response),
                 resumed: false,
                 total_size: file
                     .expected_size()
@@ -252,6 +276,7 @@ pub(crate) async fn open_http_artifact(
                     .or_else(|| continuation.and_then(|evidence| evidence.total)),
                 resource,
                 strong_etag,
+                deadline: None,
             })
         }
         (_, StatusCode::PARTIAL_CONTENT) => Err(invalid_response(
@@ -353,13 +378,33 @@ pub(crate) async fn stream_http_artifact(
     sink: &mut dyn HttpArtifactSink,
     host: &mut dyn HttpAttemptHost,
 ) -> Result<HttpBodyOutcome> {
+    let deadline = response.deadline;
+    let transfer = stream_artifact_body(response, requested_resume_from, sink, host);
+    if let Some(deadline) = deadline {
+        tokio::time::timeout_at(deadline, transfer)
+            .await
+            .map_err(|_| PumasError::Network {
+                message: "S3 acquisition attempt exceeded its operation budget".into(),
+                cause: None,
+            })?
+    } else {
+        transfer.await
+    }
+}
+
+async fn stream_artifact_body(
+    response: HttpArtifactResponse,
+    requested_resume_from: u64,
+    sink: &mut dyn HttpArtifactSink,
+    host: &mut dyn HttpAttemptHost,
+) -> Result<HttpBodyOutcome> {
     let total = response.total_size;
     let mut downloaded = if response.resumed {
         requested_resume_from
     } else {
         0
     };
-    let mut body = response.body.bytes_stream();
+    let mut body = response.body;
     loop {
         let next = tokio::select! {
             biased;
@@ -382,10 +427,7 @@ pub(crate) async fn stream_http_artifact(
             sink.flush().await?;
             return Ok(HttpBodyOutcome::Paused);
         }
-        let chunk = chunk.map_err(|error| PumasError::Network {
-            message: "HTTP artifact stream failed".into(),
-            cause: Some(error.without_url().to_string()),
-        })?;
+        let chunk = chunk?;
         let next_downloaded = downloaded
             .checked_add(chunk.len() as u64)
             .ok_or_else(|| invalid_response("HTTP artifact byte count overflowed"))?;
@@ -516,6 +558,14 @@ mod tests {
     };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    async fn body_bytes(mut body: BoxStream<'static, Result<bytes::Bytes>>) -> Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        while let Some(chunk) = body.next().await {
+            bytes.extend_from_slice(&chunk?);
+        }
+        Ok(bytes)
+    }
 
     fn selected_file(size: u64) -> ArtifactFile {
         ArtifactFile::new(
@@ -675,7 +725,7 @@ mod tests {
         .unwrap();
         assert!(reply.resumed);
         assert_eq!(reply.total_size, Some(6));
-        assert_eq!(reply.body.bytes().await.unwrap().as_ref(), b"def");
+        assert_eq!(body_bytes(reply.body).await.unwrap(), b"def");
         let request = server.await.unwrap().to_ascii_lowercase();
         assert!(request.contains("range: bytes=3-"));
         assert!(request.contains("if-match: \"fixture-v1\""));
@@ -731,7 +781,7 @@ mod tests {
         .await
         .unwrap();
         assert!(!reply.resumed);
-        assert_eq!(reply.body.bytes().await.unwrap().as_ref(), b"abcdef");
+        assert_eq!(body_bytes(reply.body).await.unwrap(), b"abcdef");
         assert!(server
             .await
             .unwrap()
@@ -1110,7 +1160,7 @@ mod tests {
         .unwrap();
         assert!(!reply.resumed);
         assert_eq!(reply.total_size, Some(6));
-        assert_eq!(reply.body.bytes().await.unwrap().as_ref(), b"abcdef");
+        assert_eq!(body_bytes(reply.body).await.unwrap(), b"abcdef");
 
         let origin_request = origin_server.await.unwrap();
         assert!(origin_request.lines().any(|line| {
@@ -1142,7 +1192,7 @@ mod tests {
             .unwrap();
             assert!(!reply.resumed);
             assert_eq!(reply.total_size, Some(5));
-            assert_eq!(reply.body.bytes().await.unwrap().as_ref(), b"bytes");
+            assert_eq!(body_bytes(reply.body).await.unwrap(), b"bytes");
             let _ = server.await.unwrap();
         }
     }
@@ -1290,7 +1340,8 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(opened.body.content_length(), None);
+        // The literal chunked fixture has no Content-Length; selection supplies
+        // the total, and the independent body oracle below rejects excess bytes.
         assert_eq!(opened.total_size, Some(3));
         let mut sink = TestSink::default();
         let mut host = TestHost {

@@ -52,6 +52,7 @@ pub struct S3Reader {
 
 /// Version, validator, and byte-size evidence observed from a selected object.
 /// A selection binds its reads to the exact reader and cannot be forged by callers.
+#[derive(Clone)]
 pub struct S3ObjectSelection {
     store: Arc<AmazonS3>,
     key: Path,
@@ -299,26 +300,7 @@ impl S3ObjectSelection {
             return Err(S3ReaderError::InvalidRange);
         }
         tokio::time::timeout(self.timeout, async {
-            let result = self
-                .store
-                .get_opts(
-                    &self.key,
-                    GetOptions {
-                        version: Some(self.version.clone()),
-                        if_match: Some(self.etag.clone()),
-                        range: Some(range.clone().into()),
-                        ..GetOptions::default()
-                    },
-                )
-                .await
-                .map_err(protocol_error)?;
-            if result.meta.version.as_deref() != Some(&self.version)
-                || result.meta.e_tag.as_deref() != Some(&self.etag)
-                || result.meta.size != self.size
-                || result.range != range
-            {
-                return Err(S3ReaderError::Changed);
-            }
+            let result = self.open_checked_range(range.clone()).await?;
             let expected = range.end - range.start;
             let mut written = 0;
             let mut stream = result.into_stream();
@@ -338,6 +320,107 @@ impl S3ObjectSelection {
         })
         .await
         .map_err(|_| S3ReaderError::TimedOut)?
+    }
+
+    async fn open_checked_range(
+        &self,
+        range: Range<u64>,
+    ) -> Result<object_store::GetResult, S3ReaderError> {
+        if range.start >= range.end || range.end > self.size {
+            return Err(S3ReaderError::InvalidRange);
+        }
+        let result = self
+            .store
+            .get_opts(
+                &self.key,
+                GetOptions {
+                    version: Some(self.version.clone()),
+                    if_match: Some(self.etag.clone()),
+                    range: Some(range.clone().into()),
+                    ..GetOptions::default()
+                },
+            )
+            .await
+            .map_err(protocol_error)?;
+        if result.meta.version.as_deref() != Some(&self.version)
+            || result.meta.e_tag.as_deref() != Some(&self.etag)
+            || result.meta.size != self.size
+            || result.range != range
+        {
+            return Err(S3ReaderError::Changed);
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn acquisition_identity(&self) -> String {
+        format!(
+            "{}:{}",
+            self.manifest.source().source_id(),
+            hex::encode(&self.version)
+        )
+    }
+
+    /// Project checked protocol bytes into the existing lifecycle's streaming
+    /// boundary. Continuation is supplied only by its live prefix owner.
+    pub(crate) async fn open_acquisition(
+        &self,
+        resume: u64,
+        continuation: Option<&super::http::HttpResumeEvidence>,
+        transfer_deadline: Option<tokio::time::Instant>,
+    ) -> crate::Result<super::http::HttpArtifactResponse> {
+        let resource = self.acquisition_identity();
+        if resume > 0
+            && !continuation.is_some_and(|proof| {
+                proof.resource == resource
+                    && proof.etag == self.etag
+                    && proof.total == Some(self.size)
+            })
+        {
+            return Err(acquisition_error(S3ReaderError::Changed));
+        }
+        let attempt_deadline = tokio::time::Instant::now()
+            .checked_add(self.timeout)
+            .ok_or_else(|| {
+                acquisition_error(S3ReaderError::Configuration(
+                    "operation budget exceeds the supported clock range",
+                ))
+            })?;
+        let deadline =
+            transfer_deadline.map_or(attempt_deadline, |limit| limit.min(attempt_deadline));
+        let result = tokio::time::timeout_at(deadline, self.open_checked_range(resume..self.size))
+            .await
+            .map_err(|_| acquisition_error(S3ReaderError::TimedOut))?
+            .map_err(acquisition_error)?;
+        Ok(super::http::HttpArtifactResponse {
+            body: result
+                .into_stream()
+                .map(|chunk| chunk.map_err(protocol_error).map_err(acquisition_error))
+                .boxed(),
+            resumed: resume > 0,
+            total_size: Some(self.size),
+            resource,
+            strong_etag: Some(self.etag.clone()),
+            deadline: Some(deadline),
+        })
+    }
+}
+
+fn acquisition_error(error: S3ReaderError) -> crate::PumasError {
+    match error {
+        S3ReaderError::TimedOut | S3ReaderError::Protocol(_) | S3ReaderError::Client(_) => {
+            crate::PumasError::Network {
+                message: "S3 acquisition protocol failed".into(),
+                cause: Some(error.to_string()),
+            }
+        }
+        S3ReaderError::Unavailable => crate::PumasError::DownloadFailed {
+            url: "S3 selected object".into(),
+            message: error.to_string(),
+        },
+        _ => crate::PumasError::Validation {
+            field: "acquisition.s3".into(),
+            message: error.to_string(),
+        },
     }
 }
 

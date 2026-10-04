@@ -2439,6 +2439,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "blake3",
+ "bytes",
  "cap-primitives",
  "cap-std",
  "chrono",

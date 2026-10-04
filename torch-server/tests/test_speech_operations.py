@@ -440,10 +440,40 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
         await owner.wait(replay.operation_ref)
 
     async def test_timer_expires_idle_receipts_and_releases_text_without_polling(self):
-        owner, _, _ = self.make_owner(adapter=lambda *args: "done", receipt_ttl=0.01)
+        now = [10.0]
+        owner, _, _ = self.make_owner(
+            adapter=lambda *args: "done", receipt_ttl=0.01, clock=lambda: now[0]
+        )
         status = owner.start(encode(payload(owner)))
-        await owner.wait(status.operation_ref)
+        done = await owner.wait(status.operation_ref)
+        self.assertEqual(done.text, "done")
+        # Completion observation has no scheduling SLA shorter than the TTL.
+        # Advance receipt time only after observing completion; the idle timer
+        # must remove the receipt without a status/cancel call driving pruning.
+        now[0] = done.expires_at + 1
         await eventually(lambda: not owner._entries)
+        self.assertFalse(owner._requests)
+        self.assertIsNone(owner._expiry)
+
+    async def test_wait_does_not_resurrect_receipt_expired_before_waiter_resumes(self):
+        now = [10.0]
+        owner, _, gate = self.make_owner(receipt_ttl=0.01, clock=lambda: now[0])
+        status = owner.start(encode(payload(owner)))
+        await eventually(gate.entered.is_set)
+        entry = owner._entries[status.operation_ref.operation_id]
+
+        def expire_before_waiter_resumes(_):
+            now[0] = entry.settled_at + 1
+            owner._prune()
+
+        # Register ahead of shield's wakeup callback, so expiry occurs after
+        # settlement and before the already waiting caller can read its receipt.
+        entry.observed.add_done_callback(expire_before_waiter_resumes)
+        gate.release.set()
+        with self.assertRaises(SpeechOperationError) as result:
+            await owner.wait(status.operation_ref)
+        self.assertEqual(result.exception.code, "unknown_or_expired_operation")
+        self.assertFalse(owner._entries)
         self.assertFalse(owner._requests)
         self.assertIsNone(owner._expiry)
 

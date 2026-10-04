@@ -15347,6 +15347,8 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let library_root = temp.path().join("library");
         let mut client = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+        let source = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        client.set_test_download_base_url(format!("http://{}", source.local_addr().unwrap()));
         let persistence = Arc::new(DownloadPersistence::new(temp.path()));
         client.set_persistence(persistence.clone());
         let completion_called = Arc::new(AtomicBool::new(false));
@@ -15390,31 +15392,78 @@ mod tests {
         .unwrap();
         let mut updates = client.subscribe_download_updates();
 
+        let destination_guard = client
+            .destination_lock(&verified.destination.identity())
+            .await
+            .lock_owned()
+            .await;
         assert!(client.resume_download(download_id).await.unwrap());
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                let update = updates.recv().await.unwrap();
-                if update.snapshot.downloads.iter().any(|download| {
+        // Resume admits an owned worker; it does not promise a filesystem
+        // settlement SLA. Hold execution across the former two-second budget
+        // without sleeping or allowing a request to the download source.
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(3)).await;
+        tokio::time::resume();
+        assert!(
+            !client
+                .download_tasks
+                .snapshot(download_id)
+                .unwrap()
+                .finished
+        );
+        assert_eq!(
+            client
+                .downloads
+                .read()
+                .await
+                .get(download_id)
+                .unwrap()
+                .status,
+            DownloadStatus::Queued
+        );
+        assert!(!persistence.load_all().is_empty());
+        assert!(!completion_called.load(Ordering::SeqCst));
+        drop(destination_guard);
+
+        // Observe the worker and all registered descendants before checking its
+        // effects. This also fails callback/cleanup regressions after worker
+        // exit, instead of polling persistence while the real I/O is pending.
+        let observation = tokio::select! {
+            biased;
+            request = source.accept() => {
+                panic!("byte-complete ordinary resume attempted network access: {request:?}");
+            }
+            observation = async {
+                loop {
+                    if let Some(observation) = client.download_tasks.observe_finished(download_id).await {
+                        break observation;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            } => observation,
+        };
+        assert_eq!(observation.role, TaskRole::Worker);
+        assert_eq!(observation.terminal, TaskTerminal::Completed);
+        assert_eq!(observation.nested_failures, 0);
+        assert!(
+            std::iter::from_fn(|| updates.try_recv().ok()).any(|update| {
+                update.snapshot.downloads.iter().any(|download| {
                     download.download_id == download_id
                         && download.status == DownloadStatus::Completed
-                }) {
-                    break;
-                }
-            }
-        })
-        .await
-        .expect("byte-complete ordinary resume should finish without network access");
-
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                if completion_called.load(Ordering::SeqCst) && persistence.load_all().is_empty() {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("ordinary completion callback and persistence cleanup should finish");
+                })
+            })
+        );
+        assert!(completion_called.load(Ordering::SeqCst));
+        assert!(persistence.load_all().is_empty());
+        assert_eq!(
+            std::fs::read(verified.destination.display_path().join("weights.gguf")).unwrap(),
+            b"done"
+        );
+        assert!(!verified
+            .destination
+            .display_path()
+            .join("weights.gguf.part")
+            .exists());
         assert!(aux_called.load(Ordering::SeqCst));
         let downloads = client.downloads.read().await;
         let state = downloads.get(download_id).unwrap();

@@ -433,14 +433,25 @@ impl ModelIndex {
         let hashes_json = serde_json::to_string(&record.hashes)?;
         let metadata_json = serde_json::to_string_pretty(&record.metadata)?;
 
-        let existing = conn
+        let existing_hashes: Option<String> = conn
             .query_row(
-                "SELECT 1 FROM models WHERE id = ?1",
+                "SELECT hashes_json FROM models WHERE id = ?1",
                 params![record.id],
-                |_| Ok(()),
+                |row| row.get(0),
             )
-            .optional()?
-            .is_some();
+            .optional()?;
+        // HashMap key order is not a model change. Retain the stored encoding
+        // when its hashes match, leaving every other SQL update guard intact.
+        let hashes_json = match existing_hashes.as_ref() {
+            Some(stored)
+                if serde_json::from_str::<HashMap<String, String>>(stored)
+                    .is_ok_and(|hashes| hashes == record.hashes) =>
+            {
+                stored.clone()
+            }
+            _ => hashes_json,
+        };
+        let existing = existing_hashes.is_some();
         let changed = conn.execute(
             "INSERT INTO models (id, path, cleaned_name, official_name, model_type,
                                  tags_json, hashes_json, metadata_json, updated_at)
@@ -1277,6 +1288,144 @@ mod tests {
         let record = create_test_record("stable-row", "Stable Row", "checkpoint");
         assert!(index.upsert(&record).unwrap());
         assert!(!index.upsert(&record).unwrap());
+    }
+
+    #[test]
+    fn test_upsert_hash_key_order_is_a_noop() {
+        let (index, _temp) = create_test_index();
+        let mut record = create_test_record("stable-hashes", "Stable Hashes", "llm");
+        record.hashes.insert("blake3".into(), "def456".into());
+        assert!(index.upsert(&record).unwrap());
+        let summary = create_package_facts_cache_record(
+            &record.id,
+            ModelPackageFactsCacheScope::Summary,
+            "stable-fingerprint",
+            package_facts_summary_json(&record.id),
+        );
+        index.upsert_model_package_facts_cache(&summary).unwrap();
+
+        // Seed a valid legacy representation in the opposite order from this
+        // exact HashMap. This fails deterministically, without random retries.
+        let serialized = serde_json::to_string(&record.hashes).unwrap();
+        let sha_first = r#"{"sha256":"abc123","blake3":"def456"}"#;
+        let blake_first = r#"{"blake3":"def456","sha256":"abc123"}"#;
+        let stored = if serialized == sha_first {
+            blake_first
+        } else {
+            sha_first
+        };
+        assert_ne!(serialized, stored);
+        index
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE models SET hashes_json = ?1 WHERE id = ?2",
+                params![stored, record.id],
+            )
+            .unwrap();
+        let cursor = index.current_model_library_update_cursor().unwrap();
+        let mut events = index.subscribe_model_library_update_events();
+        assert!(!index.upsert(&record).unwrap());
+        assert_eq!(index.current_model_library_update_cursor().unwrap(), cursor);
+        assert!(events.try_recv().is_err());
+        assert_eq!(
+            index
+                .get_model_package_facts_cache(
+                    &record.id,
+                    None,
+                    ModelPackageFactsCacheScope::Summary,
+                )
+                .unwrap(),
+            Some(summary)
+        );
+        let retained: String = index
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT hashes_json FROM models WHERE id = ?1",
+                params![record.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            retained, stored,
+            "a semantic no-op must not rewrite the row"
+        );
+    }
+
+    #[test]
+    fn test_upsert_repairs_invalid_stored_hashes() {
+        let (index, _temp) = create_test_index();
+        let mut record = create_test_record("invalid-hashes", "Invalid Hashes", "llm");
+        record.hashes.clear();
+        index.upsert(&record).unwrap();
+        for invalid in ["not-json", "[]", "null", r#"{"sha256":123}"#] {
+            index
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE models SET hashes_json = ?1 WHERE id = ?2",
+                    params![invalid, record.id],
+                )
+                .unwrap();
+            assert!(index.upsert(&record).unwrap(), "{invalid}");
+            let retained: String = index
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT hashes_json FROM models WHERE id = ?1",
+                    params![record.id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(retained, "{}");
+            assert!(!index.upsert(&record).unwrap());
+        }
+    }
+
+    #[test]
+    fn test_upsert_still_reports_each_semantic_record_change() {
+        for field in 0..8 {
+            let (index, _temp) = create_test_index();
+            let record = create_test_record("changed-row", "Changed Row", "llm");
+            index.upsert(&record).unwrap();
+            let cursor = index.current_model_library_update_cursor().unwrap();
+            let mut changed = record.clone();
+            match field {
+                0 => changed.path.push_str("/moved"),
+                1 => changed.cleaned_name.push_str("_updated"),
+                2 => changed.official_name.push_str(" Updated"),
+                3 => changed.model_type = "embedding".into(),
+                4 => changed.tags.push("updated".into()),
+                5 => {
+                    changed.hashes.insert("sha256".into(), "new-hash".into());
+                }
+                6 => changed.metadata["family"] = serde_json::json!("updated"),
+                7 => changed.updated_at = "2024-01-02T00:00:00Z".into(),
+                _ => unreachable!(),
+            }
+            assert!(index.upsert(&changed).unwrap(), "field {field}");
+            assert_eq!(
+                serde_json::to_value(index.get(&record.id).unwrap().unwrap()).unwrap(),
+                serde_json::to_value(&changed).unwrap()
+            );
+            let feed = index
+                .list_model_library_updates_since(Some(&cursor), 100)
+                .unwrap();
+            assert_eq!(feed.events.len(), 1, "field {field}");
+            assert_eq!(
+                feed.events[0].change_kind,
+                ModelLibraryChangeKind::MetadataModified
+            );
+            assert!(
+                !index.upsert(&changed).unwrap(),
+                "field {field} must settle"
+            );
+        }
     }
 
     #[test]

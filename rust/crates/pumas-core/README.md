@@ -13,6 +13,33 @@ tensor support. Enable `onnx-runtime` explicitly to expose `onnx_runtime` and it
 re-exported execution types. Provider descriptions and model metadata remain
 available without that feature. RPC enables it through `inference-plugins`.
 
+## Optional S3 protocol reader
+
+Enable `s3` explicitly to use `acquisition::{S3Reader, S3ReaderConfig}`. This
+reader supports anonymous access to explicitly configured versioned objects;
+it does not discover credentials or endpoints from the environment. Configure
+an HTTP(S) origin, region, bucket, addressing style, and positive operation
+budget. Virtual-hosted endpoints must already identify the bucket; HTTP requires
+explicit opt-in. Redirects, ambient proxies, SDK retries, and automatic HTTP
+protocol retries are disabled.
+
+`select(key, version_id, logical_path, sha256)` validates the local path and
+exact remote key, resolves HEAD for that VersionId, and refuses mutable `null`
+versions or missing/different version evidence. The returned selection exposes
+the existing `ArtifactManifest`; its source identity binds endpoint, bucket,
+addressing style, key, and revision. `read_range(start..end, &mut staging)` streams
+exact selected bytes using VersionId and If-Match, with metadata checks before
+writes. ETag is a conditional validator, never a digest. Dropping the read future
+stops polling it; timeout, error, or cancellation can leave partial staging bytes
+under the caller's custody.
+
+This first reader milestone does not provide authenticated stores, prefix
+selection, shared-service S3 dispatch, model import, or desktop source selection.
+It owns no acquisition store, tasks, retry policy, verifier, or publication.
+The shared acquisition lifecycle must own those effects when source dispatch is
+admitted. Local protocol fixtures do not qualify AWS, non-AWS stores, MinIO,
+packaged consumers, or the AQ-S3 gate. Default and headless builds omit the SDK.
+
 ## Choose the Correct Access Role
 
 | API | Use when |

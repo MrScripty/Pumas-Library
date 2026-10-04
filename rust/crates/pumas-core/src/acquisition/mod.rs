@@ -8,12 +8,16 @@
 mod github_release;
 mod http;
 mod manifest;
+#[cfg(feature = "s3")]
+mod s3;
 mod service;
 pub(crate) mod store;
 pub(crate) mod task_custody;
 mod workspace;
 
 pub use http::{AcquisitionHttpClient, HttpAttemptHost};
+#[cfg(feature = "s3")]
+pub use s3::{S3Addressing, S3ObjectSelection, S3Reader, S3ReaderConfig, S3ReaderError};
 pub use task_custody::AcquisitionCapacity;
 
 pub(crate) use github_release::{select_github_release_asset, GitHubReleaseAssetMetadata};

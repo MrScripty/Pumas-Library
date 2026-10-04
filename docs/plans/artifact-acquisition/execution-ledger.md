@@ -1,5 +1,38 @@
 # Acquisition execution ledger
 
+## 2026-10-04 — delegated optional S3 reader milestone
+
+The coordinator admitted and resumed a separate reader development slice on
+`feat/acquisition-s3-reader-c70a78f7` over
+`c70a78f7232f46dfb3a6b73db8bcc75fa9293acf`, independently of Torch acceptance.
+Its protocol adapter uses optional `object_store = =0.12.4` with only `aws`,
+explicit anonymous endpoint/bucket/addressing configuration, immutable VersionId
+selection, strong conditional validators, and bounded range streaming into
+caller-owned staging. It preserves the existing manifest and does not introduce
+acquisition persistence, retry, verification, or publication ownership.
+
+Addressing style now participates in stable source identity. The same-endpoint,
+same-key fixture independently observes different request paths and source
+identities while repeated equivalent configuration retains identity. All 11
+local protocol fixtures passed. Strict all-target Clippy with `s3,test-support`,
+the no-default headless compile, rustfmt and authored-source diff checks passed.
+Exact upstream notice whitespace is retained and flags the unrestricted diff
+check, as recorded in the qualification report. The repository
+checker passed 12 target/feature graphs; the SDK is absent from the six checked
+default/headless core graphs. The unchanged canonical attribution generator and
+checker passed, with exact optional dependency notices retained separately.
+See [qualification](reports/s3-reader-qualification-2026-10-04.md) for commands,
+dependency comparison, source boundaries, disk-related failed builds and limits.
+
+The separate PR37 repair remains protected at
+`44f5df72f9bb918049e197cfa74e8f2edf792749`; its worktree/branch was not edited.
+Only completed task-owned compiled artifacts were retired to fit local checks.
+The coordinator owns independent review, hosted CI, PR creation and integration.
+AWS/non-AWS/MinIO, credentials/refresh, model import, native/default ONNX builds,
+resource qualification and AQ-S3 remain open. The next S3 implementation slice
+is dispatch through the existing acquisition owner; this reader milestone does
+not establish an import workflow or advance the full gate.
+
 ## 2026-09-29 — coordinated planning delivery
 
 The user requested a separate acquisition prerequisite plan alongside the runtime/model-adapter plan. The attached r3 plan and integration review were read; current Pumas branch and standards refs were verified. Pumas remains at `04e7f156`; standards is now `39d55dc` (the inspected intervening commit changes test/evidence material, not the retained normative planning/architecture rules).

@@ -129,6 +129,10 @@ No broad list/search capability, cloud-specific UI product, remote writes, custo
 
 ## Q4: qualification and cutover
 
+### Delegated Q3 reader milestone, 2026-10-04
+
+The coordinator admitted a bounded reader development slice on base `c70a78f7232f46dfb3a6b73db8bcc75fa9293acf` and authorized coherent commits and non-force pushes, with PR/review/integration retained by the coordinator. This explicit admission includes the otherwise integrator-owned dependency/export projections for this slice only: `rust/crates/pumas-core/src/acquisition/s3.rs`, `rust/crates/pumas-core/tests/s3_reader.rs`, acquisition module exports, `rust/crates/pumas-core/Cargo.toml`, `rust/Cargo.lock`, core README, this write-set, plan/ledger state, and focused reader qualification/licensing evidence. The canonical attribution generator may run unchanged and update its owned outputs. No store/manifest redesign, global retry policy, shared-service cutover, RPC/UI, installer, credential/network settings, or other branches are admitted. AQ-S3 remains not ready.
+
 Affected installed/public/native consumers, source installation/build packaging and exact generated outputs. Change CI/release scripts only where necessary to observe a named acceptance claim. Final docs include the active source-of-truth guide and consumer/migration limits. Remove a public legacy helper only with its actual supported consumer/version disposition; otherwise retain a delegating facade without a second lifecycle owner. No release publication is authorized.
 
 ## Shared roles and integration

@@ -56,12 +56,23 @@ impl HfLoopbackFixture {
     }
 
     pub(crate) fn transport(&self) -> Result<reqwest::Client> {
+        self.transport_builder()
+            .build()
+            .map_err(|error| PumasError::Other(format!("HF fixture transport: {error}")))
+    }
+
+    pub(crate) fn api_transport(&self) -> Result<reqwest::Client> {
+        self.transport_builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|error| PumasError::Other(format!("HF fixture API transport: {error}")))
+    }
+
+    fn transport_builder(&self) -> reqwest::ClientBuilder {
         reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|error| PumasError::Other(format!("HF fixture transport: {error}")))
     }
 }
 

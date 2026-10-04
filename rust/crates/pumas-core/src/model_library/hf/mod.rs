@@ -314,14 +314,15 @@ impl HuggingFaceClient {
         cache_dir: PathBuf,
         source: super::test_support::HfLoopbackFixture,
     ) -> Result<Self> {
-        let client = source.transport()?;
+        let client = source.api_transport()?;
+        let download_client = source.transport()?;
         std::fs::create_dir_all(&cache_dir)?;
         // Unlike ordinary construction, this explicit fixture never invokes
         // an environment/disk credential loader. Its transport follows no redirect.
         let mut fixture = Self::from_transport(
             cache_dir,
-            client.clone(),
-            crate::acquisition::AcquisitionHttpClient::from(client),
+            client,
+            crate::acquisition::AcquisitionHttpClient::from(download_client),
             None,
         )?;
         fixture.download_base_url = Some(source.origin().to_owned());
@@ -638,6 +639,116 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let client = HuggingFaceClient::new(temp_dir.path()).unwrap();
         (temp_dir, client)
+    }
+
+    #[cfg(feature = "test-support")]
+    #[tokio::test]
+    async fn fixture_api_timeout_preserves_connect_only_downloads() {
+        use futures::FutureExt;
+        use std::panic::AssertUnwindSafe;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        use tokio::sync::oneshot;
+
+        let root = TempDir::new().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let fixture = super::super::test_support::HfLoopbackFixture::parse(&origin).unwrap();
+        let client =
+            HuggingFaceClient::new_with_loopback_fixture(root.path().into(), fixture).unwrap();
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let mut release = Some(release_tx);
+        let mut server = tokio::spawn(async move {
+            let mut peers = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    assert!(request.len() < 8192);
+                    request.push(stream.read_u8().await.unwrap());
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(!request.to_ascii_lowercase().contains("authorization:"));
+                let download = request.starts_with("GET /payload ");
+                if download {
+                    // Headers and first byte arrive; hold the rest of the body.
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nA",
+                        )
+                        .await
+                        .unwrap();
+                } else {
+                    assert!(request
+                        .starts_with("GET /api/models/fixture/model/tree/main?recursive=true "));
+                    // Keep the accepted API connection open without any response.
+                }
+                peers.push((stream, download));
+            }
+            ready_tx.send(()).unwrap();
+            let _ = release_rx.await;
+            for (mut stream, download) in peers {
+                if download {
+                    let _ = stream.write_all(b"B").await;
+                }
+            }
+        });
+
+        // Observe failures after dropping request futures and draining both owners.
+        let outcome = AssertUnwindSafe(async {
+            assert!(client.auth_token.read().await.is_none());
+            let api = client.get_repo_files("fixture/model");
+            let url = format!("{origin}/payload");
+            let download = async {
+                client.download_client.for_request(&url, false).unwrap()
+                    .get(&url).send().await.unwrap().bytes().await
+            };
+            tokio::pin!(api, download);
+            tokio::time::timeout(Duration::from_secs(5), async {
+                tokio::select! {
+                    result = &mut api => panic!("API settled before its held response: {result:?}"),
+                    result = &mut download => panic!("Download settled before its held body: {result:?}"),
+                    ready = ready_rx => ready.unwrap(),
+                }
+            }).await.expect("both literal-loopback peers must accept requests");
+            // A real 31-second body hold proves absence of the 30-second total
+            // download deadline. Do not shorten the fixture API's real deadline.
+            let body_release_at = tokio::time::Instant::now() + Duration::from_secs(31);
+            let refusal = tokio::time::timeout(Duration::from_secs(45), async {
+                tokio::select! {
+                    result = &mut api => result,
+                    result = &mut download => panic!("Download acquired a total transfer deadline: {result:?}"),
+                }
+            }).await.expect("stalled fixture API must obey its total request deadline");
+            assert!(matches!(refusal, Err(PumasError::Network { .. })), "{refusal:?}");
+            tokio::select! {
+                result = &mut download => panic!("Download body settled before release: {result:?}"),
+                _ = tokio::time::sleep_until(body_release_at) => {},
+            }
+            release.take().unwrap().send(()).unwrap();
+            let bytes = tokio::time::timeout(Duration::from_secs(5), &mut download)
+                .await.unwrap().unwrap();
+            assert_eq!(bytes.as_ref(), b"AB");
+        }).catch_unwind().await;
+
+        if let Some(release) = release.take() {
+            let _ = release.send(());
+        }
+        let source_cleanup = tokio::time::timeout(Duration::from_secs(5), &mut server).await;
+        if source_cleanup.is_err() {
+            server.abort();
+            let _ = server.await;
+        }
+        let owner_cleanup =
+            tokio::time::timeout(Duration::from_secs(5), client.shutdown_downloads()).await;
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
+        }
+        source_cleanup.expect("loopback peer must drain").unwrap();
+        owner_cleanup
+            .expect("fixture download owner must drain")
+            .unwrap();
     }
 
     #[tokio::test]

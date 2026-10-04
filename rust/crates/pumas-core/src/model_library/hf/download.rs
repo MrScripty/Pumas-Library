@@ -15342,6 +15342,94 @@ mod tests {
         assert!(persistence.load_all().is_empty());
     }
 
+    async fn observe_worker_with_local_watchdog(
+        client: &HuggingFaceClient,
+        download_id: &str,
+    ) -> std::result::Result<TaskObservation, String> {
+        // A diagnostic bound for hung local tests, not a settlement SLA.
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if let Some(observation) = client.download_tasks.observe_finished(download_id).await {
+                    break observation;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .map_err(|_| {
+            // Timeout diagnostics must not wait behind the stalled worker's
+            // state lock. Keep custody intact for the test's shutdown owner.
+            let download = client.downloads.try_read().map(|states| {
+                states.get(download_id).map(|state| {
+                    (state.status, state.files_completed, state.files.len())
+                })
+            });
+            format!(
+                "owned worker {download_id:?} exceeded the 60-second local test watchdog; task={:?}; download={download:?}",
+                client.download_tasks.snapshot(download_id)
+            )
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn worker_watchdog_reports_locked_state_without_releasing_live_custody() {
+        let temp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+        let verified = verified_recovery(
+            &temp.path().join("library"),
+            "acme/model",
+            &["weights.gguf"],
+        );
+        let download_id = "stalled-owned-worker";
+        let state = recovery_test_state(&verified, download_id, DownloadStatus::Queued, false);
+        client
+            .downloads
+            .write()
+            .await
+            .insert(download_id.into(), state);
+        let prepared = client
+            .download_tasks
+            .prepare(download_id.into(), TaskRole::Worker, |_| async {
+                std::future::pending::<()>().await
+            })
+            .unwrap();
+        client
+            .download_tasks
+            .install_gated(prepared)
+            .unwrap()
+            .start();
+
+        let state_guard = client.downloads.write().await;
+        let observation = observe_worker_with_local_watchdog(&client, download_id);
+        tokio::pin!(observation);
+        assert!(futures::poll!(&mut observation).is_pending());
+        tokio::time::advance(Duration::from_secs(59)).await;
+        assert!(futures::poll!(&mut observation).is_pending());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let diagnostic = observation.await.unwrap_err();
+        assert!(diagnostic.contains(download_id));
+        assert!(diagnostic.contains("60-second local test watchdog"));
+        assert!(diagnostic.contains("role: Worker"));
+        assert!(diagnostic.contains("finished: false"));
+        assert!(diagnostic.contains("download=Err"));
+        drop(state_guard);
+        let task = client.download_tasks.snapshot(download_id).unwrap();
+        assert_eq!(task.role, TaskRole::Worker);
+        assert!(!task.finished);
+        assert_eq!(
+            client
+                .downloads
+                .read()
+                .await
+                .get(download_id)
+                .unwrap()
+                .status,
+            DownloadStatus::Queued
+        );
+        client.shutdown_downloads().await.unwrap();
+        assert!(client.download_tasks.is_empty());
+    }
+
     #[tokio::test]
     async fn ordinary_resume_preserves_ambient_callbacks_and_persistence_contract() {
         let temp = TempDir::new().unwrap();
@@ -15433,14 +15521,13 @@ mod tests {
             request = source.accept() => {
                 panic!("byte-complete ordinary resume attempted network access: {request:?}");
             }
-            observation = async {
-                loop {
-                    if let Some(observation) = client.download_tasks.observe_finished(download_id).await {
-                        break observation;
-                    }
-                    tokio::task::yield_now().await;
-                }
-            } => observation,
+            observation = observe_worker_with_local_watchdog(&client, download_id) => {
+                observation.unwrap_or_else(|diagnostic| {
+                    panic!("{diagnostic}; completion_callback={}; auxiliary_callback={}",
+                        completion_called.load(Ordering::SeqCst),
+                        aux_called.load(Ordering::SeqCst));
+                })
+            },
         };
         assert_eq!(observation.role, TaskRole::Worker);
         assert_eq!(observation.terminal, TaskTerminal::Completed);

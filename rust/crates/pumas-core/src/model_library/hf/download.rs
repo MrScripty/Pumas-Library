@@ -6972,6 +6972,8 @@ mod tests {
         let mut client = configured_download_client(temp.path().join("cache")).unwrap();
         client.configure_download_destination_root(&root).unwrap();
         let head_id = uuid::Uuid::new_v4().to_string();
+        let source = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        client.set_test_download_base_url(format!("http://{}", source.local_addr().unwrap()));
         admit_snapshot_at_root(
             client.persistence.as_ref().unwrap(),
             &PersistedDownload {
@@ -7048,8 +7050,33 @@ mod tests {
         std::fs::remove_file(destination.join(".pumas_download")).unwrap();
         // Known final bytes keep this queue-order oracle independent of HTTP.
         std::fs::write(destination.join("second.gguf"), b"complete").unwrap();
+        let identity = client
+            .downloads
+            .read()
+            .await
+            .get(&successor)
+            .unwrap()
+            .destination
+            .as_ref()
+            .unwrap()
+            .identity();
+        let destination_guard = client.destination_lock(&identity).await.lock_owned().await;
         assert!(client.cancel_download(&head_id).await.unwrap());
-        tokio::time::timeout(Duration::from_secs(2), async {
+        let incumbent = observe_worker_with_local_watchdog(&client, &head_id)
+            .await
+            .unwrap();
+        assert_eq!(incumbent.role, TaskRole::CancelFinalizer);
+        assert_eq!(incumbent.terminal, TaskTerminal::Completed);
+        assert_eq!(incumbent.nested_failures, 0);
+        assert_eq!(
+            client.get_download_status(&head_id).await,
+            Some(DownloadStatus::Cancelled)
+        );
+        // Cancellation releases the queue reservation; successor filesystem work
+        // still has no two-second settlement promise. Demonstrate that distinction
+        // with controlled lock custody rather than a wall-clock sleep.
+        tokio::time::pause();
+        let premature_settlement = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 if client.get_download_status(&head_id).await == Some(DownloadStatus::Cancelled)
                     && client.get_download_status(&successor).await
@@ -7059,10 +7086,40 @@ mod tests {
                 }
                 tokio::task::yield_now().await;
             }
-        })
-        .await
-        .expect("exact incumbent cancellation must release the canonical successor");
+        });
+        tokio::pin!(premature_settlement);
+        assert!(futures::poll!(&mut premature_settlement).is_pending());
+        tokio::time::advance(Duration::from_secs(3)).await;
+        assert!(premature_settlement.await.is_err());
+        tokio::time::resume();
+        assert_eq!(
+            client.get_download_status(&successor).await,
+            Some(DownloadStatus::Queued)
+        );
+        assert!(!client.download_tasks.snapshot(&successor).unwrap().finished);
+        drop(destination_guard);
+        let observation = tokio::select! {
+            biased;
+            request = source.accept() => panic!("byte-complete canonical successor attempted network access: {request:?}"),
+            observation = observe_worker_with_local_watchdog(&client, &successor) => observation.unwrap(),
+        };
+        assert_eq!(observation.role, TaskRole::Worker);
+        assert_eq!(observation.terminal, TaskTerminal::Completed);
+        assert_eq!(observation.nested_failures, 0);
+        assert_eq!(
+            client.get_download_status(&head_id).await,
+            Some(DownloadStatus::Cancelled)
+        );
+        assert_eq!(
+            client.get_download_status(&successor).await,
+            Some(DownloadStatus::Completed)
+        );
         assert!(!destination.join("first.gguf.part").exists());
+        assert_eq!(
+            std::fs::read(destination.join("second.gguf")).unwrap(),
+            b"complete"
+        );
+        assert!(!destination.join("second.gguf.part").exists());
     }
     #[tokio::test]
     async fn queued_pause_preserves_destination_and_restarts_at_its_fifo_position() {
@@ -7969,6 +8026,7 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let (requested_sender, requested) = tokio::sync::oneshot::channel();
         let (release_sender, release) = tokio::sync::oneshot::channel();
+        let (listener_sender, listener_receiver) = tokio::sync::oneshot::channel();
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut headers = Vec::new();
@@ -7986,19 +8044,21 @@ mod tests {
             let listener = if retry {
                 Some(listener)
             } else {
-                drop(listener);
+                // Retain the source address across pause/restart. Rebinding a
+                // released ephemeral port permits another fixture to claim it.
+                listener_sender.send(listener).unwrap();
                 None
             };
             requested_sender.send(()).unwrap();
             if retry {
                 drop(socket);
                 release.await.unwrap();
-                return tokio::time::timeout(
-                    Duration::from_millis(100),
-                    listener.as_ref().unwrap().accept(),
-                )
-                .await
-                .is_err();
+                let listener = listener.unwrap();
+                let no_extra_request =
+                    tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                        .await
+                        .is_err();
+                return (no_extra_request, Some(listener));
             }
             release.await.unwrap();
             if !stall_body {
@@ -8008,7 +8068,7 @@ mod tests {
                     )
                     .await;
             }
-            true
+            (true, None)
         });
         let mut client = configured_download_client(temp.path().join("cache")).unwrap();
         client.set_test_download_base_url(format!("http://{address}"));
@@ -8038,6 +8098,11 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        let mut resumed_listener = if retry {
+            None
+        } else {
+            Some(listener_receiver.await.unwrap())
+        };
         if stall_body {
             tokio::time::timeout(Duration::from_secs(3), async {
                 while !client.list_downloads().await.iter().any(|entry| {
@@ -8079,7 +8144,7 @@ mod tests {
             );
             continue_sender.send(()).unwrap();
             release_sender.send(()).unwrap();
-            assert!(server.await.unwrap());
+            assert!(server.await.unwrap().0);
             tokio::time::timeout(Duration::from_secs(3), async {
                 while client.get_download_status(&id).await != Some(DownloadStatus::Cancelled)
                     || client
@@ -8116,13 +8181,22 @@ mod tests {
         if paused.is_ok() && matches!(stall, StalledResponse::ImmediateResume) {
             // Do not drain the paused generation first: public Paused is the
             // promise that callers may immediately request a successor.
-            assert_resumed_partial_completes(&mut client, &id, &destination, address).await;
+            assert_resumed_partial_completes(
+                &mut client,
+                &id,
+                &destination,
+                resumed_listener.take().unwrap(),
+            )
+            .await;
             release_sender.send(()).unwrap();
-            assert!(server.await.unwrap());
+            assert!(server.await.unwrap().0);
             return;
         }
         release_sender.send(()).unwrap();
-        let no_extra_request = server.await.unwrap();
+        let (no_extra_request, retry_listener) = server.await.unwrap();
+        if retry {
+            resumed_listener = retry_listener;
+        }
         if paused.is_err() {
             client.cancel_download(&id).await.unwrap();
         }
@@ -8164,7 +8238,13 @@ mod tests {
             Some(DownloadStatus::Paused)
         );
         if stall_body {
-            assert_resumed_partial_completes(&mut restarted, &id, &destination, address).await;
+            assert_resumed_partial_completes(
+                &mut restarted,
+                &id,
+                &destination,
+                resumed_listener.take().unwrap(),
+            )
+            .await;
         }
     }
 
@@ -8172,10 +8252,9 @@ mod tests {
         client: &mut HuggingFaceClient,
         id: &str,
         destination: &Path,
-        address: std::net::SocketAddr,
+        listener: tokio::net::TcpListener,
     ) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind(address).await.unwrap();
         client.set_test_download_base_url(format!("http://{}", listener.local_addr().unwrap()));
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();

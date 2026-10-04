@@ -43,6 +43,22 @@ async fn main() -> Result<()> {
 }
 ```
 
+## Full Package Facts Through Local IPC
+
+`PumasLocalClient::resolve_model_package_facts(&model_id)` returns the owner's
+full `ResolvedModelPackageFacts` version 3, including the nested model reference,
+artifact evidence and diagnostics. It uses the existing authenticated framed
+`resolve_model_package_facts` IPC operation and the owner's model-library resolver.
+Model IDs must be nonempty relative identities of at most 4,096 UTF-8 bytes;
+accepted identities are forwarded without rewriting. Registered external assets
+continue to resolve through their relative library model IDs.
+
+Invalid parameters and missing or wrong connection tokens retain JSON-RPC code
+`-32602` and become `PumasError::InvalidParams` in the local client. Other server
+errors retain their wire codes and use the existing `PumasError::Other` client
+mapping; missing models retain wire code `-32002`. Transport loss remains
+`PumasError::SharedInstanceLost`. This method does not select or launch inference.
+
 ## Local Intent Interface
 
 `PumasApi::intent()` exposes structured local model requirements through

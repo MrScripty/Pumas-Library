@@ -715,7 +715,7 @@ impl CancellationPersistence {
 }
 
 struct PreparedDownloadTask {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     download_base_url: Option<String>,
     client: crate::acquisition::AcquisitionHttpClient,
     acquisition: Arc<crate::acquisition::AcquisitionService>,
@@ -1666,7 +1666,7 @@ impl PreparedDownloadTask {
                 self.destination_lock,
                 self.start_setup,
                 self.persist_queued_status,
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test-support"))]
                 self.download_base_url,
             ))
             .catch_unwind()
@@ -3982,7 +3982,7 @@ impl HuggingFaceClient {
                 .ok_or_else(|| PumasError::Other("Durable download snapshot unavailable".into()))?;
             let execution_files = files.iter().map(|file| file.filename.clone()).collect();
             let prepared_download = PreparedDownloadTask {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test-support"))]
                 download_base_url: self.download_base_url.clone(),
                 client: self.download_client.clone(),
                 acquisition: self.acquisition.clone(),
@@ -4235,7 +4235,7 @@ impl HuggingFaceClient {
             self.download_importer.clone()
         };
         PreparedDownloadTask {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             download_base_url: self.download_base_url.clone(),
             client: self.download_client.clone(),
             acquisition: self.acquisition.clone(),
@@ -4479,7 +4479,7 @@ impl HuggingFaceClient {
         destination_lock: Arc<TokioMutex<()>>,
         start_setup: Option<DownloadStartSetup>,
         persist_queued_status: bool,
-        #[cfg(test)] download_base_url: Option<String>,
+        #[cfg(any(test, feature = "test-support"))] download_base_url: Option<String>,
     ) -> Result<()> {
         use crate::config::NetworkConfig;
         use crate::network::RetryConfig;
@@ -4903,7 +4903,7 @@ impl HuggingFaceClient {
             .await?;
 
             let download_base = HF_HUB_BASE;
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             let download_base = download_base_url.as_deref().unwrap_or(download_base);
             let url = super::acquisition_source::retrieval_url(
                 download_base,
@@ -7082,6 +7082,495 @@ mod tests {
     #[tokio::test]
     async fn queued_pause_waits_for_owned_persistence_without_a_settlement_sla() {
         assert_queued_pause_resume_preserves_marker(false, false, true).await;
+    }
+
+    #[tokio::test]
+    async fn active_destination_queued_pause_persists_and_restarts_in_fifo_order() {
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            assert_active_destination_queued_pause(false),
+        )
+        .await
+        .expect("active queue fixture must finish within its watchdog");
+    }
+
+    #[tokio::test]
+    async fn active_destination_queued_pause_retains_persistence_failure() {
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            assert_active_destination_queued_pause(true),
+        )
+        .await
+        .expect("pause failure fixture must finish within its watchdog");
+    }
+
+    async fn assert_active_destination_queued_pause(fail_persistence: bool) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        async fn source_request(socket: &mut tokio::net::TcpStream) -> String {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let mut headers = Vec::new();
+                while !headers.ends_with(b"\r\n\r\n") {
+                    assert!(headers.len() < 4096, "bounded fixture request");
+                    headers.push(socket.read_u8().await.unwrap());
+                }
+                String::from_utf8(headers).unwrap()
+            })
+            .await
+            .expect("fixture request must complete")
+        }
+
+        async fn finished(client: &HuggingFaceClient, id: &str) {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while client
+                    .download_tasks
+                    .snapshot(id)
+                    .is_some_and(|task| !task.finished)
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("owned worker must finish within the test watchdog");
+        }
+
+        async fn blocked(client: &HuggingFaceClient, destination: &Path, id: &str) {
+            let generation = client.download_tasks.active_worker_generation(id).unwrap();
+            let identity = destination_identity(client, destination);
+            let turn = client.destination_executions.wait_for_turn(
+                &identity,
+                id,
+                DestinationDomain::Ambient,
+                &generation,
+            );
+            tokio::pin!(turn);
+            assert!(
+                futures::poll!(&mut turn).is_pending(),
+                "actual execution slot is occupied"
+            );
+            let snapshot = client.download_tasks.snapshot(id).unwrap();
+            assert!(!snapshot.finished);
+            assert_eq!(
+                client.get_download_status(id).await,
+                Some(DownloadStatus::Queued)
+            );
+        }
+
+        // Dropping the sender also releases a failing test's real blocking job.
+        struct PauseGate(Option<std::sync::mpsc::Sender<()>>);
+        impl PauseGate {
+            fn release(&mut self) {
+                self.0.take().unwrap().send(()).unwrap();
+            }
+        }
+
+        let temp = TempDir::new().unwrap();
+        let destination = temp.path().join("model");
+        let mut client = configured_download_client(temp.path().join("cache")).unwrap();
+        *client.auth_token.write().await = None;
+        for (repo, file, digest) in [
+            (
+                "acme/first",
+                "first.gguf",
+                "9c56cc51b374c3ba189210d5b6d4bf57790d351c96c47c02190ecf1e430635ab",
+            ),
+            (
+                "acme/second",
+                "second.gguf",
+                "eebbf6457e46a7f63acdf9b97390f790ba443d60cfa44b607da7e5c40aa1cc1d",
+            ),
+            (
+                "acme/third",
+                "third.gguf",
+                "eebbf6457e46a7f63acdf9b97390f790ba443d60cfa44b607da7e5c40aa1cc1d",
+            ),
+        ] {
+            cache_repo_tree(
+                &client,
+                repo,
+                vec![LfsFileInfo {
+                    filename: file.into(),
+                    size: 8,
+                    sha256: digest.into(),
+                }],
+                Vec::new(),
+            );
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        client.set_test_download_base_url(format!("http://{}", listener.local_addr().unwrap()));
+        let (requested, request_seen) = tokio::sync::oneshot::channel();
+        let (release_body, body_held) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let request = source_request(&mut socket).await;
+            assert!(request.starts_with("GET /acme/first/resolve/main/first.gguf HTTP/1.1"));
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nETag: \"active-v1\"\r\nConnection: close\r\n\r\nabcde").await.unwrap();
+            requested.send(()).unwrap();
+            let _ = tokio::time::timeout(Duration::from_secs(10), body_held)
+                .await
+                .unwrap();
+            // The paused client closes this attempt; no completion bytes are sent.
+        });
+        let head = client
+            .start_download(
+                &recovery_test_request("acme/first", &["first.gguf".into()]),
+                &destination,
+                None,
+            )
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), request_seen)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !client.list_downloads().await.iter().any(|entry| {
+                entry.download_id == head
+                    && entry.status == DownloadStatus::Downloading
+                    && entry.downloaded_bytes == Some(5)
+            }) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("real active transfer must consume the prefix before queuing a follower");
+        let head_generation = client
+            .download_tasks
+            .active_worker_generation(&head)
+            .unwrap();
+        let identity = destination_identity(&client, &destination);
+        assert!(
+            client
+                .destination_executions
+                .wait_for_turn(
+                    &identity,
+                    &head,
+                    DestinationDomain::Ambient,
+                    &head_generation,
+                )
+                .await
+        );
+        assert!(!client.download_tasks.snapshot(&head).unwrap().finished);
+        assert!(client.destination_lock(&identity).await.try_lock().is_err());
+        let marker = std::fs::read(destination.join(".pumas_download")).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&marker).unwrap()["repo_id"],
+            "acme/first"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("first.gguf.part")).unwrap(),
+            b"abcde"
+        );
+
+        let follower = client
+            .start_download(
+                &recovery_test_request("acme/second", &["second.gguf".into()]),
+                &destination,
+                None,
+            )
+            .await
+            .unwrap();
+        blocked(&client, &destination, &follower).await;
+        let store = client.persistence.as_ref().unwrap().clone();
+        let before = store.load_lifecycle_inventory_strict().unwrap();
+        let attempt = before.queue_admissions[&follower].attempt_id.clone();
+        assert_eq!(
+            before
+                .downloads
+                .iter()
+                .find(|entry| entry.download_id == follower)
+                .unwrap()
+                .status,
+            DownloadStatus::Queued
+        );
+        assert_eq!(client.destination_executions.claim_count(&identity), 2);
+        let (entered, pause_entered) = tokio::sync::oneshot::channel();
+        let entered = std::sync::Mutex::new(Some(entered));
+        let (release, held) = std::sync::mpsc::channel();
+        let held = std::sync::Mutex::new(held);
+        let mut gate = PauseGate(Some(release));
+        client
+            .download_tasks
+            .set_blocking_observer(Some(Arc::new(move |operation| {
+                if operation == "persist download pause" {
+                    if let Some(entered) = entered.lock().unwrap().take() {
+                        entered.send(()).unwrap();
+                        let _ = held.lock().unwrap().recv_timeout(Duration::from_secs(10));
+                    }
+                }
+            })));
+        assert!(client.pause_download(&follower).await.unwrap());
+        tokio::time::timeout(Duration::from_secs(5), pause_entered)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            client.get_download_status(&follower).await,
+            Some(DownloadStatus::Pausing)
+        );
+        assert_eq!(
+            client.get_download_status(&head).await,
+            Some(DownloadStatus::Downloading)
+        );
+        assert!(!client.download_tasks.snapshot(&head).unwrap().finished);
+        assert_eq!(
+            std::fs::read(destination.join(".pumas_download")).unwrap(),
+            marker
+        );
+        assert_eq!(
+            std::fs::read(destination.join("first.gguf.part")).unwrap(),
+            b"abcde"
+        );
+        assert!(!destination.join("second.gguf.part").exists());
+        assert!(!destination.join("second.gguf").exists());
+        assert_eq!(
+            store
+                .load_lifecycle_inventory_strict()
+                .unwrap()
+                .queue_admissions[&follower]
+                .attempt_id,
+            attempt
+        );
+        let state_path = temp.path().join("downloads.json");
+        let backup = temp.path().join("downloads.saved");
+        if fail_persistence {
+            std::fs::rename(&state_path, &backup).unwrap();
+            std::fs::create_dir(&state_path).unwrap();
+        }
+        gate.release();
+        finished(&client, &follower).await;
+        client.download_tasks.set_blocking_observer(None);
+        if fail_persistence {
+            {
+                let states = client.downloads.read().await;
+                let state = &states[&follower];
+                assert_eq!(state.status, DownloadStatus::Error);
+                assert_eq!(
+                    state.error.as_deref(),
+                    Some("failed to persist download pause")
+                );
+                assert!(state.lifecycle_failure_unverified);
+                assert!(!state.task_registered);
+            }
+            std::fs::remove_dir(&state_path).unwrap();
+            std::fs::rename(&backup, &state_path).unwrap();
+        } else {
+            assert_eq!(
+                client.get_download_status(&follower).await,
+                Some(DownloadStatus::Paused)
+            );
+        }
+        let inventory = store.load_lifecycle_inventory_strict().unwrap();
+        assert_eq!(inventory.queue_admissions[&follower].attempt_id, attempt);
+        assert_eq!(
+            serde_json::to_value(&inventory.queue_admissions).unwrap(),
+            serde_json::to_value(&before.queue_admissions).unwrap(),
+            "pause must preserve the exact admitted destination and FIFO ownership"
+        );
+        assert_eq!(
+            inventory
+                .downloads
+                .iter()
+                .find(|entry| entry.download_id == follower)
+                .unwrap()
+                .status,
+            if fail_persistence {
+                DownloadStatus::Queued
+            } else {
+                DownloadStatus::Paused
+            }
+        );
+        assert_eq!(
+            client.get_download_status(&head).await,
+            Some(DownloadStatus::Downloading)
+        );
+        assert_eq!(
+            std::fs::read(destination.join(".pumas_download")).unwrap(),
+            marker
+        );
+        assert_eq!(
+            std::fs::read(destination.join("first.gguf.part")).unwrap(),
+            b"abcde"
+        );
+        assert!(!destination.join("second.gguf.part").exists());
+        assert!(!destination.join("second.gguf").exists());
+        assert_eq!(client.destination_executions.claim_count(&identity), 2);
+        let third = if fail_persistence {
+            None
+        } else {
+            let third = client
+                .start_download(
+                    &recovery_test_request("acme/third", &["third.gguf".into()]),
+                    &destination,
+                    None,
+                )
+                .await
+                .unwrap();
+            blocked(&client, &destination, &third).await;
+            Some(third)
+        };
+        assert!(client.pause_download(&head).await.unwrap());
+        finished(&client, &head).await;
+        release_body.send(()).unwrap();
+        server.await.unwrap();
+        if fail_persistence {
+            for _ in 0..2 {
+                assert!(
+                    client.shutdown_downloads().await.is_err(),
+                    "failed pause must remain visible through repeated shutdown"
+                );
+            }
+            assert_eq!(
+                std::fs::read(destination.join(".pumas_download")).unwrap(),
+                marker
+            );
+            assert_eq!(
+                std::fs::read(destination.join("first.gguf.part")).unwrap(),
+                b"abcde"
+            );
+            return;
+        }
+        client.shutdown_downloads().await.unwrap();
+        drop(client);
+
+        let mut restored = configured_download_client(temp.path().join("cache")).unwrap();
+        restored.restore_persisted_downloads().await.unwrap();
+        let third = third.unwrap();
+        for id in [&head, &follower, &third] {
+            assert_eq!(
+                restored.get_download_status(id).await,
+                Some(DownloadStatus::Paused)
+            );
+        }
+        assert_eq!(
+            restored
+                .persistence
+                .as_ref()
+                .unwrap()
+                .load_lifecycle_inventory_strict()
+                .unwrap()
+                .queue_admissions[&follower]
+                .attempt_id,
+            attempt
+        );
+        assert_eq!(
+            std::fs::read(destination.join(".pumas_download")).unwrap(),
+            marker
+        );
+        assert_eq!(
+            std::fs::read(destination.join("first.gguf.part")).unwrap(),
+            b"abcde"
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        restored.set_test_download_base_url(format!("http://{}", listener.local_addr().unwrap()));
+        let (second_requested, second_seen) = tokio::sync::oneshot::channel();
+        let (release_second, second_held) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(source_request(&mut socket)
+                .await
+                .starts_with("GET /acme/second/resolve/main/second.gguf HTTP/1.1"));
+            second_requested.send(()).unwrap();
+            tokio::time::timeout(Duration::from_secs(5), second_held)
+                .await
+                .expect("second response gate must be released")
+                .unwrap();
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\ncomplete",
+                )
+                .await
+                .unwrap();
+            let (mut third_socket, _) =
+                tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            assert!(source_request(&mut third_socket)
+                .await
+                .starts_with("GET /acme/third/resolve/main/third.gguf HTTP/1.1"));
+            third_socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\ncomplete",
+                )
+                .await
+                .unwrap();
+        });
+        // Resume in reverse order: retained FIFO custody, not request order,
+        // determines who may replace the incumbent marker and write next.
+        assert!(restored.resume_download(&third).await.unwrap());
+        assert!(restored.resume_download(&follower).await.unwrap());
+        blocked(&restored, &destination, &third).await;
+        blocked(&restored, &destination, &follower).await;
+        assert_eq!(
+            std::fs::read(destination.join(".pumas_download")).unwrap(),
+            marker
+        );
+        assert!(!destination.join("second.gguf.part").exists());
+        assert!(!destination.join("third.gguf.part").exists());
+        assert!(restored.cancel_download(&head).await.unwrap());
+        tokio::time::timeout(Duration::from_secs(5), second_seen)
+            .await
+            .unwrap()
+            .unwrap();
+        blocked(&restored, &destination, &third).await;
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &std::fs::read(destination.join(".pumas_download")).unwrap()
+            )
+            .unwrap()["repo_id"],
+            "acme/second"
+        );
+        assert!(!destination.join("third.gguf.part").exists());
+        assert!(!destination.join("third.gguf").exists());
+        release_second.send(()).unwrap();
+        server.await.unwrap();
+        finished(&restored, &head).await;
+        finished(&restored, &follower).await;
+        finished(&restored, &third).await;
+        assert_eq!(
+            restored.get_download_status(&head).await,
+            Some(DownloadStatus::Cancelled)
+        );
+        assert_eq!(
+            restored.get_download_status(&follower).await,
+            Some(DownloadStatus::Completed)
+        );
+        assert_eq!(
+            restored.get_download_status(&third).await,
+            Some(DownloadStatus::Completed)
+        );
+        assert_eq!(
+            std::fs::read(destination.join("second.gguf")).unwrap(),
+            b"complete"
+        );
+        assert_eq!(
+            std::fs::read(destination.join("third.gguf")).unwrap(),
+            b"complete"
+        );
+        assert!(!destination.join("first.gguf.part").exists());
+        assert!(!destination.join(".pumas_download").exists());
+        assert_eq!(
+            restored
+                .destination_executions
+                .claim_count(&destination_identity(&restored, &destination)),
+            0
+        );
+        assert!(restored
+            .persistence
+            .as_ref()
+            .unwrap()
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .is_empty());
+        restored.shutdown_downloads().await.unwrap();
     }
 
     async fn assert_queued_pause_resume_preserves_marker(

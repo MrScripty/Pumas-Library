@@ -1,0 +1,86 @@
+name: Q2 pinned CPU qualification
+
+# The reviewed push to this disposable branch runs one ordinary CPU job.
+# A new workflow_dispatch workflow would require default-branch integration.
+on:
+  push:
+    branches: [qualify/q2-cpu-ci-1e83cfc9]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: q2-cpu-1e83cfc9
+  cancel-in-progress: false
+
+env:
+  CARGO_BUILD_JOBS: '2'
+  CARGO_INCREMENTAL: '0'
+  CARGO_TERM_COLOR: never
+
+jobs:
+  cpu:
+    name: Public install and isolated local CPU use
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout reviewed qualification recipe
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          path: qualification
+          persist-credentials: false
+      - name: Checkout exact production candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: 1e83cfc95f9bc0f9f0e37d514371bd1f4364f9d8
+          path: candidate
+          persist-credentials: false
+      - name: Check qualification failure oracles without network
+        run: python3 -m unittest discover -s qualification/scripts/acceptance -p test_q2_cpu_qualification.py
+      - name: Check existing sandbox, resources and pinned wheel availability
+        run: |
+          python3 qualification/scripts/acceptance/q2_cpu_qualification.py preflight \
+            --repo "$GITHUB_WORKSPACE/candidate" --output "$GITHUB_WORKSPACE/evidence"
+      - name: Install repository Rust toolchain
+        working-directory: candidate
+        run: rustup toolchain install --no-self-update
+      - name: Build public API driver against the exact candidate
+        working-directory: candidate
+        run: |
+          test ! -e rust/crates/pumas-app-manager/examples/qualify_q2_cpu.rs
+          mkdir -p rust/crates/pumas-app-manager/examples
+          cp ../qualification/scripts/acceptance/q2_cpu_driver.rs \
+            rust/crates/pumas-app-manager/examples/qualify_q2_cpu.rs
+          cargo build --locked --manifest-path rust/Cargo.toml \
+            -p pumas-app-manager --example qualify_q2_cpu
+      - name: Qualify one disposable CPU installation
+        run: |
+          python3 qualification/scripts/acceptance/q2_cpu_qualification.py run \
+            --repo "$GITHUB_WORKSPACE/candidate" --output "$GITHUB_WORKSPACE/evidence" \
+            --binary "$GITHUB_WORKSPACE/candidate/rust/target/debug/examples/qualify_q2_cpu"
+      - name: Verify and remove only the copied driver
+        if: always()
+        working-directory: candidate
+        run: |
+          if test -f rust/crates/pumas-app-manager/examples/qualify_q2_cpu.rs; then
+            cmp ../qualification/scripts/acceptance/q2_cpu_driver.rs \
+              rust/crates/pumas-app-manager/examples/qualify_q2_cpu.rs
+            rm -- rust/crates/pumas-app-manager/examples/qualify_q2_cpu.rs
+          fi
+          git diff --exit-code HEAD --
+      - name: Collect bounded receipts only
+        if: always()
+        run: |
+          python3 qualification/scripts/acceptance/q2_cpu_qualification.py receipts \
+            --repo "$GITHUB_WORKSPACE/candidate" --output "$GITHUB_WORKSPACE/evidence" \
+            --receipts "$GITHUB_WORKSPACE/receipts"
+          echo 'CPU qualification receipts; AC11 and AC12 remain open pending independent review.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload compact receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: q2-cpu-1e83cfc9-${{ github.run_id }}
+          path: receipts/
+          retention-days: 3
+          if-no-files-found: warn

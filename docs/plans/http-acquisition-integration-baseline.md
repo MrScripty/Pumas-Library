@@ -1,8 +1,7 @@
 # Proposed HTTP acquisition integration baseline
 
 Status: approved implementation plan. The main prerequisite completed green in
-Build 37127500248 on 2026-10-03. Integration is source preparation until the
-combined branch's independent review and exact-head hosted qualification finish.
+Build 37127500248 on 2026-10-03. [Build 37141872406](https://github.com/MrScripty/Pumas-Library/actions/runs/37141872406) passed all seven ordinary jobs on `0dd38c707125facfdaae29c82704213e85ceb155` (tree `7611df7a568d56807589bb2dca2bfbb03e484dd0`): workflow/release contracts, frontend/desktop, strict Rust quality, headless without inference, and native Linux/macOS/Windows. This is exact-head supporting AC15 evidence for the checks that ran. Release archives and native model E2E remain unqualified; AQ-HTTP, external review disposition and maintainer integration remain pending. Review repairs after this head require fresh exact-head qualification.
 No live-store migration or deployment cutover is authorized by this baseline.
 
 ## Pinned entry state and scope

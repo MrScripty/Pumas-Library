@@ -108,9 +108,10 @@ impl OllamaVersionManager {
             activities.tasks.harvest_finished();
             let task = tokio::spawn(async move {
                 let result = operation.await;
-                let terminal = result.as_ref().map(|_| ()).map_err(ToString::to_string);
-                let _ = sender.send(result);
-                terminal
+                match sender.send(result) {
+                    Ok(()) => Ok(()),
+                    Err(unobserved) => unobserved.map(|_| ()).map_err(|error| error.to_string()),
+                }
             });
             activities.tasks.tasks.push(task);
         }
@@ -1073,6 +1074,21 @@ mod tests {
                 assert!(manager.uninstall_version("v1").await.is_err());
             }
         });
+    }
+
+    #[tokio::test]
+    async fn ollama_shutdown_does_not_replay_delivered_operation_errors() {
+        let (manager, _root) = test_manager().await;
+        for _ in 0..3 {
+            assert!(matches!(
+                manager
+                    .owned_activity(async { Err(PumasError::InstallationCancelled) })
+                    .await,
+                Err(PumasError::InstallationCancelled)
+            ));
+        }
+        manager.shutdown().await.unwrap();
+        manager.shutdown().await.unwrap();
     }
 
     #[tokio::test]

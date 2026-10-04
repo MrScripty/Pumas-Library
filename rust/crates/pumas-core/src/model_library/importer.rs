@@ -456,7 +456,7 @@ impl ModelImporter {
             .map_err(|error| {
                 PumasError::Other(format!("Model import guard observation failed: {error}"))
             })??;
-        guard.claim_final_import_completion()?;
+        guard.claim_final_import_completion().await?;
         let importer = Self {
             library: Arc::new(self.library.with_import_guard(guard)),
             #[cfg(test)]

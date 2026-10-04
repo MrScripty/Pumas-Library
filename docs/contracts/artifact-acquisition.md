@@ -59,6 +59,41 @@ A disconnected observer does not cancel durably admitted work. Explicit cancella
 
 ## 5. HTTP representation rules
 
+### Authenticated transport and caller migration
+
+`AcquisitionConsumer::acquire_http` accepts `Into<AcquisitionHttpClient>`.
+Existing `reqwest::Client` arguments retain their configuration for requests
+without an explicit `AcquisitionHttpSource.authorization` value or URL userinfo. Passing an
+opaque existing client with explicit source authorization or detected URL
+userinfo now returns a typed
+validation refusal before a network request, including for an HTTPS URL. This
+is a deliberate behavioral change for authenticated external callers; source
+compatibility alone does not preserve their authenticated behavior.
+
+Authenticated callers must construct
+`AcquisitionHttpClient::https(their_configured_reqwest_builder)` and pass that
+client. This retains proxy, custom CA, timeout, user-agent and redirect options,
+but enforces HTTPS on the initial request and every followed redirect. A
+custom redirect policy cannot authorize a plaintext downgrade. No global trust
+store or caller client is rewritten. Credentials embedded in a caller's opaque
+client configuration remain that caller's responsibility; the explicit source
+credential channel must use the HTTPS-only constructor. Plaintext literal-IP
+loopback credential fixtures exist only in unit-test builds and are not enabled
+by the public `test-support` feature or a production constructor.
+
+Continuation still requires a matching strong ETag and total length. For
+`github` on `release-assets.githubusercontent.com`, only SAS expiry/signature
+and JWT transport-grant fields are ignored in effective-resource comparison.
+For `huggingface` on the recognized HTTPS delivery hosts
+`cdn-lfs.huggingface.co`, `cdn-lfs.hf.co`, `cas-bridge.xethub.hf.co`, and
+`us.aws.cdn.hf.co`, only the known AWS signing/expiry fields are ignored. Origin, port, path, version/query
+selectors, response overrides and every unknown query field remain part of
+resource identity. Other providers and hosts retain exact URL comparison.
+This is bounded HTTP adapter behavior, not S3 acquisition support. Signing
+parameter semantics are documented by [AWS SigV4](https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html)
+and [Azure SAS](https://learn.microsoft.com/en-us/rest/api/storageservices/create-service-sas).
+
+
 Source readers use established HTTP parsing/transport facilities and preserve status, headers and representation facts needed by acquisition. Request exact bytes (normally identity content encoding); decompression must not silently alter offsets or the representation being hashed. Inspect every `Content-Encoding` field before exposing the response body: accept no field or exactly one `identity` field, and refuse duplicate fields or unsupported encodings with typed response validation.
 
 Resume requires verified local partial identity, an exact offset/length, and source identity evidence appropriate to that source. With strong HTTP validators, apply the relevant conditional request. Validate the returned range, total length where known, actual byte count and current validator. A `200` full-body response to a ranged request is a restart/replan outcome, never data to append. A `206` with wrong/missing range evidence is invalid and must contain exactly one `Content-Range` field; duplicate fields are ambiguous even when one value matches the selected offset and length. `304` and `416` are refused in this slice; neither is completion evidence. Any future completion path after `416` must independently verify selected length and the entire local file. Short successful bodies, extra bytes and changed representations retain their owning result rather than becoming success.

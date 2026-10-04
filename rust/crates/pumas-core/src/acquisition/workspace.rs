@@ -660,6 +660,15 @@ impl AcquisitionWorkspace {
     }
 
     pub(crate) fn verify_file(&self, file: &ArtifactFile, partial: bool) -> Result<VerifiedFile> {
+        self.observe_file(file, partial, true)
+    }
+
+    fn observe_file(
+        &self,
+        file: &ArtifactFile,
+        partial: bool,
+        enforce_manifest: bool,
+    ) -> Result<VerifiedFile> {
         let (parent, name) = self.parent(file.logical_path(), false)?;
         let name = if partial { staging_path(&name) } else { name };
         let mut read_options = options();
@@ -674,9 +683,10 @@ impl AcquisitionWorkspace {
         let mut handle = parent.open_with(&name, &verification_options)?.into_std();
         let before = Metadata::from_file(&handle)?;
         if !before.is_file()
-            || file
-                .expected_size()
-                .is_some_and(|size| size != before.len())
+            || (enforce_manifest
+                && file
+                    .expected_size()
+                    .is_some_and(|size| size != before.len()))
         {
             return Err(changed());
         }
@@ -704,7 +714,7 @@ impl AcquisitionWorkspace {
         {
             return Err(changed());
         }
-        if let Some(expected) = file.expected_sha256() {
+        if let Some(expected) = file.expected_sha256().filter(|_| enforce_manifest) {
             if expected.value() != digest {
                 return Err(PumasError::HashMismatch {
                     expected: expected.value().into(),
@@ -782,7 +792,7 @@ impl AcquisitionWorkspace {
         let staged = self.verify_file(file, true)?;
         let (parent, name) = self.parent(file.logical_path(), false)?;
         if compare_existing {
-            let current = self.verify_file(file, false)?;
+            let current = self.observe_file(file, false, false)?;
             if current != staged {
                 return Err(PumasError::Validation {
                     field: "download.integrity".into(),
@@ -995,6 +1005,39 @@ mod tests {
             b"DATA"
         );
         assert_eq!(workspace.seal(&manifest).unwrap(), vec![published]);
+    }
+
+    #[test]
+    fn existing_file_mismatches_preserve_both_files_as_integrity_refusals() {
+        for existing in [b"EVIL".as_slice(), b"WRONG-SIZE".as_slice()] {
+            let temp = tempfile::tempdir().unwrap();
+            let workspace = AcquisitionWorkspace::from_capability(
+                crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+                WorkspaceIdentity {
+                    root_identity: "integrity-fixture".into(),
+                    relative_target: "stage".into(),
+                },
+                Arc::new(()),
+                || Ok(()),
+            )
+            .unwrap();
+            let manifest = verification_manifest(b"DATA");
+            std::fs::write(temp.path().join("payload.bin"), existing).unwrap();
+            let mut part = workspace.open_part("payload.bin", false).unwrap();
+            part.write_all(b"DATA").unwrap();
+            part.sync_all().unwrap();
+            drop(part);
+            assert!(matches!(workspace.publish_part(&manifest.files()[0], true),
+                Err(PumasError::Validation { ref field, .. }) if field == "download.integrity"));
+            assert_eq!(
+                std::fs::read(temp.path().join("payload.bin")).unwrap(),
+                existing
+            );
+            assert_eq!(
+                std::fs::read(temp.path().join("payload.bin.part")).unwrap(),
+                b"DATA"
+            );
+        }
     }
 
     #[cfg(windows)]

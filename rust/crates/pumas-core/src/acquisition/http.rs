@@ -8,6 +8,84 @@ use reqwest::header::{
 };
 use reqwest::{Response, StatusCode};
 
+/// HTTP transport whose credential policy is established before a request.
+///
+/// Existing clients convert without changing their configuration, but cannot
+/// carry explicit credentials: their redirect policy is opaque. Authenticated
+/// callers must pass their configured builder to [`Self::https`], which enforces
+/// HTTPS for both initial requests and redirects while preserving other options.
+#[derive(Clone)]
+pub struct AcquisitionHttpClient {
+    client: reqwest::Client,
+    credentials_over_https: bool,
+    #[cfg(test)]
+    loopback_fixture: Option<reqwest::Client>,
+}
+
+impl AcquisitionHttpClient {
+    pub fn https(builder: reqwest::ClientBuilder) -> reqwest::Result<Self> {
+        Ok(Self {
+            client: builder.https_only(true).build()?,
+            credentials_over_https: true,
+            #[cfg(test)]
+            loopback_fixture: None,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_loopback_fixture(mut self, client: reqwest::Client) -> Self {
+        self.loopback_fixture = Some(client);
+        self
+    }
+
+    pub(crate) fn for_request(&self, url: &str, credentials: bool) -> Result<&reqwest::Client> {
+        let parsed = reqwest::Url::parse(url)
+            .map_err(|_| invalid_response("HTTP artifact URL is invalid"))?;
+        let credentials =
+            credentials || !parsed.username().is_empty() || parsed.password().is_some();
+        #[cfg(test)]
+        {
+            let literal_loopback = reqwest::Url::parse(url).ok().is_some_and(|url| {
+                url.scheme() == "http"
+                    && url.host().is_some_and(|host| match host {
+                        url::Host::Ipv4(ip) => ip.is_loopback(),
+                        url::Host::Ipv6(ip) => ip.is_loopback(),
+                        url::Host::Domain(_) => false,
+                    })
+            });
+            if literal_loopback {
+                if let Some(fixture) = &self.loopback_fixture {
+                    return Ok(fixture);
+                }
+            }
+        }
+        if credentials {
+            if parsed.scheme() != "https" {
+                return Err(invalid_response(
+                    "HTTP artifact credentials require an HTTPS source",
+                ));
+            }
+            if !self.credentials_over_https {
+                return Err(invalid_response(
+                    "HTTP artifact credentials require an HTTPS-only transport builder",
+                ));
+            }
+        }
+        Ok(&self.client)
+    }
+}
+
+impl From<reqwest::Client> for AcquisitionHttpClient {
+    fn from(client: reqwest::Client) -> Self {
+        Self {
+            client,
+            credentials_over_https: false,
+            #[cfg(test)]
+            loopback_fixture: None,
+        }
+    }
+}
+
 /// A checked response to one whole-file or suffix-range artifact request.
 /// Body transfer remains owned by the caller's supervised acquisition attempt.
 #[derive(Debug)]
@@ -60,7 +138,7 @@ pub(crate) enum HttpBodyOutcome {
 /// manifest. A server which ignores Range returns a full response with
 /// `resumed == false`, requiring the caller to replace its partial file.
 pub(crate) async fn open_http_artifact(
-    client: &reqwest::Client,
+    client: &AcquisitionHttpClient,
     url: &str,
     manifest: &ArtifactManifest,
     file_index: usize,
@@ -75,6 +153,7 @@ pub(crate) async fn open_http_artifact(
     if resume_from > 0 && !manifest.permits_resume(file_index) {
         return Err(resume_identity_required());
     }
+    let client = client.for_request(url, authorization.is_some())?;
     let mut request = client.get(url).header(ACCEPT_ENCODING, "identity");
     if let Some(authorization) = authorization {
         request = request.header(AUTHORIZATION, authorization);
@@ -99,7 +178,9 @@ pub(crate) async fn open_http_artifact(
     let status = response.status();
     if resume_from > 0 && matches!(status, StatusCode::OK | StatusCode::PARTIAL_CONTENT) {
         let evidence = continuation.ok_or_else(resume_identity_required)?;
-        if resource != evidence.resource || strong_etag.as_deref() != Some(evidence.etag.as_str()) {
+        if !same_http_resource(manifest.source().provider(), &resource, &evidence.resource)
+            || strong_etag.as_deref() != Some(evidence.etag.as_str())
+        {
             return Err(invalid_response(
                 "HTTP continuation representation or resource changed",
             ));
@@ -194,6 +275,71 @@ pub(crate) async fn open_http_artifact(
             url: "artifact source".into(),
             message: format!("HTTP {status}"),
         }),
+    }
+}
+
+/// Compare resource identity without the narrowly recognized transport grants
+/// used by the existing source adapters. Unknown providers, hosts and query
+/// fields retain exact identity; ETag and length checks remain mandatory.
+fn same_http_resource(provider: &str, left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    fn identity(provider: &str, raw: &str) -> Option<String> {
+        let mut url = reqwest::Url::parse(raw).ok()?;
+        if url.scheme() != "https" {
+            return None;
+        }
+        let host = url.host_str()?;
+        let github = provider == "github" && host == "release-assets.githubusercontent.com";
+        let hf = provider == "huggingface"
+            && matches!(
+                host,
+                "cdn-lfs.huggingface.co"
+                    | "cdn-lfs.hf.co"
+                    | "cas-bridge.xethub.hf.co"
+                    | "us.aws.cdn.hf.co"
+            );
+        if !github && !hf {
+            return None;
+        }
+        // Preserve the original encoding/order of representation parameters.
+        // In particular, versionId, response overrides, and unknown parameters
+        // are not authentication material and must never be discarded.
+        let retained = url
+            .query()
+            .into_iter()
+            .flat_map(|query| query.split('&'))
+            .filter(|pair| {
+                let key = pair.split_once('=').map_or(*pair, |(key, _)| key);
+                let grant = if github {
+                    matches!(key, "se" | "st" | "ske" | "skt" | "sig" | "jwt")
+                } else {
+                    matches!(
+                        key,
+                        "X-Amz-Algorithm"
+                            | "X-Amz-Credential"
+                            | "X-Amz-Date"
+                            | "X-Amz-Expires"
+                            | "X-Amz-SignedHeaders"
+                            | "X-Amz-Signature"
+                            | "X-Amz-Security-Token"
+                            | "Expires"
+                            | "Policy"
+                            | "Signature"
+                            | "Key-Pair-Id"
+                    )
+                };
+                !grant
+            })
+            .collect::<Vec<_>>();
+        let query = retained.join("&");
+        url.set_query((!retained.is_empty()).then_some(query.as_str()));
+        Some(url.into())
+    }
+    match (identity(provider, left), identity(provider, right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
     }
 }
 
@@ -440,8 +586,10 @@ mod tests {
             etag: "\"fixture-v1\"".into(),
             total: manifest.files()[file_index].expected_size(),
         };
+        let transport =
+            AcquisitionHttpClient::from(client.clone()).with_loopback_fixture(client.clone());
         super::open_http_artifact(
-            client,
+            &transport,
             url,
             manifest,
             file_index,
@@ -547,7 +695,7 @@ mod tests {
                 total: Some(6),
             };
             let error = super::open_http_artifact(
-                &reqwest::Client::new(),
+                &AcquisitionHttpClient::from(reqwest::Client::new()),
                 url.as_str(),
                 &manifest(selected_file(6), RevisionStrength::Immutable),
                 0,
@@ -682,6 +830,262 @@ mod tests {
         ));
         let request = server.await.unwrap().to_ascii_lowercase();
         assert!(request.lines().any(|line| line == "range: bytes=3-"));
+    }
+
+    #[tokio::test]
+    async fn opaque_client_refuses_credentials_before_connecting() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("https://{}/artifact", listener.local_addr().unwrap());
+        let client = AcquisitionHttpClient::from(reqwest::Client::new());
+        let error = super::open_http_artifact(
+            &client,
+            &url,
+            &manifest(weak_file(6), RevisionStrength::Weak),
+            0,
+            0,
+            Some("Bearer fixture-only"),
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, PumasError::Validation { ref message, .. }
+            if message == "HTTP artifact credentials require an HTTPS-only transport builder"));
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(30), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn url_userinfo_requires_the_same_secure_transport_without_disclosure() {
+        let client = AcquisitionHttpClient::from(reqwest::Client::new());
+        for (url, expected) in [
+            (
+                "http://fixture-user:fixture-secret@example.invalid/artifact",
+                "HTTP artifact credentials require an HTTPS source",
+            ),
+            (
+                "https://fixture-user:fixture-secret@example.invalid/artifact",
+                "HTTP artifact credentials require an HTTPS-only transport builder",
+            ),
+            (
+                "https://:fixture-secret@example.invalid/artifact",
+                "HTTP artifact credentials require an HTTPS-only transport builder",
+            ),
+        ] {
+            let error = super::open_http_artifact(
+                &client,
+                url,
+                &manifest(weak_file(6), RevisionStrength::Weak),
+                0,
+                0,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                matches!(&error, PumasError::Validation { message, .. } if message == expected)
+            );
+            let diagnostic = error.to_string();
+            assert!(!diagnostic.contains("fixture-user"));
+            assert!(!diagnostic.contains("fixture-secret"));
+        }
+    }
+
+    #[tokio::test]
+    async fn https_transport_preserves_custom_ca_and_refuses_same_port_downgrade() {
+        use std::io::{Read, Write};
+        use std::time::{Duration, Instant};
+        // This public fixture key authenticates only this disposable loopback
+        // listener. Trust is installed only in the test's client builder.
+        let identity = native_tls::Identity::from_pkcs12(
+            include_bytes!("../../tests/fixtures/http-tls/localhost.p12"),
+            "fixture",
+        )
+        .unwrap();
+        let acceptor = native_tls::TlsAcceptor::new(identity).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let certificate = reqwest::Certificate::from_pem(include_bytes!(
+            "../../tests/fixtures/http-tls/localhost.pem"
+        ))
+        .unwrap();
+        let client = AcquisitionHttpClient::https(
+            reqwest::Client::builder()
+                .no_proxy()
+                .add_root_certificate(certificate)
+                .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                    attempt.follow()
+                }))
+                .timeout(Duration::from_secs(5)),
+        )
+        .unwrap();
+        let server = std::thread::spawn(move || -> std::result::Result<(String, bool), String> {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        std::thread::sleep(Duration::from_millis(5))
+                    }
+                    Err(error) => return Err(format!("TLS fixture accept failed: {error}")),
+                }
+            };
+            socket.set_nonblocking(false).map_err(|e| e.to_string())?;
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .map_err(|e| e.to_string())?;
+            socket
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .map_err(|e| e.to_string())?;
+            let mut tls = acceptor.accept(socket).map_err(|e| e.to_string())?;
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") && request.len() < 8192 {
+                let mut byte = [0];
+                tls.read_exact(&mut byte).map_err(|e| e.to_string())?;
+                request.push(byte[0]);
+            }
+            write!(tls, "HTTP/1.1 302 Found\r\nLocation: http://{address}/artifact\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").map_err(|e| e.to_string())?;
+            tls.flush().map_err(|e| e.to_string())?;
+            drop(tls);
+            let deadline = Instant::now() + Duration::from_millis(150);
+            loop {
+                match listener.accept() {
+                    Ok(_) => {
+                        return Ok((String::from_utf8(request).map_err(|e| e.to_string())?, true))
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            return Ok((
+                                String::from_utf8(request).map_err(|e| e.to_string())?,
+                                false,
+                            ));
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => return Err(error.to_string()),
+                }
+            }
+        });
+        let result = super::open_http_artifact(
+            &client,
+            &format!("https://{address}/artifact"),
+            &manifest(weak_file(6), RevisionStrength::Weak),
+            0,
+            0,
+            Some("Bearer fixture-only"),
+            None,
+        )
+        .await;
+        // Observe the server even when the client fails, before asserting.
+        let (request, followed) = tokio::task::spawn_blocking(move || server.join())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer fixture-only"));
+        assert!(
+            !followed,
+            "HTTPS-only transport must refuse before a plaintext connection"
+        );
+        assert!(matches!(result, Err(PumasError::Network { .. })));
+    }
+
+    #[test]
+    fn signed_resource_renewal_preserves_origin_path_and_representation_query() {
+        for (provider, prefix, auth) in [
+            (
+                "github",
+                "https://release-assets.githubusercontent.com/asset",
+                "sig",
+            ),
+            (
+                "huggingface",
+                "https://cdn-lfs.huggingface.co/object",
+                "X-Amz-Signature",
+            ),
+            (
+                "huggingface",
+                "https://cas-bridge.xethub.hf.co/object",
+                "Signature",
+            ),
+            ("huggingface", "https://us.aws.cdn.hf.co/object", "Policy"),
+        ] {
+            let original = format!("{prefix}?versionId=v1&{auth}=old");
+            let refreshed = format!("{prefix}?versionId=v1&{auth}=new");
+            assert!(same_http_resource(provider, &original, &refreshed));
+            assert!(!same_http_resource(
+                provider,
+                &original,
+                &refreshed.replace("v1", "v2")
+            ));
+            assert!(!same_http_resource(
+                provider,
+                &original,
+                &format!("{prefix}/other?versionId=v1&{auth}=new")
+            ));
+            assert!(!same_http_resource(
+                provider,
+                &original,
+                &refreshed.replace("https://", "http://")
+            ));
+            assert!(!same_http_resource("unknown", &original, &refreshed));
+            assert!(!same_http_resource(
+                provider,
+                &original,
+                &format!("{refreshed}&")
+            ));
+            assert!(!same_http_resource(
+                provider,
+                &original,
+                &format!("{refreshed}&response-content-type=other")
+            ));
+        }
+        assert!(!same_http_resource(
+            "huggingface",
+            "https://example.org/file?Signature=old",
+            "https://example.org/file?Signature=new"
+        ));
+        assert!(!same_http_resource(
+            "huggingface",
+            "https://api.hf.co/file?Signature=old",
+            "https://api.hf.co/file?Signature=new"
+        ));
+        assert!(!same_http_resource(
+            "github",
+            "https://release-assets.githubusercontent.com/asset?sig=old",
+            "https://other.githubusercontent.com/asset?sig=new"
+        ));
+    }
+
+    #[tokio::test]
+    async fn credentials_are_refused_before_plaintext_non_loopback_requests() {
+        for url in [
+            "http://example.invalid/artifact",
+            "http://localhost/artifact",
+            "ftp://127.0.0.1/artifact",
+        ] {
+            let error = open_http_artifact(
+                &reqwest::Client::new(),
+                url,
+                &manifest(weak_file(6), RevisionStrength::Weak),
+                0,
+                0,
+                Some("Bearer seeded-test-credential"),
+            )
+            .await
+            .unwrap_err();
+            assert!(matches!(error, PumasError::Validation { ref message, .. }
+                if message == "HTTP artifact credentials require an HTTPS source"));
+        }
     }
 
     #[tokio::test]
@@ -1020,7 +1424,7 @@ mod tests {
             total: Some(6),
         };
         let error = super::open_http_artifact(
-            &reqwest::Client::new(),
+            &AcquisitionHttpClient::from(reqwest::Client::new()),
             url.as_str(),
             &manifest(selected_file(6), RevisionStrength::Immutable),
             0,
@@ -1058,7 +1462,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/artifact", listener.local_addr().unwrap());
         let error = super::open_http_artifact(
-            &reqwest::Client::new(),
+            &AcquisitionHttpClient::from(reqwest::Client::new()),
             &url,
             &manifest(selected_file(6), RevisionStrength::Immutable),
             0,

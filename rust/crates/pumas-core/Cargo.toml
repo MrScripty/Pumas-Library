@@ -121,6 +121,8 @@ windows-sys = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
 
 [dev-dependencies]
+# Loopback TLS redirect regression only; already locked by reqwest.
+native-tls = "=0.2.14"
 tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
 
 [features]

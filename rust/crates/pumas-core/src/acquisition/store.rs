@@ -525,11 +525,50 @@ impl AcquisitionStore {
         receipt
             .validate_for_record(expected, lease)
             .map_err(|_| invalid_receipt("Consumer receipt does not match its acquisition"))?;
-        if matches!(&expected.phase, super::service::AcquisitionPhase::Using { lease: current } if *current == lease)
+        if !matches!(&expected.phase,
+            super::service::AcquisitionPhase::Using { lease: current_lease }
+                | super::service::AcquisitionPhase::Adopted { lease: current_lease }
+                if *current_lease == lease)
         {
-            self.issue_consumer_receipt(expected, lease, &receipt)?;
+            return Err(invalid_receipt(
+                "Consumer settlement requires its exact use lease",
+            ));
         }
-        self.settle_consumer_receipt(expected, lease, &receipt)
+        let transaction = self.transaction(false)?;
+        let mut document = transaction.document()?;
+        let Some(current) = document.acquisitions.get(&expected.id) else {
+            return Err(invalid_receipt("Consumer acquisition disappeared"));
+        };
+        let receipt_value = serde_json::to_value(receipt)?;
+        let mut adopted = expected.clone();
+        adopted.phase = super::service::AcquisitionPhase::Adopted { lease };
+        if current == &adopted
+            && document.consumer_receipts.get(&expected.id) == Some(&receipt_value)
+        {
+            return Ok(());
+        }
+        if current != expected
+            || !matches!(&expected.phase, super::service::AcquisitionPhase::Using { lease: current_lease } if *current_lease == lease)
+        {
+            return Err(invalid_receipt(
+                "Consumer settlement does not match the exact active acquisition lease",
+            ));
+        }
+        if document
+            .consumer_receipts
+            .get(&expected.id)
+            .is_some_and(|stored| stored != &receipt_value)
+        {
+            return Err(invalid_receipt(
+                "A conflicting consumer receipt is already published",
+            ));
+        }
+        document.acquisitions.insert(expected.id, adopted);
+        document
+            .consumer_receipts
+            .insert(expected.id, receipt_value);
+        document.validate()?;
+        require_durable(transaction.publish_document(&document))
     }
 
     pub(crate) fn issue_consumer_receipt(
@@ -549,6 +588,12 @@ impl AcquisitionStore {
         let receipt_value = serde_json::to_value(receipt)?;
         if current == expected
             && matches!(&current.phase, super::service::AcquisitionPhase::Using { lease: current_lease } if *current_lease == lease)
+            && document.consumer_receipts.get(&expected.id) == Some(&receipt_value)
+        {
+            return Ok(());
+        }
+        if current == expected
+            && matches!(&current.phase, super::service::AcquisitionPhase::Using { lease: current_lease } if *current_lease == lease)
         {
             if document
                 .consumer_receipts
@@ -564,12 +609,6 @@ impl AcquisitionStore {
                 .insert(expected.id, receipt_value);
             document.validate()?;
             return require_durable(transaction.publish_document(&document));
-        }
-        if current == expected
-            && matches!(&current.phase, super::service::AcquisitionPhase::Using { lease: current_lease } if *current_lease == lease)
-            && document.consumer_receipts.get(&expected.id) == Some(&receipt_value)
-        {
-            return Ok(());
         }
         Err(invalid_receipt(
             "Consumer receipt issuance does not match the exact active acquisition lease",
@@ -951,6 +990,91 @@ mod tests {
             Err(PumasError::Validation { ref field, .. }) if field == "acquisition.custody"
         ));
         assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn consumer_settlement_is_atomic_and_retry_accepts_exact_receipt() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("downloads.json");
+        let lease = Uuid::new_v4();
+        let expected = record(
+            Uuid::new_v4(),
+            "complete",
+            "model/path",
+            AcquisitionPhase::Using { lease },
+        );
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&document(vec![expected.clone()])).unwrap(),
+        )
+        .unwrap();
+        let store = AcquisitionStore::new(temp.path());
+        let receipt: AcquisitionConsumerReceipt =
+            serde_json::from_value(generic_receipt(&expected, lease)).unwrap();
+        store
+            .settle_consumer_use(&expected, lease, receipt.clone())
+            .unwrap();
+        assert_eq!(
+            store.acquisitions().unwrap()[&expected.id].phase,
+            AcquisitionPhase::Adopted { lease }
+        );
+        assert_eq!(
+            store.consumer_receipt(expected.id).unwrap(),
+            Some(receipt.clone())
+        );
+        let settled = std::fs::read(&path).unwrap();
+        store
+            .settle_consumer_use(&expected, lease, receipt.clone())
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), settled);
+        let mut conflict = receipt;
+        conflict.payload = serde_json::json!({"fixture": "different"});
+        assert!(store
+            .settle_consumer_use(&expected, lease, conflict)
+            .is_err());
+        let mut changed = expected.clone();
+        changed.demand.operation = "different".into();
+        let changed_receipt = serde_json::from_value(generic_receipt(&changed, lease)).unwrap();
+        assert!(store
+            .settle_consumer_use(&changed, lease, changed_receipt)
+            .is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), settled);
+    }
+
+    #[test]
+    fn receipt_issuance_is_idempotent_and_settlement_can_finish_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("downloads.json");
+        let lease = Uuid::new_v4();
+        let expected = record(
+            Uuid::new_v4(),
+            "complete",
+            "model/path",
+            AcquisitionPhase::Using { lease },
+        );
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&document(vec![expected.clone()])).unwrap(),
+        )
+        .unwrap();
+        let store = AcquisitionStore::new(temp.path());
+        let receipt: AcquisitionConsumerReceipt =
+            serde_json::from_value(generic_receipt(&expected, lease)).unwrap();
+        store
+            .issue_consumer_receipt(&expected, lease, &receipt)
+            .unwrap();
+        let issued = std::fs::read(&path).unwrap();
+        store
+            .issue_consumer_receipt(&expected, lease, &receipt)
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), issued);
+        store
+            .settle_consumer_use(&expected, lease, receipt)
+            .unwrap();
+        assert_eq!(
+            store.acquisitions().unwrap()[&expected.id].phase,
+            AcquisitionPhase::Adopted { lease }
+        );
     }
 
     #[test]

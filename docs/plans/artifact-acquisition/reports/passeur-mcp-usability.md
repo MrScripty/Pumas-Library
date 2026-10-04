@@ -147,7 +147,7 @@ service connects with open admission and `passeur_prepare` reports coordination
 ready/held. Identity reads succeed and the task list is empty. However,
 `passeur_agents` still returns `PATH_NOT_FOUND` at `profile.open`, and the
 expected project profile path
-`/home/jeremy/.config/muse-bridge/projects/6aaae9e5ae2b753918ac7478.json` does
+`<redacted-local-project-profile-path>` does
 not exist. Separately, `passeur_coordination` status reports `not_enabled`,
 which conflicts with the `passeur_prepare` readiness report. Execution profile,
 provider, and approval remain `not_checked`. No agent ID was returned and no

@@ -19,7 +19,10 @@ use uuid::Uuid;
 /// One operation-scoped decision between cancellation and durable completion.
 /// It replaces the download's boolean cancellation flag so the receipt boundary
 /// has a single atomic winner.
-pub(crate) struct DownloadCancellation(AtomicU8);
+pub(crate) struct DownloadCancellation {
+    state: AtomicU8,
+    decision_changed: tokio::sync::Notify,
+}
 
 impl DownloadCancellation {
     const ACTIVE: u8 = 0;
@@ -28,11 +31,14 @@ impl DownloadCancellation {
     const COMPLETING: u8 = 3;
 
     pub(crate) fn new() -> Self {
-        Self(AtomicU8::new(Self::ACTIVE))
+        Self {
+            state: AtomicU8::new(Self::ACTIVE),
+            decision_changed: tokio::sync::Notify::new(),
+        }
     }
 
     pub(crate) fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire) == Self::CANCELLED
+        self.state.load(Ordering::Acquire) == Self::CANCELLED
     }
 
     /// Reserve the cancellation decision before replacing the worker owner.
@@ -40,10 +46,10 @@ impl DownloadCancellation {
     /// the reservation after installing the finalizer.
     pub(crate) fn prepare_cancel(&self) -> Option<bool> {
         loop {
-            match self.0.load(Ordering::Acquire) {
+            match self.state.load(Ordering::Acquire) {
                 Self::ACTIVE => {
                     if self
-                        .0
+                        .state
                         .compare_exchange(
                             Self::ACTIVE,
                             Self::CANCEL_PREPARING,
@@ -64,38 +70,50 @@ impl DownloadCancellation {
 
     pub(crate) fn finish_cancel(&self, prepared: bool) -> bool {
         if !prepared {
-            return self.0.load(Ordering::Acquire) == Self::CANCELLED;
+            return self.state.load(Ordering::Acquire) == Self::CANCELLED;
         }
-        self.0
+        let committed = self
+            .state
             .compare_exchange(
                 Self::CANCEL_PREPARING,
                 Self::CANCELLED,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             )
-            .is_ok()
+            .is_ok();
+        self.decision_changed.notify_waiters();
+        committed
     }
 
     pub(crate) fn abort_cancel(&self, prepared: bool) {
         if prepared {
-            let _ = self.0.compare_exchange(
+            let _ = self.state.compare_exchange(
                 Self::CANCEL_PREPARING,
                 Self::ACTIVE,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             );
+            self.decision_changed.notify_waiters();
         }
     }
 
-    pub(crate) fn claim_completion(&self) -> bool {
-        match self.0.compare_exchange(
-            Self::ACTIVE,
-            Self::COMPLETING,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) | Err(Self::COMPLETING) => true,
-            Err(_) => false,
+    pub(crate) async fn claim_completion(&self) -> bool {
+        loop {
+            // Register before observing the reservation so a concurrent commit
+            // or rollback cannot be lost between the observation and wait.
+            let changed = self.decision_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            match self.state.compare_exchange(
+                Self::ACTIVE,
+                Self::COMPLETING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) | Err(Self::COMPLETING) => return true,
+                Err(Self::CANCEL_PREPARING) => changed.await,
+                Err(_) => return false,
+            }
         }
     }
 }
@@ -610,7 +628,7 @@ impl LibraryImportGuard {
     /// Resolve cancellation against managed import before any model publication
     /// effects begin. Once this succeeds, cancellation cannot report success
     /// while metadata/index effects are still being drained.
-    pub(crate) fn claim_final_import_completion(&self) -> Result<()> {
+    pub(crate) async fn claim_final_import_completion(&self) -> Result<()> {
         if self.partial {
             return Err(import_invalid(
                 "Partial import authority cannot claim final completion",
@@ -621,7 +639,7 @@ impl LibraryImportGuard {
             .as_ref()
             .and_then(|proof| proof.completion_decision.as_ref())
             .ok_or_else(|| import_invalid("Managed HF completion decision is unavailable"))?;
-        if completion_decision.claim_completion() {
+        if completion_decision.claim_completion().await {
             Ok(())
         } else {
             Err(PumasError::DownloadCancelled)
@@ -852,6 +870,31 @@ pub(crate) fn owned_mutation_outcome<T>(result: Result<T>) -> Result<Result<T>> 
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn completion_waits_for_cancellation_rollback() {
+        let decision = super::DownloadCancellation::new();
+        assert_eq!(decision.prepare_cancel(), Some(true));
+        let completion = decision.claim_completion();
+        tokio::pin!(completion);
+        assert!(futures::poll!(&mut completion).is_pending());
+        decision.abort_cancel(true);
+        assert!(completion.await);
+        assert_eq!(decision.prepare_cancel(), None);
+        assert!(!decision.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn completion_waits_for_committed_cancellation() {
+        let decision = super::DownloadCancellation::new();
+        assert_eq!(decision.prepare_cancel(), Some(true));
+        let completion = decision.claim_completion();
+        tokio::pin!(completion);
+        assert!(futures::poll!(&mut completion).is_pending());
+        assert!(decision.finish_cancel(true));
+        assert!(!completion.await);
+        assert!(decision.is_cancelled());
+    }
+
     use super::*;
 
     #[tokio::test]

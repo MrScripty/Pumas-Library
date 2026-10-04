@@ -717,7 +717,7 @@ impl CancellationPersistence {
 struct PreparedDownloadTask {
     #[cfg(test)]
     download_base_url: Option<String>,
-    client: reqwest::Client,
+    client: crate::acquisition::AcquisitionHttpClient,
     acquisition: Arc<crate::acquisition::AcquisitionService>,
     metadata_client: HuggingFaceClient,
     downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
@@ -4459,7 +4459,7 @@ impl HuggingFaceClient {
 
     #[allow(clippy::too_many_arguments)]
     async fn run_download(
-        client: reqwest::Client,
+        client: crate::acquisition::AcquisitionHttpClient,
         acquisition: Arc<crate::acquisition::AcquisitionService>,
         downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
         download_publications: Arc<DownloadPublicationOwner>,

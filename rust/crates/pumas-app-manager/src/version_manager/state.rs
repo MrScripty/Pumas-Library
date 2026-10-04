@@ -97,9 +97,10 @@ impl StateMutationTasks {
             let task = tokio::task::spawn_blocking(move || {
                 let result = work();
                 drop(lease);
-                let terminal = result.as_ref().map(|_| ()).map_err(ToString::to_string);
-                let _ = sender.send(result);
-                terminal
+                match sender.send(result) {
+                    Ok(()) => Ok(()),
+                    Err(unobserved) => unobserved.map(|_| ()).map_err(|error| error.to_string()),
+                }
             });
             state.tasks.tasks.push(task);
         }
@@ -480,7 +481,6 @@ impl VersionState {
                         versions.default_version = Some(new_tag.clone());
                     }
                 }
-                metadata_manager.save_versions(&versions, Some(AppId::LlamaCpp))?;
                 for (old_tag, new_tag) in replacements {
                     let old_path = versions_dir.join(&old_tag);
                     let new_path = versions_dir.join(&new_tag);
@@ -504,6 +504,9 @@ impl VersionState {
                         Err(error) => return Err(PumasError::io_with_path(error, &active_file)),
                     }
                 }
+                // Keep the old tags durable until every rename and active
+                // pointer update succeeds, so a partial migration can retry.
+                metadata_manager.save_versions(&versions, Some(AppId::LlamaCpp))?;
                 Ok(())
             })
             .await
@@ -1241,6 +1244,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn state_mutation_shutdown_does_not_replay_delivered_errors() {
+        let owner = StateMutationTasks::default();
+        for _ in 0..3 {
+            let error = owner
+                .leased_transaction(&(), || -> Result<()> {
+                    Err(PumasError::Other("delivered mutation error".into()))
+                })
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("delivered mutation error"));
+        }
+        owner.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn state_mutation_shutdown_drains_cancelled_waiters_and_retains_failures() {
         for terminal in ["success", "error", "panic"] {
             let (mut state, root) = create_test_state_for_app(AppId::LlamaCpp).await;
@@ -1551,6 +1570,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_llama_cpp_legacy_sycl_tag_migrates_to_precision_variant() {
+        assert_legacy_sycl_migration(false).await;
+    }
+
+    #[tokio::test]
+    async fn legacy_sycl_migration_retries_after_renames_before_metadata_save() {
+        assert_legacy_sycl_migration(true).await;
+    }
+
+    async fn assert_legacy_sycl_migration(interrupt_after_rename: bool) {
         let temp_dir = TempDir::new().unwrap();
         std::fs::create_dir_all(temp_dir.path().join("launcher-data/metadata")).unwrap();
         std::fs::create_dir_all(temp_dir.path().join("launcher-data/cache")).unwrap();
@@ -1583,6 +1611,32 @@ mod tests {
         metadata_manager
             .set_default_version(Some("b9090+sycl"), Some(AppId::LlamaCpp))
             .unwrap();
+
+        if interrupt_after_rename {
+            let active = temp_dir.path().join(".active-version");
+            std::fs::remove_file(&active).unwrap();
+            std::fs::create_dir(&active).unwrap();
+            assert!(
+                VersionState::new(temp_dir.path(), AppId::LlamaCpp, metadata_manager.clone())
+                    .await
+                    .is_err()
+            );
+            let retained = metadata_manager
+                .load_versions(Some(AppId::LlamaCpp))
+                .unwrap();
+            assert!(retained.installed.contains_key("b9090+sycl"));
+            assert!(!retained.installed.contains_key("b9090+sycl-fp16"));
+            assert!(!temp_dir
+                .path()
+                .join("llama-cpp-versions/b9090+sycl")
+                .exists());
+            assert!(temp_dir
+                .path()
+                .join("llama-cpp-versions/b9090+sycl-fp16/bin/llama-server")
+                .exists());
+            std::fs::remove_dir(&active).unwrap();
+            std::fs::write(&active, "b9090+sycl").unwrap();
+        }
 
         let state = VersionState::new(temp_dir.path(), AppId::LlamaCpp, metadata_manager.clone())
             .await

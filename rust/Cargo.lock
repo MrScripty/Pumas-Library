@@ -2342,6 +2342,7 @@ dependencies = [
  "hex",
  "libc",
  "mini-moka",
+ "native-tls",
  "nix 0.29.0",
  "notify",
  "ort",

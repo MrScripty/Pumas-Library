@@ -74,7 +74,7 @@ pub struct HuggingFaceClient {
     /// HTTP client for API requests (has total timeout)
     pub(super) client: Client,
     /// HTTP client for downloads (connect timeout only, no total timeout)
-    pub(super) download_client: Client,
+    pub(super) download_client: crate::acquisition::AcquisitionHttpClient,
     /// Cache directory for LFS file info (legacy JSON cache)
     pub(super) cache_dir: PathBuf,
     /// Active downloads
@@ -280,14 +280,26 @@ impl HuggingFaceClient {
         // Separate client for downloads: connect timeout only, no total timeout.
         // The total timeout would kill multi-gigabyte downloads that take longer
         // than 30 seconds. The stream loop handles progress and cancellation.
-        let download_client = Client::builder()
-            .connect_timeout(Duration::from_secs(30))
-            .user_agent("pumas-library/1.0")
-            .build()
-            .map_err(|e| PumasError::Network {
-                message: format!("Failed to create download HTTP client: {}", e),
-                cause: None,
-            })?;
+        let download_client = crate::acquisition::AcquisitionHttpClient::https(
+            Client::builder()
+                .connect_timeout(Duration::from_secs(30))
+                .user_agent("pumas-library/1.0"),
+        )
+        .map_err(|e| PumasError::Network {
+            message: format!("Failed to create download HTTP client: {}", e),
+            cause: None,
+        })?;
+
+        #[cfg(test)]
+        let download_client = download_client.with_loopback_fixture(
+            Client::builder()
+                .connect_timeout(Duration::from_secs(30))
+                .user_agent("pumas-library/1.0")
+                .build()
+                .map_err(|error| {
+                    PumasError::Other(format!("Fixture HTTP client failed: {error}"))
+                })?,
+        );
 
         let initial_token = auth::resolve_token_from_disk().map(|(token, source)| {
             info!("HuggingFace auth token found from {}", source);

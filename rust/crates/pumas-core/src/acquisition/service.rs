@@ -816,7 +816,7 @@ impl AcquisitionService {
         operation: &AcquisitionOperation,
         workspace: &AcquisitionWorkspace,
         file_index: usize,
-        client: &reqwest::Client,
+        client: &super::AcquisitionHttpClient,
         url: &str,
         authorization: Option<&str>,
         retry: &AcquisitionRetryPolicy,
@@ -1550,7 +1550,7 @@ impl AcquisitionConsumer {
     pub async fn acquire_http<Staged, Output, F, Fut, Publish, PublishFut>(
         &self,
         request: AcquisitionHttpRequest,
-        client: reqwest::Client,
+        client: impl Into<super::AcquisitionHttpClient>,
         mut host: Box<dyn AcquisitionHost>,
         prepare: F,
         publish: Publish,
@@ -1563,6 +1563,7 @@ impl AcquisitionConsumer {
         Publish: FnOnce(Staged, AcquisitionConsumerReceipt) -> PublishFut + Send + 'static,
         PublishFut: Future<Output = Result<Output>> + Send + 'static,
     {
+        let client = client.into();
         if request.demand.consumer != self.owner {
             return Err(invalid("Consumer demand identity does not match its scope"));
         }
@@ -1575,6 +1576,9 @@ impl AcquisitionConsumer {
             return Err(invalid(
                 "HTTP sources must match the exact selected manifest files",
             ));
+        }
+        for source in &request.sources {
+            client.for_request(&source.url, source.authorization.is_some())?;
         }
         let service = self.service.clone();
         self.scope
@@ -2670,7 +2674,7 @@ mod tests {
                         &operation,
                         &grant,
                         0,
-                        &reqwest::Client::new(),
+                        &reqwest::Client::new().into(),
                         &url,
                         None,
                         &retry(),
@@ -2727,7 +2731,7 @@ mod tests {
                         &operation,
                         &grant,
                         0,
-                        &reqwest::Client::new(),
+                        &reqwest::Client::new().into(),
                         &url,
                         None,
                         &retry(),
@@ -3819,7 +3823,8 @@ mod tests {
                     old_url.clone(),
                     &old_authorization,
                 ),
-                reqwest::Client::new(),
+                super::super::AcquisitionHttpClient::from(reqwest::Client::new())
+                    .with_loopback_fixture(reqwest::Client::new()),
                 Box::new(host.clone()),
                 move |_use_handle| async move {
                     prepare_on_denial.fetch_add(1, Ordering::SeqCst);
@@ -3884,7 +3889,8 @@ mod tests {
             timeout,
             consumer.acquire_http(
                 make_request(changed_manifest, old_url.clone(), &old_authorization),
-                reqwest::Client::new(),
+                super::super::AcquisitionHttpClient::from(reqwest::Client::new())
+                    .with_loopback_fixture(reqwest::Client::new()),
                 Box::new(host.clone()),
                 move |_use_handle| async move {
                     prepare_on_changed.fetch_add(1, Ordering::SeqCst);
@@ -3932,7 +3938,8 @@ mod tests {
             timeout,
             consumer.acquire_http(
                 make_request(original_manifest.clone(), refreshed_url, &new_authorization),
-                reqwest::Client::new(),
+                super::super::AcquisitionHttpClient::from(reqwest::Client::new())
+                    .with_loopback_fixture(reqwest::Client::new()),
                 Box::new(host.clone()),
                 move |use_handle| async move {
                     prepare_on_refresh.fetch_add(1, Ordering::SeqCst);

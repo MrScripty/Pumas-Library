@@ -6,6 +6,7 @@ an inference runtime. Never pass real credentials or a real bucket endpoint.
 """
 import argparse
 import hashlib
+import hmac
 import http.server
 import json
 import os
@@ -13,7 +14,6 @@ from pathlib import Path
 import re
 import shutil
 import signal
-import socket
 import ssl
 import struct
 import subprocess
@@ -29,7 +29,8 @@ ROOT = Path(__file__).resolve().parents[2]
 ACCESS = "installed-s3-synthetic-access"
 SECRET = "installed-s3-synthetic-secret"
 TOKEN = "installed-s3-synthetic-token"
-SECRETS = tuple(value.encode() for value in (ACCESS, SECRET, TOKEN))
+AMBIENT = ("synthetic-unselected-ambient-access", "synthetic-unselected-ambient-secret", "synthetic-unselected-ambient-token")
+SECRETS = tuple(value.encode() for value in (ACCESS, SECRET, TOKEN, *AMBIENT))
 WEIGHTS = b"GGUF" + struct.pack("<IQQ", 3, 0, 0)
 EMPTY_SHA = hashlib.sha256(b"").hexdigest()
 HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -47,6 +48,27 @@ def digest(path):
 
 def secret_free(data):
     check(all(secret not in data for secret in SECRETS), "synthetic credential escaped ephemeral boundary")
+
+
+def valid_signature(handler, secret):
+    # This fixture owns a simple path and one already canonical version query.
+    fields = dict(field.split("=", 1) for field in handler.headers["Authorization"].removeprefix("AWS4-HMAC-SHA256 ").split(", "))
+    access, scope = fields["Credential"].split("/", 1)
+    date, region, service, terminal = scope.split("/")
+    check(access == ACCESS and (region, service, terminal) == ("fixture-region", "s3", "aws4_request"), "unexpected signing scope")
+    signed = fields["SignedHeaders"]
+    names = signed.split(";")
+    check(names == sorted(names) and "host" in names and "x-amz-date" in names, "invalid signed header set")
+    if handler.server.token:
+        check("x-amz-security-token" in names, "session token was not signed")
+    parts = urllib.parse.urlsplit(handler.path)
+    headers = "".join(f"{name}:{' '.join(handler.headers[name].split())}\n" for name in names)
+    canonical = f"{handler.command}\n{parts.path}\n{parts.query}\n{headers}\n{signed}\n{handler.headers['x-amz-content-sha256']}"
+    message = f"AWS4-HMAC-SHA256\n{handler.headers['x-amz-date']}\n{scope}\n{hashlib.sha256(canonical.encode()).hexdigest()}"
+    key = ("AWS4" + secret).encode()
+    for component in (date, region, service, terminal):
+        key = hmac.digest(key, component.encode(), "sha256")
+    return hmac.compare_digest(hmac.new(key, message.encode(), "sha256").hexdigest(), fields["Signature"])
 
 
 class Source(http.server.ThreadingHTTPServer):
@@ -96,6 +118,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             check(bool(authorization) == source.authenticated, "unexpected signing mode")
             if source.authenticated:
                 check(authorization.startswith("AWS4-HMAC-SHA256 ") and f"Credential={ACCESS}/" in authorization, "missing explicit SigV4 identity")
+                check(valid_signature(self, SECRET) and not valid_signature(self, "wrong-synthetic-secret"), "invalid SigV4 signature")
             check(self.headers.get("x-amz-security-token") == (TOKEN if source.token else None), "unexpected session token")
             check(SECRET not in authorization, "secret key appeared on wire")
             source.requests.append({"method": "HEAD" if head else "GET", "version": version})
@@ -145,7 +168,7 @@ class Backend:
         self.root, self.output, self.overflow = root, bytearray(), False
         env = {**os.environ, "XDG_CONFIG_HOME": str(root / "config"), "APPDATA": str(root / "config"),
                "PUMAS_REGISTRY_DB_PATH": str(root / "registry.db"), "SSL_CERT_FILE": str(ca),
-               "AWS_ACCESS_KEY_ID": "synthetic-unselected-ambient-access", "AWS_SECRET_ACCESS_KEY": "synthetic-unselected-ambient-secret"}
+               "AWS_ACCESS_KEY_ID": AMBIENT[0], "AWS_SECRET_ACCESS_KEY": AMBIENT[1], "AWS_SESSION_TOKEN": AMBIENT[2]}
         self.process = subprocess.Popen([str(binary), "--launcher-root", str(root), "--port", "0", "--debug"],
                                         cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
         self.reader = threading.Thread(target=self.capture, daemon=True)
@@ -296,7 +319,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="pumas-installed-s3-") as temporary:
         workspace = Path(temporary)
         stage, installed = workspace / "stage", workspace / "installed"
-        stage.mkdir(); installed.mkdir()
+        stage.mkdir()
+        installed.mkdir()
         inputs = [(binary, "pumas-rpc"), (ROOT / "LICENSE", "LICENSE.txt"), (ROOT / "docs/release-attribution/0.7.0/THIRD-PARTY-NOTICES.txt", "THIRD-PARTY-NOTICES.txt"), (ROOT / "docs/plans/artifact-acquisition/reports/s3-reader-third-party-notices.txt", "S3-THIRD-PARTY-NOTICES.txt")]
         for original, name in inputs:
             shutil.copy2(original, stage / name)
@@ -325,7 +349,7 @@ if __name__ == "__main__":
         main()
     except Exception as error:
         message = str(error)
-        for value in (ACCESS, SECRET, TOKEN):
+        for value in (ACCESS, SECRET, TOKEN, *AMBIENT):
             message = message.replace(value, "[REDACTED]")
         print(json.dumps({"result": "failed", "error_type": type(error).__name__, "error": message}))
         raise SystemExit(1)

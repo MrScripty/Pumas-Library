@@ -58,3 +58,21 @@ the local sandbox helper is not modified or bypassed.
 Raw evidence and subsequent credential qualification are retained under
 `/workspace/scratch/s3-desktop-auth/`. Parent owns independent review, hosted
 qualification and PR/merge/Library coordination.
+
+## Implemented successor evidence
+
+Transport prerequisite is `0023bcf9954f99c2755395d82b8daa632f73bfcd`;
+authenticated successor is `39f7689ab20a10276839a8f5dff206879d53b008`.
+The closed credential DTO has no Debug/Clone/Serialize; per-field printable ASCII
+is bounded to 4096 bytes, with native access-key delimiter restrictions. Before
+admission, bounded temporary copies validate using the actual authenticated
+constructor and are dropped; owned originals move into the bounded native job.
+Safe Current/task/result records never contain credentials. All credential DOM
+nodes clear before the admission wait and on close/replacement/unmount; only
+boolean mode is React state. Lost acknowledgement observes UUID without replay.
+Actual controlled HTTPS, RPC, compiled preload/main transport and DOM tests cover
+these owners, capture and scan DEBUG stdout/stderr and owned files/receipts, and
+refuse reflected diagnostics. A proxy-configured global HTTP agent does not
+redirect the local request; a 302 response is refused without following Location.
+See [complete qualification](s3-desktop-authentication-qualification-2026-10-05.md)
+for exact logs and remaining browser/default/platform/provider limits.

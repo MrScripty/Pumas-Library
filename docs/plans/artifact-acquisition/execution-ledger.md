@@ -1,5 +1,29 @@
 # Acquisition execution ledger
 
+## 2026-10-05 — authenticated explicit-source desktop/RPC successor
+
+Separate `feat/s3-desktop-auth-106a6ca4` preserves frozen anonymous `106a6ca4`,
+review fixes `887308dc`, native `eabc3959`, reader `ffecce07`, main `05717338`
+and original PR40 `63123fd8` ancestry. Transport prerequisite `0023bcf9` contains
+reflected errors before IPC. Implementation `39f7689ab20a10276839a8f5dff206879d53b008`,
+tree `01f49715a2b3637826591a078134db0bc59f62ca`, adds a distinct authenticated
+command with bounded Deserialize-only credentials and one-use uncontrolled form
+inputs. Existing native HTTPS authenticated reader/import owns signing, identity,
+verification, finalization and receipts; safe task state carries no credentials.
+
+217 RPC tests, four no-S3 regressions, 860 frontend tests, final 17 focused tests,
+239 Electron tests (one native sandbox smoke skipped), eight generator tests,
+types/lint/builds, scoped Clippy/format/diff/frozen checks pass. Controlled HTTPS
+proves optional token signing, cancellation, static reflected-provider errors,
+exact receipt identity and credential exclusion from owned files/debug output.
+DOM evidence does not qualify browser behavior; existing sandbox/default ONNX
+403/fully strict dead-code blockers remain. See [qualification](reports/s3-desktop-authentication-qualification-2026-10-05.md)
+for commands, logs, corrections and lifetime limits. No frozen native/core,
+dependency or security policy changes. Parent owns review/hosted/PR/merge/Library
+coordination. Next existing-plan implementation candidate: explicit pinned
+multi-file desktop selection through the existing native bundle workflow;
+real-provider/refresh/platform acceptance remains separate. AQ-S3 stays pending.
+
 ## 2026-10-05 — anonymous explicit-source desktop/RPC successor
 
 Separate `feat/s3-desktop-workflow-eabc3959` preserves frozen native workflow

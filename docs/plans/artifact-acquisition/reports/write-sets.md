@@ -765,3 +765,24 @@ Anonymous UI is the admitted small slice; an authenticated secret boundary and
 real-provider/packaged/browser/platform qualification are separate. No security
 bypass, real credentials, paid service or external reviewer contact is admitted.
 Parent owns PR/review/merge/hosted/Library coordination.
+
+## Q3 authenticated desktop/RPC successor — 2026-10-05
+
+Scope was traced and reported before implementation in
+[s3-credential-boundaries-2026-10-05.md](s3-credential-boundaries-2026-10-05.md).
+Independent review fixes are frozen on `fix/s3-desktop-review-106a6ca4` at
+`887308dc`; authenticated successor descends from that tested commit and frozen
+anonymous `106a6ca4`. Prerequisite `0023bcf9` edits Electron `python-bridge.ts`,
+`main.ts`, new `s3-import-rpc.ts`, receiving/transport tests and the boundary trace.
+
+Authenticated implementation `39f7689a` edits only RPC contract/export/handler,
+`s3_imports.rs`/co-located tests; Electron registry/IPC/preload and three source
+contract/transport tests; frontend ImportAPI/bridge types, S3 dialog/hook and
+co-located tests; the six generated DTO/validator files; root/RPC READMEs and
+shared contract. Plan/ledger/boundary/qualification records document that scope.
+No core/app-manager, reader/signing/manifest, native repair, importer/watcher,
+discovery, dependency/lockfile or hosted workflow write is admitted. Credentials
+are bounded explicit ephemeral request data, with no ambient discovery,
+persistence, logging, automatic replay or refresh. Synthetic fixture credentials
+only; existing normally verified HTTPS trust remains unchanged. Parent owns
+review, hosted/browser/provider qualification, PRs/merges and Library delivery.

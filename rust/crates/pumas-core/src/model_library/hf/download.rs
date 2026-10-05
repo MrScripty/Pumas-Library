@@ -11134,8 +11134,13 @@ mod tests {
                     download_id,
                     DestinationDomain::Recovery,
                 );
+                let resumed = matches!(
+                    &first_result,
+                    Ok(RecoveryDownloadAdmission::Resumed { .. })
+                );
+                let admission_error = first_result.as_ref().err();
                 panic!(
-                    "committed worker must complete before the held waiter inspects state: {error}; first_admission={first_result:?}; download={download:?}; task={task:?}; destination_released={released}"
+                    "committed worker must complete before the held waiter inspects state: {error}; first_admission_resumed={resumed}; admission_error={admission_error:?}; download={download:?}; task={task:?}; destination_released={released}"
                 );
             });
             waiter_release.send(()).unwrap();

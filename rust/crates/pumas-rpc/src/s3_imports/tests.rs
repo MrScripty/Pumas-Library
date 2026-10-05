@@ -658,3 +658,417 @@ async fn source_pin_preflight_matches_reader_structural_refusal_without_io() {
     ));
     client.close();
 }
+
+fn bundle_params(endpoint: &str) -> Value {
+    json!({"operation_id":ID,"endpoint":endpoint,"region":"fixture-region","bucket":"fixture-bucket","addressing":"path",
+        "primary_logical_path":"weights.gguf","family":"fixture","official_name":"Desktop Bundle",
+        "files":[{"key":"models/shared","version_id":"weights-v1","logical_path":"weights.gguf","sha256":HASH},
+          {"key":"models/shared","version_id":"data-v2","logical_path":"config/data.json","sha256":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"}]})
+}
+#[test]
+fn source_bundle_structural_preflight_refuses_entire_set_before_admission() {
+    let (client, mut receiver) = S3Imports::channel();
+    for (field, value) in [
+        ("logical_path", json!("../data.json")),
+        ("logical_path", json!("WEIGHTS.GGUF")),
+        ("logical_path", json!("weights.gguf.part/data.json")),
+        ("logical_path", json!("config/run.py")),
+        ("version_id", json!("null")),
+        ("key", json!("../bad")),
+        ("sha256", json!("bad")),
+    ] {
+        let mut input = bundle_params("https://source.invalid");
+        input["files"][1][field] = value;
+        assert!(matches!(
+            client
+                .admit_bundle(serde_json::from_value(input).unwrap(), None)
+                .unwrap(),
+            S3ImportOutcome::Rejected { .. }
+        ));
+        assert!(matches!(
+            client.snapshot(None).unwrap(),
+            S3ImportOutcome::Idle
+        ));
+        assert!(receiver.try_recv().is_err());
+    }
+    let mut conflicting = bundle_params("https://source.invalid");
+    conflicting["files"][1]["version_id"] = json!("weights-v1");
+    assert!(matches!(
+        client
+            .admit_bundle(serde_json::from_value(conflicting).unwrap(), None)
+            .unwrap(),
+        S3ImportOutcome::Rejected { .. }
+    ));
+    let mut overbudget = bundle_params("https://source.invalid");
+    overbudget["files"]=json!((0..8).map(|i| json!({"key":"models/shared","version_id":"x".repeat(4096),"logical_path":if i==0 {"weights.gguf".to_string()} else {format!("data{i}.json")},"sha256":HASH})).collect::<Vec<_>>());
+    assert!(matches!(
+        client
+            .admit_bundle(serde_json::from_value(overbudget).unwrap(), None)
+            .unwrap(),
+        S3ImportOutcome::Rejected { .. }
+    ));
+    assert!(receiver.try_recv().is_err());
+    assert!(matches!(
+        client
+            .admit_bundle(
+                serde_json::from_value(bundle_params("https://source.invalid")).unwrap(),
+                None
+            )
+            .unwrap(),
+        S3ImportOutcome::Running { .. }
+    ));
+    assert_eq!(receiver.try_recv().unwrap().entries.len(), 2);
+    client.close();
+}
+
+#[cfg(all(target_os = "linux", not(feature = "inference-plugins")))]
+struct BundleSource {
+    endpoint: String,
+    thread: Option<std::thread::JoinHandle<Vec<String>>>,
+    started: tokio::sync::oneshot::Receiver<()>,
+}
+#[cfg(all(target_os = "linux", not(feature = "inference-plugins")))]
+impl BundleSource {
+    fn start(mode: u8) -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!(
+            "https://localhost:{}",
+            listener.local_addr().unwrap().port()
+        );
+        let (started, waiting) = tokio::sync::oneshot::channel();
+        let thread = std::thread::spawn(move || {
+            let identity = native_tls::Identity::from_pkcs12(
+                include_bytes!("../../../pumas-core/tests/fixtures/http-tls/localhost.p12"),
+                "fixture",
+            )
+            .unwrap();
+            let acceptor = native_tls::TlsAcceptor::new(identity).unwrap();
+            let mut captured = vec![];
+            let mut started = Some(started);
+            for (step, (head, primary)) in
+                [(true, false), (true, true), (false, false), (false, true)]
+                    .into_iter()
+                    .enumerate()
+            {
+                let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                let socket = loop {
+                    match listener.accept() {
+                        Ok((socket, _)) => break socket,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(
+                                std::time::Instant::now() < deadline,
+                                "bundle source accept deadline"
+                            );
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(error) => panic!("{error}"),
+                    }
+                };
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                socket
+                    .set_write_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut socket = acceptor.accept(socket).unwrap();
+                let mut request = vec![];
+                while !request.ends_with(b"\r\n\r\n") {
+                    assert!(request.len() < 16 * 1024);
+                    let mut byte = [0];
+                    socket.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(request.starts_with(if head { "HEAD " } else { "GET " }));
+                assert!(request.contains(if primary {
+                    "versionId=weights-v1"
+                } else {
+                    "versionId=data-v2"
+                }));
+                assert!(request.contains("/fixture-bucket/models/shared?"));
+                captured.push(request);
+                if mode == 1 && step == 1 {
+                    started.take().unwrap().send(()).unwrap();
+                    let mut byte = [0];
+                    assert_eq!(socket.read(&mut byte).unwrap(), 0);
+                    break;
+                }
+                if mode == 3 && step == 1 {
+                    let body = format!("{ACCESS} {SECRET} {TOKEN}");
+                    write!(socket,"HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
+                    break;
+                }
+                let bytes = if primary { gguf() } else { b"{}".to_vec() };
+                let version = if primary { "weights-v1" } else { "data-v2" };
+                write!(socket,"HTTP/1.1 {}\r\nContent-Length: {}\r\n{}Last-Modified: Wed, 01 Jan 2025 00:00:00 GMT\r\nx-amz-version-id: {}\r\nETag: \"selected\"\r\nConnection: close\r\n\r\n",if head {"200 OK"} else {"206 Partial Content"},bytes.len(),if head {String::new()} else {format!("Content-Range: bytes 0-{}/{}\r\n",bytes.len()-1,bytes.len())},version).unwrap();
+                if !head {
+                    socket
+                        .write_all(if mode == 2 && primary {
+                            &bytes[..1]
+                        } else {
+                            &bytes
+                        })
+                        .unwrap();
+                    socket.flush().unwrap();
+                    if mode == 2 && primary {
+                        started.take().unwrap().send(()).unwrap();
+                        let mut byte = [0];
+                        assert_eq!(socket.read(&mut byte).unwrap(), 0);
+                    }
+                    if mode == 4 {
+                        break;
+                    }
+                }
+            }
+            captured
+        });
+        Self {
+            endpoint,
+            thread: Some(thread),
+            started: waiting,
+        }
+    }
+    fn finish(mut self) -> Vec<String> {
+        self.thread.take().unwrap().join().unwrap()
+    }
+}
+#[cfg(all(target_os = "linux", not(feature = "inference-plugins")))]
+#[tokio::test]
+async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction() {
+    const MARKER: &str = "PUMAS_S3_BUNDLE_RPC_TLS_CHILD";
+    if std::env::var_os(MARKER).is_none() {
+        let config = tempfile::TempDir::new().unwrap();
+        let output=std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact","s3_imports::tests::source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction","--nocapture"])
+            .env(MARKER,"1").env("XDG_CONFIG_HOME",config.path()).env("SSL_CERT_FILE",Path::new(env!("CARGO_MANIFEST_DIR")).join("../pumas-core/tests/fixtures/http-tls/localhost.pem"))
+            .env("AWS_ACCESS_KEY_ID","synthetic-unselected-ambient-key").env("AWS_SECRET_ACCESS_KEY","synthetic-unselected-ambient-secret").output().unwrap();
+        for value in [ACCESS, SECRET, TOKEN] {
+            for stream in [&output.stdout, &output.stderr] {
+                assert!(
+                    !stream
+                        .windows(value.len())
+                        .any(|bytes| bytes == value.as_bytes()),
+                    "bundle child exposed credential; output withheld"
+                );
+            }
+        }
+        assert!(
+            output.status.success(),
+            "bundle child failed; output withheld"
+        );
+        return;
+    }
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .try_init()
+        .unwrap();
+    for (mode, auth, token) in [
+        (0, false, false),
+        (0, true, false),
+        (0, true, true),
+        (1, true, true),
+        (2, true, true),
+        (3, true, true),
+        (4, false, false),
+    ] {
+        let root = tempfile::TempDir::new().unwrap();
+        let api = pumas_library::PumasApi::builder(root.path())
+            .auto_create_dirs(true)
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let library = api.model_library().clone();
+        let acquisition = api.acquisition().clone();
+        let server = start_server(
+            api,
+            LoopbackHost::parse("127.0.0.1").unwrap(),
+            0,
+            crate::http_transport::HttpShutdownPolicy::default(),
+        )
+        .await
+        .unwrap();
+        let mut source = BundleSource::start(mode);
+        let mut input = bundle_params(&source.endpoint);
+        // Real RPC refuses invalid complete sets before any stage or source I/O;
+        // the corrected same-process request remains admissible afterwards.
+        for path in [
+            "../bad.json",
+            "WEIGHTS.GGUF",
+            "weights.gguf.part/data.json",
+            "run.py",
+        ] {
+            let mut bad = input.clone();
+            bad["files"][1]["logical_path"] = json!(path);
+            let denied = rpc(&server, "start_s3_model_bundle_import", bad).await;
+            assert_eq!(denied["error"]["code"], -32602);
+            assert_eq!(
+                rpc(&server, "get_s3_model_import", json!({})).await["result"]["status"],
+                "idle"
+            );
+            assert!(!root
+                .path()
+                .join(format!("launcher-data/.s3-import-{ID}"))
+                .exists());
+            assert!(acquisition.store().acquisitions().unwrap().is_empty());
+        }
+        if mode == 4 {
+            input["files"][1]["sha256"] = json!("b".repeat(64));
+        }
+        let (method, input) = if auth {
+            (
+                "start_authenticated_s3_model_bundle_import",
+                json!({"source":input,"credentials":{"access_key_id":ACCESS,"secret_access_key":SECRET,"session_token":if token {Some(TOKEN)} else {None}}}),
+            )
+        } else {
+            ("start_s3_model_bundle_import", input)
+        };
+        assert_eq!(
+            rpc(&server, method, input).await["result"]["status"],
+            "running"
+        );
+        if mode == 1 || mode == 2 {
+            tokio::time::timeout(Duration::from_secs(5), &mut source.started)
+                .await
+                .unwrap()
+                .unwrap();
+            if mode == 2 {
+                let observation = tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        let value = rpc(
+                            &server,
+                            "get_s3_model_bundle_import",
+                            json!({"operation_id":ID}),
+                        )
+                        .await;
+                        if value["result"]["bundle_progress"]["total_bytes_observed"] == "3" {
+                            break value["result"].clone();
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                let p = &observation["bundle_progress"];
+                assert_eq!(p["bytes_acquired"], "2");
+                assert_eq!(p["files_acquired"], 1);
+                assert_eq!(p["files_total"], 2);
+                assert_eq!(p["total_expected_bytes"], "26");
+                assert_eq!(p["file_index"], 1);
+                assert_eq!(
+                    observation["outcome"]["progress"]["downloaded_for_current_file"],
+                    "1"
+                );
+            }
+            assert_eq!(
+                rpc(
+                    &server,
+                    "cancel_s3_model_import",
+                    json!({"operation_id":ID})
+                )
+                .await["result"]["accepted"],
+                true
+            );
+        }
+        let result = terminal(&server).await;
+        for value in [ACCESS, SECRET, TOKEN] {
+            assert!(!result.to_string().contains(value));
+        }
+        let bundle = rpc(
+            &server,
+            "get_s3_model_bundle_import",
+            json!({"operation_id":ID}),
+        )
+        .await;
+        assert_eq!(bundle["result"]["outcome"], result);
+        assert!(bundle["result"]["bundle_progress"].is_null());
+        if mode == 0 {
+            assert_eq!(result["result"]["status"], "completed");
+            let model = result["result"]["model_id"].as_str().unwrap();
+            assert_eq!(
+                library
+                    .get_effective_metadata(model)
+                    .unwrap()
+                    .unwrap()
+                    .import_state,
+                Some(pumas_library::models::ImportState::Ready)
+            );
+            let destination = library.library_root().join(model);
+            assert_eq!(
+                std::fs::read(destination.join("weights.gguf")).unwrap(),
+                gguf()
+            );
+            assert_eq!(
+                std::fs::read(destination.join("config/data.json")).unwrap(),
+                b"{}"
+            );
+            let records = acquisition.store().acquisitions().unwrap();
+            assert_eq!(records.len(), 1);
+            let record = records.values().next().unwrap();
+            assert_eq!(record.manifest.files().len(), 2);
+            assert!(record
+                .manifest
+                .files()
+                .iter()
+                .all(|file| file.source_key().starts_with("[\"models/shared\",")));
+            let consumer = acquisition.open_consumer("model.s3.workflow").unwrap();
+            let receipt = consumer.completion_receipt(record).unwrap().unwrap();
+            assert_eq!(receipt.demand, record.demand);
+            assert_eq!(receipt.manifest, record.manifest);
+            assert_eq!(receipt.owner, "model.s3.workflow");
+            assert_eq!(receipt.payload["path"], "weights.gguf");
+            consumer.shutdown().await.unwrap();
+        } else {
+            assert_eq!(
+                result["result"]["status"],
+                if mode == 1 || mode == 2 {
+                    "cancelled"
+                } else {
+                    "failed"
+                }
+            );
+            assert_eq!(result["result"]["retained_work"], true);
+            assert!(library.list_models().await.unwrap().is_empty());
+            if mode == 3 {
+                assert!(acquisition.store().acquisitions().unwrap().is_empty());
+            }
+            let replay = rpc(
+                &server,
+                "start_s3_model_bundle_import",
+                bundle_params(&source.endpoint),
+            )
+            .await;
+            assert_eq!(replay["result"]["status"], "rejected");
+        }
+        server.shutdown().await.unwrap();
+        let captured = source.finish();
+        assert_eq!(
+            captured.len(),
+            match mode {
+                1 | 3 => 2,
+                4 => 3,
+                _ => 4,
+            }
+        );
+        for request in captured {
+            let lower = request.to_ascii_lowercase();
+            assert_eq!(lower.contains("authorization: aws4-hmac-sha256"), auth);
+            assert!(!request.contains(SECRET));
+            assert!(!request.contains("synthetic-unselected-ambient-key"));
+            if auth {
+                assert!(request.contains(&format!("Credential={ACCESS}/")));
+                assert_eq!(request.contains(TOKEN), token);
+                assert_eq!(lower.contains("x-amz-security-token:"), token);
+            }
+        }
+        for path in walk_owned_files(root.path()) {
+            let bytes = std::fs::read(path).unwrap();
+            for value in [ACCESS, SECRET, TOKEN] {
+                assert!(!bytes
+                    .windows(value.len())
+                    .any(|bytes| bytes == value.as_bytes()));
+            }
+        }
+    }
+}

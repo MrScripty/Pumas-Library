@@ -69,3 +69,18 @@ test('S3 response decoders retain exact u64 progress and typed custody outcomes'
   }
   assert.equal(decodeS3ImportOutcome({ ...running, token: 'synthetic-secret' }).status, 'invalid');
 });
+
+test('bundle IPC requires a bounded complete per-file pin set and preserves ephemeral authenticated construction', () => {
+  const {key,version_id,filename,sha256,...source}=request;
+  const bundle={...source,primary_logical_path:filename,files:[{key,version_id,logical_path:filename,sha256},{key,version_id:'other-version',logical_path:'config/data.json',sha256:'b'.repeat(64)}]};
+  assert.deepEqual(JSON.parse(JSON.stringify(validateApiCallPayload('start_s3_model_bundle_import',bundle).params)),bundle);
+  const credentials={access_key_id:'synthetic-bundle-ipc-key',secret_access_key:'synthetic-bundle-ipc-secret',session_token:null};
+  const decoded=validateApiCallPayload('start_authenticated_s3_model_bundle_import',{source:bundle,credentials});
+  assert.deepEqual(JSON.parse(JSON.stringify(decoded.params)),{source:bundle,credentials});assert.notEqual(decoded.params.credentials,credentials);
+  for(const patch of [{version_id:'null'},{key:'../bad'},{logical_path:'../data.json'},{logical_path:'CON.json'},{sha256:'bad'},{credentials}]) {
+    assert.throws(()=>validateApiCallPayload('start_s3_model_bundle_import',{...bundle,files:[bundle.files[0],{...bundle.files[1],...patch}]}),error=>error.message==='Invalid S3 bundle parameters');
+  }
+  for(const files of [[],[bundle.files[0]],Array(33).fill(bundle.files[0])]) assert.throws(()=>validateApiCallPayload('start_s3_model_bundle_import',{...bundle,files}));
+  assert.throws(()=>validateApiCallPayload('start_authenticated_s3_model_bundle_import',{source:bundle,credentials:{...credentials,profile:credentials.secret_access_key}}),error=>!String(error).includes(credentials.secret_access_key));
+  assert.deepEqual(JSON.parse(JSON.stringify(validateApiCallPayload('get_s3_model_bundle_import',{operation_id:id}).params)),{operation_id:id});
+});

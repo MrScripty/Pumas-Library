@@ -2,6 +2,8 @@ import type { OpenDialogOptions } from 'electron';
 import {
   decodeS3ImportParams,
   decodeS3AuthenticatedImportParams,
+  decodeS3BundleImportParams,
+  decodeS3AuthenticatedBundleImportParams,
   decodeS3ImportStatusParams,
   decodeS3ImportCancelParams,
   decodeDownloadIdParams,
@@ -57,6 +59,13 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
   }
 
   const method = rawMethod as RpcMethodName;
+  if (method === 'start_s3_model_bundle_import' || method === 'start_authenticated_s3_model_bundle_import' || method === 'get_s3_model_bundle_import') {
+    const decoded = method === 'start_s3_model_bundle_import' ? decodeS3BundleImportParams(rawParams)
+      : method === 'start_authenticated_s3_model_bundle_import' ? decodeS3AuthenticatedBundleImportParams(rawParams)
+      : decodeS3ImportStatusParams(rawParams);
+    if (decoded.status !== 'valid') throw new Error('Invalid S3 bundle parameters');
+    return { method, params: decoded.value };
+  }
   if (method === 'start_authenticated_s3_model_import') {
     const decoded = decodeS3AuthenticatedImportParams(rawParams);
     if (decoded.status !== 'valid') throw new Error('Invalid authenticated S3 import parameters');

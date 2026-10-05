@@ -42,6 +42,45 @@ configuration, refuses redirects, bounds responses to 64 KiB, correlates JSON-RP
 IDs and projects static failures before IPC. Reflected response/error text never
 reaches renderer diagnostics. No listener, TLS trust or security settings change.
 
+`start_s3_model_bundle_import` adds a complete explicit file-set path. It accepts
+`operation_id`, `endpoint`, `region`, `bucket`, `addressing`, `family`,
+`official_name`, `primary_logical_path` and `files`. The set has 2–32 members,
+each exactly `{key, version_id, logical_path, sha256}`. The primary must be a
+selected ASCII GGUF basename; other paths must be portable relative paths with
+extensions `json`, `txt`, `md`, `model`, `tiktoken`, `vocab` or `merges`, matching
+the existing native bundle importer. One key may select different versions;
+conflicting evidence for the same key/version, duplicate/colliding paths,
+staging aliases and prefix collisions are refused by shared manifest validation.
+The actual reader's pure preflight also enforces exact object-key semantics and
+the existing 16 KiB encoded revision limit before job/workspace admission.
+This is an explicit set, without prefix enumeration or atomic snapshot claims.
+
+`start_authenticated_s3_model_bundle_import` takes
+`{source: <bundle start params>, credentials: <the same credential params>}`.
+It preserves the one-use credential and HTTPS rules above. Both bundle starts
+return the existing `S3ImportOutcome`; existing single-object starts remain
+unchanged. Cancellation uses the same `cancel_s3_model_import` UUID command.
+
+`get_s3_model_bundle_import` takes the same optional UUID as the existing getter
+and returns `{outcome: S3ImportOutcome, bundle_progress: <progress or null>}`.
+It can observe either a single-object or bundle job from the same owner. Only a
+running outcome includes aggregate progress: zero-based `file_index` (null
+between files), `files_total`, `files_acquired`, decimal-string `bytes_acquired`,
+`total_expected_bytes` (null until the complete selection resolves) and
+`total_bytes_observed`. File indices follow logical-path order. Total observed
+bytes combine acquired staging bytes with current-file attempt bytes; retries
+can lower the latter, so this is not a monotone network-byte counter. Acquired
+files/bytes are individual staging observations; complete-set verification,
+publication, registration and receipt settlement remain separate. Neither full
+byte counts nor cancellation acknowledgement mean the model was published.
+Terminal results preserve the existing possible publication ID and retained-work
+semantics. Progress includes no keys, source endpoints or credentials.
+
+The dialog adds up to 31 explicit auxiliary rows and observes aggregate progress
+through the additive getter, including when reopened. Removing a row changes
+only the unsubmitted draft. Every selected file needs its own immutable pin and
+expected digest; credentials still clear before any admission wait.
+
 `get_s3_model_import` accepts optional/null `operation_id`; omission reads the
 one retained process-local job. `cancel_s3_model_import` requires its exact UUID
 and returns `{accepted, outcome}`. Cancellation acknowledgement is not proof

@@ -106,3 +106,10 @@ test('S3 local transport stays direct despite a proxy-configured global agent an
     await Promise.all([new Promise(resolve => direct.close(resolve)), new Promise(resolve => proxy.close(resolve))]);
   }
 });
+
+test('bundle observation receiving boundary projects reflected errors before IPC', async () => {
+  const observation={outcome:{status:'finished',operation_id:'c3f7d104-1234-4321-abcd-aaaaaaaaaaaa',result:{status:'failed',error:{code:-32603,class:'internal',message:'synthetic-bundle-reflected-secret'},retained_work:true,published_model_id:'fixture/model'}},bundle_progress:null};
+  const safe=await receiveS3ImportRpc('get_s3_model_bundle_import',async()=>observation);
+  assert.equal(safe.outcome.result.published_model_id,'fixture/model');assert.ok(!JSON.stringify(safe).includes('synthetic-bundle-reflected-secret'));
+  await assert.rejects(()=>receiveS3ImportRpc('get_s3_model_bundle_import',async()=>({...observation,credentials:'synthetic-bundle-reflected-secret'})),error=>String(error)===`Error: ${S3_RPC_FAILURE}`);
+});

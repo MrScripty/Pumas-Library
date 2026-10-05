@@ -1580,3 +1580,19 @@ test('cached-liveness routes remain unexposed by the actual preload API', () => 
   assert.equal(Object.hasOwn(harness.api, 'is_torch_running'), false);
   assert.equal(harness.invocations.length, 0);
 });
+
+test('compiled bundle preload forwards complete anonymous/authenticated pins and decodes aggregate observations', async () => {
+  const harness=loadCompiledPreload();const id='c3f7d104-1234-4321-abcd-aaaaaaaaaaaa';
+  const source={operation_id:id,endpoint:'https://source.invalid',region:'fixture-region',bucket:'fixture-bucket',addressing:'path',family:'fixture',official_name:'Bundle',primary_logical_path:'weights.gguf',
+    files:[{key:'models/shared',version_id:'v1',logical_path:'weights.gguf',sha256:'a'.repeat(64)},{key:'models/shared',version_id:'v2',logical_path:'config/data.json',sha256:'b'.repeat(64)}]};
+  const running={status:'running',operation_id:id,progress:{phase:'acquiring',downloaded_for_current_file:'1'}};
+  harness.respondWith(running);await harness.api.start_s3_model_bundle_import(source);
+  assert.equal(harness.invocations.at(-1)?.[1],'start_s3_model_bundle_import');assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]),source);
+  const request={source,credentials:{access_key_id:'synthetic-bundle-preload-key',secret_access_key:'synthetic-bundle-preload-secret'}};
+  harness.respondWith(running);await harness.api.start_authenticated_s3_model_bundle_import(request);
+  assert.equal(harness.invocations.at(-1)?.[1],'start_authenticated_s3_model_bundle_import');assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]),request);
+  const observation={outcome:running,bundle_progress:{file_index:1,files_total:2,files_acquired:1,bytes_acquired:'9007199254740993',total_expected_bytes:'18446744073709551615',total_bytes_observed:'9007199254740994'}};
+  harness.respondWith(observation);assert.deepEqual(toPlainValue(await harness.api.get_s3_model_bundle_import(id)),observation);
+  harness.respondWith({...observation,bundle_progress:{...observation.bundle_progress,secret:'synthetic-bundle-preload-secret'}});
+  await assert.rejects(()=>harness.api.get_s3_model_bundle_import(id),error=>!String(error).includes('synthetic-bundle-preload-secret'));
+});

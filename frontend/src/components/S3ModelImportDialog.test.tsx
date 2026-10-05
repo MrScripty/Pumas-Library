@@ -1,9 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { S3ModelImportDialog } from './S3ModelImportDialog';
-import type { S3ImportOutcome } from '../generated/desktop-contract';
+import type { S3BundleProgressWire, S3ImportOutcome } from '../generated/desktop-contract';
 const hook = vi.hoisted(() => ({ snapshot: null as S3ImportOutcome | null, error: null,
-  commandBusy: false, start: vi.fn(), startAuthenticated: vi.fn(), cancel: vi.fn(), observeAgain: vi.fn() }));
+  bundleProgress: null as S3BundleProgressWire | null, commandBusy: false, startBundle: vi.fn(), start: vi.fn(), startAuthenticated: vi.fn(), cancel: vi.fn(), observeAgain: vi.fn() }));
 vi.mock('../hooks/useS3ModelImport', () => ({ useS3ModelImport: () => hook }));
 describe('S3 import dialog content and commands (DOM fixture)', () => {
   beforeEach(() => { vi.clearAllMocks(); hook.snapshot = { status: 'idle' }; });
@@ -70,5 +70,38 @@ describe('S3 import dialog content and commands (DOM fixture)', () => {
     view.rerender(<S3ModelImportDialog onClose={vi.fn()} />);
     expect(screen.getByText(/backend built with the S3 feature/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import pinned object' })).toBeDisabled();
+  });
+});
+
+describe('S3 explicit bundle inputs (DOM fixture)', () => {
+  it('forwards exact per-file pins without row bookkeeping and clears bundle credentials before the wait', () => {
+    hook.snapshot = {status:'idle'}; hook.startBundle.mockReturnValueOnce(new Promise(() => {}));
+    render(<S3ModelImportDialog onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', {name:'Add auxiliary file'}));
+    for (const [label,value] of [['exact object key','models/shared'],['immutable VersionId','data-v2'],['logical output path','config/data.json'],['expected SHA-256','b'.repeat(64)]]) {
+      fireEvent.change(screen.getByLabelText(`Auxiliary 1 ${label}`),{target:{value}});
+    }
+    fireEvent.click(screen.getByLabelText('Use one-use credentials'));
+    const secret=screen.getByLabelText('Secret access key');fireEvent.change(secret,{target:{value:'synthetic-bundle-secret'}});
+    fireEvent.change(screen.getByLabelText('Access key ID'),{target:{value:'synthetic-bundle-key'}});
+    const form=screen.getByRole('button',{name:'Import pinned object'}).closest('form'); expect(form).not.toBeNull(); if(form) fireEvent.submit(form);
+    expect(hook.startBundle).toHaveBeenCalledWith(expect.anything(),[{key:'models/shared',version_id:'data-v2',logical_path:'config/data.json',sha256:'b'.repeat(64)}],
+      {access_key_id:'synthetic-bundle-key',secret_access_key:'synthetic-bundle-secret',session_token:null});
+    expect(secret).toHaveValue('');
+    fireEvent.click(screen.getByRole('button',{name:'Remove auxiliary 1'}));expect(screen.queryByLabelText('Auxiliary 1 logical output path')).not.toBeInTheDocument();
+  });
+  it('shows aggregate staging evidence separately from publication and preserves a possible publication result', () => {
+    hook.snapshot={status:'running',operation_id:'fixture-id',progress:{phase:'acquiring',downloaded_for_current_file:'1'}};
+    hook.bundleProgress={file_index:1,files_total:2,files_acquired:1,bytes_acquired:'9007199254740993',total_expected_bytes:'18446744073709551615',total_bytes_observed:'9007199254740994'};
+    const view=render(<S3ModelImportDialog onClose={vi.fn()} />);
+    expect(screen.getByText(/9007199254740994 of 18446744073709551615/)).toHaveTextContent('do not prove publication');
+    expect(screen.getByText(/1 of 2 selected files/)).toHaveTextContent('registration follow separately');
+    expect(screen.getByRole('button',{name:'Cancel import'})).toBeEnabled();
+    expect(screen.getByRole('button',{name:'Add auxiliary file'})).toBeDisabled();
+    hook.snapshot={status:'finished',operation_id:'fixture-id',result:{status:'failed',retained_work:true,published_model_id:'fixture/possible-model',error:{code:-32603,class:'internal',message:'Import failed'}}};
+    view.rerender(<S3ModelImportDialog onClose={vi.fn()} />);
+    expect(screen.getByText(/Publication may exist for fixture\/possible-model/)).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Import pinned object'})).toBeDisabled();
+    hook.bundleProgress=null;
   });
 });

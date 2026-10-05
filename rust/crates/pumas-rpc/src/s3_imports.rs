@@ -21,6 +21,7 @@ use tokio::{
 };
 pub(crate) struct Job {
     request: S3ImportParams,
+    entries: Vec<S3ManifestEntry>,
     credentials: Option<pumas_library::acquisition::S3Credentials>,
     control: S3ModelImportControl,
 }
@@ -28,6 +29,7 @@ struct Current {
     id: String,
     control: S3ModelImportControl,
     progress: watch::Receiver<pumas_library::S3ModelImportProgress>,
+    bundle_progress: watch::Receiver<pumas_library::S3ModelBundleProgress>,
     result: Option<S3ImportResultWire>,
 }
 struct Inner {
@@ -71,7 +73,7 @@ impl S3Imports {
                 error: PublicError::invalid_params(),
             });
         }
-        self.admit_ready(request, None)
+        self.admit_ready(request, None, None)
     }
     pub(crate) fn admit_authenticated(
         &self,
@@ -91,12 +93,87 @@ impl S3Imports {
             .credentials
             .into_native()
             .map_err(|_| unavailable())?;
-        self.admit_ready(request.source, Some(credentials))
+        self.admit_ready(request.source, Some(credentials), None)
+    }
+    pub(crate) fn admit_bundle(
+        &self,
+        request: S3BundleImportParams,
+        credentials: Option<S3CredentialParams>,
+    ) -> Result<S3ImportOutcome> {
+        // Auth configuration must be checked before originals are consumed.
+        if let Some(credentials) = &credentials {
+            let primary = match request.primary() {
+                Ok(value) => value,
+                Err(_) => {
+                    return Ok(S3ImportOutcome::Rejected {
+                        error: PublicError::invalid_params(),
+                    })
+                }
+            };
+            if credentials.preflight(source_config(&primary)).is_err() {
+                return Ok(S3ImportOutcome::Rejected {
+                    error: PublicError::invalid_params(),
+                });
+            }
+        }
+        let preflight = || -> std::result::Result<_, PublicError> {
+            request.validate()?;
+            let primary = request.primary()?;
+            let entries = request.native_entries()?;
+            // Construction is in-memory; both anonymous and authenticated paths
+            // validate the exact native reader and complete set before admission.
+            let native_credentials = credentials
+                .map(S3CredentialParams::into_native)
+                .transpose()?;
+            let config = source_config(&primary);
+            // Validate with a separate anonymous reader: pure object/namespace
+            // checks do not depend on credentials. Auth constructor preflight
+            // remains separate to avoid sharing or cloning its capability.
+            let reader = pumas_library::acquisition::S3Reader::new(config)
+                .map_err(|_| PublicError::invalid_params())?;
+            reader
+                .validate_manifest_entries(&entries)
+                .map_err(|_| PublicError::invalid_params())?;
+            Ok((primary, entries, native_credentials))
+        };
+        match preflight() {
+            Ok((primary, entries, credentials)) => {
+                self.admit_ready(primary, credentials, Some(entries))
+            }
+            Err(_) => Ok(S3ImportOutcome::Rejected {
+                error: PublicError::invalid_params(),
+            }),
+        }
+    }
+    pub(crate) fn bundle_snapshot(&self, id: Option<&str>) -> Result<S3BundleImportObservation> {
+        let state = self.0.lock().map_err(|_| unavailable())?;
+        let outcome = snapshot_inner(&state, id);
+        let bundle_progress = if matches!(outcome, S3ImportOutcome::Running { .. }) {
+            state.current.as_ref().map(|current| {
+                let p = *current.bundle_progress.borrow();
+                S3BundleProgressWire {
+                    file_index: p.file_index.and_then(|i| u32::try_from(i).ok()),
+                    files_total: p.files_total as u32,
+                    files_acquired: p.files_acquired as u32,
+                    bytes_acquired: p.bytes_acquired.to_string(),
+                    total_expected_bytes: p.total_expected_bytes.map(|b| b.to_string()),
+                    total_bytes_observed: (p.bytes_acquired + p.downloaded_for_current_file)
+                        .to_string(),
+                }
+            })
+        } else {
+            None
+        };
+        Ok(S3BundleImportObservation {
+            outcome,
+            bundle_progress,
+        })
     }
     fn admit_ready(
         &self,
         request: S3ImportParams,
         credentials: Option<pumas_library::acquisition::S3Credentials>,
+        entries: Option<Vec<S3ManifestEntry>>,
     ) -> Result<S3ImportOutcome> {
         let mut state = self.0.lock().map_err(|_| unavailable())?;
         let Some(sender) = state.sender.as_ref() else {
@@ -122,16 +199,28 @@ impl S3Imports {
                 error: s3_conflict(),
             });
         }
+        let entries = match entries {
+            Some(entries) => entries,
+            None => vec![S3ManifestEntry {
+                source_key: request.key.clone(),
+                version: request.version_id.clone(),
+                logical_path: request.filename.clone(),
+                expected_sha256: Sha256Evidence::new("caller.sha256", request.sha256.clone())
+                    .map_err(|_| unavailable())?,
+            }],
+        };
         let control = S3ModelImportControl::new();
         let current = Current {
             id: request.operation_id.clone(),
             control: control.clone(),
             progress: control.subscribe(),
+            bundle_progress: control.subscribe_bundle(),
             result: None,
         };
         sender
             .try_send(Job {
                 request,
+                entries,
                 credentials,
                 control,
             })
@@ -310,7 +399,7 @@ async fn run(state: &AppState, job: Job) -> S3ImportResultWire {
                     Ok(workspace) => workspace,
                     Err(error) => return failure(PublicError::from_pumas(&error), true, None),
                 };
-                let request = make_request(request, workspace, job.credentials);
+                let request = make_request(request, workspace, job.credentials, job.entries);
                 match request {
                     Err(error) => failure(PublicError::from_pumas(&error), true, None),
                     Ok(request) => match state.api.import_s3_model(request, job.control).await {
@@ -373,6 +462,7 @@ fn make_request(
     request: S3ImportParams,
     workspace: pumas_library::acquisition::AcquisitionWorkspace,
     credentials: Option<pumas_library::acquisition::S3Credentials>,
+    entries: Vec<S3ManifestEntry>,
 ) -> Result<S3ModelImportRequest> {
     let operation_id = request
         .operation_id
@@ -385,17 +475,7 @@ fn make_request(
         operation_id,
         source: source_config(&request),
         credentials,
-        entries: vec![S3ManifestEntry {
-            source_key: request.key,
-            version: request.version_id,
-            logical_path: request.filename.clone(),
-            expected_sha256: Sha256Evidence::new("caller.sha256", request.sha256).map_err(
-                |_| PumasError::Validation {
-                    field: "s3.sha256".into(),
-                    message: "Invalid expected S3 digest".into(),
-                },
-            )?,
-        }],
+        entries,
         import: ModelImportSpec {
             path: request.filename,
             family: request.family,

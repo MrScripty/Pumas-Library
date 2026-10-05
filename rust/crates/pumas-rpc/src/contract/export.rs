@@ -726,6 +726,10 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
     }
     export!(
         S3ImportParams,
+        S3BundleImportParams,
+        S3PinnedFileParams,
+        S3AuthenticatedBundleImportParams,
+        S3BundleImportObservation,
         S3AuthenticatedImportParams,
         S3CredentialParams,
         S3ImportStatusParams,
@@ -1267,6 +1271,32 @@ fn refine_named(name: &str, schema: &mut Value) {
             }
             "ModelsOutcome" => {
                 properties["models"]["pumasCatalogMap"] = true.into();
+            }
+
+            "S3BundleImportParams" => {
+                let existing = schemars::schema_for!(S3ImportParams);
+                let existing = serde_json::to_value(existing).expect("schema serialization");
+                for field in [
+                    "operation_id",
+                    "endpoint",
+                    "region",
+                    "bucket",
+                    "family",
+                    "official_name",
+                ] {
+                    properties[field] = existing["properties"][field].clone();
+                }
+                properties["primary_logical_path"] = existing["properties"]["filename"].clone();
+            }
+            "S3PinnedFileParams" => {
+                let existing = serde_json::to_value(schemars::schema_for!(S3ImportParams))
+                    .expect("schema serialization");
+                for field in ["key", "version_id", "sha256"] {
+                    properties[field] = existing["properties"][field].clone();
+                }
+                properties["logical_path"]["minLength"] = 1.into();
+                properties["logical_path"]["pumasUtf8Max"] = 1024.into();
+                properties["logical_path"]["pumasPortablePath"] = true.into();
             }
             "CatalogSearchOutcome" => {
                 properties["query"]["pumasUtf8Max"] = MAX_IDENTIFIER_BYTES.into();

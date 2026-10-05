@@ -1,15 +1,19 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { S3ImportOutcome, S3ImportParams, S3ImportCancelOutcome, S3AuthenticatedImportParams } from '../generated/desktop-contract';
+import type { S3BundleImportParams, S3AuthenticatedBundleImportParams, S3BundleImportObservation, S3ImportOutcome, S3ImportParams, S3ImportCancelOutcome, S3AuthenticatedImportParams } from '../generated/desktop-contract';
 import { useS3ModelImport, type S3ImportDraft } from './useS3ModelImport';
 
-const { start, startAuthenticated, get, cancel } = vi.hoisted(() => ({
+const { startBundle, startAuthenticatedBundle, getBundle, start, startAuthenticated, get, cancel } = vi.hoisted(() => ({
+  startBundle: vi.fn<(request: S3BundleImportParams) => Promise<S3ImportOutcome>>(),
+  startAuthenticatedBundle: vi.fn<(request: S3AuthenticatedBundleImportParams) => Promise<S3ImportOutcome>>(),
+  getBundle: vi.fn<(id?: string) => Promise<S3BundleImportObservation>>(),
   start: vi.fn<(request: S3ImportParams) => Promise<S3ImportOutcome>>(),
   startAuthenticated: vi.fn<(request: S3AuthenticatedImportParams) => Promise<S3ImportOutcome>>(),
   get: vi.fn<(id?: string) => Promise<S3ImportOutcome>>(),
   cancel: vi.fn<(id: string) => Promise<S3ImportCancelOutcome>>(),
 }));
 vi.mock('../api/import', () => ({ importAPI: {
+  startS3ModelBundleImport:startBundle, startAuthenticatedS3ModelBundleImport:startAuthenticatedBundle, getS3ModelBundleImport:getBundle,
   startS3ModelImport: start, getS3ModelImport: get, cancelS3ModelImport: cancel,
   startAuthenticatedS3ModelImport: startAuthenticated,
 } }));
@@ -148,4 +152,28 @@ describe('explicit S3 import observation', () => {
     expect(result.current.error).not.toContain('private diagnostic');
     expect(get).toHaveBeenLastCalledWith(id);
   });
+});
+
+it('observes aggregate bundles with unchanged UUID cancellation and no credential replay after lost acknowledgement', async () => {
+  vi.useFakeTimers(); vi.spyOn(crypto,'randomUUID').mockReturnValue(id);
+  try {
+    const progress={file_index:1,files_total:2,files_acquired:1,bytes_acquired:'2',total_expected_bytes:'26',total_bytes_observed:'3'};
+    getBundle.mockResolvedValueOnce({outcome:{status:'idle'},bundle_progress:null}).mockResolvedValue({outcome:running,bundle_progress:progress});
+    const credentials={access_key_id:'synthetic-bundle-hook-key',secret_access_key:'synthetic-bundle-hook-secret',session_token:null};
+    startAuthenticatedBundle.mockRejectedValueOnce(new Error(JSON.stringify(credentials)));
+    const auxiliary={key:'models/shared',version_id:'data-v2',logical_path:'config/data.json',sha256:'b'.repeat(64)};
+    const {result}=renderHook(() => useS3ModelImport(undefined,true)); await settle();
+    await act(async () => {await result.current.startBundle(draft,[{...auxiliary,logical_path:'../data.json'}],credentials);});
+    expect(startAuthenticatedBundle).not.toHaveBeenCalled();
+    await act(async () => {await result.current.startBundle(draft,[auxiliary],credentials);});
+    expect(startAuthenticatedBundle).toHaveBeenCalledTimes(1);
+    expect(startAuthenticatedBundle).toHaveBeenCalledWith({source:{operation_id:id,endpoint:draft.endpoint,region:draft.region,bucket:draft.bucket,addressing:'path',family:draft.family,official_name:draft.official_name,primary_logical_path:draft.filename,
+      files:[{key:draft.key,version_id:draft.version_id,logical_path:draft.filename,sha256:draft.sha256},auxiliary]},credentials});
+    expect(startBundle).not.toHaveBeenCalled();expect(start).not.toHaveBeenCalled();expect(startAuthenticated).not.toHaveBeenCalled();
+    expect(result.current.bundleProgress).toEqual(progress);expect(getBundle).toHaveBeenLastCalledWith(id);
+    for(const secret of [credentials.access_key_id,credentials.secret_access_key]) expect(JSON.stringify(result.current)).not.toContain(secret);
+    await act(async () => {await vi.advanceTimersByTimeAsync(1000);});expect(startAuthenticatedBundle).toHaveBeenCalledTimes(1);
+    cancel.mockResolvedValueOnce({accepted:true,outcome:{...running,progress:{phase:'cancelling',downloaded_for_current_file:'1'}}});
+    await act(async () => {await result.current.cancel();});expect(cancel).toHaveBeenCalledWith(id);
+  } finally {vi.clearAllMocks();vi.restoreAllMocks();vi.useRealTimers();}
 });

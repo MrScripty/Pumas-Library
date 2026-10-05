@@ -153,6 +153,188 @@ pub(crate) enum S3AddressingWire {
     VirtualHosted,
 }
 
+/// Explicit complete GGUF + selected inert data/text file set.
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct S3BundleImportParams {
+    pub operation_id: String,
+    pub endpoint: String,
+    pub region: String,
+    pub bucket: String,
+    pub addressing: S3AddressingWire,
+    #[cfg_attr(feature = "export-contract", schemars(length(min = 2, max = 32)))]
+    pub files: Vec<S3PinnedFileParams>,
+    pub primary_logical_path: String,
+    pub family: String,
+    pub official_name: String,
+}
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct S3PinnedFileParams {
+    pub key: String,
+    pub version_id: String,
+    pub logical_path: String,
+    pub sha256: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct S3AuthenticatedBundleImportParams {
+    pub source: S3BundleImportParams,
+    pub credentials: S3CredentialParams,
+}
+impl S3AuthenticatedBundleImportParams {
+    pub(crate) fn validate(&self) -> Result<(), PublicError> {
+        self.source.validate()?;
+        self.credentials.validate()
+    }
+}
+impl S3BundleImportParams {
+    pub(crate) fn primary(&self) -> Result<S3ImportParams, PublicError> {
+        let primary = self
+            .files
+            .iter()
+            .find(|file| file.logical_path == self.primary_logical_path)
+            .ok_or_else(PublicError::invalid_params)?;
+        Ok(S3ImportParams {
+            operation_id: self.operation_id.clone(),
+            endpoint: self.endpoint.clone(),
+            region: self.region.clone(),
+            bucket: self.bucket.clone(),
+            addressing: self.addressing,
+            key: primary.key.clone(),
+            version_id: primary.version_id.clone(),
+            filename: self.primary_logical_path.clone(),
+            sha256: primary.sha256.clone(),
+            family: self.family.clone(),
+            official_name: self.official_name.clone(),
+        })
+    }
+    pub(crate) fn validate(&self) -> Result<(), PublicError> {
+        if !(2..=32).contains(&self.files.len()) {
+            return Err(PublicError::invalid_params());
+        }
+        let primary = self.primary()?;
+        primary.validate()?;
+        for file in &self.files {
+            // Reuse existing pin/source validation; only the logical primary
+            // basename has the GGUF restriction.
+            let member = S3ImportParams {
+                key: file.key.clone(),
+                version_id: file.version_id.clone(),
+                sha256: file.sha256.clone(),
+                ..primary.clone()
+            };
+            member.validate()?;
+            let path = &file.logical_path;
+            if path.is_empty() || path.len() > 1024 || path.chars().any(char::is_control) {
+                return Err(PublicError::invalid_params());
+            }
+            if path != &self.primary_logical_path
+                && !std::path::Path::new(path)
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| {
+                        ["json", "txt", "md", "model", "tiktoken", "vocab", "merges"]
+                            .contains(&ext.to_ascii_lowercase().as_str())
+                    })
+            {
+                return Err(PublicError::invalid_params());
+            }
+        }
+        // Shared manifest validation is the final pure namespace/evidence
+        // authority even when S3 support is compiled out.
+        let files = self.native_entries()?;
+        let source = pumas_library::acquisition::ArtifactSourceIdentity::new(
+            "s3",
+            "desktop.preflight",
+            pumas_library::acquisition::ArtifactRevisionEvidence::new(
+                "s3.explicit_versions",
+                "desktop.explicit",
+                pumas_library::acquisition::RevisionStrength::Immutable,
+            )
+            .map_err(|_| PublicError::invalid_params())?,
+        )
+        .map_err(|_| PublicError::invalid_params())?;
+        let files = files
+            .into_iter()
+            .map(|entry| {
+                pumas_library::acquisition::ArtifactFile::new(
+                    entry.logical_path,
+                    serde_json::to_string(&(entry.source_key, entry.version))
+                        .map_err(|_| PublicError::invalid_params())?,
+                    None,
+                    Some(entry.expected_sha256),
+                    pumas_library::acquisition::FileVerificationRequirement::Sha256,
+                )
+                .map_err(|_| PublicError::invalid_params())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        pumas_library::acquisition::ArtifactManifest::new(source, files)
+            .map(|_| ())
+            .map_err(|_| PublicError::invalid_params())
+    }
+    pub(crate) fn native_entries(&self) -> Result<Vec<BundleEntry>, PublicError> {
+        self.files
+            .iter()
+            .map(|file| {
+                Ok(BundleEntry {
+                    source_key: file.key.clone(),
+                    version: file.version_id.clone(),
+                    logical_path: file.logical_path.clone(),
+                    expected_sha256: pumas_library::acquisition::Sha256Evidence::new(
+                        "caller.sha256",
+                        file.sha256.clone(),
+                    )
+                    .map_err(|_| PublicError::invalid_params())?,
+                })
+            })
+            .collect()
+    }
+}
+// The native S3 entry is optional; keep the non-S3 parser using shared evidence.
+#[cfg(feature = "s3")]
+type BundleEntry = pumas_library::acquisition::S3ManifestEntry;
+#[cfg(not(feature = "s3"))]
+pub(crate) struct BundleEntry {
+    pub source_key: String,
+    pub version: String,
+    pub logical_path: String,
+    pub expected_sha256: pumas_library::acquisition::Sha256Evidence,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct S3BundleProgressWire {
+    pub file_index: Option<u32>,
+    pub files_total: u32,
+    pub files_acquired: u32,
+    #[cfg_attr(
+        feature = "export-contract",
+        schemars(regex(pattern = "^(0|[1-9][0-9]{0,19})$"))
+    )]
+    pub bytes_acquired: String,
+    #[cfg_attr(
+        feature = "export-contract",
+        schemars(regex(pattern = "^(0|[1-9][0-9]{0,19})$"))
+    )]
+    pub total_expected_bytes: Option<String>,
+    #[cfg_attr(
+        feature = "export-contract",
+        schemars(regex(pattern = "^(0|[1-9][0-9]{0,19})$"))
+    )]
+    pub total_bytes_observed: String,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct S3BundleImportObservation {
+    pub outcome: S3ImportOutcome,
+    pub bundle_progress: Option<S3BundleProgressWire>,
+}
+
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -455,5 +637,68 @@ mod tests {
         ] {
             assert!(decode("start_authenticated_s3_model_import", input).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod bundle_contract_tests {
+    use super::super::{AdmittedRpcRequest, RpcCommand};
+    use serde_json::{json, Value};
+    fn params() -> Value {
+        json!({"operation_id":"c3f7d104-1234-4321-abcd-aaaaaaaaaaaa","endpoint":"https://source.invalid","region":"fixture-region","bucket":"fixture-bucket","addressing":"path","primary_logical_path":"weights.gguf","family":"fixture","official_name":"Fixture",
+        "files":[{"key":"models/shared","version_id":"v1","logical_path":"weights.gguf","sha256":"a".repeat(64)}, {"key":"models/shared","version_id":"v2","logical_path":"config/data.json","sha256":"b".repeat(64)}]})
+    }
+    fn decode(
+        method: &str,
+        params: Value,
+    ) -> Result<super::super::AdmittedRpcRequest, super::super::RpcAdmissionError> {
+        AdmittedRpcRequest::decode(
+            &serde_json::to_vec(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
+                .unwrap(),
+        )
+    }
+    #[test]
+    fn complete_bundle_wire_requires_every_pin_and_closed_ephemeral_credentials() {
+        assert!(matches!(
+            decode("start_s3_model_bundle_import", params())
+                .ok()
+                .unwrap()
+                .command,
+            RpcCommand::StartS3ModelBundleImport { .. }
+        ));
+        let credentials = json!({"access_key_id":"synthetic-bundle-key","secret_access_key":"synthetic-bundle-secret","session_token":null});
+        assert!(decode(
+            "start_authenticated_s3_model_bundle_import",
+            json!({"source":params(),"credentials":credentials})
+        )
+        .is_ok());
+        for field in ["key", "version_id", "logical_path", "sha256"] {
+            let mut input = params();
+            input["files"][1].as_object_mut().unwrap().remove(field);
+            assert!(decode("start_s3_model_bundle_import", input).is_err());
+        }
+        for input in [
+            json!({"source":params(),"credentials":credentials,"saved":true}),
+            json!({"source":params(),"credentials":{"access_key_id":"synthetic-bundle-key","secret_access_key":"synthetic-bundle-secret","profile":"synthetic-bundle-secret"}}),
+        ] {
+            let failed = decode("start_authenticated_s3_model_bundle_import", input)
+                .err()
+                .unwrap();
+            assert!(!serde_json::to_string(&failed.error)
+                .unwrap()
+                .contains("synthetic-bundle"));
+        }
+        for length in [0, 1, 33] {
+            let mut input = params();
+            input["files"] = json!(vec![input["files"][0].clone(); length]);
+            assert!(decode("start_s3_model_bundle_import", input).is_err());
+        }
+        let mut duplicate = params();
+        duplicate["files"][1]["logical_path"] = json!("weights.gguf");
+        assert!(decode("start_s3_model_bundle_import", duplicate).is_err());
+        let mut input = params();
+        input["files"][1]["credentials"] = credentials;
+        assert!(decode("start_s3_model_bundle_import", input).is_err());
+        assert!(decode("get_s3_model_bundle_import", json!({})).is_ok());
     }
 }

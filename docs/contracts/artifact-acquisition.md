@@ -177,6 +177,28 @@ Retained custody requires explicit reconciliation, never implicit replay.
 Controlled HTTPS/RPC and DOM/preload fixtures support this secret boundary;
 packaged/browser behavior and real-provider acceptance remain separate.
 
+The additive desktop bundle starts take 2–32 explicit per-file key/VersionId/
+logical-path/SHA-256 pins and one exact primary GGUF basename, with only the
+existing native inert auxiliary formats. Complete structural preflight uses
+`S3Reader::validate_manifest_entries` plus shared manifest validation before
+job/workspace admission; it grants no selection or byte-verification authority.
+Object existence and returned metadata remain the native resolver's responsibility.
+The frozen reader selection and `s3/manifest.rs` identity implementation are not
+rewritten. Anonymous/authenticated single-object wire shapes remain unchanged;
+bundle authentication uses the same ephemeral credential DTO and constructors.
+
+`S3ModelImportControl::subscribe_bundle` adds safe aggregate observations without
+changing the existing native progress struct or subscribe method. Optional
+`AcquisitionHost::file_started`/`file_acquired` callbacks default to no-op and
+observe the existing sequential acquisition loop; they neither mutate custody
+nor own retry, verification or publication. Explicit file boundaries avoid
+inferring transitions from resetting byte counts. Acquired staging bytes plus
+current attempt bytes form total observed progress, with known total size only
+after complete selection. Retries may decrease observed bytes. File counts and
+full totals do not prove complete-set verification, registration or receipt
+settlement. The additive bundle getter wraps the existing outcome with this safe
+running progress; terminal results keep existing exact custody/publication facts.
+
 Explicit multi-file S3 selections identify each object by the pair of its exact key and VersionId. Their manifest files encode that pair as a JSON tuple in the opaque `source_key`, so different versions of one key may have different size/digest evidence. Conflicting evidence for the same key and version remains invalid. Per-object revision pins and reader requests preserve the raw protocol key and VersionId; single-object selections retain their existing raw `source_key`. Retained manifests are not rewritten.
 
 Use one range per S3 GetObject call and bounded parallel calls only when the supported reader and identity contract permit them. Pagination failures or capacity limits produce incomplete/unavailable manifests, not silently shortened file sets. Recheck the exact version/evidence when refreshing credentials or location. Capability differences of compatible endpoints produce explicit unsupported results.

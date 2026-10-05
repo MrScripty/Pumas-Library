@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ModalDialog } from './ui/ModalDialog';
 import { useS3ModelImport, type S3ImportDraft } from '../hooks/useS3ModelImport';
-import type { S3ImportOutcome } from '../generated/desktop-contract';
+import type { S3PinnedFileParams, S3ImportOutcome } from '../generated/desktop-contract';
 
 const fields = [
   ['endpoint', 'HTTPS endpoint origin', 'https://s3.example.com'],
@@ -34,6 +34,8 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
   const accessKey = useRef<HTMLInputElement>(null);
   const secretKey = useRef<HTMLInputElement>(null);
   const sessionToken = useRef<HTMLInputElement>(null);
+  const nextRow = useRef(0);
+  const [auxiliaries, setAuxiliaries] = useState<Array<S3PinnedFileParams & {id: number}>>([]);
   const [authenticated, setAuthenticated] = useState(false);
   const clearCredentials = () => {
     for (const input of [accessKey.current, secretKey.current, sessionToken.current]) {
@@ -47,7 +49,7 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
   }, [authenticated]);
   const close = () => { clearCredentials(); onClose(); };
   const [draft, setDraft] = useState<S3ImportDraft>({ endpoint: '', region: '', bucket: '', addressing: 'path', key: '', version_id: '', filename: 'weights.gguf', sha256: '', family: '', official_name: '' });
-  const { snapshot, error, commandBusy, start, startAuthenticated, cancel, observeAgain } = useS3ModelImport(onImported);
+  const { snapshot, bundleProgress, error, commandBusy, start, startBundle, startAuthenticated, cancel, observeAgain } = useS3ModelImport(onImported, true);
   const editable = canStart(snapshot) && !commandBusy;
   const active = snapshot?.status === 'running';
   const cancellable = active && ['pending', 'selecting', 'acquiring'].includes(snapshot.progress.phase);
@@ -55,15 +57,17 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
     <ModalDialog isOpen ariaLabelledBy="s3-import-title" ariaDescribedBy="s3-import-description" onClose={close}
       initialFocusRef={closeButton} contentClassName="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-secondary))] p-6 text-[hsl(var(--launcher-text-primary))]">
       <h2 id="s3-import-title" className="text-lg font-semibold">Import from S3</h2>
-      <p id="s3-import-description" className="my-3 text-sm">Import one pinned GGUF object over HTTPS. Anonymous access is the default. Supply the exact VersionId and expected SHA-256; a key alone is insufficient.</p>
+      <p id="s3-import-description" className="my-3 text-sm">Import a pinned GGUF and optional explicitly selected data/text files over HTTPS. Anonymous access is the default. Supply the exact VersionId and expected SHA-256; a key alone is insufficient.</p>
       <form autoComplete="off" onSubmit={event => {
         event.preventDefault();
         if (!editable) return;
-        if (!authenticated) { void start(draft); return; }
+        const files = auxiliaries.map(({key,version_id,logical_path,sha256}) => ({key,version_id,logical_path,sha256}));
+        if (!authenticated) { if (files.length) void startBundle(draft, files); else void start(draft); return; }
         const credentials = { access_key_id: accessKey.current?.value ?? '',
           secret_access_key: secretKey.current?.value ?? '', session_token: sessionToken.current?.value || null };
         clearCredentials();
-        void startAuthenticated(draft, credentials);
+        if (files.length) void startBundle(draft, files, credentials);
+        else void startAuthenticated(draft, credentials);
       }}>
         <fieldset disabled={!editable} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {fields.map(([key, label, placeholder]) => (
@@ -79,6 +83,19 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
               <option value="path">Path</option><option value="virtual_hosted">Virtual hosted</option>
             </select>
           </label>
+        </fieldset>
+        <fieldset disabled={!editable} className="mt-4 space-y-3">
+          <legend>Selected auxiliary files</legend>
+          <p className="text-sm">Each file needs its exact key, immutable VersionId, output path and SHA-256. Supported auxiliaries: json, txt, md, model, tiktoken, vocab and merges. All selected files must verify before registration.</p>
+          {auxiliaries.map((file, index) => <fieldset key={file.id} className="grid grid-cols-1 sm:grid-cols-2 gap-3 border p-3">
+            <legend>Auxiliary {index + 1}</legend>
+            {([['key','exact object key',1024],['version_id','immutable VersionId',4096],['logical_path','logical output path',1024],['sha256','expected SHA-256',64]] as const).map(([field,label,max]) =>
+              <label key={field} className="block text-sm">Auxiliary {index + 1} {label}<input className={inputClass} required maxLength={max} value={file[field]}
+                onChange={event => setAuxiliaries(rows => rows.map(row => row.id === file.id ? {...row,[field]:event.target.value} : row))} /></label>)}
+            <button type="button" className={buttonClass} onClick={() => setAuxiliaries(rows => rows.filter(row => row.id !== file.id))}>Remove auxiliary {index + 1}</button>
+          </fieldset>)}
+          <button type="button" className={buttonClass} disabled={auxiliaries.length >= 31}
+            onClick={() => setAuxiliaries(rows => [...rows,{id:nextRow.current++,key:'',version_id:'',logical_path:'',sha256:''}])}>Add auxiliary file</button>
         </fieldset>
         <fieldset disabled={!editable} className="mt-4">
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={authenticated}
@@ -96,6 +113,11 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
         {snapshot?.status === 'running' && <div role="status" className="mt-4">
           <p>{phaseLabels[snapshot.progress.phase]}</p>
           <p>{snapshot.progress.downloaded_for_current_file} bytes observed for the current file. This count can reset and does not prove verification.</p>
+          {bundleProgress && bundleProgress.files_total > 0 && <>
+            <p>{bundleProgress.total_bytes_observed} of {bundleProgress.total_expected_bytes ?? 'unknown'} total bytes observed in staging. Counts can reset on retry and do not prove publication.</p>
+            <p>{bundleProgress.files_acquired} of {bundleProgress.files_total} selected files acquired in staging; complete verification and registration follow separately.</p>
+            {bundleProgress.file_index !== null && <p>Acquiring file {bundleProgress.file_index + 1} in logical-path order.</p>}
+          </>}
           <p className="text-xs">Operation: {snapshot.operation_id}</p>
         </div>}
         {snapshot?.status === 'not_found' && <p role="alert" className="mt-4">The operation result is unavailable. Check the library and reconcile retained work before importing this source again. Operation: {snapshot.operation_id}</p>}

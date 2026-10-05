@@ -748,13 +748,17 @@ fn is_internal_library_artifact_path(library_root: &Path, path: &Path) -> bool {
     let Ok(rel) = path.strip_prefix(library_root) else {
         return false;
     };
-    // Copied imports own their private staging tree until publication. A
-    // nested stage file is not the third component of a canonical model root.
-    // Match model_dirs' pruning at every depth, including deleted stage events.
-    if rel.components().any(|component| {
-        matches!(component, Component::Normal(name) if name.to_string_lossy().starts_with(crate::model_library::TEMP_IMPORT_PREFIX))
-    }) {
-        return true;
+    // The prefix reserves staging directories, not payload basenames. Ancestor
+    // components and the three model-root positions are directories even after
+    // removal. Below a model root, a prefixed leaf can be a published payload;
+    // do not hide its Modify/Remove event merely because its name looks internal.
+    let mut components = rel.components().enumerate().peekable();
+    while let Some((depth, component)) = components.next() {
+        if matches!(component, Component::Normal(name) if name.to_string_lossy().starts_with(crate::model_library::TEMP_IMPORT_PREFIX))
+            && (depth < 3 || components.peek().is_some() || path.is_dir())
+        {
+            return true;
+        }
     }
     let mut components = rel.components();
     let Some(first) = components.next() else {
@@ -2440,6 +2444,74 @@ mod tests {
             HashSet::from(["llm/family/model".into()])
         );
         assert!(!summary.requires_full_scope);
+    }
+
+    #[tokio::test]
+    async fn prefixed_payload_modification_marks_model_dirty_amid_staging_events() {
+        assert_prefixed_payload_event_marks_model_dirty(false).await;
+    }
+
+    #[tokio::test]
+    async fn prefixed_payload_removal_marks_model_dirty_amid_staging_events() {
+        assert_prefixed_payload_event_marks_model_dirty(true).await;
+    }
+
+    async fn assert_prefixed_payload_event_marks_model_dirty(remove: bool) {
+        let temp = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(temp.path(), None).await;
+        let primary = api.primary();
+        let root = primary.model_library.library_root();
+        let model_id = "llm/family/model";
+        let payload = root.join(model_id).join(".tmp_import_weights.gguf");
+        let auxiliary = root.join(model_id).join("config/.tmp_import_settings.json");
+        let stage = root.join(".tmp_import_payload-regression");
+        let staged_config = stage.join("config/tokenizer_config.json");
+        let nested_stage = root.join("llm/family/staging-only/.tmp_import_nested");
+        let nested_payload = nested_stage.join("weights.gguf");
+        for path in [&payload, &auxiliary, &staged_config, &nested_payload] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"before").unwrap();
+        }
+        let mut paths = vec![stage.clone(), staged_config, nested_payload];
+        if remove {
+            std::fs::remove_file(&payload).unwrap();
+            std::fs::remove_file(&auxiliary).unwrap();
+            std::fs::remove_dir_all(&stage).unwrap();
+            std::fs::remove_dir_all(&nested_stage).unwrap();
+        } else {
+            std::fs::write(&payload, b"modified").unwrap();
+            std::fs::write(&auxiliary, b"modified").unwrap();
+            paths.push(nested_stage);
+        }
+        let staged_summary =
+            classify_watcher_changes(root, &primary.watcher_write_suppressor, paths.clone());
+        assert!(staged_summary.model_ids.is_empty());
+        assert!(!staged_summary.requires_full_scope);
+
+        // A real reconciliation may already be active when the watcher delivers
+        // this batch. Hold its token so the dirty mark cannot be consumed before
+        // we inspect it; this fixture does not start an OS watcher.
+        let StartOutcome::Started(run) = primary
+            .reconciliation
+            .try_start(&ReconcileScope::AllModels, ReconcileIntent::Forced)
+            .await
+        else {
+            panic!("fixture must admit initial run")
+        };
+        paths.extend([payload, auxiliary]);
+        let summary =
+            classify_watcher_changes(root, &primary.watcher_write_suppressor, paths.clone());
+        assert_eq!(summary.model_ids, HashSet::from([model_id.to_string()]));
+        assert!(!summary.requires_full_scope);
+        notify_filesystem_changes(primary.clone(), paths).await;
+        {
+            let state = primary.reconciliation.lock_state();
+            assert_eq!(state.models.len(), 1);
+            assert!(state.models.get(model_id).unwrap().dirty);
+            assert!(!state.all.dirty);
+        }
+        run.finish_success(chrono::Utc::now().to_rfc3339()).await;
+        primary.runtime_tasks.shutdown_owned().await.unwrap();
     }
 
     #[test]

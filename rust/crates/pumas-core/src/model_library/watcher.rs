@@ -218,4 +218,25 @@ mod tests {
         )));
         assert!(is_relevant_event_kind(&EventKind::Remove(RemoveKind::File)));
     }
+
+    #[test]
+    fn prefixed_payload_modify_and_remove_events_reach_reconciliation() {
+        use notify::event::{DataChange, ModifyKind, RemoveKind};
+
+        let paths = vec![
+            PathBuf::from("/library/.tmp_import_stage/config/tokenizer_config.json"),
+            PathBuf::from("/library/llm/family/model/.tmp_import_weights.gguf"),
+            PathBuf::from("/library/llm/family/model/config/.tmp_import_settings.json"),
+        ];
+        for kind in [
+            EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+            EventKind::Remove(RemoveKind::File),
+        ] {
+            let mut event = Event::new(kind);
+            event.paths = paths.clone();
+            let mut pending = Vec::new();
+            handle_watcher_event(Ok(event), &mut pending);
+            assert_eq!(pending, paths);
+        }
+    }
 }

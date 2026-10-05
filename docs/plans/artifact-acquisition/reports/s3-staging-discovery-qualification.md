@@ -14,10 +14,25 @@ VersionId regression failed with `Manifest(ConflictingSourceEvidence)` before
 version-qualified manifest keys. Same-key/same-version digest and size conflicts
 remain refused; consistent evidence may serve two distinct logical paths.
 
-The successor changes only tests and qualification documentation. Production
-source remains at the two fixes above. The new test is
+The `5fb3f1ea` successor changed only tests and qualification documentation. Its
+production source retained the two fixes above. The added test is
 `manifest::staging_acceptance::large_s3_bundle_with_live_watcher_publishes_and_cold_recovers`;
 its source blob is `65c0f54ada03ac23d18145c661db78aa1e3af02e`.
+
+## Payload-name review correction
+
+The original watcher filter also hid accepted final payload basenames such as
+`llm/family/model/.tmp_import_weights.gguf`. Staging exclusion now applies to
+directory positions and ancestors, plus existing nested directories, rather than
+every prefixed leaf. Deleted stage descendants and root-level staging-directory
+events remain excluded. A missing prefixed leaf below the model root is
+conservatively visible because the path-only callback cannot prove it was a
+directory. Import admission and version-qualified S3 manifest keys are unchanged.
+
+New regressions cover raw Modify/Remove event forwarding and mixed staging and
+published-payload batches retaining the model's dirty mark. These Rust regressions
+require exact-head hosted qualification; the historical results below do not
+claim to execute this correction.
 
 ## Normal workflow evidence
 
@@ -36,7 +51,10 @@ After closing the first owner, a new owner proves the complete output through
 the existing bundle reconciliation operation. Publication receipt bytes,
 auxiliary bytes and the adopted acquisition record stay unchanged. The source
 observes exactly four requests across transfer and cold proof, proving recovery
-does not replay source access. Operations and shutdown have 30-second deadlines.
+does not replay source access. Acquisition/import, staging-event observation,
+public `get_model`, and both API close calls have explicit 30-second deadlines.
+Cold reconciliation and consumer shutdown are not individually timeout-wrapped;
+the enclosing test command supplies the overall timeout.
 
 The new test passed alone and in the focused aggregate. Final results: 41 S3
 acquisition tests, 11 reader tests and five HTTP acquisition tests passed, with

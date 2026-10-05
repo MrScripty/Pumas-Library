@@ -30,6 +30,8 @@ use tokio::{
 const VERSION: &str = "selected-v1";
 const LOGICAL: &str = "weights.gguf";
 
+#[path = "s3_acquisition/empty.rs"]
+mod empty;
 #[path = "s3_acquisition/manifest.rs"]
 mod manifest;
 

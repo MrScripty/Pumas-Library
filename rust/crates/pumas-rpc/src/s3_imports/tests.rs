@@ -749,6 +749,11 @@ impl BundleSource {
             for (step, (head, primary)) in
                 [(true, false), (true, true), (false, false), (false, true)]
                     .into_iter()
+                    .filter(|(head, primary)| {
+                        *head
+                            || !((!primary && matches!(mode, 5 | 6 | 8 | 9 | 10))
+                                || (*primary && matches!(mode, 7 | 10)))
+                    })
                     .enumerate()
             {
                 let deadline = std::time::Instant::now() + Duration::from_secs(10);
@@ -799,33 +804,35 @@ impl BundleSource {
                     write!(socket,"HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
                     break;
                 }
-                let bytes = if primary {
-                    gguf()
-                } else if mode == 5 {
+                let bytes = if (primary && matches!(mode, 7 | 10))
+                    || (!primary && matches!(mode, 5 | 6 | 8 | 9 | 10))
+                {
                     vec![]
+                } else if primary {
+                    gguf()
                 } else {
                     b"{}".to_vec()
                 };
                 let version = if primary { "weights-v1" } else { "data-v2" };
                 write!(socket,"HTTP/1.1 {}\r\nContent-Length: {}\r\n{}Last-Modified: Wed, 01 Jan 2025 00:00:00 GMT\r\nx-amz-version-id: {}\r\nETag: \"selected\"\r\nConnection: close\r\n\r\n",if head {"200 OK"} else {"206 Partial Content"},bytes.len(),if head {String::new()} else {format!("Content-Range: bytes 0-{}/{}\r\n",bytes.len()-1,bytes.len())},version).unwrap();
-                if mode == 5 && step == 1 {
+                if mode == 6 && step == 1 {
                     break;
                 }
                 if !head {
                     socket
-                        .write_all(if mode == 2 && primary {
+                        .write_all(if matches!(mode, 2 | 8 | 9) && primary {
                             &bytes[..1]
                         } else {
                             &bytes
                         })
                         .unwrap();
                     socket.flush().unwrap();
-                    if mode == 2 && primary {
+                    if matches!(mode, 2 | 9) && primary {
                         started.take().unwrap().send(()).unwrap();
                         let mut byte = [0];
                         assert_eq!(socket.read(&mut byte).unwrap(), 0);
                     }
-                    if mode == 4 {
+                    if matches!(mode, 4 | 8) {
                         break;
                     }
                 }
@@ -880,6 +887,12 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
         (3, true, true),
         (4, false, false),
         (5, false, false),
+        (5, true, true),
+        (6, false, false),
+        (7, false, false),
+        (8, false, false),
+        (9, true, true),
+        (10, false, false),
     ] {
         let root = tempfile::TempDir::new().unwrap();
         let api = pumas_library::PumasApi::builder(root.path())
@@ -926,8 +939,12 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
         if mode == 4 {
             input["files"][1]["sha256"] = json!("b".repeat(64));
         }
-        if mode == 5 {
+        if matches!(mode, 5 | 8 | 9 | 10) {
             input["files"][1]["sha256"] =
+                json!("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        }
+        if matches!(mode, 7 | 10) {
+            input["files"][0]["sha256"] =
                 json!("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
         }
         let (method, input) = if auth {
@@ -942,12 +959,12 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
             rpc(&server, method, input).await["result"]["status"],
             "running"
         );
-        if mode == 1 || mode == 2 {
+        if matches!(mode, 1 | 2 | 9) {
             tokio::time::timeout(Duration::from_secs(5), &mut source.started)
                 .await
                 .unwrap()
                 .unwrap();
-            if mode == 2 {
+            if matches!(mode, 2 | 9) {
                 let observation = tokio::time::timeout(Duration::from_secs(5), async {
                     loop {
                         let value = rpc(
@@ -956,7 +973,9 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
                             json!({"operation_id":ID}),
                         )
                         .await;
-                        if value["result"]["bundle_progress"]["total_bytes_observed"] == "3" {
+                        if value["result"]["bundle_progress"]["total_bytes_observed"]
+                            == if mode == 9 { "1" } else { "3" }
+                        {
                             break value["result"].clone();
                         }
                         tokio::task::yield_now().await;
@@ -965,10 +984,13 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
                 .await
                 .unwrap();
                 let p = &observation["bundle_progress"];
-                assert_eq!(p["bytes_acquired"], "2");
+                assert_eq!(p["bytes_acquired"], if mode == 9 { "0" } else { "2" });
                 assert_eq!(p["files_acquired"], 1);
                 assert_eq!(p["files_total"], 2);
-                assert_eq!(p["total_expected_bytes"], "26");
+                assert_eq!(
+                    p["total_expected_bytes"],
+                    if mode == 9 { "24" } else { "26" }
+                );
                 assert_eq!(p["file_index"], 1);
                 assert_eq!(
                     observation["outcome"]["progress"]["downloaded_for_current_file"],
@@ -997,7 +1019,7 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
         .await;
         assert_eq!(bundle["result"]["outcome"], result);
         assert!(bundle["result"]["bundle_progress"].is_null());
-        if mode == 0 {
+        if matches!(mode, 0 | 5) {
             assert_eq!(result["result"]["status"], "completed");
             let model = result["result"]["model_id"].as_str().unwrap();
             assert_eq!(
@@ -1015,7 +1037,11 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
             );
             assert_eq!(
                 std::fs::read(destination.join("config/data.json")).unwrap(),
-                b"{}"
+                if mode == 5 {
+                    b"".as_slice()
+                } else {
+                    b"{}".as_slice()
+                }
             );
             let records = acquisition.store().acquisitions().unwrap();
             assert_eq!(records.len(), 1);
@@ -1030,13 +1056,22 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
             let receipt = consumer.completion_receipt(record).unwrap().unwrap();
             assert_eq!(receipt.demand, record.demand);
             assert_eq!(receipt.manifest, record.manifest);
+            assert_eq!(receipt.verified_files, record.files);
+            assert_eq!(record.files[0].bytes, if mode == 5 { 0 } else { 2 });
+            assert_eq!(
+                record.files[0].sha256,
+                record.manifest.files()[0]
+                    .expected_sha256()
+                    .unwrap()
+                    .value()
+            );
             assert_eq!(receipt.owner, "model.s3.workflow");
             assert_eq!(receipt.payload["path"], "weights.gguf");
             consumer.shutdown().await.unwrap();
         } else {
             assert_eq!(
                 result["result"]["status"],
-                if mode == 1 || mode == 2 {
+                if matches!(mode, 1 | 2 | 9) {
                     "cancelled"
                 } else {
                     "failed"
@@ -1047,7 +1082,7 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
             if mode == 3 {
                 assert!(acquisition.store().acquisitions().unwrap().is_empty());
             }
-            if mode == 5 {
+            if matches!(mode, 6 | 8 | 9) {
                 let records = acquisition.store().acquisitions().unwrap();
                 assert_eq!(records.len(), 1);
                 let record = records.values().next().unwrap();
@@ -1067,19 +1102,38 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
             .await;
             assert_eq!(replay["result"]["status"], "rejected");
         }
-        server.shutdown().await.unwrap();
+        let shutdown = server.shutdown().await;
+        if matches!(mode, 7 | 10) {
+            // Invalid GGUF parsing leaves an observed nested owner failure;
+            // shutdown drains custody and must continue reporting that failure.
+            assert!(shutdown
+                .unwrap_err()
+                .to_string()
+                .contains("Download shutdown observed 1 failure(s)"));
+        } else {
+            shutdown.unwrap_or_else(|error| panic!("bundle mode {mode}: {error}"));
+        }
         let captured = source.finish();
         assert_eq!(
             captured.len(),
             match mode {
-                1 | 3 | 5 => 2,
-                4 => 3,
+                1 | 3 | 6 | 10 => 2,
+                4 | 5 | 7 | 8 | 9 => 3,
                 _ => 4,
             }
         );
         for request in captured {
             let lower = request.to_ascii_lowercase();
             assert_eq!(lower.contains("authorization: aws4-hmac-sha256"), auth);
+            if request.starts_with("GET ") {
+                assert!(lower.contains("\r\nif-match: \"selected\"\r\n"));
+                if matches!(mode, 5 | 8 | 9) {
+                    assert!(
+                        request.contains("versionId=weights-v1"),
+                        "empty member issued GET"
+                    );
+                }
+            }
             assert!(!request.contains(SECRET));
             assert!(!request.contains("synthetic-unselected-ambient-key"));
             if auth {

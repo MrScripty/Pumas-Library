@@ -520,15 +520,25 @@ impl S3ObjectSelection {
             })?;
         let deadline =
             transfer_deadline.map_or(attempt_deadline, |limit| limit.min(attempt_deadline));
-        let result = tokio::time::timeout_at(deadline, self.open_checked_range(resume..self.size))
-            .await
-            .map_err(|_| acquisition_error(S3ReaderError::TimedOut))?
-            .map_err(acquisition_error)?;
-        Ok(super::http::HttpArtifactResponse {
-            body: result
+        let body = if self.size == 0 && resume == 0 {
+            // Selection already checked HEAD for this immutable VersionId and
+            // a known size of zero. There is no valid byte range to request.
+            // Still pass through the owner's writer and SHA-256 verifier: HEAD
+            // is identity/length evidence, not a verified-file receipt.
+            futures::stream::empty().boxed()
+        } else {
+            let result =
+                tokio::time::timeout_at(deadline, self.open_checked_range(resume..self.size))
+                    .await
+                    .map_err(|_| acquisition_error(S3ReaderError::TimedOut))?
+                    .map_err(acquisition_error)?;
+            result
                 .into_stream()
                 .map(|chunk| chunk.map_err(protocol_error).map_err(acquisition_error))
-                .boxed(),
+                .boxed()
+        };
+        Ok(super::http::HttpArtifactResponse {
+            body,
             resumed: resume > 0,
             total_size: Some(self.size),
             resource,

@@ -80,7 +80,16 @@ impl Default for ModelTypeInfo {
 pub fn identify_model_type(path: impl AsRef<Path>) -> Result<ModelTypeInfo> {
     let path = path.as_ref();
     let mut file = std::fs::File::open(path).map_err(|e| PumasError::io_with_path(e, path))?;
+    identify_model_reader(&mut file, path)
+}
 
+/// Identify through a held descriptor. The path supplies format/context hints,
+/// never the input bytes. Callers of the GGUF-only acquired path admit its magic
+/// before this function, so no directory-context discovery is performed there.
+pub(crate) fn identify_model_reader<R: Read + Seek>(
+    file: &mut R,
+    path: &Path,
+) -> Result<ModelTypeInfo> {
     // Read first bytes for magic detection
     let mut header = [0u8; 64];
     let bytes_read = file
@@ -106,8 +115,8 @@ pub fn identify_model_type(path: impl AsRef<Path>) -> Result<ModelTypeInfo> {
         .map_err(|e| PumasError::io_with_path(e, path))?;
 
     match format {
-        FileFormat::Gguf => identify_gguf(&mut file, path),
-        FileFormat::Safetensors => identify_safetensors(&mut file, path),
+        FileFormat::Gguf => identify_gguf(file, path),
+        FileFormat::Safetensors => identify_safetensors(file, path),
         _ => Ok(ModelTypeInfo {
             format,
             model_type: ModelType::Unknown,

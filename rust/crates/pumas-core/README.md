@@ -13,6 +13,69 @@ tensor support. Enable `onnx-runtime` explicitly to expose `onnx_runtime` and it
 re-exported execution types. Provider descriptions and model metadata remain
 available without that feature. RPC enables it through `inference-plugins`.
 
+## Optional S3 protocol reader
+
+Enable `s3` explicitly to use `acquisition::{S3Reader, S3ReaderConfig}`. This
+reader supports anonymous access to explicitly configured versioned objects;
+it does not discover credentials or endpoints from the environment. Configure
+an HTTP(S) origin, region, bucket, addressing style, and positive operation
+budget. Virtual-hosted endpoints must already identify the bucket; HTTP requires
+explicit opt-in. Redirects, ambient proxies, SDK retries, and automatic HTTP
+protocol retries are disabled.
+
+`select(key, version_id, logical_path, sha256)` validates the local path and
+exact remote key, resolves HEAD for that VersionId, and refuses mutable `null`
+versions or missing/different version evidence. The returned selection exposes
+the existing `ArtifactManifest`; its source identity binds endpoint, bucket,
+addressing style, key, and revision. `read_range(start..end, &mut staging)` streams
+exact selected bytes using VersionId and If-Match, with metadata checks before
+writes. ETag is a conditional validator, never a digest. Dropping the read future
+stops polling it; timeout, error, or cancellation can leave partial staging bytes
+under the caller's custody.
+
+The reader owns no acquisition store, tasks, retry policy, verifier, or
+publication. Default and headless builds omit the SDK.
+
+### Shared S3 acquisition and one-file GGUF import
+
+`AcquisitionConsumer::acquire_s3` accepts an `AcquisitionS3Request` containing
+the exact selection, demand, reserved workspace, and positive finite attempt and
+elapsed retry budgets. It uses the same transfer, live-prefix checkpoints,
+verification, task supervision and consumer-receipt settlement as HTTP.
+Network/body deadlines include destination writes; an interrupted registered
+filesystem effect must drain before retry or release. Admission and consumer
+publication are separate lifecycle phases, not a hard wall-clock guarantee.
+
+For a single GGUF, keep the acquired use in the prepare result and perform model
+publication in the publish callback. Its receipt payload must be the serialized
+`ModelImportSpec`, whose `path` is the exact selected logical path:
+
+```rust,ignore
+let prepared_spec = spec.clone();
+let result = consumer.acquire_s3(request, host,
+    move |inputs| async move {
+        Ok((inputs, serde_json::to_value(prepared_spec)?))
+    },
+    move |inputs, receipt| async move {
+        importer.import_acquired_gguf(&inputs, &receipt, &spec).await
+    },
+).await?;
+```
+
+Use the lifecycle-owned `ModelLibrary` supplied by `PumasApi` or
+`PumasLibraryInstance`. Model publication requires the exact currently issued
+acquisition receipt and reads the verified descriptor. Copying checks the
+output digest against the acquisition receipt before the existing model
+publisher can expose Ready. A refused import returns an error and retains
+consumer custody. A retained `Using` intent receipt without proven model output
+requires explicit owner reconciliation; automatic reimport is unavailable.
+
+Authenticated stores, prefix/multifile model selection, other acquired model
+formats, desktop source selection, and live AWS/non-AWS/MinIO qualification
+remain open. Local synthetic GGUF fixtures prove model-library publication,
+not inference execution, packaged consumers, or the AQ-S3 gate. Hosted S3
+commands explicitly enable `s3`; ordinary feature graphs omit the reader.
+
 ## Choose the Correct Access Role
 
 | API | Use when |

@@ -134,6 +134,87 @@ pub struct AcquisitionHttpRequest {
     pub retry: AcquisitionRetryPolicy,
 }
 
+/// One exact versioned S3 selection; access remains ephemeral. Retry budgets
+/// must have positive finite attempt and elapsed limits.
+#[cfg(feature = "s3")]
+pub struct AcquisitionS3Request {
+    pub demand: AcquisitionDemand,
+    pub selection: super::S3ObjectSelection,
+    pub workspace: AcquisitionWorkspace,
+    pub retry: AcquisitionRetryPolicy,
+}
+
+enum AcquisitionSource {
+    Http {
+        client: super::AcquisitionHttpClient,
+        source: AcquisitionHttpSource,
+    },
+    #[cfg(feature = "s3")]
+    S3(super::S3ObjectSelection),
+}
+
+impl AcquisitionSource {
+    fn request_identity(&self) -> String {
+        match self {
+            Self::Http { source, .. } => source.url.clone(),
+            #[cfg(feature = "s3")]
+            Self::S3(selection) => selection.acquisition_identity(),
+        }
+    }
+
+    fn transfer_deadline(
+        &self,
+        _retry: &AcquisitionRetryPolicy,
+    ) -> Result<Option<tokio::time::Instant>> {
+        match self {
+            Self::Http { .. } => Ok(None),
+            #[cfg(feature = "s3")]
+            Self::S3(_) => tokio::time::Instant::now()
+                .checked_add(_retry.elapsed)
+                .map(Some)
+                .ok_or_else(|| invalid("S3 elapsed budget exceeds the supported clock range")),
+        }
+    }
+
+    async fn open(
+        &self,
+        manifest: &ArtifactManifest,
+        file_index: usize,
+        resume: u64,
+        continuation: Option<&HttpResumeEvidence>,
+        _deadline: Option<tokio::time::Instant>,
+    ) -> Result<super::http::HttpArtifactResponse> {
+        match self {
+            Self::Http { client, source } => {
+                open_http_artifact(
+                    client,
+                    &source.url,
+                    manifest,
+                    file_index,
+                    resume,
+                    source.authorization.as_deref(),
+                    continuation,
+                )
+                .await
+            }
+            #[cfg(feature = "s3")]
+            Self::S3(selection) => {
+                selection
+                    .open_acquisition(resume, continuation, _deadline)
+                    .await
+            }
+        }
+    }
+}
+
+struct AcquisitionRequest {
+    demand: AcquisitionDemand,
+    manifest: ArtifactManifest,
+    workspace: AcquisitionWorkspace,
+    sources: Vec<AcquisitionSource>,
+    retry: AcquisitionRetryPolicy,
+}
+
 fn invalid(message: &str) -> PumasError {
     PumasError::Validation {
         field: "acquisition.custody".into(),
@@ -325,6 +406,36 @@ pub struct AcquiredArtifactUse {
 }
 
 impl AcquiredArtifactUse {
+    /// A model publisher must observe the exact issued receipt before effects.
+    /// Neither a serialized receipt nor a matching in-memory value grants use.
+    pub(crate) async fn require_issued_receipt(
+        &self,
+        receipt: &AcquisitionConsumerReceipt,
+    ) -> Result<()> {
+        let store = self.store.clone();
+        let expected = self.lease.record().clone();
+        let receipt = receipt.clone();
+        owned(
+            &self.context,
+            "require issued model consumer receipt",
+            move || {
+                let current = store
+                    .acquisitions()?
+                    .remove(&expected.id)
+                    .ok_or_else(|| invalid("Model acquisition custody disappeared"))?;
+                if current != expected
+                    || store.consumer_receipt(expected.id)?.as_ref() != Some(&receipt)
+                {
+                    return Err(invalid(
+                        "Model publication requires the exact current issued consumer receipt",
+                    ));
+                }
+                Ok(())
+            },
+        )
+        .await
+    }
+
     /// Join registered effects, then durably revoke and reclaim consumer output.
     /// Only successful cleanup permits exact, receipt-free Using withdrawal.
     /// Cleanup must revoke this attempt before reclaiming it. Cleanup errors retain
@@ -822,6 +933,37 @@ impl AcquisitionService {
         retry: &AcquisitionRetryPolicy,
         host: &mut dyn AcquisitionHost,
     ) -> Result<u64> {
+        self.acquire_source_file(
+            context,
+            operation,
+            workspace,
+            file_index,
+            &AcquisitionSource::Http {
+                client: client.clone(),
+                source: AcquisitionHttpSource {
+                    url: url.to_owned(),
+                    authorization: authorization.map(str::to_owned),
+                },
+            },
+            retry,
+            host,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn acquire_source_file(
+        &self,
+        context: &TaskContext,
+        operation: &AcquisitionOperation,
+        workspace: &AcquisitionWorkspace,
+        file_index: usize,
+        source: &AcquisitionSource,
+        retry: &AcquisitionRetryPolicy,
+        host: &mut dyn AcquisitionHost,
+    ) -> Result<u64> {
+        let url = source.request_identity();
+        let transfer_deadline = source.transfer_deadline(retry)?;
         if &operation.record.workspace != workspace.identity() {
             return Err(invalid("Workspace grant does not match acquisition"));
         }
@@ -893,6 +1035,12 @@ impl AcquisitionService {
         let started = Instant::now();
         let mut attempt = 0_u32;
         loop {
+            if transfer_deadline.is_some_and(|deadline| deadline <= tokio::time::Instant::now()) {
+                return Err(PumasError::DownloadFailed {
+                    url: "S3 selected object".into(),
+                    message: "S3 acquisition elapsed retry budget exhausted".into(),
+                });
+            }
             attempt = attempt
                 .checked_add(1)
                 .ok_or_else(|| invalid("Retry counter exhausted"))?;
@@ -984,7 +1132,7 @@ impl AcquisitionService {
                 } else {
                     PumasError::DownloadPaused
                 }),
-                response = open_http_artifact(client, url, &operation.record.manifest, file_index, resume, authorization, continuation.as_ref()) => response,
+                response = source.open(&operation.record.manifest, file_index, resume, continuation.as_ref(), transfer_deadline) => response,
             };
             let outcome = match response {
                 Ok(mut response) => {
@@ -1018,6 +1166,15 @@ impl AcquisitionService {
                         hash,
                     };
                     let outcome = stream_http_artifact(response, resume, &mut sink, host).await;
+                    if sink.file.is_none() {
+                        // A source deadline can cancel the write waiter. Join the
+                        // registered descriptor effect before any retry truncates it.
+                        match context.drain_blocking().await {
+                            Ok(0) => {},
+                            result => return Err(PumasError::Other(format!(
+                                "Acquisition write effects unsettled after interruption: {result:?}"))),
+                        }
+                    }
                     if !matches!(outcome, Ok(HttpBodyOutcome::Cancelled)) && sink.file.is_some() {
                         sink.flush().await?;
                         let mut handle = sink
@@ -1045,7 +1202,7 @@ impl AcquisitionService {
                                     workspace,
                                     WarmCheckpointMetadata {
                                         record: &operation.record,
-                                        request_url: url,
+                                        request_url: &url,
                                         resource: &resource,
                                         etag: &etag,
                                         total,
@@ -1093,6 +1250,11 @@ impl AcquisitionService {
                         return Err(PumasError::DownloadFailed { url: "artifact source".into(), message: format!("Acquisition retry budget exhausted after {attempt} attempts: {error}") });
                     }
                     let delay = retry.backoff.calculate_delay(attempt.saturating_sub(1));
+                    let delay = if let Some(deadline) = transfer_deadline {
+                        delay.min(deadline.saturating_duration_since(tokio::time::Instant::now()))
+                    } else {
+                        delay
+                    };
                     host.retry(attempt, Some(delay), Some(&error.to_string()))
                         .await?;
                     tokio::select! {
@@ -1551,7 +1713,7 @@ impl AcquisitionConsumer {
         &self,
         request: AcquisitionHttpRequest,
         client: impl Into<super::AcquisitionHttpClient>,
-        mut host: Box<dyn AcquisitionHost>,
+        host: Box<dyn AcquisitionHost>,
         prepare: F,
         publish: Publish,
     ) -> Result<Output>
@@ -1580,6 +1742,91 @@ impl AcquisitionConsumer {
         for source in &request.sources {
             client.for_request(&source.url, source.authorization.is_some())?;
         }
+        self.acquire(
+            AcquisitionRequest {
+                demand: request.demand,
+                manifest: request.manifest,
+                workspace: request.workspace,
+                sources: request
+                    .sources
+                    .into_iter()
+                    .map(|source| AcquisitionSource::Http {
+                        client: client.clone(),
+                        source,
+                    })
+                    .collect(),
+                retry: request.retry,
+            },
+            host,
+            prepare,
+            publish,
+        )
+        .await
+    }
+
+    /// Acquire one versioned S3 object under this consumer's existing durable
+    /// lifecycle, then hold its verified use through consumer publication.
+    /// Caller-supplied positive finite attempt and elapsed limits bound transfer
+    /// retries; registered writes are drained before retry or terminal release.
+    #[cfg(feature = "s3")]
+    pub async fn acquire_s3<Staged, Output, F, Fut, Publish, PublishFut>(
+        &self,
+        request: AcquisitionS3Request,
+        host: Box<dyn AcquisitionHost>,
+        prepare: F,
+        publish: Publish,
+    ) -> Result<Output>
+    where
+        Staged: Send + 'static,
+        Output: Send + 'static,
+        F: FnOnce(AcquiredArtifactUse) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(Staged, Value)>> + Send + 'static,
+        Publish: FnOnce(Staged, AcquisitionConsumerReceipt) -> PublishFut + Send + 'static,
+        PublishFut: Future<Output = Result<Output>> + Send + 'static,
+    {
+        if request.demand.consumer != self.owner {
+            return Err(invalid("Consumer demand identity does not match its scope"));
+        }
+        if request.retry.attempts.is_none_or(|limit| limit == 0)
+            || request.retry.elapsed.is_zero()
+            || tokio::time::Instant::now()
+                .checked_add(request.retry.elapsed)
+                .is_none()
+        {
+            return Err(invalid(
+                "S3 transfer requires positive finite attempt and elapsed retry budgets",
+            ));
+        }
+        self.acquire(
+            AcquisitionRequest {
+                demand: request.demand,
+                manifest: request.selection.manifest().clone(),
+                workspace: request.workspace,
+                sources: vec![AcquisitionSource::S3(request.selection)],
+                retry: request.retry,
+            },
+            host,
+            prepare,
+            publish,
+        )
+        .await
+    }
+
+    async fn acquire<Staged, Output, F, Fut, Publish, PublishFut>(
+        &self,
+        request: AcquisitionRequest,
+        mut host: Box<dyn AcquisitionHost>,
+        prepare: F,
+        publish: Publish,
+    ) -> Result<Output>
+    where
+        Staged: Send + 'static,
+        Output: Send + 'static,
+        F: FnOnce(AcquiredArtifactUse) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(Staged, Value)>> + Send + 'static,
+        Publish: FnOnce(Staged, AcquisitionConsumerReceipt) -> PublishFut + Send + 'static,
+        PublishFut: Future<Output = Result<Output>> + Send + 'static,
+    {
         let service = self.service.clone();
         self.scope
             .run_worker_invocation(move |context| async move {
@@ -1601,14 +1848,12 @@ impl AcquisitionConsumer {
                 }
                 for (file_index, source) in request.sources.iter().enumerate() {
                     service
-                        .acquire_file(
+                        .acquire_source_file(
                             &context,
                             &operation,
                             &request.workspace,
                             file_index,
-                            &client,
-                            &source.url,
-                            source.authorization.as_deref(),
+                            source,
                             &request.retry,
                             host.as_mut(),
                         )

@@ -1,5 +1,74 @@
 # Acquisition execution ledger
 
+## 2026-10-04 — delegated S3 dispatch and GGUF import successor
+
+The coordinator resumed a separate successor to reader `2c7d6014`, then required
+accepted main `96c2dca9` in its ancestry and explicitly enabled hosted S3 checks.
+Local composition `74ea1823` preserves both parents and the exact accepted HF
+and speech-test bytes. The worker did not edit either protected reader or PR37
+branch and did not create a PR, request external review or merge an external PR.
+
+The existing acquisition owner now dispatches its ephemeral HTTP/S3 sources
+through one transfer/checkpoint/retry/file-verification/receipt lifecycle.
+The single-GGUF importer checks an actual issued receipt, consumes a verified
+descriptor, checks the copied digest before model publication, and uses existing
+model confirmation/indexing. Refusals retain Using rather than adopting failure.
+Source deadlines drain registered writes before retry; no second task/store,
+schema, signer, credential path or model-publication protocol was introduced.
+
+The local fixture observes a Ready indexed model and exact durable acquisition
+receipts. Negative/control fixtures cover changed source/digest, unsupported
+input, model collision, forged unissued receipt, pause/resume, cancellation,
+elapsed retry budget and dropped waiters. Reader and HTTP integration regressions
+remain required. See [qualification](reports/s3-dispatch-import-qualification-2026-10-04.md)
+for exact commands, final check results, initial disk/fixture/lint failures and
+limits. Only identified task-generated/superseded build outputs were retired.
+Final source passed 12 dispatch/import, 11 reader and five HTTP integration
+tests, strict all-target core Clippy, the headless compile, 12 feature graphs,
+six SDK-isolation graphs, canonical/optional attribution, 20 release/workflow
+contract tests, dependency ownership, rustfmt and diff checks. These local
+results do not imply a full unit suite, native build or hosted acceptance.
+
+The headless hosted job now runs explicit `s3` reader/dispatch tests and strict
+all-target Clippy after locked fetch. The worker claims no hosted result,
+credential/provider qualification, full default/native suite, real inference,
+desktop source workflow or automatic interrupted-model recovery. AQ-S3 remains
+not ready. Source-facing composition and exact model-output reconciliation are
+the next bounded slice; credentials and live providers stay separate.
+
+## 2026-10-04 — delegated optional S3 reader milestone
+
+The coordinator admitted and resumed a separate reader development slice on
+`feat/acquisition-s3-reader-c70a78f7` over
+`c70a78f7232f46dfb3a6b73db8bcc75fa9293acf`, independently of Torch acceptance.
+Its protocol adapter uses optional `object_store = =0.12.4` with only `aws`,
+explicit anonymous endpoint/bucket/addressing configuration, immutable VersionId
+selection, strong conditional validators, and bounded range streaming into
+caller-owned staging. It preserves the existing manifest and does not introduce
+acquisition persistence, retry, verification, or publication ownership.
+
+Addressing style now participates in stable source identity. The same-endpoint,
+same-key fixture independently observes different request paths and source
+identities while repeated equivalent configuration retains identity. All 11
+local protocol fixtures passed. Strict all-target Clippy with `s3,test-support`,
+the no-default headless compile, rustfmt and authored-source diff checks passed.
+Exact upstream notice whitespace is retained and flags the unrestricted diff
+check, as recorded in the qualification report. The repository
+checker passed 12 target/feature graphs; the SDK is absent from the six checked
+default/headless core graphs. The unchanged canonical attribution generator and
+checker passed, with exact optional dependency notices retained separately.
+See [qualification](reports/s3-reader-qualification-2026-10-04.md) for commands,
+dependency comparison, source boundaries, disk-related failed builds and limits.
+
+The separate PR37 repair remains protected at
+`44f5df72f9bb918049e197cfa74e8f2edf792749`; its worktree/branch was not edited.
+Only completed task-owned compiled artifacts were retired to fit local checks.
+The coordinator owns independent review, hosted CI, PR creation and integration.
+AWS/non-AWS/MinIO, credentials/refresh, model import, native/default ONNX builds,
+resource qualification and AQ-S3 remain open. The next S3 implementation slice
+is dispatch through the existing acquisition owner; this reader milestone does
+not establish an import workflow or advance the full gate.
+
 ## 2026-09-29 — coordinated planning delivery
 
 The user requested a separate acquisition prerequisite plan alongside the runtime/model-adapter plan. The attached r3 plan and integration review were read; current Pumas branch and standards refs were verified. Pumas remains at `04e7f156`; standards is now `39d55dc` (the inspected intervening commit changes test/evidence material, not the retained normative planning/architecture rules).

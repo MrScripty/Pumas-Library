@@ -933,7 +933,9 @@ async fn copied_import_reserved_backup_source_and_native_alias_collisions_are_re
     std::fs::write(source.join("a"), b"first").unwrap();
     std::fs::write(source.join("b"), b"backup collision").unwrap();
     let plan = CopyPlan {
-        source: crate::platform::capability_fs::open_directory(source).unwrap(),
+        source: CopySource::Directory(
+            crate::platform::capability_fs::open_directory(source).unwrap(),
+        ),
         directories: vec![],
         files: vec![
             (PathBuf::from("a"), "a".into(), "first.onnx".into()),

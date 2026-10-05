@@ -1,5 +1,25 @@
 # Single S3 SDK: bounded guard and diagnostic-scope follow-up
 
+## Exact-value review correction
+
+Independent review of frozen `3a9cb5dc` found that roxmltree 0.21.1 merges
+adjacent Text/CDATA while the pinned Smithy XML reader can use only its first Text.
+The original guard could therefore approve `models/ab` while SDK typed output
+selected `models/a`. A separate successor, `fix/s3-sdk-xml-values-3a9cb5dc`,
+preserves the reviewed checkpoint and now compares every used root field and
+each Contents Key/ETag/Size with SDK values, including count/order; CommonPrefixes
+also preserve count/order and exact Prefix agreement. There is no new parser,
+protocol owner, dependency, schema or production migration.
+
+The wire regression failed on the old guard and passes with the repair. It
+covers split/single CDATA keys, ETag/size/root-prefix/count/common-prefix mismatch,
+plus a valid two-object ordered page with escaped key bytes and distinct evidence.
+Final standalone tests pass 16/16, plus both parent-executed child fixtures;
+strict all-target Clippy and formatting pass. Logs are
+`/workspace/scratch/s3-sdk-spike/xml-values-{red,final,clippy}.log`.
+The original 15-probe result below is historical; the migration recommendation
+must use this successor's exact-value evidence rather than frozen `3a9cb5dc` alone.
+
 This is the coordinator-authorized isolated follow-up to
 [the initial suitability spike](s3-single-sdk-spike-2026-10-05.md).
 It preserves that checkpoint at `a6dbc3ffa745a2611fb5cd2f01b28b8c9bc1cd87`,

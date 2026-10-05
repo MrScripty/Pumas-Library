@@ -36,8 +36,8 @@ fn singleton<'a, 'input>(
     {
         return Err(invalid());
     }
-    // More than one text node (e.g. split CDATA) is deliberately unsupported in
-    // fields whose exact decoded value must agree with the SDK's interpretation.
+    // roxmltree may coalesce adjacent Text/CDATA; callers also compare the value
+    // with SDK output. Counting DOM text nodes alone cannot prove agreement.
     let mut text = node.children().filter(|child| child.is_text());
     let value = text.next().and_then(|child| child.text()).unwrap_or("");
     if text.next().is_some() {
@@ -104,28 +104,69 @@ impl Intercept for ListXmlGuard {
         {
             return Err(invalid());
         }
-        for name in [
-            "Name",
-            "Prefix",
-            "Delimiter",
-            "ContinuationToken",
-            "StartAfter",
-            "EncodingType",
-            "KeyCount",
-            "MaxKeys",
+        for (name, sdk_value) in [
+            ("Name", output.name()),
+            ("Prefix", output.prefix()),
+            ("Delimiter", output.delimiter()),
+            ("ContinuationToken", output.continuation_token()),
+            ("StartAfter", output.start_after()),
+            (
+                "EncodingType",
+                output.encoding_type().map(|value| value.as_str()),
+            ),
         ] {
-            singleton(root, name, false)?;
+            if singleton(root, name, false)? != sdk_value {
+                return Err(invalid());
+            }
         }
-        for contents in root
+        for (name, sdk_value) in [
+            ("KeyCount", output.key_count()),
+            ("MaxKeys", output.max_keys()),
+        ] {
+            if singleton(root, name, false)?
+                .map(str::parse::<i32>)
+                .transpose()
+                .map_err(|_| invalid())?
+                != sdk_value
+            {
+                return Err(invalid());
+            }
+        }
+        let contents = root
             .children()
             .filter(|node| node.is_element() && node.tag_name().name() == "Contents")
-        {
+            .collect::<Vec<_>>();
+        if contents.len() != output.contents().len() {
+            return Err(invalid());
+        }
+        for (contents, sdk_value) in contents.into_iter().zip(output.contents()) {
             if contents.tag_name().namespace() != root.tag_name().namespace() {
                 return Err(invalid());
             }
-            singleton(contents, "Key", true)?;
-            singleton(contents, "ETag", false)?;
-            singleton(contents, "Size", false)?;
+            if singleton(contents, "Key", true)? != sdk_value.key()
+                || singleton(contents, "ETag", false)? != sdk_value.e_tag()
+                || singleton(contents, "Size", false)?
+                    .map(str::parse::<i64>)
+                    .transpose()
+                    .map_err(|_| invalid())?
+                    != sdk_value.size()
+            {
+                return Err(invalid());
+            }
+        }
+        let prefixes = root
+            .children()
+            .filter(|node| node.is_element() && node.tag_name().name() == "CommonPrefixes")
+            .collect::<Vec<_>>();
+        if prefixes.len() != output.common_prefixes().len() {
+            return Err(invalid());
+        }
+        for (prefix, sdk_value) in prefixes.into_iter().zip(output.common_prefixes()) {
+            if prefix.tag_name().namespace() != root.tag_name().namespace()
+                || singleton(prefix, "Prefix", true)? != sdk_value.prefix()
+            {
+                return Err(invalid());
+            }
         }
         Ok(())
     }

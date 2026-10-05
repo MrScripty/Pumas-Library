@@ -476,6 +476,42 @@ async fn listing_guard_preserves_namespace_and_enforces_xml_node_budget() {
 
 #[derive(Clone)]
 struct MemoryLog(Arc<Mutex<Vec<u8>>>);
+
+#[tokio::test]
+async fn listing_guard_refuses_sdk_xml_value_disagreement() {
+    for field in [
+        "<Contents><Key>models/a<![CDATA[b]]></Key><ETag>\"opaque\"</ETag><Size>1</Size></Contents>",
+        "<Contents><Key><![CDATA[models/a]]></Key><ETag>\"opaque\"</ETag><Size>1</Size></Contents>",
+        "<Contents><Key>models/a</Key><ETag>opaque<![CDATA[changed]]></ETag><Size>1</Size></Contents>",
+        "<Contents><Key>models/a</Key><Size>1<![CDATA[2]]></Size></Contents>",
+        "<Prefix>models/<![CDATA[other]]></Prefix>",
+        "<KeyCount>1<![CDATA[2]]></KeyCount>",
+        "<CommonPrefixes><Prefix>models/<![CDATA[other]]></Prefix></CommonPrefixes>",
+    ] {
+        let body = format!("<ListBucketResult><IsTruncated>false</IsTruncated>{field}</ListBucketResult>");
+        let fixture = Fixture::serve(vec![fixture::xml(&body)], false).await;
+        let sdk = reader(&fixture, Addressing::Path, None, 4096);
+        let result = client::page(&sdk).await;
+        assert!(result.is_err(), "different SDK/XML selection values must be refused");
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+    let body = "<ListBucketResult><IsTruncated>false</IsTruncated><Name>fixture-bucket</Name><Prefix>models</Prefix><Delimiter>/</Delimiter><ContinuationToken>previous</ContinuationToken><StartAfter>models/0</StartAfter><EncodingType>url</EncodingType><KeyCount>2</KeyCount><MaxKeys>2</MaxKeys><Contents><Key>models/a&amp;1</Key><ETag>\"first\"</ETag><Size>0</Size></Contents><Contents><Key>models/b</Key><ETag>\"second\"</ETag><Size>1</Size></Contents></ListBucketResult>";
+    let fixture = Fixture::serve(vec![fixture::xml(body)], false).await;
+    let sdk = reader(&fixture, Addressing::Path, None, 4096);
+    let output = client::page(&sdk).await.unwrap();
+    assert_eq!(
+        output
+            .contents()
+            .iter()
+            .map(|item| (item.key(), item.e_tag(), item.size()))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some("models/a&1"), Some("\"first\""), Some(0)),
+            (Some("models/b"), Some("\"second\""), Some(1))
+        ]
+    );
+    assert_eq!(fixture.finish().await.len(), 1);
+}
 impl Write for MemoryLog {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         self.0.lock().unwrap().extend_from_slice(bytes);

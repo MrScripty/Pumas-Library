@@ -814,3 +814,15 @@ and full RPC checks were rerun. Qualification/plan/ledger records are the final
 docs set. See [report](s3-desktop-bundle-qualification-2026-10-05.md) for public
 surfaces, raw evidence, exact composition and pending browser/default/provider
 limits. Parent owns PRs/reviews/merges/hosted/Library coordination.
+
+
+### Q3 reserved acquired destination preflight correction — 2026-10-05
+
+Separate `fix/s3-bundle-reserved-e8082649`, frozen base e808: importer `staging.rs`
+extracts/reuses its existing reserved-root check and adds pure public preflight;
+native `api/s3_models.rs` and RPC `contract/s3.rs` call it before source/admission.
+Native workflow and RPC source tests exercise refusal/corrected success; importer
+unit exercises all owned roots/aliases. RPC README/shared contract, plan/ledger/
+write set and correction qualification report record this reviewed gap. Reader,
+manifest, watcher, importer.rs, existing publication protocol, dependencies,
+frontend/Electron/generated DTOs and all zero-length work are excluded.

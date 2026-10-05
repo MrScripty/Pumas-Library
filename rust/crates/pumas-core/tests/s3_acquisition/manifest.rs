@@ -9,6 +9,9 @@ const AUX_VERSION: &str = "auxiliary-v7";
 const AUX: &[u8] = b"{}";
 const AUX_PATH: &str = "config/tokenizer_config.json";
 
+#[path = "manifest/staging_acceptance.rs"]
+mod staging_acceptance;
+
 fn reader(endpoint: &str) -> S3Reader {
     S3Reader::new(S3ReaderConfig {
         endpoint: endpoint.into(),

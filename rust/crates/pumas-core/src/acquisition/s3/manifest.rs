@@ -50,7 +50,7 @@ impl S3Reader {
             pins.push(source);
             files.push(ArtifactFile::new(
                 &entry.logical_path,
-                &entry.source_key,
+                versioned_source_key(&entry.source_key, &entry.version)?,
                 None,
                 Some(entry.expected_sha256.clone()),
                 FileVerificationRequirement::Sha256,
@@ -83,8 +83,17 @@ impl S3Reader {
         }
         let files = objects
             .iter()
-            .map(|object| object.manifest.files()[0].clone())
-            .collect();
+            .map(|object| {
+                let file = &object.manifest.files()[0];
+                Ok(ArtifactFile::new(
+                    file.logical_path(),
+                    versioned_source_key(file.source_key(), &object.version)?,
+                    file.expected_size(),
+                    file.expected_sha256().cloned(),
+                    file.verification(),
+                )?)
+            })
+            .collect::<Result<Vec<_>, S3ReaderError>>()?;
         let manifest = ArtifactManifest::new(source, files)?;
         Ok(S3ManifestSelection { manifest, objects })
     }
@@ -129,4 +138,13 @@ impl S3Reader {
         )?;
         Ok((key, source))
     }
+}
+
+// Shared manifest admission compares evidence for equal opaque source keys.
+// Within a multi-version selection, an object is identified by both key and
+// VersionId. JSON tuple encoding keeps that pair unambiguous for arbitrary
+// accepted keys/versions. Reader requests and per-object pins retain the raw key.
+fn versioned_source_key(key: &str, version: &str) -> Result<String, S3ReaderError> {
+    serde_json::to_string(&(key, version))
+        .map_err(|_| S3ReaderError::Configuration("versioned object key encoding failed"))
 }

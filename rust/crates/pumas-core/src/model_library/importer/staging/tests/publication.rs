@@ -1034,7 +1034,7 @@ fn publication_in_place_spec(directory: PathBuf) -> InPlaceImportSpec {
 }
 
 #[tokio::test]
-async fn copied_import_stale_watcher_projection_preserves_producer_ready() {
+async fn copied_import_watcher_defers_to_producer_and_then_observes_ready() {
     let mut fixture = Fixture::new().await;
     let (published_tx, published_rx) = tokio::sync::oneshot::channel();
     let published_tx = std::sync::Mutex::new(Some(published_tx));
@@ -1043,7 +1043,11 @@ async fn copied_import_stale_watcher_projection_preserves_producer_ready() {
     fixture.importer.import_hook = Some(Arc::new(move |boundary, _| {
         if boundary == ImportBoundary::Published {
             let _ = published_tx.lock().unwrap().take().unwrap().send(());
-            resume_rx.lock().unwrap().recv().unwrap();
+            resume_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .unwrap();
         }
         Ok(())
     }));
@@ -1051,21 +1055,20 @@ async fn copied_import_stale_watcher_projection_preserves_producer_ready() {
     let spec = fixture.spec.clone();
     let producer = tokio::spawn(async move { importer.import(&spec).await });
     published_rx.await.unwrap();
-    let (prepared_tx, prepared_rx) = tokio::sync::oneshot::channel();
-    let (commit_tx, commit_rx) = tokio::sync::oneshot::channel();
-    let library = fixture.library.clone();
     let target = fixture.target();
-    let watcher = tokio::spawn(async move {
-        library
-            .index_model_dir_paused_projection(&target, prepared_tx, commit_rx)
-            .await
-    });
-    prepared_rx.await.unwrap();
+    let id = fixture.library.get_model_id(&target).unwrap();
+    let before = fixture.library.index().get(&id).unwrap();
+    let watcher = fixture.library.index_model_dir(&target).await;
+    let after = fixture.library.index().get(&id).unwrap();
+    // Release the blocking producer before asserting, including on a regression.
     resume_tx.send(()).unwrap();
     assert!(producer.await.unwrap().unwrap().success);
-    commit_tx.send(()).unwrap();
-    watcher.await.unwrap().unwrap();
-    let id = fixture.library.get_model_id(&fixture.target()).unwrap();
+    assert!(matches!(watcher, Err(PumasError::DownloadRootBusy)));
+    assert_eq!(
+        serde_json::to_value(before).unwrap(),
+        serde_json::to_value(after).unwrap()
+    );
+    fixture.library.index_model_dir(&target).await.unwrap();
     assert!(crate::models::copied_import_ready_value(
         &fixture.library.index().get(&id).unwrap().unwrap().metadata
     ));

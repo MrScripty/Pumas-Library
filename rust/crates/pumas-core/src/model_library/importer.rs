@@ -74,7 +74,7 @@ use tokio::sync::mpsc;
 use walkdir::WalkDir;
 
 /// Prefix for temporary import directories.
-pub(super) const TEMP_IMPORT_PREFIX: &str = ".tmp_import_";
+pub(crate) const TEMP_IMPORT_PREFIX: &str = ".tmp_import_";
 
 mod acquired;
 #[cfg(test)]

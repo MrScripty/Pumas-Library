@@ -941,6 +941,31 @@ impl ModelLibrary {
         Ok(())
     }
 
+    /// Discovery cannot rewrite the Pending snapshot owned by a live copied
+    /// publisher. Reuse its native root exclusion, then let the caller reread
+    /// evidence and retain the grant through conditional projection. Terminal
+    /// publications remain observable; legacy and acknowledged Ready paths do
+    /// not acquire another grant inside an already-owned reclassification.
+    fn protect_unacknowledged_publication_observation(
+        &self,
+        expected: Option<&ModelRecord>,
+        metadata: Option<&ModelMetadata>,
+    ) -> Result<Option<crate::model_library::RootExecutionGrant>> {
+        if self.import_guard.is_some()
+            || expected
+                .is_some_and(|record| crate::models::copied_import_ready_value(&record.metadata))
+            || !(expected.is_some_and(|record| {
+                publication_observation::claims_publication(&record.metadata)
+            }) || metadata.is_some_and(|metadata| metadata.import_publication.is_some()))
+        {
+            return Ok(None);
+        }
+        self.mutation_authority
+            .get()
+            .map(|authority| authority.root().try_acquire_execution_grant())
+            .transpose()
+    }
+
     pub(crate) fn require_finalized_import_edit(
         &self,
         model_dir: &Path,
@@ -1038,20 +1063,6 @@ impl ModelLibrary {
         let prepared = self.prepare_index_projection_async(model_dir).await?;
         self.persist_index_projection(model_dir, prepared).await?;
 
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn index_model_dir_paused_projection(
-        &self,
-        model_dir: &Path,
-        prepared_tx: tokio::sync::oneshot::Sender<()>,
-        resume: tokio::sync::oneshot::Receiver<()>,
-    ) -> Result<()> {
-        let prepared = self.prepare_index_projection_async(model_dir).await?;
-        let _ = prepared_tx.send(());
-        let _ = resume.await;
-        self.persist_index_projection(model_dir, prepared).await?;
         Ok(())
     }
 
@@ -1667,6 +1678,7 @@ impl ModelLibrary {
                     self.persist_index_projection(&directory, prepared).await?;
                     count += 1;
                 }
+                Err(PumasError::DownloadRootBusy) => return Err(PumasError::DownloadRootBusy),
                 Err(error) => {
                     tracing::warn!(path = %directory.display(), %error, "Model projection was not adopted")
                 }
@@ -1863,7 +1875,7 @@ impl ModelLibrary {
                 });
             }
 
-            let expected = self
+            let mut expected = self
                 .get_model_id(model_dir)
                 .map(|id| self.index.get(&id))
                 .transpose()?
@@ -1883,6 +1895,36 @@ impl ModelLibrary {
                         continue;
                     }
                 };
+
+            let _publication_grant = match self
+                .protect_unacknowledged_publication_observation(expected.as_ref(), Some(&metadata))
+            {
+                Ok(grant) => grant,
+                Err(error) => {
+                    result.errors.push((model_dir.clone(), error.to_string()));
+                    continue;
+                }
+            };
+            if _publication_grant.is_some() {
+                expected = self
+                    .get_model_id(model_dir)
+                    .map(|id| self.index.get(&id))
+                    .transpose()?
+                    .flatten();
+                match load_model_metadata_async(self.clone(), model_dir.clone()).await {
+                    Ok(Some(observed)) => metadata = observed,
+                    Ok(None) => {
+                        result
+                            .errors
+                            .push((model_dir.clone(), "No metadata".into()));
+                        continue;
+                    }
+                    Err(error) => {
+                        result.errors.push((model_dir.clone(), error.to_string()));
+                        continue;
+                    }
+                }
+            }
 
             if let Some(id) = self.get_model_id(model_dir) {
                 self.preserve_pending_import_index(&id, &mut metadata)?;
@@ -4991,12 +5033,30 @@ impl ModelLibrary {
         let model_id = self
             .get_model_id(model_dir)
             .ok_or_else(|| PumasError::Other("Model directory has no library ID".into()))?;
-        let expected = self.index.get(&model_id)?;
+        let mut expected = self.index.get(&model_id)?;
         let mut metadata = load_model_metadata_async(self.clone(), model_dir.to_path_buf())
             .await?
             .ok_or_else(|| PumasError::ModelNotFound {
                 model_id: model_dir.display().to_string(),
             })?;
+        let mut publication_grant = self
+            .protect_unacknowledged_publication_observation(expected.as_ref(), Some(&metadata))?;
+        if publication_grant.is_some() {
+            expected = self.index.get(&model_id)?;
+            metadata = load_model_metadata_async(self.clone(), model_dir.to_path_buf())
+                .await?
+                .ok_or_else(|| PumasError::ModelNotFound {
+                    model_id: model_dir.display().to_string(),
+                })?;
+            if expected
+                .as_ref()
+                .is_some_and(|record| crate::models::copied_import_ready_value(&record.metadata))
+            {
+                // The producer completed before exclusion was acquired. Its
+                // acknowledged row now has the ordinary Ready/CAS protection.
+                publication_grant = None;
+            }
+        }
 
         self.preserve_pending_import_index(&model_id, &mut metadata)?;
         if cold_import_observation_unadoptable(expected.as_ref(), &metadata) {
@@ -5016,6 +5076,7 @@ impl ModelLibrary {
                 metadata,
                 projection: None,
                 metadata_changed: false,
+                _publication_grant: publication_grant,
             });
         }
         let mut metadata_changed = normalize_library_owned_bundle_paths(model_dir, &mut metadata);
@@ -5059,6 +5120,7 @@ impl ModelLibrary {
             record,
             projection,
             metadata_changed,
+            _publication_grant: publication_grant,
         })
     }
 
@@ -5082,6 +5144,10 @@ impl ModelLibrary {
                 return Ok(false);
             }
             prepared.expected = Some(prepared.record.clone());
+            // Admission is now acknowledged Ready. Ordinary metadata refresh
+            // follows its existing ownership path; no discovery grant is left
+            // solely in a cancellable future while that write runs elsewhere.
+            prepared._publication_grant = None;
         }
         if prepared.metadata_changed {
             self.save_metadata(model_dir, &prepared.metadata).await?;
@@ -5112,6 +5178,9 @@ impl ModelLibrary {
         if outcome == crate::index::ProjectionCommit::Conflict {
             return Ok(false);
         }
+        // The guarded observation is committed. Any subsequent Ready metadata
+        // or binding work follows the existing acknowledged projection path.
+        prepared._publication_grant = None;
         let mut mutated = outcome.changed();
         if let Some(projection) = prepared.projection.as_ref() {
             mutated |= self.ensure_custom_runtime_binding(&prepared.model_id, projection)?;
@@ -5243,7 +5312,6 @@ fn cold_import_observation_unadoptable(
         && !metadata.copied_import_ready()
 }
 
-#[derive(Debug, Clone)]
 struct PreparedIndexProjection {
     expected: Option<ModelRecord>,
     model_id: String,
@@ -5251,6 +5319,7 @@ struct PreparedIndexProjection {
     record: ModelRecord,
     projection: Option<CustomRuntimeProjection>,
     metadata_changed: bool,
+    _publication_grant: Option<crate::model_library::RootExecutionGrant>,
 }
 
 fn model_record_matches(existing: &ModelRecord, projected: &ModelRecord) -> bool {

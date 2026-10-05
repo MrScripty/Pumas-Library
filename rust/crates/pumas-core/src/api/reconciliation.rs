@@ -748,6 +748,18 @@ fn is_internal_library_artifact_path(library_root: &Path, path: &Path) -> bool {
     let Ok(rel) = path.strip_prefix(library_root) else {
         return false;
     };
+    // The prefix reserves staging directories, not payload basenames. Ancestor
+    // components and the three model-root positions are directories even after
+    // removal. Below a model root, a prefixed leaf can be a published payload;
+    // do not hide its Modify/Remove event merely because its name looks internal.
+    let mut components = rel.components().enumerate().peekable();
+    while let Some((depth, component)) = components.next() {
+        if matches!(component, Component::Normal(name) if name.to_string_lossy().starts_with(crate::model_library::TEMP_IMPORT_PREFIX))
+            && (depth < 3 || components.peek().is_some() || path.is_dir())
+        {
+            return true;
+        }
+    }
     let mut components = rel.components();
     let Some(first) = components.next() else {
         // Root path events are internal noise for our purposes.
@@ -1603,6 +1615,22 @@ async fn reconcile_model_scope(
             return Ok(());
         }
         primary.model_library.index_model_dir(&model_dir).await?;
+        if primary
+            .model_library
+            .index()
+            .get(model_id)?
+            .is_some_and(|record| {
+                record
+                    .metadata
+                    .get("import_publication")
+                    .is_some_and(|value| !value.is_null())
+                    && !crate::models::copied_import_ready_value(&record.metadata)
+            })
+        {
+            // Discovery can retain terminal Pending diagnostics. That is not
+            // permission to edit/reclassify the producer-owned publication.
+            return Ok(());
+        }
         if let Err(err) = primary.model_library.reclassify_model(model_id).await {
             let message = err.to_string();
             if is_non_fatal_reclassify_error(&err) {
@@ -2372,6 +2400,194 @@ mod tests {
         assert!(!summary.requires_full_scope);
         assert!(summary.model_ids.contains("llm/llama/model-b"));
         assert!(!summary.model_ids.contains("llm/llama/model-a"));
+    }
+
+    #[tokio::test]
+    async fn temporary_import_events_do_not_admit_model_reconciliation() {
+        let temp = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(temp.path(), None).await;
+        let primary = api.primary();
+        let root = primary.model_library.library_root();
+        let stage = root.join(".tmp_import_discovery-regression");
+        let config = stage.join("config/tokenizer_config.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, b"{}").unwrap();
+        let paths = vec![stage.clone(), config.clone(), stage.join("metadata.json")];
+        let summary =
+            classify_watcher_changes(root, &primary.watcher_write_suppressor, paths.clone());
+
+        notify_filesystem_changes(primary.clone(), paths).await;
+        primary.runtime_tasks.shutdown_owned().await.unwrap();
+        assert!(summary.model_ids.is_empty(), "{:?}", summary.model_ids);
+        assert!(!summary.requires_full_scope);
+        assert!(!primary
+            .reconciliation
+            .lock_state()
+            .models
+            .contains_key(".tmp_import_discovery-regression/config/tokenizer_config.json"));
+        assert!(primary.model_library.index().list_all().unwrap().is_empty());
+        assert_eq!(std::fs::read(config).unwrap(), b"{}");
+    }
+
+    #[tokio::test]
+    async fn unavailable_copied_publication_is_not_reclassified_or_an_owner_failure() {
+        let temp = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(temp.path(), None).await;
+        let primary = api.primary();
+        let id = "llm/family/pending";
+        let model_dir = primary.model_library.library_root().join(id);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        let metadata = ModelMetadata {
+            model_id: Some(id.into()),
+            model_type: Some("llm".into()),
+            import_publication: Some(crate::models::ImportPublicationIdentity {
+                version: 1,
+                id: uuid::Uuid::new_v4().to_string(),
+                confirmed: false,
+            }),
+            import_state: Some(crate::models::ImportState::Pending),
+            validation_state: Some(crate::models::AssetValidationState::Invalid),
+            ..Default::default()
+        };
+        let bytes = serde_json::to_vec(&metadata).unwrap();
+        std::fs::write(model_dir.join("metadata.json"), &bytes).unwrap();
+
+        let authority = primary.model_library.mutation_authority().unwrap();
+        let producer = authority.root().try_acquire_execution_grant().unwrap();
+        assert!(reconcile_on_demand(
+            primary,
+            ReconcileScope::Model(id.into()),
+            "active-publication-regression",
+        )
+        .await
+        .unwrap());
+        assert!(primary.model_library.index().get(id).unwrap().is_none());
+        assert!(
+            primary
+                .reconciliation
+                .lock_state()
+                .models
+                .get(id)
+                .unwrap()
+                .dirty
+        );
+        drop(producer);
+
+        assert!(reconcile_on_demand(
+            primary,
+            ReconcileScope::Model(id.into()),
+            "pending-publication-regression",
+        )
+        .await
+        .unwrap());
+        let record = primary.model_library.index().get(id).unwrap().unwrap();
+        assert!(!crate::models::copied_import_ready_value(&record.metadata));
+        assert_eq!(
+            std::fs::read(model_dir.join("metadata.json")).unwrap(),
+            bytes
+        );
+        primary.runtime_tasks.shutdown_owned().await.unwrap();
+    }
+
+    #[test]
+    fn temporary_import_events_are_hidden_at_every_layout_depth_but_publication_is_visible() {
+        let root = Path::new("/library");
+        let suppressor = WatcherWriteSuppressor::new(WATCHER_WRITE_SUPPRESSION_TTL);
+        let staged = [
+            ".tmp_import_one/config/tokenizer_config.json",
+            "llm/.tmp_import_two/config/tokenizer_config.json",
+            "llm/family/.tmp_import_three/metadata.json",
+            "llm/family/model/.tmp_import_four/weights.gguf",
+        ];
+        let summary = classify_watcher_changes(
+            root,
+            &suppressor,
+            staged.iter().map(|path| root.join(path)).collect(),
+        );
+        assert!(summary.model_ids.is_empty(), "{:?}", summary.model_ids);
+        assert!(!summary.requires_full_scope);
+
+        let summary = classify_watcher_changes(
+            root,
+            &suppressor,
+            vec![
+                root.join("llm/family/model"),
+                root.join("llm/family/model/config/tokenizer_config.json"),
+            ],
+        );
+        assert_eq!(
+            summary.model_ids,
+            HashSet::from(["llm/family/model".into()])
+        );
+        assert!(!summary.requires_full_scope);
+    }
+
+    #[tokio::test]
+    async fn prefixed_payload_modification_marks_model_dirty_amid_staging_events() {
+        assert_prefixed_payload_event_marks_model_dirty(false).await;
+    }
+
+    #[tokio::test]
+    async fn prefixed_payload_removal_marks_model_dirty_amid_staging_events() {
+        assert_prefixed_payload_event_marks_model_dirty(true).await;
+    }
+
+    async fn assert_prefixed_payload_event_marks_model_dirty(remove: bool) {
+        let temp = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(temp.path(), None).await;
+        let primary = api.primary();
+        let root = primary.model_library.library_root();
+        let model_id = "llm/family/model";
+        let payload = root.join(model_id).join(".tmp_import_weights.gguf");
+        let auxiliary = root.join(model_id).join("config/.tmp_import_settings.json");
+        let stage = root.join(".tmp_import_payload-regression");
+        let staged_config = stage.join("config/tokenizer_config.json");
+        let nested_stage = root.join("llm/family/staging-only/.tmp_import_nested");
+        let nested_payload = nested_stage.join("weights.gguf");
+        for path in [&payload, &auxiliary, &staged_config, &nested_payload] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"before").unwrap();
+        }
+        let mut paths = vec![stage.clone(), staged_config, nested_payload];
+        if remove {
+            std::fs::remove_file(&payload).unwrap();
+            std::fs::remove_file(&auxiliary).unwrap();
+            std::fs::remove_dir_all(&stage).unwrap();
+            std::fs::remove_dir_all(&nested_stage).unwrap();
+        } else {
+            std::fs::write(&payload, b"modified").unwrap();
+            std::fs::write(&auxiliary, b"modified").unwrap();
+            paths.push(nested_stage);
+        }
+        let staged_summary =
+            classify_watcher_changes(root, &primary.watcher_write_suppressor, paths.clone());
+        assert!(staged_summary.model_ids.is_empty());
+        assert!(!staged_summary.requires_full_scope);
+
+        // A real reconciliation may already be active when the watcher delivers
+        // this batch. Hold its token so the dirty mark cannot be consumed before
+        // we inspect it; this fixture does not start an OS watcher.
+        let StartOutcome::Started(run) = primary
+            .reconciliation
+            .try_start(&ReconcileScope::AllModels, ReconcileIntent::Forced)
+            .await
+        else {
+            panic!("fixture must admit initial run")
+        };
+        paths.extend([payload, auxiliary]);
+        let summary =
+            classify_watcher_changes(root, &primary.watcher_write_suppressor, paths.clone());
+        assert_eq!(summary.model_ids, HashSet::from([model_id.to_string()]));
+        assert!(!summary.requires_full_scope);
+        notify_filesystem_changes(primary.clone(), paths).await;
+        {
+            let state = primary.reconciliation.lock_state();
+            assert_eq!(state.models.len(), 1);
+            assert!(state.models.get(model_id).unwrap().dirty);
+            assert!(!state.all.dirty);
+        }
+        run.finish_success(chrono::Utc::now().to_rfc3339()).await;
+        primary.runtime_tasks.shutdown_owned().await.unwrap();
     }
 
     #[test]

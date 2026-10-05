@@ -14,11 +14,90 @@ use crate::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
+
+// New consumer bindings reserve space for the copied-output receipt: embedding
+// at most doubles pretty JSON indentation; namespace entries include physical
+// identities, sizes and hashes. The model publication schema contract test
+// checks these reserves against the real version-2 receipt and its 16 MiB limit.
+const CONSUMER_DOCUMENT_MAX_BYTES: usize = 4 * 1024 * 1024;
+const CONSUMER_NAMESPACE_MAX_BYTES: usize = 2 * 1024 * 1024;
+const CONSUMER_NAMESPACE_ENTRY_BYTES: usize = 512;
+
+struct JsonSize {
+    bytes: usize,
+    limit: usize,
+}
+
+impl Write for JsonSize {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let next = self
+            .bytes
+            .checked_add(bytes.len())
+            .filter(|next| *next <= self.limit)
+            .ok_or_else(|| io::Error::other("Consumer JSON exceeds its byte budget"))?;
+        self.bytes = next;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn consumer_json_size<T: Serialize + ?Sized>(
+    value: &T,
+    limit: usize,
+    field: &str,
+) -> Result<usize> {
+    let mut size = JsonSize { bytes: 0, limit };
+    serde_json::to_writer_pretty(&mut size, value).map_err(|error| PumasError::Validation {
+        field: field.into(),
+        message: format!("Consumer serialization must fit {limit} bytes: {error}"),
+    })?;
+    Ok(size.bytes)
+}
+
+fn require_consumer_manifest_bound(manifest: &ArtifactManifest) -> Result<()> {
+    consumer_json_size(
+        manifest,
+        CONSUMER_DOCUMENT_MAX_BYTES,
+        "acquisition.consumer_document_size",
+    )?;
+    let mut parents = BTreeSet::new();
+    let mut namespace_bytes = 0_usize;
+    let mut charge = |path: &str| -> Result<()> {
+        let name_bytes = consumer_json_size(
+            path,
+            CONSUMER_NAMESPACE_MAX_BYTES,
+            "acquisition.consumer_namespace_size",
+        )?;
+        namespace_bytes = namespace_bytes
+            .checked_add(name_bytes)
+            .and_then(|bytes| bytes.checked_add(CONSUMER_NAMESPACE_ENTRY_BYTES))
+            .filter(|bytes| *bytes <= CONSUMER_NAMESPACE_MAX_BYTES)
+            .ok_or_else(|| PumasError::Validation {
+                field: "acquisition.consumer_namespace_size".into(),
+                message: "Consumer payload namespace exceeds its serialized proof budget".into(),
+            })?;
+        Ok(())
+    };
+    for file in manifest.files() {
+        charge(file.logical_path())?;
+        for (separator, _) in file.logical_path().match_indices('/') {
+            let parent = &file.logical_path()[..separator];
+            if parents.insert(parent) {
+                charge(parent)?;
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Consumer identity and exact demand operation; neither authorizes file access.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,6 +219,16 @@ pub struct AcquisitionHttpRequest {
 pub struct AcquisitionS3Request {
     pub demand: AcquisitionDemand,
     pub selection: super::S3ObjectSelection,
+    pub workspace: AcquisitionWorkspace,
+    pub retry: AcquisitionRetryPolicy,
+}
+
+/// A complete explicit pinned S3 set. Retry limits apply to each object's
+/// transfer; all members verify before the shared owner grants consumer use.
+#[cfg(feature = "s3")]
+pub struct AcquisitionS3ManifestRequest {
+    pub demand: AcquisitionDemand,
+    pub selection: super::S3ManifestSelection,
     pub workspace: AcquisitionWorkspace,
     pub retry: AcquisitionRetryPolicy,
 }
@@ -720,6 +809,11 @@ impl AcquisitionService {
         let store = self.store.clone();
         let expected = expected.clone();
         owned(context, "issue consumer completion receipt", move || {
+            consumer_json_size(
+                &receipt,
+                CONSUMER_DOCUMENT_MAX_BYTES,
+                "acquisition.consumer_document_size",
+            )?;
             store.issue_consumer_receipt(&expected, lease, &receipt)
         })
         .await
@@ -1784,19 +1878,7 @@ impl AcquisitionConsumer {
         Publish: FnOnce(Staged, AcquisitionConsumerReceipt) -> PublishFut + Send + 'static,
         PublishFut: Future<Output = Result<Output>> + Send + 'static,
     {
-        if request.demand.consumer != self.owner {
-            return Err(invalid("Consumer demand identity does not match its scope"));
-        }
-        if request.retry.attempts.is_none_or(|limit| limit == 0)
-            || request.retry.elapsed.is_zero()
-            || tokio::time::Instant::now()
-                .checked_add(request.retry.elapsed)
-                .is_none()
-        {
-            return Err(invalid(
-                "S3 transfer requires positive finite attempt and elapsed retry budgets",
-            ));
-        }
+        self.require_s3_transfer(&request.demand, &request.retry)?;
         self.acquire(
             AcquisitionRequest {
                 demand: request.demand,
@@ -1810,6 +1892,65 @@ impl AcquisitionConsumer {
             publish,
         )
         .await
+    }
+
+    /// Acquire the complete explicit version-pinned set through the same store,
+    /// writer, verified-file handoff and consumer receipt/settlement protocol.
+    /// Retry attempts and elapsed budgets apply per object; no complete-set
+    /// hard wall-clock or atomic remote-prefix snapshot is promised.
+    #[cfg(feature = "s3")]
+    pub async fn acquire_s3_manifest<Staged, Output, F, Fut, Publish, PublishFut>(
+        &self,
+        request: AcquisitionS3ManifestRequest,
+        host: Box<dyn AcquisitionHost>,
+        prepare: F,
+        publish: Publish,
+    ) -> Result<Output>
+    where
+        Staged: Send + 'static,
+        Output: Send + 'static,
+        F: FnOnce(AcquiredArtifactUse) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(Staged, Value)>> + Send + 'static,
+        Publish: FnOnce(Staged, AcquisitionConsumerReceipt) -> PublishFut + Send + 'static,
+        PublishFut: Future<Output = Result<Output>> + Send + 'static,
+    {
+        self.require_s3_transfer(&request.demand, &request.retry)?;
+        let (manifest, objects) = request.selection.into_parts();
+        self.acquire(
+            AcquisitionRequest {
+                demand: request.demand,
+                manifest,
+                workspace: request.workspace,
+                sources: objects.into_iter().map(AcquisitionSource::S3).collect(),
+                retry: request.retry,
+            },
+            host,
+            prepare,
+            publish,
+        )
+        .await
+    }
+
+    #[cfg(feature = "s3")]
+    fn require_s3_transfer(
+        &self,
+        demand: &AcquisitionDemand,
+        retry: &AcquisitionRetryPolicy,
+    ) -> Result<()> {
+        if demand.consumer != self.owner {
+            return Err(invalid("Consumer demand identity does not match its scope"));
+        }
+        if retry.attempts.is_none_or(|limit| limit == 0)
+            || retry.elapsed.is_zero()
+            || tokio::time::Instant::now()
+                .checked_add(retry.elapsed)
+                .is_none()
+        {
+            return Err(invalid(
+                "S3 transfer requires positive finite attempt and elapsed retry budgets",
+            ));
+        }
+        Ok(())
     }
 
     async fn acquire<Staged, Output, F, Fut, Publish, PublishFut>(
@@ -1830,6 +1971,11 @@ impl AcquisitionConsumer {
         let service = self.service.clone();
         self.scope
             .run_worker_invocation(move |context| async move {
+                let request = owned(&context, "bound consumer admission", move || {
+                    require_consumer_manifest_bound(&request.manifest)?;
+                    Ok(request)
+                })
+                .await?;
                 service.require_schema(&context).await?;
                 let operation = service
                     .begin(

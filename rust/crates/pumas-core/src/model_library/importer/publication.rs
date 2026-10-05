@@ -15,7 +15,7 @@ use crate::model_library::download_recovery::IMPORT_DOCUMENT_MAX_BYTES;
 pub(crate) use crate::model_library::download_recovery::IMPORT_RECEIPT as RECEIPT_FILENAME;
 pub(crate) const EVIDENCE_SIZE_FIELD: &str = "import_publication.evidence_size";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PublicationReceipt {
     version: u32,
@@ -24,6 +24,10 @@ struct PublicationReceipt {
     original_stage: String,
     state: ReceiptState,
     payload: ImportPayloadIdentity,
+    // Version 1 is the retained ordinary copied-import format. Version 2 binds
+    // acquired publication to its exact issued use; absence never grants recovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    acquisition: Option<crate::acquisition::AcquisitionConsumerReceipt>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,8 +179,7 @@ pub(crate) fn held_confirmed_receipt_matches(
         return Ok(false);
     }
     let receipt = read_receipt(destination)?;
-    let matches = receipt.version == 1
-        && receipt.id == identity.id
+    let matches = receipt.id == identity.id
         && receipt.state == ReceiptState::Confirmed
         && destination.import_payload_root_matches(&receipt.payload)?;
     if matches && verify_payload {
@@ -191,6 +194,7 @@ impl ImportPublication {
         model_id: &str,
         files: BTreeMap<String, ImportFileIdentity>,
         metadata: &mut ModelMetadata,
+        acquisition: Option<crate::acquisition::AcquisitionConsumerReceipt>,
     ) -> Result<Self> {
         let payload = stage.capture_copied_import_payload(files)?;
         let id = uuid::Uuid::new_v4().to_string();
@@ -203,7 +207,7 @@ impl ImportPublication {
         });
         Ok(Self {
             receipt: PublicationReceipt {
-                version: 1,
+                version: if acquisition.is_some() { 2 } else { 1 },
                 id,
                 model_id: model_id.to_owned(),
                 original_stage: stage
@@ -214,6 +218,7 @@ impl ImportPublication {
                     .into(),
                 state: ReceiptState::Pending,
                 payload,
+                acquisition,
             },
         })
     }
@@ -370,7 +375,78 @@ fn read_receipt(destination: &DownloadRecoveryDestination) -> Result<Publication
             message: "Copied import publication receipt exceeds the supported size limit".into(),
         });
     }
-    Ok(serde_json::from_slice(&bytes)?)
+    let receipt: PublicationReceipt = serde_json::from_slice(&bytes)?;
+    if !matches!(
+        (receipt.version, &receipt.acquisition),
+        (1, None) | (2, Some(_))
+    ) {
+        return Err(super::acquired::recovery_required(
+            "Unsupported copied-import publication receipt version or binding",
+        ));
+    }
+    Ok(receipt)
+}
+
+/// Confirmed output is observed through held root authority, the primary
+/// metadata, canonical index acknowledgement and physical payload proof.
+/// This observer neither repairs the model nor changes an acquisition record.
+pub(super) fn reconcile_acquired_output(
+    library: &ModelLibrary,
+    authority: &crate::model_library::mutation_authority::LibraryMutationAuthority,
+    acquisition: &crate::acquisition::AcquisitionConsumerReceipt,
+    spec: &ModelImportSpec,
+    model_id: &str,
+) -> Result<ModelImportResult> {
+    use super::acquired::recovery_required;
+    let indexed = library.index().get(model_id)?.ok_or_else(|| {
+        recovery_required("Acquired model output has no acknowledged index record")
+    })?;
+    let destination = authority
+        .root()
+        .resolve(&library.library_root().join(model_id))?;
+    let metadata = read_held_canonical_import_metadata(&destination)?
+        .ok_or_else(|| recovery_required("Acquired model output has no canonical metadata"))?;
+    // Legacy readiness helpers intentionally accept absent publication identity.
+    // Acquired settlement must never enter that compatibility path: require the
+    // canonical identity before matching its explicit indexed projection and
+    // reaching Confirmed/root/payload proof through the held receipt helper.
+    let identity = metadata.import_publication.as_ref().ok_or_else(|| {
+        recovery_required("Acquired model output has no canonical publication identity")
+    })?;
+    let receipt = read_receipt(&destination)?;
+    if receipt.version != 2
+        || receipt.acquisition.as_ref() != Some(acquisition)
+        || receipt.model_id != model_id
+        || indexed.id != model_id
+        || metadata.model_id.as_deref() != Some(model_id)
+        || !crate::models::copied_import_ready_value(&indexed.metadata)
+        || !metadata.copied_import_ready()
+        || indexed.metadata.get("import_publication") != Some(&serde_json::to_value(identity)?)
+        || !match acquisition.verified_files.as_slice() {
+            [file] => receipt
+                .payload
+                .matches_single_file(file.bytes, &file.sha256),
+            files if !files.is_empty() => receipt.payload.matches_file_set(
+                files
+                    .iter()
+                    .map(|file| (file.path.as_str(), file.bytes, file.sha256.as_str())),
+            ),
+            _ => false,
+        }
+        || !held_confirmed_receipt_matches(&destination, &metadata, true)?
+    {
+        return Err(recovery_required(
+            "Acquired model output does not prove this exact confirmed consumer generation",
+        ));
+    }
+    Ok(ModelImportResult {
+        path: spec.path.clone(),
+        success: true,
+        model_id: Some(model_id.into()),
+        model_path: Some(model_id.into()),
+        error: None,
+        security_tier: Some(SecurityTier::Safe),
+    })
 }
 
 pub(super) fn require_durable_document(outcome: AtomicPublication, document: &str) -> Result<()> {

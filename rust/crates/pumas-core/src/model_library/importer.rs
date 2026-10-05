@@ -76,6 +76,7 @@ use walkdir::WalkDir;
 /// Prefix for temporary import directories.
 pub(super) const TEMP_IMPORT_PREFIX: &str = ".tmp_import_";
 
+mod acquired;
 #[cfg(test)]
 mod acquisition_integration_tests;
 #[cfg(test)]
@@ -236,27 +237,17 @@ impl ModelImporter {
         receipt: &crate::acquisition::AcquisitionConsumerReceipt,
         spec: &ModelImportSpec,
     ) -> Result<ModelImportResult> {
-        let record = acquired.record();
-        if record.manifest.files().len() != 1
-            || record.files.len() != 1
-            || record.manifest.files()[0].logical_path() != spec.path
-            || record.manifest.files()[0].expected_sha256().is_none()
-            || !Path::new(&spec.path)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
-        {
-            return Err(PumasError::Validation { field: "import.acquired".into(),
-                message: "Acquired GGUF import requires one digest-verified file and its exact logical path".into() });
-        }
-        if receipt.payload != serde_json::to_value(spec)? {
-            return Err(PumasError::Validation {
-                field: "import.acquired".into(),
-                message: "Model publication receipt must bind the exact import specification"
-                    .into(),
-            });
+        Self::validate_acquired_gguf_intent(acquired, receipt, spec)?;
+        if !matches!(
+            acquired.record().phase,
+            crate::acquisition::AcquisitionPhase::Using { .. }
+        ) {
+            return Err(acquired::recovery_required(
+                "An adopted model operation cannot be imported again",
+            ));
         }
         acquired.require_issued_receipt(receipt).await?;
-        let result = self.import_acquired_owned(acquired, spec).await?;
+        let result = self.import_acquired_owned(acquired, receipt, spec).await?;
         if result.success {
             Ok(result)
         } else {

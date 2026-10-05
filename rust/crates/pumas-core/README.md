@@ -70,8 +70,61 @@ publisher can expose Ready. A refused import returns an error and retains
 consumer custody. A retained `Using` intent receipt without proven model output
 requires explicit owner reconciliation; automatic reimport is unavailable.
 
-Authenticated stores, prefix/multifile model selection, other acquired model
-formats, desktop source selection, and live AWS/non-AWS/MinIO qualification
+For a confirmed model whose acquisition acknowledgement was interrupted, use
+`ModelImporter::reconcile_acquired_gguf` as the output-validation callback of
+`AcquisitionConsumer::reconcile`. Supply the retained demand, exact manifest,
+fresh held workspace, import spec and candidate model ID. The candidate ID is
+only a lookup: recovery requires the exact acquisition receipt in the model's
+confirmed publication record, acknowledged Ready index, canonical primary
+metadata and unchanged physical payload with the verified input digest. The
+observer performs no download, import, index repair, Pending promotion or
+cleanup. Successful proof lets the existing consumer settle the same use;
+repeated adopted proof is observational and idempotent.
+
+Acquired recovery requires an explicit canonical publication identity with its
+matching indexed projection before Confirmed/root/payload proof. Missing/null
+identity retains acquisition uncertainty even if a matching v2 receipt survives.
+Ordinary legacy readiness remains supported separately.
+
+New consumer-facade operations admit at most 4 MiB of actual pretty-serialized
+manifest JSON and a 2 MiB payload namespace proof reserve before transfer or
+store admission. The reserve charges the encoded file names and unique parent
+prefixes plus 512 bytes per physical proof entry. New completion bindings must
+also fit 4 MiB before issuance or the publication callback; callback refusal
+retains the verified input and unreceipted use. These budgets leave room inside
+the copied-output receipt's 16 MiB observation limit. Existing manifest decoding,
+retained receipt reconciliation and ordinary copied-import formats are unchanged.
+
+Acquired copied imports now emit publication receipt version 2 with their exact
+issued acquisition binding. Ordinary copied imports retain version 1. Existing
+version-1 copied models remain readable, but an unbound version-1 model cannot
+prove an interrupted acquisition generation. Unsupported versions and missing
+bindings are refused and retained without automatic migration. Model metadata's
+existing publication identity remains version 1; it is a separate contract.
+
+Explicit file sets use `S3Reader::select_manifest(Vec<S3ManifestEntry>)` followed
+by `AcquisitionConsumer::acquire_s3_manifest(AcquisitionS3ManifestRequest, ...)`.
+Each entry declares an exact key, immutable VersionId, logical path and SHA256.
+Resolution validates the complete namespace before HEAD and returns a selection
+only after every declared version resolves. The manifest revision retains every
+original per-object identity in canonical logical-path order. Its existing
+16-KiB revision bound limits the encoded pin set; operation/retry budgets remain
+per object. This is an explicit set, not a snapshot obtained from prefix listing.
+
+For one primary GGUF with selected data/text auxiliaries, use
+`ModelImporter::import_acquired_gguf_bundle` in the commit callback and
+`reconcile_acquired_gguf_bundle` in the existing consumer reconciliation callback.
+The exact serialized import spec names the primary logical GGUF path. Auxiliary
+paths are preserved, every held input is copied and digest-verified, and the
+existing publisher confirms the complete model before acquisition acknowledgement.
+Cold proof requires the exact current receipt and every selected output path,
+size and digest; omitted or changed members cannot settle the use. Allowed
+auxiliary extensions are json, txt, md, model, tiktoken, vocab and merges. Another
+weight file, executable auxiliary and reserved root metadata name are refused.
+Output receipt versions and ordinary/single-object behavior remain unchanged.
+
+Authenticated stores, prefix discovery, sharded/multifile weight formats,
+desktop source selection, and live AWS/non-AWS/MinIO qualification
 remain open. Local synthetic GGUF fixtures prove model-library publication,
 not inference execution, packaged consumers, or the AQ-S3 gate. Hosted S3
 commands explicitly enable `s3`; ordinary feature graphs omit the reader.

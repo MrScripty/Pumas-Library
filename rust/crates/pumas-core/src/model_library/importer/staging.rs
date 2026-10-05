@@ -35,20 +35,55 @@ pub(super) enum ImportBoundary {
 pub(super) type ImportHook =
     Arc<dyn Fn(ImportBoundary, &DownloadRecoveryDestination) -> Result<()> + Send + Sync>;
 
+struct VerifiedCopyInput {
+    file: std::fs::File,
+    receipt: crate::acquisition::VerifiedFile,
+}
+
+struct AcquiredCopyInput {
+    files: Vec<VerifiedCopyInput>,
+    primary: usize,
+    consumer_receipt: crate::acquisition::AcquisitionConsumerReceipt,
+}
+
 impl ModelImporter {
     pub(super) async fn import_acquired_owned(
         &self,
         acquired: &crate::acquisition::AcquiredArtifactUse,
+        consumer_receipt: &crate::acquisition::AcquisitionConsumerReceipt,
         spec: &ModelImportSpec,
     ) -> Result<ModelImportResult> {
         let authority = self.library.mutation_authority()?;
-        let receipt = acquired.record().files[0].clone();
-        let file = acquired.open_file(0).await?;
+        let consumer_receipt = consumer_receipt.clone();
+        let primary = acquired
+            .record()
+            .files
+            .iter()
+            .position(|file| file.path == spec.path)
+            .ok_or_else(|| {
+                super::acquired::recovery_required("Selected primary GGUF input is unavailable")
+            })?;
+        let mut files = Vec::with_capacity(acquired.record().files.len());
+        for (index, receipt) in acquired.record().files.iter().enumerate() {
+            files.push(VerifiedCopyInput {
+                file: acquired.open_file(index).await?,
+                receipt: receipt.clone(),
+            });
+        }
         let importer = self.clone();
         let spec = spec.clone();
         acquired
             .run_blocking("copy and settle acquired GGUF model", move || {
-                importer.import_staged(&spec, &authority, None, Some((file, receipt)))
+                importer.import_staged(
+                    &spec,
+                    &authority,
+                    None,
+                    Some(AcquiredCopyInput {
+                        files,
+                        primary,
+                        consumer_receipt,
+                    }),
+                )
             })
             .await
     }
@@ -91,8 +126,11 @@ impl ModelImporter {
         spec: &ModelImportSpec,
         authority: &LibraryMutationAuthority,
         progress: Option<&mpsc::Sender<ImportProgress>>,
-        acquired: Option<(std::fs::File, crate::acquisition::VerifiedFile)>,
+        acquired: Option<AcquiredCopyInput>,
     ) -> Result<ModelImportResult> {
+        let acquisition = acquired
+            .as_ref()
+            .map(|input| input.consumer_receipt.clone());
         report(
             progress,
             ImportStage::Copying,
@@ -100,8 +138,8 @@ impl ModelImporter {
             "Inspecting import source",
         );
         let source_path = PathBuf::from(&spec.path);
-        let source_metadata = if let Some((file, _)) = &acquired {
-            file.metadata()?
+        let source_metadata = if let Some(input) = &acquired {
+            input.files[input.primary].file.metadata()?
         } else {
             std::fs::metadata(&source_path).map_err(|error| {
                 if error.kind() == io::ErrorKind::NotFound {
@@ -111,8 +149,9 @@ impl ModelImporter {
                 }
             })?
         };
-        let (type_info, acquired) = if let Some((mut file, verified)) = acquired {
+        let (type_info, acquired) = if let Some(mut input) = acquired {
             use std::io::{Read, Seek, SeekFrom};
+            let file = &mut input.files[input.primary].file;
             let mut magic = [0; 4];
             file.read_exact(&mut magic)?;
             if magic != *b"GGUF" {
@@ -122,10 +161,9 @@ impl ModelImporter {
                 });
             }
             file.seek(SeekFrom::Start(0))?;
-            let info =
-                crate::model_library::identifier::identify_model_reader(&mut file, &source_path)?;
+            let info = crate::model_library::identifier::identify_model_reader(file, &source_path)?;
             file.seek(SeekFrom::Start(0))?;
-            (info, Some((file, verified)))
+            (info, Some(input))
         } else {
             (self.detect_type(&source_path)?, None)
         };
@@ -166,8 +204,8 @@ impl ModelImporter {
             &normalize_name(&spec.official_name),
         );
         // Preflight the whole filename mapping before a stage is created.
-        let plan = match if let Some((file, verified)) = acquired {
-            CopyPlan::verified(file, verified)
+        let plan = match if let Some(input) = acquired {
+            CopyPlan::verified_set(input.files)
         } else {
             CopyPlan::open(&source_path, validation.is_some())
         } {
@@ -270,8 +308,13 @@ impl ModelImporter {
                 0.8,
                 "Writing metadata",
             );
-            let publication =
-                ImportPublication::prepare(&stage, &model_id, copied_evidence, &mut metadata)?;
+            let publication = ImportPublication::prepare(
+                &stage,
+                &model_id,
+                copied_evidence,
+                &mut metadata,
+                acquisition,
+            )?;
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforeMetadata, &stage)?;
             let projection =
@@ -552,28 +595,55 @@ struct CopyPlan {
 
 enum CopySource {
     Directory(Dir),
-    Verified {
-        file: std::fs::File,
-        receipt: crate::acquisition::VerifiedFile,
-    },
+    Verified(BTreeMap<String, VerifiedCopyInput>),
 }
 
 impl CopyPlan {
-    fn verified(file: std::fs::File, receipt: crate::acquisition::VerifiedFile) -> Result<Self> {
-        let original = receipt.path.clone();
-        let normalized = normalize_filename(&original);
-        if IMPORT_MUTABLE_DOCUMENTS
-            .iter()
-            .any(|name| normalized == normalize_filename(name))
-        {
-            return Err(invalid_filename(
-                "Acquired payload uses a reserved import filename",
-            ));
+    fn verified_set(inputs: Vec<VerifiedCopyInput>) -> Result<Self> {
+        let preserve_layout = inputs.len() > 1;
+        let mut source = BTreeMap::new();
+        let mut files = Vec::with_capacity(inputs.len());
+        let mut directories = std::collections::BTreeSet::new();
+        for input in inputs {
+            let original = input.receipt.path.clone();
+            let normalized = if preserve_layout {
+                original.clone()
+            } else {
+                normalize_filename(&original)
+            };
+            let first = normalized.split('/').next().unwrap_or_default();
+            if IMPORT_MUTABLE_DOCUMENTS
+                .iter()
+                .any(|name| normalize_filename(first) == normalize_filename(name))
+            {
+                return Err(invalid_filename(
+                    "Acquired payload uses a reserved import filename",
+                ));
+            }
+            let relative = PathBuf::from(&original);
+            if preserve_layout {
+                for parent in relative
+                    .ancestors()
+                    .skip(1)
+                    .filter(|path| !path.as_os_str().is_empty())
+                {
+                    directories.insert(
+                        parent
+                            .to_string_lossy()
+                            .replace(std::path::MAIN_SEPARATOR, "/"),
+                    );
+                }
+            }
+            if source.insert(original.clone(), input).is_some() {
+                return Err(invalid_filename("Acquired payload repeats a logical path"));
+            }
+            files.push((relative, original, normalized));
         }
+        files.sort_by(|left, right| left.2.cmp(&right.2));
         Ok(Self {
-            source: CopySource::Verified { file, receipt },
-            files: vec![(PathBuf::from(&original), original, normalized)],
-            directories: Vec::new(),
+            source: CopySource::Verified(source),
+            files,
+            directories: directories.into_iter().collect(),
         })
     }
 
@@ -688,7 +758,11 @@ impl CopyPlan {
         let mut evidence = BTreeMap::new();
         for (relative, original, normalized) in &self.files {
             let mut input = match &self.source {
-                CopySource::Verified { file, .. } => file.try_clone()?,
+                CopySource::Verified(inputs) => inputs
+                    .get(original)
+                    .ok_or_else(|| invalid_filename("Acquired copy has no exact input descriptor"))?
+                    .file
+                    .try_clone()?,
                 CopySource::Directory(source) => {
                     let parent = open_directory_chain(
                         source,
@@ -724,7 +798,11 @@ impl CopyPlan {
                 }
             })?;
             let (size, hashes) = copy_and_hash(&mut input, &mut output)?;
-            if let CopySource::Verified { receipt, .. } = &self.source {
+            if let CopySource::Verified(inputs) = &self.source {
+                let receipt = &inputs
+                    .get(original)
+                    .ok_or_else(|| invalid_filename("Acquired copy has no verified input receipt"))?
+                    .receipt;
                 if receipt.bytes != size || receipt.sha256 != hashes.sha256 {
                     return Err(PumasError::HashMismatch {
                         expected: receipt.sha256.clone(),

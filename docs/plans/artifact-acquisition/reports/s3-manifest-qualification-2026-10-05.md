@@ -1,5 +1,7 @@
 # Explicit pinned S3 file sets and GGUF auxiliary composition
 
+**Review correction:** Independent review found acquired recovery could accept missing/null publication identities through legacy readiness helpers, skipping held payload proof. The earlier focused checks did not cover this defect. See [bounded proof repair](s3-publication-proof-repair-2026-10-05.md); this report's output-proof claim is superseded for that gap.
+
 Branch `feat/acquisition-s3-manifest-ea1c4ae7`; exact parent
 `ea1c4ae75a8a6d4719a95f31c684e1d0398acbb8`, tree
 `736424cfd86f4c3d24ce268718ebec21e5e9613e`. Frozen dispatch e1ee893f,

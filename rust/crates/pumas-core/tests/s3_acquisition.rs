@@ -443,9 +443,37 @@ async fn cold_publication_reconciliation(fault: &str) {
         serde_json::from_slice::<serde_json::Value>(&metadata_bytes).unwrap()["import_state"],
         "ready"
     );
+    let publication_identity = serde_json::from_slice::<serde_json::Value>(&metadata_bytes)
+        .unwrap()["import_publication"]
+        .clone();
     drop(consumer);
     drop(first);
 
+    if fault.contains("identity") {
+        if !fault.starts_with("index-") {
+            let mut metadata: serde_json::Value = serde_json::from_slice(&metadata_bytes).unwrap();
+            if fault.starts_with("null-") {
+                metadata["import_publication"] = serde_json::Value::Null;
+            } else {
+                metadata
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("import_publication");
+            }
+            std::fs::write(
+                &metadata_path,
+                serde_json::to_vec_pretty(&metadata).unwrap(),
+            )
+            .unwrap();
+        }
+        if fault.ends_with("missing") {
+            std::fs::remove_file(&payload_path).unwrap();
+        } else {
+            let mut changed = bytes.clone();
+            changed[5] ^= 1;
+            std::fs::write(&payload_path, changed).unwrap();
+        }
+    }
     match fault {
         "none" => {}
         "bytes" => {
@@ -472,9 +500,10 @@ async fn cold_publication_reconciliation(fault: &str) {
                 .unwrap()
                 .remove("acquisition");
         }
+        _ if fault.contains("identity") => {}
         _ => panic!("unknown fixture fault"),
     }
-    if !matches!(fault, "none" | "bytes" | "metadata") {
+    if !matches!(fault, "none" | "bytes" | "metadata") && !fault.contains("identity") {
         std::fs::write(
             &receipt_path,
             serde_json::to_vec_pretty(&output_receipt).unwrap(),
@@ -483,11 +512,45 @@ async fn cold_publication_reconciliation(fault: &str) {
     }
     // Fresh owner/root capabilities, with no original use handle or task scope.
     let cold = api(root.path()).await;
+    if fault.contains("identity") {
+        // Set the exact disposable cold index projection under test. Startup may
+        // already have reprojected missing canonical identity as a legacy row.
+        let mut indexed = cold
+            .model_library()
+            .index()
+            .get(&model_id)
+            .unwrap()
+            .unwrap();
+        if fault.starts_with("canonical-") {
+            indexed.metadata["import_publication"] = publication_identity;
+        } else if fault.starts_with("null-") || fault.starts_with("index-null-") {
+            indexed.metadata["import_publication"] = serde_json::Value::Null;
+        } else {
+            indexed
+                .metadata
+                .as_object_mut()
+                .unwrap()
+                .remove("import_publication");
+        }
+        cold.model_library().index().upsert(&indexed).unwrap();
+        let canonical: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
+        let explicit_identity = |value: &serde_json::Value| {
+            value
+                .get("import_publication")
+                .is_some_and(|identity| !identity.is_null())
+        };
+        assert_eq!(explicit_identity(&canonical), fault.starts_with("index-"));
+        assert_eq!(
+            explicit_identity(&indexed.metadata),
+            fault.starts_with("canonical-")
+        );
+    }
     let consumer = cold.acquisition().open_consumer("model.s3").unwrap();
     let store_path = root.path().join("launcher-data/downloads.json");
     let store_before = std::fs::read(&store_path).unwrap();
     let output_before = std::fs::read(&receipt_path).unwrap();
-    let payload_before = std::fs::read(&payload_path).unwrap();
+    let payload_before = std::fs::read(&payload_path).ok();
     let metadata_before = std::fs::read(&metadata_path).ok();
     let index_before = cold
         .model_library()
@@ -515,6 +578,13 @@ async fn cold_publication_reconciliation(fault: &str) {
         close(&cold).await;
         let requests = fixture.finish().await;
         assert!(reconciled.is_err(), "{fault} unexpectedly settled");
+        if fault.contains("identity") {
+            assert!(
+                matches!(reconciled, Err(PumasError::Validation { ref field, .. })
+                if field == "import.acquired_recovery_required")
+            );
+            assert!(matches!(record.phase, AcquisitionPhase::Using { .. }));
+        }
         assert_eq!(
             std::fs::read(&store_path).unwrap(),
             store_before,
@@ -526,7 +596,7 @@ async fn cold_publication_reconciliation(fault: &str) {
             "{fault} rewrote model receipt"
         );
         assert_eq!(
-            std::fs::read(&payload_path).unwrap(),
+            std::fs::read(&payload_path).ok(),
             payload_before,
             "{fault} modified model payload"
         );
@@ -645,6 +715,25 @@ async fn future_model_receipt_version_is_refused_without_mutation() {
 #[tokio::test]
 async fn current_model_receipt_without_binding_is_refused_without_mutation() {
     cold_publication_reconciliation("unbound").await;
+}
+
+#[tokio::test]
+async fn missing_publication_identities_cannot_settle_changed_or_missing_output() {
+    for fault in ["identity-bytes", "identity-missing", "null-identity-bytes"] {
+        cold_publication_reconciliation(fault).await;
+    }
+}
+
+#[tokio::test]
+async fn missing_index_publication_identity_cannot_settle_changed_output() {
+    for fault in ["index-identity-bytes", "index-null-identity-bytes"] {
+        cold_publication_reconciliation(fault).await;
+    }
+}
+
+#[tokio::test]
+async fn missing_canonical_publication_identity_cannot_be_replaced_by_index() {
+    cold_publication_reconciliation("canonical-identity-bytes").await;
 }
 
 #[tokio::test]
@@ -1076,7 +1165,54 @@ async fn ordinary_copied_import_still_uses_the_directory_source_path() {
             .import_state,
         Some(ImportState::Ready)
     );
+    let target = api.model_library().library_root().join(&id);
     close(&api).await;
+    // A pre-protocol ordinary model has no publication identity or receipt.
+    // Acquired settlement is strict; this separate legacy read contract stays.
+    let metadata_path = target.join("metadata.json");
+    let mut metadata: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
+    metadata
+        .as_object_mut()
+        .unwrap()
+        .remove("import_publication");
+    std::fs::write(
+        &metadata_path,
+        serde_json::to_vec_pretty(&metadata).unwrap(),
+    )
+    .unwrap();
+    std::fs::remove_file(target.join(".pumas_import_publication.json")).unwrap();
+    let mut legacy = api.model_library().index().get(&id).unwrap().unwrap();
+    legacy
+        .metadata
+        .as_object_mut()
+        .unwrap()
+        .remove("import_publication");
+    api.model_library().index().upsert(&legacy).unwrap();
+    drop(api);
+    let cold = self::api(root.path()).await;
+    let metadata = cold
+        .model_library()
+        .get_effective_metadata(&id)
+        .unwrap()
+        .unwrap();
+    let reader = PumasReadOnlyLibrary::open(cold.model_library().library_root()).unwrap();
+    let snapshot = reader
+        .model_library_selector_snapshot(Default::default())
+        .unwrap();
+    drop(reader);
+    close(&cold).await;
+    assert!(metadata.import_publication.is_none());
+    assert_eq!(
+        snapshot
+            .rows
+            .iter()
+            .find(|row| row.model_id == id)
+            .unwrap()
+            .artifact_state,
+        ModelArtifactState::Ready
+    );
+    assert_eq!(std::fs::read(target.join(LOGICAL)).unwrap(), bytes);
 }
 
 #[tokio::test]

@@ -261,10 +261,53 @@ async fn bundle_publication_and_cold_proof(interrupt: bool, fault: &str) {
     assert!(output["payload"]["files"].get(AUX_PATH).is_some());
     drop(consumer);
     drop(first);
-    if fault == "auxiliary" {
+    if fault == "auxiliary" || fault.contains("identity") {
         std::fs::write(target.join(AUX_PATH), b"[]").unwrap();
     }
+    if fault.contains("identity") {
+        let path = target.join("metadata.json");
+        let mut metadata: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        if fault.starts_with("null-") {
+            metadata["import_publication"] = serde_json::Value::Null;
+        } else {
+            metadata
+                .as_object_mut()
+                .unwrap()
+                .remove("import_publication");
+        }
+        std::fs::write(path, serde_json::to_vec_pretty(&metadata).unwrap()).unwrap();
+    }
     let cold = api(root.path()).await;
+    if fault.contains("identity") {
+        let mut indexed = cold.model_library().index().get(&id).unwrap().unwrap();
+        if fault.starts_with("null-") {
+            indexed.metadata["import_publication"] = serde_json::Value::Null;
+        } else {
+            indexed
+                .metadata
+                .as_object_mut()
+                .unwrap()
+                .remove("import_publication");
+        }
+        cold.model_library().index().upsert(&indexed).unwrap();
+    }
+    let metadata_before = std::fs::read(target.join("metadata.json")).unwrap();
+    let index_before = cold
+        .model_library()
+        .index()
+        .get(&id)
+        .unwrap()
+        .unwrap()
+        .metadata;
+    if fault.contains("identity") {
+        let canonical: serde_json::Value = serde_json::from_slice(&metadata_before).unwrap();
+        for projection in [&canonical, &index_before] {
+            assert!(projection
+                .get("import_publication")
+                .is_none_or(serde_json::Value::is_null));
+        }
+    }
     let consumer = cold.acquisition().open_consumer("model.s3").unwrap();
     let before = std::fs::read(root.path().join("launcher-data/downloads.json")).unwrap();
     let auxiliary_before = std::fs::read(target.join(AUX_PATH)).unwrap();
@@ -315,6 +358,26 @@ async fn bundle_publication_and_cold_proof(interrupt: bool, fault: &str) {
         AUX
     );
     if fault != "none" {
+        if fault.contains("identity") {
+            assert!(
+                matches!(proof, Err(PumasError::Validation { ref field, .. })
+                if field == "import.acquired_recovery_required")
+            );
+            assert!(matches!(record.phase, AcquisitionPhase::Using { .. }));
+        }
+        assert_eq!(
+            std::fs::read(target.join("metadata.json")).unwrap(),
+            metadata_before
+        );
+        assert_eq!(
+            cold.model_library()
+                .index()
+                .get(&id)
+                .unwrap()
+                .unwrap()
+                .metadata,
+            index_before
+        );
         assert!(
             proof.is_err(),
             "{fault} settled an incomplete or changed output"
@@ -357,6 +420,13 @@ async fn bundle_publication_and_cold_proof(interrupt: bool, fault: &str) {
                 .artifact_state,
             ModelArtifactState::Ready
         );
+    }
+}
+
+#[tokio::test]
+async fn missing_bundle_publication_identities_cannot_settle_changed_auxiliary() {
+    for fault in ["identity", "null-identity"] {
+        bundle_publication_and_cold_proof(true, fault).await;
     }
 }
 

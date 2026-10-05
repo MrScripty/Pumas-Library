@@ -71,6 +71,11 @@ consumer custody. A retained `Using` intent receipt without proven model output
 requires explicit owner reconciliation; automatic reimport is unavailable.
 
 For a confirmed model whose acquisition acknowledgement was interrupted, use
+Acquired recovery requires an explicit canonical publication identity with its
+matching indexed projection before Confirmed/root/payload proof. Missing/null
+identity retains acquisition uncertainty even if a matching v2 receipt survives.
+Ordinary legacy readiness remains supported separately.
+
 `ModelImporter::reconcile_acquired_gguf` as the output-validation callback of
 `AcquisitionConsumer::reconcile`. Supply the retained demand, exact manifest,
 fresh held workspace, import spec and candidate model ID. The candidate ID is

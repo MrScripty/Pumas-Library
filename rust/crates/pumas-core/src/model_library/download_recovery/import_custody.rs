@@ -35,6 +35,16 @@ pub(crate) struct ImportPayloadIdentity {
     files: BTreeMap<String, ImportFileIdentity>,
 }
 
+impl ImportPayloadIdentity {
+    pub(crate) fn matches_single_file(&self, bytes: u64, sha256: &str) -> bool {
+        self.files.len() == 1
+            && self
+                .files
+                .values()
+                .all(|file| file.size == bytes && file.sha256 == sha256)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ImportFileIdentity {

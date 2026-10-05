@@ -216,6 +216,9 @@ fn retry(attempts: u32) -> AcquisitionRetryPolicy {
 }
 fn workspace(root: &Path) -> AcquisitionWorkspace {
     std::fs::create_dir(root.join("stage")).unwrap();
+    reopen_workspace(root)
+}
+fn reopen_workspace(root: &Path) -> AcquisitionWorkspace {
     AcquisitionWorkspace::from_reserved_directory(root, Path::new("stage"), Arc::new(()), || Ok(()))
         .unwrap()
 }
@@ -364,6 +367,281 @@ async fn s3_protocol_through_shared_custody_imports_a_ready_indexed_model() {
         reopened.acquisitions().unwrap().get(&record.id),
         Some(&record)
     );
+}
+
+// Interrupt only acquisition acknowledgement after the real model producer
+// confirms Ready. The listener remains active through recovery to observe replay.
+async fn cold_publication_reconciliation(fault: &str) {
+    let root = tempfile::TempDir::new().unwrap();
+    let stage = tempfile::TempDir::new().unwrap();
+    let first = api(root.path()).await;
+    let bytes = gguf();
+    let fixture = Fixture::serve(vec![
+        head(bytes.len()),
+        range(VERSION, 0, bytes.len(), &bytes),
+    ])
+    .await;
+    let selected = selection(&fixture.endpoint, &bytes).await;
+    let manifest = selected.manifest().clone();
+    let consumer = first.acquisition().open_consumer("model.s3").unwrap();
+    let request = acquire_request(selected, workspace(stage.path()), 2);
+    let demand = request.demand.clone();
+    let importer = ModelImporter::new(first.model_library().clone());
+    let (published, observed) = tokio::sync::oneshot::channel();
+    let result: Result<()> = consumer
+        .acquire_s3(
+            request,
+            Box::new(Host::quiet()),
+            |acquired| async { Ok((acquired, serde_json::to_value(spec(LOGICAL))?)) },
+            move |acquired, receipt| async move {
+                let model = importer
+                    .import_acquired_gguf(&acquired, &receipt, &spec(LOGICAL))
+                    .await?;
+                published.send(model).unwrap();
+                Err(PumasError::Validation {
+                    field: "fixture.after_confirmed_publication".into(),
+                    message: "Acknowledgement interrupted".into(),
+                })
+            },
+        )
+        .await;
+    let model = observed.await.unwrap();
+    consumer.shutdown().await.unwrap();
+    close(&first).await;
+    assert!(
+        matches!(result, Err(PumasError::Validation { ref field, .. }) if field == "fixture.after_confirmed_publication")
+    );
+    let model_id = model.model_id.unwrap();
+    let target = first.model_library().library_root().join(&model_id);
+    let record = first
+        .acquisition()
+        .store()
+        .acquisitions()
+        .unwrap()
+        .into_values()
+        .next()
+        .unwrap();
+    assert!(matches!(record.phase, AcquisitionPhase::Using { .. }));
+    let issued = consumer.completion_receipt(&record).unwrap().unwrap();
+    let receipt_path = target.join(".pumas_import_publication.json");
+    let receipt_bytes = std::fs::read(&receipt_path).unwrap();
+    let mut output_receipt: serde_json::Value = serde_json::from_slice(&receipt_bytes).unwrap();
+    assert_eq!(output_receipt["version"], 2);
+    assert_eq!(output_receipt["state"], "confirmed");
+    assert_eq!(
+        output_receipt["acquisition"],
+        serde_json::to_value(&issued).unwrap()
+    );
+    let metadata_path = target.join("metadata.json");
+    let metadata_bytes = std::fs::read(&metadata_path).unwrap();
+    let payload_path = target.join(LOGICAL);
+    assert_eq!(std::fs::read(&payload_path).unwrap(), bytes);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&metadata_bytes).unwrap()["import_state"],
+        "ready"
+    );
+    drop(consumer);
+    drop(first);
+
+    match fault {
+        "none" => {}
+        "bytes" => {
+            let mut changed = bytes.clone();
+            changed[5] ^= 1;
+            std::fs::write(&payload_path, changed).unwrap();
+        }
+        "lease" => {
+            output_receipt["acquisition"]["use_lease"] = uuid::Uuid::new_v4().to_string().into()
+        }
+        "pending" => output_receipt["state"] = "pending".into(),
+        "metadata" => std::fs::remove_file(&metadata_path).unwrap(),
+        "legacy" => {
+            output_receipt["version"] = 1.into();
+            output_receipt
+                .as_object_mut()
+                .unwrap()
+                .remove("acquisition");
+        }
+        "future" => output_receipt["version"] = 99.into(),
+        "unbound" => {
+            output_receipt
+                .as_object_mut()
+                .unwrap()
+                .remove("acquisition");
+        }
+        _ => panic!("unknown fixture fault"),
+    }
+    if !matches!(fault, "none" | "bytes" | "metadata") {
+        std::fs::write(
+            &receipt_path,
+            serde_json::to_vec_pretty(&output_receipt).unwrap(),
+        )
+        .unwrap();
+    }
+    // Fresh owner/root capabilities, with no original use handle or task scope.
+    let cold = api(root.path()).await;
+    let consumer = cold.acquisition().open_consumer("model.s3").unwrap();
+    let store_path = root.path().join("launcher-data/downloads.json");
+    let store_before = std::fs::read(&store_path).unwrap();
+    let output_before = std::fs::read(&receipt_path).unwrap();
+    let payload_before = std::fs::read(&payload_path).unwrap();
+    let metadata_before = std::fs::read(&metadata_path).ok();
+    let index_before = cold
+        .model_library()
+        .index()
+        .get(&model_id)
+        .unwrap()
+        .map(|row| row.metadata);
+    let source_before = std::fs::read(stage.path().join("stage").join(LOGICAL)).unwrap();
+    let importer = ModelImporter::new(cold.model_library().clone());
+    let checked_id = model_id.clone();
+    let reconciled = consumer
+        .reconcile(
+            demand.clone(),
+            manifest.clone(),
+            reopen_workspace(stage.path()),
+            move |receipt, acquired| async move {
+                importer
+                    .reconcile_acquired_gguf(&acquired, &receipt, &spec(LOGICAL), &checked_id)
+                    .await
+            },
+        )
+        .await;
+    if fault != "none" {
+        consumer.shutdown().await.unwrap();
+        close(&cold).await;
+        let requests = fixture.finish().await;
+        assert!(reconciled.is_err(), "{fault} unexpectedly settled");
+        assert_eq!(
+            std::fs::read(&store_path).unwrap(),
+            store_before,
+            "{fault} mutated acquisition state"
+        );
+        assert_eq!(
+            std::fs::read(&receipt_path).unwrap(),
+            output_before,
+            "{fault} rewrote model receipt"
+        );
+        assert_eq!(
+            std::fs::read(&payload_path).unwrap(),
+            payload_before,
+            "{fault} modified model payload"
+        );
+        assert_eq!(
+            cold.acquisition()
+                .store()
+                .acquisitions()
+                .unwrap()
+                .get(&record.id),
+            Some(&record)
+        );
+        assert_eq!(std::fs::read(&metadata_path).ok(), metadata_before);
+        assert_eq!(
+            cold.model_library()
+                .index()
+                .get(&model_id)
+                .unwrap()
+                .map(|row| row.metadata),
+            index_before
+        );
+        assert_eq!(
+            std::fs::read(stage.path().join("stage").join(LOGICAL)).unwrap(),
+            source_before
+        );
+        assert_eq!(requests.len(), 2, "cold refusal replayed the source");
+        return;
+    } else {
+        assert_eq!(
+            reconciled.unwrap().unwrap().model_id.as_deref(),
+            Some(model_id.as_str())
+        );
+    }
+    let importer = ModelImporter::new(cold.model_library().clone());
+    let checked_id = model_id.clone();
+    let settled = consumer
+        .reconcile(
+            demand.clone(),
+            manifest.clone(),
+            reopen_workspace(stage.path()),
+            move |receipt, acquired| async move {
+                importer
+                    .reconcile_acquired_gguf(&acquired, &receipt, &spec(LOGICAL), &checked_id)
+                    .await
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(settled.model_id.as_deref(), Some(model_id.as_str()));
+    let adopted = cold
+        .acquisition()
+        .store()
+        .acquisitions()
+        .unwrap()
+        .remove(&record.id)
+        .unwrap();
+    assert!(matches!(adopted.phase, AcquisitionPhase::Adopted { .. }));
+    assert_eq!(consumer.completion_receipt(&adopted).unwrap(), Some(issued));
+    assert_eq!(std::fs::read(&receipt_path).unwrap(), receipt_bytes);
+    assert_eq!(std::fs::read(&metadata_path).unwrap(), metadata_bytes);
+    assert_eq!(std::fs::read(&payload_path).unwrap(), bytes);
+    assert_eq!(
+        std::fs::read(stage.path().join("stage").join(LOGICAL)).unwrap(),
+        source_before
+    );
+    let reader = PumasReadOnlyLibrary::open(cold.model_library().library_root()).unwrap();
+    assert_eq!(
+        reader
+            .model_library_selector_snapshot(Default::default())
+            .unwrap()
+            .rows
+            .iter()
+            .find(|row| row.model_id == model_id)
+            .unwrap()
+            .artifact_state,
+        ModelArtifactState::Ready
+    );
+    drop(reader);
+    consumer.shutdown().await.unwrap();
+    close(&cold).await;
+    assert_eq!(
+        fixture.finish().await.len(),
+        2,
+        "cold reconciliation replayed the source"
+    );
+}
+
+#[tokio::test]
+async fn confirmed_model_publication_cold_reconciles_and_repeats_without_source_replay() {
+    cold_publication_reconciliation("none").await;
+}
+#[tokio::test]
+async fn changed_model_output_cold_reconciliation_preserves_custody() {
+    cold_publication_reconciliation("bytes").await;
+}
+#[tokio::test]
+async fn another_use_generation_cannot_settle_confirmed_model_output() {
+    cold_publication_reconciliation("lease").await;
+}
+#[tokio::test]
+async fn pending_model_publication_is_not_promoted_by_cold_reconciliation() {
+    cold_publication_reconciliation("pending").await;
+}
+#[tokio::test]
+async fn missing_canonical_metadata_cannot_be_replaced_by_index_or_backup() {
+    cold_publication_reconciliation("metadata").await;
+}
+#[tokio::test]
+async fn legacy_unbound_model_receipt_retains_acquisition_uncertainty() {
+    cold_publication_reconciliation("legacy").await;
+}
+#[tokio::test]
+async fn future_model_receipt_version_is_refused_without_mutation() {
+    cold_publication_reconciliation("future").await;
+}
+#[tokio::test]
+async fn current_model_receipt_without_binding_is_refused_without_mutation() {
+    cold_publication_reconciliation("unbound").await;
 }
 
 #[tokio::test]
@@ -771,6 +1049,18 @@ async fn ordinary_copied_import_still_uses_the_directory_source_path() {
         .unwrap();
     assert!(result.success);
     let id = result.model_id.unwrap();
+    let receipt: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            api.model_library()
+                .library_root()
+                .join(&id)
+                .join(".pumas_import_publication.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(receipt["version"], 1);
+    assert!(receipt.get("acquisition").is_none());
     assert_eq!(
         std::fs::read(api.model_library().library_root().join(&id).join(LOGICAL)).unwrap(),
         bytes

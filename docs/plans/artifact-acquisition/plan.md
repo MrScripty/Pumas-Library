@@ -193,6 +193,21 @@ A further Linux x86_64 fixture drives the real native installer with a valid pub
 
 ## Acceptance and verification
 
+**Admitted Q3 interrupted-publication successor (2026-10-05):** The coordinator
+assigned the next concrete plan requirement while `e1ee893f` is independently
+reviewed. Branch `feat/acquisition-s3-reconcile-e1ee893f` preserves that candidate
+and reader PR38 unchanged. This slice addresses the consumer-commit-before-
+acquisition-acknowledgement requirement in contract section 9 and bounded AC05
+support: the real copied model publisher binds its exact issued acquisition use,
+and a cold consumer may settle only an already confirmed, indexed Ready,
+unchanged output without transfer or import replay. Missing, Pending, legacy
+unbound, changed and unsupported outputs remain unresolved. Evidence is in
+[reconciliation qualification](reports/s3-reconciliation-qualification-2026-10-05.md).
+Independent review and exact-head hosted acceptance remain coordinator-owned.
+This does not qualify source-facing desktop/RPC composition, multi-file model
+selection, credentials, live providers or every interruption boundary. AQ-S3
+remains not ready.
+
 [Acceptance matrix](reports/acceptance-matrix.md) owns criteria, evidence kind, environment, execution mode and named procedures. Every production claim remains pending. Static checks and disposable fixtures support, but do not replace, real transfer, package, desktop, native and deployment evidence. Source review and this package's link checks do not certify code compliance.
 
 Composed-design review is **applicable**. [Architecture review](reports/architecture-review.md) answers all eight probes for this design and its runtime consumer, plus the authority-scope and dependency questions. The required simplicity result is reduced caller knowledge: a new source changes a source integration, not runtime installers or model adapters; a new installer consumes existing verified artifacts without learning HTTP/S3 recovery.

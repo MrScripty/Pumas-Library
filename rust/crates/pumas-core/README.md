@@ -70,6 +70,24 @@ publisher can expose Ready. A refused import returns an error and retains
 consumer custody. A retained `Using` intent receipt without proven model output
 requires explicit owner reconciliation; automatic reimport is unavailable.
 
+For a confirmed model whose acquisition acknowledgement was interrupted, use
+`ModelImporter::reconcile_acquired_gguf` as the output-validation callback of
+`AcquisitionConsumer::reconcile`. Supply the retained demand, exact manifest,
+fresh held workspace, import spec and candidate model ID. The candidate ID is
+only a lookup: recovery requires the exact acquisition receipt in the model's
+confirmed publication record, acknowledged Ready index, canonical primary
+metadata and unchanged physical payload with the verified input digest. The
+observer performs no download, import, index repair, Pending promotion or
+cleanup. Successful proof lets the existing consumer settle the same use;
+repeated adopted proof is observational and idempotent.
+
+Acquired copied imports now emit publication receipt version 2 with their exact
+issued acquisition binding. Ordinary copied imports retain version 1. Existing
+version-1 copied models remain readable, but an unbound version-1 model cannot
+prove an interrupted acquisition generation. Unsupported versions and missing
+bindings are refused and retained without automatic migration. Model metadata's
+existing publication identity remains version 1; it is a separate contract.
+
 Authenticated stores, prefix/multifile model selection, other acquired model
 formats, desktop source selection, and live AWS/non-AWS/MinIO qualification
 remain open. Local synthetic GGUF fixtures prove model-library publication,

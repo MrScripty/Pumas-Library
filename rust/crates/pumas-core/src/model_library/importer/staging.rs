@@ -39,16 +39,23 @@ impl ModelImporter {
     pub(super) async fn import_acquired_owned(
         &self,
         acquired: &crate::acquisition::AcquiredArtifactUse,
+        consumer_receipt: &crate::acquisition::AcquisitionConsumerReceipt,
         spec: &ModelImportSpec,
     ) -> Result<ModelImportResult> {
         let authority = self.library.mutation_authority()?;
         let receipt = acquired.record().files[0].clone();
+        let consumer_receipt = consumer_receipt.clone();
         let file = acquired.open_file(0).await?;
         let importer = self.clone();
         let spec = spec.clone();
         acquired
             .run_blocking("copy and settle acquired GGUF model", move || {
-                importer.import_staged(&spec, &authority, None, Some((file, receipt)))
+                importer.import_staged(
+                    &spec,
+                    &authority,
+                    None,
+                    Some((file, receipt, consumer_receipt)),
+                )
             })
             .await
     }
@@ -91,8 +98,13 @@ impl ModelImporter {
         spec: &ModelImportSpec,
         authority: &LibraryMutationAuthority,
         progress: Option<&mpsc::Sender<ImportProgress>>,
-        acquired: Option<(std::fs::File, crate::acquisition::VerifiedFile)>,
+        acquired: Option<(
+            std::fs::File,
+            crate::acquisition::VerifiedFile,
+            crate::acquisition::AcquisitionConsumerReceipt,
+        )>,
     ) -> Result<ModelImportResult> {
+        let acquisition = acquired.as_ref().map(|(_, _, receipt)| receipt.clone());
         report(
             progress,
             ImportStage::Copying,
@@ -100,7 +112,7 @@ impl ModelImporter {
             "Inspecting import source",
         );
         let source_path = PathBuf::from(&spec.path);
-        let source_metadata = if let Some((file, _)) = &acquired {
+        let source_metadata = if let Some((file, _, _)) = &acquired {
             file.metadata()?
         } else {
             std::fs::metadata(&source_path).map_err(|error| {
@@ -111,7 +123,7 @@ impl ModelImporter {
                 }
             })?
         };
-        let (type_info, acquired) = if let Some((mut file, verified)) = acquired {
+        let (type_info, acquired) = if let Some((mut file, verified, consumer_receipt)) = acquired {
             use std::io::{Read, Seek, SeekFrom};
             let mut magic = [0; 4];
             file.read_exact(&mut magic)?;
@@ -125,7 +137,7 @@ impl ModelImporter {
             let info =
                 crate::model_library::identifier::identify_model_reader(&mut file, &source_path)?;
             file.seek(SeekFrom::Start(0))?;
-            (info, Some((file, verified)))
+            (info, Some((file, verified, consumer_receipt)))
         } else {
             (self.detect_type(&source_path)?, None)
         };
@@ -166,7 +178,7 @@ impl ModelImporter {
             &normalize_name(&spec.official_name),
         );
         // Preflight the whole filename mapping before a stage is created.
-        let plan = match if let Some((file, verified)) = acquired {
+        let plan = match if let Some((file, verified, _)) = acquired {
             CopyPlan::verified(file, verified)
         } else {
             CopyPlan::open(&source_path, validation.is_some())
@@ -270,8 +282,13 @@ impl ModelImporter {
                 0.8,
                 "Writing metadata",
             );
-            let publication =
-                ImportPublication::prepare(&stage, &model_id, copied_evidence, &mut metadata)?;
+            let publication = ImportPublication::prepare(
+                &stage,
+                &model_id,
+                copied_evidence,
+                &mut metadata,
+                acquisition,
+            )?;
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforeMetadata, &stage)?;
             let projection =

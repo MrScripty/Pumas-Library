@@ -786,3 +786,31 @@ are bounded explicit ephemeral request data, with no ambient discovery,
 persistence, logging, automatic replay or refresh. Synthetic fixture credentials
 only; existing normally verified HTTPS trust remains unchanged. Parent owns
 review, hosted/browser/provider qualification, PRs/merges and Library delivery.
+
+## Q3 pinned multi-file desktop/native composition — 2026-10-05
+
+Scope was reported before implementation on separate branch
+`feat/s3-desktop-bundle-d30412e9`, frozen base d30412e9. Core prerequisite dd90f416
+writes only `acquisition/s3.rs`, default observation methods/ticks in
+`acquisition/service.rs`, `api/s3_models.rs`, root/API exports and native workflow
+progress assertions. It uses shared manifest validation and unchanged private
+object validation; `s3/manifest.rs`, importer, watcher and all PR40 repair paths
+remain untouched by feature implementation.
+
+Desktop milestone 339032ff writes RPC S3 contract/export/command/handler,
+`s3_imports.rs` and tests; Electron registry/validation/preload/source result
+projection and three source tests; frontend ImportAPI/bridge types, existing S3
+hook/dialog and tests; six canonical generated files; root/RPC README and shared
+contract. No new dependency, config persistence, transfer/retry/publication
+writer or credential storage is admitted.
+
+After PR40 merged into accepted main 838eb299, the coordinator explicitly
+requested normal composition. Merge d9d907cf has ordered parents 339032ff and
+838eb299, tree 82511113e7e82a44ee526f91a8ce7f480282e0ec. It includes PR40's
+reconciliation/HF/library/publication-observation/test/report changes solely by
+normal merge, with frozen milestones and refs preserved. Follow-up 5104a21e adds
+only empty-object refusal fixture and help/docs text. Affected composed lifecycle
+and full RPC checks were rerun. Qualification/plan/ledger records are the final
+docs set. See [report](s3-desktop-bundle-qualification-2026-10-05.md) for public
+surfaces, raw evidence, exact composition and pending browser/default/provider
+limits. Parent owns PRs/reviews/merges/hosted/Library coordination.

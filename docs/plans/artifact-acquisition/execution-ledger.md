@@ -1,5 +1,37 @@
 # Acquisition execution ledger
 
+## 2026-10-05 — pinned multi-file desktop and accepted native composition
+
+Separate `feat/s3-desktop-bundle-d30412e9` starts from frozen authenticated
+`d30412e9`. Tested prerequisite `dd90f416` adds pure native manifest preflight
+and safe explicit file-boundary observations; implementation `339032ff` adds
+anonymous/authenticated bundle starts, aggregate read and per-file dialog pins.
+Existing single-object methods, ephemeral secret handling, acquisition/import/
+registration/receipt/cancellation owners and policies remain compatible.
+
+The coordinator then authorized an explicit normal merge of accepted main
+`838eb2990905144a59830f1a16fe91b4e1105d4d`, tree
+`f6d6c1d3c5ba5be0fb998a6fd157fcb31c63dc72`, whose ordered parents are 05717338
+and 1e811936. Composition `d9d907cfe0e57b1e2bc7e296eff1327de835bc5e`, tree
+`82511113e7e82a44ee526f91a8ce7f480282e0ec`, has ordered parents 339032ff and
+838eb299. All frozen feature refs remain separate ancestors; accepted PR40
+publication/discovery repairs are included through that merge without rewriting
+their implementation. Follow-up `5104a21e` qualifies the existing empty-member
+refusal and adds its help text, with no reader policy change.
+
+Composed acquisition 171, model-library 832, reconciliation 35 and S3 integration
+60 tests pass (overlapping subsets); full RPC 220 passes. Frontend 863, Node 242,
+final DOM 20, no-S3 source 4 and generator 8 pass. Strict core Clippy and RPC
+Clippy with inherited dead-code exception pass. Controlled HTTPS proves exact
+multi-version pins, aggregate staging progress, optional authentication,
+cancellation, receipts, no secret persistence/logging, missing/digest/empty
+member refusal and honest retained outcomes. Browser/default/platform/provider
+limits remain; AQ-S3 is not advanced. See [qualification](reports/s3-desktop-bundle-qualification-2026-10-05.md)
+for exact trees, logs and boundary proof. Parent owns PR/review/hosted/merge/Library.
+Next existing-plan implementation candidate: S3 zero-byte selected-member
+handling through the existing reader/acquisition boundary, separately scoped;
+live provider and Q4 installed/native qualification remain separate.
+
 ## 2026-10-05 — authenticated explicit-source desktop/RPC successor
 
 Separate `feat/s3-desktop-auth-106a6ca4` preserves frozen anonymous `106a6ca4`,

@@ -3,6 +3,15 @@
 **Plan status:** `Active` — Q1 is admitted on the current accepted `main` base; AQ-HTTP remains not ready.
 **Objective acceptance status:** `pending`.
 
+**Independent AC10 measurement (2026-10-05):** The authorized opt-in public-owner
+probe on `qualification/acquisition-resources-26a84e32` passed 15 fresh Linux
+process cases. Its [measurement contract and evidence](reports/ac10-resource-measurement-2026-10-05.md)
+separate kernel/process and sampled filesystem observations from configured
+admission/chunk limits. This adds no production transfer/runtime/build policy
+and preserves the frozen S3/ORT checkpoints. Representative release/model/host
+resource budgets and complete AC10 qualification remain pending; no acquisition
+gate or runtime R1 prerequisite is advanced.
+
 **Q3 staging/version acceptance follow-up:** Merged PR39 is the base for the two fixes on `fix/import-discovery-s3-version`: private temporary-import events no longer become watcher model scopes, and explicit S3 manifests distinguish same-key/different-VersionId objects while retaining same-version evidence checks. The fixes were pushed without force and verified at `a606c80b0be41580c7af0583703d9f9af5f2cb44`. A successor normal-workflow fixture now qualifies a valid 3 MiB callback and 3 MiB auxiliary with the real watcher, public GetModel observation, clean shutdown and cold output proof without source replay. See [qualification](reports/s3-staging-discovery-qualification.md) for commands, failed experiment and limits. AC13/AC14 and AQ-S3 remain pending. The next slice is authorized real-provider/source-configuration qualification; credentials, live AWS/non-AWS/MinIO and desktop workflow are not supplied or established by these local fixtures.
 
 **Admitted Q3 reader development (2026-10-04):** The coordinator explicitly delegated the next useful feature slice independently of blocked Torch acceptance. On `feat/acquisition-s3-reader-c70a78f7`, base `c70a78f7232f46dfb3a6b73db8bcc75fa9293acf`, develop the first optional anonymous, version-bound S3 protocol reader and qualify it against a deterministic local fixture. The reader produces the existing manifest and streams ranges into caller-owned staging; it does not own retry, persistence, import, or consumer publication. Its accepted boundary is explicit endpoint/addressing authority, immutable VersionId selection, conditional range reads, changed-object refusal, cancellation, and optional-feature isolation. AWS/non-AWS/MinIO, authenticated/refreshing credentials, shared-service source dispatch, model import, and AQ-S3 acceptance remain open. PR/review/integration are coordinator-owned; worker commit and non-force push are authorized. Historical gate evidence below is not advanced by this slice.

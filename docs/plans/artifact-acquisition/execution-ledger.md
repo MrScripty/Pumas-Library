@@ -1,5 +1,33 @@
 # Acquisition execution ledger
 
+## 2026-10-05 — opt-in AC10 streaming measurement
+
+The owner authorized quantitative resource evidence after read-only Q3 provider
+investigation found no installed/cached local service and no authorized real
+provider environment. The prior MinIO denial was not retried. Pinned
+`object_store 0.12.4` does not expose `IsTruncated`, so a defensible bounded prefix
+completion API still needs a maintained dependency decision; none was added.
+
+Separate `qualification/acquisition-resources-26a84e32` starts from verified ORT
+formatter successor `26a84e323cae566a46a8f76bef48fa1010aed48b`, preserving frozen
+`a94fd920` and S3 `493b935c`. Implementation checkpoint
+`7535927163ef84bba33e9edd5e2a150e1b7a1ef4` adds a Linux opt-in integration probe,
+fresh-process runner and on-demand verification-inventory row. All 15 measured
+cases pass exact SHA/receipt, pre-source overload refusal, same-inode workspace
+publication and drainage checks. Two 128 MiB transfers have median process peak
+RSS 22.26 MiB; a deliberate 256 MiB resident allocation control measures
+278.14 MiB. Configured limits are not presented as measured internal-buffer or
+production RAM guarantees. [The report](reports/ac10-resource-measurement-2026-10-05.md)
+records exact identity/tree, data, reproduction, evidence cost and proof limits.
+
+Strict scoped no-default Clippy, Cargo formatting, Ruff 0.15.2 lint/format,
+10 guard tests and 21 dependency graphs pass. Zero-test and zero-size controls
+are refused. There are no production/API/dependency/schema/credential/security
+changes or new runtime/build downloads. Parent retains PR/review/merge/pin
+ownership. Full AC10, all acquisition gates and runtime R1 remain pending at
+their previously recorded scopes; required provider/platform/deployment inputs
+are not supplied by these synthetic measurements.
+
 ## 2026-10-04 — delegated S3 dispatch and GGUF import successor
 
 The coordinator resumed a separate successor to reader `2c7d6014`, then required

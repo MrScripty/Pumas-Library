@@ -107,18 +107,26 @@ async fn explicit_manifest_preserves_each_pin_and_canonical_order_without_resele
         Some((gguf().len() + AUX.len()) as u64)
     );
     assert_eq!(manifest.files()[0].logical_path(), AUX_PATH);
-    assert_eq!(manifest.files()[0].source_key(), "models/auxiliary.json");
-    assert_eq!(manifest.files()[1].source_key(), "models/weights.gguf");
+    assert_eq!(
+        manifest.files()[0].source_key(),
+        r#"["models/auxiliary.json","auxiliary-v7"]"#
+    );
+    assert_eq!(
+        manifest.files()[1].source_key(),
+        r#"["models/weights.gguf","selected-v1"]"#
+    );
     let pins: Vec<ArtifactSourceIdentity> =
         serde_json::from_str(manifest.source().revision().value()).unwrap();
     assert_eq!(pins.len(), 2);
     assert_eq!(pins[0].revision().value(), AUX_VERSION);
     assert_eq!(pins[1].revision().value(), VERSION);
     for (pin, file) in pins.iter().zip(manifest.files()) {
+        let (key, version): (String, String) = serde_json::from_str(file.source_key()).unwrap();
         assert_eq!(
             hex::decode(pin.source_id().rsplit(':').next().unwrap()).unwrap(),
-            file.source_key().as_bytes()
+            key.as_bytes()
         );
+        assert_eq!(pin.revision().value(), version);
     }
 }
 
@@ -144,6 +152,60 @@ async fn manifest_resolution_requires_every_declared_version_without_partial_adm
     assert!(api.acquisition().store().acquisitions().unwrap().is_empty());
     assert_eq!(std::fs::read(&store_path).ok(), before);
     assert!(api.model_library().index().list_all().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn same_s3_key_with_distinct_versions_publishes_and_recovers_each_selected_payload() {
+    bundle_publication_and_cold_proof_with_same_key(false, "none", true).await;
+}
+
+#[tokio::test]
+async fn same_s3_key_and_version_with_conflicting_digests_is_refused_before_head() {
+    let fixture = Fixture::serve(Vec::new()).await;
+    let mut entries = members(AUX_PATH);
+    entries[1].source_key = entries[0].source_key.clone();
+    entries[1].version = entries[0].version.clone();
+    let result = reader(&fixture.endpoint).select_manifest(entries).await;
+    assert!(matches!(result, Err(S3ReaderError::Manifest(_))));
+    assert!(fixture.finish().await.is_empty());
+}
+
+#[tokio::test]
+async fn same_s3_key_and_version_with_conflicting_sizes_is_refused_after_head() {
+    let fixture = Fixture::serve(vec![head_version(2, VERSION), head_version(24, VERSION)]).await;
+    let mut entries = members(AUX_PATH);
+    entries[1].source_key = entries[0].source_key.clone();
+    entries[1].version = entries[0].version.clone();
+    entries[1].expected_sha256 = entries[0].expected_sha256.clone();
+    let result = reader(&fixture.endpoint).select_manifest(entries).await;
+    assert!(matches!(result, Err(S3ReaderError::Manifest(_))));
+    let requests = fixture.finish().await;
+    assert_eq!(requests.len(), 2);
+    assert!(requests.iter().all(|request| request.starts_with("HEAD ")));
+}
+
+#[tokio::test]
+async fn same_s3_key_and_version_with_consistent_evidence_may_have_two_logical_paths() {
+    let size = gguf().len();
+    let fixture = Fixture::serve(vec![
+        head_version(size, VERSION),
+        head_version(size, VERSION),
+    ])
+    .await;
+    let mut entries = members(AUX_PATH);
+    entries[1].source_key = entries[0].source_key.clone();
+    entries[1].version = entries[0].version.clone();
+    entries[1].expected_sha256 = entries[0].expected_sha256.clone();
+    let selected = reader(&fixture.endpoint)
+        .select_manifest(entries)
+        .await
+        .unwrap();
+    let files = selected.manifest().files();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0].source_key(), files[1].source_key());
+    assert_ne!(files[0].logical_path(), files[1].logical_path());
+    assert_eq!(selected.manifest().total_bytes(), Some(2 * size as u64));
+    assert_eq!(fixture.finish().await.len(), 2);
 }
 
 #[tokio::test]
@@ -187,10 +249,21 @@ async fn whole_manifest_namespace_and_pin_budget_are_refused_before_source_io() 
 }
 
 async fn bundle_publication_and_cold_proof(interrupt: bool, fault: &str) {
+    bundle_publication_and_cold_proof_with_same_key(interrupt, fault, false).await;
+}
+
+async fn bundle_publication_and_cold_proof_with_same_key(
+    interrupt: bool,
+    fault: &str,
+    same_key: bool,
+) {
     let root = tempfile::TempDir::new().unwrap();
     let stage = tempfile::TempDir::new().unwrap();
     let first = api(root.path()).await;
-    let entries = members(AUX_PATH);
+    let mut entries = members(AUX_PATH);
+    if same_key {
+        entries[1].source_key = entries[0].source_key.clone();
+    }
     let fixture = Fixture::serve(responses(&entries)).await;
     let selected = reader(&fixture.endpoint)
         .select_manifest(entries)
@@ -341,6 +414,20 @@ async fn bundle_publication_and_cold_proof(interrupt: bool, fault: &str) {
     close(&cold).await;
     let requests = fixture.finish().await;
     assert_eq!(requests.len(), 4, "bundle recovery replayed the source");
+    if same_key {
+        assert!(requests
+            .iter()
+            .all(|request| request.contains("/fixture-bucket/models/weights.gguf?")));
+        for version in [VERSION, AUX_VERSION] {
+            assert_eq!(
+                requests
+                    .iter()
+                    .filter(|request| request.contains(&format!("versionId={version}")))
+                    .count(),
+                2
+            );
+        }
+    }
     assert_eq!(
         std::fs::read(target.join(".pumas_import_publication.json")).unwrap(),
         receipt_bytes

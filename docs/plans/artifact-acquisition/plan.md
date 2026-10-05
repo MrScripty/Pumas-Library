@@ -1,5 +1,23 @@
 # Plan: source-neutral artifact acquisition
 
+**Q3 anonymous desktop/RPC successor (2026-10-05):** Separate
+`feat/s3-desktop-workflow-eabc3959` starts exactly from frozen native workflow
+`eabc395966f2f3f155b298144bc81c4941121225`. Model Manager now offers one pinned
+anonymous GGUF import with explicit HTTPS source facts, required VersionId and
+SHA-256, phase/current-file byte observation, pre-finalization cancellation and
+typed registered/retained-work results. Three closed commands compose the
+existing native operation under one bounded RPC worker; closing observation does
+not cancel it, and process shutdown awaits it. Source facts are not persisted as
+account/configuration defaults; credentials are deliberately absent from this
+wire/UI. Native authentication remains additive and independently frozen.
+See [desktop qualification](reports/s3-desktop-workflow-qualification-2026-10-05.md)
+for exact scope, controlled evidence and environment blockers. Frozen core,
+reader, manifest, discovery, importer and native-repair bytes remain unchanged.
+Next existing-plan Q3 feature is authenticated explicit-source RPC/desktop
+configuration with a qualified ephemeral secret boundary; live AWS, a non-AWS
+service and MinIO acceptance and Q4 installed/native qualification remain
+separate. Parent retains review/hosted qualification/PRs/merges; AQ-S3 is not ready.
+
 **Plan status:** `Active` — Q1 is admitted on the current accepted `main` base; AQ-HTTP remains not ready.
 **Objective acceptance status:** `pending`.
 

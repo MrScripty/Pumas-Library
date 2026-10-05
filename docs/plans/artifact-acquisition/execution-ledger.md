@@ -1,5 +1,38 @@
 # Acquisition execution ledger
 
+## 2026-10-05 — anonymous explicit-source desktop/RPC successor
+
+Separate `feat/s3-desktop-workflow-eabc3959` preserves frozen native workflow
+`eabc395966f2f3f155b298144bc81c4941121225` exactly. Implementation milestone is
+`04cb954c3cd226144fcd5dde2d19ac040bda4d78`, tree
+`011160b67e12840d33481f760b16c1e78224f928`. Model Manager adds an anonymous
+single-GGUF dialog with explicit HTTPS source facts, mandatory VersionId/digest,
+current-file byte observation and pre-finalization cancellation. Three closed
+commands reuse the native API through one process-owned RPC worker, preserving
+validation, classification, registration and receipt identity. Closing
+observation does not stop the job; server shutdown awaits it before shared
+acquisition drainage. Retained custody refuses implicit replay.
+
+Linux controlled production TLS/RPC proves import, exact receipts and Ready/cold
+public lookup, cancellation during HEAD and GET, shutdown drainage and ambient
+credential exclusion. 195 RPC unit + 18 non-ignored integration/intent tests,
+three no-S3 source regressions, 856 frontend tests, final eight renderer tests,
+234 Electron tests, eight generator tests, types/lint/builds, headless check,
+format/diff/frozen refs and four feature graphs pass. Attribution regeneration
+changes two input hashes only; resolved package identities and notice bytes are
+unchanged. Clippy passes with the pre-existing headless dead-code lint excepted;
+strict headless/default qualification remains blocked by those existing warnings
+and ort-sys HTTP 403 respectively. Sandboxed Chromium cannot launch because its
+installed helper lacks the required configuration; no browser claim/bypass is made.
+
+See [qualification](reports/s3-desktop-workflow-qualification-2026-10-05.md)
+for exact commands/logs, initial corrections, scope and limits. Core/native
+repair/reader/manifest/signing/watcher/importer/reconciliation bytes, main and
+frozen feature refs are unchanged. Parent owns independent review, hosted
+qualification, PRs/merges and Library delivery. Next planned Q3 feature is a
+qualified authenticated ephemeral RPC/desktop secret boundary; live providers,
+installed/native qualification and AQ-S3 acceptance remain separate/pending.
+
 ## 2026-10-04 — delegated S3 dispatch and GGUF import successor
 
 The coordinator resumed a separate successor to reader `2c7d6014`, then required

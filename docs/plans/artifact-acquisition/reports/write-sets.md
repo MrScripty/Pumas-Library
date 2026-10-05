@@ -736,3 +736,32 @@ external reviewer contact, account provisioning, PR/review/merge and hosting
 are excluded; parent retains those coordination responsibilities. Fixture TLS
 uses the existing synthetic localhost certificate with verification enabled in
 an isolated child, with no production certificate or transport policy change.
+
+## Q3 anonymous desktop/RPC successor — 2026-10-05
+
+Exact base is frozen native workflow `eabc395966f2f3f155b298144bc81c4941121225`;
+branch is `feat/s3-desktop-workflow-eabc3959`. Production members are RPC
+`src/s3_imports.rs`, `src/contract/s3.rs`, command/export/handler dispatch,
+`src/main.rs` and `src/server.rs`; RPC Cargo manifest and its three existing
+lockfile references; Electron IPC registry/validation/preload; frontend import
+adapter/bridge types, Model Manager, `S3ModelImportDialog` and
+`useS3ModelImport`; and the six canonical generated desktop contract files.
+The same-file and cap-std packages already exist in the locked/default notice
+closure; no resolved package identity changes. Existing owned directory grants
+hold workspace authority; existing native API owns selection, transfer,
+verification, publication, registration and receipts.
+
+Tests are RPC `src/s3_imports/tests.rs`, one no-S3 handler regression, the three
+existing AppState test literals that require the new feature-gated client,
+Electron `s3-import-contract.test.mjs` and one bundled-preload test, and the
+new renderer hook/dialog tests. README/contracts/plan/ledger and desktop report
+document the scope. Attribution regeneration proves package records and notice
+bytes identical; only RPC-manifest/Cargo.lock input hashes are refreshed.
+
+No core or app-manager production/test/manifest files, reader signing code,
+S3 manifest, watcher/importer/discovery/reconciliation, staged VersionId repairs,
+native-repair write set, ambient credential path or account setup is changed.
+Anonymous UI is the admitted small slice; an authenticated secret boundary and
+real-provider/packaged/browser/platform qualification are separate. No security
+bypass, real credentials, paid service or external reviewer contact is admitted.
+Parent owns PR/review/merge/hosted/Library coordination.

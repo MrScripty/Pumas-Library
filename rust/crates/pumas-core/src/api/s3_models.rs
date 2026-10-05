@@ -6,7 +6,7 @@ use crate::{
         AcquisitionWorkspace, HttpAttemptHost, S3Credentials, S3ManifestEntry, S3Reader,
         S3ReaderConfig, S3ReaderError,
     },
-    model_library::{ModelImportResult, ModelImportSpec},
+    model_library::{ModelImportResult, ModelImportSpec, ModelImporter},
     PumasApi, PumasError,
 };
 use serde::{Deserialize, Serialize};
@@ -340,6 +340,13 @@ impl PumasApi {
         request: S3ModelImportRequest,
         control: S3ModelImportControl,
     ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
+        ModelImporter::validate_acquired_payload_paths(
+            &request
+                .entries
+                .iter()
+                .map(|entry| entry.logical_path.as_str())
+                .collect::<Vec<_>>(),
+        )?;
         let consumer = self.acquisition().open_consumer(CONSUMER)?;
         let result = async {
             if !request

@@ -529,3 +529,60 @@ async fn digest_refusal_and_pre_cancelled_requests_never_publish() {
         )));
     close(&api).await;
 }
+
+#[tokio::test]
+async fn reserved_bundle_destinations_fail_before_resolution_and_corrected_request_publishes() {
+    let root = tempfile::TempDir::new().unwrap();
+    let api = setup_api(root.path()).await;
+    let bytes = gguf();
+    let (fixture, _) = Fixture::serve(
+        vec![
+            wire(b"{}", true),
+            wire(&bytes, true),
+            wire(b"{}", false),
+            wire(&bytes, false),
+        ],
+        false,
+    )
+    .await;
+    let store_path = root.path().join("launcher-data/downloads.json");
+    let before = std::fs::read(&store_path).ok();
+    for path in [
+        "metadata.json",
+        "overrides.json",
+        "metadata.json/data.json",
+        "OVERRIDES.JSON/data.json",
+        "_metadata_.json",
+        "metadata.json.bak/data.json",
+        ".pumas_import_publication.json/data.json",
+    ] {
+        let stage = tempfile::TempDir::new().unwrap();
+        let mut bad = request(&fixture.endpoint, stage.path(), true);
+        bad.entries[1].logical_path = path.into();
+        let result = api.import_s3_model(bad, S3ModelImportControl::new()).await;
+        assert!(result.is_err(), "reserved payload accepted: {path}");
+        assert!(api.acquisition().store().acquisitions().unwrap().is_empty());
+        assert_eq!(std::fs::read(&store_path).ok(), before);
+        assert_eq!(
+            std::fs::read_dir(stage.path().join("stage"))
+                .unwrap()
+                .count(),
+            0
+        );
+        assert!(api.model_library().list_models().await.unwrap().is_empty());
+    }
+    let stage = tempfile::TempDir::new().unwrap();
+    let corrected = request(&fixture.endpoint, stage.path(), true);
+    let result = api
+        .import_s3_model(corrected, S3ModelImportControl::new())
+        .await
+        .unwrap();
+    assert!(result.success);
+    assert_published(&api, result.model_id.as_deref().unwrap(), true).await;
+    let requests = fixture.finish().await;
+    assert_eq!(requests.len(), 4, "rejected names performed source IO");
+    assert!(requests
+        .iter()
+        .all(|request| !request.contains("metadata.json") && !request.contains("overrides.json")));
+    close(&api).await;
+}

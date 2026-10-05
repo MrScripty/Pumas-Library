@@ -53,7 +53,11 @@ conflicting evidence for the same key/version, duplicate/colliding paths,
 staging aliases and prefix collisions are refused by shared manifest validation.
 The actual reader's pure preflight also enforces exact object-key semantics and
 the existing 16 KiB encoded revision limit before job/workspace admission.
-This is an explicit set, without prefix enumeration or atomic snapshot claims.
+Importer-owned reserved roots (including metadata/overrides), descendants and
+normalized aliases fail before job admission, staging or source I/O. The native
+workflow and final copy plan share that exact importer preflight; a corrected
+request remains admissible. This is an explicit set, without prefix enumeration
+or atomic snapshot claims.
 The existing reader cannot transfer zero-byte source objects: they fail with
 retained-work status and no publication. Select nonempty members; no reader
 range or verification policy is changed to handle this limitation.

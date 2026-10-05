@@ -273,8 +273,15 @@ impl S3BundleImportParams {
             })
             .collect::<Result<Vec<_>, _>>()?;
         pumas_library::acquisition::ArtifactManifest::new(source, files)
-            .map(|_| ())
-            .map_err(|_| PublicError::invalid_params())
+            .map_err(|_| PublicError::invalid_params())?;
+        pumas_library::model_library::ModelImporter::validate_acquired_payload_paths(
+            &self
+                .files
+                .iter()
+                .map(|file| file.logical_path.as_str())
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|_| PublicError::invalid_params())
     }
     pub(crate) fn native_entries(&self) -> Result<Vec<BundleEntry>, PublicError> {
         self.files

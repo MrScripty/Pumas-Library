@@ -673,6 +673,16 @@ fn source_bundle_structural_preflight_refuses_entire_set_before_admission() {
         ("logical_path", json!("WEIGHTS.GGUF")),
         ("logical_path", json!("weights.gguf.part/data.json")),
         ("logical_path", json!("config/run.py")),
+        ("logical_path", json!("metadata.json")),
+        ("logical_path", json!("overrides.json")),
+        ("logical_path", json!("metadata.json/notes.txt")),
+        ("logical_path", json!("OVERRIDES.JSON/notes.txt")),
+        ("logical_path", json!("_metadata_.json")),
+        ("logical_path", json!("metadata.json.bak/notes.txt")),
+        (
+            "logical_path",
+            json!(".pumas_import_publication.json/notes.txt"),
+        ),
         ("version_id", json!("null")),
         ("key", json!("../bad")),
         ("sha256", json!("bad")),
@@ -908,6 +918,13 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
             "WEIGHTS.GGUF",
             "weights.gguf.part/data.json",
             "run.py",
+            "metadata.json",
+            "overrides.json",
+            "metadata.json/notes.txt",
+            "OVERRIDES.JSON/notes.txt",
+            "_metadata_.json",
+            "metadata.json.bak/notes.txt",
+            ".pumas_import_publication.json/notes.txt",
         ] {
             let mut bad = input.clone();
             bad["files"][1]["logical_path"] = json!(path);
@@ -922,6 +939,7 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
                 .join(format!("launcher-data/.s3-import-{ID}"))
                 .exists());
             assert!(acquisition.store().acquisitions().unwrap().is_empty());
+            assert!(library.list_models().await.unwrap().is_empty());
         }
         if mode == 4 {
             input["files"][1]["sha256"] = json!("b".repeat(64));

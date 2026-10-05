@@ -88,8 +88,29 @@ prove an interrupted acquisition generation. Unsupported versions and missing
 bindings are refused and retained without automatic migration. Model metadata's
 existing publication identity remains version 1; it is a separate contract.
 
-Authenticated stores, prefix/multifile model selection, other acquired model
-formats, desktop source selection, and live AWS/non-AWS/MinIO qualification
+Explicit file sets use `S3Reader::select_manifest(Vec<S3ManifestEntry>)` followed
+by `AcquisitionConsumer::acquire_s3_manifest(AcquisitionS3ManifestRequest, ...)`.
+Each entry declares an exact key, immutable VersionId, logical path and SHA256.
+Resolution validates the complete namespace before HEAD and returns a selection
+only after every declared version resolves. The manifest revision retains every
+original per-object identity in canonical logical-path order. Its existing
+16-KiB revision bound limits the encoded pin set; operation/retry budgets remain
+per object. This is an explicit set, not a snapshot obtained from prefix listing.
+
+For one primary GGUF with selected data/text auxiliaries, use
+`ModelImporter::import_acquired_gguf_bundle` in the commit callback and
+`reconcile_acquired_gguf_bundle` in the existing consumer reconciliation callback.
+The exact serialized import spec names the primary logical GGUF path. Auxiliary
+paths are preserved, every held input is copied and digest-verified, and the
+existing publisher confirms the complete model before acquisition acknowledgement.
+Cold proof requires the exact current receipt and every selected output path,
+size and digest; omitted or changed members cannot settle the use. Allowed
+auxiliary extensions are json, txt, md, model, tiktoken, vocab and merges. Another
+weight file, executable auxiliary and reserved root metadata name are refused.
+Output receipt versions and ordinary/single-object behavior remain unchanged.
+
+Authenticated stores, prefix discovery, sharded/multifile weight formats,
+desktop source selection, and live AWS/non-AWS/MinIO qualification
 remain open. Local synthetic GGUF fixtures prove model-library publication,
 not inference execution, packaged consumers, or the AQ-S3 gate. Hosted S3
 commands explicitly enable `s3`; ordinary feature graphs omit the reader.

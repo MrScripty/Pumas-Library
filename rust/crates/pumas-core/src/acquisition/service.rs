@@ -144,6 +144,16 @@ pub struct AcquisitionS3Request {
     pub retry: AcquisitionRetryPolicy,
 }
 
+/// A complete explicit pinned S3 set. Retry limits apply to each object's
+/// transfer; all members verify before the shared owner grants consumer use.
+#[cfg(feature = "s3")]
+pub struct AcquisitionS3ManifestRequest {
+    pub demand: AcquisitionDemand,
+    pub selection: super::S3ManifestSelection,
+    pub workspace: AcquisitionWorkspace,
+    pub retry: AcquisitionRetryPolicy,
+}
+
 enum AcquisitionSource {
     Http {
         client: super::AcquisitionHttpClient,
@@ -1784,19 +1794,7 @@ impl AcquisitionConsumer {
         Publish: FnOnce(Staged, AcquisitionConsumerReceipt) -> PublishFut + Send + 'static,
         PublishFut: Future<Output = Result<Output>> + Send + 'static,
     {
-        if request.demand.consumer != self.owner {
-            return Err(invalid("Consumer demand identity does not match its scope"));
-        }
-        if request.retry.attempts.is_none_or(|limit| limit == 0)
-            || request.retry.elapsed.is_zero()
-            || tokio::time::Instant::now()
-                .checked_add(request.retry.elapsed)
-                .is_none()
-        {
-            return Err(invalid(
-                "S3 transfer requires positive finite attempt and elapsed retry budgets",
-            ));
-        }
+        self.require_s3_transfer(&request.demand, &request.retry)?;
         self.acquire(
             AcquisitionRequest {
                 demand: request.demand,
@@ -1810,6 +1808,65 @@ impl AcquisitionConsumer {
             publish,
         )
         .await
+    }
+
+    /// Acquire the complete explicit version-pinned set through the same store,
+    /// writer, verified-file handoff and consumer receipt/settlement protocol.
+    /// Retry attempts and elapsed budgets apply per object; no complete-set
+    /// hard wall-clock or atomic remote-prefix snapshot is promised.
+    #[cfg(feature = "s3")]
+    pub async fn acquire_s3_manifest<Staged, Output, F, Fut, Publish, PublishFut>(
+        &self,
+        request: AcquisitionS3ManifestRequest,
+        host: Box<dyn AcquisitionHost>,
+        prepare: F,
+        publish: Publish,
+    ) -> Result<Output>
+    where
+        Staged: Send + 'static,
+        Output: Send + 'static,
+        F: FnOnce(AcquiredArtifactUse) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(Staged, Value)>> + Send + 'static,
+        Publish: FnOnce(Staged, AcquisitionConsumerReceipt) -> PublishFut + Send + 'static,
+        PublishFut: Future<Output = Result<Output>> + Send + 'static,
+    {
+        self.require_s3_transfer(&request.demand, &request.retry)?;
+        let (manifest, objects) = request.selection.into_parts();
+        self.acquire(
+            AcquisitionRequest {
+                demand: request.demand,
+                manifest,
+                workspace: request.workspace,
+                sources: objects.into_iter().map(AcquisitionSource::S3).collect(),
+                retry: request.retry,
+            },
+            host,
+            prepare,
+            publish,
+        )
+        .await
+    }
+
+    #[cfg(feature = "s3")]
+    fn require_s3_transfer(
+        &self,
+        demand: &AcquisitionDemand,
+        retry: &AcquisitionRetryPolicy,
+    ) -> Result<()> {
+        if demand.consumer != self.owner {
+            return Err(invalid("Consumer demand identity does not match its scope"));
+        }
+        if retry.attempts.is_none_or(|limit| limit == 0)
+            || retry.elapsed.is_zero()
+            || tokio::time::Instant::now()
+                .checked_add(retry.elapsed)
+                .is_none()
+        {
+            return Err(invalid(
+                "S3 transfer requires positive finite attempt and elapsed retry budgets",
+            ));
+        }
+        Ok(())
     }
 
     async fn acquire<Staged, Output, F, Fut, Publish, PublishFut>(

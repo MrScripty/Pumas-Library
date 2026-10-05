@@ -30,6 +30,9 @@ use tokio::{
 const VERSION: &str = "selected-v1";
 const LOGICAL: &str = "weights.gguf";
 
+#[path = "s3_acquisition/manifest.rs"]
+mod manifest;
+
 fn gguf() -> Vec<u8> {
     [
         b"GGUF".as_slice(),

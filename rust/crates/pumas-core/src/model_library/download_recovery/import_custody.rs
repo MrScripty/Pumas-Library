@@ -36,6 +36,17 @@ pub(crate) struct ImportPayloadIdentity {
 }
 
 impl ImportPayloadIdentity {
+    pub(crate) fn matches_file_set<'a>(
+        &self,
+        mut files: impl ExactSizeIterator<Item = (&'a str, u64, &'a str)>,
+    ) -> bool {
+        self.files.len() == files.len()
+            && files.all(|(path, size, sha256)| {
+                self.files
+                    .get(path)
+                    .is_some_and(|file| file.size == size && file.sha256 == sha256)
+            })
+    }
     pub(crate) fn matches_single_file(&self, bytes: u64, sha256: &str) -> bool {
         self.files.len() == 1
             && self

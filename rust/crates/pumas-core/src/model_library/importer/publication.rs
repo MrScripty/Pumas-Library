@@ -416,11 +416,17 @@ pub(super) fn reconcile_acquired_output(
         || !metadata.copied_import_ready()
         || serde_json::to_value(&metadata.import_publication)?
             != indexed.metadata["import_publication"]
-        || acquisition.verified_files.len() != 1
-        || !receipt.payload.matches_single_file(
-            acquisition.verified_files[0].bytes,
-            &acquisition.verified_files[0].sha256,
-        )
+        || !match acquisition.verified_files.as_slice() {
+            [file] => receipt
+                .payload
+                .matches_single_file(file.bytes, &file.sha256),
+            files if !files.is_empty() => receipt.payload.matches_file_set(
+                files
+                    .iter()
+                    .map(|file| (file.path.as_str(), file.bytes, file.sha256.as_str())),
+            ),
+            _ => false,
+        }
         || !held_confirmed_receipt_matches(&destination, &metadata, true)?
     {
         return Err(recovery_required(

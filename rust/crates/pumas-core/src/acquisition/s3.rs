@@ -18,6 +18,9 @@ use super::{
     FileVerificationRequirement, ManifestValidationError, RevisionStrength, Sha256Evidence,
 };
 
+mod manifest;
+pub use manifest::{S3ManifestEntry, S3ManifestSelection};
+
 /// Endpoint interpretation. Virtual-hosted endpoints already include the bucket.
 #[derive(Clone, Copy, Debug)]
 pub enum S3Addressing {
@@ -196,20 +199,7 @@ impl S3Reader {
         logical_path: &str,
         expected_sha256: Sha256Evidence,
     ) -> Result<S3ObjectSelection, S3ReaderError> {
-        let key = Path::parse(source_key)
-            .map_err(|_| S3ReaderError::Configuration("unsupported object key"))?;
-        if key.as_ref() != source_key || source_key.is_empty() || source_key.len() > 1024 {
-            return Err(S3ReaderError::Configuration(
-                "object key must preserve its exact identity",
-            ));
-        }
-        if version.is_empty() || version == "null" || version.chars().any(char::is_control) {
-            return Err(S3ReaderError::Configuration(
-                "an immutable VersionId is required",
-            ));
-        }
-        let revision =
-            ArtifactRevisionEvidence::new("s3.version_id", version, RevisionStrength::Immutable)?;
+        let (key, source) = self.validated_object(source_key, version)?;
         let file = ArtifactFile::new(
             logical_path,
             source_key,
@@ -246,20 +236,6 @@ impl S3Reader {
                         .all(|b| b == 0x21 || (0x23..=0x7e).contains(&b) || b >= 0x80)
             })
             .ok_or(S3ReaderError::Changed)?;
-        // Addressing changes the request target even at the same endpoint.
-        // Hex fields preserve exact boundaries without turning a manifest identity
-        // into a transport URL or admitting credentials into it.
-        let addressing = match self.addressing {
-            S3Addressing::Path => "path",
-            S3Addressing::VirtualHosted => "virtual_hosted",
-        };
-        let source_id = format!(
-            "{addressing}:{}:{}:{}",
-            hex::encode(self.endpoint.as_str()),
-            hex::encode(&self.bucket),
-            hex::encode(source_key)
-        );
-        let source = ArtifactSourceIdentity::new("s3", source_id, revision)?;
         let manifest = ArtifactManifest::new(
             source,
             vec![ArtifactFile::new(

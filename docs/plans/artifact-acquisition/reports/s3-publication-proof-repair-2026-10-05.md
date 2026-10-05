@@ -2,13 +2,15 @@
 
 Separate branch `fix/acquisition-publication-proof-772294c1` over frozen file-set
 candidate `772294c1c3d1ea29552a33c81cff0ad3c040baf1`. Reconciliation ea1c4ae7,
-dispatch e1ee893f and accepted reader histories are preserved. Coordinator reports
-accepted main `73fec2e06c75ddae8c0e58be6ffcf352923376bd`, tree b449f2c8 with
-ordered 96c2dca9/e1ee893f parents. A normal fetch could not authenticate in this
-worker, so that new merge object is not locally composed or independently verified;
-its accepted source tree remains available as exact dispatch ancestor e1ee893f.
-Coordinator must preserve the reported merge identity during integration. No
-credential, permission or network setting was changed to work around the failure.
+dispatch e1ee893f and accepted reader histories are preserved. Accepted main `73fec2e06c75ddae8c0e58be6ffcf352923376bd` is now verified locally:
+tree `b449f2c88d3e34a9cfa16dd14c778d6b802c8495`, ordered parents
+`96c2dca97fad673a2735f9f778013067569fe692` and
+`e1ee893ff67752bdc839a067f15519f25a323c1a`. A direct SHA fetch initially failed
+authentication. The subsequent normal repair push and branch fetch succeeded
+through existing access, without any credential/settings change. The exact
+accepted-main merge identity is preserved in this repair composition. The merge
+initially reproduced the frozen repair tree exactly; only these documentation
+updates were added, with no runtime source or test change.
 
 ## Demonstrated defect and bounded owner repair
 

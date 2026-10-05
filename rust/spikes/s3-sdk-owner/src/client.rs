@@ -21,6 +21,7 @@ use aws_smithy_runtime_api::client::{
 use aws_smithy_types::{body::SdkBody, timeout::TimeoutConfig};
 use futures::StreamExt;
 use http_body_util::StreamBody;
+use tracing::instrument::WithSubscriber;
 
 pub(super) const ACCESS: &str = "PUMAS-SYNTHETIC-ACCESS";
 pub(super) const SECRET: &str = "pumas-synthetic-secret/+=";
@@ -215,6 +216,9 @@ pub(super) fn build(
         .disable_multi_region_access_points(true)
         .identity_cache(IdentityCache::no_cache())
         .http_client(transport)
+        .interceptor(crate::list_xml::ListXmlGuard {
+            max_bytes: response_limit,
+        })
         .timeout_config(
             TimeoutConfig::builder()
                 .connect_timeout(Duration::from_secs(5))
@@ -243,6 +247,7 @@ pub(super) async fn select(
             .version_id(VERSION)
             .send(),
     )
+    .with_subscriber(tracing::subscriber::NoSubscriber::default())
     .await
     .map_err(|_| "selection timed out")?
     .map_err(|_| "selection failed")?;
@@ -294,6 +299,7 @@ pub(super) async fn range(
         }
         Ok(bytes)
     })
+    .with_subscriber(tracing::subscriber::NoSubscriber::default())
     .await
     .map_err(|_| "range timed out")?
 }
@@ -306,4 +312,22 @@ pub(super) fn completion(
         (Some(true), Some(token)) if !token.is_empty() => Ok(Some(token)),
         _ => Err("missing or contradictory listing completion evidence"),
     }
+}
+
+pub(super) async fn page(
+    client: &aws_sdk_s3::Client,
+) -> Result<aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Output, &'static str> {
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        client
+            .list_objects_v2()
+            .bucket(BUCKET)
+            .prefix("models")
+            .max_keys(2)
+            .send(),
+    )
+    .with_subscriber(tracing::subscriber::NoSubscriber::default())
+    .await
+    .map_err(|_| "listing timed out")?
+    .map_err(|_| "listing failed")
 }

@@ -5,4 +5,6 @@ mod client;
 #[cfg(test)]
 mod fixture;
 #[cfg(test)]
+mod list_xml;
+#[cfg(test)]
 mod probes;

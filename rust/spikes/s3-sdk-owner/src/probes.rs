@@ -392,10 +392,12 @@ async fn listing_parser_retains_completion_and_continuation_independently() {
             .max_keys(2)
             .continuation_token("previous+/=")
             .send()
-            .await
-            .unwrap();
-        assert_eq!(client::completion(&output).is_ok(), valid);
-        assert_eq!(output.contents()[0].key(), Some("models/a.bin"));
+            .await;
+        assert_eq!(output.is_ok(), valid);
+        if let Ok(output) = output {
+            assert!(client::completion(&output).is_ok());
+            assert_eq!(output.contents()[0].key(), Some("models/a.bin"));
+        }
         let requests = fixture.finish().await;
         assert_eq!(requests.len(), 1);
         assert!(valid_signature(&requests[0], SECRET));
@@ -432,18 +434,42 @@ async fn invalid_scalar_and_oversized_list_bodies_are_refused() {
 }
 
 #[tokio::test]
-async fn probe_unclosed_and_duplicate_completion_xml_are_accepted_by_sdk() {
+async fn guarded_listing_refuses_malformed_or_ambiguous_completion() {
     for body in [
         "<ListBucketResult><IsTruncated>false</IsTruncated>",
         "<ListBucketResult><IsTruncated>true</IsTruncated><IsTruncated>false</IsTruncated></ListBucketResult>",
+        "<WrongRoot><IsTruncated>false</IsTruncated></WrongRoot>",
+        "<ListBucketResult><IsTruncated>true</IsTruncated><NextContinuationToken>a</NextContinuationToken><NextContinuationToken>b</NextContinuationToken></ListBucketResult>",
+        "<ListBucketResult><IsTruncated>false</IsTruncated><Prefix>models</Prefix><Prefix>other</Prefix></ListBucketResult>",
+        "<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>models/a</Key><Key>other</Key></Contents></ListBucketResult>",
+        "<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>models/a</Key><Size>1</Size><Size>2</Size></Contents></ListBucketResult>",
+        "<ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>models/a</Key><ETag>a</ETag><ETag>b</ETag></Contents></ListBucketResult>",
+        "<ListBucketResult xmlns='urn:wrong'><IsTruncated>false</IsTruncated></ListBucketResult>",
+        "<!DOCTYPE ListBucketResult [<!ENTITY t 'false'>]><ListBucketResult><IsTruncated>&t;</IsTruncated></ListBucketResult>",
     ] {
         let fixture = Fixture::serve(vec![fixture::xml(body)], false).await;
         let sdk = reader(&fixture, Addressing::Path, None, 4096);
-        let output = sdk.list_objects_v2().bucket(BUCKET).prefix("models").send().await.unwrap();
-        // Expected incompatibility reproduction, not successful malformed-page
-        // handling. A typed completion flag does not establish XML validity.
-        assert_eq!(output.is_truncated(), Some(false));
-        assert_eq!(client::completion(&output).unwrap(), None);
+        let output = sdk.list_objects_v2().bucket(BUCKET).prefix("models").send().await;
+        assert!(output.is_err(), "invalid listing must fail before send returns");
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn listing_guard_preserves_namespace_and_enforces_xml_node_budget() {
+    let valid = "<ListBucketResult xmlns='http://s3.amazonaws.com/doc/2006-03-01/'><IsTruncated>true</IsTruncated><NextContinuationToken>next&amp;opaque</NextContinuationToken></ListBucketResult>".to_owned();
+    let overflow = format!(
+        "<ListBucketResult><IsTruncated>false</IsTruncated>{}</ListBucketResult>",
+        "<Ignored/>".repeat(4096)
+    );
+    for (body, accepted) in [(valid, true), (overflow, false)] {
+        let fixture = Fixture::serve(vec![fixture::xml(&body)], false).await;
+        let sdk = reader(&fixture, Addressing::Path, None, 64 * 1024);
+        let result = client::page(&sdk).await;
+        assert_eq!(result.is_ok(), accepted);
+        if let Ok(output) = result {
+            assert_eq!(client::completion(&output).unwrap(), Some("next&opaque"));
+        }
         assert_eq!(fixture.finish().await.len(), 1);
     }
 }
@@ -477,7 +503,11 @@ async fn probe_sdk_trace_exposes_access_key_id_before_transport_redaction() {
         .finish();
     let fixture = Fixture::serve(vec![fixture::head(VERSION, "\"selected\"")], false).await;
     let sdk = reader(&fixture, Addressing::Path, Some(Some(TOKEN)), 4096);
-    client::select(&sdk)
+    sdk.head_object()
+        .bucket(BUCKET)
+        .key(client::KEY)
+        .version_id(VERSION)
+        .send()
         .with_subscriber(subscriber)
         .await
         .unwrap();
@@ -492,6 +522,102 @@ async fn probe_sdk_trace_exposes_access_key_id_before_transport_redaction() {
     );
     assert!(!logs.contains(SECRET));
     assert!(!logs.contains(TOKEN));
+}
+
+#[test]
+fn sdk_future_scope_preserves_safe_statuses_under_global_trace() {
+    let result = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "probes::global_trace_scope_child", "--ignored"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "isolated global-TRACE fixture failed"
+    );
+    assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
+}
+
+#[tokio::test]
+#[ignore = "fresh-process global subscriber fixture; parent executes it"]
+async fn global_trace_scope_child() {
+    let memory = MemoryLog(Arc::new(Mutex::new(Vec::new())));
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(memory.clone())
+        .finish();
+    // Test-only setup in a disposable process; the adapter never changes the
+    // embedding application's process-global subscriber.
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    let fixture = Fixture::serve(vec![fixture::head(VERSION, "\"selected\"")], true).await;
+    let sdk = reader(&fixture, Addressing::Path, Some(Some(TOKEN)), 4096);
+    sdk.head_object()
+        .bucket(BUCKET)
+        .key(client::KEY)
+        .version_id(VERSION)
+        .send()
+        .await
+        .unwrap();
+    fixture.finish().await;
+    assert!(
+        String::from_utf8_lossy(&memory.0.lock().unwrap()).contains(ACCESS),
+        "global TRACE control must reproduce access-key-ID disclosure"
+    );
+    memory.0.lock().unwrap().clear();
+
+    let reflected = format!(
+        "<Error><Code>AccessDenied</Code><Message>{ACCESS} {SECRET} {TOKEN}</Message></Error>"
+    );
+    let denied = format!(
+        "HTTP/1.1 403 Denied\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reflected}",
+        reflected.len()
+    );
+    let malformed = format!("<ListBucketResult><IsTruncated>false</IsTruncated><IsTruncated>false</IsTruncated><Prefix>{ACCESS} {SECRET} {TOKEN}</Prefix></ListBucketResult>");
+    let fixture = Fixture::serve(vec![
+        fixture::head(VERSION, "\"selected\""),
+        fixture::range(VERSION, "\"selected\"", 206, Some("bytes 2-5/8"), "cdef"),
+        fixture::xml("<ListBucketResult><IsTruncated>true</IsTruncated><NextContinuationToken>next+/=</NextContinuationToken></ListBucketResult>"),
+        denied.clone(), denied.clone(), denied, fixture::xml(&malformed),
+    ], true).await;
+    let sdk = reader(&fixture, Addressing::Path, Some(Some(TOKEN)), 4096);
+    tracing::info!(phase = "selecting", "Pumas safe acquisition status");
+    let selected = client::select(&sdk).await.unwrap();
+    assert_eq!(
+        client::range(&sdk, selected.0, &selected.1).await.unwrap(),
+        b"cdef"
+    );
+    assert_eq!(
+        client::completion(&client::page(&sdk).await.unwrap()).unwrap(),
+        Some("next+/=")
+    );
+    assert_eq!(client::select(&sdk).await.unwrap_err(), "selection failed");
+    assert_eq!(
+        client::range(&sdk, 8, "\"selected\"").await.unwrap_err(),
+        "range request failed"
+    );
+    assert_eq!(client::page(&sdk).await.unwrap_err(), "listing failed");
+    assert_eq!(client::page(&sdk).await.unwrap_err(), "listing failed");
+    tracing::info!(phase = "settled", "Pumas safe acquisition status");
+    assert_eq!(fixture.finish().await.len(), 7);
+    let buffer = memory.0.lock().unwrap();
+    let logs = String::from_utf8_lossy(&buffer);
+    assert!(
+        logs.contains("selecting") && logs.contains("settled"),
+        "safe outer statuses must remain visible"
+    );
+    assert!(
+        !logs.contains(ACCESS),
+        "scoped SDK execution disclosed access-key ID"
+    );
+    assert!(
+        !logs.contains(SECRET),
+        "scoped SDK execution disclosed secret key"
+    );
+    assert!(
+        !logs.contains(TOKEN),
+        "scoped SDK execution disclosed session token"
+    );
 }
 
 #[test]

@@ -115,11 +115,25 @@ def check():
             ["-p", "pumas-library", "--no-default-features", "--features", "onnx-runtime"],
         ):
             command = [
-                "cargo", "tree", "--locked", "--offline", "--manifest-path", "rust/Cargo.toml",
-                "--target", target, "--edges", "normal,build,dev", "--prefix", "none",
-                "--format", "{p}|{f}", *selection,
+                "cargo",
+                "tree",
+                "--locked",
+                "--offline",
+                "--manifest-path",
+                "rust/Cargo.toml",
+                "--target",
+                target,
+                "--edges",
+                "normal,build,dev",
+                "--prefix",
+                "none",
+                "--format",
+                "{p}|{f}",
+                *selection,
             ]
-            check_ort_features(subprocess.check_output(command, cwd=ROOT, text=True), f"{target} {selection}")
+            check_ort_features(
+                subprocess.check_output(command, cwd=ROOT, text=True), f"{target} {selection}"
+            )
             print(f"{target} {selection}: ONNX no-download contract passed")
 
 

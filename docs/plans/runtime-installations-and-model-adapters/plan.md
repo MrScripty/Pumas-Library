@@ -8,6 +8,11 @@
 
 **Current phase:** waiting for Acquisition Q1 to satisfy and merge AQ-HTTP; read-only preparation may continue.
 
+An independently authorized [2026-10-05 ONNX build correction](reports/onnx-no-build-download-2026-10-05.md)
+removes build-time native SDK downloads without starting R1, adding an installer,
+or advancing the acquisition gates. Its explicit SDK contract and qualification
+limits are recorded separately from runtime installation implementation.
+
 **Exactly one next runtime slice:** **R1 — shared installation identity and bound launch for Torch and llama.cpp; begin only after AQ-HTTP is accepted and merged for the target in scope.**
 
 **Canonical repository path:** `docs/plans/runtime-installations-and-model-adapters/plan.md`.

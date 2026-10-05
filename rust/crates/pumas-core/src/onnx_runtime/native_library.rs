@@ -148,7 +148,7 @@ mod runtime_library_tests {
                 unavailable_executable()
             )
             .unwrap(),
-            selected
+            selected.canonicalize().unwrap()
         );
         for path in [OsString::new(), OsString::from("libonnxruntime.so")] {
             let error = runtime_library_path(Some(path), unavailable_executable()).unwrap_err();
@@ -162,5 +162,30 @@ mod runtime_library_tests {
         .unwrap_err();
         assert!(error.message.contains("file is missing"));
         assert!(runtime_library_path(None, Ok(fixture.path().join("pumas-rpc"))).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_runtime_path_resolves_a_symlinked_temporary_directory() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = tempfile::tempdir().unwrap();
+        let directory = fixture.path().join("native-sdk");
+        let alias = fixture.path().join("temporary-directory-alias");
+        std::fs::create_dir(&directory).unwrap();
+        symlink(&directory, &alias).unwrap();
+        let selected = alias.join("selected-library");
+        std::fs::write(&selected, b"selection fixture").unwrap();
+
+        let resolved = runtime_library_path(
+            Some(selected.clone().into_os_string()),
+            Err(std::io::Error::other("unavailable executable")),
+        )
+        .unwrap();
+        assert_eq!(resolved, selected.canonicalize().unwrap());
+        assert_eq!(
+            resolved,
+            directory.join("selected-library").canonicalize().unwrap()
+        );
     }
 }

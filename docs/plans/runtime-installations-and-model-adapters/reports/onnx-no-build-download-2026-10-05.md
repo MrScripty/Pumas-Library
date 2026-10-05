@@ -63,8 +63,9 @@ stager copies provisioned native files; it does not fetch them. Release operator
 must record official archive/library hashes, target/version and notices, stage
 the full SDK closure, and prove real inference in the extracted package.
 
-Primary upstream anchors: the pinned
-[ort-sys build implementation](https://github.com/pykeio/ort/blob/079ecb47034ec8188e3a06fc04f49ec28a6499e8/ort-sys/build/main.rs)
+Primary upstream anchors: the exact `2.0.0-rc.12` tag commit
+`f085e4c2516901ee606d1e10022142afa9348bf1`
+[ort-sys build implementation](https://github.com/pykeio/ort/blob/f085e4c2516901ee606d1e10022142afa9348bf1/ort-sys/build/main.rs)
 and Microsoft's [ONNX Runtime 1.24.2 release](https://github.com/microsoft/onnxruntime/releases/tag/v1.24.2).
 The qualification SDK pin is 1.24.2/C API 24; no SDK was downloaded by this correction.
 
@@ -125,3 +126,24 @@ The next existing acquisition-plan feature is completion of **Q3 real-provider
 acceptance**, including credential-expiry/provider behavior, then **Q4 installed
 and shipping-platform qualification**. Runtime **R1** remains gated by its
 target-scoped AQ-HTTP acceptance. This correction does not advance those gates.
+
+## Independent review portability successor
+
+Review of frozen checkpoint `10fe0bb2d92c8ef147a328803a3425672ac30bdb`
+found one test portability defect: its expected tempfile path was not
+canonicalized, while production intentionally returns the canonical path.
+Symlinked temporary roots, including the common macOS layout, could therefore
+fail the assertion despite a correct result. The narrow successor canonicalizes
+the expected path and adds an explicit Unix symlink-directory regression.
+Production loading, dependency features, runtime selection, and public APIs are
+unchanged. The provenance anchor above now names the exact rc.12 tag commit.
+
+The preserved qualified implementation's test binary reproduced the original
+assertion failure under an owned symlinked `TMPDIR` (expected exit 101). Both
+focused native-library tests pass on the successor with ordinary and symlinked
+temporary roots; Cargo formatting/whitespace checks also pass. This qualifies
+the test/documentation correction on Linux. The Unix regression also targets macOS
+semantics, but macOS execution is not claimed. Logs and exact successor identity
+are retained at `/workspace/scratch/ort-path-review/`; parent coordination owns
+Pantograph propagation and positive SDK/inference qualification. Q3 work is not
+included in this successor.

@@ -1,5 +1,7 @@
 # Confirmed S3 model publication reconciliation
 
+**Review correction:** Independent review found acquired recovery could accept missing/null publication identities through legacy readiness helpers, skipping held payload proof. The earlier focused checks did not cover this defect. See [bounded proof repair](s3-publication-proof-repair-2026-10-05.md); this report's output-proof claim is superseded for that gap.
+
 Branch: `feat/acquisition-s3-reconcile-e1ee893f`. Parent candidate:
 `e1ee893ff67752bdc839a067f15519f25a323c1a`, tree
 `b449f2c88d3e34a9cfa16dd14c778d6b802c8495`. Accepted reader

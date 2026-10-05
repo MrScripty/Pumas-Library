@@ -406,6 +406,13 @@ pub(super) fn reconcile_acquired_output(
         .resolve(&library.library_root().join(model_id))?;
     let metadata = read_held_canonical_import_metadata(&destination)?
         .ok_or_else(|| recovery_required("Acquired model output has no canonical metadata"))?;
+    // Legacy readiness helpers intentionally accept absent publication identity.
+    // Acquired settlement must never enter that compatibility path: require the
+    // canonical identity before matching its explicit indexed projection and
+    // reaching Confirmed/root/payload proof through the held receipt helper.
+    let identity = metadata.import_publication.as_ref().ok_or_else(|| {
+        recovery_required("Acquired model output has no canonical publication identity")
+    })?;
     let receipt = read_receipt(&destination)?;
     if receipt.version != 2
         || receipt.acquisition.as_ref() != Some(acquisition)
@@ -414,8 +421,7 @@ pub(super) fn reconcile_acquired_output(
         || metadata.model_id.as_deref() != Some(model_id)
         || !crate::models::copied_import_ready_value(&indexed.metadata)
         || !metadata.copied_import_ready()
-        || serde_json::to_value(&metadata.import_publication)?
-            != indexed.metadata["import_publication"]
+        || indexed.metadata.get("import_publication") != Some(&serde_json::to_value(identity)?)
         || acquisition.verified_files.len() != 1
         || !receipt.payload.matches_single_file(
             acquisition.verified_files[0].bytes,

@@ -408,12 +408,15 @@ async fn cold_publication_reconciliation(fault: &str) {
             },
         )
         .await;
-    let model = observed.await.unwrap();
+    assert!(
+        matches!(&result, Err(PumasError::Validation { field, .. }) if field == "fixture.after_confirmed_publication"),
+        "{fault}: acquisition/import failed before the intended interruption: {result:?}"
+    );
+    let model = observed
+        .await
+        .expect("confirmed publication callback must report its model");
     consumer.shutdown().await.unwrap();
     close(&first).await;
-    assert!(
-        matches!(result, Err(PumasError::Validation { ref field, .. }) if field == "fixture.after_confirmed_publication")
-    );
     let model_id = model.model_id.unwrap();
     let target = first.model_library().library_root().join(&model_id);
     let record = first

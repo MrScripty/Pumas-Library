@@ -816,6 +816,19 @@ surfaces, raw evidence, exact composition and pending browser/default/provider
 limits. Parent owns PRs/reviews/merges/hosted/Library coordination.
 
 
+### Q3 frozen sibling composition and qualification — 2026-10-05
+
+`qualification/s3-composed-e6acb0ba`: normal merge of frozen e6acb0ba and
+7dc6acef, ordered exactly as authorized. Five documentation conflicts combine
+both historical scopes and their current contract/README behavior. No additional
+production code change beyond the two siblings. New successor writes only
+`scripts/release/qualify-s3-installed.py`, the composed provider qualification
+report and current plan/ledger/write-set/acceptance-matrix annotations. Owned
+scratch logs/archive/build receipts remain outside the repository. Existing PR40
+watcher/importer/manifest/publication protocol is preserved; frozen refs stay
+unchanged. No service, dependency manifest, provider grant, release tag or real
+credential is added.
+
 ### Q3 zero-length selected-member successor — 2026-10-05
 
 Separate `feat/s3-empty-members-e8082649`, frozen base e808: only production

@@ -1,5 +1,21 @@
 # Plan: source-neutral artifact acquisition
 
+**Q3 sibling composition and bounded Q4 evidence (2026-10-05):** The coordinator
+authorized normal composition of frozen e6acb0ba and 7dc6acef, in that ordered
+parent sequence. Merge cd9d8191 preserves accepted PR40 and every frozen ref.
+Combined checks pass, including 171 acquisition units, 64 S3 integrations,
+220 RPC cases, native owner/process checks and renderer/Node checks. A normal
+production S3 release binary, unpacked outside checkout, passes ten independent
+TLS/signature/import/cancellation/cold-restart scenarios and release health smoke.
+This is an unreleased Linux qualification archive, with no test-support or
+inference claim. Browser launch is blocked by sandbox-helper ownership; ordinary
+official MinIO installation is blocked by HTTP 403 and stopped at that denial.
+See [provider/platform matrix](reports/s3-composed-provider-qualification-2026-10-05.md)
+for exact lineage, hashes, evidence kinds and missing external inputs.
+The sibling entries below describe their earlier separate scope. AC13/AC14,
+AQ-S3 and full AC17/Q4 remain pending. Parent owns review/integration; next
+existing-plan work remains authorized actual-provider Q3 acceptance, then Q4.
+
 **Q3 empty selected S3 members (2026-10-05):** Separate
 `feat/s3-empty-members-e8082649` preserves frozen e808 and its PR40 merge.
 Known-zero immutable selections now pass through the existing writer/SHA/receipt

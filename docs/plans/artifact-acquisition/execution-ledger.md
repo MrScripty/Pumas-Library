@@ -1,5 +1,23 @@
 # Acquisition execution ledger
 
+## 2026-10-05 — frozen sibling normal composition and installed qualification
+
+Coordinator-authorized normal merge cd9d8191 has ordered parents frozen
+e6acb0ba then 7dc6acef; all earlier frozen refs and accepted PR40 remain intact.
+Successor 7358bd3d adds only independent installed qualification code. Combined
+171 acquisition units, 64 S3 integration, 220 RPC, 45 native owner and eight
+direct installer, 14 renderer and 242 Node tests pass within their stated scopes.
+Strict core/scoped RPC Clippy, format and normal optimized production build pass.
+The unpacked Linux S3 binary passes ten independent TLS/SigV4 scenarios and
+standard health smoke. Synthetic fixtures prove no live provider or inference.
+Browser sandbox ownership and official MinIO module HTTP 403 stop their actual
+flows; no alternate security/network routes were attempted. The
+[qualification matrix](reports/s3-composed-provider-qualification-2026-10-05.md)
+records exact composition, packaged bytes, logs and external missing inputs.
+Historical sibling-only statements below retain their original execution scope;
+the current candidate composes both explicitly. Real-provider, shipping desktop,
+supported platforms and full Q4 gates remain pending, with parent review control.
+
 **Q3 empty selected S3 members (2026-10-05):** Separate
 `feat/s3-empty-members-e8082649` preserves frozen e808 and its PR40 merge.
 Known-zero immutable selections now pass through the existing writer/SHA/receipt

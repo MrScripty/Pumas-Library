@@ -1615,6 +1615,22 @@ async fn reconcile_model_scope(
             return Ok(());
         }
         primary.model_library.index_model_dir(&model_dir).await?;
+        if primary
+            .model_library
+            .index()
+            .get(model_id)?
+            .is_some_and(|record| {
+                record
+                    .metadata
+                    .get("import_publication")
+                    .is_some_and(|value| !value.is_null())
+                    && !crate::models::copied_import_ready_value(&record.metadata)
+            })
+        {
+            // Discovery can retain terminal Pending diagnostics. That is not
+            // permission to edit/reclassify the producer-owned publication.
+            return Ok(());
+        }
         if let Err(err) = primary.model_library.reclassify_model(model_id).await {
             let message = err.to_string();
             if is_non_fatal_reclassify_error(&err) {
@@ -2411,6 +2427,66 @@ mod tests {
             .contains_key(".tmp_import_discovery-regression/config/tokenizer_config.json"));
         assert!(primary.model_library.index().list_all().unwrap().is_empty());
         assert_eq!(std::fs::read(config).unwrap(), b"{}");
+    }
+
+    #[tokio::test]
+    async fn unavailable_copied_publication_is_not_reclassified_or_an_owner_failure() {
+        let temp = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(temp.path(), None).await;
+        let primary = api.primary();
+        let id = "llm/family/pending";
+        let model_dir = primary.model_library.library_root().join(id);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        let metadata = ModelMetadata {
+            model_id: Some(id.into()),
+            model_type: Some("llm".into()),
+            import_publication: Some(crate::models::ImportPublicationIdentity {
+                version: 1,
+                id: uuid::Uuid::new_v4().to_string(),
+                confirmed: false,
+            }),
+            import_state: Some(crate::models::ImportState::Pending),
+            validation_state: Some(crate::models::AssetValidationState::Invalid),
+            ..Default::default()
+        };
+        let bytes = serde_json::to_vec(&metadata).unwrap();
+        std::fs::write(model_dir.join("metadata.json"), &bytes).unwrap();
+
+        let authority = primary.model_library.mutation_authority().unwrap();
+        let producer = authority.root().try_acquire_execution_grant().unwrap();
+        assert!(reconcile_on_demand(
+            primary,
+            ReconcileScope::Model(id.into()),
+            "active-publication-regression",
+        )
+        .await
+        .unwrap());
+        assert!(primary.model_library.index().get(id).unwrap().is_none());
+        assert!(
+            primary
+                .reconciliation
+                .lock_state()
+                .models
+                .get(id)
+                .unwrap()
+                .dirty
+        );
+        drop(producer);
+
+        assert!(reconcile_on_demand(
+            primary,
+            ReconcileScope::Model(id.into()),
+            "pending-publication-regression",
+        )
+        .await
+        .unwrap());
+        let record = primary.model_library.index().get(id).unwrap().unwrap();
+        assert!(!crate::models::copied_import_ready_value(&record.metadata));
+        assert_eq!(
+            std::fs::read(model_dir.join("metadata.json")).unwrap(),
+            bytes
+        );
+        primary.runtime_tasks.shutdown_owned().await.unwrap();
     }
 
     #[test]

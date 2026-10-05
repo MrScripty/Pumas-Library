@@ -34,6 +34,33 @@ published-payload batches retaining the model's dirty mark. These Rust regressio
 require exact-head hosted qualification; the historical results below do not
 claim to execute this correction.
 
+## Hosted publication/discovery race correction
+
+Exact-head hosted execution at `63123fd8f9f866064a8315096ab3fb1fc81e8f0f`
+reported 39 passing and two failing S3 acquisition cases in
+[the headless integration job](https://github.com/MrScripty/Pumas-Library/actions/runs/37326608913/job/111819229166).
+The live-watcher case reached owner shutdown with a background reconciliation
+failure: discovery attempted to reclassify an unacknowledged copied publication.
+Source inspection also found discovery could rewrite its Pending index snapshot
+before the producer's conditional Ready commit. A two-second notification
+suppression does not provide publication ownership.
+
+Unacknowledged copied-publication observations now acquire the existing native
+root grant, reread their evidence, and retain exclusion through conditional
+index projection. Busy observations defer through the existing reconciliation
+path. Terminal unavailable publications retain diagnostic projection, but are
+not reclassified. Legacy and acknowledged Ready projections keep their existing
+paths. No new publication owner or recovery API is added.
+
+The second failure, `missing_index_publication_identity_cannot_settle_changed_output`,
+reported only `RecvError`: its fixture awaited a dropped callback before checking
+the acquisition/import result. The fixture now reports that underlying result
+first; this log cannot establish that it shares the first failure's cause.
+Deterministic regressions cover live Pending/Ready-metadata observation, deferred
+owner shutdown, cold admission exclusion, and preserved terminal diagnostics.
+These changes require fresh exact-head hosted Rust qualification; the historical
+passing runs below do not qualify this correction.
+
 ## Normal workflow evidence
 
 On Linux x86_64 with pinned Rust 1.92.0, the real anonymous loopback S3 reader

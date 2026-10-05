@@ -133,6 +133,17 @@ impl ModelLibrary {
     }
 
     pub(super) fn refresh_retained_publication_record(&self, record: &ModelRecord) -> Result<bool> {
+        let grant = self.protect_unacknowledged_publication_observation(Some(record), None)?;
+        let current;
+        let record = if grant.is_some() {
+            current = self.index.get(&record.id)?;
+            let Some(current) = current.as_ref() else {
+                return Ok(false);
+            };
+            current
+        } else {
+            record
+        };
         let mut diagnostic = record.clone();
         match self.indexed_model_dir(record) {
             Ok(_) => self.observe_publication_records(std::slice::from_mut(&mut diagnostic))?,

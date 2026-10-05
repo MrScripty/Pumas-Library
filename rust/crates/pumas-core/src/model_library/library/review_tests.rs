@@ -72,6 +72,93 @@ fn insert_model(
 }
 
 #[tokio::test]
+async fn copied_import_live_pending_observers_preserve_the_producer_snapshot() {
+    for canonical_ready in [false, true] {
+        let (_temp, library, tasks) = fixture().await;
+        let id = "llm/review/live-publisher";
+        let path = insert_model(&library, id, pending_metadata(), true);
+        let expected = library.index.get(id).unwrap().unwrap();
+        if canonical_ready {
+            let mut metadata: ModelMetadata =
+                serde_json::from_slice(&std::fs::read(path.join(METADATA_FILENAME)).unwrap())
+                    .unwrap();
+            metadata.import_state = Some(ImportState::Ready);
+            metadata.validation_state = Some(AssetValidationState::Valid);
+            metadata.import_publication.as_mut().unwrap().confirmed = true;
+            std::fs::write(
+                path.join(METADATA_FILENAME),
+                serde_json::to_vec(&metadata).unwrap(),
+            )
+            .unwrap();
+        }
+        // Reproduce both sides of Ready-metadata publication before the index
+        // acknowledgment, using the same native exclusion as the real producer.
+        let authority = library.mutation_authority().unwrap();
+        let grant = authority.root().try_acquire_execution_grant().unwrap();
+        assert!(matches!(
+            library.index_model_dir(&path).await,
+            Err(PumasError::DownloadRootBusy)
+        ));
+        assert!(matches!(
+            library.refresh_retained_publication_record(&expected),
+            Err(PumasError::DownloadRootBusy)
+        ));
+        assert!(matches!(
+            library.rebuild_index().await,
+            Err(PumasError::DownloadRootBusy)
+        ));
+        let deep = library
+            .deep_scan_rebuild(false, None::<fn(DeepScanProgress)>)
+            .await
+            .unwrap();
+        assert_eq!(deep.indexed, 0);
+        assert_eq!(deep.errors.len(), 1);
+        assert_eq!(
+            serde_json::to_value(library.index.get(id).unwrap()).unwrap(),
+            serde_json::to_value(Some(&expected)).unwrap()
+        );
+        drop(grant);
+        // Once no producer is active, unavailable evidence remains diagnostic.
+        library.index_model_dir(&path).await.unwrap();
+        assert!(!crate::models::copied_import_ready_value(
+            &library.index.get(id).unwrap().unwrap().metadata
+        ));
+        tasks.shutdown_owned().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn copied_import_cold_projection_retains_exclusion_until_commit() {
+    let (_temp, library, tasks) = fixture().await;
+    let id = "llm/review/cold-pending";
+    let path = insert_model(&library, id, pending_metadata(), true);
+    library.index.delete(id).unwrap();
+    let authority = library.mutation_authority().unwrap();
+    let producer = authority.root().try_acquire_execution_grant().unwrap();
+    assert!(matches!(
+        library.prepare_index_projection_async(&path).await,
+        Err(PumasError::DownloadRootBusy)
+    ));
+    assert!(library.index.get(id).unwrap().is_none());
+    drop(producer);
+    let prepared = library.prepare_index_projection_async(&path).await.unwrap();
+    assert!(matches!(
+        authority.root().try_acquire_execution_grant(),
+        Err(PumasError::DownloadRootBusy)
+    ));
+    library
+        .persist_index_projection(&path, prepared)
+        .await
+        .unwrap();
+    let grant = authority.root().try_acquire_execution_grant().unwrap();
+    assert!(!crate::models::copied_import_ready_value(
+        &library.index.get(id).unwrap().unwrap().metadata
+    ));
+    drop(grant);
+    tasks.shutdown_owned().await.unwrap();
+}
+
+#[tokio::test]
 async fn copied_import_cleanup_skips_only_eligible_blocked_models() {
     let (_temp, library, tasks) = fixture().await;
     let metadata = ModelMetadata {

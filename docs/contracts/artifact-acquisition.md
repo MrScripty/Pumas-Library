@@ -110,6 +110,24 @@ RFC authority: [HTTP Semantics, RFC 9110](https://www.rfc-editor.org/rfc/rfc9110
 
 Source configuration includes endpoint, region where applicable, bucket, addressing style, TLS/approved local-development policy, and explicit credential-provider identity. Preserve object version IDs and conditional reads. Treat ETag as an opaque source validator unless its specific documented checksum semantics are established. A multipart or encrypted-object ETag must not be relabeled SHA-256/MD5 evidence.
 
+The optional S3 reader retains `S3ReaderConfig` and anonymous `S3Reader::new`.
+`S3Reader::new_authenticated(config, S3Credentials)` consumes explicitly supplied
+access-key ID, secret and optional session token for a bounded acquisition.
+`S3Credentials::new` admits nonempty printable ASCII without whitespace; access-key
+IDs additionally exclude SigV4 credential-field delimiters `/`, `,`, and `=`.
+Authenticated signing regions use ASCII alphanumerics and hyphens. Invalid
+credentials/configuration fail before I/O with non-sensitive configuration errors.
+Authentication requires HTTPS regardless of `allow_http`; plaintext literal-IP
+loopback signing fixtures exist only in unit-test builds, never via `test-support`.
+No ambient discovery, persistence, automatic refresh, anonymous fallback, or
+receiving-origin expansion is allowed. Redirects and proxies remain disabled.
+The maintained SDK supplies SigV4; Pumas marks credential headers sensitive and
+contains remote diagnostics before public errors or durable status can expose
+them. Existing anonymous constructors, source identity, VersionId/If-Match,
+receipt formats, retry budgets and byte-verification policy remain unchanged.
+Selections retain their credential capability in memory through their existing
+ownership lifetime; callers scope them to the authorized acquisition.
+
 Explicit multi-file S3 selections identify each object by the pair of its exact key and VersionId. Their manifest files encode that pair as a JSON tuple in the opaque `source_key`, so different versions of one key may have different size/digest evidence. Conflicting evidence for the same key and version remains invalid. Per-object revision pins and reader requests preserve the raw protocol key and VersionId; single-object selections retain their existing raw `source_key`. Retained manifests are not rewritten.
 
 Use one range per S3 GetObject call and bounded parallel calls only when the supported reader and identity contract permit them. Pagination failures or capacity limits produce incomplete/unavailable manifests, not silently shortened file sets. Recheck the exact version/evidence when refreshing credentials or location. Capability differences of compatible endpoints produce explicit unsupported results.

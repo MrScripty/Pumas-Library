@@ -6,8 +6,7 @@ use pumas_library::acquisition::{
 use std::time::Duration;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
-    task::JoinHandle,
+    net::TcpListener,
 };
 
 const VERSION: &str = "v+1/=";
@@ -28,82 +27,9 @@ fn digest() -> Sha256Evidence {
     Sha256Evidence::new("fixture.sha256", "0".repeat(64)).unwrap()
 }
 
-fn head(version: Option<&str>, etag: Option<&str>) -> String {
-    format!("HTTP/1.1 200 OK\r\nContent-Length: 8\r\nLast-Modified: Wed, 01 Jan 2025 00:00:00 GMT\r\n{}{}Connection: close\r\n\r\n",
-        version.map(|v| format!("x-amz-version-id: {v}\r\n")).unwrap_or_default(),
-        etag.map(|v| format!("ETag: {v}\r\n")).unwrap_or_default())
-}
-
-fn range_response(version: &str, etag: &str, total: u64, range: &str, body: &str) -> String {
-    format!("HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {range}/{total}\r\nLast-Modified: Wed, 01 Jan 2025 00:00:00 GMT\r\nx-amz-version-id: {version}\r\nETag: {etag}\r\nConnection: close\r\n\r\n{body}", body.len())
-}
-
-async fn request(socket: &mut TcpStream) -> String {
-    let mut data = Vec::new();
-    while !data.ends_with(b"\r\n\r\n") {
-        assert!(data.len() < 16 * 1024, "fixture request too large");
-        data.push(socket.read_u8().await.unwrap());
-    }
-    String::from_utf8(data).unwrap()
-}
-
-struct Fixture {
-    endpoint: String,
-    task: JoinHandle<Vec<String>>,
-    stop: Option<tokio::sync::oneshot::Sender<()>>,
-}
-
-impl Fixture {
-    async fn serve(responses: Vec<String>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
-        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
-        let task = tokio::spawn(async move {
-            let mut requests = Vec::new();
-            for response in responses {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                requests.push(request(&mut socket).await);
-                socket.write_all(response.as_bytes()).await.unwrap();
-                socket.shutdown().await.unwrap();
-            }
-            // Keep the source reachable until the operation returns, so a retry
-            // or followed redirect is observable rather than hidden by refusal.
-            loop {
-                tokio::select! {
-                    _ = &mut stop_rx => break,
-                    accepted = listener.accept() => {
-                        let (mut socket, _) = accepted.unwrap();
-                        requests.push(request(&mut socket).await);
-                        socket.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
-                        socket.shutdown().await.unwrap();
-                    }
-                }
-            }
-            requests
-        });
-        Self {
-            endpoint,
-            task,
-            stop: Some(stop_tx),
-        }
-    }
-
-    async fn finish(mut self) -> Vec<String> {
-        if let Some(stop) = self.stop.take() {
-            stop.send(()).unwrap();
-        }
-        tokio::time::timeout(Duration::from_secs(5), &mut self.task)
-            .await
-            .expect("fixture did not finish")
-            .expect("fixture failed")
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
+#[path = "s3_reader/fixture.rs"]
+mod fixture;
+use fixture::{head, range_response, request, Fixture};
 
 #[tokio::test]
 async fn version_bound_range_uses_exact_keys_and_both_addressing_styles() {
@@ -448,4 +374,74 @@ async fn operation_budget_includes_destination_backpressure() {
     assert!(matches!(read.await, Err(S3ReaderError::TimedOut)));
     tokio::time::resume();
     assert_eq!(fixture.finish().await.len(), 2);
+}
+
+#[test]
+fn authenticated_public_constructor_requires_https_even_with_http_opt_in() {
+    use pumas_library::acquisition::S3Credentials;
+    for endpoint in [
+        "http://127.0.0.1:1",
+        "http://[::1]:1",
+        "http://localhost:1",
+        "http://example.invalid",
+    ] {
+        let error = S3Reader::new_authenticated(
+            config(endpoint.into(), S3Addressing::Path),
+            S3Credentials::new("synthetic-access".into(), "synthetic-secret".into(), None).unwrap(),
+        )
+        .err()
+        .unwrap();
+        assert!(matches!(
+            error,
+            S3ReaderError::Configuration("authenticated S3 requires HTTPS")
+        ));
+    }
+    for addressing in [S3Addressing::Path, S3Addressing::VirtualHosted] {
+        for allow_http in [false, true] {
+            let mut config = config("https://example.invalid".into(), addressing);
+            config.allow_http = allow_http;
+            assert!(S3Reader::new_authenticated(
+                config,
+                S3Credentials::new(
+                    "synthetic-access".into(),
+                    "synthetic-secret".into(),
+                    Some("synthetic-token".into())
+                )
+                .unwrap()
+            )
+            .is_ok());
+        }
+    }
+}
+
+#[test]
+fn authenticated_public_constructor_retains_endpoint_authority_validation() {
+    use pumas_library::acquisition::S3Credentials;
+    for endpoint in [
+        "https://synthetic-user:synthetic-password@example.invalid",
+        "https://example.invalid/path",
+        "https://example.invalid?synthetic-secret",
+        "https://example.invalid#synthetic-token",
+        "file:///tmp/object",
+    ] {
+        let error = S3Reader::new_authenticated(
+            config(endpoint.into(), S3Addressing::Path),
+            S3Credentials::new("synthetic-access".into(), "synthetic-secret".into(), None).unwrap(),
+        )
+        .err()
+        .unwrap();
+        assert!(matches!(
+            error,
+            S3ReaderError::Configuration("endpoint must be a credential-free HTTP(S) origin")
+        ));
+        let diagnostic = format!("{error} {error:?}");
+        for value in [
+            "synthetic-user",
+            "synthetic-password",
+            "synthetic-secret",
+            "synthetic-token",
+        ] {
+            assert!(!diagnostic.contains(value));
+        }
+    }
 }

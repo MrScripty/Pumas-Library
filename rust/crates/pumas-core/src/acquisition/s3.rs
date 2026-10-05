@@ -6,7 +6,7 @@ use std::{ops::Range, sync::Arc, time::Duration};
 use futures::StreamExt;
 use object_store::{
     aws::{AmazonS3, AmazonS3Builder, AwsCredential},
-    client::{HttpClient, HttpConnector},
+    client::{HttpClient, HttpConnector, HttpError, HttpRequest, HttpResponse, HttpService},
     path::Path,
     ClientOptions, GetOptions, ObjectStore, RetryConfig, StaticCredentialProvider,
 };
@@ -21,6 +21,9 @@ use super::{
 mod manifest;
 pub use manifest::{S3ManifestEntry, S3ManifestSelection};
 
+#[cfg(test)]
+mod auth_tests;
+
 /// Endpoint interpretation. Virtual-hosted endpoints already include the bucket.
 #[derive(Clone, Copy, Debug)]
 pub enum S3Addressing {
@@ -30,8 +33,8 @@ pub enum S3Addressing {
 
 /// Explicit caller-authorized source configuration, never read from model metadata.
 ///
-/// This first reader supports anonymous general-purpose/versioned buckets only.
-/// Credentials, environment discovery, prefix listing, and remote writes are absent.
+/// General-purpose/versioned buckets only. Environment discovery, prefix listing,
+/// and remote writes are absent. Authentication is supplied separately in memory.
 pub struct S3ReaderConfig {
     /// Absolute HTTP(S) origin, without credentials, query, fragment, or path.
     pub endpoint: String,
@@ -42,6 +45,51 @@ pub struct S3ReaderConfig {
     pub allow_http: bool,
     /// Budget for each complete selection/read operation, including destination writes.
     pub operation_timeout: Duration,
+}
+
+/// Explicit credentials for one bounded acquisition. No discovery, persistence,
+/// serialization, or refresh is performed. Reader selections retain the credentials
+/// only while their in-memory protocol capability remains alive.
+pub struct S3Credentials(AwsCredential);
+
+impl S3Credentials {
+    /// Accept nonempty printable ASCII credentials without whitespace. Access-key
+    /// IDs must also exclude SigV4 credential-field delimiters (`/`, `,`, `=`).
+    /// Validation errors never include the supplied values.
+    pub fn new(
+        access_key_id: String,
+        secret_access_key: String,
+        session_token: Option<String>,
+    ) -> Result<Self, S3ReaderError> {
+        let valid = |value: &str| {
+            !value.is_empty() && value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+        };
+        if !valid(&access_key_id)
+            || access_key_id.contains(['/', ',', '='])
+            || !valid(&secret_access_key)
+            || session_token.as_deref().is_some_and(|token| !valid(token))
+        {
+            return Err(S3ReaderError::Configuration("invalid explicit credentials"));
+        }
+        Ok(Self(AwsCredential {
+            key_id: access_key_id,
+            secret_key: secret_access_key,
+            token: session_token,
+        }))
+    }
+}
+
+impl std::fmt::Debug for S3Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("S3Credentials([REDACTED])")
+    }
+}
+
+enum Authentication {
+    Anonymous,
+    Explicit(S3Credentials),
+    #[cfg(test)]
+    LoopbackFixture(S3Credentials),
 }
 
 /// One configured protocol reader. It owns no tasks, runtime, or durable state.
@@ -92,12 +140,26 @@ pub enum S3ReaderError {
     Write(#[from] std::io::Error),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ScopedConnector(reqwest::Client);
 
 impl HttpConnector for ScopedConnector {
     fn connect(&self, _options: &ClientOptions) -> object_store::Result<HttpClient> {
-        Ok(HttpClient::new(self.0.clone()))
+        Ok(HttpClient::new(self.clone()))
+    }
+}
+
+// The pinned signer does not mark its credential headers sensitive. Mark them
+// before passing to maintained transport so request Debug cannot disclose them.
+#[async_trait::async_trait]
+impl HttpService for ScopedConnector {
+    async fn call(&self, mut request: HttpRequest) -> Result<HttpResponse, HttpError> {
+        for name in ["authorization", "x-amz-security-token"] {
+            if let Some(value) = request.headers_mut().get_mut(name) {
+                value.set_sensitive(true);
+            }
+        }
+        self.0.call(request).await
     }
 }
 
@@ -105,6 +167,23 @@ impl S3Reader {
     /// Construct a reader from explicit endpoint authority. Redirects, proxy
     /// discovery, automatic retries, and ambient credential discovery are disabled.
     pub fn new(config: S3ReaderConfig) -> Result<Self, S3ReaderError> {
+        Self::build(config, Authentication::Anonymous)
+    }
+
+    /// Sign HEAD and conditional range GET with explicitly supplied credentials.
+    /// HTTPS is mandatory even when `config.allow_http` is true. Credentials are
+    /// consumed, remain in memory, and never participate in artifact identity.
+    pub fn new_authenticated(
+        config: S3ReaderConfig,
+        credentials: S3Credentials,
+    ) -> Result<Self, S3ReaderError> {
+        Self::build(config, Authentication::Explicit(credentials))
+    }
+
+    fn build(
+        config: S3ReaderConfig,
+        authentication: Authentication,
+    ) -> Result<Self, S3ReaderError> {
         let endpoint = Url::parse(&config.endpoint)
             .map_err(|_| S3ReaderError::Configuration("endpoint must be an absolute origin"))?;
         if !matches!(endpoint.scheme(), "http" | "https")
@@ -124,8 +203,50 @@ impl S3Reader {
                 "HTTP requires explicit source authority",
             ));
         }
+        let (credential, skip_signature, allow_http) = match authentication {
+            Authentication::Anonymous => (
+                AwsCredential {
+                    key_id: String::new(),
+                    secret_key: String::new(),
+                    token: None,
+                },
+                true,
+                config.allow_http,
+            ),
+            Authentication::Explicit(credentials) => {
+                if endpoint.scheme() != "https" {
+                    return Err(S3ReaderError::Configuration(
+                        "authenticated S3 requires HTTPS",
+                    ));
+                }
+                (credentials.0, false, false)
+            }
+            #[cfg(test)]
+            Authentication::LoopbackFixture(credentials) => {
+                if endpoint.scheme() != "http"
+                    || !endpoint.host().is_some_and(|host| match host {
+                        url::Host::Ipv4(ip) => ip.is_loopback(),
+                        url::Host::Ipv6(ip) => ip.is_loopback(),
+                        url::Host::Domain(_) => false,
+                    })
+                {
+                    return Err(S3ReaderError::Configuration(
+                        "fixture requires literal loopback HTTP",
+                    ));
+                }
+                (credentials.0, false, true)
+            }
+        };
         if config.region.is_empty() || config.region.chars().any(char::is_control) {
             return Err(S3ReaderError::Configuration("region must be nonempty text"));
+        }
+        if !skip_signature
+            && !config
+                .region
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err(S3ReaderError::Configuration("invalid signing region"));
         }
         // Only ordinary bucket names, not ARN/access-point or directory-bucket selectors.
         if !(3..=63).contains(&config.bucket.len())
@@ -153,7 +274,7 @@ impl S3Reader {
             .no_brotli()
             .no_deflate()
             .no_zstd()
-            .https_only(!config.allow_http)
+            .https_only(!allow_http)
             .timeout(config.operation_timeout)
             .connect_timeout(config.operation_timeout)
             .build()?;
@@ -165,14 +286,10 @@ impl S3Reader {
                 config.addressing,
                 S3Addressing::VirtualHosted
             ))
-            .with_allow_http(config.allow_http)
-            .with_skip_signature(true)
+            .with_allow_http(allow_http)
+            .with_skip_signature(skip_signature)
             // Prevent even constructing an ambient/metadata credential provider.
-            .with_credentials(Arc::new(StaticCredentialProvider::new(AwsCredential {
-                key_id: String::new(),
-                secret_key: String::new(),
-                token: None,
-            })))
+            .with_credentials(Arc::new(StaticCredentialProvider::new(credential)))
             .with_http_connector(ScopedConnector(client))
             .with_retry(RetryConfig {
                 max_retries: 0,
@@ -404,6 +521,8 @@ fn protocol_error(error: object_store::Error) -> S3ReaderError {
     match error {
         object_store::Error::Precondition { .. } => S3ReaderError::Changed,
         object_store::Error::NotFound { .. } => S3ReaderError::Unavailable,
-        other => S3ReaderError::Protocol(other.to_string()),
+        // Upstream errors may contain echoed response bodies, headers or URLs.
+        // Never expose remote diagnostics through public errors or durable state.
+        _ => S3ReaderError::Protocol("S3 request or response failed".into()),
     }
 }

@@ -16,12 +16,32 @@ available without that feature. RPC enables it through `inference-plugins`.
 ## Optional S3 protocol reader
 
 Enable `s3` explicitly to use `acquisition::{S3Reader, S3ReaderConfig}`. This
-reader supports anonymous access to explicitly configured versioned objects;
-it does not discover credentials or endpoints from the environment. Configure
+reader supports anonymous or explicitly authenticated access to configured
+versioned objects. It does not discover credentials or endpoints from the environment. Configure
 an HTTP(S) origin, region, bucket, addressing style, and positive operation
 budget. Virtual-hosted endpoints must already identify the bucket; HTTP requires
 explicit opt-in. Redirects, ambient proxies, SDK retries, and automatic HTTP
 protocol retries are disabled.
+
+`S3Reader::new(config)` retains anonymous behavior. For authentication, construct
+`S3Credentials::new(access_key_id, secret_access_key, optional_session_token)`
+and pass the owned value to `S3Reader::new_authenticated(config, credentials)`.
+Credentials must be nonempty printable ASCII without whitespace; access-key IDs
+also exclude `/`, `,`, and `=`. Invalid input returns `S3ReaderError::Configuration`
+without echoing its value. Authenticated construction requires HTTPS, even with
+`allow_http: true`; it uses normal peer verification. The public `test-support`
+feature does not enable plaintext credential transport.
+
+The maintained SDK signs HEAD and conditional range GET with SigV4 and includes
+the optional session token. Credentials remain in the in-memory reader/selection
+capability until its last owner drops; they have no serialization or discovery
+API and are never part of manifests, receipts, checkpoint identity, or persisted
+state. Their `Debug` output redacts all fields. Remote protocol diagnostics are
+replaced with bounded safe messages, including for anonymous readers, because
+response errors can echo access material. Existing error variants are retained.
+Selections can outlive their reader. Callers should scope those selections to
+their acquisition; expiration or revocation fails the selected request and does
+not refresh credentials, retry anonymously, or select a different object.
 
 `select(key, version_id, logical_path, sha256)` validates the local path and
 exact remote key, resolves HEAD for that VersionId, and refuses mutable `null`

@@ -71,11 +71,6 @@ consumer custody. A retained `Using` intent receipt without proven model output
 requires explicit owner reconciliation; automatic reimport is unavailable.
 
 For a confirmed model whose acquisition acknowledgement was interrupted, use
-Acquired recovery requires an explicit canonical publication identity with its
-matching indexed projection before Confirmed/root/payload proof. Missing/null
-identity retains acquisition uncertainty even if a matching v2 receipt survives.
-Ordinary legacy readiness remains supported separately.
-
 `ModelImporter::reconcile_acquired_gguf` as the output-validation callback of
 `AcquisitionConsumer::reconcile`. Supply the retained demand, exact manifest,
 fresh held workspace, import spec and candidate model ID. The candidate ID is
@@ -85,6 +80,20 @@ metadata and unchanged physical payload with the verified input digest. The
 observer performs no download, import, index repair, Pending promotion or
 cleanup. Successful proof lets the existing consumer settle the same use;
 repeated adopted proof is observational and idempotent.
+
+Acquired recovery requires an explicit canonical publication identity with its
+matching indexed projection before Confirmed/root/payload proof. Missing/null
+identity retains acquisition uncertainty even if a matching v2 receipt survives.
+Ordinary legacy readiness remains supported separately.
+
+New consumer-facade operations admit at most 4 MiB of actual pretty-serialized
+manifest JSON and a 2 MiB payload namespace proof reserve before transfer or
+store admission. The reserve charges the encoded file names and unique parent
+prefixes plus 512 bytes per physical proof entry. New completion bindings must
+also fit 4 MiB before issuance or the publication callback; callback refusal
+retains the verified input and unreceipted use. These budgets leave room inside
+the copied-output receipt's 16 MiB observation limit. Existing manifest decoding,
+retained receipt reconciliation and ordinary copied-import formats are unchanged.
 
 Acquired copied imports now emit publication receipt version 2 with their exact
 issued acquisition binding. Ordinary copied imports retain version 1. Existing

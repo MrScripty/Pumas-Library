@@ -468,7 +468,7 @@ async fn cold_publication_reconciliation(fault: &str) {
         }
         if fault.ends_with("missing") {
             std::fs::remove_file(&payload_path).unwrap();
-        } else {
+        } else if !fault.ends_with("intact") {
             let mut changed = bytes.clone();
             changed[5] ^= 1;
             std::fs::write(&payload_path, changed).unwrap();
@@ -720,6 +720,13 @@ async fn current_model_receipt_without_binding_is_refused_without_mutation() {
 #[tokio::test]
 async fn missing_publication_identities_cannot_settle_changed_or_missing_output() {
     for fault in ["identity-bytes", "identity-missing", "null-identity-bytes"] {
+        cold_publication_reconciliation(fault).await;
+    }
+}
+
+#[tokio::test]
+async fn missing_publication_identities_cannot_settle_intact_output() {
+    for fault in ["identity-intact", "null-identity-intact"] {
         cold_publication_reconciliation(fault).await;
     }
 }
@@ -1272,3 +1279,6 @@ async fn model_collision_retains_consumer_use_and_never_adopts_a_refused_import(
     consumer.shutdown().await.unwrap();
     close(&api).await;
 }
+
+#[path = "s3_acquisition/bounds.rs"]
+mod bounds;

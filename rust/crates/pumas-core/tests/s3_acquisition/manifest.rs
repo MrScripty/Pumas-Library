@@ -253,6 +253,7 @@ async fn bundle_publication_and_cold_proof(interrupt: bool, fault: &str) {
     assert_eq!(std::fs::read(target.join(AUX_PATH)).unwrap(), AUX);
     let receipt_bytes = std::fs::read(target.join(".pumas_import_publication.json")).unwrap();
     let output: serde_json::Value = serde_json::from_slice(&receipt_bytes).unwrap();
+    super::bounds::check_publication_schema_reserve(&output);
     assert_eq!(
         output["acquisition"],
         serde_json::to_value(&issued).unwrap()

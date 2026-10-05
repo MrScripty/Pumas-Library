@@ -14,11 +14,90 @@ use crate::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
+
+// New consumer bindings reserve space for the copied-output receipt: embedding
+// at most doubles pretty JSON indentation; namespace entries include physical
+// identities, sizes and hashes. The model publication schema contract test
+// checks these reserves against the real version-2 receipt and its 16 MiB limit.
+const CONSUMER_DOCUMENT_MAX_BYTES: usize = 4 * 1024 * 1024;
+const CONSUMER_NAMESPACE_MAX_BYTES: usize = 2 * 1024 * 1024;
+const CONSUMER_NAMESPACE_ENTRY_BYTES: usize = 512;
+
+struct JsonSize {
+    bytes: usize,
+    limit: usize,
+}
+
+impl Write for JsonSize {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let next = self
+            .bytes
+            .checked_add(bytes.len())
+            .filter(|next| *next <= self.limit)
+            .ok_or_else(|| io::Error::other("Consumer JSON exceeds its byte budget"))?;
+        self.bytes = next;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn consumer_json_size<T: Serialize + ?Sized>(
+    value: &T,
+    limit: usize,
+    field: &str,
+) -> Result<usize> {
+    let mut size = JsonSize { bytes: 0, limit };
+    serde_json::to_writer_pretty(&mut size, value).map_err(|error| PumasError::Validation {
+        field: field.into(),
+        message: format!("Consumer serialization must fit {limit} bytes: {error}"),
+    })?;
+    Ok(size.bytes)
+}
+
+fn require_consumer_manifest_bound(manifest: &ArtifactManifest) -> Result<()> {
+    consumer_json_size(
+        manifest,
+        CONSUMER_DOCUMENT_MAX_BYTES,
+        "acquisition.consumer_document_size",
+    )?;
+    let mut parents = BTreeSet::new();
+    let mut namespace_bytes = 0_usize;
+    let mut charge = |path: &str| -> Result<()> {
+        let name_bytes = consumer_json_size(
+            path,
+            CONSUMER_NAMESPACE_MAX_BYTES,
+            "acquisition.consumer_namespace_size",
+        )?;
+        namespace_bytes = namespace_bytes
+            .checked_add(name_bytes)
+            .and_then(|bytes| bytes.checked_add(CONSUMER_NAMESPACE_ENTRY_BYTES))
+            .filter(|bytes| *bytes <= CONSUMER_NAMESPACE_MAX_BYTES)
+            .ok_or_else(|| PumasError::Validation {
+                field: "acquisition.consumer_namespace_size".into(),
+                message: "Consumer payload namespace exceeds its serialized proof budget".into(),
+            })?;
+        Ok(())
+    };
+    for file in manifest.files() {
+        charge(file.logical_path())?;
+        for (separator, _) in file.logical_path().match_indices('/') {
+            let parent = &file.logical_path()[..separator];
+            if parents.insert(parent) {
+                charge(parent)?;
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Consumer identity and exact demand operation; neither authorizes file access.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -730,6 +809,11 @@ impl AcquisitionService {
         let store = self.store.clone();
         let expected = expected.clone();
         owned(context, "issue consumer completion receipt", move || {
+            consumer_json_size(
+                &receipt,
+                CONSUMER_DOCUMENT_MAX_BYTES,
+                "acquisition.consumer_document_size",
+            )?;
             store.issue_consumer_receipt(&expected, lease, &receipt)
         })
         .await
@@ -1887,6 +1971,11 @@ impl AcquisitionConsumer {
         let service = self.service.clone();
         self.scope
             .run_worker_invocation(move |context| async move {
+                let request = owned(&context, "bound consumer admission", move || {
+                    require_consumer_manifest_bound(&request.manifest)?;
+                    Ok(request)
+                })
+                .await?;
                 service.require_schema(&context).await?;
                 let operation = service
                     .begin(

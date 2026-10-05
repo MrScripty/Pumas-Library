@@ -34,6 +34,7 @@ import {
 } from './ipc-validation';
 import { resolveBackendBinaryPath } from './backend-path';
 import { PythonBridge } from './python-bridge';
+import { isS3ImportMethod, receiveS3ImportRpc } from './s3-import-rpc';
 import { decodeRuntimeRunningOutcome } from './generated/desktop-contract';
 import {
   LauncherRootRecoveryRequiredError,
@@ -474,6 +475,14 @@ function registerIPCHandlers(): void {
   // Generic API call handler - forwards validated renderer requests to the backend sidecar.
   ipcMain.handle('api:call', async (_event, method: unknown, params: unknown) => {
     const request = validateApiCallPayload(method, params);
+
+    if (isS3ImportMethod(request.method)) {
+      return receiveS3ImportRpc(request.method, async () => {
+        if (backendInitializationPromise) await backendInitializationPromise;
+        if (!pythonBridge) throw new Error('Backend unavailable');
+        return pythonBridge.call(request.method, request.params);
+      });
+    }
 
     if (backendInitializationPromise) {
       await backendInitializationPromise;

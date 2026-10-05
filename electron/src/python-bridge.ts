@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as net from 'net';
 import log from 'electron-log';
+import { decodeS3ImportRpcResult, isS3ImportMethod, S3_RPC_FAILURE, S3_RPC_RESPONSE_LIMIT } from './s3-import-rpc';
 
 type BridgeTimer = ReturnType<typeof setTimeout>;
 
@@ -933,6 +934,16 @@ export class PythonBridge {
    * Make an RPC call to the backend
    */
   async call(method: string, params: Record<string, unknown>): Promise<unknown> {
+    const sourceCall = isS3ImportMethod(method);
+    try {
+      return await this.callRequest(method, params, sourceCall);
+    } catch (error) {
+      if (sourceCall) throw new Error(S3_RPC_FAILURE);
+      throw error;
+    }
+  }
+
+  private async callRequest(method: string, params: Record<string, unknown>, sourceCall: boolean): Promise<unknown> {
     if (this.isShuttingDown && method !== 'shutdown') {
       throw new Error('Backend bridge stopping');
     }
@@ -941,11 +952,12 @@ export class PythonBridge {
     }
 
     return new Promise((resolve, reject) => {
-      const requestBody = JSON.stringify({
+      const requestId = Date.now();
+      let requestBody = JSON.stringify({
         jsonrpc: '2.0',
         method,
         params,
-        id: Date.now(),
+        id: requestId,
       });
       const requestTimeoutMs = rpcRequestTimeoutMs(method);
       let deadline: BridgeTimer | null = null;
@@ -973,29 +985,54 @@ export class PythonBridge {
           'Content-Length': Buffer.byteLength(requestBody),
         },
         timeout: requestTimeoutMs,
+        ...(sourceCall ? { agent: new http.Agent({ proxyEnv: {}, keepAlive: false }) } : {}),
       };
 
       const req = http.request(options, (res) => {
         let data = '';
+        let responseBytes = 0;
+        if (sourceCall) res.setEncoding('utf8');
 
-        res.on('data', (chunk) => {
-          data += chunk;
+        res.on('data', (chunk: string | Buffer) => {
+          if (settled) return;
+          if (sourceCall) {
+            responseBytes += Buffer.byteLength(chunk);
+            if (responseBytes > S3_RPC_RESPONSE_LIMIT) {
+              data = '';
+              finish(new Error(S3_RPC_FAILURE));
+              req.destroy();
+              return;
+            }
+          }
+          data += chunk.toString();
         });
 
         res.on('end', () => {
           try {
-            const response: RPCResponse = JSON.parse(data);
+            const response: RPCResponse & { jsonrpc?: unknown; id?: unknown } = JSON.parse(data);
+            if (sourceCall && (!response || typeof response !== 'object' || Array.isArray(response)
+              || res.statusCode !== 200 || response.jsonrpc !== '2.0' || response.id !== requestId
+              || Object.keys(response).some(key => !['jsonrpc', 'id', 'result', 'error'].includes(key))
+              || Object.hasOwn(response, 'result') === Object.hasOwn(response, 'error'))) {
+              throw new Error(S3_RPC_FAILURE);
+            }
             if (response.error) {
+              if (sourceCall) {
+                finish(new Error(S3_RPC_FAILURE));
+                return;
+              }
               // Handle both string errors and JSON-RPC error objects
               const errorMessage = typeof response.error === 'string'
                 ? response.error
                 : response.error.message || JSON.stringify(response.error);
               finish(new Error(errorMessage));
             } else {
-              finish(null, response.result);
+              finish(null, sourceCall ? decodeS3ImportRpcResult(method, response.result) : response.result);
             }
           } catch {
-            finish(new Error(`Invalid JSON response: ${data}`));
+            finish(new Error(sourceCall ? S3_RPC_FAILURE : `Invalid JSON response: ${data}`));
+          } finally {
+            data = '';
           }
         });
         res.on('error', (error) => {
@@ -1034,6 +1071,8 @@ export class PythonBridge {
       } catch (error) {
         finish(error instanceof Error ? error : new Error(String(error)));
         req.destroy();
+      } finally {
+        requestBody = '';
       }
     });
   }

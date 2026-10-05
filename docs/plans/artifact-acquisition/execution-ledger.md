@@ -1,5 +1,96 @@
 # Acquisition execution ledger
 
+## 2026-10-05 — admitted Q1 shard/Diffusers package completeness
+
+Coordinator continuation of Q1/AC01 starts branch
+`feat/hf-package-completeness-04b0459e` at immutable mixed-file milestone
+`04b0459eedfea1336f200355c37f881e7d2b4f88`. Exact primary writes are
+`model_library/hf/{download.rs,mod.rs,package_selection.rs}` under core,
+`core/src/api/hf.rs`, core README and this ledger. The new private HF helper
+validates selected shard indexes from acquired, verified descriptors before
+marker removal/import; it introduces no transfer, store or publication owner.
+Whole Diffusers selections include regular files; explicit selectors remain
+exact and do not become whole-repository requests. Existing shard completeness
+and component/path semantics are reused. Focused package selection and public
+download/import/GetModel/receipt tests qualify the changed path.
+
+Frozen mixed-file/SDK/S3/ORT milestones, importer/watcher/S3-manifest repair
+writes and ONNX no-build-download policy are preserved. No dependency, DTO,
+schema, installer, acquisition gate or runtime-gate change is admitted. Parent
+owns reviews, PRs and publishing; no PR metadata or merge actions are taken.
+
+The milestone now selects matching SafeTensors/PyTorch indexes for known shard
+families, rejects incomplete counted sets and absent indexes before admission,
+and validates acquired `weight_map` references against the exact selected set.
+Duplicate/empty/invalid maps, omitted selected family members and references to
+unselected files cannot reach final import or consumer settlement. The selected
+index bytes are opened through the existing verified descriptor authority in a
+registered read effect, with the same 16 MiB ceiling as package-facts JSON.
+Both fresh transfer and restored sealed-file finalization use the check; no
+second index payload request or new acquisition writer is introduced.
+
+Whole Diffusers requests include regular and LFS files. Classification preserves
+explicit selectors, and acquired `model_index.json` proves the supported pipeline
+and declared non-optional components against that selected set using existing
+component/path semantics. Explicit bundle formats skip preliminary classification;
+automatic classification retains its existing separately accounted metadata read.
+Auxiliaries are deduplicated and unrelated automatic weight indexes are excluded.
+Public signatures, DTOs, store/receipt versions and identity/verification/retry
+policies remain unchanged. Existing partial metadata stubs stay visible through
+GetModel after package failure, with their recovery markers, partial provenance
+and no completion receipt; they are not silently converted to final imports.
+
+Linux x86_64 evidence: `package_` passed 48/48 without default features and 50/50
+with defaults; the HF module passed 244/244 and public HF API passed 38/38
+without defaults. Strict all-target no-default Clippy, scoped rustfmt and diff
+checks passed. The public controls exercise complete indexed shards and a
+Diffusers bundle with regular vocabulary/config assets through actual pinned
+selection, shared acquisition, import, GetModel, ordered verified-file/consumer
+receipts, exact published bytes, Adopted settlement and queue release. Negative
+controls refuse a missing index without payload/admission and retain malformed
+index/incomplete explicit component failures without final import/settlement.
+Every acquired payload is fetched once; the automatic classification fixture
+accounts for its additional model-index metadata observation separately.
+
+An intermediate negative probe exposed read-only validation errors being recorded
+as failed background effects and making shutdown fail. Validation now returns
+invalid package contents as observed domain results, matching existing pinned
+repository observation; panics remain owned task failures. Final negative probes
+require successful owner drain. An overly strict fixture assumption that failed
+packages leave no indexed record was corrected to assert the retained existing
+partial stub/marker contract instead. No frozen importer writes were changed.
+
+Commands used `cargo test --locked --offline --manifest-path rust/Cargo.toml
+-p pumas-library --lib`, filters `package_`, `model_library::hf::` and
+`api::hf::tests`; the latter two used `--no-default-features`. Clippy used the
+same package/manifest with `--no-default-features --all-targets -- -D warnings`.
+Invocation-only settings were one Cargo worker, debug information off and
+incremental compilation off. No ONNX download/build policy, dependency or lockfile
+changed. Logs remain at `/workspace/scratch/hf-package-completeness/`:
+`package-qualified.log`, `package-default.log`, `hf-module.log`, `hf-api.log`,
+`clippy.log`, `fmt.log` and the intermediate failure logs. Final default log
+SHA-256: `6f3f33b9c24626f289a586541445cf7d69d65de411a47a98518d4f42b01be971`.
+Final no-default package log SHA-256:
+`237db15859f40e11937de69039c8d1e91f8b94c767fb09d6725f64432ce64b62`.
+
+The frozen base tree remains `4d6ac0994508165d388748bbab54b79b5d759f41`.
+Accepted main `95a0baad2d0aea4650fc36ad4afd969ac9391bf5` was fetched and verified
+with tree `3ee66988eb1668188011b2124890b10031403ebd` and ordered parents
+`838eb299` then `26a84e32`; no feature/spike history was rebased. The isolated
+SDK exact-value successor is separately committed/pushed as
+`ba1a9d908010f23f2391059cb93bfe61dcca6aa1`, tree
+`fee4b11a76306bcf224abbd8b11811e329ca0483`, directly on preserved `3a9cb5dc`.
+Its 16 probes and strict Clippy pass; its own Markdown report and logs remain
+in that successor and `/workspace/scratch/s3-sdk-spike/`.
+
+These are controlled-source backend/package-import results. They do not prove
+real model inference, real HF/provider acceptance, desktop controls, packaged or
+native-platform qualification, or complete AC01/AQ-HTTP readiness. All dependency
+gates retain their current status. The next existing-plan work is Q1/AC08 ordinary
+desktop acquisition controls/status evidence, with real pinned shard/Diffusers
+model acceptance still separate. Parent owns reviews, next PRs and integration;
+no external reviewer, PR metadata or merge action was performed here.
+
 ## 2026-10-05 — admitted Q1 explicit regular/LFS model-file selection
 
 The coordinator requested the next unblocked practical model acquisition feature

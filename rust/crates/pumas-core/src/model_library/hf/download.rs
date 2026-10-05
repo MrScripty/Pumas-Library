@@ -376,94 +376,103 @@ fn resolve_download_selection(
 
     // Resolve weight files to download.
     // Priority: filenames (explicit list) > filename (single) > quant (substring) > all.
-    let payload_files =
-        if request.bundle_format == Some(crate::models::BundleFormat::DiffusersDirectory) {
-            tree.lfs_files
-                .iter()
-                .map(|file| FileToDownload {
-                    filename: file.filename.clone(),
-                    size: Some(file.size),
-                    sha256: Some(file.sha256.clone()),
-                })
-                .collect()
-        } else if let Some(filenames) = &request.filenames {
-            let requested_names: HashSet<&str> = filenames.iter().map(String::as_str).collect();
-            let matching: Vec<FileToDownload> = tree
-                .lfs_files
-                .iter()
-                .filter(|file| requested_names.contains(file.filename.as_str()))
-                .map(|file| FileToDownload {
-                    filename: file.filename.clone(),
-                    size: Some(file.size),
-                    sha256: Some(file.sha256.clone()),
-                })
-                .chain(
-                    tree.regular_files
-                        .iter()
-                        .filter(|path| requested_names.contains(path.as_str()))
-                        .map(|path| FileToDownload {
-                            filename: path.clone(),
-                            size: None,
-                            sha256: None,
-                        }),
-                )
-                .collect();
-            let matched_names: HashSet<&str> =
-                matching.iter().map(|file| file.filename.as_str()).collect();
-            if requested_names.is_empty() || matched_names.len() != requested_names.len() {
-                return Err(PumasError::ModelNotFound {
-                    model_id: format!("{}:{} files", request.repo_id, filenames.len()),
-                });
-            }
-            matching
-        } else if let Some(filename) = &request.filename {
-            let lfs = tree
-                .lfs_files
-                .iter()
-                .find(|file| file.filename == *filename);
-            vec![FileToDownload {
-                filename: filename.clone(),
-                size: lfs.map(|file| file.size),
-                sha256: lfs.map(|file| file.sha256.clone()),
-            }]
-        } else if let Some(quant) = &request.quant {
-            let matching: Vec<FileToDownload> = tree
-                .lfs_files
-                .iter()
-                .filter(|file| file.filename.contains(quant.as_str()))
-                .map(|file| FileToDownload {
-                    filename: file.filename.clone(),
-                    size: Some(file.size),
-                    sha256: Some(file.sha256.clone()),
-                })
-                .collect();
-            if matching.is_empty() {
-                return Err(PumasError::ModelNotFound {
-                    model_id: format!("{}:{}", request.repo_id, quant),
-                });
-            }
-            matching
-        } else {
-            if tree.lfs_files.is_empty() {
-                return Err(PumasError::ModelNotFound {
-                    model_id: request.repo_id.clone(),
-                });
-            }
-            tree.lfs_files
-                .iter()
-                .map(|file| FileToDownload {
-                    filename: file.filename.clone(),
-                    size: Some(file.size),
-                    sha256: Some(file.sha256.clone()),
-                })
-                .collect()
-        };
+    let payload_files = if let Some(filenames) = &request.filenames {
+        let requested_names: HashSet<&str> = filenames.iter().map(String::as_str).collect();
+        let matching: Vec<FileToDownload> = tree
+            .lfs_files
+            .iter()
+            .filter(|file| requested_names.contains(file.filename.as_str()))
+            .map(|file| FileToDownload {
+                filename: file.filename.clone(),
+                size: Some(file.size),
+                sha256: Some(file.sha256.clone()),
+            })
+            .chain(
+                tree.regular_files
+                    .iter()
+                    .filter(|path| requested_names.contains(path.as_str()))
+                    .map(|path| FileToDownload {
+                        filename: path.clone(),
+                        size: None,
+                        sha256: None,
+                    }),
+            )
+            .collect();
+        let matched_names: HashSet<&str> =
+            matching.iter().map(|file| file.filename.as_str()).collect();
+        if requested_names.is_empty() || matched_names.len() != requested_names.len() {
+            return Err(PumasError::ModelNotFound {
+                model_id: format!("{}:{} files", request.repo_id, filenames.len()),
+            });
+        }
+        matching
+    } else if let Some(filename) = &request.filename {
+        let lfs = tree
+            .lfs_files
+            .iter()
+            .find(|file| file.filename == *filename);
+        vec![FileToDownload {
+            filename: filename.clone(),
+            size: lfs.map(|file| file.size),
+            sha256: lfs.map(|file| file.sha256.clone()),
+        }]
+    } else if let Some(quant) = &request.quant {
+        let matching: Vec<FileToDownload> = tree
+            .lfs_files
+            .iter()
+            .filter(|file| file.filename.contains(quant.as_str()))
+            .map(|file| FileToDownload {
+                filename: file.filename.clone(),
+                size: Some(file.size),
+                sha256: Some(file.sha256.clone()),
+            })
+            .collect();
+        if matching.is_empty() {
+            return Err(PumasError::ModelNotFound {
+                model_id: format!("{}:{}", request.repo_id, quant),
+            });
+        }
+        matching
+    } else if request.bundle_format == Some(crate::models::BundleFormat::DiffusersDirectory) {
+        tree.lfs_files
+            .iter()
+            .map(|file| FileToDownload {
+                filename: file.filename.clone(),
+                size: Some(file.size),
+                sha256: Some(file.sha256.clone()),
+            })
+            .chain(tree.regular_files.iter().map(|path| FileToDownload {
+                filename: path.clone(),
+                size: None,
+                sha256: None,
+            }))
+            .collect()
+    } else {
+        if tree.lfs_files.is_empty() {
+            return Err(PumasError::ModelNotFound {
+                model_id: request.repo_id.clone(),
+            });
+        }
+        tree.lfs_files
+            .iter()
+            .map(|file| FileToDownload {
+                filename: file.filename.clone(),
+                size: Some(file.size),
+                sha256: Some(file.sha256.clone()),
+            })
+            .collect()
+    };
 
     let requested_payload_files = payload_files
         .iter()
         .map(|file| file.filename.clone())
         .collect::<Vec<_>>();
-    let mut auxiliary_files = if request.filenames.is_some() {
+    let required_indexes = super::package_selection::required_indexes(
+        requested_payload_files.iter().map(String::as_str),
+    );
+    let mut auxiliary_files = if request.filenames.is_some()
+        || request.bundle_format == Some(crate::models::BundleFormat::DiffusersDirectory)
+    {
         select_auxiliary_files_for_download(&tree.regular_files, &tree.lfs_files, &payload_files)
     } else {
         select_auxiliary_files(&tree.regular_files)
@@ -475,6 +484,24 @@ fn resolve_download_selection(
             })
             .collect()
     };
+    // Automatically add only indexes belonging to the selected shards. Explicit
+    // index selections remain payloads, and no auxiliary is fetched twice.
+    auxiliary_files.retain(|file| {
+        !requested_payload_files.contains(&file.filename)
+            && (!super::package_selection::is_weight_index(&file.filename)
+                || required_indexes.contains(&file.filename))
+    });
+    for index in required_indexes {
+        if !requested_payload_files.contains(&index)
+            && !auxiliary_files.iter().any(|file| file.filename == index)
+        {
+            auxiliary_files.push(FileToDownload {
+                filename: index,
+                size: None,
+                sha256: None,
+            });
+        }
+    }
     if !auxiliary_files.is_empty() {
         info!(
             "Including {} auxiliary file(s) for {}",
@@ -484,6 +511,13 @@ fn resolve_download_selection(
     }
     auxiliary_files.extend(payload_files);
     let files = validate_pinned_execution_tree(&request.repo_id, &auxiliary_files, &tree)?;
+    super::package_selection::validate_selected(
+        &files
+            .iter()
+            .map(|file| file.filename.clone())
+            .collect::<Vec<_>>(),
+        request.bundle_format == Some(crate::models::BundleFormat::DiffusersDirectory),
+    )?;
     let manifest =
         super::acquisition_source::manifest_for_download(&request.repo_id, &revision, &files)?;
 
@@ -1383,17 +1417,36 @@ impl PreparedDownloadTask {
             state.files_completed = state.files.len();
         }
         self.verify_pinned_final_files(context).await?;
-        let lease = self
-            .acquisition
-            .files_ready(context, operation, workspace)
-            .await?;
-        self.destination.remove_marker(context).await?;
         let info = self
             .downloads
             .read()
             .await
             .get(&self.download_id)
             .and_then(download_completion_info);
+        let diffusers = info.as_ref().is_some_and(|info| {
+            info.download_request.bundle_format
+                == Some(crate::models::BundleFormat::DiffusersDirectory)
+        });
+        let package_workspace = workspace.clone();
+        let lease = self
+            .acquisition
+            .files_ready(context, operation, workspace)
+            .await?;
+        let package_record = lease.record().clone();
+        context
+            .run_fallible_blocking_named("validate acquired model package", move || {
+                // Invalid package contents are an observed domain result, not
+                // a failed background mutation. Panics remain owned failures.
+                Ok::<_, std::convert::Infallible>(super::package_selection::validate_acquired(
+                    &package_workspace,
+                    &package_record,
+                    diffusers,
+                ))
+            })
+            .await
+            .map_err(|error| error.into_pumas_error("Package validation effect failed"))?
+            .unwrap_or_else(|never| match never {})?;
+        self.destination.remove_marker(context).await?;
         drop(destination_guard.take());
         if !already_adopted {
             import_completed_download(
@@ -5012,20 +5065,39 @@ impl HuggingFaceClient {
         }
 
         let already_adopted = operation.is_adopted();
+        let completion_info = downloads
+            .read()
+            .await
+            .get(download_id)
+            .and_then(download_completion_info);
+        let diffusers = completion_info.as_ref().is_some_and(|info| {
+            info.download_request.bundle_format
+                == Some(crate::models::BundleFormat::DiffusersDirectory)
+        });
+        let package_workspace = workspace.clone();
         let use_lease = acquisition
             .files_ready(&task_context, operation, workspace)
             .await?;
+        let package_record = use_lease.record().clone();
+        task_context
+            .run_fallible_blocking_named("validate acquired model package", move || {
+                // Invalid package contents are an observed domain result, not
+                // a failed background mutation. Panics remain owned failures.
+                Ok::<_, std::convert::Infallible>(super::package_selection::validate_acquired(
+                    &package_workspace,
+                    &package_record,
+                    diffusers,
+                ))
+            })
+            .await
+            .map_err(|error| error.into_pumas_error("Package validation effect failed"))?
+            .unwrap_or_else(|never| match never {})?;
 
         // Remove the marker through the same destination authority before
         // releasing a recovery capability from state. If this fails, the
         // download remains recoverable instead of becoming a false success.
         destination.remove_marker(&task_context).await?;
 
-        let completion_info = downloads
-            .read()
-            .await
-            .get(download_id)
-            .and_then(download_completion_info);
         drop(destination_guard.take());
         if !already_adopted {
             import_completed_download(
@@ -21920,6 +21992,130 @@ mod tests {
             headers.push(socket.read_u8().await.unwrap());
         }
         String::from_utf8(headers).unwrap()
+    }
+
+    fn package_selection_tree() -> RepoFileTree {
+        RepoFileTree {
+            repo_id: "acme/model".into(),
+            lfs_files: [
+                "unet/model-00001-of-00002.safetensors",
+                "unet/model-00002-of-00002.safetensors",
+            ]
+            .into_iter()
+            .map(|filename| LfsFileInfo {
+                filename: filename.into(),
+                size: 24,
+                sha256: "a".repeat(64),
+            })
+            .collect(),
+            regular_files: [
+                "model_index.json",
+                "unet/model.safetensors.index.json",
+                "unet/pytorch_model.bin.index.json",
+                "unet/config.json",
+                "tokenizer/vocab.txt",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+            cached_at: "fixture".into(),
+            last_modified: None,
+            cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
+        }
+    }
+
+    #[test]
+    fn package_selection_adds_only_matching_shard_index_once() {
+        let tree = package_selection_tree();
+        let request = recovery_test_request(
+            "acme/model",
+            &tree
+                .lfs_files
+                .iter()
+                .map(|file| file.filename.clone())
+                .collect::<Vec<_>>(),
+        );
+        let selection = resolve_download_selection(
+            &request,
+            DownloadRevision::from_commit("4444444444444444444444444444444444444444").unwrap(),
+            tree,
+        )
+        .unwrap();
+        let paths: Vec<_> = selection
+            .files
+            .iter()
+            .map(|file| file.filename.as_str())
+            .collect();
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| **path == "unet/model.safetensors.index.json")
+                .count(),
+            1
+        );
+        assert!(!paths.contains(&"unet/pytorch_model.bin.index.json"));
+        assert!(!paths.contains(&"tokenizer/vocab.txt"));
+        assert_eq!(selection.requested_payload_files.len(), 2);
+    }
+
+    #[test]
+    fn package_selection_refuses_missing_shards_and_missing_index() {
+        for missing_index in [false, true] {
+            let mut tree = package_selection_tree();
+            let mut paths: Vec<_> = tree
+                .lfs_files
+                .iter()
+                .map(|file| file.filename.clone())
+                .collect();
+            if missing_index {
+                tree.regular_files
+                    .retain(|path| path != "unet/model.safetensors.index.json");
+            } else {
+                paths.pop();
+            }
+            let request = recovery_test_request("acme/model", &paths);
+            let result = resolve_download_selection(
+                &request,
+                DownloadRevision::from_commit("4444444444444444444444444444444444444444").unwrap(),
+                tree,
+            );
+            assert!(
+                matches!(result, Err(PumasError::Validation { .. })),
+                "incomplete package must fail before admission"
+            );
+        }
+    }
+
+    #[test]
+    fn package_selection_diffusers_includes_regular_assets_and_preserves_explicit_scope() {
+        let tree = package_selection_tree();
+        let mut request = recovery_test_request("acme/model", &[]);
+        request.filenames = None;
+        request.bundle_format = Some(crate::models::BundleFormat::DiffusersDirectory);
+        let revision =
+            DownloadRevision::from_commit("4444444444444444444444444444444444444444").unwrap();
+        let full = resolve_download_selection(&request, revision.clone(), tree.clone()).unwrap();
+        assert_eq!(
+            full.files.len(),
+            tree.lfs_files.len() + tree.regular_files.len()
+        );
+        assert_eq!(full.manifest.files().len(), full.files.len());
+        assert!(full
+            .requested_payload_files
+            .iter()
+            .any(|path| path == "tokenizer/vocab.txt"));
+        request.filenames = Some(
+            tree.lfs_files
+                .iter()
+                .map(|file| file.filename.clone())
+                .collect(),
+        );
+        let explicit = resolve_download_selection(&request, revision, tree).unwrap();
+        assert_eq!(explicit.requested_payload_files.len(), 2);
+        assert!(!explicit
+            .files
+            .iter()
+            .any(|file| file.filename == "tokenizer/vocab.txt"));
     }
 
     #[test]

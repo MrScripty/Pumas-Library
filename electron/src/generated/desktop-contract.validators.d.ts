@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 69c81057ad63925334de3ff84146b762da99f2a1e4881f43066e4fa7ad0d9fdb. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 959bdfb8e2c0edbfdeaa0886e461084bfdc1717d0d4376aadf34000dc3b00bbc. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -48,6 +48,8 @@ export declare function validateRuntimeLaunchOutcome(value: unknown): boolean;
 export declare function validateRuntimeLaunchParams(value: unknown): boolean;
 export declare function validateRuntimeRunningOutcome(value: unknown): boolean;
 export declare function validateRuntimeStopOutcome(value: unknown): boolean;
+export declare function validateS3AuthenticatedImportParams(value: unknown): boolean;
+export declare function validateS3CredentialParams(value: unknown): boolean;
 export declare function validateS3ImportCancelOutcome(value: unknown): boolean;
 export declare function validateS3ImportCancelParams(value: unknown): boolean;
 export declare function validateS3ImportOutcome(value: unknown): boolean;

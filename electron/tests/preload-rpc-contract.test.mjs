@@ -11,6 +11,24 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('compiled preload uses the distinct one-request authenticated S3 command with optional token', async () => {
+  const harness = loadCompiledPreload();
+  const source = { operation_id: 'c3f7d104-1234-4321-abcd-aaaaaaaaaaaa', endpoint: 'https://source.invalid',
+    region: 'fixture-region', bucket: 'fixture-bucket', addressing: 'path', key: 'models/weights.gguf',
+    version_id: 'desktop-v1', filename: 'weights.gguf', sha256: 'a'.repeat(64), family: 'fixture', official_name: 'Fixture' };
+  for (const session_token of [null, 'synthetic-preload-token']) {
+    const request = { source, credentials: { access_key_id: 'synthetic-preload-key', secret_access_key: 'synthetic-preload-secret', session_token } };
+    harness.respondWith({ status: 'running', operation_id: source.operation_id, progress: { phase: 'selecting', downloaded_for_current_file: '0' } });
+    await harness.api.start_authenticated_s3_model_import(request);
+    assert.equal(harness.invocations.at(-1)?.[1], 'start_authenticated_s3_model_import');
+    assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), request);
+    const before = harness.invocations.length;
+    assert.throws(() => harness.api.start_authenticated_s3_model_import({ ...request, credentials: { ...request.credentials, profile: 'synthetic-preload-secret' } }),
+      error => !String(error).includes('synthetic-preload-secret'));
+    assert.equal(harness.invocations.length, before);
+  }
+});
+
 test('compiled preload forwards exact anonymous S3 pins and runtime-decodes observations', async () => {
   const harness = loadCompiledPreload();
   const id = 'c3f7d104-1234-4321-abcd-aaaaaaaaaaaa';

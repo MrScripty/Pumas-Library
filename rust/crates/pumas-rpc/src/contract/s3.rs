@@ -1,6 +1,92 @@
-//! Closed anonymous S3 desktop wire. No credentials or arbitrary metadata channel.
+//! Closed S3 desktop wire. Credentials are one-request access material only.
 use super::{PublicError, PublicErrorClass};
 use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct S3CredentialParams {
+    #[cfg_attr(
+        feature = "export-contract",
+        schemars(
+            length(min = 1, max = 4096),
+            regex(pattern = "^(?!.*[/,=])[!-~]+(?![\\s\\S])")
+        )
+    )]
+    access_key_id: String,
+    #[cfg_attr(
+        feature = "export-contract",
+        schemars(length(min = 1, max = 4096), regex(pattern = "^[!-~]+(?![\\s\\S])"))
+    )]
+    secret_access_key: String,
+    #[cfg_attr(
+        feature = "export-contract",
+        schemars(length(min = 1, max = 4096), regex(pattern = "^[!-~]+(?![\\s\\S])"))
+    )]
+    session_token: Option<String>,
+}
+impl S3CredentialParams {
+    fn validate(&self) -> Result<(), PublicError> {
+        for value in [&self.access_key_id, &self.secret_access_key]
+            .into_iter()
+            .chain(self.session_token.as_ref())
+        {
+            if value.is_empty()
+                || value.len() > 4096
+                || !value.bytes().all(|b| (0x21..=0x7e).contains(&b))
+            {
+                return Err(PublicError::invalid_params());
+            }
+        }
+        if self.access_key_id.contains(['/', ',', '=']) {
+            return Err(PublicError::invalid_params());
+        }
+        Ok(())
+    }
+    #[cfg(feature = "s3")]
+    pub(crate) fn preflight(
+        &self,
+        config: pumas_library::acquisition::S3ReaderConfig,
+    ) -> Result<(), PublicError> {
+        self.validate()?;
+        // Bounded temporary copies validate with the real constructor before
+        // admission. They are dropped here; the owned originals enter the job.
+        let credentials = pumas_library::acquisition::S3Credentials::new(
+            self.access_key_id.clone(),
+            self.secret_access_key.clone(),
+            self.session_token.clone(),
+        )
+        .map_err(|_| PublicError::invalid_params())?;
+        pumas_library::acquisition::S3Reader::new_authenticated(config, credentials)
+            .map(|_| ())
+            .map_err(|_| PublicError::invalid_params())
+    }
+    #[cfg(feature = "s3")]
+    pub(crate) fn into_native(
+        self,
+    ) -> Result<pumas_library::acquisition::S3Credentials, PublicError> {
+        self.validate()?;
+        pumas_library::acquisition::S3Credentials::new(
+            self.access_key_id,
+            self.secret_access_key,
+            self.session_token,
+        )
+        .map_err(|_| PublicError::invalid_params())
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct S3AuthenticatedImportParams {
+    pub source: S3ImportParams,
+    pub credentials: S3CredentialParams,
+}
+impl S3AuthenticatedImportParams {
+    pub(crate) fn validate(&self) -> Result<(), PublicError> {
+        self.source.validate()?;
+        self.credentials.validate()
+    }
+}
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -326,6 +412,48 @@ mod tests {
             )
             .is_err());
             assert!(decode(method, json!({"operation_id":""})).is_err());
+        }
+    }
+
+    #[test]
+    fn source_authenticated_command_is_closed_bounded_and_never_echoes_credentials() {
+        let credentials = json!({"access_key_id":"synthetic-contract-key","secret_access_key":"synthetic-contract-secret","session_token":"synthetic-contract-token"});
+        for token in [Value::Null, json!("synthetic-contract-token")] {
+            let mut input = json!({"source":params(),"credentials":credentials});
+            input["credentials"]["session_token"] = token;
+            assert!(matches!(
+                decode("start_authenticated_s3_model_import", input)
+                    .ok()
+                    .unwrap()
+                    .command,
+                RpcCommand::StartAuthenticatedS3ModelImport { .. }
+            ));
+        }
+        for (field, value) in [
+            ("access_key_id", json!("bad/key")),
+            ("secret_access_key", json!("")),
+            ("secret_access_key", json!("bad\n")),
+            ("secret_access_key", json!("x".repeat(4097))),
+            ("session_token", json!("")),
+            ("session_token", json!("bad\n")),
+            ("profile", json!("synthetic-contract-secret")),
+        ] {
+            let mut input = json!({"source":params(),"credentials":credentials});
+            input["credentials"][field] = value;
+            let failure = decode("start_authenticated_s3_model_import", input)
+                .err()
+                .expect("invalid credentials must be refused");
+            assert_eq!(failure.error.code, -32602);
+            assert!(!serde_json::to_string(&failure.error)
+                .unwrap()
+                .contains("synthetic-contract"));
+        }
+        for input in [
+            json!({"source":params(),"credentials":credentials,"saved":true}),
+            json!({"source":params()}),
+            json!({"credentials":credentials}),
+        ] {
+            assert!(decode("start_authenticated_s3_model_import", input).is_err());
         }
     }
 }

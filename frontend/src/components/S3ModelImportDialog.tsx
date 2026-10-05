@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ModalDialog } from './ui/ModalDialog';
 import { useS3ModelImport, type S3ImportDraft } from '../hooks/useS3ModelImport';
 import type { S3ImportOutcome } from '../generated/desktop-contract';
@@ -31,17 +31,40 @@ const phaseLabels = {
 };
 export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => void; onImported?: () => void }) {
   const closeButton = useRef<HTMLButtonElement>(null);
+  const accessKey = useRef<HTMLInputElement>(null);
+  const secretKey = useRef<HTMLInputElement>(null);
+  const sessionToken = useRef<HTMLInputElement>(null);
+  const [authenticated, setAuthenticated] = useState(false);
+  const clearCredentials = () => {
+    for (const input of [accessKey.current, secretKey.current, sessionToken.current]) {
+      if (input) input.value = '';
+    }
+  };
+  useEffect(() => {
+    // Capture owned nodes: React may clear refs before passive unmount cleanup.
+    const inputs = [accessKey.current, secretKey.current, sessionToken.current];
+    return () => { for (const input of inputs) if (input) input.value = ''; };
+  }, [authenticated]);
+  const close = () => { clearCredentials(); onClose(); };
   const [draft, setDraft] = useState<S3ImportDraft>({ endpoint: '', region: '', bucket: '', addressing: 'path', key: '', version_id: '', filename: 'weights.gguf', sha256: '', family: '', official_name: '' });
-  const { snapshot, error, commandBusy, start, cancel, observeAgain } = useS3ModelImport(onImported);
+  const { snapshot, error, commandBusy, start, startAuthenticated, cancel, observeAgain } = useS3ModelImport(onImported);
   const editable = canStart(snapshot) && !commandBusy;
   const active = snapshot?.status === 'running';
   const cancellable = active && ['pending', 'selecting', 'acquiring'].includes(snapshot.progress.phase);
   return (
-    <ModalDialog isOpen ariaLabelledBy="s3-import-title" ariaDescribedBy="s3-import-description" onClose={onClose}
+    <ModalDialog isOpen ariaLabelledBy="s3-import-title" ariaDescribedBy="s3-import-description" onClose={close}
       initialFocusRef={closeButton} contentClassName="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-secondary))] p-6 text-[hsl(var(--launcher-text-primary))]">
       <h2 id="s3-import-title" className="text-lg font-semibold">Import from S3</h2>
-      <p id="s3-import-description" className="my-3 text-sm">Anonymous access to one pinned GGUF object. Objects requiring credentials are unsupported here. Supply the exact VersionId and expected SHA-256; a key alone is insufficient.</p>
-      <form onSubmit={event => { event.preventDefault(); if (editable) void start(draft); }}>
+      <p id="s3-import-description" className="my-3 text-sm">Import one pinned GGUF object over HTTPS. Anonymous access is the default. Supply the exact VersionId and expected SHA-256; a key alone is insufficient.</p>
+      <form autoComplete="off" onSubmit={event => {
+        event.preventDefault();
+        if (!editable) return;
+        if (!authenticated) { void start(draft); return; }
+        const credentials = { access_key_id: accessKey.current?.value ?? '',
+          secret_access_key: secretKey.current?.value ?? '', session_token: sessionToken.current?.value || null };
+        clearCredentials();
+        void startAuthenticated(draft, credentials);
+      }}>
         <fieldset disabled={!editable} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {fields.map(([key, label, placeholder]) => (
             <label key={key} className="block text-sm">{label}
@@ -56,6 +79,16 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
               <option value="path">Path</option><option value="virtual_hosted">Virtual hosted</option>
             </select>
           </label>
+        </fieldset>
+        <fieldset disabled={!editable} className="mt-4">
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={authenticated}
+            onChange={event => { clearCredentials(); setAuthenticated(event.target.checked); }} />Use one-use credentials</label>
+          {authenticated && <div className="mt-3 grid grid-cols-1 gap-3">
+            <p className="text-sm">Credentials are used for this import only. Inputs clear on submit or close; credentials are not saved or refreshed.</p>
+            <label className="block text-sm">Access key ID<input ref={accessKey} type="password" autoComplete="off" maxLength={4096} required className={inputClass} /></label>
+            <label className="block text-sm">Secret access key<input ref={secretKey} type="password" autoComplete="off" maxLength={4096} required className={inputClass} /></label>
+            <label className="block text-sm">Session token (optional)<input ref={sessionToken} type="password" autoComplete="off" maxLength={4096} className={inputClass} /></label>
+          </div>}
         </fieldset>
         {commandBusy && <p role="status" className="mt-4">Waiting for command acknowledgement…</p>}
         {snapshot === null && !error && <p role="status" className="mt-4">Checking source import availability…</p>}
@@ -78,7 +111,7 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
           <button className={buttonClass} type="submit" disabled={!editable}>Import pinned object</button>
           <button className={buttonClass} type="button" disabled={!cancellable || commandBusy} onClick={() => { void cancel(); }}>Cancel import</button>
           <button className={buttonClass} type="button" disabled={commandBusy} onClick={observeAgain}>Observe again</button>
-          <button ref={closeButton} className={buttonClass} type="button" onClick={onClose}>Close</button>
+          <button ref={closeButton} className={buttonClass} type="button" onClick={close}>Close</button>
         </div>
       </form>
     </ModalDialog>

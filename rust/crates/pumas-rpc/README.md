@@ -3,7 +3,7 @@
 ## Explicit S3 model import
 
 The optional `s3` Cargo feature composes the existing native
-`PumasApi::import_s3_model` operation. It imports one anonymous GGUF with an
+`PumasApi::import_s3_model` operation. It imports one GGUF with an
 explicit caller pin, using the existing transfer, verification, model importer,
 registration and receipt owners. Default feature selection remains unchanged.
 Without `s3`, these commands return the closed `unavailable` outcome.
@@ -14,9 +14,33 @@ Without `s3`, these commands return the closed `unavailable` outcome.
 `filename` (ASCII GGUF basename), `sha256` (64 hex digits), `family` and
 `official_name`. VersionId and digest are required; neither is discovered or
 substituted. Unknown fields, credentials and HTTP opt-outs are rejected before
-I/O. Request fields are not Debug/Serialize-enabled. There is no credentials
-manager, ambient discovery or authentication UI; authenticated native callers
-continue to use the separate explicit in-memory API.
+I/O. This anonymous command remains source compatible.
+
+`start_authenticated_s3_model_import` is a distinct additive command. Its closed
+params are `{source: <the existing start params>, credentials: {access_key_id,
+secret_access_key, session_token?}}`. A missing/null token selects static key
+credentials; a supplied token must be nonempty. Each credential value is limited
+to 4096 printable ASCII characters without whitespace; access-key IDs also
+exclude `/`, `,` and `=`. The receiving owner validates the actual authenticated
+reader constructor before admission, then consumes the credentials into the
+existing bounded native operation. HTTPS is mandatory. No ambient provider,
+profile, account defaults, refresh or anonymous fallback is introduced.
+
+Credential wire types are Deserialize-only, without Debug/Clone/Serialize.
+Credentials remain in ephemeral request/worker/reader memory and never enter
+snapshots, receipts, model metadata, caches, telemetry or saved configuration.
+The dialog uses uncontrolled password inputs, clears them before awaiting submit,
+on close, mode replacement and unmount, and never stores them in React task state.
+Lost acknowledgements observe the same UUID without replaying credentials.
+Generated decoders and IPC make transient copies; secure memory erasure and
+protection from privileged process inspection are not claimed.
+
+The existing local Electron IPC/direct loopback HTTP control plane carries this
+request; it does not become a remote or TLS RPC service. Credentialed S3 reads
+use HTTPS with normal certificate verification. Source transport ignores proxy
+configuration, refuses redirects, bounds responses to 64 KiB, correlates JSON-RPC
+IDs and projects static failures before IPC. Reflected response/error text never
+reaches renderer diagnostics. No listener, TLS trust or security settings change.
 
 `get_s3_model_import` accepts optional/null `operation_id`; omission reads the
 one retained process-local job. `cancel_s3_model_import` requires its exact UUID

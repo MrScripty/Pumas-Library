@@ -523,6 +523,22 @@ async fn dispatch_admitted_command(
     command: RpcCommand,
 ) -> Result<RpcOutcome, RpcDispatchError> {
     let result: pumas_library::Result<RpcOutcome> = match command {
+        RpcCommand::StartAuthenticatedS3ModelImport { request } => {
+            #[cfg(feature = "s3")]
+            {
+                state
+                    .s3_imports
+                    .admit_authenticated(request)
+                    .map(RpcOutcome::S3Import)
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                let _ = request;
+                Ok(RpcOutcome::S3Import(
+                    crate::contract::S3ImportOutcome::Unavailable,
+                ))
+            }
+        }
         RpcCommand::StartS3ModelImport { request } => {
             #[cfg(feature = "s3")]
             {
@@ -1077,6 +1093,10 @@ async fn source_commands_report_unavailable_without_s3_feature() {
     let state = test_support::build_test_app_state(root.path()).await;
     let id = "c3f7d104-1234-4321-abcd-aaaaaaaaaaaa";
     for command in [
+        RpcCommand::StartAuthenticatedS3ModelImport { request: serde_json::from_value(serde_json::json!({
+            "source": {"operation_id": id, "endpoint":"https://source.invalid","region":"fixture-region","bucket":"fixture-bucket","addressing":"path","key":"models/weights.gguf","version_id":"desktop-v1","filename":"weights.gguf","sha256":"a".repeat(64),"family":"fixture","official_name":"Fixture"},
+            "credentials":{"access_key_id":"synthetic-disabled-key","secret_access_key":"synthetic-disabled-secret","session_token":null}
+        })).unwrap() },
         RpcCommand::GetS3ModelImport { operation_id: None },
         RpcCommand::CancelS3ModelImport { operation_id: id.into() },
         RpcCommand::StartS3ModelImport { request: serde_json::from_value(serde_json::json!({

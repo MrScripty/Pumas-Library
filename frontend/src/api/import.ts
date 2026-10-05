@@ -5,7 +5,7 @@
  * FTS5 search, network status monitoring, and HuggingFace metadata lookup.
  */
 
-import type { S3ImportParams, S3ImportOutcome, S3ImportCancelOutcome } from '../generated/desktop-contract';
+import type { S3ImportParams, S3AuthenticatedImportParams, S3ImportOutcome, S3ImportCancelOutcome } from '../generated/desktop-contract';
 import { api, isAPIAvailable } from './adapter';
 import { APIError } from '../errors';
 import type {
@@ -26,6 +26,9 @@ import type {
 } from '../types/api';
 
 class ImportAPI {
+  async startAuthenticatedS3ModelImport(request: S3AuthenticatedImportParams): Promise<S3ImportOutcome> {
+    return this.getAPI().start_authenticated_s3_model_import(request);
+  }
   async startS3ModelImport(request: S3ImportParams): Promise<S3ImportOutcome> {
     return this.getAPI().start_s3_model_import(request);
   }

@@ -21,6 +21,7 @@ use tokio::{
 };
 pub(crate) struct Job {
     request: S3ImportParams,
+    credentials: Option<pumas_library::acquisition::S3Credentials>,
     control: S3ModelImportControl,
 }
 struct Current {
@@ -70,6 +71,33 @@ impl S3Imports {
                 error: PublicError::invalid_params(),
             });
         }
+        self.admit_ready(request, None)
+    }
+    pub(crate) fn admit_authenticated(
+        &self,
+        request: S3AuthenticatedImportParams,
+    ) -> Result<S3ImportOutcome> {
+        if request.validate().is_err()
+            || request
+                .credentials
+                .preflight(source_config(&request.source))
+                .is_err()
+        {
+            return Ok(S3ImportOutcome::Rejected {
+                error: PublicError::invalid_params(),
+            });
+        }
+        let credentials = request
+            .credentials
+            .into_native()
+            .map_err(|_| unavailable())?;
+        self.admit_ready(request.source, Some(credentials))
+    }
+    fn admit_ready(
+        &self,
+        request: S3ImportParams,
+        credentials: Option<pumas_library::acquisition::S3Credentials>,
+    ) -> Result<S3ImportOutcome> {
         let mut state = self.0.lock().map_err(|_| unavailable())?;
         let Some(sender) = state.sender.as_ref() else {
             return Ok(S3ImportOutcome::Unavailable);
@@ -102,7 +130,11 @@ impl S3Imports {
             result: None,
         };
         sender
-            .try_send(Job { request, control })
+            .try_send(Job {
+                request,
+                credentials,
+                control,
+            })
             .map_err(|_| unavailable())?;
         state.current = Some(current);
         Ok(snapshot_inner(&state, None))
@@ -278,7 +310,7 @@ async fn run(state: &AppState, job: Job) -> S3ImportResultWire {
                     Ok(workspace) => workspace,
                     Err(error) => return failure(PublicError::from_pumas(&error), true, None),
                 };
-                let request = make_request(request, workspace);
+                let request = make_request(request, workspace, job.credentials);
                 match request {
                     Err(error) => failure(PublicError::from_pumas(&error), true, None),
                     Ok(request) => match state.api.import_s3_model(request, job.control).await {
@@ -340,6 +372,7 @@ async fn run(state: &AppState, job: Job) -> S3ImportResultWire {
 fn make_request(
     request: S3ImportParams,
     workspace: pumas_library::acquisition::AcquisitionWorkspace,
+    credentials: Option<pumas_library::acquisition::S3Credentials>,
 ) -> Result<S3ModelImportRequest> {
     let operation_id = request
         .operation_id
@@ -351,7 +384,7 @@ fn make_request(
     Ok(S3ModelImportRequest {
         operation_id,
         source: source_config(&request),
-        credentials: None,
+        credentials,
         entries: vec![S3ManifestEntry {
             source_key: request.key,
             version: request.version_id,

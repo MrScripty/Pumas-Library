@@ -205,6 +205,9 @@ pub(crate) struct RpcAdmissionError {
 /// Its method is still resolved by the producer dispatcher, where unknown
 /// names become method-not-found without reaching a domain handler.
 pub(crate) enum RpcCommand {
+    StartAuthenticatedS3ModelImport {
+        request: S3AuthenticatedImportParams,
+    },
     StartS3ModelImport {
         request: S3ImportParams,
     },
@@ -450,6 +453,7 @@ pub(crate) enum RpcCommand {
 impl RpcCommand {
     pub(crate) fn method(&self) -> &str {
         match self {
+            Self::StartAuthenticatedS3ModelImport { .. } => "start_authenticated_s3_model_import",
             Self::StartS3ModelImport { .. } => "start_s3_model_import",
             Self::GetS3ModelImport { .. } => "get_s3_model_import",
             Self::CancelS3ModelImport { .. } => "cancel_s3_model_import",
@@ -6125,6 +6129,11 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             .and_then(DownloadModelFromHfParams::into_request)
     };
     match method {
+        "start_authenticated_s3_model_import" => {
+            let request = parse_params::<S3AuthenticatedImportParams>(params)?;
+            request.validate()?;
+            Ok(RpcCommand::StartAuthenticatedS3ModelImport { request })
+        }
         "start_s3_model_import" => {
             let request = parse_params::<S3ImportParams>(params)?;
             request.validate()?;

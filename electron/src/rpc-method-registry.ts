@@ -71,6 +71,7 @@ export const RPC_METHOD_REGISTRY = {
     'refresh_model_index',
     'import_model',
     'start_s3_model_import',
+    'start_authenticated_s3_model_import',
     'get_s3_model_import',
     'cancel_s3_model_import',
     'download_model_from_hf',

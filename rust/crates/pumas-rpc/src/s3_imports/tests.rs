@@ -6,6 +6,12 @@ use serde_json::{json, Value};
 use std::io::{Read, Write};
 const ID: &str = "c3f7d104-1234-4321-abcd-aaaaaaaaaaaa";
 const HASH: &str = "a4e5e156ddec27e286f75328784d7106b60a4eb1d246e950a001a3f944fbda99";
+const ACCESS: &str = "desktop-auth-synthetic-key";
+const SECRET: &str = "desktop-auth-synthetic-secret";
+const TOKEN: &str = "desktop-auth-synthetic-token";
+fn authenticated_params(endpoint: &str, token: bool) -> Value {
+    json!({"source": params(endpoint), "credentials":{"access_key_id":ACCESS,"secret_access_key":SECRET,"session_token":if token {Some(TOKEN)} else {None}}})
+}
 #[cfg(all(target_os = "linux", not(feature = "inference-plugins")))]
 fn gguf() -> Vec<u8> {
     [
@@ -90,6 +96,11 @@ impl Source {
                     request.push(byte[0]);
                 }
                 requests.push(String::from_utf8(request).unwrap());
+                if mode == 3 && !head {
+                    let body = format!("{ACCESS} {SECRET} {TOKEN}");
+                    write!(socket, "HTTP/1.1 403 Forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                    break;
+                }
                 if mode == 1 && head {
                     started.take().unwrap().send(()).unwrap();
                     let mut byte = [0];
@@ -397,6 +408,202 @@ fn source_progress_preserves_u64_and_job_admission_is_bounded() {
         client.snapshot(None).unwrap(),
         S3ImportOutcome::Unavailable
     ));
+}
+
+#[test]
+fn source_authenticated_preflight_keeps_failures_out_of_job_and_snapshots() {
+    let (client, mut receiver) = S3Imports::channel();
+    for (field, value) in [
+        ("endpoint", "http://127.0.0.1:1"),
+        ("region", "invalid_region"),
+        ("version_id", "null"),
+        ("key", "../weights.gguf"),
+    ] {
+        let mut input = authenticated_params("https://source.invalid", true);
+        input["source"][field] = json!(value);
+        assert!(matches!(
+            client
+                .admit_authenticated(serde_json::from_value(input).unwrap())
+                .unwrap(),
+            S3ImportOutcome::Rejected { .. }
+        ));
+        assert!(matches!(
+            client.snapshot(None).unwrap(),
+            S3ImportOutcome::Idle
+        ));
+        assert!(receiver.try_recv().is_err());
+    }
+    assert!(matches!(
+        client
+            .admit_authenticated(
+                serde_json::from_value(authenticated_params("https://source.invalid", true))
+                    .unwrap()
+            )
+            .unwrap(),
+        S3ImportOutcome::Running { .. }
+    ));
+    let job = receiver.try_recv().unwrap();
+    let redacted = format!("{:?}", job.credentials.unwrap());
+    let snapshot = serde_json::to_string(&client.snapshot(None).unwrap()).unwrap();
+    for secret in [ACCESS, SECRET, TOKEN] {
+        assert!(!redacted.contains(secret));
+        assert!(!snapshot.contains(secret));
+    }
+    client.close();
+}
+
+#[cfg(all(target_os = "linux", not(feature = "inference-plugins")))]
+#[tokio::test]
+async fn source_authenticated_rpc_https_credentials_are_scoped_and_redacted() {
+    const MARKER: &str = "PUMAS_S3_AUTH_RPC_TLS_CHILD";
+    if std::env::var_os(MARKER).is_none() {
+        let config = tempfile::TempDir::new().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "s3_imports::tests::source_authenticated_rpc_https_credentials_are_scoped_and_redacted", "--nocapture"])
+            .env(MARKER, "1").env("XDG_CONFIG_HOME", config.path())
+            .env("SSL_CERT_FILE", Path::new(env!("CARGO_MANIFEST_DIR")).join("../pumas-core/tests/fixtures/http-tls/localhost.pem"))
+            .env("AWS_ACCESS_KEY_ID", "synthetic-unselected-ambient-key")
+            .env("AWS_SECRET_ACCESS_KEY", "synthetic-unselected-ambient-secret")
+            .output().unwrap();
+        for value in [ACCESS, SECRET, TOKEN] {
+            assert!(
+                !output
+                    .stdout
+                    .windows(value.len())
+                    .any(|bytes| bytes == value.as_bytes()),
+                "stdout exposed a credential; output withheld"
+            );
+            assert!(
+                !output
+                    .stderr
+                    .windows(value.len())
+                    .any(|bytes| bytes == value.as_bytes()),
+                "stderr exposed a credential; output withheld"
+            );
+        }
+        assert!(
+            output.status.success(),
+            "credentialed child failed; output withheld"
+        );
+        return;
+    }
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .try_init()
+        .unwrap();
+    for (mode, token) in [(0, false), (0, true), (1, true), (2, true), (3, true)] {
+        let root = tempfile::TempDir::new().unwrap();
+        let api = pumas_library::PumasApi::builder(root.path())
+            .auto_create_dirs(true)
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let library = api.model_library().clone();
+        let acquisition = api.acquisition().clone();
+        let server = start_server(
+            api,
+            LoopbackHost::parse("127.0.0.1").unwrap(),
+            0,
+            crate::http_transport::HttpShutdownPolicy::default(),
+        )
+        .await
+        .unwrap();
+        let mut source = Source::start(mode);
+        let admitted = rpc(
+            &server,
+            "start_authenticated_s3_model_import",
+            authenticated_params(&source.endpoint, token),
+        )
+        .await;
+        assert_eq!(admitted["result"]["status"], "running");
+        if mode == 1 || mode == 2 {
+            tokio::time::timeout(Duration::from_secs(5), &mut source.started)
+                .await
+                .unwrap()
+                .unwrap();
+            let ack = rpc(
+                &server,
+                "cancel_s3_model_import",
+                json!({"operation_id":ID}),
+            )
+            .await;
+            assert_eq!(ack["result"]["accepted"], true);
+        }
+        let result = terminal(&server).await;
+        for value in [ACCESS, SECRET, TOKEN] {
+            assert!(!result.to_string().contains(value));
+        }
+        match mode {
+            0 => {
+                assert_eq!(result["result"]["status"], "completed");
+                let model = result["result"]["model_id"].as_str().unwrap();
+                assert_eq!(
+                    library
+                        .get_effective_metadata(model)
+                        .unwrap()
+                        .unwrap()
+                        .import_state,
+                    Some(pumas_library::models::ImportState::Ready)
+                );
+                assert_eq!(
+                    std::fs::read(library.library_root().join(model).join("weights.gguf")).unwrap(),
+                    gguf()
+                );
+                let records = acquisition.store().acquisitions().unwrap();
+                assert_eq!(records.len(), 1);
+                let record = records.values().next().unwrap();
+                let consumer = acquisition.open_consumer("model.s3.workflow").unwrap();
+                let receipt = consumer.completion_receipt(record).unwrap().unwrap();
+                assert_eq!(receipt.demand, record.demand);
+                assert_eq!(receipt.manifest, record.manifest);
+                assert_eq!(receipt.owner, "model.s3.workflow");
+                let saved = serde_json::to_string(&receipt).unwrap();
+                for value in [ACCESS, SECRET, TOKEN] {
+                    assert!(!saved.contains(value));
+                }
+                consumer.shutdown().await.unwrap();
+            }
+            1 | 2 => {
+                assert_eq!(result["result"]["status"], "cancelled");
+                assert!(library.list_models().await.unwrap().is_empty());
+            }
+            _ => {
+                assert_eq!(result["result"]["status"], "failed");
+                assert!(library.list_models().await.unwrap().is_empty());
+            }
+        }
+        server.shutdown().await.unwrap();
+        for request in source.finish() {
+            let lower = request.to_ascii_lowercase();
+            assert!(lower.contains("authorization: aws4-hmac-sha256"));
+            assert!(request.contains(&format!("Credential={ACCESS}/")));
+            assert!(!request.contains(SECRET));
+            assert!(request.contains("versionId=desktop-v1"));
+            assert_eq!(lower.contains("x-amz-security-token:"), token);
+            if token {
+                assert!(request.contains(TOKEN));
+                assert!(lower
+                    .split("signedheaders=")
+                    .nth(1)
+                    .unwrap()
+                    .split(',')
+                    .next()
+                    .unwrap()
+                    .contains("x-amz-security-token"));
+            }
+            assert!(!request.contains("synthetic-unselected-ambient-key"));
+        }
+        for path in walk_owned_files(root.path()) {
+            let bytes = std::fs::read(path).unwrap();
+            for value in [ACCESS, SECRET, TOKEN] {
+                assert!(!bytes
+                    .windows(value.len())
+                    .any(|bytes| bytes == value.as_bytes()));
+            }
+        }
+    }
 }
 
 #[tokio::test]

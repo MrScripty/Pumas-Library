@@ -9,6 +9,25 @@ const request = { operation_id: id, endpoint: 'https://source.invalid', region: 
   version_id: 'exact+version/id', filename: 'weights.gguf', sha256: 'a'.repeat(64),
   family: 'fixture', official_name: 'Fixture GGUF' };
 
+test('authenticated S3 IPC admits only an explicit closed bounded credential object', () => {
+  const credentials = { access_key_id: 'synthetic-ipc-key', secret_access_key: 'synthetic-ipc-secret', session_token: 'synthetic-ipc-token' };
+  for (const session_token of [undefined, null, credentials.session_token]) {
+    const input = { source: request, credentials: { ...credentials, session_token } };
+    if (session_token === undefined) delete input.credentials.session_token;
+    const decoded = validateApiCallPayload('start_authenticated_s3_model_import', input);
+    assert.deepEqual(JSON.parse(JSON.stringify(decoded.params)), input);
+    assert.notEqual(decoded.params.credentials, input.credentials);
+  }
+  for (const patch of [{ secret_access_key: '' }, { secret_access_key: 'bad\n' }, { session_token: '' },
+    { session_token: 'bad\n' }, { access_key_id: 'bad/key' }, { access_key_id: 'bad=key' },
+    { secret_access_key: 'x'.repeat(4097) }, { profile: 'synthetic-ipc-secret' }]) {
+    assert.throws(() => validateApiCallPayload('start_authenticated_s3_model_import', { source: request, credentials: { ...credentials, ...patch } }),
+      error => !String(error).includes('synthetic-ipc-secret'));
+  }
+  assert.throws(() => validateApiCallPayload('start_authenticated_s3_model_import', { source: request, credentials, saved: true }));
+  assert.throws(() => validateApiCallPayload('start_authenticated_s3_model_import', { source: { ...request, version_id: 'null' }, credentials }));
+});
+
 test('S3 IPC admits a closed anonymous request with exact source pins and copies it', () => {
   const value = validateApiCallPayload('start_s3_model_import', request);
   assert.deepEqual(JSON.parse(JSON.stringify(value.params)), request);

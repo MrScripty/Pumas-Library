@@ -148,18 +148,34 @@ be reconciled under the same operation identity, never implicitly replayed with
 new demand identity. Desktop/RPC composition and live-provider acceptance remain
 unqualified by this native entry point.
 
-The optional RPC/desktop composition admits one explicit anonymous GGUF through
-that facade. It requires caller-supplied HTTPS origin, bucket, region, addressing,
-exact key, immutable VersionId and SHA-256; its closed wire rejects credential
-fields and HTTP opt-outs. The backend retains one process-local UUID-correlated
-job/result and drains it before shared acquisition shutdown. Current-file byte
-observations use decimal strings; cancellation acknowledgement is distinct from
-the owned terminal result. Existing import validation, classification,
-registration and exact receipt identity remain authoritative. Retained custody
-requires explicit reconciliation, never implicit replay. Source facts and access
-material are not part of progress or new account/configuration persistence.
-The dialog is anonymous only; this does not qualify an authenticated RPC secret
-boundary, packaged/browser behavior or live-provider acceptance.
+The optional RPC/desktop composition admits one explicit GGUF through that
+facade. The anonymous `start_s3_model_import` stays unchanged; the distinct
+`start_authenticated_s3_model_import` takes the same source facts plus explicitly
+supplied request-scoped access key, secret and optional session token. Both
+require caller-supplied HTTPS origin, bucket, region, addressing, exact key,
+immutable VersionId and SHA-256; neither accepts HTTP opt-outs. The closed
+credential DTO is Deserialize-only and bounds each value to 4096 printable ASCII
+characters without whitespace, with the native access-key delimiter restrictions.
+The actual authenticated constructor validates before job/workspace admission.
+
+The backend retains one process-local UUID-correlated safe job/result and drains
+it before shared acquisition shutdown. Credentials move into the native job,
+never its safe snapshot, receipts, model metadata, caches, telemetry or saved
+defaults. One-use password inputs clear before submission waits, on close, mode
+replacement and unmount; hooks retain no credentials in task state or refs.
+Lost acknowledgement observes the same UUID without resubmitting. Existing local
+IPC and direct loopback HTTP carry transient serialized request copies; secure
+memory erasure and protection from privileged inspection are not claimed.
+The source-only transport bounds/correlates responses, bypasses no security
+controls, disables proxies/redirects and contains reflected remote diagnostics
+before IPC. Credentialed S3 requires normally verified HTTPS.
+
+Current-file byte observations use decimal strings; cancellation acknowledgement
+is distinct from the owned terminal result. Existing import validation,
+classification, registration and exact receipt identity remain authoritative.
+Retained custody requires explicit reconciliation, never implicit replay.
+Controlled HTTPS/RPC and DOM/preload fixtures support this secret boundary;
+packaged/browser behavior and real-provider acceptance remain separate.
 
 Explicit multi-file S3 selections identify each object by the pair of its exact key and VersionId. Their manifest files encode that pair as a JSON tuple in the opaque `source_key`, so different versions of one key may have different size/digest evidence. Conflicting evidence for the same key and version remains invalid. Per-object revision pins and reader requests preserve the raw protocol key and VersionId; single-object selections retain their existing raw `source_key`. Retained manifests are not rewritten.
 

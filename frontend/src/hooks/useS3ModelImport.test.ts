@@ -1,15 +1,17 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { S3ImportOutcome, S3ImportParams, S3ImportCancelOutcome } from '../generated/desktop-contract';
+import type { S3ImportOutcome, S3ImportParams, S3ImportCancelOutcome, S3AuthenticatedImportParams } from '../generated/desktop-contract';
 import { useS3ModelImport, type S3ImportDraft } from './useS3ModelImport';
 
-const { start, get, cancel } = vi.hoisted(() => ({
+const { start, startAuthenticated, get, cancel } = vi.hoisted(() => ({
   start: vi.fn<(request: S3ImportParams) => Promise<S3ImportOutcome>>(),
+  startAuthenticated: vi.fn<(request: S3AuthenticatedImportParams) => Promise<S3ImportOutcome>>(),
   get: vi.fn<(id?: string) => Promise<S3ImportOutcome>>(),
   cancel: vi.fn<(id: string) => Promise<S3ImportCancelOutcome>>(),
 }));
 vi.mock('../api/import', () => ({ importAPI: {
   startS3ModelImport: start, getS3ModelImport: get, cancelS3ModelImport: cancel,
+  startAuthenticatedS3ModelImport: startAuthenticated,
 } }));
 const id = 'c3f7d104-1234-4321-abcd-aaaaaaaaaaaa';
 const draft: S3ImportDraft = {
@@ -29,6 +31,27 @@ function deferred<T>() {
 async function settle() { await act(async () => { await Promise.resolve(); }); }
 
 describe('explicit S3 import observation', () => {
+  it('admits credentials only through the distinct path and observes a lost acknowledgement without replay or secret state', async () => {
+    const credentials = { access_key_id: 'synthetic-renderer-key', secret_access_key: 'synthetic-renderer-secret', session_token: 'synthetic-renderer-token' };
+    startAuthenticated.mockRejectedValueOnce(new Error(JSON.stringify(credentials)));
+    get.mockResolvedValueOnce({ status: 'idle' }).mockResolvedValue(running);
+    const { result } = renderHook(() => useS3ModelImport());
+    await settle();
+    for (const patch of [{ secret_access_key: '' }, { secret_access_key: 'bad\n' }, { session_token: '' }, { session_token: 'bad\n' }, { access_key_id: 'bad/key' }]) {
+      await act(async () => { await result.current.startAuthenticated(draft, { ...credentials, ...patch }); });
+    }
+    expect(startAuthenticated).not.toHaveBeenCalled();
+    await act(async () => { await result.current.startAuthenticated(draft, credentials); });
+    expect(startAuthenticated).toHaveBeenCalledTimes(1);
+    expect(startAuthenticated).toHaveBeenCalledWith({ source: { ...draft, operation_id: id }, credentials });
+    expect(start).not.toHaveBeenCalled();
+    expect(get).toHaveBeenLastCalledWith(id);
+    for (const secret of Object.values(credentials)) expect(JSON.stringify(result.current)).not.toContain(secret);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(startAuthenticated).toHaveBeenCalledTimes(1);
+    act(() => result.current.observeAgain()); await settle();
+    expect(startAuthenticated).toHaveBeenCalledTimes(1);
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     vi.spyOn(crypto, 'randomUUID').mockReturnValue(id);

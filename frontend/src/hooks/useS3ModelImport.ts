@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { importAPI } from '../api/import';
-import { decodeS3ImportParams, type S3ImportOutcome, type S3ImportParams } from '../generated/desktop-contract';
+import { decodeS3ImportParams, decodeS3AuthenticatedImportParams, type S3CredentialParams, type S3ImportOutcome, type S3ImportParams } from '../generated/desktop-contract';
 
 type Observation = { id?: string; token: object };
 export type S3ImportDraft = Record<keyof Omit<S3ImportParams, 'operation_id'>, string>;
@@ -73,7 +73,7 @@ export function useS3ModelImport(onImported?: () => void) {
     return () => { active = false; if (timer !== undefined) clearTimeout(timer); };
   }, [observation, apply]);
 
-  const start = async (draft: S3ImportDraft) => {
+  const startRequest = async (draft: S3ImportDraft, credentials?: S3CredentialParams) => {
     if (busy.current) return;
     if (typeof crypto.randomUUID !== 'function') {
       setError('This renderer cannot create an operation identity. Import is unavailable.');
@@ -85,6 +85,11 @@ export function useS3ModelImport(onImported?: () => void) {
       setError('Check all required source fields, the HTTPS origin, GGUF filename and 64-digit SHA-256.');
       return;
     }
+    const authenticated = credentials === undefined ? null : decodeS3AuthenticatedImportParams({ source: decoded.value, credentials });
+    if (authenticated !== null && authenticated.status !== 'valid') {
+      setError('Check the explicitly supplied credential fields. They were cleared; enter them again for a new request.');
+      return;
+    }
     const token = {};
     busy.current = true;
     owner.current = token;
@@ -93,7 +98,9 @@ export function useS3ModelImport(onImported?: () => void) {
     setObservation(null);
     setError(null);
     try {
-      const value = await importAPI.startS3ModelImport(decoded.value);
+      const value = authenticated?.status === 'valid'
+        ? await importAPI.startAuthenticatedS3ModelImport(authenticated.value)
+        : await importAPI.startS3ModelImport(decoded.value);
       if (!mounted.current || owner.current !== token) return;
       if ((value.status === 'running' || value.status === 'finished') && value.operation_id !== id) {
         setSnapshot(null);
@@ -155,5 +162,7 @@ export function useS3ModelImport(onImported?: () => void) {
     setSnapshot(null);
     setObservation({ id: query.current, token });
   };
-  return { snapshot, error, commandBusy, start, cancel, observeAgain };
+  return { snapshot, error, commandBusy, start: (draft: S3ImportDraft) => startRequest(draft),
+    startAuthenticated: (draft: S3ImportDraft, credentials: S3CredentialParams) => startRequest(draft, credentials),
+    cancel, observeAgain };
 }

@@ -14,6 +14,8 @@ import type {
 import type { LauncherRootCommittedPresentation } from './window-presentation';
 import {
   decodeS3ImportParams,
+  decodeS3AuthenticatedImportParams,
+  type S3AuthenticatedImportParams,
   decodeS3ImportOutcome,
   decodeS3ImportStatusParams,
   decodeS3ImportCancelParams,
@@ -1017,6 +1019,9 @@ const electronAPI = {
   start_s3_model_import: (request: S3ImportParams) =>
     validatedApiCall('start_s3_model_import', decodeS3ImportOutcome,
       requireDecoded(decodeS3ImportParams(request), 'start_s3_model_import')),
+  start_authenticated_s3_model_import: (request: S3AuthenticatedImportParams) =>
+    validatedApiCall('start_authenticated_s3_model_import', decodeS3ImportOutcome,
+      requireDecoded(decodeS3AuthenticatedImportParams(request), 'start_authenticated_s3_model_import')),
   get_s3_model_import: (operationId?: string) =>
     validatedApiCall('get_s3_model_import', decodeS3ImportOutcome,
       requireDecoded(decodeS3ImportStatusParams({ operation_id: operationId ?? null }), 'get_s3_model_import')),

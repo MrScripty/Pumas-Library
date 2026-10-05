@@ -1,5 +1,18 @@
 # Acquisition execution ledger
 
+**Q3 empty selected S3 members (2026-10-05):** Separate
+`feat/s3-empty-members-e8082649` preserves frozen e808 and its PR40 merge.
+Known-zero immutable selections now pass through the existing writer/SHA/receipt
+owner without an impossible range request; empty auxiliaries publish with exact
+receipts, while empty GGUF weights, unknown/missing objects, wrong digests and
+truncated mixed bundles fail. Cancellation and cold proof remain authoritative.
+See [qualification](reports/s3-empty-members-qualification-2026-10-05.md).
+The parent-requested reserved-name admission correction is a separate sibling
+`fix/s3-bundle-reserved-e8082649`, not silently composed here. Parent owns reviews
+and integration; provider and installed/native acceptance remain pending.
+Next existing-plan work: authorized Q3 cross-provider acceptance, then Q4.
+
+
 ## 2026-10-05 — pinned multi-file desktop and accepted native composition
 
 Separate `feat/s3-desktop-bundle-d30412e9` starts from frozen authenticated

@@ -814,3 +814,14 @@ and full RPC checks were rerun. Qualification/plan/ledger records are the final
 docs set. See [report](s3-desktop-bundle-qualification-2026-10-05.md) for public
 surfaces, raw evidence, exact composition and pending browser/default/provider
 limits. Parent owns PRs/reviews/merges/hosted/Library coordination.
+
+
+### Q3 zero-length selected-member successor — 2026-10-05
+
+Separate `feat/s3-empty-members-e8082649`, frozen base e808: only production
+`acquisition/s3.rs` adapter, S3 acquisition test entry/empty/manifest fixtures,
+RPC source-import tests, the dialog's obsolete help sentence, RPC README/shared
+contract, plan/ledger/write set and its qualification report. No new public API,
+schema, dependency, importer/publication/watcher/manifest or security policy.
+The reserved-destination admission correction is independently scoped and
+qualified on sibling `fix/s3-bundle-reserved-e8082649`.

@@ -206,9 +206,12 @@ production regression, and the hidden PowerShell/marker outcome prevents assigni
 a precise host/fixture cause from that log alone.
 
 The publisher owns the unchanged-head Windows retry, job `112003112044` in run
-`37378173012`; no duplicate retry or fixture change was made. At the recorded
-inspection, the managed-Python subset had passed and the previously failing broad
-filter was pending. Any repeated failure needs startup/provider-task diagnostics
+`37378173012`; no duplicate retry or fixture change was made. At the final
+inspection, the managed-Python subset (step 13) and the previously failing broad
+native acquisition cleanup filter (step 25) had passed. The full job was still
+running at step 26. The passed retry supports an intermittent startup/observation
+failure without identifying its precise cause. Any repeated failure needs
+startup/provider-task diagnostics
 and owned failure-path drainage with the existing bounds/assertions preserved,
 not a blind timeout increase. The focused Markdown diagnosis and decoded initial
 job evidence remain under `/workspace/scratch/pr41-windows-fixture/`.

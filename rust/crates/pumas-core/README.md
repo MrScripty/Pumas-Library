@@ -13,6 +13,17 @@ tensor support. Enable `onnx-runtime` explicitly to expose `onnx_runtime` and it
 re-exported execution types. Provider descriptions and model metadata remain
 available without that feature. RPC enables it through `inference-plugins`.
 
+## Explicit Hugging Face file selections
+
+`DownloadRequest::filenames` selects both regular repository files and LFS files
+from one resolved commit. Every distinct requested path must exist in that pinned
+tree before admission. LFS selections retain the tree's size and SHA-256;
+regular files retain unknown size/digest until shared acquisition verifies their
+actual bytes. A mixed set has no selected-set size denominator while any file
+size is unknown. Explicitly selected config/tokenizer files are fetched once,
+alongside the existing automatic auxiliaries. Completion still waits for model
+import and its consumer receipt; selecting a file does not authorize code execution.
+
 ## Optional S3 protocol reader
 
 Enable `s3` explicitly to use `acquisition::{S3Reader, S3ReaderConfig}`. This

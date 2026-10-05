@@ -2207,6 +2207,210 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
+    async fn public_hf_explicit_mixed_files_imports_and_settles_exact_payloads() {
+        use sha2::{Digest, Sha256};
+        use std::time::Duration;
+        use tokio::io::AsyncWriteExt;
+
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        const BOUND: Duration = Duration::from_secs(10);
+        let weights = intent_test_gguf();
+        let config = br#"{"fixture":"explicit-mixed-files"}"#.to_vec();
+        let digest = hex::encode(Sha256::digest(&weights));
+        let tree = format!(
+            r#"[{{"path":"weights.gguf","type":"file","lfs":{{"oid":"{digest}","size":{}}}}},{{"path":"config.json","type":"file"}},{{"path":"empty.txt","type":"file"}}]"#,
+            weights.len()
+        );
+        let source_weights = weights.clone();
+        let source_config = config.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut source = tokio::spawn(async move {
+            let mut observed = Vec::new();
+            for (route, body) in [
+                (
+                    "/api/models/acme/model/revision/main".to_owned(),
+                    format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}","tags":["gguf"]}}"#)
+                        .into_bytes(),
+                ),
+                (
+                    format!("/api/models/acme/model/revision/{COMMIT}"),
+                    format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}","tags":["gguf"]}}"#)
+                        .into_bytes(),
+                ),
+                (
+                    format!("/api/models/acme/model/tree/{COMMIT}?recursive=true"),
+                    tree.into_bytes(),
+                ),
+                (
+                    format!("/acme/model/resolve/{COMMIT}/weights.gguf"),
+                    source_weights,
+                ),
+                (
+                    format!("/acme/model/resolve/{COMMIT}/config.json"),
+                    source_config,
+                ),
+                (
+                    format!("/acme/model/resolve/{COMMIT}/empty.txt"),
+                    Vec::new(),
+                ),
+            ] {
+                let (mut socket, _) = tokio::time::timeout(BOUND, listener.accept())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let request = tokio::time::timeout(BOUND, read_intent_test_request(&mut socket))
+                    .await
+                    .unwrap();
+                assert_eq!(request, format!("GET {route} HTTP/1.1"));
+                observed.push(request);
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                tokio::time::timeout(BOUND, async {
+                    socket.write_all(header.as_bytes()).await?;
+                    socket.write_all(&body).await
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            }
+            observed
+        });
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: None,
+            filenames: Some(vec![
+                "weights.gguf".into(),
+                "config.json".into(),
+                "empty.txt".into(),
+                "config.json".into(),
+            ]),
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let result = tokio::time::timeout(BOUND, async {
+            let download_id = api.start_hf_download(&request).await?;
+            loop {
+                let progress = api
+                    .get_hf_download_progress(&download_id)
+                    .await?
+                    .ok_or_else(|| crate::PumasError::Other("missing admitted download".into()))?;
+                match progress.status {
+                    models::DownloadStatus::Completed => {
+                        return Ok::<_, crate::PumasError>((download_id, progress))
+                    }
+                    models::DownloadStatus::Error | models::DownloadStatus::Cancelled => {
+                        return Err(crate::PumasError::Other(
+                            "mixed-file download did not complete".into(),
+                        ))
+                    }
+                    _ => tokio::time::sleep(Duration::from_millis(10)).await,
+                }
+            }
+        })
+        .await;
+        let shutdown = tokio::time::timeout(BOUND, api.shutdown_downloads()).await;
+        let observed = match tokio::time::timeout(Duration::from_secs(1), &mut source).await {
+            Ok(result) => Some(result),
+            Err(_) => {
+                source.abort();
+                let _ = source.await;
+                None
+            }
+        };
+        assert!(
+            matches!(shutdown, Ok(Ok(()))),
+            "owner drain failed: {shutdown:?}"
+        );
+        let (download_id, progress) = result
+            .expect("public mixed-file acquisition exceeded bound")
+            .expect("complete mixed selection must import");
+        let observed = observed
+            .expect("source must finish its exact sequence")
+            .unwrap();
+        assert_eq!(observed.len(), 6);
+        assert_eq!(
+            progress.downloaded_bytes,
+            Some((weights.len() + config.len()) as u64)
+        );
+        let persistence = api
+            .primary()
+            .hf_client
+            .as_ref()
+            .unwrap()
+            .persistence()
+            .unwrap();
+        let acquisitions = persistence.acquisition_store().acquisitions().unwrap();
+        assert_eq!(acquisitions.len(), 1);
+        let acquisition = acquisitions.values().next().unwrap();
+        assert!(matches!(
+            acquisition.phase,
+            crate::acquisition::AcquisitionPhase::Adopted { .. }
+        ));
+        assert_eq!(acquisition.files.len(), 3);
+        assert_eq!(
+            acquisition
+                .files
+                .iter()
+                .map(|file| (file.path.as_str(), file.bytes, file.sha256.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "weights.gguf",
+                    weights.len() as u64,
+                    hex::encode(Sha256::digest(&weights))
+                ),
+                (
+                    "config.json",
+                    config.len() as u64,
+                    hex::encode(Sha256::digest(&config))
+                ),
+                ("empty.txt", 0, hex::encode(Sha256::digest([]))),
+            ]
+        );
+        let receipt = persistence
+            .read_hf_completion_receipt(acquisition.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(receipt.download_id, download_id);
+        assert!(api.get_model(&receipt.model_id).await.unwrap().is_some());
+        let destination = api
+            .primary()
+            .model_library
+            .library_root()
+            .join(&receipt.model_id);
+        assert_eq!(
+            std::fs::read(destination.join("weights.gguf")).unwrap(),
+            weights
+        );
+        assert_eq!(
+            std::fs::read(destination.join("config.json")).unwrap(),
+            config
+        );
+        assert!(std::fs::read(destination.join("empty.txt"))
+            .unwrap()
+            .is_empty());
+        assert!(!persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&download_id));
+    }
+
+    #[tokio::test]
     async fn public_hf_explicit_complete_file_selection_is_admitted_intact() {
         use std::time::Duration;
         use tokio::sync::oneshot;

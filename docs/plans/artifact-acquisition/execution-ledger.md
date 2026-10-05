@@ -1,5 +1,67 @@
 # Acquisition execution ledger
 
+## 2026-10-05 — admitted Q1 explicit regular/LFS model-file selection
+
+The coordinator requested the next unblocked practical model acquisition feature
+while preserving isolated S3 SDK spike `a6dbc3ff`. This bounded Q1 continuation
+implements AC01's complete explicit selection, including unknown-size files:
+`filenames` may select regular repository files as well as LFS files from the
+same pinned tree, matching the existing single-`filename` capability.
+
+Branch `feat/hf-explicit-mixed-files-26a84e32` starts at
+`26a84e323cae566a46a8f76bef48fa1010aed48b`, preserving approved main
+`838eb2990905144a59830f1a16fe91b4e1105d4d` and ONNX no-build-download policy.
+Exact writes: `rust/crates/pumas-core/src/model_library/hf/download.rs`,
+`rust/crates/pumas-core/src/api/hf.rs` (tests only),
+`rust/crates/pumas-core/README.md` and this ledger. Focused selection tests and
+the public HF download/import/GetModel path prove the outcome; existing
+missing-member, LFS-only and mixed-size progress checks remain regression controls.
+No importer, watcher, S3, production manifest/lockfile, runtime installation,
+credential or gate-readiness change is admitted. Runtime R1/R2 remain gated;
+parent owns PR/review/integration and remaining PR41 gates.
+
+The milestone now admits an explicit mixed list through the existing public
+`start_hf_download`, preserves pinned LFS evidence and unknown regular-file
+evidence, and fetches explicitly selected auxiliaries once. The public fixture
+imports a valid GGUF with a regular config and a zero-byte regular file, observes
+the model through GetModel, checks all exact published bytes and verified
+path/size/digest receipts, Adopted settlement and queue release. The DTO, public
+signatures, store schema, identity policy and importer remain unchanged.
+
+Both the selection and public workflow regression controls failed on the
+unchanged implementation with `ModelNotFound { model_id: "acme/model:4 files" }`.
+Final Linux x86_64 results: explicit controls 24/24 no-default and 27/27 default;
+the complete HF module filter 239/239 and public HF API filter 33/33 no-default;
+strict all-target no-default Clippy, scoped rustfmt and diff checks passed.
+The existing mixed-size progress/finalization test and missing-member/LFS-only
+controls passed unchanged. This is local controlled-source evidence, not a real
+HF/model-inference, desktop, packaged/native-platform or complete AC01/AQ-HTTP
+qualification. All acquisition/runtime gates retain their existing status.
+
+Commands used `cargo test --locked --offline --manifest-path rust/Cargo.toml
+-p pumas-library --lib` with filters `explicit_`, `model_library::hf::` and
+`api::hf::tests`; the latter two used `--no-default-features`. Clippy used the
+same package/manifest with `--no-default-features --all-targets -- -D warnings`.
+Invocation-only settings used one Cargo worker, debug information off and
+incremental compilation off; no repository build policy changed.
+
+The first ordinary debug/incremental build exhausted available workspace disk
+before running tests and was stopped. Only identified task-generated unfinished
+objects and superseded library debug outputs were retired; source/checkpoints,
+logs and pre-existing artifacts were preserved. The retry above completed with
+smaller invocation settings. Filesystem recovery required reviewed escalation
+only because the full disk prevented ordinary sandbox startup; no network or
+security control was changed. Evidence and cleanup inventories remain under
+`/workspace/scratch/hf-explicit-mixed/`. Final default test-log SHA-256:
+`9a11c1fffeafca5d2250ec3de8df2968d5fd2335814a10f570186e9392629daf`.
+
+The next existing-plan model acquisition work is Q1/AC01 shard/Diffusers complete
+selection through the current model owner, with Q1/AC08 ordinary desktop control
+evidence still pending. Neither starts gated runtime R1/R2 or silently widens
+the currently supported model-format importer. S3 prefix selection remains a
+separate coordinator decision, with the bounded SDK guard follow-up on its own
+branch.
+
 ## 2026-10-04 — delegated S3 dispatch and GGUF import successor
 
 The coordinator resumed a separate successor to reader `2c7d6014`, then required

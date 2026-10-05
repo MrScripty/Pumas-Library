@@ -287,7 +287,7 @@ fn select_auxiliary_files_for_download(
             filename == "model_index.json" || filename == "scheduler_config.json"
         };
 
-        if include && seen.insert(path.clone()) {
+        if include && !weight_names.contains(path.as_str()) && seen.insert(path.clone()) {
             aux.push(FileToDownload {
                 filename: path.clone(),
                 size: None,
@@ -397,6 +397,16 @@ fn resolve_download_selection(
                     size: Some(file.size),
                     sha256: Some(file.sha256.clone()),
                 })
+                .chain(
+                    tree.regular_files
+                        .iter()
+                        .filter(|path| requested_names.contains(path.as_str()))
+                        .map(|path| FileToDownload {
+                            filename: path.clone(),
+                            size: None,
+                            sha256: None,
+                        }),
+                )
                 .collect();
             let matched_names: HashSet<&str> =
                 matching.iter().map(|file| file.filename.as_str()).collect();
@@ -21910,6 +21920,56 @@ mod tests {
             headers.push(socket.read_u8().await.unwrap());
         }
         String::from_utf8(headers).unwrap()
+    }
+
+    #[test]
+    fn explicit_selection_accepts_regular_and_lfs_files_without_duplicate_auxiliaries() {
+        let request = recovery_test_request(
+            "acme/model",
+            &[
+                "weights.gguf".into(),
+                "config.json".into(),
+                "empty.txt".into(),
+                "config.json".into(),
+            ],
+        );
+        let revision =
+            DownloadRevision::from_commit("4444444444444444444444444444444444444444").unwrap();
+        let tree = RepoFileTree {
+            repo_id: "acme/model".into(),
+            lfs_files: vec![LfsFileInfo {
+                filename: "weights.gguf".into(),
+                size: 24,
+                sha256: "a".repeat(64),
+            }],
+            regular_files: vec!["config.json".into(), "empty.txt".into()],
+            cached_at: "fixture".into(),
+            last_modified: None,
+            cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
+        };
+        let selection = resolve_download_selection(&request, revision, tree).unwrap();
+        assert_eq!(
+            selection.requested_payload_files,
+            vec!["weights.gguf", "config.json", "empty.txt"]
+        );
+        assert_eq!(selection.manifest.files().len(), 3);
+        assert_eq!(
+            selection
+                .files
+                .iter()
+                .map(|file| file.filename.as_str())
+                .collect::<Vec<_>>(),
+            vec!["weights.gguf", "config.json", "empty.txt"]
+        );
+        assert_eq!(selection.files[0].size, Some(24));
+        assert_eq!(
+            selection.files[0].sha256.as_deref(),
+            Some("a".repeat(64).as_str())
+        );
+        assert!(selection.files[1..]
+            .iter()
+            .all(|file| file.size.is_none() && file.sha256.is_none()));
+        assert_eq!(selected_download_total_bytes(&selection.files), Ok(None));
     }
 
     #[test]

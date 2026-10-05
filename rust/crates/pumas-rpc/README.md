@@ -53,6 +53,10 @@ conflicting evidence for the same key/version, duplicate/colliding paths,
 staging aliases and prefix collisions are refused by shared manifest validation.
 The actual reader's pure preflight also enforces exact object-key semantics and
 the existing 16 KiB encoded revision limit before job/workspace admission.
+Importer-owned reserved roots (including metadata/overrides), descendants and
+normalized aliases fail before job admission, staging or source I/O. The native
+workflow and final copy plan share that exact importer preflight; a corrected
+request remains admissible.
 This is an explicit set, without prefix enumeration or atomic snapshot claims.
 A pinned HEAD with an explicit zero length supports empty auxiliary members
 without GET or a byte-range request. The shared writer and SHA-256 verifier

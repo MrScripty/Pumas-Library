@@ -12,6 +12,17 @@ The parent-requested reserved-name admission correction is a separate sibling
 and integration; provider and installed/native acceptance remain pending.
 Next existing-plan work: authorized Q3 cross-provider acceptance, then Q4.
 
+**Q3 reserved bundle destination correction (2026-10-05):** Reviewer P2 at
+frozen e808 is isolated on `fix/s3-bundle-reserved-e8082649`. RPC and native
+preflight now reuse the acquired importer's reserved root/normalization rule
+before job admission or source resolution, preserving final validation and
+retained-work recovery. Reserved roots/aliases/descendants cause no source,
+workspace-file or publication effects; a corrected same-owner request succeeds.
+See [qualification](reports/s3-bundle-reserved-destinations-qualification-2026-10-05.md).
+Frozen e808 and PR40 composition remain unchanged and changes-requested pending
+parent review/integration. The separately delegated next slice is zero-length
+members on sibling `feat/s3-empty-members-e8082649`; provider/Q4 gates stay open.
+
 
 ## 2026-10-05 — pinned multi-file desktop and accepted native composition
 

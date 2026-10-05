@@ -825,3 +825,14 @@ contract, plan/ledger/write set and its qualification report. No new public API,
 schema, dependency, importer/publication/watcher/manifest or security policy.
 The reserved-destination admission correction is independently scoped and
 qualified on sibling `fix/s3-bundle-reserved-e8082649`.
+
+### Q3 reserved acquired destination preflight correction — 2026-10-05
+
+Separate `fix/s3-bundle-reserved-e8082649`, frozen base e808: importer `staging.rs`
+extracts/reuses its existing reserved-root check and adds pure public preflight;
+native `api/s3_models.rs` and RPC `contract/s3.rs` call it before source/admission.
+Native workflow and RPC source tests exercise refusal/corrected success; importer
+unit exercises all owned roots/aliases. RPC README/shared contract, plan/ledger/
+write set and correction qualification report record this reviewed gap. Reader,
+manifest, watcher, importer.rs, existing publication protocol, dependencies,
+frontend/Electron/generated DTOs and all zero-length work are excluded.

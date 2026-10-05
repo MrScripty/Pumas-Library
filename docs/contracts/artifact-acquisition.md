@@ -182,6 +182,10 @@ logical-path/SHA-256 pins and one exact primary GGUF basename, with only the
 existing native inert auxiliary formats. Complete structural preflight uses
 `S3Reader::validate_manifest_entries` plus shared manifest validation before
 job/workspace admission; it grants no selection or byte-verification authority.
+Importer-owned reserved roots and their normalized aliases/descendants are
+refused by `ModelImporter::validate_acquired_payload_paths` before RPC job
+admission or native source resolution. The final acquired copy plan reuses
+that same rule; wire decoding alone grants no destination authority.
 Object existence and returned metadata remain the native resolver's responsibility.
 A checked HEAD for the exact immutable VersionId and explicit size zero yields
 an empty acquisition stream without GET or an impossible byte range. The shared

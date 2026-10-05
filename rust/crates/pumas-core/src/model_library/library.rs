@@ -952,9 +952,8 @@ impl ModelLibrary {
         metadata: Option<&ModelMetadata>,
     ) -> Result<Option<crate::model_library::RootExecutionGrant>> {
         if self.import_guard.is_some()
-            || expected.is_some_and(|record| {
-                crate::models::copied_import_ready_value(&record.metadata)
-            })
+            || expected
+                .is_some_and(|record| crate::models::copied_import_ready_value(&record.metadata))
             || !(expected.is_some_and(|record| {
                 publication_observation::claims_publication(&record.metadata)
             }) || metadata.is_some_and(|metadata| metadata.import_publication.is_some()))
@@ -1915,7 +1914,9 @@ impl ModelLibrary {
                 match load_model_metadata_async(self.clone(), model_dir.clone()).await {
                     Ok(Some(observed)) => metadata = observed,
                     Ok(None) => {
-                        result.errors.push((model_dir.clone(), "No metadata".into()));
+                        result
+                            .errors
+                            .push((model_dir.clone(), "No metadata".into()));
                         continue;
                     }
                     Err(error) => {
@@ -5047,9 +5048,10 @@ impl ModelLibrary {
                 .ok_or_else(|| PumasError::ModelNotFound {
                     model_id: model_dir.display().to_string(),
                 })?;
-            if expected.as_ref().is_some_and(|record| {
-                crate::models::copied_import_ready_value(&record.metadata)
-            }) {
+            if expected
+                .as_ref()
+                .is_some_and(|record| crate::models::copied_import_ready_value(&record.metadata))
+            {
                 // The producer completed before exclusion was acquired. Its
                 // acknowledged row now has the ordinary Ready/CAS protection.
                 publication_grant = None;

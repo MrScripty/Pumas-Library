@@ -2455,24 +2455,26 @@ mod tests {
         let authority = primary.model_library.mutation_authority().unwrap();
         let producer = authority.root().try_acquire_execution_grant().unwrap();
         assert!(reconcile_on_demand(
-            &primary,
+            primary,
             ReconcileScope::Model(id.into()),
             "active-publication-regression",
         )
         .await
         .unwrap());
         assert!(primary.model_library.index().get(id).unwrap().is_none());
-        assert!(primary
-            .reconciliation
-            .lock_state()
-            .models
-            .get(id)
-            .unwrap()
-            .dirty);
+        assert!(
+            primary
+                .reconciliation
+                .lock_state()
+                .models
+                .get(id)
+                .unwrap()
+                .dirty
+        );
         drop(producer);
 
         assert!(reconcile_on_demand(
-            &primary,
+            primary,
             ReconcileScope::Model(id.into()),
             "pending-publication-regression",
         )
@@ -2480,7 +2482,10 @@ mod tests {
         .unwrap());
         let record = primary.model_library.index().get(id).unwrap().unwrap();
         assert!(!crate::models::copied_import_ready_value(&record.metadata));
-        assert_eq!(std::fs::read(model_dir.join("metadata.json")).unwrap(), bytes);
+        assert_eq!(
+            std::fs::read(model_dir.join("metadata.json")).unwrap(),
+            bytes
+        );
         primary.runtime_tasks.shutdown_owned().await.unwrap();
     }
 

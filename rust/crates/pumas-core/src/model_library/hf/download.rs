@@ -11110,7 +11110,34 @@ mod tests {
                 }
             })
             .await
-            .expect("committed worker must complete before the held waiter inspects state");
+            .unwrap_or_else(|error| {
+                // Capture without awaiting another state lock after the deadline;
+                // the waiter gate and original completion assertion stay intact.
+                let download = match client.downloads.try_read() {
+                    Ok(states) => states.get(download_id).map(|state| {
+                        format!(
+                            "status={:?}, registered={}, unverified_failure={}, bytes={}/{:?}, retrying={}, error={:?}",
+                            state.status,
+                            state.task_registered,
+                            state.lifecycle_failure_unverified,
+                            state.downloaded_bytes,
+                            state.total_bytes,
+                            state.retrying,
+                            state.error,
+                        )
+                    }),
+                    Err(_) => Some("download state lock busy".into()),
+                };
+                let task = client.download_tasks.snapshot(download_id);
+                let released = client.destination_executions.was_released(
+                    &verified.destination.identity(),
+                    download_id,
+                    DestinationDomain::Recovery,
+                );
+                panic!(
+                    "committed worker must complete before the held waiter inspects state: {error}; first_admission={first_result:?}; download={download:?}; task={task:?}; destination_released={released}"
+                );
+            });
             waiter_release.send(()).unwrap();
         }
         let second_result = match early {

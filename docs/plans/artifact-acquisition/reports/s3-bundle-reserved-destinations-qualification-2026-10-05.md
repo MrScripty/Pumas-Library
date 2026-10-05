@@ -13,7 +13,7 @@ merge `d9d907cfe0e57b1e2bc7e296eff1327de835bc5e` and its ordered parents
 339032ff / 838eb299 are preserved. Parent owns PRs/review/integration.
 No zero-length implementation is included: acquisition reader and manifest,
 frontend/Electron/generated wire DTOs, dependencies, watcher and existing
-publication/receipt/recovery machinery remain byte-identical to e808.
+publication-protocol, receipt and recovery modules remain byte-identical to e808.
 
 The reviewer identified a P2 preflight gap: `metadata.json` could pass desktop
 bundle validation, transfer and enter durable Using with a consumer receipt,

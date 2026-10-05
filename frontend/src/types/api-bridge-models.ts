@@ -1,3 +1,4 @@
+import type { S3ImportParams, S3ImportOutcome, S3ImportCancelOutcome } from '../generated/desktop-contract';
 import type { BaseResponse } from './api-common';
 import type {
   CheckFilesWritableResponse,
@@ -42,6 +43,9 @@ import type {
 } from './api-package-facts';
 
 export interface DesktopBridgeModelAPI {
+  start_s3_model_import(request: S3ImportParams): Promise<S3ImportOutcome>;
+  get_s3_model_import(operationId?: string): Promise<S3ImportOutcome>;
+  cancel_s3_model_import(operationId: string): Promise<S3ImportCancelOutcome>;
   // ========================================
   // Model Management
   // ========================================

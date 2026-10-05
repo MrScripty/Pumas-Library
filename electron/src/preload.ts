@@ -13,6 +13,12 @@ import type {
 } from './launcher-root-recovery';
 import type { LauncherRootCommittedPresentation } from './window-presentation';
 import {
+  decodeS3ImportParams,
+  decodeS3ImportOutcome,
+  decodeS3ImportStatusParams,
+  decodeS3ImportCancelParams,
+  decodeS3ImportCancelOutcome,
+  type S3ImportParams,
   decodeCatalogSearchOutcome,
   decodeConversionProgressResponse,
   decodeConversionSetupStartedOutcome,
@@ -1008,6 +1014,15 @@ const electronAPI = {
   // ========================================
   // Model Import (Phase 2)
   // ========================================
+  start_s3_model_import: (request: S3ImportParams) =>
+    validatedApiCall('start_s3_model_import', decodeS3ImportOutcome,
+      requireDecoded(decodeS3ImportParams(request), 'start_s3_model_import')),
+  get_s3_model_import: (operationId?: string) =>
+    validatedApiCall('get_s3_model_import', decodeS3ImportOutcome,
+      requireDecoded(decodeS3ImportStatusParams({ operation_id: operationId ?? null }), 'get_s3_model_import')),
+  cancel_s3_model_import: (operationId: string) =>
+    validatedApiCall('cancel_s3_model_import', decodeS3ImportCancelOutcome,
+      requireDecoded(decodeS3ImportCancelParams({ operation_id: operationId }), 'cancel_s3_model_import')),
   import_model: (localPath: string, family: string, officialName: string, repoId?: string) =>
     apiCall('import_model', {
       local_path: localPath,

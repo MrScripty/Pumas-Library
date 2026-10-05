@@ -32,6 +32,11 @@ use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+// The closed wire remains available to report unsupported builds.
+#[cfg_attr(not(feature = "s3"), allow(dead_code))]
+mod s3;
+pub(crate) use s3::*;
+
 const MAX_METHOD_BYTES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 4 * 1024;
 const MAX_CREDENTIAL_BYTES: usize = 4 * 1024;
@@ -200,6 +205,15 @@ pub(crate) struct RpcAdmissionError {
 /// Its method is still resolved by the producer dispatcher, where unknown
 /// names become method-not-found without reaching a domain handler.
 pub(crate) enum RpcCommand {
+    StartS3ModelImport {
+        request: S3ImportParams,
+    },
+    GetS3ModelImport {
+        operation_id: Option<String>,
+    },
+    CancelS3ModelImport {
+        operation_id: String,
+    },
     #[cfg(feature = "inference-plugins")]
     IsOllamaRunning,
     #[cfg(feature = "inference-plugins")]
@@ -436,6 +450,9 @@ pub(crate) enum RpcCommand {
 impl RpcCommand {
     pub(crate) fn method(&self) -> &str {
         match self {
+            Self::StartS3ModelImport { .. } => "start_s3_model_import",
+            Self::GetS3ModelImport { .. } => "get_s3_model_import",
+            Self::CancelS3ModelImport { .. } => "cancel_s3_model_import",
             #[cfg(feature = "inference-plugins")]
             Self::IsOllamaRunning => "is_ollama_running",
             #[cfg(feature = "inference-plugins")]
@@ -559,6 +576,8 @@ impl SecretToken {
 /// Only the temporary `Legacy` branch may carry arbitrary JSON. It is removed
 /// one domain group at a time as typed commands move into this module.
 pub(crate) enum RpcOutcome {
+    S3Import(S3ImportOutcome),
+    S3ImportCancel(S3ImportCancelOutcome),
     Health(HealthOutcome),
     Shutdown(ShutdownOutcome),
     Status(Box<StatusResponse>),
@@ -680,6 +699,8 @@ impl RpcOutcome {
 
     pub(crate) fn into_value(self) -> Result<Value, PublicError> {
         let result = match self {
+            Self::S3Import(value) => serde_json::to_value(value),
+            Self::S3ImportCancel(value) => serde_json::to_value(value),
             Self::Health(value) => serde_json::to_value(value),
             Self::Shutdown(value) => serde_json::to_value(value),
             Self::Status(value) => serde_json::to_value(value),
@@ -6104,6 +6125,27 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             .and_then(DownloadModelFromHfParams::into_request)
     };
     match method {
+        "start_s3_model_import" => {
+            let request = parse_params::<S3ImportParams>(params)?;
+            request.validate()?;
+            Ok(RpcCommand::StartS3ModelImport { request })
+        }
+        "get_s3_model_import" => {
+            let request = parse_params::<S3ImportStatusParams>(params)?;
+            if let Some(id) = &request.operation_id {
+                validate_s3_id(id)?;
+            }
+            Ok(RpcCommand::GetS3ModelImport {
+                operation_id: request.operation_id,
+            })
+        }
+        "cancel_s3_model_import" => {
+            let request = parse_params::<S3ImportCancelParams>(params)?;
+            validate_s3_id(&request.operation_id)?;
+            Ok(RpcCommand::CancelS3ModelImport {
+                operation_id: request.operation_id,
+            })
+        }
         "health_check" => empty().map(|()| RpcCommand::HealthCheck),
         "shutdown" => empty().map(|()| RpcCommand::Shutdown),
         "get_status" => empty().map(|()| RpcCommand::GetStatus),

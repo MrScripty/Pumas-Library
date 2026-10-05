@@ -523,6 +523,54 @@ async fn dispatch_admitted_command(
     command: RpcCommand,
 ) -> Result<RpcOutcome, RpcDispatchError> {
     let result: pumas_library::Result<RpcOutcome> = match command {
+        RpcCommand::StartS3ModelImport { request } => {
+            #[cfg(feature = "s3")]
+            {
+                state.s3_imports.admit(request).map(RpcOutcome::S3Import)
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                let _ = request;
+                Ok(RpcOutcome::S3Import(
+                    crate::contract::S3ImportOutcome::Unavailable,
+                ))
+            }
+        }
+        RpcCommand::GetS3ModelImport { operation_id } => {
+            #[cfg(feature = "s3")]
+            {
+                state
+                    .s3_imports
+                    .snapshot(operation_id.as_deref())
+                    .map(RpcOutcome::S3Import)
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                let _ = operation_id;
+                Ok(RpcOutcome::S3Import(
+                    crate::contract::S3ImportOutcome::Unavailable,
+                ))
+            }
+        }
+        RpcCommand::CancelS3ModelImport { operation_id } => {
+            #[cfg(feature = "s3")]
+            {
+                state
+                    .s3_imports
+                    .cancel(&operation_id)
+                    .map(RpcOutcome::S3ImportCancel)
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                let _ = operation_id;
+                Ok(RpcOutcome::S3ImportCancel(
+                    crate::contract::S3ImportCancelOutcome {
+                        accepted: false,
+                        outcome: crate::contract::S3ImportOutcome::Unavailable,
+                    },
+                ))
+            }
+        }
         RpcCommand::HealthCheck => Ok(RpcOutcome::Health(HealthOutcome::ok())),
         RpcCommand::Shutdown => shutdown_result(state),
         RpcCommand::GetStatus => status::get_status(state)
@@ -1020,6 +1068,46 @@ async fn dispatch_admitted_command(
         }
     };
     result.map_err(RpcDispatchError::Domain)
+}
+
+#[cfg(all(test, not(feature = "s3")))]
+#[tokio::test]
+async fn source_commands_report_unavailable_without_s3_feature() {
+    let root = tempfile::TempDir::new().unwrap();
+    let state = test_support::build_test_app_state(root.path()).await;
+    let id = "c3f7d104-1234-4321-abcd-aaaaaaaaaaaa";
+    for command in [
+        RpcCommand::GetS3ModelImport { operation_id: None },
+        RpcCommand::CancelS3ModelImport { operation_id: id.into() },
+        RpcCommand::StartS3ModelImport { request: serde_json::from_value(serde_json::json!({
+            "operation_id": id, "endpoint": "https://source.invalid", "region": "fixture-region",
+            "bucket": "fixture-bucket", "addressing": "path", "key": "models/weights.gguf",
+            "version_id": "exact-version", "filename": "weights.gguf", "sha256": "a".repeat(64),
+            "family": "fixture", "official_name": "Fixture GGUF"
+        })).unwrap() },
+    ] {
+        let Ok(outcome) = dispatch_admitted_command(&state, command).await else {
+            panic!("unsupported source command must return a typed outcome");
+        };
+        let result = outcome.into_value().unwrap();
+        match result["outcome"].as_object() {
+            Some(_) => {
+                assert_eq!(result["accepted"], false);
+                assert_eq!(result["outcome"]["status"], "unavailable");
+            }
+            None => assert_eq!(result["status"], "unavailable"),
+        }
+    }
+    assert!(state
+        .api
+        .acquisition()
+        .store()
+        .acquisitions()
+        .unwrap()
+        .is_empty());
+    state.api.shutdown_intent().await.unwrap();
+    state.api.shutdown_downloads().await.unwrap();
+    state.api.shutdown_acquisition().await.unwrap();
 }
 
 fn shutdown_result(state: &AppState) -> pumas_library::Result<RpcOutcome> {

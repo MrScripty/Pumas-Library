@@ -10,6 +10,8 @@ mod http_admission;
 mod http_transport;
 #[cfg(feature = "inference-plugins")]
 mod provider_clients;
+#[cfg(feature = "s3")]
+mod s3_imports;
 mod server;
 mod wrapper;
 

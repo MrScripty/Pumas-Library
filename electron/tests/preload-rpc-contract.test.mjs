@@ -11,6 +11,36 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('compiled preload forwards exact anonymous S3 pins and runtime-decodes observations', async () => {
+  const harness = loadCompiledPreload();
+  const id = 'c3f7d104-1234-4321-abcd-aaaaaaaaaaaa';
+  const request = { operation_id: id, endpoint: 'https://source.invalid', region: 'fixture-region',
+    bucket: 'fixture-bucket', addressing: 'path', key: 'models/exact object.gguf',
+    version_id: 'exact+version/id', filename: 'weights.gguf', sha256: 'a'.repeat(64),
+    family: 'fixture', official_name: 'Fixture GGUF' };
+  const running = { status: 'running', operation_id: id,
+    progress: { phase: 'acquiring', downloaded_for_current_file: '18446744073709551615' } };
+  harness.respondWith(running);
+  assert.deepEqual(toPlainValue(await harness.api.start_s3_model_import(request)), running);
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), request);
+  harness.respondWith({ status: 'idle' });
+  assert.deepEqual(toPlainValue(await harness.api.get_s3_model_import()), { status: 'idle' });
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), { operation_id: null });
+  harness.respondWith({ accepted: true, outcome: running });
+  assert.deepEqual(toPlainValue(await harness.api.cancel_s3_model_import(id)), { accepted: true, outcome: running });
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), { operation_id: id });
+  const count = harness.invocations.length;
+  assert.throws(() => harness.api.start_s3_model_import({ ...request, credentials: 'synthetic-secret' }),
+    error => error.name === 'DesktopContractError' && !error.message.includes('synthetic-secret'));
+  assert.equal(harness.invocations.length, count);
+  for (const method of ['start_s3_model_import', 'get_s3_model_import']) {
+    harness.respondWith({ ...running, credentials: 'synthetic-secret' });
+    await assert.rejects(method === 'start_s3_model_import'
+      ? harness.api[method](request) : harness.api[method](id),
+    error => error.name === 'DesktopContractError' && !error.message.includes('synthetic-secret'));
+  }
+});
+
 test('Torch runtime options require manager preset capability and an offered default adapter', async () => {
   const harness = loadCompiledPreload();
   const options = {

@@ -115,6 +115,8 @@ impl ShutdownRequest {
 
 /// Application state shared across handlers.
 pub struct AppState {
+    #[cfg(feature = "s3")]
+    pub(crate) s3_imports: crate::s3_imports::S3Imports,
     pub(crate) shutdown_request: ShutdownRequest,
     pub(crate) catalog_projection: CatalogProjection,
     /// Core API (model library, system utilities)
@@ -298,7 +300,11 @@ pub async fn start_server(
     let (catalog_projection, catalog_worker) = CatalogProjection::start(MAX_IN_FLIGHT_RPC_REQUESTS);
     let shutdown_request = ShutdownRequest::default();
     let shutdown_signal = shutdown_request.signal.clone();
+    #[cfg(feature = "s3")]
+    let (s3_imports, s3_jobs) = crate::s3_imports::S3Imports::channel();
     let state = Arc::new(AppState {
+        #[cfg(feature = "s3")]
+        s3_imports,
         shutdown_request: shutdown_request.clone(),
         catalog_projection,
         api,
@@ -321,6 +327,9 @@ pub async fn start_server(
         #[cfg(feature = "inference-plugins")]
         onnx_session_manager,
     });
+
+    #[cfg(feature = "s3")]
+    let s3_worker = crate::s3_imports::S3ImportWorker::start(state.clone(), s3_jobs);
 
     // Configure CORS for local development and packaged renderer diagnostics.
     let cors = CorsLayer::new()
@@ -402,6 +411,8 @@ pub async fn start_server(
             _ = shutdown_request.clone().requested() => None,
         };
         shutdown_request.request();
+        #[cfg(feature = "s3")]
+        state.s3_imports.close();
         // Retain accepted connections until their responses settle. Core owners
         // drain concurrently, so requests awaiting those owners cannot deadlock
         // behind an HTTP-first shutdown ordering.
@@ -444,6 +455,19 @@ pub async fn start_server(
                     result
                 },
                 async {
+                    #[cfg(feature = "s3")]
+                    let result = {
+                        let (catalog, source) =
+                            tokio::join!(catalog_worker.shutdown(), s3_worker.shutdown());
+                        match (catalog, source) {
+                            (Ok(()), Ok(())) => Ok(()),
+                            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+                            (Err(catalog), Err(source)) => {
+                                Err(anyhow::anyhow!("{catalog}; {source}"))
+                            }
+                        }
+                    };
+                    #[cfg(not(feature = "s3"))]
                     let result = catalog_worker.shutdown().await;
                     #[cfg(test)]
                     catalog_drain_observed.store(true, std::sync::atomic::Ordering::Release);

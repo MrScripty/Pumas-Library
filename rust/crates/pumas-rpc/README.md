@@ -1,5 +1,65 @@
 # Backend setup RPC
 
+## Explicit S3 model import
+
+The optional `s3` Cargo feature composes the existing native
+`PumasApi::import_s3_model` operation. It imports one anonymous GGUF with an
+explicit caller pin, using the existing transfer, verification, model importer,
+registration and receipt owners. Default feature selection remains unchanged.
+Without `s3`, these commands return the closed `unavailable` outcome.
+
+`start_s3_model_import` accepts only `operation_id` (canonical lowercase UUID),
+`endpoint` (HTTPS origin without userinfo, path, query or fragment), `region`,
+`bucket`, `addressing` (`path` or `virtual_hosted`), `key`, `version_id`,
+`filename` (ASCII GGUF basename), `sha256` (64 hex digits), `family` and
+`official_name`. VersionId and digest are required; neither is discovered or
+substituted. Unknown fields, credentials and HTTP opt-outs are rejected before
+I/O. Request fields are not Debug/Serialize-enabled. There is no credentials
+manager, ambient discovery or authentication UI; authenticated native callers
+continue to use the separate explicit in-memory API.
+
+`get_s3_model_import` accepts optional/null `operation_id`; omission reads the
+one retained process-local job. `cancel_s3_model_import` requires its exact UUID
+and returns `{accepted, outcome}`. Cancellation acknowledgement is not proof
+that work has stopped. Finalization closes cancellation admission. Closing the
+dialog or dropping an HTTP request stops observation only; server shutdown
+closes admission, requests cancellation and awaits the operation before shared
+acquisition drainage.
+
+Outcomes are `unavailable`, `idle`, `not_found`, `rejected`, `running` or
+`finished`. Running progress contains native phase and a decimal-string
+`downloaded_for_current_file`, preserving u64 counts without claiming percentage,
+verification or completion. Finished results are `completed {model_id}`,
+`cancelled {retained_work}` or `failed {error, retained_work,
+published_model_id}`. Errors are the existing closed redacted public projection.
+Completed means the native receipt settled and the owned input reservation was
+cleaned. A failure may preserve a published model ID; inspect the library before
+any recovery. Acknowledgement, final phase and byte counts are separate evidence.
+
+One process-owned worker admits one operation at a time and retains only the
+latest safe result. Repeated UUIDs, active work and retained failure/cancellation
+refuse resubmission. Results are not restart-persisted history: after restart or
+replacement, an exact-ID read can return `not_found`; check the library and
+reconcile existing custody rather than replaying with a new UUID. Existing
+`model.s3.workflow` Using custody also blocks a new desktop import.
+
+The RPC caller selects finite defaults of three attempts, a 600-second
+acquisition elapsed budget and a 30-second source-operation timeout. Existing
+native retry and verification policies are unchanged. Staging is reserved under
+`launcher-data/.s3-import-<UUID>` through held directory identities, outside model
+discovery. Broad custom model-library layouts containing launcher-data are
+refused before allocation. Failed/cancelled stages are retained for exact
+reconciliation; the dialog does not offer an unsafe reset or implicit replay.
+
+Rust owns the wire schemas; generated Electron/frontend decoders enforce closed
+request/response shapes. The renderer polls serially every 500 ms only while
+running, fences stale responses when a command or replacement observer wins,
+and can reopen a retained result without another start. Controlled Linux HTTPS,
+RPC and DOM/preload fixtures provide local support; real-browser, packaged,
+default-inference, cross-platform and live-provider acceptance remain separate.
+
+## Backend setup
+
 The RPC adapter exposes the standalone library's existing setup owners. It does
 not own another installer lifecycle.
 

@@ -725,6 +725,11 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         )+ };
     }
     export!(
+        S3ImportParams,
+        S3ImportStatusParams,
+        S3ImportCancelParams,
+        S3ImportOutcome,
+        S3ImportCancelOutcome,
         RouterProfileSyncStatus,
         ModelsOutcome,
         CatalogSearchOutcome,

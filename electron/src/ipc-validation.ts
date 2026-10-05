@@ -1,5 +1,8 @@
 import type { OpenDialogOptions } from 'electron';
 import {
+  decodeS3ImportParams,
+  decodeS3ImportStatusParams,
+  decodeS3ImportCancelParams,
   decodeDownloadIdParams,
   decodeGetBackendSetupParams,
   decodeCheckVersionDependenciesParams,
@@ -53,6 +56,16 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
   }
 
   const method = rawMethod as RpcMethodName;
+  if (method === 'start_s3_model_import' || method === 'get_s3_model_import' || method === 'cancel_s3_model_import') {
+    const decoded = method === 'start_s3_model_import'
+      ? decodeS3ImportParams(rawParams)
+      : method === 'get_s3_model_import'
+        ? decodeS3ImportStatusParams(rawParams)
+        : decodeS3ImportCancelParams(rawParams);
+    if (decoded.status !== 'valid') throw new Error(`Invalid API params for method: ${method}`);
+    return { method, params: decoded.value };
+  }
+
   if (
     method === 'get_model_download_status'
     || method === 'pause_model_download'

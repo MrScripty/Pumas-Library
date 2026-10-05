@@ -748,6 +748,14 @@ fn is_internal_library_artifact_path(library_root: &Path, path: &Path) -> bool {
     let Ok(rel) = path.strip_prefix(library_root) else {
         return false;
     };
+    // Copied imports own their private staging tree until publication. A
+    // nested stage file is not the third component of a canonical model root.
+    // Match model_dirs' pruning at every depth, including deleted stage events.
+    if rel.components().any(|component| {
+        matches!(component, Component::Normal(name) if name.to_string_lossy().starts_with(crate::model_library::TEMP_IMPORT_PREFIX))
+    }) {
+        return true;
+    }
     let mut components = rel.components();
     let Some(first) = components.next() else {
         // Root path events are internal noise for our purposes.
@@ -2372,6 +2380,66 @@ mod tests {
         assert!(!summary.requires_full_scope);
         assert!(summary.model_ids.contains("llm/llama/model-b"));
         assert!(!summary.model_ids.contains("llm/llama/model-a"));
+    }
+
+    #[tokio::test]
+    async fn temporary_import_events_do_not_admit_model_reconciliation() {
+        let temp = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(temp.path(), None).await;
+        let primary = api.primary();
+        let root = primary.model_library.library_root();
+        let stage = root.join(".tmp_import_discovery-regression");
+        let config = stage.join("config/tokenizer_config.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, b"{}").unwrap();
+        let paths = vec![stage.clone(), config.clone(), stage.join("metadata.json")];
+        let summary =
+            classify_watcher_changes(root, &primary.watcher_write_suppressor, paths.clone());
+
+        notify_filesystem_changes(primary.clone(), paths).await;
+        primary.runtime_tasks.shutdown_owned().await.unwrap();
+        assert!(summary.model_ids.is_empty(), "{:?}", summary.model_ids);
+        assert!(!summary.requires_full_scope);
+        assert!(!primary
+            .reconciliation
+            .lock_state()
+            .models
+            .contains_key(".tmp_import_discovery-regression/config/tokenizer_config.json"));
+        assert!(primary.model_library.index().list_all().unwrap().is_empty());
+        assert_eq!(std::fs::read(config).unwrap(), b"{}");
+    }
+
+    #[test]
+    fn temporary_import_events_are_hidden_at_every_layout_depth_but_publication_is_visible() {
+        let root = Path::new("/library");
+        let suppressor = WatcherWriteSuppressor::new(WATCHER_WRITE_SUPPRESSION_TTL);
+        let staged = [
+            ".tmp_import_one/config/tokenizer_config.json",
+            "llm/.tmp_import_two/config/tokenizer_config.json",
+            "llm/family/.tmp_import_three/metadata.json",
+            "llm/family/model/.tmp_import_four/weights.gguf",
+        ];
+        let summary = classify_watcher_changes(
+            root,
+            &suppressor,
+            staged.iter().map(|path| root.join(path)).collect(),
+        );
+        assert!(summary.model_ids.is_empty(), "{:?}", summary.model_ids);
+        assert!(!summary.requires_full_scope);
+
+        let summary = classify_watcher_changes(
+            root,
+            &suppressor,
+            vec![
+                root.join("llm/family/model"),
+                root.join("llm/family/model/config/tokenizer_config.json"),
+            ],
+        );
+        assert_eq!(
+            summary.model_ids,
+            HashSet::from(["llm/family/model".into()])
+        );
+        assert!(!summary.requires_full_scope);
     }
 
     #[test]

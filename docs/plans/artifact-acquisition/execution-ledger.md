@@ -1004,3 +1004,30 @@ Review 5409255854 selected all 18 PR39 files. The receipt-size finding (discussi
 Separate `fix/acquisition-output-receipt-bound-159fd371` preserves 159fd371 and accepted main 73fec2e06c75ddae8c0e58be6ffcf352923376bd. The sole production change is neutral consumer admission/issuance in `acquisition/service.rs`: actual JSON capped at 4 MiB, unique file/parent namespace reserved at 2 MiB using encoded names plus 512 bytes per entry, within existing owned blocking work. Current copied-output schema measurement checks maximum-width physical identities/size/hash and fixed strings against those reserves; 2 × (4 MiB + 2 MiB) + 16 KiB is below the unchanged 16 MiB output limit. Old manifest decoding, receipt settlement/reconciliation and producer publication checks remain byte-identical. README sentence placement and ledger joined number/SHA tokens are repaired. Missing/null identity with intact payload retains exact cold uncertainty.
 
 Final runtime targets pass 36 acquisition/import, 11 reader and five HTTP tests (52). A temporary 3 MiB callback/bundle stress extension separately ran 36 passes/one failure: owned background reconciliation visited `.tmp_import_…/config/tokenizer_config.json/metadata.json` and returned ENOTDIR at shutdown. The stress source/patch and failed log are retained outside this repair; the experiment is not a passing fixture or large-payload concurrency claim. AQ-S3 remains not ready on this and existing acceptance gaps. [Qualification](reports/s3-consumer-receipt-bound-2026-10-05.md) records final supporting checks and remaining limits. All 482 locked identities, canonical generator, HF/speech sources and frozen branches are preserved. No credentials, permissions/network settings, external review request or merge changed; parent owns PR39 integration.
+
+## 2026-10-05 — explicit authenticated S3 reader successor
+
+The coordinator delegated explicit request-scoped credentials on current PR40
+`63123fd8f9f866064a8315096ab3fb1fc81e8f0f`, expected tree
+`163ef2442695b44555ac0e42ff79a6a88de9e817`, retaining main
+`05717338c2aea737483fb4b28c3ed4053a65de96`. Normal fetch replaced the initial
+older checkout as the implementation base. Separate branch
+`feat/acquisition-s3-auth-63123fd8` committed and non-force pushed tested source
+`d74114c63a9717692fa7051ef5146d7253a2c5c5`, tree
+`bd21dd5e46970b74e18706076adc9defa7de9586`. Additive `S3Credentials` and
+`S3Reader::new_authenticated` preserve anonymous construction and source/receipt
+identity, enforce HTTPS, and contain remote diagnostics. Private loopback
+credentials exist only under `cfg(test)`.
+
+Nine authentication unit fixtures (plus their isolated child's one-test run),
+41 existing S3 acquisition/import regressions, 13 reader tests, strict enabled-S3
+all-target Clippy, headless check, formatting, diff checks and all 12 dependency
+feature graphs pass locally. The initial integration run's 30 read-only-home
+registry setup failures were corrected with disposable XDG configuration, without
+editing frozen repair code. Exact commands, source/standards authority, raw log
+paths/hashes and limitations are in [qualification](reports/s3-authentication-qualification-2026-10-05.md).
+No real credentials/provider, external reviewer, PR/merge, native repair,
+dependency/lockfile or receipt/schema changes were used. Parent owns independent
+review and hosted integration. Next existing-plan feature is Q3 direct explicit
+source-facing application workflow/source configuration; real-provider acceptance
+and credential refresh remain separate. AQ-S3 stays not ready.

@@ -696,3 +696,22 @@ PR39 review 5409255854 identified a structurally valid generic manifest or callb
 Production write set is only `acquisition/service.rs`: actual pretty JSON and unique parent-prefix accounting before new facade admission; actual completion binding accounting before issuance. Both run in the existing owned blocking scope. No deserializer, store schema, producer schema, late defensive check, retained settlement, lifecycle owner, dependency or generator changes. Test set is `tests/s3_acquisition.rs`, its existing `manifest.rs`, and new `bounds.rs`: actual red generic/source and callback/issuance failures, namespace expansion, existing real admitted bundle import and cold proof with the current output-schema reserve oracle, and missing/null identity with intact payload. README, this write set, active plan, ledger and qualification report document contracts and results. The interrupted README sentence and joined ledger number/SHA tokens are corrected without altering the identities. Parent owns PR39 review and integration; no external review request or merge is admitted.
 
 A temporary 3 MiB callback/bundle stress extension ran 36 passes and exposed an independent live stage-discovery ENOTDIR owner failure at shutdown. Its exact fixture source, patch and failed log are retained outside this repair; it is not admitted as a passing qualification fixture or weakened/retried into a success claim. AQ-S3 remains blocked on that separate observation.
+## Q3 explicit authenticated-reader successor — 2026-10-05
+
+The coordinator's explicit delegation admits `docs/plans/artifact-acquisition/plan.md`
+Q3 execution on exact PR40 `63123fd8f9f866064a8315096ab3fb1fc81e8f0f`
+(tree `163ef2442695b44555ac0e42ff79a6a88de9e817`), retaining main
+`05717338c2aea737483fb4b28c3ed4053a65de96`. This slice adds explicit
+request-scoped access-key/secret credentials with optional session token in the
+existing reader, with HTTPS mandatory in production. The exact source write set
+is `rust/crates/pumas-core/src/acquisition/{s3.rs,mod.rs,s3/auth_tests.rs}`,
+`rust/crates/pumas-core/tests/{s3_reader.rs,s3_reader/fixture.rs}`, the existing
+core README and `docs/contracts/artifact-acquisition.md`. Plan/ledger updates
+and the linked qualification report record evidence and handoff. The small
+fixture extraction shares existing protocol setup with private unit tests; it
+does not expose plaintext credential transport through any product feature.
+No watcher, importer, reconciliation, S3 manifest, receipt/schema, dependency,
+lockfile, native-repair, or provider-provisioning changes are admitted. Signing
+stays with maintained `object_store`; reader selections carry only ephemeral
+access material, and the existing acquisition owner retains retry, verification,
+receipt and publication responsibilities. Parent owns PRs/reviews/merges.

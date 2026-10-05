@@ -3,6 +3,24 @@
 **Plan status:** `Active` — Q1 is admitted on the current accepted `main` base; AQ-HTTP remains not ready.
 **Objective acceptance status:** `pending`.
 
+**Q3 explicit authenticated-reader slice (2026-10-05):** On
+`feat/acquisition-s3-auth-63123fd8`, the explicitly delegated credential slice
+builds on exact PR40 head `63123fd8f9f866064a8315096ab3fb1fc81e8f0f`, tree
+`163ef2442695b44555ac0e42ff79a6a88de9e817`, preserving accepted main
+`05717338c2aea737483fb4b28c3ed4053a65de96` and every staging/VersionId repair.
+Code milestone `d74114c63a9717692fa7051ef5146d7253a2c5c5` adds an additive
+HTTPS-only authenticated constructor with explicit in-memory credentials and an
+optional session token. Anonymous construction and identity/retry/verification
+contracts are retained. Nine authentication unit fixtures, 41 existing S3
+acquisition regressions, 13 reader tests, strict enabled-S3 Clippy and supporting
+headless/static checks pass locally. See [qualification](reports/s3-authentication-qualification-2026-10-05.md).
+The frozen watcher/importer/manifest write set remains untouched. Independent
+review, exact-head hosted qualification and integration are coordinator-owned.
+The next existing-plan implementation slice is Q3's direct explicit source-facing
+application workflow/source configuration through the existing model operations;
+real AWS/non-AWS/MinIO acceptance and credential refresh remain separate.
+AC13/AC14 and AQ-S3 remain pending.
+
 **Q3 staging/version acceptance follow-up:** Merged PR39 is the base for the two fixes on `fix/import-discovery-s3-version`: private temporary-import events no longer become watcher model scopes, and explicit S3 manifests distinguish same-key/different-VersionId objects while retaining same-version evidence checks. The fixes were pushed without force and verified at `a606c80b0be41580c7af0583703d9f9af5f2cb44`. A successor normal-workflow fixture now qualifies a valid 3 MiB callback and 3 MiB auxiliary with the real watcher, public GetModel observation, clean shutdown and cold output proof without source replay. See [qualification](reports/s3-staging-discovery-qualification.md) for commands, failed experiment and limits. AC13/AC14 and AQ-S3 remain pending. The next slice is authorized real-provider/source-configuration qualification; credentials, live AWS/non-AWS/MinIO and desktop workflow are not supplied or established by these local fixtures.
 
 **Admitted Q3 reader development (2026-10-04):** The coordinator explicitly delegated the next useful feature slice independently of blocked Torch acceptance. On `feat/acquisition-s3-reader-c70a78f7`, base `c70a78f7232f46dfb3a6b73db8bcc75fa9293acf`, develop the first optional anonymous, version-bound S3 protocol reader and qualify it against a deterministic local fixture. The reader produces the existing manifest and streams ranges into caller-owned staging; it does not own retry, persistence, import, or consumer publication. Its accepted boundary is explicit endpoint/addressing authority, immutable VersionId selection, conditional range reads, changed-object refusal, cancellation, and optional-feature isolation. AWS/non-AWS/MinIO, authenticated/refreshing credentials, shared-service source dispatch, model import, and AQ-S3 acceptance remain open. PR/review/integration are coordinator-owned; worker commit and non-force push are authorized. Historical gate evidence below is not advanced by this slice.

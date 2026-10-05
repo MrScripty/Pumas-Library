@@ -715,3 +715,24 @@ lockfile, native-repair, or provider-provisioning changes are admitted. Signing
 stays with maintained `object_store`; reader selections carry only ephemeral
 access material, and the existing acquisition owner retains retry, verification,
 receipt and publication responsibilities. Parent owns PRs/reviews/merges.
+
+## Q3 native explicit source workflow successor — 2026-10-05
+
+The coordinator freezes reader `ffecce07220f6504fb1db2e348759473bd284de6` and
+admits its separate `feat/s3-model-workflow-ffecce07` successor. Exact production
+members are core `src/api/s3_models.rs` (new native facade and request/control/
+progress/error types), `src/api/mod.rs`, `src/lib.rs` (additive feature-gated
+exports), and `src/acquisition/service.rs` (crate-private selection under the
+existing bounded consumer scope). No second transfer, persistence or publication
+owner is introduced. Tests are new `tests/s3_model_workflow.rs`, a co-located
+control test, and the requested token SignedHeaders/tamper assertion in existing
+`src/acquisition/s3/auth_tests.rs`. Contracts/core README, active plan, ledger
+and the workflow qualification report document the surface and evidence.
+
+Reader and S3 manifest production code, watcher, importer, reconciliation,
+staging/VersionId fixtures, schemas, dependencies/lockfiles, native-repair
+write sets and generated contracts remain unchanged. Real credentials/provider,
+external reviewer contact, account provisioning, PR/review/merge and hosting
+are excluded; parent retains those coordination responsibilities. Fixture TLS
+uses the existing synthetic localhost certificate with verification enabled in
+an isolated child, with no production certificate or transport policy change.

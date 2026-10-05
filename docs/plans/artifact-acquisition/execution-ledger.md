@@ -1031,3 +1031,32 @@ dependency/lockfile or receipt/schema changes were used. Parent owns independent
 review and hosted integration. Next existing-plan feature is Q3 direct explicit
 source-facing application workflow/source configuration; real-provider acceptance
 and credential refresh remain separate. AQ-S3 stays not ready.
+
+## 2026-10-05 — native explicit S3 model workflow successor
+
+The coordinator freezes accepted-static reader ffecce07220f6504fb1db2e348759473bd284de6
+(tree 0acb23784970e86859851c9063e76d04cd740b8b) and admits a distinct native
+source-facing successor. `feat/s3-model-workflow-ffecce07` commits and normally
+pushes `2b8e0a4401224212d84f4c02abcbd175369728ab`, tree
+`d78dd9ed0113eaee6d728056ae22dfde14115d80`. The additive
+`PumasApi::import_s3_model` composes explicit source pins, finite retry budgets,
+caller workspace/operation identity and optional ephemeral credentials through
+the existing bounded acquisition consumer and receipt-bound GGUF importer.
+Safe phase/current-file progress, cancellation admission before finalization,
+typed result/drain errors and Interrupted/retained-work semantics are documented.
+No secret-bearing request Debug/serde, persisted source/credential configuration
+or new transfer/publication owner is introduced.
+
+Seventy focused tests plus two isolated child runs, strict enabled-S3 all-target
+Clippy, headless check, formatting, diff and frozen-file checks pass locally.
+Production authenticated HTTPS is exercised against the existing synthetic TLS
+fixture with verification enabled in a child process. The coordinator's optional
+SignedHeaders/token-tampering assertion is added only on this successor.
+The initial missing-await test compile and subsequent passing runs are retained.
+Exact commands, surface, raw logs/hashes and boundaries are in
+[qualification](reports/s3-model-workflow-qualification-2026-10-05.md).
+Frozen reader/native watcher/importer/reconciliation/manifest production and
+staging/VersionId fixtures, main, schemas and dependencies remain unchanged.
+Parent owns review/hosted qualification/PRs/merges. Next existing-plan feature is
+Q3 desktop/RPC explicit source workflow through the native operation;
+real-provider/installed/native acceptance remains separate. AQ-S3 stays not ready.

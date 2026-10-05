@@ -3,6 +3,26 @@
 **Plan status:** `Active` — Q1 is admitted on the current accepted `main` base; AQ-HTTP remains not ready.
 **Objective acceptance status:** `pending`.
 
+**Q3 native explicit source workflow successor (2026-10-05):** Separate
+`feat/s3-model-workflow-ffecce07` starts from the frozen authenticated reader
+`ffecce07220f6504fb1db2e348759473bd284de6`, tree
+`0acb23784970e86859851c9063e76d04cd740b8b`. The coordinator reported independent
+source-review acceptance of that reader; hosted/provider acceptance remains
+separate. The selected smallest application entry is native
+`PumasApi::import_s3_model`: caller-supplied explicit source/version/digest facts,
+a reserved workspace, finite retry budgets, stable operation UUID and optional
+request-scoped credentials compose through the bounded acquisition scope and
+existing single/bundled GGUF importer. Safe phase/current-file byte observation,
+pre-finalization cancellation, typed result and retained-work semantics belong
+to this additive facade. See [qualification](reports/s3-model-workflow-qualification-2026-10-05.md)
+for the exact tested code milestone and checks. Frozen native discovery,
+watcher/importer/reconciliation and reader/manifest production paths are
+unchanged. The optional reviewed token-signing assertion is extended only in
+the successor test. Next existing-plan implementation is Q3 desktop/RPC explicit
+source/configuration entry through this native operation; real-provider and
+installed/native qualification remain separate. Parent owns review, hosted
+qualification and integration. AQ-S3 stays not ready.
+
 **Q3 explicit authenticated-reader slice (2026-10-05):** On
 `feat/acquisition-s3-auth-63123fd8`, the explicitly delegated credential slice
 builds on exact PR40 head `63123fd8f9f866064a8315096ab3fb1fc81e8f0f`, tree

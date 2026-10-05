@@ -42,7 +42,7 @@ describe('explicit S3 import observation', () => {
     get.mockResolvedValueOnce({ status: 'idle' }).mockResolvedValue(running);
     const { result } = renderHook(() => useS3ModelImport());
     await settle();
-    for (const invalid of [{ sha256: 'bad' }, { version_id: '' }, { endpoint: 'http://source.invalid' },
+    for (const invalid of [{ sha256: 'bad' }, { version_id: '' }, { version_id: 'null' }, { key: '../weights.gguf' }, { endpoint: 'http://source.invalid' },
       { endpoint: 'https://user:secret@source.invalid' }, { session_token: 'synthetic-secret' }]) {
       await act(async () => { await result.current.start({ ...draft, ...invalid }); });
     }

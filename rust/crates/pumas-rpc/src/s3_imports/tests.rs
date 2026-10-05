@@ -197,6 +197,22 @@ async fn source_rpc_https_owned_import_cancel_and_shutdown() {
             rpc(&server, "get_s3_model_import", json!({})).await["result"]["status"],
             "idle"
         );
+        for (field, invalid) in [("version_id", "null"), ("key", "../weights.gguf")] {
+            let mut bad = params(&source.endpoint);
+            bad[field] = json!(invalid);
+            let refused = rpc(&server, "start_s3_model_import", bad).await;
+            assert_eq!(refused["error"]["code"], -32602);
+            assert_eq!(
+                rpc(&server, "get_s3_model_import", json!({})).await["result"]["status"],
+                "idle"
+            );
+            assert!(acquisition.store().acquisitions().unwrap().is_empty());
+            assert!(!root
+                .path()
+                .join("launcher-data")
+                .join(format!(".s3-import-{ID}"))
+                .exists());
+        }
         let mut invalid = params(&source.endpoint);
         invalid["credentials"] = json!({"secret":"synthetic-secret"});
         let refused = rpc(&server, "start_s3_model_import", invalid).await;
@@ -381,4 +397,57 @@ fn source_progress_preserves_u64_and_job_admission_is_bounded() {
         client.snapshot(None).unwrap(),
         S3ImportOutcome::Unavailable
     ));
+}
+
+#[tokio::test]
+async fn source_pin_preflight_matches_reader_structural_refusal_without_io() {
+    for (key, version) in [
+        ("weights.gguf", "null"),
+        ("../weights.gguf", "desktop-v1"),
+        ("models/./weights.gguf", "desktop-v1"),
+        ("models//weights.gguf", "desktop-v1"),
+        ("/weights.gguf", "desktop-v1"),
+        ("weights.gguf/", "desktop-v1"),
+    ] {
+        let mut input = params("https://source.invalid");
+        input["key"] = json!(key);
+        input["version_id"] = json!(version);
+        let request: S3ImportParams = serde_json::from_value(input).unwrap();
+        assert!(request.validate().is_err());
+        let reader = pumas_library::acquisition::S3Reader::new(source_config(&request)).unwrap();
+        let result = reader
+            .select(
+                key,
+                version,
+                "weights.gguf",
+                Sha256Evidence::new("fixture.sha256", HASH).unwrap(),
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(pumas_library::acquisition::S3ReaderError::Configuration(_))
+        ));
+    }
+    let (client, _receiver) = S3Imports::channel();
+    for (field, invalid) in [("version_id", "null"), ("key", "../weights.gguf")] {
+        let mut input = params("https://source.invalid");
+        input[field] = json!(invalid);
+        assert!(matches!(
+            client
+                .admit(serde_json::from_value(input).unwrap())
+                .unwrap(),
+            S3ImportOutcome::Rejected { .. }
+        ));
+        assert!(matches!(
+            client.snapshot(None).unwrap(),
+            S3ImportOutcome::Idle
+        ));
+    }
+    assert!(matches!(
+        client
+            .admit(serde_json::from_value(params("https://source.invalid")).unwrap())
+            .unwrap(),
+        S3ImportOutcome::Running { .. }
+    ));
+    client.close();
 }

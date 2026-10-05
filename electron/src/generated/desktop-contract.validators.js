@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 29d536f9c94afaf3ead276589bc8d7c0362c4f8468a5cafcfd2bc0523a7031bc. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 69c81057ad63925334de3ff84146b762da99f2a1e4881f43066e4fa7ad0d9fdb. DO NOT EDIT.
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -15921,11 +15921,13 @@ function validate119(data, { instancePath = "", parentData, parentDataProperty, 
   return errors === 0;
 }
 var validateS3ImportParams = validate127;
-var schema135 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "S3AddressingWire": { "enum": ["path", "virtual_hosted"], "type": "string" } }, "properties": { "addressing": { "$ref": "#/definitions/S3AddressingWire" }, "bucket": { "maxLength": 255, "minLength": 1, "type": "string" }, "endpoint": { "maxLength": 4096, "minLength": 1, "pattern": "^https://[^/@?#]+/?$", "type": "string" }, "family": { "maxLength": 255, "minLength": 1, "type": "string" }, "filename": { "maxLength": 255, "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$", "type": "string" }, "key": { "maxLength": 1024, "minLength": 1, "type": "string" }, "official_name": { "maxLength": 255, "minLength": 1, "type": "string" }, "operation_id": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "region": { "maxLength": 255, "minLength": 1, "type": "string" }, "sha256": { "pattern": "^[0-9a-fA-F]{64}$", "type": "string" }, "version_id": { "maxLength": 4096, "minLength": 1, "type": "string" } }, "required": ["operation_id", "endpoint", "region", "bucket", "addressing", "key", "version_id", "filename", "sha256", "family", "official_name"], "title": "S3ImportParams", "type": "object" };
+var schema135 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "S3AddressingWire": { "enum": ["path", "virtual_hosted"], "type": "string" } }, "properties": { "addressing": { "$ref": "#/definitions/S3AddressingWire" }, "bucket": { "maxLength": 255, "minLength": 1, "type": "string" }, "endpoint": { "maxLength": 4096, "minLength": 1, "pattern": "^https://[^/@?#]+/?$", "type": "string" }, "family": { "maxLength": 255, "minLength": 1, "type": "string" }, "filename": { "maxLength": 255, "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$", "type": "string" }, "key": { "maxLength": 1024, "minLength": 1, "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$", "type": "string" }, "official_name": { "maxLength": 255, "minLength": 1, "type": "string" }, "operation_id": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "region": { "maxLength": 255, "minLength": 1, "type": "string" }, "sha256": { "pattern": "^[0-9a-fA-F]{64}$", "type": "string" }, "version_id": { "maxLength": 4096, "minLength": 1, "pattern": "^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$", "type": "string" } }, "required": ["operation_id", "endpoint", "region", "bucket", "addressing", "key", "version_id", "filename", "sha256", "family", "official_name"], "title": "S3ImportParams", "type": "object" };
 var schema136 = { "enum": ["path", "virtual_hosted"], "type": "string" };
 var pattern31 = new RegExp("^https://[^/@?#]+/?$", "u");
 var pattern32 = new RegExp("^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$", "u");
-var pattern34 = new RegExp("^[0-9a-fA-F]{64}$", "u");
+var pattern33 = new RegExp("^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$", "u");
+var pattern35 = new RegExp("^[0-9a-fA-F]{64}$", "u");
+var pattern36 = new RegExp("^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$", "u");
 function validate127(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -16079,6 +16081,11 @@ function validate127(data, { instancePath = "", parentData, parentDataProperty, 
                             if (func5(data5) < 1) {
                               validate127.errors = [{ instancePath: instancePath + "/key", schemaPath: "#/properties/key/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
                               return false;
+                            } else {
+                              if (!pattern33.test(data5)) {
+                                validate127.errors = [{ instancePath: instancePath + "/key", schemaPath: "#/properties/key/pattern", keyword: "pattern", params: { pattern: "^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$" }, message: 'must match pattern "^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$"' }];
+                                return false;
+                              }
                             }
                           }
                         } else {
@@ -16163,7 +16170,7 @@ function validate127(data, { instancePath = "", parentData, parentDataProperty, 
                               const _errs21 = errors;
                               if (errors === _errs21) {
                                 if (typeof data9 === "string") {
-                                  if (!pattern34.test(data9)) {
+                                  if (!pattern35.test(data9)) {
                                     validate127.errors = [{ instancePath: instancePath + "/sha256", schemaPath: "#/properties/sha256/pattern", keyword: "pattern", params: { pattern: "^[0-9a-fA-F]{64}$" }, message: 'must match pattern "^[0-9a-fA-F]{64}$"' }];
                                     return false;
                                   }
@@ -16189,6 +16196,11 @@ function validate127(data, { instancePath = "", parentData, parentDataProperty, 
                                       if (func5(data10) < 1) {
                                         validate127.errors = [{ instancePath: instancePath + "/version_id", schemaPath: "#/properties/version_id/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
                                         return false;
+                                      } else {
+                                        if (!pattern36.test(data10)) {
+                                          validate127.errors = [{ instancePath: instancePath + "/version_id", schemaPath: "#/properties/version_id/pattern", keyword: "pattern", params: { pattern: "^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$" }, message: 'must match pattern "^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$"' }];
+                                          return false;
+                                        }
                                       }
                                     }
                                   } else {

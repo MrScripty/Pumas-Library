@@ -23,9 +23,23 @@ pub(crate) struct S3ImportParams {
     #[cfg_attr(feature = "export-contract", schemars(length(min = 1, max = 255)))]
     pub bucket: String,
     pub addressing: S3AddressingWire,
-    #[cfg_attr(feature = "export-contract", schemars(length(min = 1, max = 1024)))]
+    #[cfg_attr(
+        feature = "export-contract",
+        schemars(
+            length(min = 1, max = 1024),
+            regex(
+                pattern = "^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$"
+            )
+        )
+    )]
     pub key: String,
-    #[cfg_attr(feature = "export-contract", schemars(length(min = 1, max = 4096)))]
+    #[cfg_attr(
+        feature = "export-contract",
+        schemars(
+            length(min = 1, max = 4096),
+            regex(pattern = "^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$")
+        )
+    )]
     pub version_id: String,
     #[cfg_attr(
         feature = "export-contract",
@@ -110,6 +124,18 @@ impl S3ImportParams {
             if value.trim().is_empty() || value.len() > max || value.chars().any(char::is_control) {
                 return Err(PublicError::invalid_params());
             }
+        }
+        // The frozen reader's validated_object uses object_store::Path::parse
+        // and requires exact preservation: no empty, dot or parent segments,
+        // including leading/trailing delimiters. Reject the same structural
+        // pins before admitting a job or allocating its reservation.
+        if self.version_id == "null"
+            || self
+                .key
+                .split('/')
+                .any(|part| matches!(part, "" | "." | ".."))
+        {
+            return Err(PublicError::invalid_params());
         }
         let filename = self.filename.as_bytes();
         if !filename[0].is_ascii_alphanumeric()
@@ -263,6 +289,12 @@ mod tests {
             ("session_token", json!("synthetic-session-token")),
             ("allow_http", json!(true)),
             ("version_id", json!("")),
+            ("version_id", json!("null")),
+            ("key", json!("../weights.gguf")),
+            ("key", json!("models/./weights.gguf")),
+            ("key", json!("models//weights.gguf")),
+            ("key", json!("/weights.gguf")),
+            ("key", json!("weights.gguf/")),
             ("operation_id", json!("not-an-operation")),
             ("sha256", json!("a".repeat(63))),
             ("filename", json!("../weights.gguf")),

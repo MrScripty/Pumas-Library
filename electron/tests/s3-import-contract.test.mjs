@@ -15,7 +15,9 @@ test('S3 IPC admits a closed anonymous request with exact source pins and copies
   assert.notEqual(value.params, request);
   assert.ok(Object.isFrozen(value.params));
   for (const patch of [{ credentials: 'synthetic-secret' }, { session_token: 'synthetic-token' },
-    { allow_http: true }, { sha256: 'bad' }, { version_id: '' }, { addressing: 'auto' },
+    { allow_http: true }, { sha256: 'bad' }, { version_id: '' }, { version_id: 'null' },
+    { key: '../weights.gguf' }, { key: 'models/./weights.gguf' }, { key: 'models//weights.gguf' },
+    { key: '/weights.gguf' }, { key: 'weights.gguf/' }, { addressing: 'auto' },
     { endpoint: 'http://source.invalid' }, { endpoint: 'https://user:synthetic-secret@source.invalid' },
     { filename: '../weights.gguf' }, { operation_id: id.toUpperCase() }]) {
     assert.throws(() => validateApiCallPayload('start_s3_model_import', { ...request, ...patch }),

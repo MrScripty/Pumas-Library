@@ -86,7 +86,7 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
         </fieldset>
         <fieldset disabled={!editable} className="mt-4 space-y-3">
           <legend>Selected auxiliary files</legend>
-          <p className="text-sm">Each file needs its exact key, immutable VersionId, output path and SHA-256. Supported auxiliaries: json, txt, md, model, tiktoken, vocab and merges. All selected files must verify before registration.</p>
+          <p className="text-sm">Each file needs its exact key, immutable VersionId, output path and SHA-256. Supported auxiliaries: json, txt, md, model, tiktoken, vocab and merges. Use nonempty source objects. All selected files must verify before registration.</p>
           {auxiliaries.map((file, index) => <fieldset key={file.id} className="grid grid-cols-1 sm:grid-cols-2 gap-3 border p-3">
             <legend>Auxiliary {index + 1}</legend>
             {([['key','exact object key',1024],['version_id','immutable VersionId',4096],['logical_path','logical output path',1024],['sha256','expected SHA-256',64]] as const).map(([field,label,max]) =>

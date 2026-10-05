@@ -799,9 +799,18 @@ impl BundleSource {
                     write!(socket,"HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
                     break;
                 }
-                let bytes = if primary { gguf() } else { b"{}".to_vec() };
+                let bytes = if primary {
+                    gguf()
+                } else if mode == 5 {
+                    vec![]
+                } else {
+                    b"{}".to_vec()
+                };
                 let version = if primary { "weights-v1" } else { "data-v2" };
                 write!(socket,"HTTP/1.1 {}\r\nContent-Length: {}\r\n{}Last-Modified: Wed, 01 Jan 2025 00:00:00 GMT\r\nx-amz-version-id: {}\r\nETag: \"selected\"\r\nConnection: close\r\n\r\n",if head {"200 OK"} else {"206 Partial Content"},bytes.len(),if head {String::new()} else {format!("Content-Range: bytes 0-{}/{}\r\n",bytes.len()-1,bytes.len())},version).unwrap();
+                if mode == 5 && step == 1 {
+                    break;
+                }
                 if !head {
                     socket
                         .write_all(if mode == 2 && primary {
@@ -870,6 +879,7 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
         (2, true, true),
         (3, true, true),
         (4, false, false),
+        (5, false, false),
     ] {
         let root = tempfile::TempDir::new().unwrap();
         let api = pumas_library::PumasApi::builder(root.path())
@@ -915,6 +925,10 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
         }
         if mode == 4 {
             input["files"][1]["sha256"] = json!("b".repeat(64));
+        }
+        if mode == 5 {
+            input["files"][1]["sha256"] =
+                json!("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
         }
         let (method, input) = if auth {
             (
@@ -1033,6 +1047,18 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
             if mode == 3 {
                 assert!(acquisition.store().acquisitions().unwrap().is_empty());
             }
+            if mode == 5 {
+                let records = acquisition.store().acquisitions().unwrap();
+                assert_eq!(records.len(), 1);
+                let record = records.values().next().unwrap();
+                assert!(matches!(record.phase, AcquisitionPhase::Transferring));
+                assert!(record
+                    .manifest
+                    .files()
+                    .iter()
+                    .any(|file| file.expected_size() == Some(0)));
+                assert!(record.files.is_empty());
+            }
             let replay = rpc(
                 &server,
                 "start_s3_model_bundle_import",
@@ -1046,7 +1072,7 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
         assert_eq!(
             captured.len(),
             match mode {
-                1 | 3 => 2,
+                1 | 3 | 5 => 2,
                 4 => 3,
                 _ => 4,
             }

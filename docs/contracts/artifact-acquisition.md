@@ -183,6 +183,8 @@ existing native inert auxiliary formats. Complete structural preflight uses
 `S3Reader::validate_manifest_entries` plus shared manifest validation before
 job/workspace admission; it grants no selection or byte-verification authority.
 Object existence and returned metadata remain the native resolver's responsibility.
+The existing S3 nonempty-range path refuses zero-byte objects; desktop imports
+report failure/retained work rather than publishing a shortened set.
 The frozen reader selection and `s3/manifest.rs` identity implementation are not
 rewritten. Anonymous/authenticated single-object wire shapes remain unchanged;
 bundle authentication uses the same ephemeral credential DTO and constructors.

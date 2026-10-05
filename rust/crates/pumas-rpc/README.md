@@ -54,6 +54,9 @@ staging aliases and prefix collisions are refused by shared manifest validation.
 The actual reader's pure preflight also enforces exact object-key semantics and
 the existing 16 KiB encoded revision limit before job/workspace admission.
 This is an explicit set, without prefix enumeration or atomic snapshot claims.
+The existing reader cannot transfer zero-byte source objects: they fail with
+retained-work status and no publication. Select nonempty members; no reader
+range or verification policy is changed to handle this limitation.
 
 `start_authenticated_s3_model_bundle_import` takes
 `{source: <bundle start params>, credentials: <the same credential params>}`.

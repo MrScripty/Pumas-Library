@@ -477,6 +477,13 @@ pub struct AcquisitionRetryPolicy {
 
 #[async_trait::async_trait]
 pub trait AcquisitionHost: HttpAttemptHost {
+    /// Optional observation only: an exact manifest member is about to acquire.
+    /// Default no-op preserves existing hosts and transfer/publication policy.
+    fn file_started(&mut self, _index: usize) {}
+    /// The member's verified staging acquisition returned these bytes. Complete
+    /// set verification and consumer publication still follow separately.
+    fn file_acquired(&mut self, _index: usize, _bytes: u64) {}
+
     async fn retry(
         &mut self,
         attempt: u32,
@@ -2019,7 +2026,8 @@ impl AcquisitionConsumer {
                     });
                 }
                 for (file_index, source) in request.sources.iter().enumerate() {
-                    service
+                    host.file_started(file_index);
+                    let bytes = service
                         .acquire_source_file(
                             &context,
                             &operation,
@@ -2030,6 +2038,7 @@ impl AcquisitionConsumer {
                             host.as_mut(),
                         )
                         .await?;
+                    host.file_acquired(file_index, bytes);
                 }
                 let lease = service
                     .files_ready_with_host(&context, operation, request.workspace, host.as_mut())

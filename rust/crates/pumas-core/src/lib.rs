@@ -107,8 +107,8 @@ pub use system::{
 pub use api::PumasApiBuilder;
 #[cfg(feature = "s3")]
 pub use api::{
-    S3ModelImportControl, S3ModelImportError, S3ModelImportPhase, S3ModelImportProgress,
-    S3ModelImportRequest,
+    S3ModelBundleProgress, S3ModelImportControl, S3ModelImportError, S3ModelImportPhase,
+    S3ModelImportProgress, S3ModelImportRequest,
 };
 
 use std::path::PathBuf;

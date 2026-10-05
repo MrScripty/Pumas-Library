@@ -65,10 +65,25 @@ pub struct S3ModelImportProgress {
     pub downloaded_for_current_file: u64,
 }
 
+/// Safe complete-set observation. File indices follow the selected manifest's
+/// logical-path order. Current bytes can reset on retries; acquired staging bytes
+/// are separate from complete-set verification and publication success.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct S3ModelBundleProgress {
+    pub phase: S3ModelImportPhase,
+    pub file_index: Option<usize>,
+    pub files_total: usize,
+    pub files_acquired: usize,
+    pub bytes_acquired: u64,
+    pub downloaded_for_current_file: u64,
+    pub total_expected_bytes: Option<u64>,
+}
+
 struct ControlState {
     gate: AtomicU8,
     cancelled: Notify,
     progress: watch::Sender<S3ModelImportProgress>,
+    bundle_progress: watch::Sender<S3ModelBundleProgress>,
 }
 
 /// One operation's cancellation latch and coalesced live progress. Cloning keeps
@@ -87,14 +102,29 @@ impl S3ModelImportControl {
             phase: S3ModelImportPhase::Pending,
             downloaded_for_current_file: 0,
         });
+        let (bundle_progress, _) = watch::channel(S3ModelBundleProgress {
+            phase: S3ModelImportPhase::Pending,
+            file_index: None,
+            files_total: 0,
+            files_acquired: 0,
+            bytes_acquired: 0,
+            downloaded_for_current_file: 0,
+            total_expected_bytes: None,
+        });
         Self(Arc::new(ControlState {
             gate: AtomicU8::new(PENDING),
             cancelled: Notify::new(),
             progress,
+            bundle_progress,
         }))
     }
     pub fn subscribe(&self) -> watch::Receiver<S3ModelImportProgress> {
         self.0.progress.subscribe()
+    }
+    /// Aggregate staging observations for the same owned operation. Existing
+    /// current-file subscribers and request/receipt formats remain unchanged.
+    pub fn subscribe_bundle(&self) -> watch::Receiver<S3ModelBundleProgress> {
+        self.0.bundle_progress.subscribe()
     }
     /// Returns true only if cancellation won before finalization. Once finalization
     /// starts, cancellation is refused and the receipt/publication pipeline settles.
@@ -144,6 +174,9 @@ impl S3ModelImportControl {
             };
             if valid {
                 progress.phase = phase;
+                self.0
+                    .bundle_progress
+                    .send_modify(|bundle| bundle.phase = phase);
             }
         });
     }
@@ -226,11 +259,37 @@ impl HttpAttemptHost for Host {
              .0
             .progress
             .send_modify(|progress| progress.downloaded_for_current_file = bytes);
+        self.0
+             .0
+            .bundle_progress
+            .send_modify(|progress| progress.downloaded_for_current_file = bytes);
         Ok(())
     }
 }
 #[async_trait::async_trait]
 impl AcquisitionHost for Host {
+    fn file_started(&mut self, index: usize) {
+        self.0
+             .0
+            .progress
+            .send_modify(|progress| progress.downloaded_for_current_file = 0);
+        self.0 .0.bundle_progress.send_modify(|progress| {
+            progress.file_index = Some(index);
+            progress.downloaded_for_current_file = 0;
+        });
+    }
+    fn file_acquired(&mut self, index: usize, bytes: u64) {
+        self.0 .0.bundle_progress.send_modify(|progress| {
+            if progress.file_index == Some(index) {
+                // Selection's shared manifest validator rejects total overflow;
+                // acquired bytes must match those selected sizes.
+                progress.bytes_acquired += bytes;
+                progress.files_acquired += 1;
+                progress.file_index = None;
+                progress.downloaded_for_current_file = 0;
+            }
+        });
+    }
     async fn retry(&mut self, _: u32, _: Option<Duration>, _: Option<&str>) -> crate::Result<()> {
         Ok(())
     }
@@ -320,6 +379,14 @@ impl PumasApi {
             if control.is_cancelled() {
                 return Err(PumasError::DownloadCancelled.into());
             }
+            control.0.bundle_progress.send_modify(|progress| {
+                progress.files_total = selection.manifest().files().len();
+                progress.total_expected_bytes = selection
+                    .manifest()
+                    .files()
+                    .iter()
+                    .try_fold(0_u64, |sum, file| sum.checked_add(file.expected_size()?));
+            });
             control.phase(S3ModelImportPhase::Acquiring);
             let bundle = selection.manifest().files().len() > 1;
             let spec = request.import;
@@ -375,6 +442,43 @@ impl PumasApi {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn bundle_progress_separates_acquired_files_current_attempt_and_publication() {
+        let control = S3ModelImportControl::new();
+        control.0.gate.store(ACTIVE, Ordering::SeqCst);
+        control.0.bundle_progress.send_modify(|p| {
+            p.files_total = 3;
+            p.total_expected_bytes = Some(12);
+        });
+        let bundle = control.subscribe_bundle();
+        let legacy = control.subscribe();
+        let mut host = Host(control.clone());
+        control.phase(S3ModelImportPhase::Acquiring);
+        host.file_started(0);
+        host.record_progress(5).await.unwrap();
+        assert_eq!(bundle.borrow().downloaded_for_current_file, 5);
+        host.file_acquired(0, 5);
+        host.file_started(1);
+        host.record_progress(2).await.unwrap();
+        assert_eq!(bundle.borrow().bytes_acquired, 5);
+        assert_eq!(bundle.borrow().files_acquired, 1);
+        assert_eq!(bundle.borrow().file_index, Some(1));
+        // Retrying/current bytes may go backwards; never counted twice.
+        host.record_progress(1).await.unwrap();
+        assert_eq!(bundle.borrow().bytes_acquired, 5);
+        host.file_acquired(1, 7);
+        host.file_started(2);
+        host.file_acquired(2, 0);
+        assert_eq!(bundle.borrow().bytes_acquired, 12);
+        assert_eq!(bundle.borrow().files_acquired, 3);
+        assert_eq!(bundle.borrow().file_index, None);
+        assert_eq!(legacy.borrow().downloaded_for_current_file, 0);
+        assert_eq!(bundle.borrow().phase, S3ModelImportPhase::Acquiring);
+        assert!(control.cancel());
+        assert_eq!(bundle.borrow().phase, S3ModelImportPhase::Cancelling);
+        control.phase(S3ModelImportPhase::Acquiring);
+        assert_eq!(bundle.borrow().phase, S3ModelImportPhase::Cancelling);
+    }
     #[test]
     fn cancellation_and_finalization_have_one_winner_and_stale_progress_is_ignored() {
         let control = S3ModelImportControl::new();

@@ -219,9 +219,20 @@ async fn public_single_and_bundle_workflows_publish_ready_and_settle_exact_recei
         let operation = request.operation_id.to_string();
         let control = S3ModelImportControl::new();
         let progress = control.subscribe();
+        let bundle_progress = control.subscribe_bundle();
         let result = api.import_s3_model(request, control.clone()).await.unwrap();
         assert!(result.success);
         assert_eq!(progress.borrow().phase, S3ModelImportPhase::Completed);
+        let bundle = *bundle_progress.borrow();
+        assert_eq!(bundle.files_total, if aux { 2 } else { 1 });
+        assert_eq!(bundle.files_acquired, bundle.files_total);
+        assert_eq!(
+            bundle.bytes_acquired,
+            bytes.len() as u64 + if aux { 2 } else { 0 }
+        );
+        assert_eq!(bundle.total_expected_bytes, Some(bundle.bytes_acquired));
+        assert_eq!(bundle.file_index, None);
+        assert_eq!(bundle.phase, S3ModelImportPhase::Completed);
         assert!(!control.cancel());
         let id = result.model_id.unwrap();
         assert_published(&api, &id, aux).await;

@@ -164,6 +164,46 @@ impl HttpService for ScopedConnector {
 }
 
 impl S3Reader {
+    /// Pure complete-set structural preflight, without HEAD, tasks or staging.
+    /// Uses the same object identity and shared manifest validators as selection.
+    /// This does not establish object existence, size, or digest correctness.
+    pub fn validate_manifest_entries(
+        &self,
+        entries: &[S3ManifestEntry],
+    ) -> Result<(), S3ReaderError> {
+        let mut entries: Vec<_> = entries.iter().collect();
+        entries.sort_by(|a, b| a.logical_path.cmp(&b.logical_path));
+        let mut pins = Vec::with_capacity(entries.len());
+        let mut files = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let (_, source) = self.validated_object(&entry.source_key, &entry.version)?;
+            pins.push(source);
+            files.push(ArtifactFile::new(
+                &entry.logical_path,
+                serde_json::to_string(&(&entry.source_key, &entry.version))
+                    .map_err(|_| S3ReaderError::Configuration("explicit pin encoding failed"))?,
+                None,
+                Some(entry.expected_sha256.clone()),
+                FileVerificationRequirement::Sha256,
+            )?);
+        }
+        // Exact per-object pins enforce the existing encoded revision budget;
+        // this temporary source label grants no selection or access authority.
+        let source = ArtifactSourceIdentity::new(
+            "s3",
+            "explicit.preflight",
+            ArtifactRevisionEvidence::new(
+                "s3.explicit_versions",
+                serde_json::to_string(&pins)
+                    .map_err(|_| S3ReaderError::Configuration("explicit pin encoding failed"))?,
+                RevisionStrength::Immutable,
+            )?,
+        )?;
+        ArtifactManifest::new(source, files)
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
     /// Construct a reader from explicit endpoint authority. Redirects, proxy
     /// discovery, automatic retries, and ambient credential discovery are disabled.
     pub fn new(config: S3ReaderConfig) -> Result<Self, S3ReaderError> {
@@ -524,5 +564,61 @@ fn protocol_error(error: object_store::Error) -> S3ReaderError {
         // Upstream errors may contain echoed response bodies, headers or URLs.
         // Never expose remote diagnostics through public errors or durable state.
         _ => S3ReaderError::Protocol("S3 request or response failed".into()),
+    }
+}
+
+#[cfg(test)]
+mod bundle_preflight_tests {
+    use super::*;
+    fn reader() -> S3Reader {
+        S3Reader::new(S3ReaderConfig {
+            endpoint: "https://source.invalid".into(),
+            region: "fixture-region".into(),
+            bucket: "fixture-bucket".into(),
+            addressing: S3Addressing::Path,
+            allow_http: false,
+            operation_timeout: Duration::from_secs(1),
+        })
+        .unwrap()
+    }
+    fn entry(path: &str, version: &str, hash: &str) -> S3ManifestEntry {
+        S3ManifestEntry {
+            source_key: "models/exact key".into(),
+            version: version.into(),
+            logical_path: path.into(),
+            expected_sha256: Sha256Evidence::new("caller.sha256", hash).unwrap(),
+        }
+    }
+    #[tokio::test]
+    async fn complete_set_preflight_matches_selection_structural_refusal_without_io() {
+        let reader = reader();
+        let hash = "a".repeat(64);
+        let good = entry("weights.gguf", "v1", &hash);
+        for entries in [
+            vec![],
+            vec![good.clone(), good.clone()],
+            vec![good.clone(), entry("WEIGHTS.GGUF", "v2", &hash)],
+            vec![
+                good.clone(),
+                entry("weights.gguf.part/data.json", "v2", &hash),
+            ],
+            vec![good.clone(), entry("../data.json", "v2", &hash)],
+            vec![good.clone(), entry("data.json", "v1", &"b".repeat(64))],
+            vec![good.clone(), entry("data.json", &"x".repeat(16000), &hash)],
+        ] {
+            let preflight = reader.validate_manifest_entries(&entries).unwrap_err();
+            let selection = reader.select_manifest(entries).await.err().unwrap();
+            assert!(matches!(
+                preflight,
+                S3ReaderError::Configuration(_) | S3ReaderError::Manifest(_)
+            ));
+            assert_eq!(
+                std::mem::discriminant(&preflight),
+                std::mem::discriminant(&selection)
+            );
+        }
+        assert!(reader
+            .validate_manifest_entries(&[good, entry("data.json", "v2", &"b".repeat(64))])
+            .is_ok());
     }
 }

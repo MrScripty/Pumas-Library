@@ -128,6 +128,26 @@ receipt formats, retry budgets and byte-verification policy remain unchanged.
 Selections retain their credential capability in memory through their existing
 ownership lifetime; callers scope them to the authorized acquisition.
 
+The optional native `PumasApi::import_s3_model` facade consumes explicit source
+facts, pinned manifest entries, a model import spec, a reserved workspace, finite
+retry budgets, a retained operation UUID and optional ephemeral credentials.
+Its request is not Debug/serde-enabled; only phase/current-file byte progress is
+serializable. Selection runs under the same bounded acquisition consumer scope
+as transfer, and verified single/bundled GGUF publication uses the existing
+importer and exact receipt pipeline. The stable demand owner is
+`model.s3.workflow`. Neither source access nor credentials enter the importer
+payload or progress; no account/source-configuration persistence is introduced.
+
+Control cancellation and finalization have one atomic admission winner.
+Cancellation can win through verification but is refused before receipt issuance
+once finalization starts. A cancellation acknowledgement is not a stopped-effects
+result. Final success follows durable settlement; a drain error preserves any
+published result and original failure. Dropping the waiter is interruption, with
+shared shutdown responsible for registered effect drainage. Retained custody must
+be reconciled under the same operation identity, never implicitly replayed with
+new demand identity. Desktop/RPC composition and live-provider acceptance remain
+unqualified by this native entry point.
+
 Explicit multi-file S3 selections identify each object by the pair of its exact key and VersionId. Their manifest files encode that pair as a JSON tuple in the opaque `source_key`, so different versions of one key may have different size/digest evidence. Conflicting evidence for the same key and version remains invalid. Per-object revision pins and reader requests preserve the raw protocol key and VersionId; single-object selections retain their existing raw `source_key`. Retained manifests are not rewritten.
 
 Use one range per S3 GetObject call and bounded parallel calls only when the supported reader and identity contract permit them. Pagination failures or capacity limits produce incomplete/unavailable manifests, not silently shortened file sets. Recheck the exact version/evidence when refreshing credentials or location. Capability differences of compatible endpoints produce explicit unsupported results.

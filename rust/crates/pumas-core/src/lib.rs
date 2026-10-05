@@ -105,6 +105,11 @@ pub use system::{
 
 // Re-export builder from api module
 pub use api::PumasApiBuilder;
+#[cfg(feature = "s3")]
+pub use api::{
+    S3ModelImportControl, S3ModelImportError, S3ModelImportPhase, S3ModelImportProgress,
+    S3ModelImportRequest,
+};
 
 use std::path::PathBuf;
 use std::sync::Arc;

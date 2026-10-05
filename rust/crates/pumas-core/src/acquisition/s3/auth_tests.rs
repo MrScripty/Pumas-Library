@@ -150,6 +150,22 @@ async fn signs_version_bound_head_and_conditional_range_with_optional_token() {
                 ));
                 let token_line = format!("x-amz-security-token: {TOKEN}\r\n");
                 assert_eq!(request.contains(&token_line), token.is_some());
+                if token.is_some() {
+                    let signed = request
+                        .split("SignedHeaders=")
+                        .nth(1)
+                        .unwrap()
+                        .split(',')
+                        .next()
+                        .unwrap();
+                    assert!(signed
+                        .split(';')
+                        .any(|header| header == "x-amz-security-token"));
+                    assert!(!valid_signature(
+                        &request.replace(TOKEN, "tampered-synthetic-token"),
+                        SECRET
+                    ));
+                }
                 assert!(!request.contains(SECRET));
             }
             assert!(!valid_signature(

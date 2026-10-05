@@ -1630,6 +1630,32 @@ pub struct AcquisitionConsumer {
 }
 
 impl AcquisitionConsumer {
+    /// Resolve explicit pins under the same bounded worker/scope authority as
+    /// transfer. Source failures remain typed; no durable acquisition is admitted.
+    #[cfg(feature = "s3")]
+    pub(crate) async fn resolve_s3_manifest(
+        &self,
+        reader: super::S3Reader,
+        entries: Vec<super::S3ManifestEntry>,
+        demand: &AcquisitionDemand,
+        retry: &AcquisitionRetryPolicy,
+        host: Box<dyn AcquisitionHost>,
+    ) -> Result<std::result::Result<super::S3ManifestSelection, super::S3ReaderError>> {
+        self.require_s3_transfer(demand, retry)?;
+        self.scope.run_worker_invocation(move |_| async move {
+            if host.cancel_requested() {
+                return Err(PumasError::DownloadCancelled);
+            }
+            tokio::select! {
+                biased;
+                _ = host.pause_requested() => {
+                    Err(if host.cancel_requested() { PumasError::DownloadCancelled } else { PumasError::DownloadPaused })
+                }
+                selection = reader.select_manifest(entries) => Ok(selection),
+            }
+        }).await
+    }
+
     pub fn owner(&self) -> &str {
         &self.owner
     }

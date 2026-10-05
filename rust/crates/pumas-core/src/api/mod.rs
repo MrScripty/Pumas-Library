@@ -18,7 +18,14 @@ mod reconciliation;
 mod resource_responses;
 mod runtime_profiles;
 mod runtime_tasks;
+#[cfg(feature = "s3")]
+mod s3_models;
 mod serving;
+#[cfg(feature = "s3")]
+pub use s3_models::{
+    S3ModelImportControl, S3ModelImportError, S3ModelImportPhase, S3ModelImportProgress,
+    S3ModelImportRequest,
+};
 mod state;
 mod state_hf;
 mod state_process;

@@ -156,6 +156,12 @@ are bounded startup checks, not installer installation or complete user flows.
 
 Before tagging or publishing, satisfy the remaining artifact-plan obligations:
 
+- Separately provision and verify ONNX Runtime for full inference packages.
+  Cargo never downloads it. Stage the selected 1.24.2 distribution's native
+  library closure beside RPC, with trusted archive/library hashes and notices;
+  `stage-rpc.py` copies already staged native inputs, not a build download.
+  Prove real ONNX execution from the extracted package with developer runtime
+  paths removed. An SDK-free build/health check does not qualify inference.
 - Extract each exact installer and verify renderer, RPC, native dependencies,
   version identity, and installation/startup on its target platform.
 - Exercise the required desktop, launcher-root recovery, and termination flows

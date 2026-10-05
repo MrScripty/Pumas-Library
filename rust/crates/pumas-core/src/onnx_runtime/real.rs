@@ -16,7 +16,7 @@ use super::{
     OnnxSessionStatus, OnnxTokenizer,
 };
 
-const ORT_NATIVE_LIBRARY_STRATEGY: &str = "ort-download-binaries-copy-dylibs-cpu";
+const ORT_NATIVE_LIBRARY_STRATEGY: &str = "explicit-runtime-library-cpu";
 const ONNX_RUNTIME_GRAPH_OPTIMIZATION: GraphOptimizationLevel = GraphOptimizationLevel::Level3;
 const ONNX_RUNTIME_INTRA_THREADS: usize = 1;
 const ONNX_RUNTIME_INTER_THREADS: usize = 1;
@@ -39,6 +39,7 @@ impl OnnxRuntimeSession {
         let tokenizer = OnnxTokenizer::from_model_path(&request.model_path)?;
         let model_config = OnnxModelConfig::from_model_path(&request.model_path)?;
         let embedding_dimensions = resolve_embedding_dimensions(&request.options, &model_config)?;
+        super::native_library::ensure_runtime_library()?;
         info!(
             provider = "onnx_runtime",
             model_id = %request.model_id.as_str(),

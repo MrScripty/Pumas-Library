@@ -3,11 +3,34 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const workflow = fs.readFileSync(path.join(root, '.github/workflows/build.yml'), 'utf8');
 const versionTagGuard = "github.ref_type == 'tag' && startsWith(github.ref_name, 'v')";
 const escapedVersionTagGuard = versionTagGuard.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+test('ONNX graph gate rejects transitive download unification and linked runtime mode', () => {
+  const check = spawnSync('python', ['-c', String.raw`
+import importlib.util
+spec = importlib.util.spec_from_file_location('features', 'scripts/release/check-dependency-features.py')
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+for graph in (
+    'ort v2.0.0-rc.12|api-24,load-dynamic,download-binaries',
+    'ort-sys v2.0.0-rc.12|api-24,disable-linking,download-binaries',
+    'ort v2.0.0-rc.12|api-24',
+):
+    try:
+        module.check_ort_features(graph, 'transitive regression')
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError('unsafe graph accepted')
+module.check_ort_features('ort v2.0.0-rc.12|api-24,load-dynamic\n\nort-sys v2.0.0-rc.12|api-24,disable-linking', 'accepted')
+`], { cwd: root, encoding: 'utf8', timeout: 10_000 });
+  assert.equal(check.status, 0, check.stderr || String(check.error));
+});
 
 test('Build runs for pull requests against every review base', () => {
   assert.match(workflow, /^  pull_request: \{\}$/m);

@@ -38,6 +38,45 @@ diagnostic facts, not design or documentation requirements.
 
 ### Rust
 
+Cargo builds never download ONNX Runtime. Default core/RPC builds keep the
+optional ONNX execution APIs and load a separately provisioned native library
+only when execution is requested. Missing or invalid runtime files return a
+`runtime_library` backend error; metadata/library-only use needs no native SDK.
+
+Provision and verify the native distribution before running ONNX: the current
+qualification pin is Microsoft's ONNX Runtime 1.24.2, with C API 24 and the
+correct target/CPU variant. Record the official release identity and trusted
+archive SHA-256, verify before extraction, and retain the selected library hash
+and upstream notices. The existing acquisition owner handles any explicitly
+authorized setup transfer; neither Cargo/build scripts nor app settings fetch it.
+There is no automatic source fallback or new version-manager installation flow.
+
+Set `ORT_DYLIB_PATH` to the absolute `.so`/`.dylib`/`.dll` file before process
+startup, or package the platform's named library beside the executable. For
+example, with an already verified Linux SDK:
+
+```bash
+ORT_DYLIB_PATH=/absolute/onnxruntime-1.24.2/lib/libonnxruntime.so \
+  cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library
+```
+
+If its dependent libraries require an OS loader path, supply that only to the
+invocation; do not change system loader configuration. `ORT_LIB_PATH` and
+`ORT_PREFER_DYNAMIC_LINK` belonged to build-time linking and are not runtime
+selectors in this mode. The binding retains its process-wide loaded library;
+runtime replacement requires restarting the process. Applications embedding
+Pumas keep ownership of ORT environment settings and must select the same
+library before any other direct ORT calls.
+
+Consumers that only need model metadata can declare `pumas-library` with
+`default-features = false`; add `hf-client`, `process-manager`, `gpu-monitor`
+or `s3` only when their actual calls need them. `full` includes `onnx-runtime`.
+Metadata/index/import APIs remain outside that feature. Cargo features unify
+additively, so audit the entire consumer graph: another dependency enabling ORT
+defaults can reintroduce its optional download capability and is unsupported.
+`scripts/release/check-dependency-features.py` guards the workspace's default,
+all-feature, binding and explicit ONNX graphs on all declared desktop targets.
+
 ```bash
 ./scripts/rust/check.sh
 cargo test --manifest-path rust/Cargo.toml -p pumas-library <test-filter>

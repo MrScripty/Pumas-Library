@@ -59,6 +59,15 @@ binary, Python, Docker, or version-manager installation flows.
 - Persisted runtime-profile routes require migration when identity changes.
 - ONNX Runtime packaging remains part of the Rust native dependency closure.
 
+The no-download correction keeps execution in-process but provisions native
+ONNX Runtime separately. `ort` uses `load-dynamic` with its download capability
+disabled across supported Cargo graphs. Cargo never fetches runtime binaries;
+the explicit installed library or release-packaged adjacent library is selected
+before session creation. Build/setup source choice is not ordinary app settings
+and does not enter app-manager's version installation flows. See
+[development setup](../DEVELOPMENT.md#rust) for the compatibility change and
+verified-distribution requirements.
+
 ## Rejected Alternatives
 
 - Add ONNX-specific branches beside Ollama and llama.cpp: this preserves hidden

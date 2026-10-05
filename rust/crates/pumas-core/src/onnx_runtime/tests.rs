@@ -276,7 +276,106 @@ fn real_session_loader_uses_validated_model_directory_contract() {
     };
 
     assert_eq!(err.code, OnnxRuntimeErrorCode::Backend);
-    assert!(err.message.contains("model load failed"));
+    // Model parsing is reached only when the explicitly provisioned native
+    // library is available; otherwise the missing dependency is reported first.
+    if err.field.as_deref() == Some("runtime_library") {
+        assert!(err.message.contains("do not download ONNX Runtime"));
+    } else {
+        assert!(err.message.contains("model load failed"));
+    }
+}
+
+#[test]
+fn real_session_missing_or_invalid_runtime_is_a_typed_error_in_a_fresh_process() {
+    let fixture = tempfile::tempdir().unwrap();
+    let invalid = fixture.path().join("invalid-library");
+    std::fs::write(&invalid, b"not a native shared library").unwrap();
+    let cases = vec![
+        ("missing", fixture.path().join("missing-library")),
+        ("invalid", invalid),
+    ];
+    #[cfg(target_os = "linux")]
+    let cases = {
+        let mut cases = cases;
+        for (case, source) in [
+        ("symbol", "int synthetic_fixture(void) { return 1; }"),
+        ("null", "void *OrtGetApiBase(void) { return 0; }"),
+        ("incompatible", "struct Base { void *(*api)(unsigned); const char *(*version)(void); }; void *api(unsigned v) { (void)v; return 0; } const char *version(void) { return \"1.23.0\"; } static struct Base base = {api, version}; const struct Base *OrtGetApiBase(void) { return &base; }"),
+        ("api", "struct Base { void *(*api)(unsigned); const char *(*version)(void); }; void *api(unsigned v) { (void)v; return 0; } const char *version(void) { return \"1.24.2\"; } static struct Base base = {api, version}; const struct Base *OrtGetApiBase(void) { return &base; }"),
+    ] {
+        let input = fixture.path().join(format!("{case}.c"));
+        let library = fixture.path().join(format!("{case}.so"));
+        std::fs::write(&input, source).unwrap();
+        let compiled = std::process::Command::new("cc")
+            .args(["-shared", "-fPIC"])
+            .arg(&input).arg("-o").arg(&library).status().unwrap();
+        assert!(compiled.success(), "synthetic ABI fixture did not compile");
+            cases.push((case, library));
+        }
+        cases
+    };
+    for (case, path) in cases {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "onnx_runtime::tests::real_session_runtime_error_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("PUMAS_ONNX_RUNTIME_ERROR_CASE", case)
+            .env("ORT_DYLIB_PATH", path)
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    assert!(status.success(), "runtime error child failed: {case}");
+                    break;
+                }
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20))
+                }
+                outcome => {
+                    let termination = child.kill();
+                    let drained = child.wait();
+                    assert!(
+                        drained.is_ok(),
+                        "runtime child could not drain: {drained:?}"
+                    );
+                    panic!("runtime child {case} did not finish: {outcome:?}, termination {termination:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "spawned in isolated processes by the runtime error regression"]
+fn real_session_runtime_error_child() {
+    let case = std::env::var("PUMAS_ONNX_RUNTIME_ERROR_CASE").unwrap();
+    let fixture = model_fixture_with_tokenizer();
+    let request = OnnxLoadRequest::parse(
+        fixture.path(),
+        "model.onnx",
+        "nomic-embed-text-v1.5",
+        OnnxLoadOptions::default(),
+    )
+    .unwrap();
+    let error = OnnxRuntimeSession::load(request).unwrap_err();
+    assert_eq!(error.code, OnnxRuntimeErrorCode::Backend);
+    assert_eq!(error.field.as_deref(), Some("runtime_library"));
+    assert!(error.message.contains(match case.as_str() {
+        "missing" => "file is missing",
+        "invalid" => "could not be loaded",
+        "symbol" => "lacks OrtGetApiBase",
+        "null" => "null API base",
+        "incompatible" => "incompatible with C API 24",
+        "api" => "does not provide C API 24",
+        _ => panic!("unknown fixture case"),
+    }));
+    assert!(error.message.contains("ORT_DYLIB_PATH"));
+    assert!(error.message.contains("do not download ONNX Runtime"));
 }
 
 #[test]

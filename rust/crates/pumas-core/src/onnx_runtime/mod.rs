@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 mod config;
 mod fake;
 mod manager;
+mod native_library;
 mod output;
 mod package;
 mod postprocess;

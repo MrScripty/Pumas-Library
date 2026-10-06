@@ -2,6 +2,17 @@
 
 These are the admitted exact paths/closed path families. The actual source files selected for the current Q1 slice are listed in the execution ledger; remaining paths below are authorized Q1 boundaries, not claims that those implementations exist. Before a slice edits files, its integrator records the exact members and actual tests in its ledger. New authority/consumer boundaries trigger re-plan.
 
+## Installed S3 process-loss acceptance — 2026-10-06
+
+Parent admits exactly one pre-FilesReady Linux process-loss milestone from frozen
+ed31639 on `feat/s3-installed-process-loss-ed31639`. Only the existing installed
+harness, its focused provenance/harness tests, owning plan/ledger/write-set and
+the [process-loss report](s3-installed-process-loss-2026-10-06.md) with matching
+JSON evidence may change. Preserve the actual qualified production binary and
+all frozen Rust/native/dependency/ONNX/network settings. Tests and precise
+boundary/cold-custody claims are recorded in that admission. No further fault
+campaign or provider/platform/inference acceptance is admitted.
+
 ## Q1: one HTTP acquisition owner with real consumers
 
 **Canonical module paths:** `rust/crates/pumas-core/src/acquisition/{mod.rs,manifest.rs,http.rs,service.rs,store.rs,workspace.rs}` now hold validated source-neutral selections, the HTTP representation/body-streaming protocol, the durable lifecycle/store, and capability workspace. The GitHub release adapter is `acquisition/github_release.rs`, with its fresh asset-metadata resolver in the existing `network/github.rs` owner; the public/cache release DTO remains unchanged. The adapter maps publisher asset identity/digest evidence into a verified manifest while keeping the retrieval URL ephemeral. The local Q1 candidate has one durable transfer owner; consumer-specific receipt interpretation stays with its existing model or native owner. Source-reader adaptation may remain in this module or a focused `acquisition/sources/` child when an accepted source requires it.

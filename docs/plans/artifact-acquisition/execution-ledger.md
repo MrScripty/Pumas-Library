@@ -1,5 +1,15 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — one installed pre-FilesReady process-loss milestone admitted
+
+Parent delegates one bounded AC05/AC17 fixture after frozen ed31639. Separate
+`feat/s3-installed-process-loss-ed31639` preserves that branch/ref and all
+production artifact identities. The exact write set, first-byte/SIGKILL/cold
+custody proof, focused controls and unchanged eleven-scenario scope are recorded
+in [admission](reports/s3-installed-process-loss-2026-10-06.md). No production
+Rust/dependency/native/ONNX/network setting changes are admitted. Execution is
+pending; actual-provider, UI/platform/inference and hosted gates remain open.
+
 ## 2026-10-06 — installed production default-plus-S3 milestone frozen
 
 The actual unchanged release settings build completed in 19m25s at 4f5a2a74.

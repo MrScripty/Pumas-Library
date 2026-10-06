@@ -1,0 +1,145 @@
+test_approved_redirect_dispatches_without_real_network (__main__.AdmissionTests.test_approved_redirect_dispatches_without_real_network) ... FAIL
+test_approved_wheels_and_hash_fragment_reach_constructor (__main__.AdmissionTests.test_approved_wheels_and_hash_fragment_reach_constructor) ... 
+  test_approved_wheels_and_hash_fragment_reach_constructor (__main__.AdmissionTests.test_approved_wheels_and_hash_fragment_reach_constructor) (url='https://download.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-py3-none-any.whl') ... ERROR
+  test_approved_wheels_and_hash_fragment_reach_constructor (__main__.AdmissionTests.test_approved_wheels_and_hash_fragment_reach_constructor) (url='https://files.pythonhosted.org/packages/helper-1.0-py3-none-any.whl') ... ERROR
+  test_approved_wheels_and_hash_fragment_reach_constructor (__main__.AdmissionTests.test_approved_wheels_and_hash_fragment_reach_constructor) (url='https://files.pythonhosted.org/packages/helper-1.0-py3-none-any.whl#sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') ... ERROR
+test_cached_https_adapter_is_refused_before_cache_or_dispatch (__main__.AdmissionTests.test_cached_https_adapter_is_refused_before_cache_or_dispatch) ... ok
+test_candidate_refusals_precede_constructor (__main__.AdmissionTests.test_candidate_refusals_precede_constructor) ... ok
+test_original_pip_reaches_source_constructor_despite_public_flags (__main__.AdmissionTests.test_original_pip_reaches_source_constructor_despite_public_flags) ... ERROR
+test_real_requirement_boundary_refuses_inert_metadata_direct_sources (__main__.AdmissionTests.test_real_requirement_boundary_refuses_inert_metadata_direct_sources) ... 
+  test_real_requirement_boundary_refuses_inert_metadata_direct_sources (__main__.AdmissionTests.test_real_requirement_boundary_refuses_inert_metadata_direct_sources) (dependency='helper @ https://files.pythonhosted.org/packages/helper-1.0-py3-none-any.whl') ... ERROR
+test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) ... 
+  test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) (redirect='https://example.invalid/hidden.tar.gz') ... FAIL
+  test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) (redirect='http://download.pytorch.org/whl/cpu/fixture') ... FAIL
+  test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) (redirect='file:///not-read/fixture') ... FAIL
+  test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) (redirect='https://user:secret@download.pytorch.org/whl/cpu/fixture') ... FAIL
+  test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) (redirect='https://download.pytorch.org/whl/cpu/fixture?token=secret') ... FAIL
+test_refusal_message_excludes_rejected_url_and_credentials (__main__.AdmissionTests.test_refusal_message_excludes_rejected_url_and_credentials) ... ok
+test_unsupported_version_and_missing_seam_refuse_before_activation (__main__.AdmissionTests.test_unsupported_version_and_missing_seam_refuse_before_activation) ... ok
+
+======================================================================
+ERROR: test_approved_wheels_and_hash_fragment_reach_constructor (__main__.AdmissionTests.test_approved_wheels_and_hash_fragment_reach_constructor) (url='https://download.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-py3-none-any.whl')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/q2-resolver-boundary/test_admission_proposal.py", line 129, in test_approved_wheels_and_hash_fragment_reach_constructor
+    self.factory()._make_base_candidate_from_link(
+  File "/workspace/scratch/q2-resolver-boundary/admission_proposal.py", line 94, in candidate
+    return original_candidate(factory, link, template, name, version)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/factory.py", line 198, in _make_base_candidate_from_link
+    if link in self._build_failures:
+               ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Factory' object has no attribute '_build_failures'
+
+======================================================================
+ERROR: test_approved_wheels_and_hash_fragment_reach_constructor (__main__.AdmissionTests.test_approved_wheels_and_hash_fragment_reach_constructor) (url='https://files.pythonhosted.org/packages/helper-1.0-py3-none-any.whl')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/q2-resolver-boundary/test_admission_proposal.py", line 129, in test_approved_wheels_and_hash_fragment_reach_constructor
+    self.factory()._make_base_candidate_from_link(
+  File "/workspace/scratch/q2-resolver-boundary/admission_proposal.py", line 94, in candidate
+    return original_candidate(factory, link, template, name, version)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/factory.py", line 198, in _make_base_candidate_from_link
+    if link in self._build_failures:
+               ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Factory' object has no attribute '_build_failures'
+
+======================================================================
+ERROR: test_approved_wheels_and_hash_fragment_reach_constructor (__main__.AdmissionTests.test_approved_wheels_and_hash_fragment_reach_constructor) (url='https://files.pythonhosted.org/packages/helper-1.0-py3-none-any.whl#sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/q2-resolver-boundary/test_admission_proposal.py", line 129, in test_approved_wheels_and_hash_fragment_reach_constructor
+    self.factory()._make_base_candidate_from_link(
+  File "/workspace/scratch/q2-resolver-boundary/admission_proposal.py", line 94, in candidate
+    return original_candidate(factory, link, template, name, version)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/factory.py", line 198, in _make_base_candidate_from_link
+    if link in self._build_failures:
+               ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Factory' object has no attribute '_build_failures'
+
+======================================================================
+ERROR: test_original_pip_reaches_source_constructor_despite_public_flags (__main__.AdmissionTests.test_original_pip_reaches_source_constructor_despite_public_flags)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/q2-resolver-boundary/test_admission_proposal.py", line 73, in test_original_pip_reaches_source_constructor_despite_public_flags
+    list(self.factory()._make_requirements_from_install_req(child, []))
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/factory.py", line 519, in _make_requirements_from_install_req
+    cand = self._make_base_candidate_from_link(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/factory.py", line 198, in _make_base_candidate_from_link
+    if link in self._build_failures:
+               ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Factory' object has no attribute '_build_failures'
+
+======================================================================
+ERROR: test_real_requirement_boundary_refuses_inert_metadata_direct_sources (__main__.AdmissionTests.test_real_requirement_boundary_refuses_inert_metadata_direct_sources) (dependency='helper @ https://files.pythonhosted.org/packages/helper-1.0-py3-none-any.whl')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/q2-resolver-boundary/test_admission_proposal.py", line 91, in test_real_requirement_boundary_refuses_inert_metadata_direct_sources
+    list(self.factory()._make_requirements_from_install_req(child, []))
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/factory.py", line 514, in _make_requirements_from_install_req
+    self._fail_if_link_is_unsupported_wheel(ireq.link)
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/factory.py", line 138, in _fail_if_link_is_unsupported_wheel
+    if wheel.supported(self._finder.target_python.get_unsorted_tags()):
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'target_python'
+
+======================================================================
+FAIL: test_approved_redirect_dispatches_without_real_network (__main__.AdmissionTests.test_approved_redirect_dispatches_without_real_network)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/q2-resolver-boundary/test_admission_proposal.py", line 159, in test_approved_redirect_dispatches_without_real_network
+    self.assertEqual(session.get(WHEEL).status_code, 200)
+AssertionError: 302 != 200
+
+======================================================================
+FAIL: test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) (redirect='https://example.invalid/hidden.tar.gz')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/q2-resolver-boundary/test_admission_proposal.py", line 149, in test_redirect_refusals_precede_adapter_dispatch
+    with self.assertRaises(proposal.AdmissionRefused):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: AdmissionRefused not raised
+
+======================================================================
+FAIL: test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) (redirect='http://download.pytorch.org/whl/cpu/fixture')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/q2-resolver-boundary/test_admission_proposal.py", line 149, in test_redirect_refusals_precede_adapter_dispatch
+    with self.assertRaises(proposal.AdmissionRefused):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: AdmissionRefused not raised
+
+======================================================================
+FAIL: test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) (redirect='file:///not-read/fixture')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/q2-resolver-boundary/test_admission_proposal.py", line 149, in test_redirect_refusals_precede_adapter_dispatch
+    with self.assertRaises(proposal.AdmissionRefused):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: AdmissionRefused not raised
+
+======================================================================
+FAIL: test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) (redirect='https://user:secret@download.pytorch.org/whl/cpu/fixture')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/q2-resolver-boundary/test_admission_proposal.py", line 149, in test_redirect_refusals_precede_adapter_dispatch
+    with self.assertRaises(proposal.AdmissionRefused):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: AdmissionRefused not raised
+
+======================================================================
+FAIL: test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) (redirect='https://download.pytorch.org/whl/cpu/fixture?token=secret')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/q2-resolver-boundary/test_admission_proposal.py", line 149, in test_redirect_refusals_precede_adapter_dispatch
+    with self.assertRaises(proposal.AdmissionRefused):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: AdmissionRefused not raised
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.047s
+
+FAILED (failures=6, errors=5)

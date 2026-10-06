@@ -15,7 +15,8 @@ prefix-to-import and cold receipts. Attribution/release tests pass 19 cases;
 Core Clippy caught duplicate test-fixture loading; a shared test-parent module
 fix passes strict all-target core Clippy and the final 28-test unit rerun;
 intermediate compiler and disk/SIGBUS diagnostics remain retained.
-Post-prefix RPC qualification and provider/platform gates remain pending.
+Post-prefix production default-plus-S3 RPC Clippy passes with the inherited
+dead-code allowance; RPC tests and provider/platform gates remain pending.
 Protected manifest/native/ONNX source remains byte-identical to integrated 7cf.
 See [checkpoint qualification](reports/s3-prefix-enumeration-2026-10-06.md)
 and [parent review packet](reports/s3-prefix-review-packet-2026-10-06.md).

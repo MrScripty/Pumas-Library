@@ -46,7 +46,8 @@ release-contract tests pass 19; graph/ownership/format/attribution checks pass.
 The final shared test-fixture cleanup passes strict core Clippy with
 `--all-targets -- -D warnings` and the 28-test focused unit rerun.
 Production RPC compilation and 302 RPC tests passed before prefix implementation;
-post-prefix RPC tests/Clippy remain pending. Hosted CI, actual provider acceptance,
+post-prefix production RPC Clippy passes with the inherited dead-code
+allowance; post-prefix RPC tests remain pending. Hosted CI, actual provider acceptance,
 platform/runtime/inference and desktop/accessibility are separate pending gates.
 No provider account credentials have been used or provisioned.
 

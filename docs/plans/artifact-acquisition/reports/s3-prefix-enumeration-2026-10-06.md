@@ -104,8 +104,10 @@ to the shared S3 test parent, retaining its original visibility and bytes. An
 intermediate sibling import failed visibility checks; that compiler evidence is
 retained in `prefix-clippy-core-fixture-reuse.log`. Post-cleanup strict core Clippy passed with `--all-targets -- -D warnings`
 in `prefix-clippy-core-shared-fixture.log`; the final focused unit rerun passed 28 tests, with the two subprocess helpers
-exercised by their parent tests, in `prefix-unit-shared-fixture-recovered.log`. Post-prefix RPC tests,
-production RPC Clippy and hosted checks remain pending at this checkpoint.
+exercised by their parent tests, in `prefix-unit-shared-fixture-recovered.log`. Post-prefix production default-plus-S3 RPC Clippy passed (`-D warnings
+-A dead_code`, preserving the inherited dead-code allowance) in
+`prefix-rpc-production-clippy.log`. Post-prefix RPC tests and hosted checks remain
+pending at this checkpoint.
 The 302 RPC tests above qualified the attribution prerequisite before prefix
 source changes; they are not a post-prefix result.
 The actual default-plus-S3 graph retains approved-main dynamic ONNX loading and
@@ -170,3 +172,22 @@ cargo test --locked --offline --manifest-path rust/Cargo.toml \
 Resume post-prefix production/default-plus-S3 RPC qualification before claiming
 completion. Provider/platform gates remain separate; no hidden credentials or
 runtime provisioning may be introduced to close them.
+
+
+### Safe-boundary resume checkpoint at 99% allowance
+
+Final source remains `253cc3d17aeae04f4df996133e0f7f4745e03a71` (tree
+`1bf9e7614f8cfb9850f62399a0cd8f839db500d3`). Core strict Clippy, final units
+and production RPC Clippy have completed successfully. No active test is
+interrupted. The next bounded command is the actual default-plus-S3 RPC suite:
+
+```sh
+cargo test --locked --offline --manifest-path rust/Cargo.toml \
+  -p pumas-rpc --features s3 -- --test-threads=1
+```
+
+Use the reproduction environment above. Retain output at
+`/workspace/scratch/s3-prefix-main95/prefix-rpc-final-tests.log`. At this
+checkpoint its result is pending. A running process must be polled before
+starting any replacement; service interruption is not evidence of test success.
+Provider/platform gates and parent PR coordination remain open.

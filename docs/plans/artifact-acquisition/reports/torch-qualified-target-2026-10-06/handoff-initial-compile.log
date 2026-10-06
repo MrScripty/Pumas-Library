@@ -1,0 +1,10 @@
+   Compiling pumas-library v0.7.0 (/tmp/pumas-q2-qualified-target-bb33/rust/crates/pumas-core)
+   Compiling pumas-app-manager v0.7.0 (/tmp/pumas-q2-qualified-target-bb33/rust/crates/pumas-app-manager)
+error[E0425]: cannot find value `python` in this scope
+    --> crates/pumas-app-manager/src/version_manager/installer/torch.rs:2787:118
+     |
+2787 |                     validate_torch_target_evidence(&runtime, prepared.resolution.accepted_target.as_ref().unwrap(), &python)?;
+     |                                                                                                                      ^^^^^^ not found in this scope
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `pumas-app-manager` (lib test) due to 1 previous error

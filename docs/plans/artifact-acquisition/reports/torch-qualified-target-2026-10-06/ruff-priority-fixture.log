@@ -1,0 +1,14 @@
+E731 Do not assign a `lambda` expression, use a `def`
+   --> torch-server/tests/test_qualified_wheel_catalog.py:176:9
+    |
+174 |         lock = self.lock.replace("sha256:" + pure["sha256"],
+175 |                                 "sha256:" + pure["sha256"] + " --hash=sha256:" + native["sha256"])
+176 |         fetch = lambda url: index_rows([pure, native, *self.artifacts[1:]])
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+177 |         legacy = catalog.catalog(lock, [], fetch)
+178 |         explicit = catalog.catalog(lock, [], fetch, target_observation=observation)
+    |
+help: Rewrite `fetch` as a `def`
+
+Found 1 error.
+No fixes available (1 hidden fix can be enabled with the `--unsafe-fixes` option).

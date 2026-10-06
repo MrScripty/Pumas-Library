@@ -428,6 +428,32 @@ migration remain separate gates. Tiny synthetic compatible native controls canno
 close those gates or AQ-PACKAGES/Q2 acceptance. Actual native glibc2.41 still
 refuses the pinned solver's unsupported exact target projection.
 
+The private staged CPU lifecycle may consume this live installed capability by
+value. Its caller supplies an approved managed provider identity and executable
+hash; provider and selected consumer executable remain distinct. Compiled runtime
+source bytes, the actual provider, selected installed members and all original
+packet/catalog/target/producer/lock/projection/proof bytes are checked before and
+after the genuine existing probe and after controlled relocation. The explicit
+`pumas.selected-runtime-profile.v1` input binds selected artifacts and provider;
+it does not masquerade as a resolver report. Default resolution-based probing
+remains unchanged. Isolated probing uses a fresh owned `-X pycache_prefix` and
+`-B`; the source namespace and empty cache are fenced after probing.
+
+A registered publication job retains the whole live packet and validated runtime
+through rename, durable installed metadata acknowledgment and failure cleanup.
+The separate `pumas.selected-runtime-install.v1` record binds the original catalog
+receipt hash/id, genuine local proof and probe, approved provider, exact metadata
+and native directory identity. It never rewrites catalog settlement. Known
+pre-metadata failures reclaim only the matching owned destination; foreign
+identity, unknown metadata and committed-without-acknowledgment outcomes retain
+pending evidence for owner recovery. The distinct marker is deliberately
+non-authorizing to legacy cleanup. No cold reconstruction or replay API is added.
+Only a private CPU/no-adapter profile is admitted. Automatic/preview rollout,
+complete recovery, bootstrap baseline and real/native provider qualification
+remain separate. Synthetic arithmetic/protocol fixtures support local publication
+and custody evidence; they do not establish actual Torch or model execution.
+Observed network traces are not an enforced network-denial claim.
+
 The decisive test denies network during the final installation leg and rejects hidden direct-URL retrieval, alternate same-name/version wheels, and missing closure members. Resolver metadata and managed-Python bootstrap traffic remain separately recorded; the claim is exact payload handoff, not interception of every package-tool request. Sources: [pip report](https://pip.pypa.io/en/stable/reference/installation-report/) and [pip install](https://pip.pypa.io/en/stable/cli/pip_install/).
 
 The bounded retained-preview and automatic-selection Torch implementation uses

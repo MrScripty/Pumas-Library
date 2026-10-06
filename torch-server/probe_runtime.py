@@ -121,9 +121,24 @@ def device_probe(torch) -> tuple[dict, dict]:
     return hardware, capability
 
 
-def probe(root: Path) -> dict:
-    resolution_bytes = (root / "resolution.json").read_bytes()
+def probe(root: Path, *, selected_profile=False) -> dict:
+    profile = root / ("selected-runtime-profile.json" if selected_profile else "resolution.json")
+    if selected_profile:
+        if (
+            profile.is_symlink()
+            or not profile.is_file()
+            or profile.stat().st_size > 2 * 1024 * 1024
+        ):
+            raise ValueError("Invalid owned selected runtime profile")
+        with profile.open("rb") as source:
+            resolution_bytes = source.read(2 * 1024 * 1024 + 1)
+        if len(resolution_bytes) > 2 * 1024 * 1024:
+            raise ValueError("Selected runtime profile exceeds its byte budget")
+    else:
+        resolution_bytes = profile.read_bytes()
     resolution = json.loads(resolution_bytes)
+    if selected_profile and resolution.get("schema") != "pumas.selected-runtime-profile.v1":
+        raise ValueError("Unsupported selected runtime profile")
     capabilities = {}
     installed = {}
     for artifact in resolution.get("artifacts", []):
@@ -272,7 +287,9 @@ def probe(root: Path) -> dict:
             "installed_distributions": installed,
             "all_installed_distributions": all_installed,
             "distributions_sha256": distributions_sha256,
-            "resolution_sha256": hashlib.sha256(resolution_bytes).hexdigest(),
+            ("runtime_profile_sha256" if selected_profile else "resolution_sha256"): hashlib.sha256(
+                resolution_bytes
+            ).hexdigest(),
             "sidecar_sha256": hashlib.sha256((root / "serve.py").read_bytes()).hexdigest(),
         },
         "capabilities": capabilities,
@@ -281,7 +298,7 @@ def probe(root: Path) -> dict:
 
 def main() -> None:
     root = Path(__file__).resolve().parent
-    result = probe(root)
+    result = probe(root, selected_profile="--selected-profile" in sys.argv)
     (root / "probe-results.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)
     if result["core_status"] != "passed":

@@ -26,6 +26,18 @@ enum Case {
     SelectedProjectionMutation { file: &'static str, grow: bool },
     SelectedAbandonedChecker,
     Consumption(ConsumeCase),
+    Lifecycle(LifecycleCase),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum LifecycleCase {
+    Success,
+    FailedProbe,
+    Mutation(&'static str),
+    Publication(super::offline_selection::local_consumption::runtime::PublicationFault),
+    Cancel,
+    Abandon,
+    AbandonPublication,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -93,6 +105,7 @@ async fn fixture(case: Case) {
             | Case::SelectedProjectionMutation { .. }
             | Case::SelectedAbandonedChecker
             | Case::Consumption(_)
+            | Case::Lifecycle(_)
     ) {
         // Explicit test-only target declaration: uv 0.12.23 cannot represent
         // this executor's actual glibc 2.41. A synthetic 2.40 floor is validated
@@ -113,7 +126,23 @@ async fn fixture(case: Case) {
         .join("../../../torch-server/tests/test_install_verified_wheels.py");
     let code = r#"import importlib.util,json,pathlib,sys
 s=importlib.util.spec_from_file_location('fixture',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
-p=pathlib.Path(sys.argv[2]); rows=[m.make_wheel(p,'torch',version='2.14.0+cpu',requires=(['branch>=1','dependency<1'] if sys.argv[3]=='solver-error' else ['branch>=1'])),m.make_wheel(p,'branch',version='1',requires=['dependency<2']),m.make_wheel(p,'branch',version='2',requires=['dependency>=2']),m.make_wheel(p,'dependency',version='1'),m.make_wheel(p,'dependency',version='2')]
+content=b'VALUE = 7\n'
+if sys.argv[3].startswith('lifecycle'):
+ content=b"""from types import SimpleNamespace
+__version__='2.14.0+cpu'
+version=SimpleNamespace(cuda=None,hip=None)
+cuda=SimpleNamespace(is_available=lambda:False)
+backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda:False))
+class Tensor:
+ def __init__(self,values): self.values=values
+ def __matmul__(self,other):
+  return Tensor([[sum(a*b for a,b in zip(row,column)) for column in zip(*other.values)] for row in self.values])
+ def tolist(self): return self.values
+ def cpu(self): return self
+def ones(shape): return Tensor([[1.0 for _ in range(shape[1])] for _ in range(shape[0])])
+"""
+ if sys.argv[3]=='lifecycle-failed': content=content.replace(b'self.values])',b'self.values]).bad()')
+p=pathlib.Path(sys.argv[2]); rows=[m.make_wheel(p,'torch',version='2.14.0+cpu',content=content,requires=(['branch>=1','dependency<1'] if sys.argv[3]=='solver-error' else ['branch>=1'])),m.make_wheel(p,'branch',version='1',requires=['dependency<2']),m.make_wheel(p,'branch',version='2',requires=['dependency>=2']),m.make_wheel(p,'dependency',version='1'),m.make_wheel(p,'dependency',version='2')]
 if sys.argv[3]=='wrong-info':
  import hashlib,zipfile
  a=rows[0]; path=p/a['url'].rsplit('/',1)[-1]
@@ -137,6 +166,10 @@ print(json.dumps(rows))
             "wrong-info"
         } else if case == Case::SelectedSolverError {
             "solver-error"
+        } else if case == Case::Lifecycle(LifecycleCase::FailedProbe) {
+            "lifecycle-failed"
+        } else if matches!(case, Case::Lifecycle(_)) {
+            "lifecycle"
         } else {
             "valid"
         })
@@ -318,6 +351,7 @@ print(json.dumps(rows))
                     | Case::SelectedProjectionMutation { .. }
                     | Case::SelectedAbandonedChecker
                     | Case::Consumption(_)
+                    | Case::Lifecycle(_)
             ));
             assert_eq!(complete.receipt.owner, CATALOG_OWNER);
             assert_eq!(complete.evidence["request_sha256"], request_hash);
@@ -372,6 +406,7 @@ print(json.dumps(rows))
             | Case::SelectedProjectionMutation { .. }
             | Case::SelectedAbandonedChecker
             | Case::Consumption(_)
+            | Case::Lifecycle(_)
     ) {
         use super::offline_selection::{
             QualifiedOfflineSolver, SelectionContext, SelectionFailure,
@@ -450,7 +485,10 @@ print(json.dumps(rows))
         } else {
             match complete.select(context).await {
                 Ok(packet) => {
-                    assert!(matches!(case, Case::Selected | Case::Consumption(_)));
+                    assert!(matches!(
+                        case,
+                        Case::Selected | Case::Consumption(_) | Case::Lifecycle(_)
+                    ));
                     assert_eq!(packet.evidence["schema"], "pumas.selected-wheel-packet.v1");
                     assert_eq!(packet.evidence["request_sha256"], request_hash);
                     assert_eq!(packet.evidence["target_observation_sha256"], approved_hash);
@@ -468,6 +506,18 @@ print(json.dumps(rows))
                     println!("selected packet: {}", packet.evidence);
                     if let Case::Consumption(action) = case {
                         consume_fixture(
+                            action,
+                            packet,
+                            &installer,
+                            &consumer,
+                            &runtime,
+                            &python,
+                            &granted_path,
+                            &mut retained_stage,
+                        )
+                        .await;
+                    } else if let Case::Lifecycle(action) = case {
+                        lifecycle_fixture(
                             action,
                             packet,
                             &installer,
@@ -544,6 +594,15 @@ print(json.dumps(rows))
             .split_whitespace()
             .map(|pid| pid.parse().unwrap())
             .collect()
+    } else if matches!(
+        case,
+        Case::Lifecycle(LifecycleCase::Cancel | LifecycleCase::Abandon)
+    ) {
+        std::fs::read_to_string(versions.join("lifecycle-child-pids"))
+            .unwrap()
+            .split_whitespace()
+            .map(|pid| pid.parse().unwrap())
+            .collect()
     } else {
         vec![]
     };
@@ -594,6 +653,7 @@ print(json.dumps(rows))
                     | Case::SelectedProjectionMutation { .. }
                     | Case::SelectedAbandonedChecker
                     | Case::Consumption(_)
+                    | Case::Lifecycle(_)
             )
         );
         assert_eq!(
@@ -610,6 +670,7 @@ print(json.dumps(rows))
                     | Case::SelectedProjectionMutation { .. }
                     | Case::SelectedAbandonedChecker
                     | Case::Consumption(_)
+                    | Case::Lifecycle(_)
             )
         );
         assert_eq!(
@@ -639,17 +700,16 @@ print(json.dumps(rows))
             assert!(versions.join(relative).exists());
         }
     }
-    assert!(metadata
-        .get_installed_version("v2.14.0", Some(AppId::Torch))
-        .unwrap()
-        .is_none());
+    assert_eq!(metadata.get_installed_version("v2.14.0", Some(AppId::Torch)).unwrap().is_some(),
+        matches!(case, Case::Lifecycle(LifecycleCase::Success | LifecycleCase::AbandonPublication |
+            LifecycleCase::Publication(super::offline_selection::local_consumption::runtime::PublicationFault::AfterMetadata))));
     if let Some(complete) = completion.take() {
         complete._grant.validate().unwrap();
         complete._grant.clear_contents().unwrap();
     }
     drop(retained_stage);
     println!(
-        "catalog control {case:?}: requests={} complete={} runtime_published=false cleanup_drained=true",
+        "catalog control {case:?}: requests={} complete={} publication_controlled=true cleanup_drained=true",
         requests.load(Ordering::SeqCst),
         matches!(
             case,
@@ -663,6 +723,7 @@ print(json.dumps(rows))
                 | Case::SelectedProjectionMutation { .. }
                 | Case::SelectedAbandonedChecker
                 | Case::Consumption(_)
+                    | Case::Lifecycle(_)
         )
     );
 }
@@ -1032,4 +1093,403 @@ async fn abandoned_selected_consumer_retains_live_packet_until_descendant_drain(
 #[ignore = "Managed actual local verifier cancellation and descendant cleanup"]
 async fn cancelled_selected_consumer_refuses_proof_and_preserves_catalog_receipt() {
     fixture(Case::Consumption(ConsumeCase::Cancel)).await;
+}
+#[allow(clippy::too_many_arguments)]
+async fn lifecycle_fixture(
+    action: LifecycleCase,
+    packet: super::offline_selection::SelectedWheelPacket,
+    installer: &VersionInstaller,
+    consumer: &AcquisitionConsumer,
+    runtime: &Path,
+    python: &Path,
+    granted: &Path,
+    stage: &mut Option<Arc<TorchPendingStage>>,
+) {
+    use super::offline_selection::local_consumption::runtime::{
+        ProviderApproval, PublicationFault, PublicationPause, RuntimeFailure,
+        RuntimeLifecycleContext,
+    };
+    use super::offline_selection::{QualifiedOfflineSolver, SelectionContext};
+    let original_receipt = serde_json::to_vec(&packet.catalog.receipt).unwrap();
+    let context = || SelectionContext {
+        installer,
+        consumer,
+        runtime,
+        python,
+        solver: QualifiedOfflineSolver {
+            path: PathBuf::from(std::env::var("PUMAS_QUALIFIED_UV").unwrap()),
+        },
+    };
+    let installed = packet
+        .consume(context())
+        .await
+        .ok()
+        .expect("Actual selected consumer must accept fixture");
+    assert_eq!(
+        serde_json::to_vec(&installed._packet.catalog.receipt).unwrap(),
+        original_receipt
+    );
+    let provider = installer.versions_dir().join("fixture-provider-python");
+    std::fs::copy(python, &provider).unwrap();
+    let provider_hash = torch_interpreter_hash(&provider).unwrap();
+    let serve = b"from types import SimpleNamespace\nasync def health(): return {'status':'ok','protocol':3}\ndef create_app(): return SimpleNamespace(routes=[SimpleNamespace(path='/health',endpoint=health)])\n".to_vec();
+    let mut probe = std::fs::read_to_string(runtime.join("probe_runtime.py")).unwrap();
+    // Appended actions run after the genuine probe computes and writes its result.
+    probe.push_str("\nPath(__file__).with_name('lifecycle-probe-completed').write_text('actual probe completed')\n");
+    if let LifecycleCase::Mutation(file) = action {
+        let observation: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(runtime.join("catalog-approved-target.json")).unwrap(),
+        )
+        .unwrap();
+        let minor = observation["target"]["markers"]["python_version"]
+            .as_str()
+            .unwrap();
+        let path = match file {
+            "member" => torch_site_packages(runtime, minor).join("torch.py"),
+            "record" => {
+                torch_site_packages(runtime, minor).join("torch-2.14.0+cpu.dist-info/RECORD")
+            }
+            "provider" => provider.clone(),
+            "executable" => python.to_owned(),
+            "producer" => runtime.join("selected-target-observation.json"),
+            "target" => runtime.join("catalog-approved-target.json"),
+            "catalog" => runtime.join("catalog-evidence.json"),
+            "lock" => runtime.join("offline-selection/pylock.toml"),
+            "projection" => runtime.join("offline-selection/projection.json"),
+            "packet" => runtime.join("selected-consumption/packet.json"),
+            "manifest" => runtime.join("selected-consumption/proof/installed-files.json"),
+            "report" => runtime.join("selected-consumption/proof/local-pip-report.json"),
+            "runtime" => runtime.join("runtime.json"),
+            "profile" => runtime.join("selected-runtime-profile.json"),
+            "probe" => runtime.join("probe-results.json"),
+            "source" => runtime.join("serve.py"),
+            "added-source" => runtime.join("unexpected.py"),
+            _ => panic!("Unknown post-probe mutation"),
+        };
+        let path = serde_json::to_string(&path).unwrap();
+        if file == "added-source" {
+            probe.push_str(&format!(
+                "\nPath({path}).write_bytes(b'unexpected source')\n"
+            ));
+        }
+        probe.push_str(&format!("\nimport os\np=Path({path}); q=p.with_name(p.name+'.changed'); q.write_bytes(b'X'*p.stat().st_size); os.replace(q,p)\n"));
+    }
+    if matches!(action, LifecycleCase::Abandon | LifecycleCase::Cancel) {
+        probe.push_str("\nimport os,time,subprocess\nchild=subprocess.Popen([sys.executable,'-I','-c','import time; time.sleep(120)'])\nPath(__file__).with_name('lifecycle-child-alive').write_text(f'{os.getpid()} {child.pid}')\ntime.sleep(120)\n");
+    }
+    let sources = vec![
+        ("serve.py".into(), serve),
+        ("probe_runtime.py".into(), probe.into_bytes()),
+    ];
+    for (name, bytes) in &sources {
+        std::fs::write(runtime.join(name), bytes).unwrap();
+    }
+    let release = GitHubRelease {
+        tag_name: "v2.14.0".into(),
+        name: "Fixture 2.14.0".into(),
+        published_at: "2026-10-06T00:00:00Z".into(),
+        body: None,
+        tarball_url: None,
+        zipball_url: None,
+        prerelease: false,
+        assets: Vec::new(),
+        html_url: "https://github.com/pytorch/pytorch/releases/tag/v2.14.0".into(),
+        total_size: None,
+        archive_size: None,
+        dependencies_size: None,
+    };
+    let pause = (action == LifecycleCase::AbandonPublication)
+        .then(|| Arc::new(PublicationPause::default()));
+    let context = RuntimeLifecycleContext {
+        selection: context(),
+        provider: ProviderApproval::Fixture {
+            path: provider,
+            sha256: provider_hash,
+        },
+        tag: "v2.14.0",
+        release: &release,
+        adapter: "none",
+        fixture_sources: sources,
+        fault: if let LifecycleCase::Publication(fault) = action {
+            fault
+        } else {
+            PublicationFault::None
+        },
+        publication_pause: pause.clone(),
+    };
+    let destination = installer.versions_dir().join("v2.14.0");
+    let pending = installer
+        .versions_dir()
+        .join(".torch-pending-publish-v2.14.0");
+    let mut flow = Box::pin(installed.publish(context));
+    if matches!(
+        action,
+        LifecycleCase::Abandon | LifecycleCase::Cancel | LifecycleCase::AbandonPublication
+    ) {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                tokio::select! {
+                    _ = &mut flow => panic!("Lifecycle completed before abandonment boundary"),
+                    _ = tokio::time::sleep(Duration::from_millis(25)) => {
+                        if pause.as_ref().is_some_and(|p| p.entered.load(Ordering::SeqCst))
+                            || runtime.join("lifecycle-child-alive").is_file() { break; }
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap();
+        if action == LifecycleCase::AbandonPublication {
+            assert!(destination.is_dir() && pending.is_file() && granted.is_dir());
+            assert!(installer
+                .metadata_manager
+                .get_installed_version("v2.14.0", Some(AppId::Torch))
+                .unwrap()
+                .is_none());
+            drop(stage.take());
+            drop(flow);
+            assert!(
+                destination.is_dir() && granted.is_dir(),
+                "Registered publisher must retain packet through abandoned caller"
+            );
+            pause.unwrap().release();
+            consumer.shutdown().await.unwrap();
+            assert!(destination.is_dir() && !pending.exists());
+            assert!(installer
+                .metadata_manager
+                .get_installed_version("v2.14.0", Some(AppId::Torch))
+                .unwrap()
+                .is_some());
+        } else {
+            std::fs::copy(
+                runtime.join("lifecycle-child-alive"),
+                installer.versions_dir().join("lifecycle-child-pids"),
+            )
+            .unwrap();
+            if action == LifecycleCase::Abandon {
+                drop(stage.take());
+                drop(flow);
+                assert!(runtime.is_dir() && granted.is_dir());
+            } else {
+                installer.cancel_flag.store(true, Ordering::SeqCst);
+                let refusal = flow
+                    .await
+                    .err()
+                    .expect("Cancellation must refuse publication");
+                assert_eq!(refusal.kind, RuntimeFailure::Refused);
+                assert_eq!(
+                    serde_json::to_vec(&refusal._installed._packet.catalog.receipt).unwrap(),
+                    original_receipt
+                );
+            }
+            assert!(!destination.exists() && !pending.exists());
+        }
+    } else {
+        match flow.await {
+            Ok(published) => {
+                assert_eq!(action, LifecycleCase::Success);
+                assert_eq!(published.path, destination);
+                assert_eq!(
+                    published.record["schema"],
+                    "pumas.selected-runtime-install.v1"
+                );
+                assert_eq!(published.record["probe"]["core_status"], "passed");
+                assert_eq!(
+                    published.record["provider"]["kind"],
+                    "existing-local-fixture-provider"
+                );
+                assert_eq!(
+                    published.record["catalog_receipt_sha256"],
+                    target_observation_digest(
+                        &serde_json::from_slice::<serde_json::Value>(&original_receipt).unwrap()
+                    )
+                    .unwrap()
+                );
+                assert!(!runtime.exists() && destination.is_dir() && !pending.exists());
+                if let Ok(evidence) = std::env::var("PUMAS_SELECTED_LIFECYCLE_EVIDENCE") {
+                    let evidence = PathBuf::from(evidence);
+                    std::fs::create_dir_all(&evidence).unwrap();
+                    for name in [
+                        "selected-runtime-install.json",
+                        "selected-runtime-profile.json",
+                        "runtime.json",
+                        "probe-results.json",
+                        "catalog-evidence.json",
+                        "catalog-request.json",
+                        "catalog-approved-target.json",
+                        "selected-target-observation.json",
+                        "offline-selection/pylock.toml",
+                        "offline-selection/projection.json",
+                        "offline-selection/roots.in",
+                        "offline-selection/constraints.in",
+                        "selected-consumption/packet.json",
+                        "selected-consumption/proof/local-pip-report.json",
+                        "selected-consumption/proof/installed-files.json",
+                        "selected-consumption/proof/local-requirements.txt",
+                        "serve.py",
+                        "probe_runtime.py",
+                    ] {
+                        let target = evidence.join(name);
+                        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                        std::fs::copy(destination.join(name), target).unwrap();
+                    }
+                    std::fs::write(evidence.join("catalog-receipt.json"), &original_receipt)
+                        .unwrap();
+                    let manifest: StagedFilesManifest = serde_json::from_slice(
+                        &std::fs::read(
+                            destination.join("selected-consumption/proof/installed-files.json"),
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+                    let profile: serde_json::Value = serde_json::from_slice(
+                        &std::fs::read(destination.join("selected-runtime-profile.json")).unwrap(),
+                    )
+                    .unwrap();
+                    let observed: serde_json::Value = serde_json::from_slice(
+                        &std::fs::read(destination.join("catalog-approved-target.json")).unwrap(),
+                    )
+                    .unwrap();
+                    let packages = torch_site_packages(
+                        &destination,
+                        observed["target"]["markers"]["python_version"]
+                            .as_str()
+                            .unwrap(),
+                    );
+                    for file in manifest.files {
+                        let target = evidence.join("installed").join(&file.path);
+                        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                        std::fs::copy(packages.join(file.path), target).unwrap();
+                    }
+                    for row in profile["artifacts"].as_array().unwrap() {
+                        let filename = row["filename"].as_str().unwrap();
+                        let source = walkdir::WalkDir::new(granted)
+                            .into_iter()
+                            .map(|e| e.unwrap())
+                            .find(|e| e.file_name().to_string_lossy() == filename)
+                            .unwrap()
+                            .into_path();
+                        std::fs::create_dir_all(evidence.join("wheels")).unwrap();
+                        std::fs::copy(source, evidence.join("wheels").join(filename)).unwrap();
+                    }
+                }
+            }
+            Err(refusal) => {
+                assert_ne!(action, LifecycleCase::Success);
+                let expected = match action {
+                    LifecycleCase::Publication(PublicationFault::AfterMetadata) => {
+                        RuntimeFailure::CommittedWithoutAck
+                    }
+                    LifecycleCase::Publication(PublicationFault::ForeignDirectory) => {
+                        RuntimeFailure::RecoveryRequired
+                    }
+                    _ => RuntimeFailure::Refused,
+                };
+                assert_eq!(refusal.kind, expected);
+                assert_eq!(
+                    serde_json::to_vec(&refusal._installed._packet.catalog.receipt).unwrap(),
+                    original_receipt
+                );
+                if let LifecycleCase::Publication(PublicationFault::ForeignDirectory) = action {
+                    assert_eq!(
+                        std::fs::read(destination.join("foreign-keeper")).unwrap(),
+                        b"foreign directory retained"
+                    );
+                    assert!(
+                        pending.is_file()
+                            && installer
+                                .versions_dir()
+                                .join("fixture-moved-original/selected-runtime-install.json")
+                                .is_file()
+                    );
+                } else if action == LifecycleCase::Publication(PublicationFault::AfterMetadata) {
+                    assert!(
+                        destination.join("selected-runtime-install.json").is_file()
+                            && pending.is_file()
+                    );
+                } else {
+                    assert!(!destination.exists() && !pending.exists());
+                }
+                if matches!(action, LifecycleCase::Mutation(_)) {
+                    assert!(
+                        runtime.join("lifecycle-probe-completed").is_file(),
+                        "Mutation must follow actual completed probe"
+                    );
+                }
+                if action == LifecycleCase::FailedProbe {
+                    let probe: serde_json::Value = serde_json::from_slice(
+                        &std::fs::read(runtime.join("probe-results.json")).unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(probe["core_status"], "failed");
+                    assert_eq!(probe["capabilities"]["cpu_tensor"]["status"], "failed");
+                }
+            }
+        }
+    }
+    assert_eq!(std::fs::read_dir(granted).unwrap().count(), 5);
+    println!("selected lifecycle control {action:?}: actual_probe=true catalog_receipt_unchanged=true publication_custody_checked=true");
+}
+
+#[tokio::test]
+#[ignore = "Actual local selected installation and genuine probe with synthetic Torch/protocol sources"]
+async fn selected_runtime_owned_fixture_publishes_actual_probe_and_bound_record() {
+    fixture(Case::Lifecycle(LifecycleCase::Success)).await;
+}
+#[tokio::test]
+#[ignore = "Actual selected local installation followed by CPU probe failure"]
+async fn selected_runtime_actual_probe_failure_never_publishes() {
+    fixture(Case::Lifecycle(LifecycleCase::FailedProbe)).await;
+}
+#[tokio::test]
+#[ignore = "Actual completed probe followed by original input/output/provider mutations"]
+async fn selected_runtime_post_probe_mutations_refuse_publication() {
+    for file in [
+        "member",
+        "record",
+        "provider",
+        "executable",
+        "producer",
+        "target",
+        "catalog",
+        "lock",
+        "projection",
+        "packet",
+        "manifest",
+        "report",
+        "runtime",
+        "profile",
+        "probe",
+        "source",
+        "added-source",
+    ] {
+        fixture(Case::Lifecycle(LifecycleCase::Mutation(file))).await;
+    }
+}
+#[tokio::test]
+#[ignore = "Owned publication failure, moved mutations, foreign directory and uncertain acknowledgment"]
+async fn selected_runtime_publication_failure_and_movement_controls() {
+    use super::offline_selection::local_consumption::runtime::PublicationFault;
+    for fault in [
+        PublicationFault::BeforeRename,
+        PublicationFault::AfterRename,
+        PublicationFault::MovedMember,
+        PublicationFault::MovedRecord,
+        PublicationFault::ForeignDirectory,
+        PublicationFault::AfterMetadata,
+    ] {
+        fixture(Case::Lifecycle(LifecycleCase::Publication(fault))).await;
+    }
+}
+#[tokio::test]
+#[ignore = "Managed actual runtime probe and descendant cleanup custody"]
+async fn selected_runtime_cancelled_and_abandoned_probe_keep_custody_until_drain() {
+    for action in [LifecycleCase::Cancel, LifecycleCase::Abandon] {
+        fixture(Case::Lifecycle(action)).await;
+    }
+}
+#[tokio::test]
+#[ignore = "Registered owned publisher completes while caller acknowledgment is abandoned"]
+async fn selected_runtime_abandoned_publication_job_retains_custody_through_metadata() {
+    fixture(Case::Lifecycle(LifecycleCase::AbandonPublication)).await;
 }

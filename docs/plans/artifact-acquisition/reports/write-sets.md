@@ -1402,3 +1402,30 @@ consumer bytes after all validation/probe children and before publication under
 existing input/stage/blocking custody. Keep provider hash distinct and legacy
 absent-context behavior unchanged. No resolver/catalog/recipe/dependency/native
 cleanup/importer/watcher/S3/manifest or installer.rs source changes.
+
+
+## Q2 private selected-runtime lifecycle — admitted 2026-10-06
+
+Parent review acknowledges the local consumer at
+`6bddf85867364f9b31f000ed6aa7436a5fb50872`, tree
+`4ca5fbe6480acb6dac227af3018411fb8106f5f7`, and authorizes the smallest
+next staged lifecycle slice on `feat/torch-selected-lifecycle-6bddf858`.
+Admission follows that explicit authorization; the private lifecycle implementation
+and fixtures are being qualified before any source milestone is committed.
+
+Admitted paths: Torch embedding source-table extraction; private selection fence
+relocation; private selected-consumption child-module wiring and new
+`torch_selected_runtime.rs`; existing catalog-owner fixture tests; an explicit
+selected-profile mode in `probe_runtime.py` and its tests; this admission, contract
+section11, owning-plan note and a separate bounded source/evidence report.
+Bind the selected live installed packet, approved provider and compiled runtime
+sources, genuine probe evidence, installed members, owned publication directory
+and installed metadata. Retain custody through actual child/job drain and
+publication acknowledgment or cleanup. Catalog settlement remains unchanged.
+The first private profile is CPU with no adapter. No automatic/preview cutover,
+cold reconstruction, provider/model downloads, dependency/lock/recipe migration,
+shared cleanup-interface change, native importer/watcher/S3/manifest edit, reviewer
+contact, PR/merge or production/native/provider acceptance is admitted. Synthetic
+Torch and protocol fixtures exercise real probing and metadata publication while
+remaining explicitly fixture evidence. Network traces are observation, not an
+enforced network-denial claim. Parent owns review, hosted CI and integration.

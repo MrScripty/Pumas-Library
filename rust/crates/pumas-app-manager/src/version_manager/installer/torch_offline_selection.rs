@@ -136,6 +136,18 @@ struct Projection {
 }
 
 fn fence(catalog: &CompleteCatalog, runtime: &Path, python: &Path, wheels: &Path) -> Result<()> {
+    fence_at(catalog, runtime, runtime, python, wheels)
+}
+
+// Only the live staged publication owner supplies an explicit owned relocation.
+// Original observation bytes and approval remain unchanged after the move.
+fn fence_at(
+    catalog: &CompleteCatalog,
+    original: &Path,
+    runtime: &Path,
+    python: &Path,
+    wheels: &Path,
+) -> Result<()> {
     catalog._grant.validate()?;
     if torch_interpreter_hash(python)? != catalog._target.interpreter_sha256 {
         return Err(failed("Selected catalog consumer executable changed"));
@@ -144,7 +156,10 @@ fn fence(catalog: &CompleteCatalog, runtime: &Path, python: &Path, wheels: &Path
         validate_bounded_provenance(
             runtime,
             &[(
-                path.clone(),
+                runtime.join(
+                    path.strip_prefix(original)
+                        .map_err(|_| failed("Original producer escaped its owned runtime"))?,
+                ),
                 catalog._target.observation.as_bytes().to_vec(),
             )],
             64 * 1024,

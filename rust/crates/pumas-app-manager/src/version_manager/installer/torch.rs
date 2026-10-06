@@ -1162,7 +1162,37 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
         ));
     }
     std::fs::create_dir_all(destination).map_err(PumasError::from)?;
-    for (name, contents) in [
+    for (name, contents) in embedded_torch_runtime_files() {
+        let path = destination.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(PumasError::from)?;
+        }
+        std::fs::write(path, contents).map_err(PumasError::from)?;
+    }
+    std::fs::write(
+        destination.join("packaging-tooling.zip"),
+        include_bytes!("../../../../../../torch-server/tooling/packaging.zip"),
+    )
+    .map_err(PumasError::from)?;
+    let recipe = serde_json::json!({
+        "recipe_id": TORCH_291.recipe_id,
+        "protocol": SUPPORTED_TORCH_PROTOCOL,
+        "capabilities": [TORCH_IMAGE_GENERATION_CAPABILITY],
+        "python": "3.12",
+        "platform": "linux-x86_64",
+    });
+    std::fs::write(
+        destination.join("runtime.json"),
+        serde_json::to_vec_pretty(&recipe)
+            .map_err(|e| failed(format!("Cannot serialize Torch recipe: {e}")))?,
+    )
+    .map_err(PumasError::from)?;
+    Ok(())
+}
+
+fn embedded_torch_runtime_files() -> Vec<(&'static str, &'static str)> {
+    let lock = include_str!("../../../../../../torch-server/runtime/requirements.lock");
+    vec![
         ("LICENSE", include_str!("../../../../../../LICENSE")),
         (
             "serve.py",
@@ -1265,32 +1295,7 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
             include_str!("../../../../../../torch-server/wheel_records.py"),
         ),
         ("requirements.txt", lock),
-    ] {
-        let path = destination.join(name);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(PumasError::from)?;
-        }
-        std::fs::write(path, contents).map_err(PumasError::from)?;
-    }
-    std::fs::write(
-        destination.join("packaging-tooling.zip"),
-        include_bytes!("../../../../../../torch-server/tooling/packaging.zip"),
-    )
-    .map_err(PumasError::from)?;
-    let recipe = serde_json::json!({
-        "recipe_id": TORCH_291.recipe_id,
-        "protocol": SUPPORTED_TORCH_PROTOCOL,
-        "capabilities": [TORCH_IMAGE_GENERATION_CAPABILITY],
-        "python": "3.12",
-        "platform": "linux-x86_64",
-    });
-    std::fs::write(
-        destination.join("runtime.json"),
-        serde_json::to_vec_pretty(&recipe)
-            .map_err(|e| failed(format!("Cannot serialize Torch recipe: {e}")))?,
-    )
-    .map_err(PumasError::from)?;
-    Ok(())
+    ]
 }
 
 #[derive(Deserialize)]

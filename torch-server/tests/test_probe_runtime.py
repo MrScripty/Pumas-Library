@@ -215,3 +215,58 @@ class AdapterImportProbeTests(TestCase):
                 probe_runtime.all_distribution_versions(),
                 {"extra-package": "1.2.3", "torch": "2.10.0+cpu"},
             )
+
+
+class SelectedProfileTests(TestCase):
+    def test_explicit_profile_records_its_actual_digest_without_resolution_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            profile = {
+                "schema": "pumas.selected-runtime-profile.v1",
+                "torch": "2.14.0+cpu",
+                "adapter": "none",
+                "artifacts": [],
+                "provider": {"kind": "fixture"},
+            }
+            original = json.dumps(profile).encode()
+            (root / "selected-runtime-profile.json").write_bytes(original)
+            (root / "serve.py").write_text("# fixture\n")
+            with patch.object(
+                probe_runtime.importlib, "import_module", side_effect=ImportError("fixture")
+            ):
+                result = probe_runtime.probe(root, selected_profile=True)
+            self.assertEqual(result["environment"], profile)
+            self.assertEqual(
+                result["context"]["runtime_profile_sha256"], hashlib.sha256(original).hexdigest()
+            )
+            self.assertNotIn("resolution_sha256", result["context"])
+            self.assertEqual(result["core_status"], "failed")
+            self.assertFalse((root / "resolution.json").exists())
+
+    def test_wrong_schema_and_oversized_profile_refuse_before_importing_torch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            profile = root / "selected-runtime-profile.json"
+            for body in [b'{"schema":"unknown"}', b" " * (2 * 1024 * 1024 + 1)]:
+                profile.write_bytes(body)
+                with patch.object(
+                    probe_runtime.importlib,
+                    "import_module",
+                    side_effect=AssertionError("no execution"),
+                ):
+                    with self.assertRaises(ValueError):
+                        probe_runtime.probe(root, selected_profile=True)
+
+    def test_linked_profile_refuses_even_when_contents_have_supported_schema(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "actual.json"
+            target.write_text('{"schema":"pumas.selected-runtime-profile.v1"}')
+            try:
+                (root / "selected-runtime-profile.json").symlink_to(target)
+            except OSError as error:
+                if getattr(error, "winerror", None) == 1314:
+                    self.skipTest("Windows runner lacks symlink privilege")
+                raise
+            with self.assertRaises(ValueError):
+                probe_runtime.probe(root, selected_profile=True)

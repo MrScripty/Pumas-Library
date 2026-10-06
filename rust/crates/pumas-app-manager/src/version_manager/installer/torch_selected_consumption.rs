@@ -1,4 +1,5 @@
-//! Dormant local installation proof. No runtime publication or receipt mutation.
+//! Dormant local installation proof; private runtime extension holds the live packet.
+//! Catalog receipts remain unchanged.
 use super::*;
 
 const MAX_INSTALLED_PROOF: usize = 32 * 1024 * 1024;
@@ -263,3 +264,6 @@ impl SelectedWheelPacket {
         }
     }
 }
+
+#[path = "torch_selected_runtime.rs"]
+pub(in super::super) mod runtime;

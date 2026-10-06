@@ -1,6 +1,253 @@
 # Acquisition execution ledger
 
-<<<<<<< HEAD
+## 2026-10-06 — admitted HF index target semantics correction
+
+Parent independent review found P2 malformed-map acceptance at preserved
+`aca0ef2a5dcffecfb98c2ba42fc87886b2210ebe`: an extra tensor reference to an
+already selected config or the index itself passed membership/count coverage
+and could become a Present Shard package fact. Isolated branch
+`fix/hf-weight-index-targets-aca0ef2a` starts at that exact head/tree
+`1bd889433130b08d8b5ed7b66ed519fde8010d47`, independently of AC08/SDK work.
+Exact writes: core `model_library/hf/package_selection.rs`, core `api/hf.rs`
+(regressions only), core README and this ledger. Every target must be a weight
+payload of the index's SafeTensors/PyTorch format as well as an exact selected
+member. Existing known shard naming semantics are preserved; no reference widens
+selection, changes evidence/receipt policy or edits frozen importer/package-fact
+owners. Source/unit review reproduction is supplemented by actual public Rust
+regressions before repair. Valid format cases remain regression controls.
+
+Actual unchanged-code Rust execution reproduced the missing check: 45 index-filter
+cases passed and two new cases failed; the public config-target package reached
+Completed instead of Error. The repaired public loop rejects both selected config
+and index-self targets after transfer, retaining the existing partial marker/stub
+without an Adopted receipt. Valid SafeTensors and PyTorch bin/pt/pth targets,
+including known part naming, remain controls. No importer/package-fact write was
+needed.
+
+Rust 1.92 locked/offline qualification passed: 50 package cases without default
+features, 52 with defaults, 245 HF module cases and 39 public HF API cases;
+strict all-target no-default Clippy, workspace formatting and diff checks passed.
+Logs are in `/workspace/scratch/hf-weight-index-targets/`: `red.log`,
+`package-final.log`, `hf-final.log`, `api-final.log`, `default-final.log`,
+`clippy-final.log` and `fmt-final.log`. Public API signatures, receipts, dependency
+and gate states are unchanged. AC08 and SDK milestones remain separate; parent
+owns review/integration. The next authorized slice is the production SDK reader
+replacement; prefix selection follows it and live-provider/platform acceptance
+remains separate.
+
+## 2026-10-05 — admitted Q1 explicit regular/LFS model-file selection
+
+The coordinator requested the next unblocked practical model acquisition feature
+while preserving isolated S3 SDK spike `a6dbc3ff`. This bounded Q1 continuation
+implements AC01's complete explicit selection, including unknown-size files:
+`filenames` may select regular repository files as well as LFS files from the
+same pinned tree, matching the existing single-`filename` capability.
+
+Branch `feat/hf-explicit-mixed-files-26a84e32` starts at
+`26a84e323cae566a46a8f76bef48fa1010aed48b`, preserving approved main
+`838eb2990905144a59830f1a16fe91b4e1105d4d` and ONNX no-build-download policy.
+Exact writes: `rust/crates/pumas-core/src/model_library/hf/download.rs`,
+`rust/crates/pumas-core/src/api/hf.rs` (tests only),
+`rust/crates/pumas-core/README.md` and this ledger. Focused selection tests and
+the public HF download/import/GetModel path prove the outcome; existing
+missing-member, LFS-only and mixed-size progress checks remain regression controls.
+No importer, watcher, S3, production manifest/lockfile, runtime installation,
+credential or gate-readiness change is admitted. Runtime R1/R2 remain gated;
+parent owns PR/review/integration and remaining PR41 gates.
+
+The milestone now admits an explicit mixed list through the existing public
+`start_hf_download`, preserves pinned LFS evidence and unknown regular-file
+evidence, and fetches explicitly selected auxiliaries once. The public fixture
+imports a valid GGUF with a regular config and a zero-byte regular file, observes
+the model through GetModel, checks all exact published bytes and verified
+path/size/digest receipts, Adopted settlement and queue release. The DTO, public
+signatures, store schema, identity policy and importer remain unchanged.
+
+Both the selection and public workflow regression controls failed on the
+unchanged implementation with `ModelNotFound { model_id: "acme/model:4 files" }`.
+Final Linux x86_64 results: explicit controls 24/24 no-default and 27/27 default;
+the complete HF module filter 239/239 and public HF API filter 33/33 no-default;
+strict all-target no-default Clippy, scoped rustfmt and diff checks passed.
+The existing mixed-size progress/finalization test and missing-member/LFS-only
+controls passed unchanged. This is local controlled-source evidence, not a real
+HF/model-inference, desktop, packaged/native-platform or complete AC01/AQ-HTTP
+qualification. All acquisition/runtime gates retain their existing status.
+
+Commands used `cargo test --locked --offline --manifest-path rust/Cargo.toml
+-p pumas-library --lib` with filters `explicit_`, `model_library::hf::` and
+`api::hf::tests`; the latter two used `--no-default-features`. Clippy used the
+same package/manifest with `--no-default-features --all-targets -- -D warnings`.
+Invocation-only settings used one Cargo worker, debug information off and
+incremental compilation off; no repository build policy changed.
+
+The first ordinary debug/incremental build exhausted available workspace disk
+before running tests and was stopped. Only identified task-generated unfinished
+objects and superseded library debug outputs were retired; source/checkpoints,
+logs and pre-existing artifacts were preserved. The retry above completed with
+smaller invocation settings. Filesystem recovery required reviewed escalation
+only because the full disk prevented ordinary sandbox startup; no network or
+security control was changed. Evidence and cleanup inventories remain under
+`/workspace/scratch/hf-explicit-mixed/`. Final default test-log SHA-256:
+`9a11c1fffeafca5d2250ec3de8df2968d5fd2335814a10f570186e9392629daf`.
+
+The next existing-plan model acquisition work is Q1/AC01 shard/Diffusers complete
+selection through the current model owner, with Q1/AC08 ordinary desktop control
+evidence still pending. Neither starts gated runtime R1/R2 or silently widens
+the currently supported model-format importer. S3 prefix selection remains a
+separate coordinator decision, with the bounded SDK guard follow-up on its own
+branch.
+
+## 2026-10-05 — admitted Q1 shard/Diffusers package completeness
+
+Coordinator continuation of Q1/AC01 starts branch
+`feat/hf-package-completeness-04b0459e` at immutable mixed-file milestone
+`04b0459eedfea1336f200355c37f881e7d2b4f88`. Exact primary writes are
+`model_library/hf/{download.rs,mod.rs,package_selection.rs}` under core,
+`core/src/api/hf.rs`, core README and this ledger. The new private HF helper
+validates selected shard indexes from acquired, verified descriptors before
+marker removal/import; it introduces no transfer, store or publication owner.
+Whole Diffusers selections include regular files; explicit selectors remain
+exact and do not become whole-repository requests. Existing shard completeness
+and component/path semantics are reused. Focused package selection and public
+download/import/GetModel/receipt tests qualify the changed path.
+
+Frozen mixed-file/SDK/S3/ORT milestones, importer/watcher/S3-manifest repair
+writes and ONNX no-build-download policy are preserved. No dependency, DTO,
+schema, installer, acquisition gate or runtime-gate change is admitted. Parent
+owns reviews, PRs and publishing; no PR metadata or merge actions are taken.
+
+The milestone now selects matching SafeTensors/PyTorch indexes for known shard
+families, rejects incomplete counted sets and absent indexes before admission,
+and validates acquired `weight_map` references against the exact selected set.
+Duplicate/empty/invalid maps, omitted selected family members and references to
+unselected files cannot reach final import or consumer settlement. The selected
+index bytes are opened through the existing verified descriptor authority in a
+registered read effect, with the same 16 MiB ceiling as package-facts JSON.
+Both fresh transfer and restored sealed-file finalization use the check; no
+second index payload request or new acquisition writer is introduced.
+
+Whole Diffusers requests include regular and LFS files. Classification preserves
+explicit selectors, and acquired `model_index.json` proves the supported pipeline
+and declared non-optional components against that selected set using existing
+component/path semantics. Explicit bundle formats skip preliminary classification;
+automatic classification retains its existing separately accounted metadata read.
+Auxiliaries are deduplicated and unrelated automatic weight indexes are excluded.
+Public signatures, DTOs, store/receipt versions and identity/verification/retry
+policies remain unchanged. Existing partial metadata stubs stay visible through
+GetModel after package failure, with their recovery markers, partial provenance
+and no completion receipt; they are not silently converted to final imports.
+
+Linux x86_64 evidence: `package_` passed 48/48 without default features and 50/50
+with defaults; the HF module passed 244/244 and public HF API passed 38/38
+without defaults. Strict all-target no-default Clippy, scoped rustfmt and diff
+checks passed. The public controls exercise complete indexed shards and a
+Diffusers bundle with regular vocabulary/config assets through actual pinned
+selection, shared acquisition, import, GetModel, ordered verified-file/consumer
+receipts, exact published bytes, Adopted settlement and queue release. Negative
+controls refuse a missing index without payload/admission and retain malformed
+index/incomplete explicit component failures without final import/settlement.
+Every acquired payload is fetched once; the automatic classification fixture
+accounts for its additional model-index metadata observation separately.
+
+An intermediate negative probe exposed read-only validation errors being recorded
+as failed background effects and making shutdown fail. Validation now returns
+invalid package contents as observed domain results, matching existing pinned
+repository observation; panics remain owned task failures. Final negative probes
+require successful owner drain. An overly strict fixture assumption that failed
+packages leave no indexed record was corrected to assert the retained existing
+partial stub/marker contract instead. No frozen importer writes were changed.
+
+Commands used `cargo test --locked --offline --manifest-path rust/Cargo.toml
+-p pumas-library --lib`, filters `package_`, `model_library::hf::` and
+`api::hf::tests`; the latter two used `--no-default-features`. Clippy used the
+same package/manifest with `--no-default-features --all-targets -- -D warnings`.
+Invocation-only settings were one Cargo worker, debug information off and
+incremental compilation off. No ONNX download/build policy, dependency or lockfile
+changed. Logs remain at `/workspace/scratch/hf-package-completeness/`:
+`package-qualified.log`, `package-default.log`, `hf-module.log`, `hf-api.log`,
+`clippy.log`, `fmt.log` and the intermediate failure logs. Final default log
+SHA-256: `6f3f33b9c24626f289a586541445cf7d69d65de411a47a98518d4f42b01be971`.
+Final no-default package log SHA-256:
+`237db15859f40e11937de69039c8d1e91f8b94c767fb09d6725f64432ce64b62`.
+
+The frozen base tree remains `4d6ac0994508165d388748bbab54b79b5d759f41`.
+Accepted main `95a0baad2d0aea4650fc36ad4afd969ac9391bf5` was fetched and verified
+with tree `3ee66988eb1668188011b2124890b10031403ebd` and ordered parents
+`838eb299` then `26a84e32`; no feature/spike history was rebased. The isolated
+SDK exact-value successor is separately committed/pushed as
+`ba1a9d908010f23f2391059cb93bfe61dcca6aa1`, tree
+`fee4b11a76306bcf224abbd8b11811e329ca0483`, directly on preserved `3a9cb5dc`.
+Its 16 probes and strict Clippy pass; its own Markdown report and logs remain
+in that successor and `/workspace/scratch/s3-sdk-spike/`.
+
+These are controlled-source backend/package-import results. They do not prove
+real model inference, real HF/provider acceptance, desktop controls, packaged or
+native-platform qualification, or complete AC01/AQ-HTTP readiness. All dependency
+gates retain their current status. The next existing-plan work is Q1/AC08 ordinary
+desktop acquisition controls/status evidence, with real pinned shard/Diffusers
+model acceptance still separate. Parent owns reviews, next PRs and integration;
+no external reviewer, PR metadata or merge action was performed here.
+
+## 2026-10-05 — admitted AC08 startup snapshot ordering
+
+Coordinator continuation starts isolated branch
+`fix/desktop-download-startup-aca0ef2a` at preserved HF completeness head
+`aca0ef2a5dcffecfb98c2ba42fc87886b2210ebe`, tree
+`1bd889433130b08d8b5ed7b66ed519fde8010d47`. Exact writes are
+`frontend/src/hooks/useActiveModelDownload{.ts,.test.ts}`,
+`frontend/src/hooks/useModelDownloads{.ts,.test.ts}`, and this ledger.
+A delayed unversioned startup list currently overwrites a newer canonical pushed
+snapshot, resurrecting completed activity or clearing retained error state.
+The subscription's full snapshot takes presentation authority once observed;
+the outstanding startup result is still observed but classified as superseded.
+Initial queries without a push retain current command/association reconciliation.
+No domain completion, receipt, exact selection, recovery or backend/DTO policy
+changes. Deterministic hook/renderer projections and lifecycle controls qualify
+this bounded ordering repair. Browser/desktop execution remains unavailable;
+the prior ownership/access denial is respected without an alternate launch.
+Preserved HF/SDK/native/ORT work is untouched. Parent owns PR integration and
+has separately authorized an isolated production SDK reader replacement only
+after this bounded milestone completes.
+
+The repair is complete locally: a mounted hook accepts the startup list until
+its first canonical full subscription snapshot. That push supersedes the
+unversioned outstanding query; the query still resolves/rejects under its
+existing owner and is classified without stale state application. Supersession
+is scoped to each mounted effect and reset on remount. Cleanup ends callback
+application and unregisters the subscription. No polling, cursor arithmetic,
+new UI state store, DTO, backend status or receipt semantics were added.
+
+The unchanged source failed five new cases: both completed/empty terminal pushes
+were resurrected in the header and download rows, and a retained package error
+was cleared. After the fix, both hook files passed 115/115. A further actual
+Header component test in jsdom proves 100% received bytes still display active
+downloading until backend terminal status, and that a delayed startup list does
+not restore activity afterward. Paused/error controls retain the exact download
+ID for resume; existing association, optimistic command rollback, rekeying,
+partial/duplicate activity and unsubscribe tests pass. Six affected renderer
+files pass 153/153: the two hooks, completion refresh, Header, local download
+actions and remote download menu. Frontend `check:types`, zero-warning `lint`,
+and diff checks pass on the final source.
+
+Commands used the existing pnpm 10.33.0/Vitest 4.1.11 scripts with cached workspace
+dependencies whose manifests/lock match this branch. Node was 24.19.0; the
+repository pin is 24.15.0, so this is local supporting evidence rather than
+exact pinned-toolchain qualification. Workspace-only cache links were retired
+following verification; no dependency, lockfile, permission or account setting changed. An
+intermediate renderer fixture property typo and missing cached Electron type
+link were corrected before final checks. Logs are under
+`/workspace/scratch/ac08-startup-snapshot/`: `red.log`, `focused.log`,
+`renderer-qualified.log`, `types.log`, `lint.log` and intermediate setup logs.
+
+This is deterministic React/jsdom renderer/state evidence. No actual browser or
+Electron desktop was launched; no browser geometry, focus, keyboard/assistive
+technology, native pointer behavior, real-source transfer or desktop/backend
+composition is claimed. Prior browser ownership/access denial remains binding.
+AC08/AQ-HTTP and all dependent gates remain pending. Parent owns integration.
+The separately requested HF weight-map target correction is next on its own
+successor; the authorized production SDK reader replacement follows, with
+prefix enumeration and live-provider/platform qualification remaining separate.
+
 ## 2026-10-06 — admitted production S3 SDK reader replacement
 
 Parent accepted SDK suitability checkpoint `ba1a9d908010f23f2391059cb93bfe61dcca6aa1`
@@ -187,220 +434,6 @@ frozen feature refs are unchanged. Parent owns independent review, hosted
 qualification, PRs/merges and Library delivery. Next planned Q3 feature is a
 qualified authenticated ephemeral RPC/desktop secret boundary; live providers,
 installed/native qualification and AQ-S3 acceptance remain separate/pending.
-=======
-## 2026-10-05 — admitted AC08 startup snapshot ordering
-
-Coordinator continuation starts isolated branch
-`fix/desktop-download-startup-aca0ef2a` at preserved HF completeness head
-`aca0ef2a5dcffecfb98c2ba42fc87886b2210ebe`, tree
-`1bd889433130b08d8b5ed7b66ed519fde8010d47`. Exact writes are
-`frontend/src/hooks/useActiveModelDownload{.ts,.test.ts}`,
-`frontend/src/hooks/useModelDownloads{.ts,.test.ts}`, and this ledger.
-A delayed unversioned startup list currently overwrites a newer canonical pushed
-snapshot, resurrecting completed activity or clearing retained error state.
-The subscription's full snapshot takes presentation authority once observed;
-the outstanding startup result is still observed but classified as superseded.
-Initial queries without a push retain current command/association reconciliation.
-No domain completion, receipt, exact selection, recovery or backend/DTO policy
-changes. Deterministic hook/renderer projections and lifecycle controls qualify
-this bounded ordering repair. Browser/desktop execution remains unavailable;
-the prior ownership/access denial is respected without an alternate launch.
-Preserved HF/SDK/native/ORT work is untouched. Parent owns PR integration and
-has separately authorized an isolated production SDK reader replacement only
-after this bounded milestone completes.
-
-The repair is complete locally: a mounted hook accepts the startup list until
-its first canonical full subscription snapshot. That push supersedes the
-unversioned outstanding query; the query still resolves/rejects under its
-existing owner and is classified without stale state application. Supersession
-is scoped to each mounted effect and reset on remount. Cleanup ends callback
-application and unregisters the subscription. No polling, cursor arithmetic,
-new UI state store, DTO, backend status or receipt semantics were added.
-
-The unchanged source failed five new cases: both completed/empty terminal pushes
-were resurrected in the header and download rows, and a retained package error
-was cleared. After the fix, both hook files passed 115/115. A further actual
-Header component test in jsdom proves 100% received bytes still display active
-downloading until backend terminal status, and that a delayed startup list does
-not restore activity afterward. Paused/error controls retain the exact download
-ID for resume; existing association, optimistic command rollback, rekeying,
-partial/duplicate activity and unsubscribe tests pass. Six affected renderer
-files pass 153/153: the two hooks, completion refresh, Header, local download
-actions and remote download menu. Frontend `check:types`, zero-warning `lint`,
-and diff checks pass on the final source.
-
-Commands used the existing pnpm 10.33.0/Vitest 4.1.11 scripts with cached workspace
-dependencies whose manifests/lock match this branch. Node was 24.19.0; the
-repository pin is 24.15.0, so this is local supporting evidence rather than
-exact pinned-toolchain qualification. Workspace-only cache links were retired
-following verification; no dependency, lockfile, permission or account setting changed. An
-intermediate renderer fixture property typo and missing cached Electron type
-link were corrected before final checks. Logs are under
-`/workspace/scratch/ac08-startup-snapshot/`: `red.log`, `focused.log`,
-`renderer-qualified.log`, `types.log`, `lint.log` and intermediate setup logs.
-
-This is deterministic React/jsdom renderer/state evidence. No actual browser or
-Electron desktop was launched; no browser geometry, focus, keyboard/assistive
-technology, native pointer behavior, real-source transfer or desktop/backend
-composition is claimed. Prior browser ownership/access denial remains binding.
-AC08/AQ-HTTP and all dependent gates remain pending. Parent owns integration.
-The separately requested HF weight-map target correction is next on its own
-successor; the authorized production SDK reader replacement follows, with
-prefix enumeration and live-provider/platform qualification remaining separate.
-
-## 2026-10-05 — admitted Q1 shard/Diffusers package completeness
-
-Coordinator continuation of Q1/AC01 starts branch
-`feat/hf-package-completeness-04b0459e` at immutable mixed-file milestone
-`04b0459eedfea1336f200355c37f881e7d2b4f88`. Exact primary writes are
-`model_library/hf/{download.rs,mod.rs,package_selection.rs}` under core,
-`core/src/api/hf.rs`, core README and this ledger. The new private HF helper
-validates selected shard indexes from acquired, verified descriptors before
-marker removal/import; it introduces no transfer, store or publication owner.
-Whole Diffusers selections include regular files; explicit selectors remain
-exact and do not become whole-repository requests. Existing shard completeness
-and component/path semantics are reused. Focused package selection and public
-download/import/GetModel/receipt tests qualify the changed path.
-
-Frozen mixed-file/SDK/S3/ORT milestones, importer/watcher/S3-manifest repair
-writes and ONNX no-build-download policy are preserved. No dependency, DTO,
-schema, installer, acquisition gate or runtime-gate change is admitted. Parent
-owns reviews, PRs and publishing; no PR metadata or merge actions are taken.
-
-The milestone now selects matching SafeTensors/PyTorch indexes for known shard
-families, rejects incomplete counted sets and absent indexes before admission,
-and validates acquired `weight_map` references against the exact selected set.
-Duplicate/empty/invalid maps, omitted selected family members and references to
-unselected files cannot reach final import or consumer settlement. The selected
-index bytes are opened through the existing verified descriptor authority in a
-registered read effect, with the same 16 MiB ceiling as package-facts JSON.
-Both fresh transfer and restored sealed-file finalization use the check; no
-second index payload request or new acquisition writer is introduced.
-
-Whole Diffusers requests include regular and LFS files. Classification preserves
-explicit selectors, and acquired `model_index.json` proves the supported pipeline
-and declared non-optional components against that selected set using existing
-component/path semantics. Explicit bundle formats skip preliminary classification;
-automatic classification retains its existing separately accounted metadata read.
-Auxiliaries are deduplicated and unrelated automatic weight indexes are excluded.
-Public signatures, DTOs, store/receipt versions and identity/verification/retry
-policies remain unchanged. Existing partial metadata stubs stay visible through
-GetModel after package failure, with their recovery markers, partial provenance
-and no completion receipt; they are not silently converted to final imports.
-
-Linux x86_64 evidence: `package_` passed 48/48 without default features and 50/50
-with defaults; the HF module passed 244/244 and public HF API passed 38/38
-without defaults. Strict all-target no-default Clippy, scoped rustfmt and diff
-checks passed. The public controls exercise complete indexed shards and a
-Diffusers bundle with regular vocabulary/config assets through actual pinned
-selection, shared acquisition, import, GetModel, ordered verified-file/consumer
-receipts, exact published bytes, Adopted settlement and queue release. Negative
-controls refuse a missing index without payload/admission and retain malformed
-index/incomplete explicit component failures without final import/settlement.
-Every acquired payload is fetched once; the automatic classification fixture
-accounts for its additional model-index metadata observation separately.
-
-An intermediate negative probe exposed read-only validation errors being recorded
-as failed background effects and making shutdown fail. Validation now returns
-invalid package contents as observed domain results, matching existing pinned
-repository observation; panics remain owned task failures. Final negative probes
-require successful owner drain. An overly strict fixture assumption that failed
-packages leave no indexed record was corrected to assert the retained existing
-partial stub/marker contract instead. No frozen importer writes were changed.
-
-Commands used `cargo test --locked --offline --manifest-path rust/Cargo.toml
--p pumas-library --lib`, filters `package_`, `model_library::hf::` and
-`api::hf::tests`; the latter two used `--no-default-features`. Clippy used the
-same package/manifest with `--no-default-features --all-targets -- -D warnings`.
-Invocation-only settings were one Cargo worker, debug information off and
-incremental compilation off. No ONNX download/build policy, dependency or lockfile
-changed. Logs remain at `/workspace/scratch/hf-package-completeness/`:
-`package-qualified.log`, `package-default.log`, `hf-module.log`, `hf-api.log`,
-`clippy.log`, `fmt.log` and the intermediate failure logs. Final default log
-SHA-256: `6f3f33b9c24626f289a586541445cf7d69d65de411a47a98518d4f42b01be971`.
-Final no-default package log SHA-256:
-`237db15859f40e11937de69039c8d1e91f8b94c767fb09d6725f64432ce64b62`.
-
-The frozen base tree remains `4d6ac0994508165d388748bbab54b79b5d759f41`.
-Accepted main `95a0baad2d0aea4650fc36ad4afd969ac9391bf5` was fetched and verified
-with tree `3ee66988eb1668188011b2124890b10031403ebd` and ordered parents
-`838eb299` then `26a84e32`; no feature/spike history was rebased. The isolated
-SDK exact-value successor is separately committed/pushed as
-`ba1a9d908010f23f2391059cb93bfe61dcca6aa1`, tree
-`fee4b11a76306bcf224abbd8b11811e329ca0483`, directly on preserved `3a9cb5dc`.
-Its 16 probes and strict Clippy pass; its own Markdown report and logs remain
-in that successor and `/workspace/scratch/s3-sdk-spike/`.
-
-These are controlled-source backend/package-import results. They do not prove
-real model inference, real HF/provider acceptance, desktop controls, packaged or
-native-platform qualification, or complete AC01/AQ-HTTP readiness. All dependency
-gates retain their current status. The next existing-plan work is Q1/AC08 ordinary
-desktop acquisition controls/status evidence, with real pinned shard/Diffusers
-model acceptance still separate. Parent owns reviews, next PRs and integration;
-no external reviewer, PR metadata or merge action was performed here.
-
-## 2026-10-05 — admitted Q1 explicit regular/LFS model-file selection
-
-The coordinator requested the next unblocked practical model acquisition feature
-while preserving isolated S3 SDK spike `a6dbc3ff`. This bounded Q1 continuation
-implements AC01's complete explicit selection, including unknown-size files:
-`filenames` may select regular repository files as well as LFS files from the
-same pinned tree, matching the existing single-`filename` capability.
-
-Branch `feat/hf-explicit-mixed-files-26a84e32` starts at
-`26a84e323cae566a46a8f76bef48fa1010aed48b`, preserving approved main
-`838eb2990905144a59830f1a16fe91b4e1105d4d` and ONNX no-build-download policy.
-Exact writes: `rust/crates/pumas-core/src/model_library/hf/download.rs`,
-`rust/crates/pumas-core/src/api/hf.rs` (tests only),
-`rust/crates/pumas-core/README.md` and this ledger. Focused selection tests and
-the public HF download/import/GetModel path prove the outcome; existing
-missing-member, LFS-only and mixed-size progress checks remain regression controls.
-No importer, watcher, S3, production manifest/lockfile, runtime installation,
-credential or gate-readiness change is admitted. Runtime R1/R2 remain gated;
-parent owns PR/review/integration and remaining PR41 gates.
-
-The milestone now admits an explicit mixed list through the existing public
-`start_hf_download`, preserves pinned LFS evidence and unknown regular-file
-evidence, and fetches explicitly selected auxiliaries once. The public fixture
-imports a valid GGUF with a regular config and a zero-byte regular file, observes
-the model through GetModel, checks all exact published bytes and verified
-path/size/digest receipts, Adopted settlement and queue release. The DTO, public
-signatures, store schema, identity policy and importer remain unchanged.
-
-Both the selection and public workflow regression controls failed on the
-unchanged implementation with `ModelNotFound { model_id: "acme/model:4 files" }`.
-Final Linux x86_64 results: explicit controls 24/24 no-default and 27/27 default;
-the complete HF module filter 239/239 and public HF API filter 33/33 no-default;
-strict all-target no-default Clippy, scoped rustfmt and diff checks passed.
-The existing mixed-size progress/finalization test and missing-member/LFS-only
-controls passed unchanged. This is local controlled-source evidence, not a real
-HF/model-inference, desktop, packaged/native-platform or complete AC01/AQ-HTTP
-qualification. All acquisition/runtime gates retain their existing status.
-
-Commands used `cargo test --locked --offline --manifest-path rust/Cargo.toml
--p pumas-library --lib` with filters `explicit_`, `model_library::hf::` and
-`api::hf::tests`; the latter two used `--no-default-features`. Clippy used the
-same package/manifest with `--no-default-features --all-targets -- -D warnings`.
-Invocation-only settings used one Cargo worker, debug information off and
-incremental compilation off; no repository build policy changed.
-
-The first ordinary debug/incremental build exhausted available workspace disk
-before running tests and was stopped. Only identified task-generated unfinished
-objects and superseded library debug outputs were retired; source/checkpoints,
-logs and pre-existing artifacts were preserved. The retry above completed with
-smaller invocation settings. Filesystem recovery required reviewed escalation
-only because the full disk prevented ordinary sandbox startup; no network or
-security control was changed. Evidence and cleanup inventories remain under
-`/workspace/scratch/hf-explicit-mixed/`. Final default test-log SHA-256:
-`9a11c1fffeafca5d2250ec3de8df2968d5fd2335814a10f570186e9392629daf`.
-
-The next existing-plan model acquisition work is Q1/AC01 shard/Diffusers complete
-selection through the current model owner, with Q1/AC08 ordinary desktop control
-evidence still pending. Neither starts gated runtime R1/R2 or silently widens
-the currently supported model-format importer. S3 prefix selection remains a
-separate coordinator decision, with the bounded SDK guard follow-up on its own
-branch.
->>>>>>> 10f39431c1c4a447d21d34b42670cd26b4b3efff
 
 ## 2026-10-04 — delegated S3 dispatch and GGUF import successor
 

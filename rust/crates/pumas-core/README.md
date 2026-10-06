@@ -27,7 +27,9 @@ import and its consumer receipt; selecting a file does not authorize code execut
 Counted shard sets must be complete. Selected SafeTensors/PyTorch shards include
 only their matching `*.safetensors.index.json` / `*.bin.index.json`, and missing
 indexes fail before admission. Acquired indexes must map tensors to the exact
-selected shards, including every selected member of their shard family; invalid,
+selected weight payloads in the index's format (SafeTensors, or PyTorch
+`.bin`/`.pt`/`.pth`), including every selected member of their shard family.
+Auxiliary/index documents cannot serve as weight targets; invalid,
 empty, duplicate-key or out-of-selection maps cannot reach final import/completion. Existing partial metadata and recovery
 markers remain available after such a failure.
 Index validation reads verified local descriptors once without a second payload

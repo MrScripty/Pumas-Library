@@ -1,5 +1,40 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — admitted HF index target semantics correction
+
+Parent independent review found P2 malformed-map acceptance at preserved
+`aca0ef2a5dcffecfb98c2ba42fc87886b2210ebe`: an extra tensor reference to an
+already selected config or the index itself passed membership/count coverage
+and could become a Present Shard package fact. Isolated branch
+`fix/hf-weight-index-targets-aca0ef2a` starts at that exact head/tree
+`1bd889433130b08d8b5ed7b66ed519fde8010d47`, independently of AC08/SDK work.
+Exact writes: core `model_library/hf/package_selection.rs`, core `api/hf.rs`
+(regressions only), core README and this ledger. Every target must be a weight
+payload of the index's SafeTensors/PyTorch format as well as an exact selected
+member. Existing known shard naming semantics are preserved; no reference widens
+selection, changes evidence/receipt policy or edits frozen importer/package-fact
+owners. Source/unit review reproduction is supplemented by actual public Rust
+regressions before repair. Valid format cases remain regression controls.
+
+Actual unchanged-code Rust execution reproduced the missing check: 45 index-filter
+cases passed and two new cases failed; the public config-target package reached
+Completed instead of Error. The repaired public loop rejects both selected config
+and index-self targets after transfer, retaining the existing partial marker/stub
+without an Adopted receipt. Valid SafeTensors and PyTorch bin/pt/pth targets,
+including known part naming, remain controls. No importer/package-fact write was
+needed.
+
+Rust 1.92 locked/offline qualification passed: 50 package cases without default
+features, 52 with defaults, 245 HF module cases and 39 public HF API cases;
+strict all-target no-default Clippy, workspace formatting and diff checks passed.
+Logs are in `/workspace/scratch/hf-weight-index-targets/`: `red.log`,
+`package-final.log`, `hf-final.log`, `api-final.log`, `default-final.log`,
+`clippy-final.log` and `fmt-final.log`. Public API signatures, receipts, dependency
+and gate states are unchanged. AC08 and SDK milestones remain separate; parent
+owns review/integration. The next authorized slice is the production SDK reader
+replacement; prefix selection follows it and live-provider/platform acceptance
+remains separate.
+
 ## 2026-10-05 — admitted Q1 shard/Diffusers package completeness
 
 Coordinator continuation of Q1/AC01 starts branch

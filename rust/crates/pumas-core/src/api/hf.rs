@@ -2494,6 +2494,42 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
+    async fn public_hf_package_index_rejects_auxiliary_and_index_targets() {
+        for target in ["config.json", "model.safetensors.index.json"] {
+            let index = serde_json::to_vec(&serde_json::json!({"weight_map": {
+                "a": "model-00001-of-00002.safetensors",
+                "b": "model-00002-of-00002.safetensors",
+                "c": target,
+            }}))
+            .unwrap();
+            public_package_fixture(
+                vec![
+                    (
+                        "model-00001-of-00002.safetensors",
+                        package_test_safetensors(),
+                        true,
+                    ),
+                    (
+                        "model-00002-of-00002.safetensors",
+                        package_test_safetensors(),
+                        true,
+                    ),
+                    ("model.safetensors.index.json", index, false),
+                    ("config.json", br#"{"model_type":"llama"}"#.to_vec(), false),
+                ],
+                Some(vec![
+                    "model-00001-of-00002.safetensors".into(),
+                    "model-00002-of-00002.safetensors".into(),
+                ]),
+                false,
+                false,
+                Some("weight payload"),
+            )
+            .await;
+        }
+    }
+
+    #[tokio::test]
     async fn public_hf_package_missing_index_refuses_before_payload_or_admission() {
         public_package_fixture(
             vec![

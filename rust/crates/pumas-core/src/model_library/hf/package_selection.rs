@@ -82,6 +82,26 @@ fn unique_weight_map<'de, D: Deserializer<'de>>(
     decoder.deserialize_map(WeightMap)
 }
 
+fn is_weight_payload_for_index(index_path: &str, path: &str) -> bool {
+    // Reuse known shard naming, including part/numeric suffixes, before
+    // interpreting the payload format. The library supports these PyTorch
+    // suffixes; an index/config document is never a weight payload.
+    let family = sharding::extract_shard_info(path).map(|(base, _, _)| base);
+    let name = family.as_deref().unwrap_or(path);
+    let extension = name
+        .rsplit_once('.')
+        .map(|(_, extension)| extension)
+        .unwrap_or("");
+    if index_path.ends_with(".safetensors.index.json") {
+        extension.eq_ignore_ascii_case("safetensors")
+    } else {
+        index_path.ends_with(".bin.index.json")
+            && ["bin", "pt", "pth"]
+                .iter()
+                .any(|format| extension.eq_ignore_ascii_case(format))
+    }
+}
+
 fn validate_index(index_path: &str, bytes: &[u8], selected: &BTreeSet<&str>) -> Result<()> {
     let index: WeightIndex = serde_json::from_slice(bytes)
         .map_err(|_| invalid(format!("Invalid weight index {index_path}")))?;
@@ -100,6 +120,11 @@ fn validate_index(index_path: &str, bytes: &[u8], selected: &BTreeSet<&str>) -> 
         if !selected.contains(path.as_str()) {
             return Err(invalid(format!(
                 "Index {index_path} references unselected shard {path}"
+            )));
+        }
+        if !is_weight_payload_for_index(index_path, path) {
+            return Err(invalid(format!(
+                "Index {index_path} references a target outside its weight payload format: {path}"
             )));
         }
     }
@@ -217,6 +242,58 @@ mod tests {
             b"null",
         ] {
             assert!(validate_diffusers_index(invalid, &BTreeSet::new()).is_err());
+        }
+    }
+
+    #[test]
+    fn index_targets_must_be_weight_payloads_in_the_index_format() {
+        for path in [
+            "weights.bin",
+            "weights.pt",
+            "weights.pth",
+            "weights.BIN",
+            "weights.bin.part1",
+        ] {
+            let selected = BTreeSet::from([path]);
+            let map = serde_json::json!({"weight_map":{"a":path}});
+            validate_index(
+                "pytorch_model.bin.index.json",
+                &serde_json::to_vec(&map).unwrap(),
+                &selected,
+            )
+            .unwrap();
+        }
+        for extension in ["safetensors", "bin"] {
+            let first = format!("model-00001-of-00002.{extension}");
+            let second = format!("model-00002-of-00002.{extension}");
+            let index_path = format!("model.{extension}.index.json");
+            let other = if extension == "bin" {
+                "other.safetensors"
+            } else {
+                "other.bin"
+            };
+            let selected = BTreeSet::from([
+                first.as_str(),
+                second.as_str(),
+                index_path.as_str(),
+                "config.json",
+                other,
+            ]);
+            let good = serde_json::json!({"weight_map":{"a":first,"b":second}});
+            validate_index(&index_path, &serde_json::to_vec(&good).unwrap(), &selected).unwrap();
+            for target in ["config.json", index_path.as_str(), other] {
+                let mut bad = good.clone();
+                bad["weight_map"]["c"] = serde_json::Value::String(target.to_owned());
+                assert!(
+                    validate_index(&index_path, &serde_json::to_vec(&bad).unwrap(), &selected)
+                        .is_err(),
+                    "{extension} index accepted target {target}"
+                );
+            }
+            let part = format!("model.{extension}.part1");
+            let selected = BTreeSet::from([part.as_str()]);
+            let map = serde_json::json!({"weight_map":{"a":part}});
+            validate_index(&index_path, &serde_json::to_vec(&map).unwrap(), &selected).unwrap();
         }
     }
 

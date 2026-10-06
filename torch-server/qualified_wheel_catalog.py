@@ -7,6 +7,7 @@ owner. Actual acquired wheel metadata is validated by the local installer.
 import argparse
 import hashlib
 import importlib
+import importlib.util
 from html.parser import HTMLParser
 import json
 import platform
@@ -222,11 +223,31 @@ def fetch_index(url):
     return parser.links
 
 
-def catalog(lock, roots, fetch=fetch_index):
+def target_owner():
+    spec = importlib.util.spec_from_file_location(
+        "pumas_wheel_target", Path(__file__).with_name("wheel_target.py")
+    )
+    owner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(owner)
+    return owner
+
+
+def catalog(lock, roots, fetch=fetch_index, *, target_observation=None):
     entries = parse_lock(lock)
     validate_roots(entries, roots)
-    tags = {tag: rank for rank, tag in enumerate(sys_tags())}
-    python = Version(platform.python_version())
+    target = None
+    if target_observation is not None:
+        owner = target_owner()
+        target = owner.checked_observation(target_observation)
+        target_observation = {**target_observation, "target": target.to_dict()}
+        if (target_observation["interpreter"] != sys.executable
+                or target_observation["interpreter_sha256"] != owner.interpreter_digest(sys.executable)):
+            raise ValueError("Qualified target interpreter differs from approved observation")
+        target.require_native_consumer()
+    # Keep native packaging priority; explicit context only restricts compatibility.
+    tags = {tag: rank for rank, tag in enumerate(sys_tags())
+            if target is None or tag in target.tags}
+    python = Version(platform.python_version() if target is None else target.python)
     start = time.monotonic()
     requests = 0
     artifacts = []
@@ -295,13 +316,13 @@ def catalog(lock, roots, fetch=fetch_index):
         artifacts.append(
             {"name": entry["name"], "version": entry["version"], "url": source, "sha256": digest}
         )
-    return {
+    result = {
         "format": "pumas-qualified-wheel-catalog-1",
         "recipe_lock_sha256": hashlib.sha256(lock.encode()).hexdigest(),
         "release": "2.9.1",
         "torch": "2.9.1+cu130",
         "build": "cu130",
-        "python": "3.12",
+        "python": "3.12" if target is None else target.markers["python_version"],
         "interpreter": sys.executable,
         "implementation": sys.implementation.name,
         "platform": platform.platform(),
@@ -309,6 +330,7 @@ def catalog(lock, roots, fetch=fetch_index):
         "adapter": "bundled",
         "artifacts": artifacts,
     }
+    return result if target is None else owner.bind_resolution(result, target_observation)
 
 
 def validate_recipe_artifacts(lock, roots, artifacts):
@@ -337,6 +359,7 @@ def main():
     parser.add_argument("--lock", type=Path, required=True)
     parser.add_argument("--preview", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--target-observation", type=Path)
     args = parser.parse_args()
     if (
         sys.platform != "linux"
@@ -350,7 +373,18 @@ def main():
         preview = json.loads(args.preview.read_text(encoding="utf-8"))
         if preview["requirementsLock"] != lock:
             raise ValueError("Qualified preview differs from the embedded lock")
-        result = catalog(lock, preview["directArtifacts"])
+        observation = None
+        if args.target_observation is not None:
+            if args.target_observation.is_symlink() or not args.target_observation.is_file():
+                raise ValueError("Approved target observation is missing or linked")
+            with args.target_observation.open("rb") as source:
+                raw = source.read(64 * 1024 + 1)
+            if len(raw) > 64 * 1024:
+                raise ValueError("Approved target observation is oversized")
+            observation = json.loads(raw)
+            if not isinstance(observation, dict):
+                raise ValueError("Supplied target observation must be an object")
+        result = catalog(lock, preview["directArtifacts"], target_observation=observation)
         args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     except (KeyError, TypeError, ValueError, OSError, AttributeError):
         parser.exit(

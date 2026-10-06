@@ -1225,3 +1225,28 @@ checks. Native consumer must verify the selected interpreter before explicit-tar
 installation. Windows/Linux and supported macOS contracts receive scoped tests;
 unsupported ABI/target/resolver projections are explicit. Catalog authority and
 P1/AQ gates remain open; no production safety acceptance follows this prerequisite.
+
+## Q2 qualified selected-interpreter producer — admitted 2026-10-06
+
+Parent freezes bb330f2d5aed22d15f996c33fe326ce0fe6a5a1c, tree
+2087a39ae0784e2b7dd90c52b24396b9d029d129, and authorizes one production
+integration on feat/torch-qualified-target-bb330f2d. The existing qualified
+finite-recipe caller owns selected venv execution under stage/child custody and
+retains original recipe/preview authority. It can supply and retain observation
+without changing automatic or retained unqualified preview resolution.
+
+Before editing, admit only wheel_target.py's exclusive observation output mode,
+qualified_wheel_catalog.py's optional explicit observation validation/binding,
+installer/torch.rs's owned producer and finite acceptance/provenance checks,
+installer/torch_wheel_handoff_tests.rs and Python test_target_observation.py /
+test_qualified_wheel_catalog.py controls, docs/contracts/wheel-target.md, this
+admission, owning-plan status and a separate report with adjacent evidence.
+Keep provider and selected consumer executable identities separate. Check the
+original produced file against retained bytes before acquisition/consumption and
+after probe; changed evidence must refuse without recapture. Preserve the native
+recipe, fixed metadata index policy, existing native tag priority, direct roots,
+shared receipts/custody and all automatic/preview resolver behavior.
+No installer.rs/native cleanup, dependency/lock/recipe, experimental resolver,
+credential, external reviewer, model/provider payload or real backend changes.
+Controlled tiny-wheel producer→finite catalog→shared consumer evidence cannot
+qualify full recipe/provider/native-platform execution or AQ/P1 gates.

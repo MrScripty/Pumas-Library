@@ -1,5 +1,7 @@
 """Finite recipe/catalog/preflight controls; no remote fetch or source preparation."""
 
+import copy
+import base64
 import hashlib
 import importlib.util
 import json
@@ -59,9 +61,9 @@ class QualifiedCatalogTests(unittest.TestCase):
     def fetch(self, url):
         return index_rows(self.artifacts)
 
-    def invoke(self, artifacts, lock=None):
+    def invoke(self, artifacts, lock=None, *, resolution=None, observation=None):
         lock = self.lock if lock is None else lock
-        resolution = {
+        resolution = resolution or {
             "format": "pumas-qualified-wheel-catalog-1",
             "recipe_lock_sha256": hashlib.sha256(lock.encode()).hexdigest(),
             "artifacts": artifacts,
@@ -71,6 +73,10 @@ class QualifiedCatalogTests(unittest.TestCase):
         (self.root / "preview.json").write_text(
             json.dumps({"requirementsLock": lock, "directArtifacts": []})
         )
+        args = []
+        if observation is not None:
+            (self.root / "observation.json").write_text(json.dumps(observation))
+            args = ["--target-observation", str(self.root / "observation.json")]
         return subprocess.run(
             [
                 sys.executable,
@@ -88,11 +94,131 @@ class QualifiedCatalogTests(unittest.TestCase):
                 str(self.root / "packages"),
                 "--output",
                 str(self.root / "proof"),
+                *args,
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
+
+    def produced_observation(self):
+        output = self.root / "produced.json"
+        completed = subprocess.run([sys.executable, "-I", str(ROOT / "wheel_target.py"),
+            "--observe", "--output", str(output)], capture_output=True, timeout=10)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout, b"")
+        return json.loads(output.read_bytes())
+
+    def test_owned_producer_catalog_consumer_preserves_recipe_sources_and_native_priority(self):
+        observation = self.produced_observation()
+        legacy = catalog.catalog(self.lock, [], self.fetch)
+        explicit = catalog.catalog(self.lock, [], self.fetch, target_observation=observation)
+        self.assertEqual(explicit["artifacts"], legacy["artifacts"])
+        for key in legacy:
+            self.assertEqual(explicit[key], legacy[key])
+        self.assertEqual(explicit["wheel_target"], observation["target"])
+        self.assertEqual(explicit["wheel_target_observation_sha256"],
+                         catalog.target_owner().observation_digest(observation))
+        completed = self.invoke(explicit["artifacts"], resolution=explicit, observation=observation)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue((self.root / "proof" / "installed-files.json").is_file())
+        self.assertEqual((self.root / "lock").read_text(), self.lock)
+        self.assertEqual(json.loads((self.root / "preview.json").read_text()),
+                         {"requirementsLock": self.lock, "directArtifacts": []})
+
+    def test_changed_or_incomplete_observation_refuses_before_index_access(self):
+        observation = self.produced_observation()
+        variants = [None, {}, {"schema": "future"}]
+        for keys, value in [(("interpreter",), "/changed/python"),
+                            (("interpreter_sha256",), "0" * 64),
+                            (("target", "markers", "platform_release"), "changed"),
+                            (("target", "abi"), "cp312t")]:
+            changed = copy.deepcopy(observation)
+            part = changed
+            for key in keys[:-1]:
+                part = part[key]
+            part[keys[-1]] = value
+            variants.append(changed)
+        # None is the explicit API's compatibility default; supplied CLI null is
+        # separately refused rather than reaching this legacy default.
+        for changed in variants[1:]:
+            with self.subTest(observation=changed), self.assertRaises(ValueError):
+                catalog.catalog(self.lock, [], lambda url: self.fail("index reached"),
+                                target_observation=changed)
+
+    def test_catalog_retains_observed_snapshot_during_metadata_access(self):
+        observation = self.produced_observation()
+        approved = copy.deepcopy(observation)
+
+        def fetch(url):
+            observation["interpreter"] = "/changed/caller/python"
+            observation["interpreter_sha256"] = "0" * 64
+            observation["target"]["markers"]["platform_release"] = "changed caller context"
+            return self.fetch(url)
+
+        result = catalog.catalog(self.lock, [], fetch, target_observation=observation)
+        self.assertEqual(result["wheel_target"], approved["target"])
+        self.assertEqual(result["interpreter"], approved["interpreter"])
+        self.assertEqual(result["wheel_target_observation_sha256"],
+                         catalog.target_owner().observation_digest(approved))
+
+    def test_explicit_catalog_requires_python_uses_full_observed_patch(self):
+        observation = self.produced_observation()
+        rows = index_rows(self.artifacts)
+        rows[0]["requires-python"] = "<" + observation["target"]["python"]
+        with self.assertRaisesRegex(ValueError, "inconclusive"):
+            catalog.catalog(self.lock, [], lambda url: rows, target_observation=observation)
+
+    def test_explicit_catalog_preserves_priority_between_actual_approved_wheels(self):
+        observation = self.produced_observation()
+        native_tag = next(tag for tag in catalog.sys_tags()
+                          if tag.interpreter == observation["target"]["abi"]
+                          and tag.abi == observation["target"]["abi"])
+        pure = self.artifacts[0]
+        path = self.wheels / pure["url"].rsplit("/", 1)[-1]
+        with zipfile.ZipFile(path) as archive:
+            entries = {name: archive.read(name) for name in archive.namelist()}
+        wheel = next(name for name in entries if name.endswith("/WHEEL"))
+        entries[wheel] = entries[wheel].replace(b"Tag: py3-none-any",
+                                              ("Tag: " + str(native_tag)).encode())
+        record = next(name for name in entries if name.endswith("/RECORD"))
+        entries[record] = ("".join(
+            f"{name},sha256={base64.urlsafe_b64encode(hashlib.sha256(body).digest()).decode().rstrip('=')},{len(body)}\n"
+            for name, body in entries.items() if name != record
+        ) + f"{record},,\n").encode()
+        filename = path.name.replace("py3-none-any", str(native_tag))
+        native_path = self.wheels / filename
+        with zipfile.ZipFile(native_path, "w") as archive:
+            for name, body in entries.items():
+                archive.writestr(name, body)
+        native = {**pure, "url": "https://files.pythonhosted.org/packages/" + filename,
+                  "sha256": hashlib.sha256(native_path.read_bytes()).hexdigest()}
+        lock = self.lock.replace("sha256:" + pure["sha256"],
+                                "sha256:" + pure["sha256"] + " --hash=sha256:" + native["sha256"])
+        def fetch(url):
+            return index_rows([pure, native, *self.artifacts[1:]])
+        legacy = catalog.catalog(lock, [], fetch)
+        explicit = catalog.catalog(lock, [], fetch, target_observation=observation)
+        self.assertEqual(explicit["artifacts"], legacy["artifacts"])
+        self.assertEqual(explicit["artifacts"][0], native)
+
+    def test_supplied_invalid_observation_cli_never_reaches_catalog_or_output(self):
+        (self.root / "lock").write_text(self.lock)
+        (self.root / "preview.json").write_text(json.dumps(
+            {"requirementsLock": self.lock, "directArtifacts": []}))
+        approved = self.root / "invalid.json"
+        output = self.root / "catalog.json"
+        args = ["catalog", "--lock", str(self.root / "lock"), "--preview",
+                str(self.root / "preview.json"), "--output", str(output),
+                "--target-observation", str(approved)]
+        for raw in ("null", "[]", "false", "0", '"scalar"', "{", "x" * (64 * 1024 + 1)):
+            approved.write_text(raw)
+            with self.subTest(raw=raw[:30]), patch.object(sys, "argv", args), patch.object(
+                catalog, "catalog", side_effect=AssertionError("catalog reached")):
+                with self.assertRaises(SystemExit) as refused:
+                    catalog.main()
+                self.assertEqual(refused.exception.code, 3)
+                self.assertFalse(output.exists())
 
     def test_legacy_noninstall_resolver_starts_without_copied_record_owner(self):
         isolated = self.root / "resolve_runtime.py"

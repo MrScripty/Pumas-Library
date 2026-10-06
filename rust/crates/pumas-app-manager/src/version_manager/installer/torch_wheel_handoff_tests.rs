@@ -23,6 +23,11 @@ enum Case {
     TargetMissingContext,
     TargetUnsupportedContext,
     TargetChangedApproval,
+    QualifiedTargetSuccess,
+    QualifiedChangedProducerBeforeAcquisition,
+    QualifiedConsumerChangedBeforeAcquisition,
+    QualifiedChangedProducerBeforeConsumption,
+    QualifiedChangedProducerAfterProbe,
 }
 
 struct InputDropProbe {
@@ -89,6 +94,16 @@ async fn fixture(case: Case) {
     let stage_path = stage.path().to_owned();
     let runtime = stage_path.join("runtime");
     std::fs::create_dir(&runtime).unwrap();
+    let log = root.path().join("installer.log");
+    let (progress_tx, _progress_rx) = mpsc::channel(32);
+    let qualified_target = matches!(
+        case,
+        Case::QualifiedTargetSuccess
+            | Case::QualifiedChangedProducerBeforeAcquisition
+            | Case::QualifiedConsumerChangedBeforeAcquisition
+            | Case::QualifiedChangedProducerBeforeConsumption
+            | Case::QualifiedChangedProducerAfterProbe
+    );
     let source = root.path().join("fixture-source");
     std::fs::create_dir(&source).unwrap();
     let python_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -112,13 +127,166 @@ async fn fixture(case: Case) {
     );
     let mut artifacts: Vec<crate::version_manager::TorchArtifact> =
         serde_json::from_slice(&generated.stdout).unwrap();
+    let mut qualified_packet = if qualified_target {
+        write_embedded_torch_runtime(&runtime).unwrap();
+        let mut create = Command::new("python3");
+        create
+            .args(["-I", "-m", "venv", "--copies"])
+            .arg(runtime.join("venv"));
+        installer
+            .run_runtime_command(
+                create,
+                &log,
+                "Fixture selected venv",
+                &progress_tx,
+                Some(stage.clone()),
+            )
+            .await
+            .unwrap();
+        let python = pumas_library::platform::paths::venv_python(&runtime);
+        let produced = installer
+            .observe_qualified_torch_target(&runtime, &python, &stage, &log, &progress_tx)
+            .await
+            .unwrap();
+        for artifact in &mut artifacts {
+            artifact.url = format!(
+                "https://files.pythonhosted.org/packages/{}",
+                torch_wheel_filename(&artifact.url).unwrap()
+            );
+        }
+        let lock = artifacts
+            .iter()
+            .map(|a| {
+                format!(
+                    "{}=={} \\\n    --hash=sha256:{}\n",
+                    a.name, a.version, a.sha256
+                )
+            })
+            .collect::<String>();
+        std::fs::write(runtime.join("requirements.txt"), &lock).unwrap();
+        let preview =
+            serde_json::json!({"requirementsLock":lock, "directArtifacts":[]}).to_string();
+        std::fs::write(runtime.join("qualified-preview.json"), &preview).unwrap();
+        std::fs::write(
+            runtime.join("fixture-rows.json"),
+            serde_json::to_vec(&artifacts).unwrap(),
+        )
+        .unwrap();
+        // Actual catalog CLI, public catalog API with controlled metadata fetch;
+        // the production fetcher, endpoints and CLI receive no fixture bypass.
+        let code = r#"import importlib.util,json,pathlib,sys
+p=pathlib.Path(sys.argv[1])
+s=importlib.util.spec_from_file_location('catalog',p/'qualified_wheel_catalog.py')
+c=importlib.util.module_from_spec(s); s.loader.exec_module(c)
+rows=json.loads((p/'fixture-rows.json').read_text())
+called=[]
+def fetch(url):
+    assert url.startswith(c.INDEXES) and not url.endswith('.whl')
+    called.append(url)
+    return [{'url':a['url'],'hashes':{'sha256':a['sha256']}} for a in rows]
+original=c.catalog
+c.catalog=lambda lock,roots,*,target_observation: original(lock,roots,fetch,target_observation=target_observation)
+sys.argv=['catalog','--lock',str(p/'requirements.txt'),'--preview',str(p/'qualified-preview.json'),'--output',str(p/'resolution.json'),'--target-observation',str(p/'selected-target-observation.json')]
+c.main()
+assert len(called)==len(rows)*2
+"#;
+        let mut catalog = Command::new(&python);
+        catalog.args(["-I", "-c", code]).arg(&runtime);
+        installer
+            .run_runtime_command(
+                catalog,
+                &log,
+                "Fixture finite catalog CLI",
+                &progress_tx,
+                Some(stage.clone()),
+            )
+            .await
+            .unwrap();
+        let resolution_json = std::fs::read_to_string(runtime.join("resolution.json")).unwrap();
+        let document: serde_json::Value = serde_json::from_str(&resolution_json).unwrap();
+        let mut resolution: DirectTorchResolution = serde_json::from_str(&resolution_json).unwrap();
+        assert_eq!(
+            serde_json::to_value(&resolution.artifacts).unwrap(),
+            serde_json::to_value(&artifacts).unwrap()
+        );
+        validate_qualified_artifacts(&lock, &[], &resolution.artifacts).unwrap();
+        resolution.accepted_target =
+            Some(accepted_qualified_torch_target(&runtime, &document, produced, &python).unwrap());
+        Some(PreparedTorchWheelInstall {
+            runtime: runtime.clone(),
+            resolution,
+            resolution_json,
+            report: preview,
+            requirements: lock,
+            interpreter_hash: "b".repeat(64),
+            provider_label: None,
+            qualified_recipe: true,
+        })
+    } else {
+        None
+    };
+    if matches!(
+        case,
+        Case::QualifiedChangedProducerBeforeAcquisition
+            | Case::QualifiedConsumerChangedBeforeAcquisition
+    ) {
+        if case == Case::QualifiedConsumerChangedBeforeAcquisition {
+            let provider = native_observation_fixture();
+            let provider_path = Path::new(provider["interpreter"].as_str().unwrap());
+            let provider_hash = torch_interpreter_hash(provider_path).unwrap();
+            std::fs::write(
+                pumas_library::platform::paths::venv_python(&runtime),
+                b"changed selected consumer bytes",
+            )
+            .unwrap();
+            assert_eq!(
+                torch_interpreter_hash(provider_path).unwrap(),
+                provider_hash
+            );
+        } else {
+            std::fs::write(
+                runtime.join("selected-target-observation.json"),
+                b"changed after catalog",
+            )
+            .unwrap();
+        }
+        assert!(revalidate_prepared_torch_target(qualified_packet.as_ref().unwrap()).is_err());
+        assert!(AcquisitionStore::new(root.path())
+            .acquisitions()
+            .unwrap()
+            .is_empty());
+        assert!(!runtime.join("approved-target-observation.json").exists());
+        installer.shutdown_torch_cleanup().await.unwrap();
+        return;
+    }
+    if let Some(packet) = &qualified_packet {
+        revalidate_prepared_torch_target(packet).unwrap();
+        assert_eq!(packet.interpreter_hash, "b".repeat(64));
+        assert_ne!(
+            packet.interpreter_hash,
+            packet
+                .resolution
+                .accepted_target
+                .as_ref()
+                .unwrap()
+                .interpreter_sha256
+        );
+    }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let mut bodies = std::collections::BTreeMap::new();
+    let mut acquisition_sources = Vec::new();
     for artifact in &mut artifacts {
         let filename = torch_wheel_filename(&artifact.url).unwrap();
         let bytes = std::fs::read(source.join(&filename)).unwrap();
-        artifact.url = format!("{endpoint}/{filename}");
+        let fixture_url = format!("{endpoint}/{filename}");
+        acquisition_sources.push(AcquisitionHttpSource {
+            url: fixture_url.clone(),
+            authorization: None,
+        });
+        if !qualified_target {
+            artifact.url = fixture_url;
+        }
         bodies.insert(format!("/{filename}"), bytes);
     }
     if case == Case::ChangedWheel {
@@ -194,13 +362,7 @@ async fn fixture(case: Case) {
         },
         manifest: manifest.clone(),
         workspace,
-        sources: artifacts
-            .iter()
-            .map(|artifact| AcquisitionHttpSource {
-                url: artifact.url.clone(),
-                authorization: None,
-            })
-            .collect(),
+        sources: acquisition_sources,
         retry: AcquisitionRetryPolicy {
             attempts: Some(1),
             elapsed: Duration::from_secs(5),
@@ -215,8 +377,19 @@ async fn fixture(case: Case) {
             | Case::TargetUnsupportedContext
             | Case::TargetChangedApproval
     );
-    let mut resolution = serde_json::json!({"artifacts": artifacts});
-    let approved_target = if bound_target {
+    let mut resolution = qualified_packet
+        .as_ref()
+        .map(|packet| serde_json::from_str(&packet.resolution_json).unwrap())
+        .unwrap_or_else(|| serde_json::json!({"artifacts": artifacts}));
+    let approved_target = if let Some(packet) = &mut qualified_packet {
+        let accepted = packet.resolution.accepted_target.take().unwrap();
+        std::fs::write(
+            runtime.join("approved-target-observation.json"),
+            &accepted.observation,
+        )
+        .unwrap();
+        Some(accepted)
+    } else if bound_target {
         let observation = native_observation_fixture();
         resolution["wheel_target"] = observation["target"].clone();
         resolution["wheel_target_observation_sha256"] =
@@ -228,7 +401,7 @@ async fn fixture(case: Case) {
         let raw = observation.to_string();
         let accepted = accepted_torch_target(
             &resolution,
-            &serde_json::json!({"environment": observation["target"]["markers"]}),
+            &observation["target"]["markers"],
             Some(&raw),
             Path::new(observation["interpreter"].as_str().unwrap()),
             observation["interpreter_sha256"].as_str(),
@@ -264,13 +437,11 @@ async fn fixture(case: Case) {
         serde_json::to_vec(&resolution).unwrap(),
     )
     .unwrap();
-    let log = root.path().join("installer.log");
     let destination = versions.join("v2.9.1");
     let pending = versions.join(".torch-pending-publish-v2.9.1");
     let prepared = Arc::new(AtomicBool::new(false));
     let published = Arc::new(AtomicBool::new(false));
     let observed_held = Arc::new(AtomicBool::new(false));
-    let (progress_tx, _progress_rx) = mpsc::channel(32);
     let flow = with_verified_torch_wheels(
         &consumer,
         request,
@@ -328,7 +499,25 @@ async fn fixture(case: Case) {
                 }
                 let packages = runtime.join("packages");
                 let output = runtime.join("local-proof");
-                let mut command = Command::new("python3");
+                if let Some(target) = approved_target {
+                    if case == Case::QualifiedChangedProducerBeforeConsumption {
+                        std::fs::write(
+                            runtime.join("selected-target-observation.json"),
+                            b"changed after acquisition",
+                        )
+                        .unwrap();
+                    }
+                    validate_torch_target_evidence(
+                        runtime,
+                        target,
+                        Path::new(resolution["interpreter"].as_str().unwrap()),
+                    )?;
+                }
+                let mut command = if qualified_target {
+                    Command::new(resolution["interpreter"].as_str().unwrap())
+                } else {
+                    Command::new("python3")
+                };
                 if matches!(case, Case::CancelChild | Case::AbandonedChild) {
                     let child = "import pathlib,sys,time; f=open(sys.argv[1],'rb'); pathlib.Path(sys.argv[2]).write_text(str(__import__('os').getpid())); time.sleep(120)";
                     let parent = format!("import subprocess,sys,time; subprocess.Popen([sys.executable,'-I','-c',{},sys.argv[1],sys.argv[2]]); time.sleep(120)", serde_json::to_string(child).unwrap());
@@ -351,7 +540,14 @@ async fn fixture(case: Case) {
                         .arg(&packages)
                         .arg("--output")
                         .arg(&output);
-                    if bound_target && case != Case::TargetMissingContext {
+                    if qualified_target {
+                        command
+                            .arg("--recipe-lock")
+                            .arg(runtime.join("requirements.txt"))
+                            .arg("--preview")
+                            .arg(runtime.join("qualified-preview.json"));
+                    }
+                    if (bound_target || qualified_target) && case != Case::TargetMissingContext {
                         command
                             .arg("--target-observation")
                             .arg(runtime.join("approved-target-observation.json"));
@@ -388,6 +584,18 @@ async fn fixture(case: Case) {
                         runtime.join("approved-target-observation.json"),
                         target.observation.as_bytes().to_vec(),
                     ));
+                    if let Some(path) = &target.producer_path {
+                        provenance.push((path.clone(), target.observation.as_bytes().to_vec()));
+                        let packet = qualified_packet.as_ref().unwrap();
+                        provenance.push((
+                            runtime.join("requirements.txt"),
+                            packet.requirements.as_bytes().to_vec(),
+                        ));
+                        provenance.push((
+                            runtime.join("qualified-preview.json"),
+                            packet.report.as_bytes().to_vec(),
+                        ));
+                    }
                 }
                 move_verified_packages(&packages, runtime, "3.fixture")?;
                 let final_packages = torch_site_packages(runtime, "3.fixture");
@@ -397,10 +605,14 @@ async fn fixture(case: Case) {
                         | Case::ChangedProof
                         | Case::ChangedProvenance
                         | Case::TargetChangedApproval
+                        | Case::QualifiedChangedProducerAfterProbe
                 ) {
                     let changed = match case {
                         Case::ChangedInstalledMember => final_packages.join("root_wheel.py"),
                         Case::ChangedProof => proof_file.clone(),
+                        Case::QualifiedChangedProducerAfterProbe => {
+                            runtime.join("selected-target-observation.json")
+                        }
                         Case::TargetChangedApproval => {
                             runtime.join("approved-target-observation.json")
                         }
@@ -623,12 +835,15 @@ async fn fixture(case: Case) {
             2
         }
     );
-    if matches!(case, Case::Success | Case::TargetSuccess) {
+    if matches!(
+        case,
+        Case::Success | Case::TargetSuccess | Case::QualifiedTargetSuccess
+    ) {
         result.unwrap();
         assert!(matches!(row.phase, AcquisitionPhase::Adopted { .. }));
         assert!(matches!(drop_phase, Some(AcquisitionPhase::Adopted { .. })));
         assert!(receipt.is_some() && installed.is_some() && output_present && !publication_marker);
-        if case == Case::TargetSuccess {
+        if matches!(case, Case::TargetSuccess | Case::QualifiedTargetSuccess) {
             let saved: serde_json::Value = serde_json::from_slice(
                 &std::fs::read(destination.join("acquisition-wheel-receipt.json")).unwrap(),
             )
@@ -641,6 +856,12 @@ async fn fixture(case: Case) {
                 std::fs::read(destination.join("approved-target-observation.json")).unwrap(),
                 approved_target.as_ref().unwrap().observation.as_bytes()
             );
+            if qualified_target {
+                assert_eq!(
+                    std::fs::read(destination.join("selected-target-observation.json")).unwrap(),
+                    approved_target.as_ref().unwrap().observation.as_bytes()
+                );
+            }
         }
     } else {
         assert!(result.is_err());
@@ -662,7 +883,10 @@ async fn fixture(case: Case) {
         assert_eq!(installed.is_some(), case == Case::PublishedWithoutAck);
         if matches!(
             case,
-            Case::TargetMismatch | Case::TargetMissingContext | Case::TargetUnsupportedContext
+            Case::TargetMismatch
+                | Case::TargetMissingContext
+                | Case::TargetUnsupportedContext
+                | Case::QualifiedChangedProducerBeforeConsumption
         ) {
             assert!(!runtime.join("packages").exists());
             assert!(!runtime.join("local-proof").exists());
@@ -718,6 +942,27 @@ async fn fixture(case: Case) {
         assert_eq!(std::fs::read(&pending).ok(), pending_before);
         assert!(wheels.exists());
     }
+}
+
+#[tokio::test]
+async fn qualified_owned_producer_finite_catalog_shared_consumer_receipt() {
+    fixture(Case::QualifiedTargetSuccess).await;
+}
+#[tokio::test]
+async fn qualified_changed_producer_refuses_before_acquisition() {
+    fixture(Case::QualifiedChangedProducerBeforeAcquisition).await;
+}
+#[tokio::test]
+async fn qualified_changed_selected_consumer_refuses_without_changing_provider() {
+    fixture(Case::QualifiedConsumerChangedBeforeAcquisition).await;
+}
+#[tokio::test]
+async fn qualified_changed_producer_refuses_before_consumption() {
+    fixture(Case::QualifiedChangedProducerBeforeConsumption).await;
+}
+#[tokio::test]
+async fn qualified_changed_producer_probe_refuses_publication_and_receipt() {
+    fixture(Case::QualifiedChangedProducerAfterProbe).await;
 }
 
 #[tokio::test]

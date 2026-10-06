@@ -1451,6 +1451,64 @@ struct AcceptedTorchTarget {
     observation: String,
     sha256: String,
     interpreter_sha256: String,
+    producer_path: Option<PathBuf>,
+}
+
+struct ProducedTorchTarget {
+    path: PathBuf,
+    observation: String,
+    interpreter_sha256: String,
+}
+
+// Venv executables may be deliberate provider symlinks. Hash the actual selected
+// executable bytes independently of the managed-provider identity.
+fn torch_interpreter_hash(python: &Path) -> Result<String> {
+    let mut file = File::open(python).map_err(PumasError::from)?;
+    if !file.metadata().map_err(PumasError::from)?.is_file() {
+        return Err(failed("Selected Torch interpreter is not a file"));
+    }
+    let mut digest = Sha256::new();
+    std::io::copy(&mut file, &mut digest).map_err(PumasError::from)?;
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn validate_torch_target_evidence(
+    runtime: &Path,
+    target: &AcceptedTorchTarget,
+    python: &Path,
+) -> Result<()> {
+    if torch_interpreter_hash(python)? != target.interpreter_sha256 {
+        return Err(failed("Selected Torch consumer executable changed"));
+    }
+    if let Some(path) = &target.producer_path {
+        validate_torch_provenance(
+            runtime,
+            &[(path.clone(), target.observation.as_bytes().to_vec())],
+        )?;
+    }
+    Ok(())
+}
+
+fn accepted_qualified_torch_target(
+    runtime: &Path,
+    document: &serde_json::Value,
+    produced: ProducedTorchTarget,
+    python: &Path,
+) -> Result<AcceptedTorchTarget> {
+    // A finite catalog has no pip report. Its explicit complete target is checked
+    // against separately retained producer evidence; the original preview stays
+    // intact and continues to supply only the existing finite recipe authority.
+    let mut accepted = accepted_torch_target(
+        document,
+        &document["wheel_target"]["markers"],
+        Some(&produced.observation),
+        python,
+        Some(&produced.interpreter_sha256),
+    )?
+    .ok_or_else(|| failed("Qualified catalog lacks approved target"))?;
+    accepted.producer_path = Some(produced.path);
+    validate_torch_target_evidence(runtime, &accepted, python)?;
+    Ok(accepted)
 }
 
 #[derive(Deserialize)]
@@ -1492,7 +1550,7 @@ fn target_observation_digest(value: &serde_json::Value) -> Result<String> {
 
 fn accepted_torch_target(
     resolution: &serde_json::Value,
-    report: &serde_json::Value,
+    marker_environment: &serde_json::Value,
     observation: Option<&str>,
     python: &Path,
     interpreter_hash: Option<&str>,
@@ -1583,7 +1641,7 @@ fn accepted_torch_target(
         || resolution["implementation"] != markers["implementation_name"]
         || resolution["machine"] != markers["platform_machine"]
         || resolution["wheel_target"] != *target
-        || report["environment"] != *markers
+        || *marker_environment != *markers
     {
         return Err(failed(
             "Resolution target or interpreter differs from approved observation",
@@ -1597,6 +1655,7 @@ fn accepted_torch_target(
         observation: raw.to_owned(),
         sha256,
         interpreter_sha256: observed.interpreter_sha256,
+        producer_path: None,
     }))
 }
 
@@ -1613,20 +1672,36 @@ struct PreparedTorchWheelInstall {
 }
 
 fn revalidate_prepared_torch_target(prepared: &PreparedTorchWheelInstall) -> Result<()> {
-    let document = serde_json::from_str(&prepared.resolution_json)
+    let document: serde_json::Value = serde_json::from_str(&prepared.resolution_json)
         .map_err(|_| failed("Invalid retained Torch target packet"))?;
-    let report = serde_json::from_str(&prepared.report)
+    let report: serde_json::Value = serde_json::from_str(&prepared.report)
         .map_err(|_| failed("Invalid retained Torch target report"))?;
     let accepted = prepared.resolution.accepted_target.as_ref();
+    if prepared.qualified_recipe && accepted.is_none_or(|target| target.producer_path.is_none()) {
+        return Err(failed(
+            "Qualified preparation lacks owned target observation",
+        ));
+    }
     let observed = accepted_torch_target(
         &document,
-        &report,
+        if prepared.qualified_recipe {
+            &document["wheel_target"]["markers"]
+        } else {
+            &report["environment"]
+        },
         accepted.map(|target| target.observation.as_str()),
         Path::new(&prepared.resolution.interpreter),
         accepted.map(|target| target.interpreter_sha256.as_str()),
     )?;
     if observed.as_ref().map(|target| &target.sha256) != accepted.map(|target| &target.sha256) {
         return Err(failed("Accepted Torch target changed before acquisition"));
+    }
+    if let Some(target) = accepted {
+        validate_torch_target_evidence(
+            &prepared.runtime,
+            target,
+            Path::new(&prepared.resolution.interpreter),
+        )?;
     }
     Ok(())
 }
@@ -1773,7 +1848,7 @@ fn accepted_torch_resolution(
     validate_direct_torch_report(&resolution, &report, requirements, selection)?;
     resolution.accepted_target = accepted_torch_target(
         &document,
-        &report,
+        &report["environment"],
         selection.target_observation,
         selection.python,
         selection.target_interpreter_hash,
@@ -2645,6 +2720,9 @@ impl VersionInstaller {
             std::io::Write::write_all(&mut file, target.observation.as_bytes())
                 .map_err(PumasError::from)?;
             provenance.push((path, target.observation.as_bytes().to_vec()));
+            if let Some(path) = &target.producer_path {
+                provenance.push((path.clone(), target.observation.as_bytes().to_vec()));
+            }
             validate_torch_provenance(&runtime, &provenance)?;
         }
         // A durable sibling is deliberate: failure cannot auto-delete Using
@@ -2709,12 +2787,13 @@ impl VersionInstaller {
             |inputs| async move {
                 grant.validate()?;
                 for index in 0..inputs.record().manifest.files().len() { drop(inputs.open_file(index).await?); }
-                if prepared.resolution.accepted_target.is_some() {
+                let python = pumas_library::platform::paths::venv_python(&runtime);
+                if let Some(target) = &prepared.resolution.accepted_target {
                     validate_torch_provenance(&runtime, &provenance)?;
+                    validate_torch_target_evidence(&runtime, target, &python)?;
                 }
                 let packages = runtime.join("staged-packages");
                 let output = runtime.join("local-wheel-install");
-                let python = pumas_library::platform::paths::venv_python(&runtime);
                 let mut command = Command::new(&python);
                 command.arg("-I").arg(runtime.join("install_verified_wheels.py"))
                     .arg("--resolution").arg(runtime.join("resolution.json"))
@@ -2781,6 +2860,63 @@ impl VersionInstaller {
                 self.publish_staged_torch_runtime(runtime, tag, release, destination, versions, progress, stage, prepared.provider_label.clone()).await
             },
         ).await
+    }
+
+    async fn observe_qualified_torch_target(
+        &self,
+        runtime: &Path,
+        python: &Path,
+        stage: &Arc<TorchPendingStage>,
+        log: &Path,
+        progress: &mpsc::Sender<ProgressUpdate>,
+    ) -> Result<ProducedTorchTarget> {
+        let interpreter_sha256 = torch_interpreter_hash(python)?;
+        let path = runtime.join("selected-target-observation.json");
+        let mut command = Command::new(python);
+        command
+            .arg("-I")
+            .arg(runtime.join("wheel_target.py"))
+            .arg("--observe")
+            .arg("--output")
+            .arg(&path);
+        self.run_runtime_command(
+            command,
+            log,
+            "Observing qualified selected interpreter",
+            progress,
+            Some(stage.clone()),
+        )
+        .await?;
+        self.check_cancelled()?;
+        validate_torch_owned_path(runtime, &path)?;
+        let mut file = File::open(&path).map_err(PumasError::from)?;
+        if !file.metadata().map_err(PumasError::from)?.is_file() {
+            return Err(failed("Selected interpreter observation is not a file"));
+        }
+        let mut raw = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::Read::take(&mut file, 64 * 1024 + 1), &mut raw)
+            .map_err(PumasError::from)?;
+        if raw.len() > 64 * 1024 {
+            return Err(failed("Selected interpreter observation is oversized"));
+        }
+        let observation = String::from_utf8(raw)
+            .map_err(|_| failed("Invalid selected interpreter observation"))?;
+        let observed: TorchTargetObservation = serde_json::from_str(&observation)
+            .map_err(|_| failed("Invalid selected interpreter observation"))?;
+        if observed.schema != "pumas.wheel-target-observation.v1"
+            || Path::new(&observed.interpreter) != python
+            || observed.interpreter_sha256 != interpreter_sha256
+            || torch_interpreter_hash(python)? != interpreter_sha256
+        {
+            return Err(failed(
+                "Selected interpreter changed during target observation",
+            ));
+        }
+        Ok(ProducedTorchTarget {
+            path,
+            observation,
+            interpreter_sha256,
+        })
     }
 
     async fn prepare_qualified_torch_runtime(
@@ -2862,6 +2998,9 @@ impl VersionInstaller {
         )
         .await?;
         let python = pumas_library::platform::paths::venv_python(&runtime);
+        let produced = self
+            .observe_qualified_torch_target(&runtime, &python, stage, log, progress)
+            .await?;
         let mut command = Command::new(&python);
         command
             .arg("-I")
@@ -2870,6 +3009,8 @@ impl VersionInstaller {
             .arg(runtime.join("requirements.txt"))
             .arg("--preview")
             .arg(runtime.join("qualified-preview.json"))
+            .arg("--target-observation")
+            .arg(&produced.path)
             .arg("--output")
             .arg(runtime.join("resolution.json"));
         self.run_runtime_command(
@@ -2888,7 +3029,7 @@ impl VersionInstaller {
         }
         let document: serde_json::Value = serde_json::from_str(&resolution_json)
             .map_err(|_| failed("Qualified wheel catalog is invalid"))?;
-        let resolution: DirectTorchResolution = serde_json::from_str(&resolution_json)
+        let mut resolution: DirectTorchResolution = serde_json::from_str(&resolution_json)
             .map_err(|_| failed("Qualified wheel identity is invalid"))?;
         if document["format"] != "pumas-qualified-wheel-catalog-1"
             || document["recipe_lock_sha256"] != format!("{:x}", Sha256::digest(lock.as_bytes()))
@@ -2907,6 +3048,17 @@ impl VersionInstaller {
             ));
         }
         validate_qualified_artifacts(lock, &plan.preview.artifacts, &resolution.artifacts)?;
+        if torch_interpreter_hash(&plan.interpreter_path)? != plan.interpreter_hash
+            || std::fs::canonicalize(&plan.interpreter_path).map_err(PumasError::from)?
+                != plan.managed_python.executable
+        {
+            return Err(failed(
+                "Managed Python provider changed during qualified preparation",
+            ));
+        }
+        resolution.accepted_target = Some(accepted_qualified_torch_target(
+            &runtime, &document, produced, &python,
+        )?);
         Ok(PreparedTorchWheelInstall {
             runtime,
             resolution,

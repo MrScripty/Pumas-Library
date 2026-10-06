@@ -1,6 +1,7 @@
 # Explicit wheel target contract
 
-Status: implemented data/preflight and optional native-consumer validation slice.
+Status: implemented data/preflight, optional native-consumer validation and
+qualified finite-recipe selected-interpreter producer slice.
 The automatic/preview resolver migration, upstream catalog authority and AQ gates
 remain unaccepted. This contract supplies package compatibility data; it grants
 no source, redirect, filesystem, interpreter execution or installation authority.
@@ -74,6 +75,10 @@ output of the owned selected-interpreter observation may be supplied as approval
 resolver output, a cache hit, the inspection host or a replacement packet cannot
 mint it. Unknown versions, missing/extra fields and unsupported target context
 refuse. Observation input is bounded to 64 KiB at the consumer boundary.
+The additive `--output PATH` mode creates the output exclusively and emits no
+observation JSON to stdout. Existing output, including a link, refuses without
+replacement. The qualified Rust caller uses this mode after creating its selected
+venv under existing custody and retains the produced bytes separately in memory.
 
 An explicit-target resolution carries both `wheel_target` and
 `wheel_target_observation_sha256`. The latter is SHA-256 of the whole approved
@@ -86,7 +91,10 @@ repository JSON serializer; a shared nested/Unicode vector checks the projection
 The private Rust selection boundary receives approved observation separately from
 resolution/report bytes. It checks the fixed complete schema, exact target and
 observation digest, selected interpreter path/hash and the public report's whole
-runtime marker environment before accepting the packet. Standard compatibility
+runtime marker environment before accepting a pip packet. The finite catalog has
+no pip report: its complete declared target is bound directly to the separately
+retained producer observation. Its original qualified preview remains unchanged
+and supplies only the existing finite-recipe authority. Standard compatibility
 semantics remain with the Python target owner. The selected executable hash is
 separate from the existing managed-provider proof; venv redirectors do not replace
 or inherit the provider digest. Approved bytes/digest live in the
@@ -94,7 +102,13 @@ accepted packet and cannot be decoded from its resolution JSON. Before acquisiti
 the consumer rechecks retained packet bindings, then materializes the approved
 bytes with exclusive creation in its owned runtime. The existing provenance fence
 checks those bytes and resolution/report before acquisition, before local pip,
-and after the probe. Shared stage/input custody remains live through child effects,
+and after the probe. The qualified caller also retains and fences the original
+`selected-target-observation.json`; copying approval cannot conceal changes to
+the original producer file. It checks selected executable bytes around observation,
+after cataloguing, before acquisition and before local consumption. Provider
+identity is rechecked after preparation independently of the selected consumer.
+Changed observations/executable bytes refuse without recapture or resolver
+fallback. Shared stage/input custody remains live through child effects,
 publication, cleanup and settlement. The existing opaque consumer receipt payload
 adds the observation digest; the neutral durable schema does not change.
 
@@ -114,8 +128,18 @@ accepted explicit context cannot fall back to legacy. The low-level
 standalone compatibility validation; those APIs alone do not mint accepted packet
 authority. Current automatic/retained-preview producers pass no target approval
 and keep their existing resolver. They refuse unsolicited target-bearing packets.
-The finite recipe remains in its existing absent-context mode. No experimental
-resolver or new production catalog is activated by this opt-in boundary.
+The existing qualified finite-recipe production caller now supplies mandatory
+owned observation. `qualified_wheel_catalog.catalog(..., target_observation=...)`
+and its CLI `--target-observation PATH` validate the exact selected interpreter
+path/hash, native complete context and explicit compatibility before any index
+access. Wheel ranking preserves native public packaging priority within that
+target's tag set, and Requires-Python uses its full observed patch version. The
+result adds both existing packet bindings without changing recipe pins, allowed
+indexes/redirects, original sources, direct roots, budgets or resolver authority.
+The standalone catalog API/CLI still supports omitted context for compatibility;
+supplied CLI null/non-object, oversized, missing or linked input refuses. Rust
+qualified prepared packets cannot enter absent-context consumption. No experimental
+resolver or automatic/preview catalog adoption is activated by this integration.
 
 At the CLI boundary, absence means the `--target-observation` flag was omitted.
 If the flag is supplied, its file must decode to an observation object; JSON null,

@@ -240,10 +240,17 @@ def bind_resolution(resolution, observation):
 
 
 if __name__ == "__main__":
-    import sys
-    if sys.argv[1:] != ["--observe"]:
-        sys.exit("Expected --observe")
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--observe", action="store_true", required=True)
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
     try:
-        print(json.dumps(capture_observation(), sort_keys=True, separators=(",", ":"), ensure_ascii=False))
+        document = json.dumps(capture_observation(), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        if args.output is None:
+            print(document)
+        else:
+            with args.output.open("x", encoding="utf-8") as destination:
+                destination.write(document + "\n")
     except (OSError, ValueError):
-        sys.exit("Selected interpreter target observation refused")
+        parser.exit(3, "Selected interpreter target observation refused\n")

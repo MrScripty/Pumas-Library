@@ -85,6 +85,19 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(owner.observation_digest({"z": "é", "a": {"b": True, "a": None}}),
                          hashlib.sha256('{"a":{"a":null,"b":true},"z":"é"}'.encode()).hexdigest())
 
+    def test_observer_exclusive_owned_output_does_not_log_or_replace_evidence(self):
+        args = [sys.executable, "-I", str(fixtures.ROOT / "wheel_target.py"),
+                "--observe", "--output", str(self.approved)]
+        completed = subprocess.run(args, capture_output=True, timeout=10)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout, b"")
+        self.assertEqual(json.loads(self.approved.read_bytes()), self.observation)
+        original = self.approved.read_bytes()
+        completed = subprocess.run(args, capture_output=True, timeout=10)
+        self.assertEqual(completed.returncode, 3)
+        self.assertEqual(self.approved.read_bytes(), original)
+        self.assertNotIn(str(self.approved), completed.stderr.decode())
+
     def test_binding_preserves_artifact_identity_and_snapshots_approval(self):
         self.assertEqual(self.resolution["artifacts"], self.artifacts)
         self.assertEqual(owner.resolution_target(self.resolution, self.observation).to_dict(), self.observation["target"])

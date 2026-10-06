@@ -1,0 +1,510 @@
+{
+  "schema_version": 1,
+  "purpose": "unsigned local installed default-plus-S3 qualification; controlled TLS only",
+  "branch": "feat/s3-installed-prefix-main95",
+  "base": {
+    "head": "0901f6591249ccf955c10f29666e6380e898d201",
+    "tree": "422a71f51ab8403ac2f24ff1fc90b25d2a3b71e1"
+  },
+  "original_production_build": {
+    "schema_version": 1,
+    "purpose": "unsigned local installed S3 qualification; no provider or inference acceptance",
+    "source": {
+      "head": "4f5a2a7415193873e81e3737e1a41cfe3b5c18f3",
+      "tree": "12bf1bd1bb465dde4604a91f8dd3d8dd85ba0634"
+    },
+    "build": {
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--release",
+        "-p",
+        "pumas-rpc",
+        "--features",
+        "s3",
+        "--message-format=json-render-diagnostics"
+      ],
+      "target": "x86_64-unknown-linux-gnu",
+      "host": "x86_64-unknown-linux-gnu",
+      "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)\nbinary: rustc\ncommit-hash: ded5c06cf21d2b93bffd5d884aa6e96934ee4234\ncommit-date: 2025-12-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.92.0\nLLVM version: 21.1.3",
+      "cargo": "cargo 1.92.0 (344c4567c 2025-10-21)",
+      "profile": "release",
+      "checked_in_release_settings": {
+        "lto": true,
+        "codegen-units": 1,
+        "strip": "debuginfo"
+      },
+      "default_features": true,
+      "features": [
+        "s3"
+      ]
+    },
+    "binary_sha256": "69df92ec6ece85cfc257e841cfd33f76d624e57a634fa7a319e8bd7a7e00ef57",
+    "artifacts": {
+      "core": {
+        "features": [
+          "gpu-monitor",
+          "hf-client",
+          "onnx-runtime",
+          "process-manager",
+          "s3"
+        ],
+        "profile": {
+          "opt_level": "3",
+          "debuginfo": 0,
+          "debug_assertions": false,
+          "overflow_checks": false,
+          "test": false
+        },
+        "package_id": "path+file:///workspace/Pumas-Library-s3-installed-prefix-main95/rust/crates/pumas-core#pumas-library@0.7.0"
+      },
+      "rpc": {
+        "features": [
+          "default",
+          "inference-plugins",
+          "s3"
+        ],
+        "profile": {
+          "opt_level": "3",
+          "debuginfo": 0,
+          "debug_assertions": false,
+          "overflow_checks": false,
+          "test": false
+        },
+        "package_id": "path+file:///workspace/Pumas-Library-s3-installed-prefix-main95/rust/crates/pumas-rpc#0.7.0",
+        "executable": "/workspace/Pumas-Library/rust/target/release/pumas-rpc"
+      }
+    },
+    "fingerprints": {
+      "rpc": {
+        "json_sha256": "8cbd578accd47806ca30850902288cfeac6f8a9e8778e2e5ce60eb7ff42142d3",
+        "features": [
+          "default",
+          "inference-plugins",
+          "s3"
+        ],
+        "rustflags": [],
+        "opaque_profile_fingerprint": 8055818090833361886
+      },
+      "core": {
+        "json_sha256": "e30236ed53e81f11af499b7f02bc4ccd520ee190ffc5f516499dd855fb3e46a3",
+        "features": [
+          "gpu-monitor",
+          "hf-client",
+          "onnx-runtime",
+          "process-manager",
+          "s3"
+        ],
+        "rustflags": [],
+        "opaque_profile_fingerprint": 5060731410821673174
+      }
+    },
+    "attribution": {
+      "directory": "docs/release-attribution/0.7.0-s3",
+      "sha256": {
+        "README.md": "663a2d352f455938a5c14d950e26e2ffe4e2e76a68fcbfede2df70c2b5d91f77",
+        "inventory.json": "0b3cad4cfd7a6509422c34a32da255529b447e2febcb137e226ac59c6ad9c03b",
+        "THIRD-PARTY-NOTICES.txt": "90d6b8226b5cee95faa44b15a11e51e923b87d4442797715725f8c07231d5612"
+      }
+    },
+    "evidence_sha256": {
+      "cargo_jsonl": "4933e724f8b6fb2b75d4544d320e8a449149044ab3b92708ff8db9943084af48",
+      "cargo_stderr": "a6853762a2dac327eaeb9c58f1336fec8d1e214f2a716c510cdfbfd207e80e8f"
+    }
+  },
+  "installed_qualification": {
+    "source_head": "b0a66ba36773c2e4f73e5d1d982759d2f827eea0",
+    "source_tree": "5250f10681e62e6f66c478f946b4e149ba10bebd",
+    "binary_sha256": "69df92ec6ece85cfc257e841cfd33f76d624e57a634fa7a319e8bd7a7e00ef57",
+    "build_provenance": {
+      "schema_version": 1,
+      "purpose": "unsigned local installed S3 qualification; no provider or inference acceptance",
+      "source": {
+        "head": "b0a66ba36773c2e4f73e5d1d982759d2f827eea0",
+        "tree": "5250f10681e62e6f66c478f946b4e149ba10bebd"
+      },
+      "build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--release",
+          "-p",
+          "pumas-rpc",
+          "--features",
+          "s3",
+          "--message-format=json-render-diagnostics"
+        ],
+        "target": "x86_64-unknown-linux-gnu",
+        "host": "x86_64-unknown-linux-gnu",
+        "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)\nbinary: rustc\ncommit-hash: ded5c06cf21d2b93bffd5d884aa6e96934ee4234\ncommit-date: 2025-12-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.92.0\nLLVM version: 21.1.3",
+        "cargo": "cargo 1.92.0 (344c4567c 2025-10-21)",
+        "profile": "release",
+        "checked_in_release_settings": {
+          "lto": true,
+          "codegen-units": 1,
+          "strip": "debuginfo"
+        },
+        "default_features": true,
+        "features": [
+          "s3"
+        ]
+      },
+      "binary_sha256": "69df92ec6ece85cfc257e841cfd33f76d624e57a634fa7a319e8bd7a7e00ef57",
+      "artifacts": {
+        "core": {
+          "features": [
+            "gpu-monitor",
+            "hf-client",
+            "onnx-runtime",
+            "process-manager",
+            "s3"
+          ],
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": false,
+            "overflow_checks": false,
+            "test": false
+          },
+          "package_id": "path+file:///workspace/Pumas-Library-s3-installed-prefix-main95/rust/crates/pumas-core#pumas-library@0.7.0"
+        },
+        "rpc": {
+          "features": [
+            "default",
+            "inference-plugins",
+            "s3"
+          ],
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": false,
+            "overflow_checks": false,
+            "test": false
+          },
+          "package_id": "path+file:///workspace/Pumas-Library-s3-installed-prefix-main95/rust/crates/pumas-rpc#0.7.0",
+          "executable": "/workspace/Pumas-Library/rust/target/release/pumas-rpc"
+        }
+      },
+      "fingerprints": {
+        "rpc": {
+          "json_sha256": "8cbd578accd47806ca30850902288cfeac6f8a9e8778e2e5ce60eb7ff42142d3",
+          "features": [
+            "default",
+            "inference-plugins",
+            "s3"
+          ],
+          "rustflags": [],
+          "opaque_profile_fingerprint": 8055818090833361886
+        },
+        "core": {
+          "json_sha256": "e30236ed53e81f11af499b7f02bc4ccd520ee190ffc5f516499dd855fb3e46a3",
+          "features": [
+            "gpu-monitor",
+            "hf-client",
+            "onnx-runtime",
+            "process-manager",
+            "s3"
+          ],
+          "rustflags": [],
+          "opaque_profile_fingerprint": 5060731410821673174
+        }
+      },
+      "attribution": {
+        "directory": "docs/release-attribution/0.7.0-s3",
+        "sha256": {
+          "README.md": "663a2d352f455938a5c14d950e26e2ffe4e2e76a68fcbfede2df70c2b5d91f77",
+          "inventory.json": "0b3cad4cfd7a6509422c34a32da255529b447e2febcb137e226ac59c6ad9c03b",
+          "THIRD-PARTY-NOTICES.txt": "90d6b8226b5cee95faa44b15a11e51e923b87d4442797715725f8c07231d5612"
+        }
+      },
+      "evidence_sha256": {
+        "cargo_jsonl": "b92a978de4c49c21ab28c4983442b404f1d3ff8e4da3ce2cb32ae31760f00ce3",
+        "cargo_stderr": "f18e8aa44b81e7d9d1663536017be739eb80ede7041400fe06bf4e1c755d3d59"
+      }
+    },
+    "provider": "controlled TLS protocol fixture; not an actual S3-compatible service",
+    "target": "Linux x86_64",
+    "production_profile": "release with defaults and explicit s3; no test-support; no inference claim",
+    "packaged_files": {
+      "pumas-rpc": "69df92ec6ece85cfc257e841cfd33f76d624e57a634fa7a319e8bd7a7e00ef57",
+      "LICENSE.txt": "cd39fd1216a0187a1c36350649249f3f98391c5c65426ec41c6c8043e1039281",
+      "THIRD-PARTY-NOTICES.txt": "90d6b8226b5cee95faa44b15a11e51e923b87d4442797715725f8c07231d5612",
+      "ATTRIBUTION-README.md": "663a2d352f455938a5c14d950e26e2ffe4e2e76a68fcbfede2df70c2b5d91f77",
+      "ATTRIBUTION-inventory.json": "0b3cad4cfd7a6509422c34a32da255529b447e2febcb137e226ac59c6ad9c03b"
+    },
+    "scenarios": [
+      {
+        "mode": "success",
+        "authenticated": false,
+        "session_token": false,
+        "single": true,
+        "requests": [
+          {
+            "method": "HEAD",
+            "version": "weights-v1"
+          },
+          {
+            "method": "GET",
+            "version": "weights-v1",
+            "range_start": 0
+          }
+        ],
+        "drained_exit": 0,
+        "result": "passed"
+      },
+      {
+        "mode": "success",
+        "authenticated": false,
+        "session_token": false,
+        "single": false,
+        "requests": [
+          {
+            "method": "HEAD",
+            "version": "data-v2"
+          },
+          {
+            "method": "HEAD",
+            "version": "weights-v1"
+          },
+          {
+            "method": "GET",
+            "version": "weights-v1",
+            "range_start": 0
+          }
+        ],
+        "drained_exit": 0,
+        "result": "passed"
+      },
+      {
+        "mode": "success",
+        "authenticated": true,
+        "session_token": false,
+        "single": false,
+        "requests": [
+          {
+            "method": "HEAD",
+            "version": "data-v2"
+          },
+          {
+            "method": "HEAD",
+            "version": "weights-v1"
+          },
+          {
+            "method": "GET",
+            "version": "weights-v1",
+            "range_start": 0
+          }
+        ],
+        "drained_exit": 0,
+        "result": "passed"
+      },
+      {
+        "mode": "success",
+        "authenticated": true,
+        "session_token": true,
+        "single": false,
+        "requests": [
+          {
+            "method": "HEAD",
+            "version": "data-v2"
+          },
+          {
+            "method": "HEAD",
+            "version": "weights-v1"
+          },
+          {
+            "method": "GET",
+            "version": "weights-v1",
+            "range_start": 0
+          }
+        ],
+        "drained_exit": 0,
+        "result": "passed"
+      },
+      {
+        "mode": "digest",
+        "authenticated": true,
+        "session_token": true,
+        "single": false,
+        "requests": [
+          {
+            "method": "HEAD",
+            "version": "data-v2"
+          },
+          {
+            "method": "HEAD",
+            "version": "weights-v1"
+          }
+        ],
+        "drained_exit": 0,
+        "result": "passed"
+      },
+      {
+        "mode": "missing",
+        "authenticated": true,
+        "session_token": true,
+        "single": false,
+        "requests": [
+          {
+            "method": "HEAD",
+            "version": "data-v2"
+          },
+          {
+            "method": "HEAD",
+            "version": "weights-v1"
+          }
+        ],
+        "drained_exit": 0,
+        "result": "passed"
+      },
+      {
+        "mode": "unknown",
+        "authenticated": true,
+        "session_token": true,
+        "single": false,
+        "requests": [
+          {
+            "method": "HEAD",
+            "version": "data-v2"
+          },
+          {
+            "method": "HEAD",
+            "version": "weights-v1"
+          }
+        ],
+        "drained_exit": 0,
+        "result": "passed"
+      },
+      {
+        "mode": "truncated",
+        "authenticated": true,
+        "session_token": true,
+        "single": false,
+        "requests": [
+          {
+            "method": "HEAD",
+            "version": "data-v2"
+          },
+          {
+            "method": "HEAD",
+            "version": "weights-v1"
+          },
+          {
+            "method": "GET",
+            "version": "weights-v1",
+            "range_start": 0
+          },
+          {
+            "method": "GET",
+            "version": "weights-v1",
+            "range_start": 1
+          },
+          {
+            "method": "GET",
+            "version": "weights-v1",
+            "range_start": 2
+          }
+        ],
+        "drained_exit": 0,
+        "result": "passed"
+      },
+      {
+        "mode": "cancel",
+        "authenticated": true,
+        "session_token": true,
+        "single": false,
+        "requests": [
+          {
+            "method": "HEAD",
+            "version": "data-v2"
+          },
+          {
+            "method": "HEAD",
+            "version": "weights-v1"
+          },
+          {
+            "method": "GET",
+            "version": "weights-v1",
+            "range_start": 0
+          }
+        ],
+        "drained_exit": 0,
+        "result": "passed"
+      },
+      {
+        "mode": "empty-primary",
+        "authenticated": true,
+        "session_token": true,
+        "single": false,
+        "requests": [
+          {
+            "method": "HEAD",
+            "version": "data-v2"
+          },
+          {
+            "method": "HEAD",
+            "version": "weights-v1"
+          }
+        ],
+        "drained_exit": 1,
+        "result": "passed"
+      }
+    ],
+    "archive_sha256": "fdc13ae46eb6993368200dfeec30dbc65a5a9e32dc7cb2f9957c77ff99fd31bb",
+    "result": "passed"
+  },
+  "default_profile_health_smoke": {
+    "health": "passed",
+    "inference_disabled": false
+  },
+  "controls": {
+    "tests": 16,
+    "pinned_ruff": "0.15.2",
+    "ruff_scope": [
+      "torch-server",
+      "scripts/release"
+    ]
+  },
+  "external_evidence": {
+    "/workspace/scratch/s3-installed-default-profile/default-profile-smoke.log": "72614c22cb579d0023da99c4589cb6d94ed7af1188197206532dd980adf912c2",
+    "/workspace/scratch/s3-installed-default-profile/installed-diagnostic/pumas-s3-qualification-linux.tar.gz": "0ab01fd7f4e81ea73e526fa037c4a4153b8a19acc82b17b26525a082ad1e7eee",
+    "/workspace/scratch/s3-installed-default-profile/installed-diagnostic.log": "9ffda14a2674b3047d83542b00e79c28de21fd086631b8ff5b9cfd7c772384c5",
+    "/workspace/scratch/s3-installed-default-profile/installed-final/installed-result.json": "e24f6afb501615560d1c307d9771d9ed781f7ca5765d979622482aff28331bf5",
+    "/workspace/scratch/s3-installed-default-profile/installed-final/pumas-s3-qualification-linux.tar.gz": "fdc13ae46eb6993368200dfeec30dbc65a5a9e32dc7cb2f9957c77ff99fd31bb",
+    "/workspace/scratch/s3-installed-default-profile/installed-final.log": "00097e61353c8ee6bbac5782a161ae7004c3adb5aeb77ea7c02c5d584f99bed1",
+    "/workspace/scratch/s3-installed-default-profile/installed-qualification.log": "2cb41abc45c4f4ce0305a034647b2975d61cb1bfcfeaca398456ba9b2158bb65",
+    "/workspace/scratch/s3-installed-default-profile/installed-qualified/pumas-s3-qualification-linux.tar.gz": "0f8505031d39c26f0f768c435be260de9b5057a5aee0c60bcd3a90b9558d9aba",
+    "/workspace/scratch/s3-installed-default-profile/installed-query-diagnostic/installed-result.json": "b6cbf4e0f91feb2b07ab8387d759429eebbdf7e13a3ab95bd0caccc8f8ed8333",
+    "/workspace/scratch/s3-installed-default-profile/installed-query-diagnostic/pumas-s3-qualification-linux.tar.gz": "9bfb52d19ce8ae0395d6702175703f78565be0b58ad6fbe0d63c9ca7cc2d1186",
+    "/workspace/scratch/s3-installed-default-profile/installed-query-diagnostic.log": "f5c2c072beaa2755d863ccbb7b49642022b54d81b8142f8cb662b56acd5a6623",
+    "/workspace/scratch/s3-installed-default-profile/production-build-query-fixed.cargo.jsonl": "b92a978de4c49c21ab28c4983442b404f1d3ff8e4da3ce2cb32ae31760f00ce3",
+    "/workspace/scratch/s3-installed-default-profile/production-build-query-fixed.cargo.stderr.log": "f18e8aa44b81e7d9d1663536017be739eb80ede7041400fe06bf4e1c755d3d59",
+    "/workspace/scratch/s3-installed-default-profile/production-build-query-fixed.json": "9a62b168dce17536279156363e729a4097c5d4c943d252d18a6501be2edc4c7c",
+    "/workspace/scratch/s3-installed-default-profile/production-build-query-fixed.log": "6d3c940765893e3725c8bfb6704d7c53e6a66e7e336017abce8bbef1b1f1b067",
+    "/workspace/scratch/s3-installed-default-profile/production-build.cargo.jsonl": "4933e724f8b6fb2b75d4544d320e8a449149044ab3b92708ff8db9943084af48",
+    "/workspace/scratch/s3-installed-default-profile/production-build.cargo.stderr.log": "a6853762a2dac327eaeb9c58f1336fec8d1e214f2a716c510cdfbfd207e80e8f",
+    "/workspace/scratch/s3-installed-default-profile/production-build.json": "d071df18ee1b0e670e2678ecc21d7c63c1b17d88ea775b34f5221e7a74a5494e",
+    "/workspace/scratch/s3-installed-default-profile/query-oracle-format.log": "10869b88a75066aa23546ef1f95fcd4678c3fb92a56ed46ef91688052b67976a",
+    "/workspace/scratch/s3-installed-default-profile/query-oracle-green.log": "089ea9a28239a84c451fa250cbece3bb9748f343028e4c7ad63a9fd83a0a72d4",
+    "/workspace/scratch/s3-installed-default-profile/query-oracle-red.log": "129793a2949f08523a2ebf2871a893aa1dbcae28cfd3d1a65c221399de1ece29",
+    "/workspace/scratch/s3-installed-default-profile/query-oracle-ruff-ci-format.log": "b642d2f0cc49caff9e609808fb9c82854fc174b2f54b459a0d09dbe4c0f837ab",
+    "/workspace/scratch/s3-installed-default-profile/query-oracle-ruff-ci-lint.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "/workspace/scratch/s3-installed-default-profile/query-oracle-ruff-lint.log": "1811ee43bbd5312fc9928499677d3ff32192110d66e1cea167bae12a8345cb87",
+    "/workspace/scratch/s3-installed-default-profile/evidence-integrity.log": "8d4f4154fa490d2a76da0cac499bd8d5d7207b4076df66c814ebfe99949c5fe2"
+  },
+  "scope_limits": [
+    "no actual AWS/non-AWS/MinIO acceptance",
+    "no inference/native runtime obtained or executed",
+    "no desktop/UI/cross-platform/deployment/hosted CI acceptance",
+    "no release publication or external reviewer contact"
+  ],
+  "next_existing_plan_slice": "AC05/AC17 installed S3 pre-FilesReady process-loss and cold-custody fixture"
+}

@@ -16,6 +16,10 @@ path = "src/main.rs"
 pumas-library = { workspace = true, default-features = false, features = ["hf-client"] }
 pumas-app-manager = { workspace = true, optional = true }
 
+# Owned workspace handles; existing locked packages, enabled only for S3.
+cap-std = { workspace = true, optional = true }
+same-file = { version = "1.0.6", optional = true }
+
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "net", "macros", "signal"] }
 
@@ -54,6 +58,7 @@ reqwest = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 
 [features]
+s3 = ["pumas-library/s3", "dep:cap-std", "dep:same-file"]
 # Weak forwarding preserves the inference-disabled dependency boundary.
 test-support = ["pumas-app-manager?/test-support"]
 export-contract = ["dep:schemars", "dep:tempfile", "pumas-library/contract-schema"]
@@ -66,6 +71,7 @@ inference-plugins = [
 ]
 
 [dev-dependencies]
+native-tls = "0.2"
 pumas-library = { workspace = true, default-features = false, features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = { workspace = true }

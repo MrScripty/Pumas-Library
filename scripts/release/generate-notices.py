@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Collect exact package license texts; fail rather than invent missing terms."""
 
+import argparse
 import hashlib
 import json
 from pathlib import Path
 import re
 import subprocess
-import sys
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -229,7 +229,7 @@ def collect_managed_python(add):
     return inventory, inputs, uv_version
 
 
-def collect():
+def collect(features=()):
     metadata = json.loads(
         run(
             "cargo",
@@ -240,8 +240,11 @@ def collect():
             "rust/Cargo.toml",
             "--format-version",
             "1",
+            *(["--features", "pumas-rpc/" + features[0]] if features else []),
         )
     )
+    feature_args = ["--features", ",".join(features)] if features else []
+    targets = ("x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-windows-msvc")
     tree = "\n".join(
         run(
             "cargo",
@@ -260,10 +263,11 @@ def collect():
             "none",
             "--format",
             "{p}",
+            *feature_args,
         )
-        for target in ("x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-windows-msvc")
+        for target in targets
     )
-    selected = {tuple(line.split()[:2]) for line in tree.splitlines()}
+    selected = {tuple(line.split()[:2]) for line in tree.splitlines() if line.strip()}
     records, sections = [], []
     sources = json.loads((LICENSES / "sources.json").read_text())
     for source in sources:
@@ -311,25 +315,22 @@ def collect():
             "dispatch2",
             "objc2",
             "objc2-encode",
+            "base64-simd",
+            "vsimd",
         ):
             revision = json.loads((root / ".cargo_vcs_info.json").read_text())["git"]["sha1"]
             name = (
                 "binrw-LICENSE"
                 if package["name"].startswith("binrw")
+                else "simd-LICENSE"
+                if package["name"] in ("base64-simd", "vsimd")
                 else package["name"] + "-LICENSE"
             )
             provenance = next(source for source in sources if source["file"] == name)
             if revision not in provenance["source"]:
                 raise ValueError(f"Upstream license revision changed: {package['name']}")
             root = LICENSES
-            files = [
-                root
-                / (
-                    "binrw-LICENSE"
-                    if package["name"].startswith("binrw")
-                    else package["name"] + "-LICENSE"
-                )
-            ]
+            files = [root / name]
         add(
             package["name"],
             package["version"],
@@ -338,6 +339,15 @@ def collect():
             root,
             files,
             "Rust normal/build dependency, all desktop targets; conservative superset",
+        )
+
+    required_rust = {
+        (name, version[1:]) for name, version in selected if not name.startswith("pumas-")
+    }
+    covered_rust = {(record["name"], record["version"]) for record in records}
+    if required_rust != covered_rust:
+        raise ValueError(
+            f"Incomplete Rust attribution closure: {sorted(required_rust - covered_rust)}"
         )
 
     # Include the production JS closure, not just tree-shaken renderer modules.
@@ -444,6 +454,17 @@ selected install-only distributions; each archive identity is recorded below.
     (OUTPUT / "THIRD-PARTY-NOTICES.txt").write_bytes(text.encode("utf-8"))
     inventory = {
         "schema_version": 1,
+        "rust_profile": {
+            "package": "pumas-rpc",
+            "default_features": True,
+            "features": list(features),
+            "targets": list(targets),
+        },
+        "rust_dependencies": [
+            {"name": name, "version": version[1:]}
+            for name, version in sorted(selected)
+            if not name.startswith("pumas-")
+        ],
         "packages": records,
         "sources": sources,
         "managed_python": managed_python,
@@ -470,8 +491,14 @@ selected install-only distributions; each archive identity is recorded below.
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--output":
-        OUTPUT = Path(sys.argv[2]).resolve()
-    elif len(sys.argv) != 1:
-        raise SystemExit("usage: generate-notices.py [--output DIRECTORY]")
-    collect()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--features", choices=("s3",), help="Include the optional S3 release closure"
+    )
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+    if args.output:
+        OUTPUT = args.output.resolve()
+    elif args.features:
+        OUTPUT = OUTPUT.with_name(OUTPUT.name + "-s3")
+    collect((args.features,) if args.features else ())

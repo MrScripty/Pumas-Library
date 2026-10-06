@@ -45,10 +45,13 @@ function retainedFullArchiveMapping(source, expectedTargets) {
   return { release: release[0], flavors: Object.fromEntries(flavors.map(item => [item[1], item[2]])) };
 }
 
-function checkAttribution(directory) {
+function checkAttribution(directory, features = []) {
+  if (!Array.isArray(features) || (features.length && (features.length !== 1 || features[0] !== 's3'))) {
+    throw new Error('Unsupported release attribution feature profile');
+  }
   const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version;
   if (typeof directory !== 'string' || !directory) {
-    directory = path.join(root, 'docs/release-attribution', version);
+    directory = path.join(root, 'docs/release-attribution', version + (features.length ? '-s3' : ''));
   }
   const inventory = JSON.parse(fs.readFileSync(path.join(directory, 'inventory.json')));
   const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -68,6 +71,24 @@ function checkAttribution(directory) {
   for (const name of Object.keys(inventory.input_sha256)) input(name);
   if (hash(path.join(directory, 'THIRD-PARTY-NOTICES.txt')) !== inventory.notices_sha256) throw new Error('Changed release notices');
   if (!inventory.packages?.length) throw new Error('Empty release attribution inventory');
+  const profile = inventory.rust_profile;
+  if (profile || features.length) {
+    const targets = ['x86_64-unknown-linux-gnu', 'aarch64-apple-darwin', 'x86_64-pc-windows-msvc'];
+    if (profile?.package !== 'pumas-rpc' || profile.default_features !== true
+      || JSON.stringify(profile.features) !== JSON.stringify(features)
+      || JSON.stringify(profile.targets) !== JSON.stringify(targets)) {
+      throw new Error('Release attribution feature profile mismatch');
+    }
+    const rust = inventory.packages.filter(item => item.scope?.startsWith('Rust normal/build dependency'));
+    const identities = values => values.map(item => `${item.name}@${item.version}`).sort();
+    const closure = inventory.rust_dependencies;
+    if (!Array.isArray(closure) || !closure.length
+      || new Set(identities(closure)).size !== closure.length
+      || JSON.stringify(identities(closure)) !== JSON.stringify(identities(rust))
+      || (features.length && !closure.some(item => item.name === 'aws-sdk-s3'))) {
+      throw new Error('Incomplete Rust release attribution closure');
+    }
+  }
   for (const source of inventory.sources) {
     if (hash(relative(`scripts/release/licenses/${source.file}`)) !== source.sha256) throw new Error(`Changed upstream license: ${source.file}`);
   }
@@ -164,6 +185,15 @@ function checkAttribution(directory) {
 
 module.exports = checkAttribution;
 if (require.main === module) {
-  checkAttribution();
+  const args = process.argv.slice(2);
+  let directory;
+  let features = [];
+  while (args.length) {
+    const flag = args.shift();
+    if (flag === '--directory' && args.length && !directory) directory = args.shift();
+    else if (flag === '--features' && args[0] === 's3' && !features.length) features = [args.shift()];
+    else throw new Error('usage: check-attribution.cjs [--directory DIRECTORY] [--features s3]');
+  }
+  checkAttribution(directory, features);
   console.log('Release attribution matches current inputs and pinned texts');
 }

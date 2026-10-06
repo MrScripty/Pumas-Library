@@ -53,5 +53,10 @@
     "file": "uv-0.12.18-LICENSE-APACHE",
     "source": "https://raw.githubusercontent.com/astral-sh/uv/0.12.18/LICENSE-APACHE",
     "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  },
+  {
+    "file": "simd-LICENSE",
+    "source": "https://raw.githubusercontent.com/Nugine/simd/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE",
+    "sha256": "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d"
   }
 ]

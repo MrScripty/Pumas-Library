@@ -1,5 +1,611 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — bounded installed process-loss milestone complete
+
+Source 81aea4c0d97aae2a27d1a0c0eebdd784e90f705d, tree
+65cea0342055e4b76de0f0476a3a480fcce9cfdc, passes all eleven actual installed
+HTTPS scenarios and 24 controls. Exact original production binary hash is
+preserved; ed31639 branch/ref/archive remain untouched. One actual written byte
+and transferring custody precede owned SIGKILL/reap (-9). Two cold owners drain
+0, preserve full store/acquisition/manifest/physical partial/sentinel/model-row
+observations, and perform no source replay or publication. Same-demand cold
+submission retains failure custody; subsequent submission is rejected.
+The source sees only one HEAD and one GET. Offline recomputation and secret/hash
+checks pass; Rust/dependencies/native/ONNX/network settings are unchanged.
+See [report](reports/s3-installed-process-loss-2026-10-06.md) and
+[evidence](reports/s3-installed-process-loss-evidence-2026-10-06.json).
+Next documented feature is Q2 exact wheel-set/local-only Torch consumption,
+blocked by AQ-HTTP. Actual-provider Q3, desktop/platform/inference/hosted and
+deployment gates remain open. Parent owns review/publication/integration.
+
+## 2026-10-06 — one installed pre-FilesReady process-loss milestone admitted
+
+Parent delegates one bounded AC05/AC17 fixture after frozen ed31639. Separate
+`feat/s3-installed-process-loss-ed31639` preserves that branch/ref and all
+production artifact identities. The exact write set, first-byte/SIGKILL/cold
+custody proof, focused controls and unchanged eleven-scenario scope are recorded
+in [admission](reports/s3-installed-process-loss-2026-10-06.md). No production
+Rust/dependency/native/ONNX/network setting changes are admitted. Execution is
+pending; actual-provider, UI/platform/inference and hosted gates remain open.
+
+## 2026-10-06 — installed production default-plus-S3 milestone frozen
+
+The actual unchanged release settings build completed in 19m25s at 4f5a2a74.
+The first installed run exposed the old fixture HMAC oracle's wire-order query
+assumption. A fixed-vector red control and narrow SigV4 query-sort repair at
+b0a66ba36773c2e4f73e5d1d982759d2f827eea0 (tree
+5250f10681e62e6f66c478f946b4e149ba10bebd) pass all 16 controls. A fresh clean-head
+builder record observes the same actual default-plus-S3 production binary,
+SHA-256 69df92ec6ece85cfc257e841cfd33f76d624e57a634fa7a319e8bd7a7e00ef57.
+All ten unchanged HTTPS installed scenarios and default-profile health smoke
+pass. Full CI Ruff scope passes, complete 415-entry S3 notices are bound through
+extraction, and failures/diagnostics are retained. No Rust, native, dependency or
+ONNX source changed; no runtime or real credentials were obtained. This is one
+Linux backend fixture scope, not provider/platform/inference/full Q4 acceptance.
+See [frozen report](reports/s3-installed-default-profile-2026-10-06.md) and
+[hashed evidence](reports/s3-installed-default-profile-evidence-2026-10-06.json).
+Parent owns review/publication/integration. Next feasible existing-plan work is
+installed pre-FilesReady process loss and cold-custody qualification; read-only
+design exists, execution is future work.
+
+## 2026-10-06 — independent installed default-plus-S3 Q4 successor admitted
+
+Separate `feat/s3-installed-prefix-main95` preserves prefix repair 0901f659.
+Admitted write set: installed harness, one build-provenance helper and focused
+controls, existing Linux release-contract test hook, and owning documentation.
+The builder binds actual Cargo events, clean source, profile, binary and full S3
+notices; the installed harness refuses guessed source/headless/default notices.
+Fourteen synthetic controls, full pinned Ruff lint/format and workflow YAML pass.
+Actual release build and ten unchanged HTTPS scenarios remain pending at this
+source milestone. Rust/native/ONNX/dependency source is unchanged. Parent owns
+PRs and hosted/provider/platform acceptance. See [scope](reports/s3-installed-default-profile-2026-10-06.md).
+
+## 2026-10-06 — independently reviewed prefix byte-capacity repair
+
+A private typed byte-budget cause is preserved through the maintained SDK error
+chain and mapped only by prefix enumeration to documented Incomplete. Completed
+valid XML one byte over page or remaining-total capacity and unfinished overflow
+now have the correct typed outcome; malformed XML stays a protocol failure.
+The three strengthened controls fail on the original source and pass repaired.
+Full S3 units pass 30, integrations 66, strict core Clippy and production RPC
+Clippy with inherited dead-code allowance pass. Exact default-plus-S3 RPC passes
+324 tests and 12 existing ignores. Identity/retries/authentication/native/ONNX
+policies and dependencies are unchanged. See [review repair](reports/s3-prefix-budget-review-repair-2026-10-06.md).
+
+Separate pinned Python formatting checkpoint 6f260de6 changes only two edited
+release scripts and preserves their ASTs. Full Ruff lint passes; a pre-existing
+formatting failure in unchanged qualify-s3-installed.py is retained and remains
+for the independently admitted installed-harness successor. Parent owns reviews,
+publication and integration. No PR mutation occurred.
+
+## 2026-10-06 — prefix RPC recovery and local qualification complete
+
+The owner explicitly authorized reproducible Rust cache deletion. With no active
+build jobs, four inactive integration ELF files were retired (2.23 GB), retaining
+source, dependency maps, evidence and all failure logs. Exact paths/hashes are
+in `retired-rpc-recovery-inactive-tests.json`; disk headroom rose to 2.3 GB.
+The unchanged locked/offline default-plus-S3 RPC command passes 302 units,
+20 integrations and two intent integrations; 12 existing ignores are unchanged.
+Result: `prefix-rpc-recovery-tests.log`. Strict core/production RPC Clippy and
+all prior prefix/release checks remain passed; no source or dependency changed.
+Source checkpoint remains 253cc3d1 on separate `feat/s3-prefix-main95`.
+The earlier linker/disk blocker is resolved and retained as failure evidence.
+
+Next existing-plan Q3/AQ-S3 gates require authorized AWS/non-AWS fixtures and
+an approved versioned HTTPS MinIO installation; none are supplied. Docker has
+no image and MinIO is absent. Q4 still requires supported desktop/browser and
+platform/runtime/model/shipping artifacts. Chromium helper ownership remains
+unsupported; no bypass/reconfiguration or runtime download occurred. Parent
+owns PRs, reviews, hosted acceptance and integration; no PR was mutated.
+
+## 2026-10-06 — bounded prefix source checkpoint
+
+Separate `feat/s3-prefix-main95` implements bounded complete ListObjectsV2
+pagination using the sole existing SDK owner, the reviewed XML/SDK agreement
+guard, and conditional immutable HEAD observations. New public API consists of
+`S3Reader::enumerate_prefix`, `S3PrefixLimits`, `S3PrefixError`, `S3PrefixListing`
+and `S3PrefixObject`; existing config/constructors/error enum stay compatible.
+The existing explicit manifest/import owner still requires caller digests.
+
+Focused qualification passes 28 S3 units and 66 integration cases, including
+prefix-to-import and cold receipts. Attribution/release tests pass 19 cases;
+33 dependency graphs, ownership, formatting and both attribution profiles pass.
+Core Clippy caught duplicate test-fixture loading; a shared test-parent module
+fix passes strict all-target core Clippy and the final 28-test unit rerun;
+intermediate compiler and disk/SIGBUS diagnostics remain retained.
+Post-prefix production default-plus-S3 RPC Clippy passes with the inherited
+dead-code allowance; RPC tests and provider/platform gates remain pending.
+Protected manifest/native/ONNX source remains byte-identical to integrated 7cf.
+See [checkpoint qualification](reports/s3-prefix-enumeration-2026-10-06.md)
+and [parent review packet](reports/s3-prefix-review-packet-2026-10-06.md).
+Parent owns draft PR publication, review and integration; no PR was mutated.
+
+## 2026-10-06 — S3 release profile and bounded-prefix successor admitted
+
+The owner resumes from integrated `7cf17383001d582056ac4299803c83d0f9ae68a7`
+on separate `feat/s3-prefix-main95`, replacing the earlier weekly usage ceiling
+with permission to use the remaining allowance. Repository execution is available;
+no AGENTS or local skills are mounted in this environment. Parent retains PR,
+review and integration coordination. No account credentials or build-time runtime
+downloads are authorized.
+
+The first milestone adds an explicit S3 release attribution profile: 414 notices,
+387 Rust versions, 49 additional versions beyond default. Both profiles validate;
+eight attribution regressions, eleven release contracts, 33 feature graphs,
+dependency ownership, production default-plus-S3 RPC compile and all 302 RPC tests
+pass. Intermediate empty-tree and metadata-omission failures are preserved.
+See [profile qualification](reports/s3-release-attribution-2026-10-06.md) for exact
+base, reproduction, limits, logs and the next exact bounded-prefix write set.
+
+Before prefix source edits, admission is limited to S3 reader/SDK and new
+prefix/XML/test children, optional roxmltree/lock, acquisition exports, focused
+model-workflow fixtures and owning source documentation/evidence. Frozen S3
+manifest, native watcher/importer/recovery, stores, retry/verification/receipt
+formats and ONNX source remain unchanged. Complete bounded pagination and
+conditional immutable HEAD pins will produce discovery observations; caller
+digests and existing explicit acquisition/import owners still authorize content.
+No enumeration result is an atomic package snapshot. Provider/platform gates stay
+pending. No PR mutation is performed.
+
+## 2026-10-06 — bounded approved-main integration/readiness checkpoint
+
+Parent authorized history-preserving composition of approved main95, SDK9077,
+AC0810f39431 and accepted HF4eb273b3, with no prefix feature or PR merge.
+Shell access is confirmed after the disconnect. Normal merge chain 0e021b00,
+7c8aac72 and 9a1466f5 preserves every input/ref. The intermediate ledger helper
+failure/markers are corrected in 9a1466f5 without rewriting history. Main's
+runtime loader and dynamic ORT configuration, SDK reader, HF helper and AC08
+hooks are projected byte-for-byte from their approved/reviewed sources; frozen
+native repair source is preserved.
+
+Resolved default+s3 graphs for core/RPC on all three desktop targets contain no
+ONNX build-download/copy/TLS features and retain one SDK owner. Actual composed
+checks pass 52 package, 39 public HF, 13 S3 unit, 65 S3 integration, two runtime
+path-selection and 153 renderer cases, frontend types/lint, feature/ownership
+checks and six attribution tests. The unchanged canonical attribution generator
+refreshes and validates 365 default-release entries. Optional-S3 distribution
+terms remain separately scoped; no new release/platform/gate acceptance follows.
+See [exact ancestry, isolated review scopes and evidence](reports/main95-readiness-checkpoint-2026-10-06.md).
+No optional hardening, runtime provisioning or prefix feature is added. Parent
+owns PR/review/integration; work stops at this bounded checkpoint under the
+requested weekly usage ceiling.
+
+
+## 2026-10-06 — admitted HF index target semantics correction
+
+Parent independent review found P2 malformed-map acceptance at preserved
+`aca0ef2a5dcffecfb98c2ba42fc87886b2210ebe`: an extra tensor reference to an
+already selected config or the index itself passed membership/count coverage
+and could become a Present Shard package fact. Isolated branch
+`fix/hf-weight-index-targets-aca0ef2a` starts at that exact head/tree
+`1bd889433130b08d8b5ed7b66ed519fde8010d47`, independently of AC08/SDK work.
+Exact writes: core `model_library/hf/package_selection.rs`, core `api/hf.rs`
+(regressions only), core README and this ledger. Every target must be a weight
+payload of the index's SafeTensors/PyTorch format as well as an exact selected
+member. Existing known shard naming semantics are preserved; no reference widens
+selection, changes evidence/receipt policy or edits frozen importer/package-fact
+owners. Source/unit review reproduction is supplemented by actual public Rust
+regressions before repair. Valid format cases remain regression controls.
+
+Actual unchanged-code Rust execution reproduced the missing check: 45 index-filter
+cases passed and two new cases failed; the public config-target package reached
+Completed instead of Error. The repaired public loop rejects both selected config
+and index-self targets after transfer, retaining the existing partial marker/stub
+without an Adopted receipt. Valid SafeTensors and PyTorch bin/pt/pth targets,
+including known part naming, remain controls. No importer/package-fact write was
+needed.
+
+Rust 1.92 locked/offline qualification passed: 50 package cases without default
+features, 52 with defaults, 245 HF module cases and 39 public HF API cases;
+strict all-target no-default Clippy, workspace formatting and diff checks passed.
+Logs are in `/workspace/scratch/hf-weight-index-targets/`: `red.log`,
+`package-final.log`, `hf-final.log`, `api-final.log`, `default-final.log`,
+`clippy-final.log` and `fmt-final.log`. Public API signatures, receipts, dependency
+and gate states are unchanged. AC08 and SDK milestones remain separate; parent
+owns review/integration. The next authorized slice is the production SDK reader
+replacement; prefix selection follows it and live-provider/platform acceptance
+remains separate.
+
+## 2026-10-05 — admitted Q1 explicit regular/LFS model-file selection
+
+The coordinator requested the next unblocked practical model acquisition feature
+while preserving isolated S3 SDK spike `a6dbc3ff`. This bounded Q1 continuation
+implements AC01's complete explicit selection, including unknown-size files:
+`filenames` may select regular repository files as well as LFS files from the
+same pinned tree, matching the existing single-`filename` capability.
+
+Branch `feat/hf-explicit-mixed-files-26a84e32` starts at
+`26a84e323cae566a46a8f76bef48fa1010aed48b`, preserving approved main
+`838eb2990905144a59830f1a16fe91b4e1105d4d` and ONNX no-build-download policy.
+Exact writes: `rust/crates/pumas-core/src/model_library/hf/download.rs`,
+`rust/crates/pumas-core/src/api/hf.rs` (tests only),
+`rust/crates/pumas-core/README.md` and this ledger. Focused selection tests and
+the public HF download/import/GetModel path prove the outcome; existing
+missing-member, LFS-only and mixed-size progress checks remain regression controls.
+No importer, watcher, S3, production manifest/lockfile, runtime installation,
+credential or gate-readiness change is admitted. Runtime R1/R2 remain gated;
+parent owns PR/review/integration and remaining PR41 gates.
+
+The milestone now admits an explicit mixed list through the existing public
+`start_hf_download`, preserves pinned LFS evidence and unknown regular-file
+evidence, and fetches explicitly selected auxiliaries once. The public fixture
+imports a valid GGUF with a regular config and a zero-byte regular file, observes
+the model through GetModel, checks all exact published bytes and verified
+path/size/digest receipts, Adopted settlement and queue release. The DTO, public
+signatures, store schema, identity policy and importer remain unchanged.
+
+Both the selection and public workflow regression controls failed on the
+unchanged implementation with `ModelNotFound { model_id: "acme/model:4 files" }`.
+Final Linux x86_64 results: explicit controls 24/24 no-default and 27/27 default;
+the complete HF module filter 239/239 and public HF API filter 33/33 no-default;
+strict all-target no-default Clippy, scoped rustfmt and diff checks passed.
+The existing mixed-size progress/finalization test and missing-member/LFS-only
+controls passed unchanged. This is local controlled-source evidence, not a real
+HF/model-inference, desktop, packaged/native-platform or complete AC01/AQ-HTTP
+qualification. All acquisition/runtime gates retain their existing status.
+
+Commands used `cargo test --locked --offline --manifest-path rust/Cargo.toml
+-p pumas-library --lib` with filters `explicit_`, `model_library::hf::` and
+`api::hf::tests`; the latter two used `--no-default-features`. Clippy used the
+same package/manifest with `--no-default-features --all-targets -- -D warnings`.
+Invocation-only settings used one Cargo worker, debug information off and
+incremental compilation off; no repository build policy changed.
+
+The first ordinary debug/incremental build exhausted available workspace disk
+before running tests and was stopped. Only identified task-generated unfinished
+objects and superseded library debug outputs were retired; source/checkpoints,
+logs and pre-existing artifacts were preserved. The retry above completed with
+smaller invocation settings. Filesystem recovery required reviewed escalation
+only because the full disk prevented ordinary sandbox startup; no network or
+security control was changed. Evidence and cleanup inventories remain under
+`/workspace/scratch/hf-explicit-mixed/`. Final default test-log SHA-256:
+`9a11c1fffeafca5d2250ec3de8df2968d5fd2335814a10f570186e9392629daf`.
+
+The next existing-plan model acquisition work is Q1/AC01 shard/Diffusers complete
+selection through the current model owner, with Q1/AC08 ordinary desktop control
+evidence still pending. Neither starts gated runtime R1/R2 or silently widens
+the currently supported model-format importer. S3 prefix selection remains a
+separate coordinator decision, with the bounded SDK guard follow-up on its own
+branch.
+
+## 2026-10-05 — admitted Q1 shard/Diffusers package completeness
+
+Coordinator continuation of Q1/AC01 starts branch
+`feat/hf-package-completeness-04b0459e` at immutable mixed-file milestone
+`04b0459eedfea1336f200355c37f881e7d2b4f88`. Exact primary writes are
+`model_library/hf/{download.rs,mod.rs,package_selection.rs}` under core,
+`core/src/api/hf.rs`, core README and this ledger. The new private HF helper
+validates selected shard indexes from acquired, verified descriptors before
+marker removal/import; it introduces no transfer, store or publication owner.
+Whole Diffusers selections include regular files; explicit selectors remain
+exact and do not become whole-repository requests. Existing shard completeness
+and component/path semantics are reused. Focused package selection and public
+download/import/GetModel/receipt tests qualify the changed path.
+
+Frozen mixed-file/SDK/S3/ORT milestones, importer/watcher/S3-manifest repair
+writes and ONNX no-build-download policy are preserved. No dependency, DTO,
+schema, installer, acquisition gate or runtime-gate change is admitted. Parent
+owns reviews, PRs and publishing; no PR metadata or merge actions are taken.
+
+The milestone now selects matching SafeTensors/PyTorch indexes for known shard
+families, rejects incomplete counted sets and absent indexes before admission,
+and validates acquired `weight_map` references against the exact selected set.
+Duplicate/empty/invalid maps, omitted selected family members and references to
+unselected files cannot reach final import or consumer settlement. The selected
+index bytes are opened through the existing verified descriptor authority in a
+registered read effect, with the same 16 MiB ceiling as package-facts JSON.
+Both fresh transfer and restored sealed-file finalization use the check; no
+second index payload request or new acquisition writer is introduced.
+
+Whole Diffusers requests include regular and LFS files. Classification preserves
+explicit selectors, and acquired `model_index.json` proves the supported pipeline
+and declared non-optional components against that selected set using existing
+component/path semantics. Explicit bundle formats skip preliminary classification;
+automatic classification retains its existing separately accounted metadata read.
+Auxiliaries are deduplicated and unrelated automatic weight indexes are excluded.
+Public signatures, DTOs, store/receipt versions and identity/verification/retry
+policies remain unchanged. Existing partial metadata stubs stay visible through
+GetModel after package failure, with their recovery markers, partial provenance
+and no completion receipt; they are not silently converted to final imports.
+
+Linux x86_64 evidence: `package_` passed 48/48 without default features and 50/50
+with defaults; the HF module passed 244/244 and public HF API passed 38/38
+without defaults. Strict all-target no-default Clippy, scoped rustfmt and diff
+checks passed. The public controls exercise complete indexed shards and a
+Diffusers bundle with regular vocabulary/config assets through actual pinned
+selection, shared acquisition, import, GetModel, ordered verified-file/consumer
+receipts, exact published bytes, Adopted settlement and queue release. Negative
+controls refuse a missing index without payload/admission and retain malformed
+index/incomplete explicit component failures without final import/settlement.
+Every acquired payload is fetched once; the automatic classification fixture
+accounts for its additional model-index metadata observation separately.
+
+An intermediate negative probe exposed read-only validation errors being recorded
+as failed background effects and making shutdown fail. Validation now returns
+invalid package contents as observed domain results, matching existing pinned
+repository observation; panics remain owned task failures. Final negative probes
+require successful owner drain. An overly strict fixture assumption that failed
+packages leave no indexed record was corrected to assert the retained existing
+partial stub/marker contract instead. No frozen importer writes were changed.
+
+Commands used `cargo test --locked --offline --manifest-path rust/Cargo.toml
+-p pumas-library --lib`, filters `package_`, `model_library::hf::` and
+`api::hf::tests`; the latter two used `--no-default-features`. Clippy used the
+same package/manifest with `--no-default-features --all-targets -- -D warnings`.
+Invocation-only settings were one Cargo worker, debug information off and
+incremental compilation off. No ONNX download/build policy, dependency or lockfile
+changed. Logs remain at `/workspace/scratch/hf-package-completeness/`:
+`package-qualified.log`, `package-default.log`, `hf-module.log`, `hf-api.log`,
+`clippy.log`, `fmt.log` and the intermediate failure logs. Final default log
+SHA-256: `6f3f33b9c24626f289a586541445cf7d69d65de411a47a98518d4f42b01be971`.
+Final no-default package log SHA-256:
+`237db15859f40e11937de69039c8d1e91f8b94c767fb09d6725f64432ce64b62`.
+
+The frozen base tree remains `4d6ac0994508165d388748bbab54b79b5d759f41`.
+Accepted main `95a0baad2d0aea4650fc36ad4afd969ac9391bf5` was fetched and verified
+with tree `3ee66988eb1668188011b2124890b10031403ebd` and ordered parents
+`838eb299` then `26a84e32`; no feature/spike history was rebased. The isolated
+SDK exact-value successor is separately committed/pushed as
+`ba1a9d908010f23f2391059cb93bfe61dcca6aa1`, tree
+`fee4b11a76306bcf224abbd8b11811e329ca0483`, directly on preserved `3a9cb5dc`.
+Its 16 probes and strict Clippy pass; its own Markdown report and logs remain
+in that successor and `/workspace/scratch/s3-sdk-spike/`.
+
+These are controlled-source backend/package-import results. They do not prove
+real model inference, real HF/provider acceptance, desktop controls, packaged or
+native-platform qualification, or complete AC01/AQ-HTTP readiness. All dependency
+gates retain their current status. The next existing-plan work is Q1/AC08 ordinary
+desktop acquisition controls/status evidence, with real pinned shard/Diffusers
+model acceptance still separate. Parent owns reviews, next PRs and integration;
+no external reviewer, PR metadata or merge action was performed here.
+
+## 2026-10-05 — admitted AC08 startup snapshot ordering
+
+Coordinator continuation starts isolated branch
+`fix/desktop-download-startup-aca0ef2a` at preserved HF completeness head
+`aca0ef2a5dcffecfb98c2ba42fc87886b2210ebe`, tree
+`1bd889433130b08d8b5ed7b66ed519fde8010d47`. Exact writes are
+`frontend/src/hooks/useActiveModelDownload{.ts,.test.ts}`,
+`frontend/src/hooks/useModelDownloads{.ts,.test.ts}`, and this ledger.
+A delayed unversioned startup list currently overwrites a newer canonical pushed
+snapshot, resurrecting completed activity or clearing retained error state.
+The subscription's full snapshot takes presentation authority once observed;
+the outstanding startup result is still observed but classified as superseded.
+Initial queries without a push retain current command/association reconciliation.
+No domain completion, receipt, exact selection, recovery or backend/DTO policy
+changes. Deterministic hook/renderer projections and lifecycle controls qualify
+this bounded ordering repair. Browser/desktop execution remains unavailable;
+the prior ownership/access denial is respected without an alternate launch.
+Preserved HF/SDK/native/ORT work is untouched. Parent owns PR integration and
+has separately authorized an isolated production SDK reader replacement only
+after this bounded milestone completes.
+
+The repair is complete locally: a mounted hook accepts the startup list until
+its first canonical full subscription snapshot. That push supersedes the
+unversioned outstanding query; the query still resolves/rejects under its
+existing owner and is classified without stale state application. Supersession
+is scoped to each mounted effect and reset on remount. Cleanup ends callback
+application and unregisters the subscription. No polling, cursor arithmetic,
+new UI state store, DTO, backend status or receipt semantics were added.
+
+The unchanged source failed five new cases: both completed/empty terminal pushes
+were resurrected in the header and download rows, and a retained package error
+was cleared. After the fix, both hook files passed 115/115. A further actual
+Header component test in jsdom proves 100% received bytes still display active
+downloading until backend terminal status, and that a delayed startup list does
+not restore activity afterward. Paused/error controls retain the exact download
+ID for resume; existing association, optimistic command rollback, rekeying,
+partial/duplicate activity and unsubscribe tests pass. Six affected renderer
+files pass 153/153: the two hooks, completion refresh, Header, local download
+actions and remote download menu. Frontend `check:types`, zero-warning `lint`,
+and diff checks pass on the final source.
+
+Commands used the existing pnpm 10.33.0/Vitest 4.1.11 scripts with cached workspace
+dependencies whose manifests/lock match this branch. Node was 24.19.0; the
+repository pin is 24.15.0, so this is local supporting evidence rather than
+exact pinned-toolchain qualification. Workspace-only cache links were retired
+following verification; no dependency, lockfile, permission or account setting changed. An
+intermediate renderer fixture property typo and missing cached Electron type
+link were corrected before final checks. Logs are under
+`/workspace/scratch/ac08-startup-snapshot/`: `red.log`, `focused.log`,
+`renderer-qualified.log`, `types.log`, `lint.log` and intermediate setup logs.
+
+This is deterministic React/jsdom renderer/state evidence. No actual browser or
+Electron desktop was launched; no browser geometry, focus, keyboard/assistive
+technology, native pointer behavior, real-source transfer or desktop/backend
+composition is claimed. Prior browser ownership/access denial remains binding.
+AC08/AQ-HTTP and all dependent gates remain pending. Parent owns integration.
+The separately requested HF weight-map target correction is next on its own
+successor; the authorized production SDK reader replacement follows, with
+prefix enumeration and live-provider/platform qualification remaining separate.
+
+## 2026-10-06 — admitted production S3 SDK reader replacement
+
+Parent accepted SDK suitability checkpoint `ba1a9d908010f23f2391059cb93bfe61dcca6aa1`
+(tree `fee4b11a76306bcf224abbd8b11811e329ca0483`) and authorized one isolated
+production replacement after bounded AC08 renderer repair. This branch,
+`feat/s3-sdk-reader-493b935c`, starts at the composed authenticated production
+reader `493b935c6a41d4d4aeca8e8a66f10b4aba114365`, tree
+`ecb51f20c0740fa7d88e6d0eface06c45feb2e07`. It does not start from the older
+anonymous core bundled with the standalone spike.
+
+Exact writes: core Cargo manifest, production Rust lock, `acquisition/s3.rs`,
+private `acquisition/s3/sdk.rs`, synthetic `acquisition/s3/auth_tests.rs`, reader
+integrations `tests/{s3_reader,s3_acquisition}.rs`, core README, this ledger and the production
+replacement qualification report. Frozen watcher/importer and S3 manifest
+write sets are preserved byte-for-byte. `object_store` is removed; one maintained
+AWS SDK owns protocol/credentials over the existing no-proxy/no-redirect reqwest
+pool, with no fallback. Public constructors, endpoint authority, exact immutable
+versions, conditional range evidence, retry/verification/receipt policy remain
+compatible. Credential discovery, persistence and real credentials are excluded.
+
+Scoped diagnostics apply to SDK construction, entire HEAD/GET futures and body
+polls. The reviewed XML guard validates ListObjectsV2; there is no production
+listing path in this slice. It is retained in the accepted spike for the next
+prefix enumeration feature rather than interpreting raw model bytes as XML.
+Untrusted SDK error bodies are bounded and errors remain generic. No live-provider,
+platform, UI accessibility, inference or acquisition gate acceptance is claimed.
+
+The replacement qualifies 13 focused S3 units, 156 broader acquisition units,
+44 acquisition integrations, seven native workflow cases, 14 public/anonymous
+reader cases and 202 inference-disabled RPC cases. Fresh-process diagnostics,
+ambient/proxy and cold-recovery child cases are executed by their parents.
+Strict core all-target and RPC production-binary Clippy, feature-off compilation,
+format/diff, 12 repository feature contracts and three explicit SDK platform
+graphs pass. The broader strict RPC test-target pass retains 11 unchanged
+inference-disabled Torch DTO dead-code warnings; no frozen owner or lint
+suppression was changed. Behavior tests precede only a field-shorthand cleanup,
+with final lint/type checks covering delivered source.
+
+Actual lock delta: 482 to 511 versions (51 added, 22 removed); selected core
+normal/build closure: 239 to 276, with 43 new names. A canonical attribution
+candidate validates separately; authoritative texts cover every new lock version
+and the 311-version external optional-S3 platform union. Shared generator and
+release outputs remain parent-owned. The two SIMD crates' absent packaged MIT
+texts were retrieved from their declared immutable upstream commit over ordinary
+verified HTTPS. Exact deltas, evidence, intermediates and remaining scope are in
+[production replacement qualification](reports/s3-sdk-reader-replacement-2026-10-06.md).
+
+Public constructors/DTOs/receipt formats and frozen manifest/importer/watcher
+source remain unchanged. The SDK GET operation marker is documented and signed
+query-order tests follow SigV4; object identity remains the original explicit
+pin. SDK stalled-stream protection is disabled to preserve the caller budget.
+No gate is marked ready. Parent owns reviews/PRs/integration; next feature is
+bounded explicit prefix enumeration with the accepted XML guard, followed by
+separate provider/platform acceptance.
+
+
+## 2026-10-05 — frozen sibling normal composition and installed qualification
+
+Coordinator-authorized normal merge cd9d8191 has ordered parents frozen
+e6acb0ba then 7dc6acef; all earlier frozen refs and accepted PR40 remain intact.
+Successor 7358bd3d adds only independent installed qualification code. Combined
+171 acquisition units, 64 S3 integration, 220 RPC, 45 native owner and eight
+direct installer, 14 renderer and 242 Node tests pass within their stated scopes.
+Strict core/scoped RPC Clippy, format and normal optimized production build pass.
+The unpacked Linux S3 binary passes ten independent TLS/SigV4 scenarios and
+standard health smoke. Synthetic fixtures prove no live provider or inference.
+Browser sandbox ownership and official MinIO module HTTP 403 stop their actual
+flows; no alternate security/network routes were attempted. The
+[qualification matrix](reports/s3-composed-provider-qualification-2026-10-05.md)
+records exact composition, packaged bytes, logs and external missing inputs.
+Historical sibling-only statements below retain their original execution scope;
+the current candidate composes both explicitly. Real-provider, shipping desktop,
+supported platforms and full Q4 gates remain pending, with parent review control.
+
+**Q3 empty selected S3 members (2026-10-05):** Separate
+`feat/s3-empty-members-e8082649` preserves frozen e808 and its PR40 merge.
+Known-zero immutable selections now pass through the existing writer/SHA/receipt
+owner without an impossible range request; empty auxiliaries publish with exact
+receipts, while empty GGUF weights, unknown/missing objects, wrong digests and
+truncated mixed bundles fail. Cancellation and cold proof remain authoritative.
+See [qualification](reports/s3-empty-members-qualification-2026-10-05.md).
+The parent-requested reserved-name admission correction is a separate sibling
+`fix/s3-bundle-reserved-e8082649`, not silently composed here. Parent owns reviews
+and integration; provider and installed/native acceptance remain pending.
+Next existing-plan work: authorized Q3 cross-provider acceptance, then Q4.
+
+**Q3 reserved bundle destination correction (2026-10-05):** Reviewer P2 at
+frozen e808 is isolated on `fix/s3-bundle-reserved-e8082649`. RPC and native
+preflight now reuse the acquired importer's reserved root/normalization rule
+before job admission or source resolution, preserving final validation and
+retained-work recovery. Reserved roots/aliases/descendants cause no source,
+workspace-file or publication effects; a corrected same-owner request succeeds.
+See [qualification](reports/s3-bundle-reserved-destinations-qualification-2026-10-05.md).
+Frozen e808 and PR40 composition remain unchanged and changes-requested pending
+parent review/integration. The separately delegated next slice is zero-length
+members on sibling `feat/s3-empty-members-e8082649`; provider/Q4 gates stay open.
+
+
+## 2026-10-05 — pinned multi-file desktop and accepted native composition
+
+Separate `feat/s3-desktop-bundle-d30412e9` starts from frozen authenticated
+`d30412e9`. Tested prerequisite `dd90f416` adds pure native manifest preflight
+and safe explicit file-boundary observations; implementation `339032ff` adds
+anonymous/authenticated bundle starts, aggregate read and per-file dialog pins.
+Existing single-object methods, ephemeral secret handling, acquisition/import/
+registration/receipt/cancellation owners and policies remain compatible.
+
+The coordinator then authorized an explicit normal merge of accepted main
+`838eb2990905144a59830f1a16fe91b4e1105d4d`, tree
+`f6d6c1d3c5ba5be0fb998a6fd157fcb31c63dc72`, whose ordered parents are 05717338
+and 1e811936. Composition `d9d907cfe0e57b1e2bc7e296eff1327de835bc5e`, tree
+`82511113e7e82a44ee526f91a8ce7f480282e0ec`, has ordered parents 339032ff and
+838eb299. All frozen feature refs remain separate ancestors; accepted PR40
+publication/discovery repairs are included through that merge without rewriting
+their implementation. Follow-up `5104a21e` qualifies the existing empty-member
+refusal and adds its help text, with no reader policy change.
+
+Composed acquisition 171, model-library 832, reconciliation 35 and S3 integration
+60 tests pass (overlapping subsets); full RPC 220 passes. Frontend 863, Node 242,
+final DOM 20, no-S3 source 4 and generator 8 pass. Strict core Clippy and RPC
+Clippy with inherited dead-code exception pass. Controlled HTTPS proves exact
+multi-version pins, aggregate staging progress, optional authentication,
+cancellation, receipts, no secret persistence/logging, missing/digest/empty
+member refusal and honest retained outcomes. Browser/default/platform/provider
+limits remain; AQ-S3 is not advanced. See [qualification](reports/s3-desktop-bundle-qualification-2026-10-05.md)
+for exact trees, logs and boundary proof. Parent owns PR/review/hosted/merge/Library.
+Next existing-plan implementation candidate: S3 zero-byte selected-member
+handling through the existing reader/acquisition boundary, separately scoped;
+live provider and Q4 installed/native qualification remain separate.
+
+## 2026-10-05 — authenticated explicit-source desktop/RPC successor
+
+Separate `feat/s3-desktop-auth-106a6ca4` preserves frozen anonymous `106a6ca4`,
+review fixes `887308dc`, native `eabc3959`, reader `ffecce07`, main `05717338`
+and original PR40 `63123fd8` ancestry. Transport prerequisite `0023bcf9` contains
+reflected errors before IPC. Implementation `39f7689ab20a10276839a8f5dff206879d53b008`,
+tree `01f49715a2b3637826591a078134db0bc59f62ca`, adds a distinct authenticated
+command with bounded Deserialize-only credentials and one-use uncontrolled form
+inputs. Existing native HTTPS authenticated reader/import owns signing, identity,
+verification, finalization and receipts; safe task state carries no credentials.
+
+217 RPC tests, four no-S3 regressions, 860 frontend tests, final 17 focused tests,
+239 Electron tests (one native sandbox smoke skipped), eight generator tests,
+types/lint/builds, scoped Clippy/format/diff/frozen checks pass. Controlled HTTPS
+proves optional token signing, cancellation, static reflected-provider errors,
+exact receipt identity and credential exclusion from owned files/debug output.
+DOM evidence does not qualify browser behavior; existing sandbox/default ONNX
+403/fully strict dead-code blockers remain. See [qualification](reports/s3-desktop-authentication-qualification-2026-10-05.md)
+for commands, logs, corrections and lifetime limits. No frozen native/core,
+dependency or security policy changes. Parent owns review/hosted/PR/merge/Library
+coordination. Next existing-plan implementation candidate: explicit pinned
+multi-file desktop selection through the existing native bundle workflow;
+real-provider/refresh/platform acceptance remains separate. AQ-S3 stays pending.
+
+## 2026-10-05 — anonymous explicit-source desktop/RPC successor
+
+Separate `feat/s3-desktop-workflow-eabc3959` preserves frozen native workflow
+`eabc395966f2f3f155b298144bc81c4941121225` exactly. Implementation milestone is
+`04cb954c3cd226144fcd5dde2d19ac040bda4d78`, tree
+`011160b67e12840d33481f760b16c1e78224f928`. Model Manager adds an anonymous
+single-GGUF dialog with explicit HTTPS source facts, mandatory VersionId/digest,
+current-file byte observation and pre-finalization cancellation. Three closed
+commands reuse the native API through one process-owned RPC worker, preserving
+validation, classification, registration and receipt identity. Closing
+observation does not stop the job; server shutdown awaits it before shared
+acquisition drainage. Retained custody refuses implicit replay.
+
+Linux controlled production TLS/RPC proves import, exact receipts and Ready/cold
+public lookup, cancellation during HEAD and GET, shutdown drainage and ambient
+credential exclusion. 195 RPC unit + 18 non-ignored integration/intent tests,
+three no-S3 source regressions, 856 frontend tests, final eight renderer tests,
+234 Electron tests, eight generator tests, types/lint/builds, headless check,
+format/diff/frozen refs and four feature graphs pass. Attribution regeneration
+changes two input hashes only; resolved package identities and notice bytes are
+unchanged. Clippy passes with the pre-existing headless dead-code lint excepted;
+strict headless/default qualification remains blocked by those existing warnings
+and ort-sys HTTP 403 respectively. Sandboxed Chromium cannot launch because its
+installed helper lacks the required configuration; no browser claim/bypass is made.
+
+See [qualification](reports/s3-desktop-workflow-qualification-2026-10-05.md)
+for exact commands/logs, initial corrections, scope and limits. Core/native
+repair/reader/manifest/signing/watcher/importer/reconciliation bytes, main and
+frozen feature refs are unchanged. Parent owns independent review, hosted
+qualification, PRs/merges and Library delivery. Next planned Q3 feature is a
+qualified authenticated ephemeral RPC/desktop secret boundary; live providers,
+installed/native qualification and AQ-S3 acceptance remain separate/pending.
+
 ## 2026-10-04 — delegated S3 dispatch and GGUF import successor
 
 The coordinator resumed a separate successor to reader `2c7d6014`, then required
@@ -1004,3 +1610,67 @@ Review 5409255854 selected all 18 PR39 files. The receipt-size finding (discussi
 Separate `fix/acquisition-output-receipt-bound-159fd371` preserves 159fd371 and accepted main 73fec2e06c75ddae8c0e58be6ffcf352923376bd. The sole production change is neutral consumer admission/issuance in `acquisition/service.rs`: actual JSON capped at 4 MiB, unique file/parent namespace reserved at 2 MiB using encoded names plus 512 bytes per entry, within existing owned blocking work. Current copied-output schema measurement checks maximum-width physical identities/size/hash and fixed strings against those reserves; 2 × (4 MiB + 2 MiB) + 16 KiB is below the unchanged 16 MiB output limit. Old manifest decoding, receipt settlement/reconciliation and producer publication checks remain byte-identical. README sentence placement and ledger joined number/SHA tokens are repaired. Missing/null identity with intact payload retains exact cold uncertainty.
 
 Final runtime targets pass 36 acquisition/import, 11 reader and five HTTP tests (52). A temporary 3 MiB callback/bundle stress extension separately ran 36 passes/one failure: owned background reconciliation visited `.tmp_import_…/config/tokenizer_config.json/metadata.json` and returned ENOTDIR at shutdown. The stress source/patch and failed log are retained outside this repair; the experiment is not a passing fixture or large-payload concurrency claim. AQ-S3 remains not ready on this and existing acceptance gaps. [Qualification](reports/s3-consumer-receipt-bound-2026-10-05.md) records final supporting checks and remaining limits. All 482 locked identities, canonical generator, HF/speech sources and frozen branches are preserved. No credentials, permissions/network settings, external review request or merge changed; parent owns PR39 integration.
+
+## 2026-10-05 — explicit authenticated S3 reader successor
+
+The coordinator delegated explicit request-scoped credentials on current PR40
+`63123fd8f9f866064a8315096ab3fb1fc81e8f0f`, expected tree
+`163ef2442695b44555ac0e42ff79a6a88de9e817`, retaining main
+`05717338c2aea737483fb4b28c3ed4053a65de96`. Normal fetch replaced the initial
+older checkout as the implementation base. Separate branch
+`feat/acquisition-s3-auth-63123fd8` committed and non-force pushed tested source
+`d74114c63a9717692fa7051ef5146d7253a2c5c5`, tree
+`bd21dd5e46970b74e18706076adc9defa7de9586`. Additive `S3Credentials` and
+`S3Reader::new_authenticated` preserve anonymous construction and source/receipt
+identity, enforce HTTPS, and contain remote diagnostics. Private loopback
+credentials exist only under `cfg(test)`.
+
+Nine authentication unit fixtures (plus their isolated child's one-test run),
+41 existing S3 acquisition/import regressions, 13 reader tests, strict enabled-S3
+all-target Clippy, headless check, formatting, diff checks and all 12 dependency
+feature graphs pass locally. The initial integration run's 30 read-only-home
+registry setup failures were corrected with disposable XDG configuration, without
+editing frozen repair code. Exact commands, source/standards authority, raw log
+paths/hashes and limitations are in [qualification](reports/s3-authentication-qualification-2026-10-05.md).
+No real credentials/provider, external reviewer, PR/merge, native repair,
+dependency/lockfile or receipt/schema changes were used. Parent owns independent
+review and hosted integration. Next existing-plan feature is Q3 direct explicit
+source-facing application workflow/source configuration; real-provider acceptance
+and credential refresh remain separate. AQ-S3 stays not ready.
+
+## 2026-10-05 — native explicit S3 model workflow successor
+
+The coordinator freezes accepted-static reader ffecce07220f6504fb1db2e348759473bd284de6
+(tree 0acb23784970e86859851c9063e76d04cd740b8b) and admits a distinct native
+source-facing successor. `feat/s3-model-workflow-ffecce07` commits and normally
+pushes `2b8e0a4401224212d84f4c02abcbd175369728ab`, tree
+`d78dd9ed0113eaee6d728056ae22dfde14115d80`. The additive
+`PumasApi::import_s3_model` composes explicit source pins, finite retry budgets,
+caller workspace/operation identity and optional ephemeral credentials through
+the existing bounded acquisition consumer and receipt-bound GGUF importer.
+Safe phase/current-file progress, cancellation admission before finalization,
+typed result/drain errors and Interrupted/retained-work semantics are documented.
+No secret-bearing request Debug/serde, persisted source/credential configuration
+or new transfer/publication owner is introduced.
+
+Seventy focused tests plus two isolated child runs, strict enabled-S3 all-target
+Clippy, headless check, formatting, diff and frozen-file checks pass locally.
+Production authenticated HTTPS is exercised against the existing synthetic TLS
+fixture with verification enabled in a child process. The coordinator's optional
+SignedHeaders/token-tampering assertion is added only on this successor.
+The initial missing-await test compile and subsequent passing runs are retained.
+Exact commands, surface, raw logs/hashes and boundaries are in
+[qualification](reports/s3-model-workflow-qualification-2026-10-05.md).
+Frozen reader/native watcher/importer/reconciliation/manifest production and
+staging/VersionId fixtures, main, schemas and dependencies remain unchanged.
+Parent owns review/hosted qualification/PRs/merges. Next existing-plan feature is
+Q3 desktop/RPC explicit source workflow through the native operation;
+real-provider/installed/native acceptance remains separate. AQ-S3 stays not ready.
+
+
+2026-10-06 final prefix checkpoint: the post-prefix RPC suite exited 101 at normal
+binary linking with SIGBUS and zero free disk, before executing tests. Its full
+log and retired failed-link file hashes are retained. Final core units/Clippy,
+66 integrations and production RPC Clippy remain passed; RPC tests are blocked,
+not passed. Resume after restoring link headroom, using the exact report command.
+No service-limit rejection was observed; no PR mutation occurred.

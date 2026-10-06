@@ -47,6 +47,17 @@ struct AcquiredCopyInput {
 }
 
 impl ModelImporter {
+    /// Pure reserved-destination preflight for an exact acquired file set.
+    /// Uses the same layout and filename normalization as acquired publication.
+    /// Callers must also validate portable paths and the complete manifest;
+    /// this grants no file verification or publication authority.
+    pub fn validate_acquired_payload_paths(paths: &[&str]) -> Result<()> {
+        for path in paths {
+            normalized_acquired_payload_path(path, paths.len() > 1)?;
+        }
+        Ok(())
+    }
+
     pub(super) async fn import_acquired_owned(
         &self,
         acquired: &crate::acquisition::AcquiredArtifactUse,
@@ -598,6 +609,24 @@ enum CopySource {
     Verified(BTreeMap<String, VerifiedCopyInput>),
 }
 
+fn normalized_acquired_payload_path(original: &str, preserve_layout: bool) -> Result<String> {
+    let normalized = if preserve_layout {
+        original.to_owned()
+    } else {
+        normalize_filename(original)
+    };
+    let first = normalized.split('/').next().unwrap_or_default();
+    if IMPORT_MUTABLE_DOCUMENTS
+        .iter()
+        .any(|name| normalize_filename(first) == normalize_filename(name))
+    {
+        return Err(invalid_filename(
+            "Acquired payload uses a reserved import filename",
+        ));
+    }
+    Ok(normalized)
+}
+
 impl CopyPlan {
     fn verified_set(inputs: Vec<VerifiedCopyInput>) -> Result<Self> {
         let preserve_layout = inputs.len() > 1;
@@ -606,20 +635,7 @@ impl CopyPlan {
         let mut directories = std::collections::BTreeSet::new();
         for input in inputs {
             let original = input.receipt.path.clone();
-            let normalized = if preserve_layout {
-                original.clone()
-            } else {
-                normalize_filename(&original)
-            };
-            let first = normalized.split('/').next().unwrap_or_default();
-            if IMPORT_MUTABLE_DOCUMENTS
-                .iter()
-                .any(|name| normalize_filename(first) == normalize_filename(name))
-            {
-                return Err(invalid_filename(
-                    "Acquired payload uses a reserved import filename",
-                ));
-            }
+            let normalized = normalized_acquired_payload_path(&original, preserve_layout)?;
             let relative = PathBuf::from(&original);
             if preserve_layout {
                 for parent in relative
@@ -867,3 +883,35 @@ fn invalid_filename(message: &str) -> PumasError {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod namespace_preflight_tests {
+    use super::*;
+
+    #[test]
+    fn acquired_preflight_uses_all_importer_reserved_roots_and_aliases() {
+        for reserved in IMPORT_MUTABLE_DOCUMENTS {
+            for path in [
+                reserved.to_owned(),
+                reserved.to_uppercase(),
+                format!("{reserved}/data.json"),
+            ] {
+                assert!(
+                    ModelImporter::validate_acquired_payload_paths(&["weights.gguf", &path])
+                        .is_err()
+                );
+            }
+        }
+        assert!(ModelImporter::validate_acquired_payload_paths(&[
+            "weights.gguf",
+            "_metadata_.json"
+        ])
+        .is_err());
+        assert!(ModelImporter::validate_acquired_payload_paths(&[
+            "weights.gguf",
+            "config/metadata.json"
+        ])
+        .is_ok());
+        assert!(ModelImporter::validate_acquired_payload_paths(&["weights.gguf"]).is_ok());
+    }
+}

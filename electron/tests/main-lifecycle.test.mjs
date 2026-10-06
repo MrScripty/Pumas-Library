@@ -259,7 +259,16 @@ test('actual main liveness IPC validates requests and scalar results without ret
       await assert.rejects(invoke({}, method, {}), /liveness transport unavailable/);
       assert.equal(calls.length, before + 1);
     }
-    // This slice does not reinterpret responses for other routes.
+    for (const value of [{ status: 'idle', secret: 'synthetic-main-secret' }, new Error('synthetic-main-secret')]) {
+      response = value;
+      await assert.rejects(invoke({}, 'get_s3_model_import', {}), error =>
+        !String(error).includes('synthetic-main-secret') && error.message.includes('Observe the same operation'));
+    }
+    response = { status: 'rejected', error: { code: -32003, class: 'conflict', message: 'synthetic-main-secret' } };
+    const source = await invoke({}, 'get_s3_model_import', {});
+    assert.equal(source.error.class, 'conflict');
+    assert.ok(!JSON.stringify(source).includes('synthetic-main-secret'));
+    // Other routes retain their existing response contract.
     response = { success: true, running: false };
     assert.equal(await invoke({}, 'get_app_status', { app_id: 'ollama' }), response);
     assert.deepEqual(harness.errors, []);

@@ -1,5 +1,1369 @@
 {
   "schema_version": 1,
+  "rust_profile": {
+    "package": "pumas-rpc",
+    "default_features": true,
+    "features": [],
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "rust_dependencies": [
+    {
+      "name": "adler2",
+      "version": "2.0.1"
+    },
+    {
+      "name": "ahash",
+      "version": "0.8.12"
+    },
+    {
+      "name": "aho-corasick",
+      "version": "1.1.4"
+    },
+    {
+      "name": "ambient-authority",
+      "version": "0.0.2"
+    },
+    {
+      "name": "anstream",
+      "version": "0.6.21"
+    },
+    {
+      "name": "anstyle",
+      "version": "1.0.13"
+    },
+    {
+      "name": "anstyle-parse",
+      "version": "0.2.7"
+    },
+    {
+      "name": "anstyle-query",
+      "version": "1.1.5"
+    },
+    {
+      "name": "anstyle-wincon",
+      "version": "3.0.11"
+    },
+    {
+      "name": "anyhow",
+      "version": "1.0.103"
+    },
+    {
+      "name": "arrayref",
+      "version": "0.3.9"
+    },
+    {
+      "name": "arrayvec",
+      "version": "0.7.6"
+    },
+    {
+      "name": "async-trait",
+      "version": "0.1.89"
+    },
+    {
+      "name": "atomic-waker",
+      "version": "1.1.2"
+    },
+    {
+      "name": "autocfg",
+      "version": "1.5.0"
+    },
+    {
+      "name": "axum",
+      "version": "0.7.9"
+    },
+    {
+      "name": "axum-core",
+      "version": "0.4.5"
+    },
+    {
+      "name": "base64",
+      "version": "0.13.1"
+    },
+    {
+      "name": "base64",
+      "version": "0.22.1"
+    },
+    {
+      "name": "bitflags",
+      "version": "1.3.2"
+    },
+    {
+      "name": "bitflags",
+      "version": "2.10.0"
+    },
+    {
+      "name": "blake3",
+      "version": "1.8.3"
+    },
+    {
+      "name": "block-buffer",
+      "version": "0.10.4"
+    },
+    {
+      "name": "block2",
+      "version": "0.6.2"
+    },
+    {
+      "name": "byteorder",
+      "version": "1.5.0"
+    },
+    {
+      "name": "bytes",
+      "version": "1.11.1"
+    },
+    {
+      "name": "bzip2",
+      "version": "0.5.2"
+    },
+    {
+      "name": "bzip2-sys",
+      "version": "0.1.13+1.0.8"
+    },
+    {
+      "name": "cap-primitives",
+      "version": "4.0.3"
+    },
+    {
+      "name": "cap-std",
+      "version": "4.0.3"
+    },
+    {
+      "name": "castaway",
+      "version": "0.2.4"
+    },
+    {
+      "name": "cc",
+      "version": "1.2.53"
+    },
+    {
+      "name": "cfg-if",
+      "version": "1.0.4"
+    },
+    {
+      "name": "cfg_aliases",
+      "version": "0.2.1"
+    },
+    {
+      "name": "chrono",
+      "version": "0.4.43"
+    },
+    {
+      "name": "clap",
+      "version": "4.5.54"
+    },
+    {
+      "name": "clap_builder",
+      "version": "4.5.54"
+    },
+    {
+      "name": "clap_derive",
+      "version": "4.5.49"
+    },
+    {
+      "name": "clap_lex",
+      "version": "0.7.7"
+    },
+    {
+      "name": "colorchoice",
+      "version": "1.0.4"
+    },
+    {
+      "name": "compact_str",
+      "version": "0.9.0"
+    },
+    {
+      "name": "constant_time_eq",
+      "version": "0.4.2"
+    },
+    {
+      "name": "core-foundation",
+      "version": "0.9.4"
+    },
+    {
+      "name": "core-foundation-sys",
+      "version": "0.8.7"
+    },
+    {
+      "name": "cpufeatures",
+      "version": "0.2.17"
+    },
+    {
+      "name": "crc",
+      "version": "3.4.0"
+    },
+    {
+      "name": "crc-catalog",
+      "version": "2.4.0"
+    },
+    {
+      "name": "crc32fast",
+      "version": "1.5.0"
+    },
+    {
+      "name": "crossbeam-channel",
+      "version": "0.5.15"
+    },
+    {
+      "name": "crossbeam-deque",
+      "version": "0.8.6"
+    },
+    {
+      "name": "crossbeam-epoch",
+      "version": "0.9.20"
+    },
+    {
+      "name": "crossbeam-utils",
+      "version": "0.8.21"
+    },
+    {
+      "name": "crypto-common",
+      "version": "0.1.7"
+    },
+    {
+      "name": "ctrlc",
+      "version": "3.5.1"
+    },
+    {
+      "name": "daachorse",
+      "version": "1.0.1"
+    },
+    {
+      "name": "darling",
+      "version": "0.20.11"
+    },
+    {
+      "name": "darling_core",
+      "version": "0.20.11"
+    },
+    {
+      "name": "darling_macro",
+      "version": "0.20.11"
+    },
+    {
+      "name": "dary_heap",
+      "version": "0.3.9"
+    },
+    {
+      "name": "dashmap",
+      "version": "5.5.3"
+    },
+    {
+      "name": "dashmap",
+      "version": "6.1.0"
+    },
+    {
+      "name": "deflate64",
+      "version": "0.1.10"
+    },
+    {
+      "name": "derive_builder",
+      "version": "0.20.2"
+    },
+    {
+      "name": "derive_builder_core",
+      "version": "0.20.2"
+    },
+    {
+      "name": "derive_builder_macro",
+      "version": "0.20.2"
+    },
+    {
+      "name": "digest",
+      "version": "0.10.7"
+    },
+    {
+      "name": "dirs",
+      "version": "5.0.1"
+    },
+    {
+      "name": "dirs-sys",
+      "version": "0.4.1"
+    },
+    {
+      "name": "dispatch2",
+      "version": "0.3.0"
+    },
+    {
+      "name": "displaydoc",
+      "version": "0.2.5"
+    },
+    {
+      "name": "either",
+      "version": "1.15.0"
+    },
+    {
+      "name": "encoding_rs",
+      "version": "0.8.35"
+    },
+    {
+      "name": "equivalent",
+      "version": "1.0.2"
+    },
+    {
+      "name": "errno",
+      "version": "0.3.14"
+    },
+    {
+      "name": "esaxx-rs",
+      "version": "0.1.10"
+    },
+    {
+      "name": "fallible-iterator",
+      "version": "0.3.0"
+    },
+    {
+      "name": "fallible-streaming-iterator",
+      "version": "0.1.9"
+    },
+    {
+      "name": "fastrand",
+      "version": "2.3.0"
+    },
+    {
+      "name": "filetime",
+      "version": "0.2.27"
+    },
+    {
+      "name": "find-msvc-tools",
+      "version": "0.1.8"
+    },
+    {
+      "name": "flate2",
+      "version": "1.1.8"
+    },
+    {
+      "name": "fnv",
+      "version": "1.0.7"
+    },
+    {
+      "name": "foreign-types",
+      "version": "0.3.2"
+    },
+    {
+      "name": "foreign-types-shared",
+      "version": "0.1.1"
+    },
+    {
+      "name": "form_urlencoded",
+      "version": "1.2.2"
+    },
+    {
+      "name": "fs-set-times",
+      "version": "0.20.3"
+    },
+    {
+      "name": "fs2",
+      "version": "0.4.3"
+    },
+    {
+      "name": "fsevent-sys",
+      "version": "4.1.0"
+    },
+    {
+      "name": "futures",
+      "version": "0.3.31"
+    },
+    {
+      "name": "futures-channel",
+      "version": "0.3.31"
+    },
+    {
+      "name": "futures-core",
+      "version": "0.3.31"
+    },
+    {
+      "name": "futures-executor",
+      "version": "0.3.31"
+    },
+    {
+      "name": "futures-io",
+      "version": "0.3.31"
+    },
+    {
+      "name": "futures-macro",
+      "version": "0.3.31"
+    },
+    {
+      "name": "futures-sink",
+      "version": "0.3.31"
+    },
+    {
+      "name": "futures-task",
+      "version": "0.3.31"
+    },
+    {
+      "name": "futures-timer",
+      "version": "3.0.3"
+    },
+    {
+      "name": "futures-util",
+      "version": "0.3.31"
+    },
+    {
+      "name": "generic-array",
+      "version": "0.14.7"
+    },
+    {
+      "name": "getrandom",
+      "version": "0.2.17"
+    },
+    {
+      "name": "getrandom",
+      "version": "0.3.4"
+    },
+    {
+      "name": "governor",
+      "version": "0.7.0"
+    },
+    {
+      "name": "h2",
+      "version": "0.4.16"
+    },
+    {
+      "name": "half",
+      "version": "2.7.1"
+    },
+    {
+      "name": "hashbrown",
+      "version": "0.14.5"
+    },
+    {
+      "name": "hashbrown",
+      "version": "0.16.1"
+    },
+    {
+      "name": "hashlink",
+      "version": "0.9.1"
+    },
+    {
+      "name": "heck",
+      "version": "0.5.0"
+    },
+    {
+      "name": "hex",
+      "version": "0.4.3"
+    },
+    {
+      "name": "http",
+      "version": "1.4.0"
+    },
+    {
+      "name": "http-body",
+      "version": "1.0.1"
+    },
+    {
+      "name": "http-body-util",
+      "version": "0.1.3"
+    },
+    {
+      "name": "httparse",
+      "version": "1.10.1"
+    },
+    {
+      "name": "httpdate",
+      "version": "1.0.3"
+    },
+    {
+      "name": "hyper",
+      "version": "1.8.1"
+    },
+    {
+      "name": "hyper-tls",
+      "version": "0.6.0"
+    },
+    {
+      "name": "hyper-util",
+      "version": "0.1.19"
+    },
+    {
+      "name": "iana-time-zone",
+      "version": "0.1.64"
+    },
+    {
+      "name": "icu_collections",
+      "version": "2.1.1"
+    },
+    {
+      "name": "icu_locale_core",
+      "version": "2.1.1"
+    },
+    {
+      "name": "icu_normalizer",
+      "version": "2.1.1"
+    },
+    {
+      "name": "icu_normalizer_data",
+      "version": "2.1.1"
+    },
+    {
+      "name": "icu_properties",
+      "version": "2.1.2"
+    },
+    {
+      "name": "icu_properties_data",
+      "version": "2.1.2"
+    },
+    {
+      "name": "icu_provider",
+      "version": "2.1.1"
+    },
+    {
+      "name": "ident_case",
+      "version": "1.0.1"
+    },
+    {
+      "name": "idna",
+      "version": "1.1.0"
+    },
+    {
+      "name": "idna_adapter",
+      "version": "1.2.1"
+    },
+    {
+      "name": "indexmap",
+      "version": "2.13.0"
+    },
+    {
+      "name": "inotify",
+      "version": "0.10.2"
+    },
+    {
+      "name": "inotify-sys",
+      "version": "0.1.5"
+    },
+    {
+      "name": "instant",
+      "version": "0.1.13"
+    },
+    {
+      "name": "io-extras",
+      "version": "0.19.0"
+    },
+    {
+      "name": "io-lifetimes",
+      "version": "2.0.4"
+    },
+    {
+      "name": "io-lifetimes",
+      "version": "3.0.1"
+    },
+    {
+      "name": "ipnet",
+      "version": "2.11.0"
+    },
+    {
+      "name": "iri-string",
+      "version": "0.7.10"
+    },
+    {
+      "name": "is_terminal_polyfill",
+      "version": "1.70.2"
+    },
+    {
+      "name": "itertools",
+      "version": "0.14.0"
+    },
+    {
+      "name": "itoa",
+      "version": "1.0.17"
+    },
+    {
+      "name": "jobserver",
+      "version": "0.1.34"
+    },
+    {
+      "name": "lazy_static",
+      "version": "1.5.0"
+    },
+    {
+      "name": "libc",
+      "version": "0.2.180"
+    },
+    {
+      "name": "libloading",
+      "version": "0.9.0"
+    },
+    {
+      "name": "libsqlite3-sys",
+      "version": "0.30.1"
+    },
+    {
+      "name": "linux-raw-sys",
+      "version": "0.11.0"
+    },
+    {
+      "name": "litemap",
+      "version": "0.8.1"
+    },
+    {
+      "name": "lock_api",
+      "version": "0.4.14"
+    },
+    {
+      "name": "log",
+      "version": "0.4.29"
+    },
+    {
+      "name": "lzma-rs",
+      "version": "0.3.0"
+    },
+    {
+      "name": "lzma-sys",
+      "version": "0.1.20"
+    },
+    {
+      "name": "macro_rules_attribute",
+      "version": "0.2.2"
+    },
+    {
+      "name": "macro_rules_attribute-proc_macro",
+      "version": "0.2.2"
+    },
+    {
+      "name": "matchers",
+      "version": "0.2.0"
+    },
+    {
+      "name": "matchit",
+      "version": "0.7.3"
+    },
+    {
+      "name": "matrixmultiply",
+      "version": "0.3.10"
+    },
+    {
+      "name": "maybe-owned",
+      "version": "0.3.4"
+    },
+    {
+      "name": "memchr",
+      "version": "2.7.6"
+    },
+    {
+      "name": "mime",
+      "version": "0.3.17"
+    },
+    {
+      "name": "mini-moka",
+      "version": "0.10.3"
+    },
+    {
+      "name": "minimal-lexical",
+      "version": "0.2.1"
+    },
+    {
+      "name": "miniz_oxide",
+      "version": "0.8.9"
+    },
+    {
+      "name": "mio",
+      "version": "1.1.1"
+    },
+    {
+      "name": "monostate",
+      "version": "0.1.18"
+    },
+    {
+      "name": "monostate-impl",
+      "version": "0.1.18"
+    },
+    {
+      "name": "native-tls",
+      "version": "0.2.14"
+    },
+    {
+      "name": "ndarray",
+      "version": "0.17.2"
+    },
+    {
+      "name": "nix",
+      "version": "0.29.0"
+    },
+    {
+      "name": "nix",
+      "version": "0.30.1"
+    },
+    {
+      "name": "no-std-compat",
+      "version": "0.4.1"
+    },
+    {
+      "name": "nom",
+      "version": "7.1.3"
+    },
+    {
+      "name": "nonzero_ext",
+      "version": "0.3.0"
+    },
+    {
+      "name": "notify",
+      "version": "7.0.0"
+    },
+    {
+      "name": "notify-types",
+      "version": "1.0.1"
+    },
+    {
+      "name": "ntapi",
+      "version": "0.4.2"
+    },
+    {
+      "name": "nu-ansi-term",
+      "version": "0.50.3"
+    },
+    {
+      "name": "num-complex",
+      "version": "0.4.6"
+    },
+    {
+      "name": "num-integer",
+      "version": "0.1.46"
+    },
+    {
+      "name": "num-traits",
+      "version": "0.2.19"
+    },
+    {
+      "name": "objc2",
+      "version": "0.6.3"
+    },
+    {
+      "name": "objc2-encode",
+      "version": "4.1.0"
+    },
+    {
+      "name": "once_cell",
+      "version": "1.21.3"
+    },
+    {
+      "name": "once_cell_polyfill",
+      "version": "1.70.2"
+    },
+    {
+      "name": "onig",
+      "version": "6.5.3"
+    },
+    {
+      "name": "onig_sys",
+      "version": "69.9.3"
+    },
+    {
+      "name": "openssl",
+      "version": "0.10.75"
+    },
+    {
+      "name": "openssl-macros",
+      "version": "0.1.1"
+    },
+    {
+      "name": "openssl-probe",
+      "version": "0.1.6"
+    },
+    {
+      "name": "openssl-sys",
+      "version": "0.9.111"
+    },
+    {
+      "name": "option-ext",
+      "version": "0.2.0"
+    },
+    {
+      "name": "ort",
+      "version": "2.0.0-rc.12"
+    },
+    {
+      "name": "ort-sys",
+      "version": "2.0.0-rc.12"
+    },
+    {
+      "name": "parking_lot",
+      "version": "0.12.5"
+    },
+    {
+      "name": "parking_lot_core",
+      "version": "0.9.12"
+    },
+    {
+      "name": "paste",
+      "version": "1.0.15"
+    },
+    {
+      "name": "percent-encoding",
+      "version": "2.3.2"
+    },
+    {
+      "name": "pin-project-lite",
+      "version": "0.2.16"
+    },
+    {
+      "name": "pin-utils",
+      "version": "0.1.0"
+    },
+    {
+      "name": "pkg-config",
+      "version": "0.3.32"
+    },
+    {
+      "name": "portable-atomic",
+      "version": "1.13.0"
+    },
+    {
+      "name": "potential_utf",
+      "version": "0.1.4"
+    },
+    {
+      "name": "ppv-lite86",
+      "version": "0.2.21"
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.107"
+    },
+    {
+      "name": "quanta",
+      "version": "0.12.6"
+    },
+    {
+      "name": "quote",
+      "version": "1.0.47"
+    },
+    {
+      "name": "rand",
+      "version": "0.8.6"
+    },
+    {
+      "name": "rand",
+      "version": "0.9.3"
+    },
+    {
+      "name": "rand_chacha",
+      "version": "0.3.1"
+    },
+    {
+      "name": "rand_chacha",
+      "version": "0.9.0"
+    },
+    {
+      "name": "rand_core",
+      "version": "0.6.4"
+    },
+    {
+      "name": "rand_core",
+      "version": "0.9.5"
+    },
+    {
+      "name": "raw-cpuid",
+      "version": "11.6.0"
+    },
+    {
+      "name": "rawpointer",
+      "version": "0.2.1"
+    },
+    {
+      "name": "rayon",
+      "version": "1.11.0"
+    },
+    {
+      "name": "rayon-cond",
+      "version": "0.4.0"
+    },
+    {
+      "name": "rayon-core",
+      "version": "1.13.0"
+    },
+    {
+      "name": "regex",
+      "version": "1.12.2"
+    },
+    {
+      "name": "regex-automata",
+      "version": "0.4.13"
+    },
+    {
+      "name": "regex-syntax",
+      "version": "0.8.8"
+    },
+    {
+      "name": "reqwest",
+      "version": "0.12.28"
+    },
+    {
+      "name": "rusqlite",
+      "version": "0.32.1"
+    },
+    {
+      "name": "rustix",
+      "version": "1.1.3"
+    },
+    {
+      "name": "rustix-linux-procfs",
+      "version": "0.1.1"
+    },
+    {
+      "name": "rustls-pki-types",
+      "version": "1.14.0"
+    },
+    {
+      "name": "rustversion",
+      "version": "1.0.22"
+    },
+    {
+      "name": "ryu",
+      "version": "1.0.22"
+    },
+    {
+      "name": "same-file",
+      "version": "1.0.6"
+    },
+    {
+      "name": "schannel",
+      "version": "0.1.28"
+    },
+    {
+      "name": "scopeguard",
+      "version": "1.2.0"
+    },
+    {
+      "name": "security-framework",
+      "version": "2.11.1"
+    },
+    {
+      "name": "security-framework-sys",
+      "version": "2.15.0"
+    },
+    {
+      "name": "semver",
+      "version": "1.0.27"
+    },
+    {
+      "name": "serde",
+      "version": "1.0.228"
+    },
+    {
+      "name": "serde_core",
+      "version": "1.0.228"
+    },
+    {
+      "name": "serde_derive",
+      "version": "1.0.228"
+    },
+    {
+      "name": "serde_json",
+      "version": "1.0.149"
+    },
+    {
+      "name": "serde_path_to_error",
+      "version": "0.1.20"
+    },
+    {
+      "name": "serde_urlencoded",
+      "version": "0.7.1"
+    },
+    {
+      "name": "sha2",
+      "version": "0.10.9"
+    },
+    {
+      "name": "sharded-slab",
+      "version": "0.1.7"
+    },
+    {
+      "name": "shlex",
+      "version": "1.3.0"
+    },
+    {
+      "name": "signal-hook-registry",
+      "version": "1.4.8"
+    },
+    {
+      "name": "simd-adler32",
+      "version": "0.3.8"
+    },
+    {
+      "name": "slab",
+      "version": "0.4.11"
+    },
+    {
+      "name": "smallvec",
+      "version": "1.15.1"
+    },
+    {
+      "name": "socket2",
+      "version": "0.6.1"
+    },
+    {
+      "name": "spinning_top",
+      "version": "0.3.0"
+    },
+    {
+      "name": "spm_precompiled",
+      "version": "0.1.4"
+    },
+    {
+      "name": "stable_deref_trait",
+      "version": "1.2.1"
+    },
+    {
+      "name": "static_assertions",
+      "version": "1.1.0"
+    },
+    {
+      "name": "strsim",
+      "version": "0.11.1"
+    },
+    {
+      "name": "syn",
+      "version": "2.0.114"
+    },
+    {
+      "name": "sync_wrapper",
+      "version": "1.0.2"
+    },
+    {
+      "name": "synstructure",
+      "version": "0.13.2"
+    },
+    {
+      "name": "sysinfo",
+      "version": "0.32.1"
+    },
+    {
+      "name": "system-configuration",
+      "version": "0.6.1"
+    },
+    {
+      "name": "system-configuration-sys",
+      "version": "0.6.0"
+    },
+    {
+      "name": "tagptr",
+      "version": "0.2.0"
+    },
+    {
+      "name": "tar",
+      "version": "0.4.45"
+    },
+    {
+      "name": "tempfile",
+      "version": "3.24.0"
+    },
+    {
+      "name": "thiserror",
+      "version": "2.0.18"
+    },
+    {
+      "name": "thiserror-impl",
+      "version": "2.0.18"
+    },
+    {
+      "name": "thread_local",
+      "version": "1.1.9"
+    },
+    {
+      "name": "tinystr",
+      "version": "0.8.2"
+    },
+    {
+      "name": "tinyvec",
+      "version": "1.13.2"
+    },
+    {
+      "name": "tinyvec_macros",
+      "version": "0.1.1"
+    },
+    {
+      "name": "tokenizers",
+      "version": "0.23.1"
+    },
+    {
+      "name": "tokio",
+      "version": "1.49.0"
+    },
+    {
+      "name": "tokio-macros",
+      "version": "2.6.0"
+    },
+    {
+      "name": "tokio-native-tls",
+      "version": "0.3.1"
+    },
+    {
+      "name": "tokio-util",
+      "version": "0.7.18"
+    },
+    {
+      "name": "tower",
+      "version": "0.5.3"
+    },
+    {
+      "name": "tower-http",
+      "version": "0.6.8"
+    },
+    {
+      "name": "tower-layer",
+      "version": "0.3.3"
+    },
+    {
+      "name": "tower-service",
+      "version": "0.3.3"
+    },
+    {
+      "name": "tracing",
+      "version": "0.1.44"
+    },
+    {
+      "name": "tracing-attributes",
+      "version": "0.1.31"
+    },
+    {
+      "name": "tracing-core",
+      "version": "0.1.36"
+    },
+    {
+      "name": "tracing-log",
+      "version": "0.2.0"
+    },
+    {
+      "name": "tracing-subscriber",
+      "version": "0.3.22"
+    },
+    {
+      "name": "triomphe",
+      "version": "0.1.15"
+    },
+    {
+      "name": "try-lock",
+      "version": "0.2.5"
+    },
+    {
+      "name": "typenum",
+      "version": "1.19.0"
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.22"
+    },
+    {
+      "name": "unicode-normalization",
+      "version": "0.1.25"
+    },
+    {
+      "name": "unicode-normalization-alignments",
+      "version": "0.1.12"
+    },
+    {
+      "name": "unicode-segmentation",
+      "version": "1.13.2"
+    },
+    {
+      "name": "unicode_categories",
+      "version": "0.1.1"
+    },
+    {
+      "name": "url",
+      "version": "2.5.8"
+    },
+    {
+      "name": "urlencoding",
+      "version": "2.1.3"
+    },
+    {
+      "name": "utf8_iter",
+      "version": "1.0.4"
+    },
+    {
+      "name": "utf8parse",
+      "version": "0.2.2"
+    },
+    {
+      "name": "uuid",
+      "version": "1.19.0"
+    },
+    {
+      "name": "vcpkg",
+      "version": "0.2.15"
+    },
+    {
+      "name": "version_check",
+      "version": "0.9.5"
+    },
+    {
+      "name": "walkdir",
+      "version": "2.5.0"
+    },
+    {
+      "name": "want",
+      "version": "0.3.1"
+    },
+    {
+      "name": "winapi",
+      "version": "0.3.9"
+    },
+    {
+      "name": "winapi-util",
+      "version": "0.1.11"
+    },
+    {
+      "name": "windows",
+      "version": "0.57.0"
+    },
+    {
+      "name": "windows-core",
+      "version": "0.57.0"
+    },
+    {
+      "name": "windows-implement",
+      "version": "0.57.0"
+    },
+    {
+      "name": "windows-interface",
+      "version": "0.57.0"
+    },
+    {
+      "name": "windows-link",
+      "version": "0.2.1"
+    },
+    {
+      "name": "windows-registry",
+      "version": "0.6.1"
+    },
+    {
+      "name": "windows-result",
+      "version": "0.1.2"
+    },
+    {
+      "name": "windows-result",
+      "version": "0.4.1"
+    },
+    {
+      "name": "windows-strings",
+      "version": "0.5.1"
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.48.0"
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.52.0"
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.59.0"
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.60.2"
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.61.2"
+    },
+    {
+      "name": "windows-targets",
+      "version": "0.48.5"
+    },
+    {
+      "name": "windows-targets",
+      "version": "0.52.6"
+    },
+    {
+      "name": "windows-targets",
+      "version": "0.53.5"
+    },
+    {
+      "name": "windows_x86_64_msvc",
+      "version": "0.48.5"
+    },
+    {
+      "name": "windows_x86_64_msvc",
+      "version": "0.52.6"
+    },
+    {
+      "name": "windows_x86_64_msvc",
+      "version": "0.53.1"
+    },
+    {
+      "name": "winx",
+      "version": "0.36.4"
+    },
+    {
+      "name": "writeable",
+      "version": "0.6.2"
+    },
+    {
+      "name": "xattr",
+      "version": "1.6.1"
+    },
+    {
+      "name": "xz2",
+      "version": "0.1.7"
+    },
+    {
+      "name": "yoke",
+      "version": "0.8.1"
+    },
+    {
+      "name": "yoke-derive",
+      "version": "0.8.1"
+    },
+    {
+      "name": "zerocopy",
+      "version": "0.8.33"
+    },
+    {
+      "name": "zerocopy-derive",
+      "version": "0.8.33"
+    },
+    {
+      "name": "zerofrom",
+      "version": "0.1.6"
+    },
+    {
+      "name": "zerofrom-derive",
+      "version": "0.1.6"
+    },
+    {
+      "name": "zeroize",
+      "version": "1.8.2"
+    },
+    {
+      "name": "zerotrie",
+      "version": "0.2.3"
+    },
+    {
+      "name": "zerovec",
+      "version": "0.11.5"
+    },
+    {
+      "name": "zerovec-derive",
+      "version": "0.11.2"
+    },
+    {
+      "name": "zip",
+      "version": "2.4.2"
+    },
+    {
+      "name": "zmij",
+      "version": "1.0.16"
+    },
+    {
+      "name": "zstd",
+      "version": "0.13.3"
+    },
+    {
+      "name": "zstd-safe",
+      "version": "7.2.4"
+    },
+    {
+      "name": "zstd-sys",
+      "version": "2.0.16+zstd.1.5.7"
+    }
+  ],
   "packages": [
     {
       "name": "adler2",
@@ -3365,9 +4729,9 @@
     },
     {
       "name": "proc-macro2",
-      "version": "1.0.105",
+      "version": "1.0.107",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/proc-macro2/1.0.105/download",
+      "source": "https://crates.io/api/v1/crates/proc-macro2/1.0.107/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -3395,9 +4759,9 @@
     },
     {
       "name": "quote",
-      "version": "1.0.43",
+      "version": "1.0.47",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/quote/1.0.43/download",
+      "source": "https://crates.io/api/v1/crates/quote/1.0.47/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6270,6 +7634,11 @@
       "file": "uv-0.12.18-LICENSE-APACHE",
       "source": "https://raw.githubusercontent.com/astral-sh/uv/0.12.18/LICENSE-APACHE",
       "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "file": "simd-LICENSE",
+      "source": "https://raw.githubusercontent.com/Nugine/simd/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE",
+      "sha256": "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d"
     }
   ],
   "managed_python": [
@@ -6617,15 +7986,15 @@
     "electron/package.json": "1f2b68e5819cbea84a2d8f25bbdda5d8288b3c1bf90a52162dc414c5938d72d8",
     "frontend/package.json": "0f3d0d26b1155cdabd7a5b1f93d2b99aff64b70105760284343adeb1afb6ca2e",
     "pnpm-lock.yaml": "8ef64f92ef3734992ce825b3253a6edef6586cf87b0a22494096bb12b9c86304",
-    "rust/Cargo.lock": "349439594f58ed25eca72879e6e73c598a1c828017b925faf5b5b67f5e268a87",
+    "rust/Cargo.lock": "7ebce70162112913f675c270b1e6be748d7ef607280b6e84cfe667e38f1763ec",
     "rust/Cargo.toml": "20bc7d7e683b50911c3182ad3056bd09a3b0fc00081cb38904dc7651346a7ebd",
     "rust/crates/pumas-app-manager/Cargo.toml": "1093f1165c8ffc78567548aca81779386648594227978c1f77e048ac247e0f74",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "52872188b38b9010c0af7cd6004cd84712a3ad08dfa3f5c92c9a24c1ab48c637",
-    "rust/crates/pumas-core/Cargo.toml": "770a9333799a9c48bf04cd8e5783404819670655ec6ec2bc68239458f6c6672b",
-    "rust/crates/pumas-rpc/Cargo.toml": "8adfc44f73c0d325d27d8bf2055a6d5260eef67ba8361d6e4b0147efaf11a61c",
+    "rust/crates/pumas-core/Cargo.toml": "863528f0878c0dfa50d8c97b65a979fea80f2f7896f5905e164f3e4d53fc51a3",
+    "rust/crates/pumas-rpc/Cargo.toml": "4b2cb1bbd4f1b66d3b5dd742f809af0e3fa2ca21a3dc3172aac58e03e297f392",
     "scripts/release/artifact-plan.json": "d5e4a2700728ba61cabca36d727efd477d716f3b50cc90fa9ce7f5e7959c7b0c",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
     "scripts/release/torch-managed-python-acceptance.py": "b0486387627d6ae98b4b6533adcceed93e93ebf868385626f3b13f1fb949893b"
   },
-  "notices_sha256": "3a9fddb2d7847da925221803a6b05b4ab082177a2236366f15aaa6433fb4b792"
+  "notices_sha256": "306acbf0b5da2bbdea5d69cbb8325468278a49e5c1d33e521a60ddbf96047709"
 }

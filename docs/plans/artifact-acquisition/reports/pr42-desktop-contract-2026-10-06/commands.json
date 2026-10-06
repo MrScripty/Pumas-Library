@@ -1,0 +1,33 @@
+{
+  "source_head": "75d7e426acdb4f2ed25c6063653ae517a56528aa",
+  "source_tree": "93018997501ae9ec503508028767345298828abc",
+  "commands": [
+    "(cwd electron) node scripts/generate-desktop-contract.mjs",
+    "(cwd electron) node scripts/generate-desktop-contract.mjs --check",
+    "(cwd repo) node electron/scripts/generate-desktop-contract.mjs --check",
+    "(cwd electron) node scripts/generate-desktop-contract.test.mjs",
+    "(cwd electron) node scripts/with-desktop-contract-fixtures.mjs node scripts/desktop-contract-conformance.test.mjs",
+    "(cwd electron) node node_modules/typescript/bin/tsc && node scripts/bundle-preload.mjs",
+    "(cwd electron) node node_modules/eslint/bin/eslint.js . --report-unused-disable-directives --max-warnings 0",
+    "(cwd frontend) node ../electron/scripts/with-desktop-contract-fixtures.mjs node node_modules/vitest/vitest.mjs run --config vitest.conformance.config.ts"
+  ],
+  "observed_success_exit_code": 0,
+  "red_controls": {
+    "check-before.log": 1,
+    "cwd-regression-before.log": 1
+  },
+  "setup_failures_preserved": [
+    "pnpm-dependency-setup-error.log",
+    "frontend-before-preload-bundle.log",
+    "electron-lint-before-url-import.log",
+    "scoped-lint.log"
+  ],
+  "identity_verified_before_source_commit": true,
+  "sanitization": "All published bytes checked for common credential-value patterns; no environment values, auth stores or full hosted job logs collected. Exact original repair-evidence.json and all its hashed files preserved.",
+  "raw_log_container": {
+    "path": "command-logs.tar.gz",
+    "sha256": "78b748596bc2a286a9c5849a49eb3ffd101d9ef97389e299a0d7aab31cded2ef",
+    "format": "gzip tar; original log names and exact bytes; diagnostic whitespace preserved"
+  },
+  "exact_repair_regression": "exact-regression-red-green.json: Node24.19.0, esbuild0.25.12, AJV8.20.0; only absWorkingDir removed gives exit1; restored repair gives exit0; six output hashes retained"
+}

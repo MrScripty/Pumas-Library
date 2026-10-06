@@ -74,6 +74,8 @@ async fn gateway_test_state_with_clients(
         .unwrap();
     let onnx_session_manager = OnnxSessionManager::new(onnx_backend, 2).unwrap();
     let state = Arc::new(AppState {
+        #[cfg(feature = "s3")]
+        s3_imports: crate::s3_imports::S3Imports::unavailable(),
         shutdown_request: crate::server::ShutdownRequest::default(),
         catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
         api,

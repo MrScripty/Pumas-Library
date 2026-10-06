@@ -110,9 +110,141 @@ RFC authority: [HTTP Semantics, RFC 9110](https://www.rfc-editor.org/rfc/rfc9110
 
 Source configuration includes endpoint, region where applicable, bucket, addressing style, TLS/approved local-development policy, and explicit credential-provider identity. Preserve object version IDs and conditional reads. Treat ETag as an opaque source validator unless its specific documented checksum semantics are established. A multipart or encrypted-object ETag must not be relabeled SHA-256/MD5 evidence.
 
+The optional S3 reader retains `S3ReaderConfig` and anonymous `S3Reader::new`.
+`S3Reader::new_authenticated(config, S3Credentials)` consumes explicitly supplied
+access-key ID, secret and optional session token for a bounded acquisition.
+`S3Credentials::new` admits nonempty printable ASCII without whitespace; access-key
+IDs additionally exclude SigV4 credential-field delimiters `/`, `,`, and `=`.
+Authenticated signing regions use ASCII alphanumerics and hyphens. Invalid
+credentials/configuration fail before I/O with non-sensitive configuration errors.
+Authentication requires HTTPS regardless of `allow_http`; plaintext literal-IP
+loopback signing fixtures exist only in unit-test builds, never via `test-support`.
+No ambient discovery, persistence, automatic refresh, anonymous fallback, or
+receiving-origin expansion is allowed. Redirects and proxies remain disabled.
+The maintained SDK supplies SigV4; Pumas marks credential headers sensitive and
+contains remote diagnostics before public errors or durable status can expose
+them. Existing anonymous constructors, source identity, VersionId/If-Match,
+receipt formats, retry budgets and byte-verification policy remain unchanged.
+Selections retain their credential capability in memory through their existing
+ownership lifetime; callers scope them to the authorized acquisition.
+
+The optional native `PumasApi::import_s3_model` facade consumes explicit source
+facts, pinned manifest entries, a model import spec, a reserved workspace, finite
+retry budgets, a retained operation UUID and optional ephemeral credentials.
+Its request is not Debug/serde-enabled; only phase/current-file byte progress is
+serializable. Selection runs under the same bounded acquisition consumer scope
+as transfer, and verified single/bundled GGUF publication uses the existing
+importer and exact receipt pipeline. The stable demand owner is
+`model.s3.workflow`. Neither source access nor credentials enter the importer
+payload or progress; no account/source-configuration persistence is introduced.
+
+Control cancellation and finalization have one atomic admission winner.
+Cancellation can win through verification but is refused before receipt issuance
+once finalization starts. A cancellation acknowledgement is not a stopped-effects
+result. Final success follows durable settlement; a drain error preserves any
+published result and original failure. Dropping the waiter is interruption, with
+shared shutdown responsible for registered effect drainage. Retained custody must
+be reconciled under the same operation identity, never implicitly replayed with
+new demand identity. Desktop/RPC composition and live-provider acceptance remain
+unqualified by this native entry point.
+
+The optional RPC/desktop composition admits one explicit GGUF through that
+facade. The anonymous `start_s3_model_import` stays unchanged; the distinct
+`start_authenticated_s3_model_import` takes the same source facts plus explicitly
+supplied request-scoped access key, secret and optional session token. Both
+require caller-supplied HTTPS origin, bucket, region, addressing, exact key,
+immutable VersionId and SHA-256; neither accepts HTTP opt-outs. The closed
+credential DTO is Deserialize-only and bounds each value to 4096 printable ASCII
+characters without whitespace, with the native access-key delimiter restrictions.
+The actual authenticated constructor validates before job/workspace admission.
+
+The backend retains one process-local UUID-correlated safe job/result and drains
+it before shared acquisition shutdown. Credentials move into the native job,
+never its safe snapshot, receipts, model metadata, caches, telemetry or saved
+defaults. One-use password inputs clear before submission waits, on close, mode
+replacement and unmount; hooks retain no credentials in task state or refs.
+Lost acknowledgement observes the same UUID without resubmitting. Existing local
+IPC and direct loopback HTTP carry transient serialized request copies; secure
+memory erasure and protection from privileged inspection are not claimed.
+The source-only transport bounds/correlates responses, bypasses no security
+controls, disables proxies/redirects and contains reflected remote diagnostics
+before IPC. Credentialed S3 requires normally verified HTTPS.
+
+Current-file byte observations use decimal strings; cancellation acknowledgement
+is distinct from the owned terminal result. Existing import validation,
+classification, registration and exact receipt identity remain authoritative.
+Retained custody requires explicit reconciliation, never implicit replay.
+Controlled HTTPS/RPC and DOM/preload fixtures support this secret boundary;
+packaged/browser behavior and real-provider acceptance remain separate.
+
+The additive desktop bundle starts take 2–32 explicit per-file key/VersionId/
+logical-path/SHA-256 pins and one exact primary GGUF basename, with only the
+existing native inert auxiliary formats. Complete structural preflight uses
+`S3Reader::validate_manifest_entries` plus shared manifest validation before
+job/workspace admission; it grants no selection or byte-verification authority.
+Importer-owned reserved roots and their normalized aliases/descendants are
+refused by `ModelImporter::validate_acquired_payload_paths` before RPC job
+admission or native source resolution. The final acquired copy plan reuses
+that same rule; wire decoding alone grants no destination authority.
+Object existence and returned metadata remain the native resolver's responsibility.
+A checked HEAD for the exact immutable VersionId and explicit size zero yields
+an empty acquisition stream without GET or an impossible byte range. The shared
+workspace writer, SHA-256 verifier and receipt owner still verify and publish
+every selected member. Missing/invalid Content-Length or an absent/wrong-version
+object fails selection; an empty file never stands for unknown length. Empty
+auxiliaries are supported, while the primary must pass existing GGUF validation.
+Public range reads remain nonempty; selection and `s3/manifest.rs` identity
+implementation are unchanged. Anonymous/authenticated single-object wire shapes remain unchanged;
+bundle authentication uses the same ephemeral credential DTO and constructors.
+
+`S3ModelImportControl::subscribe_bundle` adds safe aggregate observations without
+changing the existing native progress struct or subscribe method. Optional
+`AcquisitionHost::file_started`/`file_acquired` callbacks default to no-op and
+observe the existing sequential acquisition loop; they neither mutate custody
+nor own retry, verification or publication. Explicit file boundaries avoid
+inferring transitions from resetting byte counts. Acquired staging bytes plus
+current attempt bytes form total observed progress, with known total size only
+after complete selection. Retries may decrease observed bytes. File counts and
+full totals do not prove complete-set verification, registration or receipt
+settlement. The additive bundle getter wraps the existing outcome with this safe
+running progress; terminal results keep existing exact custody/publication facts.
+
 Explicit multi-file S3 selections identify each object by the pair of its exact key and VersionId. Their manifest files encode that pair as a JSON tuple in the opaque `source_key`, so different versions of one key may have different size/digest evidence. Conflicting evidence for the same key and version remains invalid. Per-object revision pins and reader requests preserve the raw protocol key and VersionId; single-object selections retain their existing raw `source_key`. Retained manifests are not rewritten.
 
 Use one range per S3 GetObject call and bounded parallel calls only when the supported reader and identity contract permit them. Pagination failures or capacity limits produce incomplete/unavailable manifests, not silently shortened file sets. Recheck the exact version/evidence when refreshing credentials or location. Capability differences of compatible endpoints produce explicit unsupported results.
+
+The optional `S3Reader::enumerate_prefix` is an additive, in-memory discovery
+operation for an explicitly authorized raw prefix on a general-purpose versioned
+bucket. `S3PrefixLimits` supplies positive page, object, per-page XML byte and
+total XML byte bounds; page size is 1–1000, each XML response is at most 1 MiB,
+and the reviewed XML guard additionally limits parsing to 4096 nodes and refuses
+DTDs. The reader's existing caller-supplied operation timeout covers the complete
+pagination and subsequent HEAD pinning, rather than restarting a service-wide
+deadline per page. Requests remain sequential, with SDK retries disabled and no
+delimiter, encoding conversion, Requester Pays or source/credential discovery.
+
+Each listing uses the same SDK/closed transport/diagnostic scope as reads. The
+transport permits only an annotated ListObjectsV2 GET with HTTP 200, bounding the
+stream before SDK buffering. The promoted reviewed XML guard requires exact
+agreement with SDK-decoded completion, tokens, selection/count fields and every
+key/size/ETag. Missing, duplicate, ambiguous or contradictory completion evidence,
+changed scope echoes, grouped/encoded results, cyclic tokens, duplicate or
+non-lexicographic keys and out-of-prefix or unsupported keys fail closed. Raw
+prefixes are not turned into directory prefixes. Tokens are ephemeral and never
+part of a manifest, receipt, debug representation or log.
+
+Only a complete final page can proceed to sequential conditional HEAD observations.
+Each HEAD must match the listed size/ETag and supply an immutable, non-null
+VersionId under the existing validation policy. Missing/racing objects or failed
+pages return no listing; exhausted capacity is typed `S3PrefixError::Incomplete`.
+Other failures wrap the unchanged reader error contract. `S3PrefixListing`
+contains ordered immutable observations, no credentials or read capability;
+its Debug shows counts, and each object's Debug is redacted. A successful listing
+is still not an atomic multi-object snapshot or a ready artifact set. Callers
+choose exact logical paths and supply authoritative SHA-256 evidence, then use
+the existing explicit manifest/acquisition/import path. Its VersionId range pins,
+namespace validation, verification, receipts, retry policy and persistence formats
+remain unchanged. There is no new prefix RPC/desktop or automatic import path.
 
 [AWS GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html) and [Object metadata](https://docs.aws.amazon.com/AmazonS3/latest/API/API_Object.html) provide source semantics. A maintained SDK supplies signing and request mechanics. Pumas owns selected identity, allowed access, acquisition attempts, destination custody and verification.
 

@@ -1,7 +1,207 @@
 # Plan: source-neutral artifact acquisition
 
+**Installed S3 process-loss milestone (2026-10-06):** Separate
+`feat/s3-installed-process-loss-ed31639` preserves frozen ed31639 and its actual
+production binary hash. All eleven installed cases (the original ten plus one
+pre-FilesReady SIGKILL), 24 controls and pinned CI Ruff pass at 81aea4c0. Actual
+one-byte/transferring custody remains exact after two cold owners, with no source
+replay or model/receipt publication. See [frozen qualification](reports/s3-installed-process-loss-2026-10-06.md).
+This closes the bounded local milestone only. The next documented implementation
+feature is Q2 wheel-file-set acquisition/local-only Torch consumption, gated by
+AQ-HTTP, still not ready. Remaining S3 continuation is actual-provider Q3/AQ-S3
+acceptance; credentials/fixtures and supported platform/deployment inputs are
+not supplied. No additional fault campaign is admitted.
+
+**Q4 installed default-plus-S3 successor (2026-10-06):** Independently admitted
+`feat/s3-installed-prefix-main95` binds build provenance and complete S3 notices
+to the existing installed HTTPS fixture harness. Actual production release,
+all ten installed scenarios and default-profile health smoke pass at b0a66ba3.
+All 16 provenance/oracle controls, full CI Ruff scope and YAML parse pass.
+The original query-order fixture failure and its red/green repair are retained.
+See [frozen qualification](reports/s3-installed-default-profile-2026-10-06.md).
+The current prefix branch and all frozen evidence remain separate. Provider,
+UI/platform/inference and hosted acceptance gates remain open.
+The installed S3 pre-FilesReady process-loss successor is now locally qualified
+in its separate branch/report above; broader gates remain open.
+
+
+**Q3 prefix byte-capacity review repair (2026-10-06):** The maintained SDK now
+preserves typed listing byte overflow and the prefix API reports Incomplete at
+page/remaining-total capacity; malformed XML remains a protocol failure. Three
+old-source red controls, final 30 S3 units, 66 integrations, strict core Clippy,
+production RPC Clippy and 324 RPC cases pass (12 existing RPC ignores).
+See [repair qualification](reports/s3-prefix-budget-review-repair-2026-10-06.md).
+No source identity, retry/verification, credential or native/ONNX policy changes.
+The next independent Q4 slice is truthful installed default-plus-S3 provenance
+and complete notice packaging; actual-provider/platform gates remain open.
+
+
+**Q3 bounded prefix source checkpoint (2026-10-06):** Separate
+`feat/s3-prefix-main95` preserves integrated 7cf17383 and tested attribution
+prerequisite a39121b4. Explicit bounded SDK pagination with reviewed XML agreement
+and immutable conditional HEAD pins is implemented. Focused units/integrations
+pass; recovered post-prefix default-plus-S3 RPC qualification passes 324 tests
+with 12 existing ignores. Hosted/provider/platform gates remain pending.
+See [qualification](reports/s3-prefix-enumeration-2026-10-06.md) and
+[parent review packet](reports/s3-prefix-review-packet-2026-10-06.md).
+Parent retains PR/review/integration ownership. Next existing-plan work is
+Q3 actual-provider acceptance, then Q4 qualification.
+
+
+**Q3 sibling composition and bounded Q4 evidence (2026-10-05):** The coordinator
+authorized normal composition of frozen e6acb0ba and 7dc6acef, in that ordered
+parent sequence. Merge cd9d8191 preserves accepted PR40 and every frozen ref.
+Combined checks pass, including 171 acquisition units, 64 S3 integrations,
+220 RPC cases, native owner/process checks and renderer/Node checks. A normal
+production S3 release binary, unpacked outside checkout, passes ten independent
+TLS/signature/import/cancellation/cold-restart scenarios and release health smoke.
+This is an unreleased Linux qualification archive, with no test-support or
+inference claim. Browser launch is blocked by sandbox-helper ownership; ordinary
+official MinIO installation is blocked by HTTP 403 and stopped at that denial.
+See [provider/platform matrix](reports/s3-composed-provider-qualification-2026-10-05.md)
+for exact lineage, hashes, evidence kinds and missing external inputs.
+The sibling entries below describe their earlier separate scope. AC13/AC14,
+AQ-S3 and full AC17/Q4 remain pending. Parent owns review/integration; next
+existing-plan work remains authorized actual-provider Q3 acceptance, then Q4.
+
+**Q3 empty selected S3 members (2026-10-05):** Separate
+`feat/s3-empty-members-e8082649` preserves frozen e808 and its PR40 merge.
+Known-zero immutable selections now pass through the existing writer/SHA/receipt
+owner without an impossible range request; empty auxiliaries publish with exact
+receipts, while empty GGUF weights, unknown/missing objects, wrong digests and
+truncated mixed bundles fail. Cancellation and cold proof remain authoritative.
+See [qualification](reports/s3-empty-members-qualification-2026-10-05.md).
+The parent-requested reserved-name admission correction is a separate sibling
+`fix/s3-bundle-reserved-e8082649`, not silently composed here. Parent owns reviews
+and integration; provider and installed/native acceptance remain pending.
+Next existing-plan work: authorized Q3 cross-provider acceptance, then Q4.
+
+**Q3 reserved bundle destination correction (2026-10-05):** Reviewer P2 at
+frozen e808 is isolated on `fix/s3-bundle-reserved-e8082649`. RPC and native
+preflight now reuse the acquired importer's reserved root/normalization rule
+before job admission or source resolution, preserving final validation and
+retained-work recovery. Reserved roots/aliases/descendants cause no source,
+workspace-file or publication effects; a corrected same-owner request succeeds.
+See [qualification](reports/s3-bundle-reserved-destinations-qualification-2026-10-05.md).
+Frozen e808 and PR40 composition remain unchanged and changes-requested pending
+parent review/integration. The separately delegated next slice is zero-length
+members on sibling `feat/s3-empty-members-e8082649`; provider/Q4 gates stay open.
+
+
+**Q3 pinned multi-file desktop/native composition (2026-10-05):**
+
+Separate `feat/s3-desktop-bundle-d30412e9` starts from frozen authenticated
+`d30412e9`. Tested prerequisite `dd90f416` adds pure native manifest preflight
+and safe explicit file-boundary observations; implementation `339032ff` adds
+anonymous/authenticated bundle starts, aggregate read and per-file dialog pins.
+Existing single-object methods, ephemeral secret handling, acquisition/import/
+registration/receipt/cancellation owners and policies remain compatible.
+
+The coordinator then authorized an explicit normal merge of accepted main
+`838eb2990905144a59830f1a16fe91b4e1105d4d`, tree
+`f6d6c1d3c5ba5be0fb998a6fd157fcb31c63dc72`, whose ordered parents are 05717338
+and 1e811936. Composition `d9d907cfe0e57b1e2bc7e296eff1327de835bc5e`, tree
+`82511113e7e82a44ee526f91a8ce7f480282e0ec`, has ordered parents 339032ff and
+838eb299. All frozen feature refs remain separate ancestors; accepted PR40
+publication/discovery repairs are included through that merge without rewriting
+their implementation. Follow-up `5104a21e` qualifies the existing empty-member
+refusal and adds its help text, with no reader policy change.
+
+Composed acquisition 171, model-library 832, reconciliation 35 and S3 integration
+60 tests pass (overlapping subsets); full RPC 220 passes. Frontend 863, Node 242,
+final DOM 20, no-S3 source 4 and generator 8 pass. Strict core Clippy and RPC
+Clippy with inherited dead-code exception pass. Controlled HTTPS proves exact
+multi-version pins, aggregate staging progress, optional authentication,
+cancellation, receipts, no secret persistence/logging, missing/digest/empty
+member refusal and honest retained outcomes. Browser/default/platform/provider
+limits remain; AQ-S3 is not advanced. See [qualification](reports/s3-desktop-bundle-qualification-2026-10-05.md)
+for exact trees, logs and boundary proof. Parent owns PR/review/hosted/merge/Library.
+Next existing-plan implementation candidate: S3 zero-byte selected-member
+handling through the existing reader/acquisition boundary, separately scoped;
+live provider and Q4 installed/native qualification remain separate.
+
+**Q3 authenticated desktop/RPC successor (2026-10-05):**
+
+Separate `feat/s3-desktop-auth-106a6ca4` preserves frozen anonymous `106a6ca4`,
+review fixes `887308dc`, native `eabc3959`, reader `ffecce07`, main `05717338`
+and original PR40 `63123fd8` ancestry. Transport prerequisite `0023bcf9` contains
+reflected errors before IPC. Implementation `39f7689ab20a10276839a8f5dff206879d53b008`,
+tree `01f49715a2b3637826591a078134db0bc59f62ca`, adds a distinct authenticated
+command with bounded Deserialize-only credentials and one-use uncontrolled form
+inputs. Existing native HTTPS authenticated reader/import owns signing, identity,
+verification, finalization and receipts; safe task state carries no credentials.
+
+217 RPC tests, four no-S3 regressions, 860 frontend tests, final 17 focused tests,
+239 Electron tests (one native sandbox smoke skipped), eight generator tests,
+types/lint/builds, scoped Clippy/format/diff/frozen checks pass. Controlled HTTPS
+proves optional token signing, cancellation, static reflected-provider errors,
+exact receipt identity and credential exclusion from owned files/debug output.
+DOM evidence does not qualify browser behavior; existing sandbox/default ONNX
+403/fully strict dead-code blockers remain. See [qualification](reports/s3-desktop-authentication-qualification-2026-10-05.md)
+for commands, logs, corrections and lifetime limits. No frozen native/core,
+dependency or security policy changes. Parent owns review/hosted/PR/merge/Library
+coordination. Next existing-plan implementation candidate: explicit pinned
+multi-file desktop selection through the existing native bundle workflow;
+real-provider/refresh/platform acceptance remains separate. AQ-S3 stays pending.
+
+**Q3 anonymous desktop/RPC successor (2026-10-05):** Separate
+`feat/s3-desktop-workflow-eabc3959` starts exactly from frozen native workflow
+`eabc395966f2f3f155b298144bc81c4941121225`. Model Manager now offers one pinned
+anonymous GGUF import with explicit HTTPS source facts, required VersionId and
+SHA-256, phase/current-file byte observation, pre-finalization cancellation and
+typed registered/retained-work results. Three closed commands compose the
+existing native operation under one bounded RPC worker; closing observation does
+not cancel it, and process shutdown awaits it. Source facts are not persisted as
+account/configuration defaults; credentials are deliberately absent from this
+wire/UI. Native authentication remains additive and independently frozen.
+See [desktop qualification](reports/s3-desktop-workflow-qualification-2026-10-05.md)
+for exact scope, controlled evidence and environment blockers. Frozen core,
+reader, manifest, discovery, importer and native-repair bytes remain unchanged.
+Next existing-plan Q3 feature is authenticated explicit-source RPC/desktop
+configuration with a qualified ephemeral secret boundary; live AWS, a non-AWS
+service and MinIO acceptance and Q4 installed/native qualification remain
+separate. Parent retains review/hosted qualification/PRs/merges; AQ-S3 is not ready.
+
 **Plan status:** `Active` — Q1 is admitted on the current accepted `main` base; AQ-HTTP remains not ready.
 **Objective acceptance status:** `pending`.
+
+**Q3 native explicit source workflow successor (2026-10-05):** Separate
+`feat/s3-model-workflow-ffecce07` starts from the frozen authenticated reader
+`ffecce07220f6504fb1db2e348759473bd284de6`, tree
+`0acb23784970e86859851c9063e76d04cd740b8b`. The coordinator reported independent
+source-review acceptance of that reader; hosted/provider acceptance remains
+separate. The selected smallest application entry is native
+`PumasApi::import_s3_model`: caller-supplied explicit source/version/digest facts,
+a reserved workspace, finite retry budgets, stable operation UUID and optional
+request-scoped credentials compose through the bounded acquisition scope and
+existing single/bundled GGUF importer. Safe phase/current-file byte observation,
+pre-finalization cancellation, typed result and retained-work semantics belong
+to this additive facade. See [qualification](reports/s3-model-workflow-qualification-2026-10-05.md)
+for the exact tested code milestone and checks. Frozen native discovery,
+watcher/importer/reconciliation and reader/manifest production paths are
+unchanged. The optional reviewed token-signing assertion is extended only in
+the successor test. Next existing-plan implementation is Q3 desktop/RPC explicit
+source/configuration entry through this native operation; real-provider and
+installed/native qualification remain separate. Parent owns review, hosted
+qualification and integration. AQ-S3 stays not ready.
+
+**Q3 explicit authenticated-reader slice (2026-10-05):** On
+`feat/acquisition-s3-auth-63123fd8`, the explicitly delegated credential slice
+builds on exact PR40 head `63123fd8f9f866064a8315096ab3fb1fc81e8f0f`, tree
+`163ef2442695b44555ac0e42ff79a6a88de9e817`, preserving accepted main
+`05717338c2aea737483fb4b28c3ed4053a65de96` and every staging/VersionId repair.
+Code milestone `d74114c63a9717692fa7051ef5146d7253a2c5c5` adds an additive
+HTTPS-only authenticated constructor with explicit in-memory credentials and an
+optional session token. Anonymous construction and identity/retry/verification
+contracts are retained. Nine authentication unit fixtures, 41 existing S3
+acquisition regressions, 13 reader tests, strict enabled-S3 Clippy and supporting
+headless/static checks pass locally. See [qualification](reports/s3-authentication-qualification-2026-10-05.md).
+The frozen watcher/importer/manifest write set remains untouched. Independent
+review, exact-head hosted qualification and integration are coordinator-owned.
+The next existing-plan implementation slice is Q3's direct explicit source-facing
+application workflow/source configuration through the existing model operations;
+real AWS/non-AWS/MinIO acceptance and credential refresh remain separate.
+AC13/AC14 and AQ-S3 remain pending.
 
 **Q3 staging/version acceptance follow-up:** Merged PR39 is the base for the two fixes on `fix/import-discovery-s3-version`: private temporary-import events no longer become watcher model scopes, and explicit S3 manifests distinguish same-key/different-VersionId objects while retaining same-version evidence checks. The fixes were pushed without force and verified at `a606c80b0be41580c7af0583703d9f9af5f2cb44`. A successor normal-workflow fixture now qualifies a valid 3 MiB callback and 3 MiB auxiliary with the real watcher, public GetModel observation, clean shutdown and cold output proof without source replay. See [qualification](reports/s3-staging-discovery-qualification.md) for commands, failed experiment and limits. AC13/AC14 and AQ-S3 remain pending. The next slice is authorized real-provider/source-configuration qualification; credentials, live AWS/non-AWS/MinIO and desktop workflow are not supplied or established by these local fixtures.
 

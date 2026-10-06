@@ -83,6 +83,26 @@ integration. GUI selection does not disable backend model-library operations.
 The RPC listener accepts loopback addresses only; standalone does not imply
 remote-network exposure. Its port and root can be selected with `--help`.
 
+Add `--features s3` when building the RPC backend to enable **Import from S3**
+in Model Manager. This optional dialog imports one pinned GGUF with optional
+explicitly selected data/text auxiliaries
+using an explicit HTTPS endpoint, bucket, region, addressing style, exact object
+key, immutable VersionId and expected SHA-256. It observes the backend-owned job
+and registered result; closing the dialog leaves admitted work running. The
+dialog defaults to anonymous access and accepts explicit one-use access key, secret
+and optional session token. Credential inputs clear on submit or close and are
+never saved or refreshed. See the [RPC contract](rust/crates/pumas-rpc/README.md#explicit-s3-model-import)
+for per-file pins, aggregate staging progress, cancellation and retained-work limits.
+
+The optional Rust reader also exposes `S3Reader::enumerate_prefix` with explicit
+`S3PrefixLimits`. It returns complete, ordered immutable object observations only
+after bounded pagination and conditional HEAD pinning. Missing/racing objects,
+ambiguous completion or exhausted limits return errors. These observations are
+not an atomic package snapshot: callers still choose logical paths, provide
+SHA-256 evidence and use the existing explicit manifest/import API. Discovery
+does not download or import content. See the [acquisition contract](docs/contracts/artifact-acquisition.md#6-s3-and-other-source-readers).
+S3-enabled distributions require the [S3 release notices](docs/release-attribution/0.7.0-s3/README.md).
+
 The optional Node launcher exposes the same backend-only selection:
 
 ```bash

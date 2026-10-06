@@ -37,6 +37,30 @@ function NestedDialogs() {
 }
 
 describe('ModalDialog', () => {
+  it('wraps past effectively disabled fieldset controls, including controls with tabindex (DOM fixture)', async () => {
+    function SourceDialog() {
+      const close = useRef<HTMLButtonElement>(null);
+      return <ModalDialog isOpen ariaLabel="Source fixture" initialFocusRef={close} onClose={vi.fn()}>
+        <fieldset disabled>
+          <input aria-label="Endpoint" tabIndex={0} />
+          <select aria-label="Addressing"><option>Path</option></select>
+          <textarea aria-label="Source facts" />
+        </fieldset>
+        <button disabled>Import</button><button>Cancel import</button><button>Observe again</button>
+        <button ref={close}>Close source</button>
+      </ModalDialog>;
+    }
+    render(<SourceDialog />);
+    const close = screen.getByRole('button', { name: 'Close source' });
+    const cancel = screen.getByRole('button', { name: 'Cancel import' });
+    await waitFor(() => expect(close).toHaveFocus());
+    expect(screen.getByLabelText('Endpoint')).toBeDisabled();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(cancel).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(close).toHaveFocus();
+  });
+
   it('uses the task-owned focus destination when refresh removes the opener', async () => {
     function RefreshingDialog() {
       const [open, setOpen] = useState(false);

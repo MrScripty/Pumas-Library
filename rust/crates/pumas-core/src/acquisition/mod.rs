@@ -18,8 +18,9 @@ mod workspace;
 pub use http::{AcquisitionHttpClient, HttpAttemptHost};
 #[cfg(feature = "s3")]
 pub use s3::{
-    S3Addressing, S3ManifestEntry, S3ManifestSelection, S3ObjectSelection, S3Reader,
-    S3ReaderConfig, S3ReaderError,
+    S3Addressing, S3Credentials, S3ManifestEntry, S3ManifestSelection, S3ObjectSelection,
+    S3PrefixError, S3PrefixLimits, S3PrefixListing, S3PrefixObject, S3Reader, S3ReaderConfig,
+    S3ReaderError,
 };
 #[cfg(feature = "s3")]
 pub use service::{AcquisitionS3ManifestRequest, AcquisitionS3Request};

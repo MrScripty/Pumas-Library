@@ -411,10 +411,11 @@ impl PumasApi {
                         resolved_request.license_status = Some("license_unknown".to_string());
                     }
 
-                    let should_check_bundle = resolved_model_type
-                        .as_deref()
-                        .is_none_or(|model_type| model_type == "diffusion")
-                        || resolved_pipeline_tag.as_deref() == Some("text-to-image");
+                    let should_check_bundle = resolved_request.bundle_format.is_none()
+                        && (resolved_model_type
+                            .as_deref()
+                            .is_none_or(|model_type| model_type == "diffusion")
+                            || resolved_pipeline_tag.as_deref() == Some("text-to-image"));
                     if should_check_bundle {
                         let metadata_client = client.clone();
                         let metadata_repo = request.repo_id.clone();
@@ -439,18 +440,6 @@ impl PumasApi {
                             })??;
                         match classification {
                             Ok(Some(bundle)) => {
-                                if resolved_request.filename.is_some()
-                                    || resolved_request.filenames.is_some()
-                                    || resolved_request.quant.is_some()
-                                {
-                                    info!(
-                                    "HF repo {} classified as {:?}; forcing full bundle download",
-                                    request.repo_id, bundle.bundle_format
-                                );
-                                }
-                                resolved_request.filename = None;
-                                resolved_request.filenames = None;
-                                resolved_request.quant = None;
                                 resolved_request.bundle_format = Some(bundle.bundle_format);
                                 resolved_request.pipeline_class = Some(bundle.pipeline_class);
                                 if resolved_pipeline_tag.is_none() {
@@ -2204,6 +2193,608 @@ pub(super) mod tests {
         assert!(lifecycle_after.queue_admissions.is_empty());
         assert!(!destination.join(".pumas_download").exists());
         assert!(!destination.join("weights-a.gguf.part").exists());
+    }
+
+    // Exercises actual pinned selection, shared acquisition, import and receipts.
+    async fn public_package_fixture(
+        files: Vec<(&str, Vec<u8>, bool)>,
+        requested: Option<Vec<String>>,
+        diffusers: bool,
+        classify: bool,
+        expected_error: Option<&str>,
+    ) {
+        use sha2::{Digest, Sha256};
+        use std::{collections::BTreeMap, time::Duration};
+        use tokio::{io::AsyncWriteExt, sync::oneshot};
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        const BOUND: Duration = Duration::from_secs(10);
+        let files: Vec<(String, Vec<u8>, bool)> = files
+            .into_iter()
+            .map(|(path, bytes, lfs)| (path.to_owned(), bytes, lfs))
+            .collect();
+        let tree: Vec<_> = files.iter().map(|(path, bytes, lfs)| {
+            let mut entry = serde_json::json!({"path":path,"type":"file"});
+            if *lfs { entry["lfs"] = serde_json::json!({"oid":hex::encode(Sha256::digest(bytes)),"size":bytes.len()}); }
+            entry
+        }).collect();
+        let mut bodies = BTreeMap::from([
+            (
+                "/api/models/acme/model/revision/main".to_owned(),
+                format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}"}}"#).into_bytes(),
+            ),
+            (
+                format!("/api/models/acme/model/revision/{COMMIT}"),
+                format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}"}}"#).into_bytes(),
+            ),
+            (
+                format!("/api/models/acme/model/tree/{COMMIT}?recursive=true"),
+                serde_json::to_vec(&tree).unwrap(),
+            ),
+        ]);
+        for (path, bytes, _) in &files {
+            bodies.insert(
+                format!("/acme/model/resolve/{COMMIT}/{path}"),
+                bytes.clone(),
+            );
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop, mut stop_rx) = oneshot::channel();
+        let mut source = tokio::spawn(async move {
+            let mut counts = BTreeMap::<String, usize>::new();
+            loop {
+                let accepted = tokio::select! {
+                    _ = &mut stop_rx => break,
+                    value = listener.accept() => value.unwrap(),
+                };
+                let (mut socket, _) = accepted;
+                let request = tokio::time::timeout(BOUND, read_intent_test_request(&mut socket))
+                    .await
+                    .unwrap();
+                let route = request
+                    .strip_prefix("GET ")
+                    .unwrap()
+                    .strip_suffix(" HTTP/1.1")
+                    .unwrap();
+                let body = bodies
+                    .get(route)
+                    .expect("only exact pinned fixture routes are authorized");
+                *counts.entry(route.to_owned()).or_default() += 1;
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                tokio::time::timeout(BOUND, async {
+                    socket.write_all(header.as_bytes()).await?;
+                    socket.write_all(body).await
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            }
+            counts
+        });
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some(if diffusers { "diffusion" } else { "llm" }.into()),
+            pipeline_tag: Some(
+                if diffusers {
+                    "text-to-image"
+                } else {
+                    "text-generation"
+                }
+                .into(),
+            ),
+            filename: None,
+            filenames: requested,
+            quant: None,
+            bundle_format: (diffusers && !classify)
+                .then_some(models::BundleFormat::DiffusersDirectory),
+            pipeline_class: (diffusers && !classify).then_some("StableDiffusionPipeline".into()),
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let result = tokio::time::timeout(BOUND, async {
+            let id = api.start_hf_download(&request).await?;
+            loop {
+                let progress = api.get_hf_download_progress(&id).await?.unwrap();
+                if matches!(
+                    progress.status,
+                    models::DownloadStatus::Completed
+                        | models::DownloadStatus::Error
+                        | models::DownloadStatus::Cancelled
+                ) {
+                    return Ok::<_, crate::PumasError>((id, progress));
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        let shutdown = tokio::time::timeout(BOUND, api.shutdown_downloads()).await;
+        let _ = stop.send(());
+        let observed = match tokio::time::timeout(Duration::from_secs(1), &mut source).await {
+            Ok(value) => Some(value),
+            Err(_) => {
+                source.abort();
+                let _ = source.await;
+                None
+            }
+        };
+        assert!(
+            matches!(shutdown, Ok(Ok(()))),
+            "owner drain failed: {shutdown:?}"
+        );
+        let result = result.expect("public package operation exceeded bound");
+        let observed = observed.expect("fixture source did not drain").unwrap();
+        let persistence = api
+            .primary()
+            .hf_client
+            .as_ref()
+            .unwrap()
+            .persistence()
+            .unwrap();
+        let acquisitions = persistence.acquisition_store().acquisitions().unwrap();
+        let (id, progress) = match result {
+            Ok(value) => value,
+            Err(error) => {
+                assert!(
+                    expected_error.is_some_and(|expected| error.to_string().contains(expected)),
+                    "unexpected admission refusal: {error}"
+                );
+                assert!(acquisitions.is_empty());
+                assert!(observed.keys().all(|route| !route.contains("/resolve/")));
+                assert!(persistence
+                    .load_lifecycle_inventory_strict()
+                    .unwrap()
+                    .queue_admissions
+                    .is_empty());
+                assert!(api
+                    .primary()
+                    .model_library
+                    .list_models()
+                    .await
+                    .unwrap()
+                    .is_empty());
+                return;
+            }
+        };
+        assert_eq!(acquisitions.len(), 1);
+        let acquisition = acquisitions.values().next().unwrap();
+        let receipt = persistence
+            .read_hf_completion_receipt(acquisition.id)
+            .unwrap();
+        if let Some(error) = expected_error {
+            assert_eq!(progress.status, models::DownloadStatus::Error);
+            assert!(
+                progress
+                    .error
+                    .as_deref()
+                    .is_some_and(|message| message.contains(error)),
+                "unexpected error: {:?}",
+                progress.error
+            );
+            assert!(
+                receipt.is_none(),
+                "invalid package cannot publish a completion receipt"
+            );
+            assert!(!matches!(
+                acquisition.phase,
+                crate::acquisition::AcquisitionPhase::Adopted { .. }
+            ));
+            let models = api.primary().model_library.list_models().await.unwrap();
+            assert_eq!(
+                models.len(),
+                1,
+                "retain the existing auxiliary metadata stub"
+            );
+            let partial = api.get_model(&models[0].id).await.unwrap().unwrap();
+            assert_eq!(partial.metadata["match_source"], "download_partial");
+            assert_ne!(partial.metadata["import_state"], "ready");
+            assert!(api
+                .primary()
+                .model_library
+                .library_root()
+                .join(&partial.id)
+                .join(".pumas_download")
+                .exists());
+        } else {
+            assert_eq!(
+                progress.status,
+                models::DownloadStatus::Completed,
+                "{:?}",
+                progress.error
+            );
+            assert!(matches!(
+                acquisition.phase,
+                crate::acquisition::AcquisitionPhase::Adopted { .. }
+            ));
+            let receipt = receipt.expect("completed package requires consumer receipt");
+            assert_eq!(receipt.download_id, id);
+            let model = api.get_model(&receipt.model_id).await.unwrap().unwrap();
+            assert_eq!(model.metadata["upstream_revision"], COMMIT);
+            if diffusers {
+                assert_eq!(model.metadata["bundle_format"], "diffusers_directory");
+                assert_eq!(model.metadata["pipeline_class"], "StableDiffusionPipeline");
+                assert_eq!(model.metadata["validation_state"], "valid");
+            }
+            let destination = api
+                .primary()
+                .model_library
+                .library_root()
+                .join(&receipt.model_id);
+            assert_eq!(acquisition.files.len(), files.len());
+            for (path, bytes, _) in &files {
+                let verified = acquisition
+                    .files
+                    .iter()
+                    .find(|file| file.path == *path)
+                    .unwrap();
+                assert_eq!(verified.bytes, bytes.len() as u64);
+                assert_eq!(verified.sha256, hex::encode(Sha256::digest(bytes)));
+                assert_eq!(std::fs::read(destination.join(path)).unwrap(), *bytes);
+            }
+            assert!(!destination.join(".pumas_download").exists());
+            assert!(!persistence
+                .load_lifecycle_inventory_strict()
+                .unwrap()
+                .queue_admissions
+                .contains_key(&id));
+        }
+        for file in &acquisition.files {
+            let route = format!("/acme/model/resolve/{COMMIT}/{}", file.path);
+            let expected = if classify && file.path == "model_index.json" {
+                2
+            } else {
+                1
+            };
+            assert_eq!(
+                observed.get(&route),
+                Some(&expected),
+                "exact acquisition fetch count for {}",
+                file.path
+            );
+        }
+        // Classification's model-index observation is distinct from the one
+        // acquired payload. No other payload may be fetched outside selection.
+        let payload_calls: usize = observed
+            .iter()
+            .filter(|(route, _)| route.contains("/resolve/"))
+            .map(|(_, count)| count)
+            .sum();
+        assert_eq!(
+            payload_calls,
+            acquisition.files.len() + usize::from(classify)
+        );
+    }
+
+    fn package_test_safetensors() -> Vec<u8> {
+        let header = br#"{"fixture":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}}"#;
+        let padded_len = header.len().div_ceil(8) * 8;
+        let mut bytes = (padded_len as u64).to_le_bytes().to_vec();
+        bytes.extend_from_slice(header);
+        bytes.resize(8 + padded_len, b' ');
+        bytes.extend_from_slice(&0f32.to_le_bytes());
+        bytes
+    }
+
+    #[tokio::test]
+    async fn public_hf_package_shards_import_with_one_matching_index_fetch() {
+        public_package_fixture(vec![
+            ("model-00001-of-00002.safetensors", package_test_safetensors(), true),
+            ("model-00002-of-00002.safetensors", package_test_safetensors(), true),
+            ("model.safetensors.index.json", br#"{"metadata":{"total_size":8},"weight_map":{"a":"model-00001-of-00002.safetensors","b":"model-00002-of-00002.safetensors"}}"#.to_vec(), false),
+            ("config.json", br#"{"model_type":"llama"}"#.to_vec(), false),
+        ], Some(vec!["model-00001-of-00002.safetensors".into(), "model-00002-of-00002.safetensors".into()]), false, false, None).await;
+    }
+
+    #[tokio::test]
+    async fn public_hf_package_index_rejects_auxiliary_and_index_targets() {
+        for target in ["config.json", "model.safetensors.index.json"] {
+            let index = serde_json::to_vec(&serde_json::json!({"weight_map": {
+                "a": "model-00001-of-00002.safetensors",
+                "b": "model-00002-of-00002.safetensors",
+                "c": target,
+            }}))
+            .unwrap();
+            public_package_fixture(
+                vec![
+                    (
+                        "model-00001-of-00002.safetensors",
+                        package_test_safetensors(),
+                        true,
+                    ),
+                    (
+                        "model-00002-of-00002.safetensors",
+                        package_test_safetensors(),
+                        true,
+                    ),
+                    ("model.safetensors.index.json", index, false),
+                    ("config.json", br#"{"model_type":"llama"}"#.to_vec(), false),
+                ],
+                Some(vec![
+                    "model-00001-of-00002.safetensors".into(),
+                    "model-00002-of-00002.safetensors".into(),
+                ]),
+                false,
+                false,
+                Some("weight payload"),
+            )
+            .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn public_hf_package_missing_index_refuses_before_payload_or_admission() {
+        public_package_fixture(
+            vec![
+                (
+                    "model-00001-of-00002.safetensors",
+                    package_test_safetensors(),
+                    true,
+                ),
+                (
+                    "model-00002-of-00002.safetensors",
+                    package_test_safetensors(),
+                    true,
+                ),
+            ],
+            Some(vec![
+                "model-00001-of-00002.safetensors".into(),
+                "model-00002-of-00002.safetensors".into(),
+            ]),
+            false,
+            false,
+            Some("model.safetensors.index.json"),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn public_hf_package_bad_index_never_imports_or_settles() {
+        public_package_fixture(vec![
+            ("model-00001-of-00002.safetensors", package_test_safetensors(), true),
+            ("model-00002-of-00002.safetensors", package_test_safetensors(), true),
+            ("model.safetensors.index.json", br#"{"weight_map":{"a":"model-00001-of-00002.safetensors","b":"missing.safetensors"}}"#.to_vec(), false),
+        ], Some(vec!["model-00001-of-00002.safetensors".into(), "model-00002-of-00002.safetensors".into()]), false, false, Some("unselected shard")).await;
+    }
+
+    fn package_test_diffusers_files() -> Vec<(&'static str, Vec<u8>, bool)> {
+        vec![
+            ("unet/diffusion_pytorch_model.safetensors", package_test_safetensors(), true),
+            ("model_index.json", br#"{"_class_name":"StableDiffusionPipeline","unet":["diffusers","UNet2DConditionModel"],"tokenizer":["transformers","CLIPTokenizer"],"scheduler":["diffusers","DDIMScheduler"],"safety_checker":[null,null]}"#.to_vec(), false),
+            ("unet/config.json", br#"{"fixture":"unet"}"#.to_vec(), false),
+            ("tokenizer/vocab.txt", b"synthetic vocabulary\n".to_vec(), false),
+            ("scheduler/scheduler_config.json", br#"{"fixture":"scheduler"}"#.to_vec(), false),
+        ]
+    }
+
+    #[tokio::test]
+    async fn public_hf_package_diffusers_imports_regular_component_assets() {
+        public_package_fixture(package_test_diffusers_files(), None, true, false, None).await;
+    }
+
+    #[tokio::test]
+    async fn public_hf_package_classification_keeps_exact_explicit_components() {
+        let files = package_test_diffusers_files();
+        let requested = vec!["unet/diffusion_pytorch_model.safetensors".into()];
+        public_package_fixture(
+            files,
+            Some(requested),
+            true,
+            true,
+            Some("missing component tokenizer"),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn public_hf_explicit_mixed_files_imports_and_settles_exact_payloads() {
+        use sha2::{Digest, Sha256};
+        use std::time::Duration;
+        use tokio::io::AsyncWriteExt;
+
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        const BOUND: Duration = Duration::from_secs(10);
+        let weights = intent_test_gguf();
+        let config = br#"{"fixture":"explicit-mixed-files"}"#.to_vec();
+        let digest = hex::encode(Sha256::digest(&weights));
+        let tree = format!(
+            r#"[{{"path":"weights.gguf","type":"file","lfs":{{"oid":"{digest}","size":{}}}}},{{"path":"config.json","type":"file"}},{{"path":"empty.txt","type":"file"}}]"#,
+            weights.len()
+        );
+        let source_weights = weights.clone();
+        let source_config = config.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut source = tokio::spawn(async move {
+            let mut observed = Vec::new();
+            for (route, body) in [
+                (
+                    "/api/models/acme/model/revision/main".to_owned(),
+                    format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}","tags":["gguf"]}}"#)
+                        .into_bytes(),
+                ),
+                (
+                    format!("/api/models/acme/model/revision/{COMMIT}"),
+                    format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}","tags":["gguf"]}}"#)
+                        .into_bytes(),
+                ),
+                (
+                    format!("/api/models/acme/model/tree/{COMMIT}?recursive=true"),
+                    tree.into_bytes(),
+                ),
+                (
+                    format!("/acme/model/resolve/{COMMIT}/weights.gguf"),
+                    source_weights,
+                ),
+                (
+                    format!("/acme/model/resolve/{COMMIT}/config.json"),
+                    source_config,
+                ),
+                (
+                    format!("/acme/model/resolve/{COMMIT}/empty.txt"),
+                    Vec::new(),
+                ),
+            ] {
+                let (mut socket, _) = tokio::time::timeout(BOUND, listener.accept())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let request = tokio::time::timeout(BOUND, read_intent_test_request(&mut socket))
+                    .await
+                    .unwrap();
+                assert_eq!(request, format!("GET {route} HTTP/1.1"));
+                observed.push(request);
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                tokio::time::timeout(BOUND, async {
+                    socket.write_all(header.as_bytes()).await?;
+                    socket.write_all(&body).await
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            }
+            observed
+        });
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: None,
+            filenames: Some(vec![
+                "weights.gguf".into(),
+                "config.json".into(),
+                "empty.txt".into(),
+                "config.json".into(),
+            ]),
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let result = tokio::time::timeout(BOUND, async {
+            let download_id = api.start_hf_download(&request).await?;
+            loop {
+                let progress = api
+                    .get_hf_download_progress(&download_id)
+                    .await?
+                    .ok_or_else(|| crate::PumasError::Other("missing admitted download".into()))?;
+                match progress.status {
+                    models::DownloadStatus::Completed => {
+                        return Ok::<_, crate::PumasError>((download_id, progress))
+                    }
+                    models::DownloadStatus::Error | models::DownloadStatus::Cancelled => {
+                        return Err(crate::PumasError::Other(
+                            "mixed-file download did not complete".into(),
+                        ))
+                    }
+                    _ => tokio::time::sleep(Duration::from_millis(10)).await,
+                }
+            }
+        })
+        .await;
+        let shutdown = tokio::time::timeout(BOUND, api.shutdown_downloads()).await;
+        let observed = match tokio::time::timeout(Duration::from_secs(1), &mut source).await {
+            Ok(result) => Some(result),
+            Err(_) => {
+                source.abort();
+                let _ = source.await;
+                None
+            }
+        };
+        assert!(
+            matches!(shutdown, Ok(Ok(()))),
+            "owner drain failed: {shutdown:?}"
+        );
+        let (download_id, progress) = result
+            .expect("public mixed-file acquisition exceeded bound")
+            .expect("complete mixed selection must import");
+        let observed = observed
+            .expect("source must finish its exact sequence")
+            .unwrap();
+        assert_eq!(observed.len(), 6);
+        assert_eq!(
+            progress.downloaded_bytes,
+            Some((weights.len() + config.len()) as u64)
+        );
+        let persistence = api
+            .primary()
+            .hf_client
+            .as_ref()
+            .unwrap()
+            .persistence()
+            .unwrap();
+        let acquisitions = persistence.acquisition_store().acquisitions().unwrap();
+        assert_eq!(acquisitions.len(), 1);
+        let acquisition = acquisitions.values().next().unwrap();
+        assert!(matches!(
+            acquisition.phase,
+            crate::acquisition::AcquisitionPhase::Adopted { .. }
+        ));
+        assert_eq!(acquisition.files.len(), 3);
+        assert_eq!(
+            acquisition
+                .files
+                .iter()
+                .map(|file| (file.path.as_str(), file.bytes, file.sha256.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "weights.gguf",
+                    weights.len() as u64,
+                    hex::encode(Sha256::digest(&weights))
+                ),
+                (
+                    "config.json",
+                    config.len() as u64,
+                    hex::encode(Sha256::digest(&config))
+                ),
+                ("empty.txt", 0, hex::encode(Sha256::digest([]))),
+            ]
+        );
+        let receipt = persistence
+            .read_hf_completion_receipt(acquisition.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(receipt.download_id, download_id);
+        assert!(api.get_model(&receipt.model_id).await.unwrap().is_some());
+        let destination = api
+            .primary()
+            .model_library
+            .library_root()
+            .join(&receipt.model_id);
+        assert_eq!(
+            std::fs::read(destination.join("weights.gguf")).unwrap(),
+            weights
+        );
+        assert_eq!(
+            std::fs::read(destination.join("config.json")).unwrap(),
+            config
+        );
+        assert!(std::fs::read(destination.join("empty.txt"))
+            .unwrap()
+            .is_empty());
+        assert!(!persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&download_id));
     }
 
     #[tokio::test]

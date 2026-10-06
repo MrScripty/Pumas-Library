@@ -182,21 +182,24 @@ impl RuntimeRefusal {
         let lease = validated.clone();
         let result = consumer
             .run_blocking("reconcile owned selected runtime", move || {
-                let mut intent = publication
-                    .lock()
-                    .map_err(|_| failed("Publication intent poisoned"))?;
-                let intent = intent
-                    .as_mut()
-                    .ok_or_else(|| failed("Publication intent absent"))?;
-                #[cfg(test)]
-                if let Some(pause) = intent.pause.take() {
-                    pause.wait();
-                }
-                reconcile_publication(&lease, intent)
+                // Evidence refusal is a consumer result, not a failed custody job.
+                Ok((|| {
+                    let mut intent = publication
+                        .lock()
+                        .map_err(|_| failed("Publication intent poisoned"))?;
+                    let intent = intent
+                        .as_mut()
+                        .ok_or_else(|| failed("Publication intent absent"))?;
+                    #[cfg(test)]
+                    if let Some(pause) = intent.pause.take() {
+                        pause.wait();
+                    }
+                    reconcile_publication(&lease, intent)
+                })())
             })
             .await;
         match result {
-            Ok(true) => {
+            Ok(Ok(true)) => {
                 let intent = self.publication.lock().unwrap();
                 let intent = intent.as_ref().unwrap();
                 RuntimeReconciliation::Committed(PublishedSelectedRuntime {
@@ -206,11 +209,11 @@ impl RuntimeRefusal {
                     publication: self.publication.clone(),
                 })
             }
-            Ok(false) => {
+            Ok(Ok(false)) => {
                 self.kind = RuntimeFailure::Refused;
                 RuntimeReconciliation::RolledBack(self)
             }
-            Err(_) => {
+            _ => {
                 self.kind = RuntimeFailure::RecoveryRequired;
                 RuntimeReconciliation::Unresolved(self)
             }

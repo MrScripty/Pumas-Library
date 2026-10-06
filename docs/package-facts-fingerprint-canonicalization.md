@@ -1,5 +1,8 @@
 # Canonical package metadata fingerprints
 
+See the [portable qualification report](package-facts-fingerprint-qualification.md)
+for the recorded old/new control results and compatibility limits.
+
 Package metadata includes a `HashMap` model card. Serializing that map directly
 into a source fingerprint makes otherwise identical observations depend on map
 insertion order and each process's random hash seed. A pinned import can therefore

@@ -1,0 +1,14 @@
+# Run from the admitted worktree. No downloads/provisioning occur.
+source /workspace/.pumas-tools/env.sh
+flock /tmp/pumas-cargo-admission/cargo.lock python scripts/release/check-dependency-features.py --s3
+export PUMAS_QUALIFIED_UV=/tmp/pumas-uv-public-eval/tool-env/bin/uv
+export PUMAS_SELECTED_CONSUMER_EVIDENCE=/tmp/pumas-selected-consumer-public-evidence
+export CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=/tmp/pumas-uv-offline-build/target
+flock /tmp/pumas-cargo-admission/cargo.lock cargo test --offline --locked --manifest-path rust/Cargo.toml -p pumas-app-manager --features test-support selected_consumer -- --include-ignored --test-threads=1 --nocapture
+PUMAS_QUALIFIED_UV=/tmp/pumas-uv-public-eval/tool-env/bin/uv PUMAS_SELECTED_CONSUMER_EVIDENCE=/tmp/pumas-selected-consumer-public-evidence PYTHONPATH=/tmp/pumas-q2-test-packages:torch-server/tests python3 -m unittest -v test_consume_selected_wheels test_offline_wheel_selection test_wheel_catalog_owner test_wheel_target test_target_observation test_install_verified_wheels test_qualified_wheel_catalog
+flock /tmp/pumas-cargo-admission/cargo.lock cargo test --offline --locked --manifest-path rust/Cargo.toml -p pumas-app-manager --features test-support version_manager::installer::torch::torch_ -- --include-ignored --test-threads=1 --nocapture
+flock /tmp/pumas-cargo-admission/cargo.lock cargo clippy --offline --locked --manifest-path rust/Cargo.toml -p pumas-app-manager --features test-support --tests -- -D warnings
+rustfmt --edition 2021 --config skip_children=true --check rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs rust/crates/pumas-app-manager/src/version_manager/installer/torch_offline_selection.rs rust/crates/pumas-app-manager/src/version_manager/installer/torch_selected_consumption.rs rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs
+PYTHONPATH=/tmp/pumas-q2-test-packages python3 -m ruff check torch-server/consume_selected_wheels.py torch-server/install_verified_wheels.py torch-server/tests/test_consume_selected_wheels.py
+git diff --check
+python3 docs/plans/artifact-acquisition/reports/torch-selected-consumer-2026-10-06/verify_evidence.py

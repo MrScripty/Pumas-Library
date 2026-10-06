@@ -1,0 +1,33 @@
+208217 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3", ["/opt/codex/runtimes/codex-primar"..., "-I", "-m", "pip", "--isolated", "install", "--no-index", "--no-deps", "--require-hashes", "--only-binary=:all:", "--no-cache-dir", "--disable-pip-version-check", "--ignore-installed", "--no-compile", "--target", "/tmp/tmpfe6jmjn1/packages", "--report", "/tmp/tmpfe6jmjn1/proof/local-pip"..., "-r", "/tmp/tmpfe6jmjn1/proof/local-req"...], 0x7fff1a1d5f60 /* 65 vars */) = 0
+208217 socket(AF_INET6, SOCK_STREAM|SOCK_CLOEXEC, IPPROTO_IP) = 3
+208217 bind(3, {sa_family=AF_INET6, sin6_port=htons(0), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "::1", &sin6_addr), sin6_scope_id=0}, 28) = 0
+208219 execve("/home/agent/.local/bin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/opt/codex/bin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/usr/local/sbin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/usr/local/bin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/usr/sbin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/usr/bin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/sbin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/bin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/home/agent/.local/bin/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback/lsb_release", ["lsb_release", "-a"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208219 +++ exited with 255 +++
+208217 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=208219, si_uid=1000, si_status=255, si_utime=0, si_stime=0} ---
+208220 execve("/home/agent/.local/bin/uname", ["uname", "-rs"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208220 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override/uname", ["uname", "-rs"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208220 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/uname", ["uname", "-rs"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208220 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/uname", ["uname", "-rs"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208220 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/uname", ["uname", "-rs"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208220 execve("/opt/codex/bin/uname", ["uname", "-rs"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208220 execve("/usr/local/sbin/uname", ["uname", "-rs"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208220 execve("/usr/local/bin/uname", ["uname", "-rs"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208220 execve("/usr/sbin/uname", ["uname", "-rs"], 0x7ffd90afb750 /* 65 vars */) = -1 ENOENT (No such file or directory)
+208220 execve("/usr/bin/uname", ["uname", "-rs"], 0x7ffd90afb750 /* 65 vars */) = 0
+208220 +++ exited with 0 +++
+208217 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=208220, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+208221 +++ exited with 0 +++
+208217 +++ exited with 0 +++

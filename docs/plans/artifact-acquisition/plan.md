@@ -1,5 +1,26 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 private selected-packet local consumer (2026-10-06):** Parent ACKs
+`1769b77ee037fa7fda33df84d9bdaeff22de5006`. Separate tested source
+`587144f6ca938451ab61234f90fbd0c1e3745b00`, tree
+`c7d79f9b5343cc2be480edcebbb91ab08035eb2b`, retains live packet/catalog/grant/stage
+custody through actual public-pip local installation, real report/RECORD proof,
+read-only verification and final bounded output/member/interpreter/target/
+provenance fences. 115 Python/64 shared Rust controls, 33 pre-build graphs and
+strict checks pass; 17 post-verifier mutations, cancellation and abandonment
+refuse proof with original Adopted catalog receipt unchanged. Only a private
+staged-install capability results; no installation receipt/publication or
+production caller adoption. [Exact source, API, actual report/member proof and
+limits](reports/torch-selected-consumer-2026-10-06.md). Positive synthetic compatible
+2.40 target controls do not qualify actual native2.41 selection, real Torch/
+provider/volume/platform/tool provisioning or enforced network denial. Original
+Q2/AQ/P1 blocker classification stays unchanged. Next existing-plan work is
+runtime/provider validation and owned lifecycle/publication composition, then
+remaining exact target/tool/selection/source/provider parity before coordinated
+caller adoption. Automatic/preview activation stays OFF; main/frozen native/S3/
+manifest writes and paused Library transfers remain unchanged.
+
+
 **Q2 final selected-projection bound correction (2026-10-06):** Independent
 review found frozen 31b5c125 delegates the final projection/roots/constraints
 comparison to a global unbounded reader. Actual kernel traces reproduce 32 MiB

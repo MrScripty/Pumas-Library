@@ -1,0 +1,123 @@
+{
+  "base_head": "1769b77ee037fa7fda33df84d9bdaeff22de5006",
+  "base_tree": "6eabe90bf2629da17f28a18999cfe757e33ceda2",
+  "branch": "feat/torch-selected-consumer-1769b77",
+  "evidence": {
+    "adversarial.log": {
+      "sha256": "0607b4a1bbeb37078bf2c05825ac49c009f5acb4148733f1a6c1f69acf11375f",
+      "size": 49931
+    },
+    "catalog.json": {
+      "sha256": "bc50907e57773d94d32e93a91720150d9e861c17b4e9c0ca4d853b956e38591f",
+      "size": 5330
+    },
+    "clippy.log": {
+      "sha256": "35ce133e792b0c14a62c029b565d3a46960d060de0b4c2a3d0ac70d879f48414",
+      "size": 167
+    },
+    "commands.txt": {
+      "sha256": "dbb53648ce2b2eea905244f71545f0401d8509042d5ce09a9912e74767d1fc7b",
+      "size": 2256
+    },
+    "diff-check.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "evidence-verification.log": {
+      "sha256": "520aff70f03717aaeeb56fa8d9bf1d0451823328099073ab0685ebb0782954c2",
+      "size": 240
+    },
+    "graphs.log": {
+      "sha256": "173ed427a61ed780b4583f312ae27454b3b191dcaa5af80f51ff123e23a97b60",
+      "size": 2934
+    },
+    "installation-proof.json": {
+      "sha256": "d6ced34b81e85a429b993d2edf1bfed5649c862e4c693cbbea48ebdf885afa2c",
+      "size": 718
+    },
+    "installation-report.json": {
+      "sha256": "2cfe4438936fb131c1e1b1c0fd9838e93b7af6d8252908c39e8e126cd41f5168",
+      "size": 2623
+    },
+    "installed-files.json": {
+      "sha256": "38c45fc19e67f295e44c5c9f2a9e2e3f2e39cf7d948520f4789e5edf9fee4852",
+      "size": 2670
+    },
+    "local-requirements.txt": {
+      "sha256": "11050620867c0adba8ef1dc925a05b00e28aaf68fb53dc362ec78064ef98bb6e",
+      "size": 737
+    },
+    "packet.json": {
+      "sha256": "d8e9d9c4135f01313a60036fa89e8099e42d57d49add798f77ef64cbbeadc8b0",
+      "size": 2280
+    },
+    "pylock.toml": {
+      "sha256": "249537056aaf8d8b4e9b365f7db52aa3076f62288ac2486703cbd77259576bd8",
+      "size": 1020
+    },
+    "python-pip-invocation.json": {
+      "sha256": "4d1655ddc2081d425a43635d1358c81b34f35ebe4ca281de43face0f223a48e7",
+      "size": 434
+    },
+    "python-pip-network.trace": {
+      "sha256": "a7a0dcc54568ad6cdd0ae46ff5590d444e505ede8871c657c2ee4aab93a725e1",
+      "size": 4664
+    },
+    "python.log": {
+      "sha256": "c0be35694826ba5326e6d9741e53526d169dcc5fa210d8b8bd4b96f6402675a7",
+      "size": 24491
+    },
+    "request.json": {
+      "sha256": "93a826de1363f5c6193f3f42f0cc2a1346568b76bae5e82f69883aedf907159f",
+      "size": 2916
+    },
+    "ruff.log": {
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "size": 19
+    },
+    "rust.log": {
+      "sha256": "b26506fd4440d865376ac981c29a419c08f357ef5c0d2a5e27e0cd8af361a1ad",
+      "size": 67816
+    },
+    "rustfmt.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "source-push.log": {
+      "sha256": "ae2e9ce0557b77c8c2ed3b092102f8cdc1f4c238ef1b63ad6ed371eac640f4a1",
+      "size": 732
+    },
+    "target.json": {
+      "sha256": "82f13ab509986a716ac4923e069cc0237b9e5137227d104dd310faa122c39f5b",
+      "size": 783
+    },
+    "verify_evidence.py": {
+      "sha256": "4ad8a27595e00f0b13720987b860fcb4a41e87aa57d9f92a77cc0a139ef3f147",
+      "size": 3027
+    }
+  },
+  "main_preserved": "5e114f6d8e4559e0a4d67e56000b423120a0fde0",
+  "qualification": {
+    "catalog_selection_consumer": 25,
+    "feature_graphs": 33,
+    "network": "actual pip trace observes IPv6 ::1 availability bind; no IP connect/send retrieval; no enforced-denial claim",
+    "post_verifier_mutations": 17,
+    "provider_runtime_publication": "not qualified",
+    "python": 115,
+    "rust": 64,
+    "target": "synthetic declared native-compatible glibc2.40; actual native2.41 projection remains refused",
+    "unchanged_handoff": 31,
+    "unchanged_upstream": 8
+  },
+  "qualified_source_sha256": {
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": "65bfd08efba4231fca0da8e16120c78006635ffa0a3c73606a4a1d6299dff36f",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs": "c5a254f66db506e828d6384dc72ca61b09f71339a8e521b0c0426517b507eb52",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_offline_selection.rs": "e300d5b8481c7d71408ff1637f396aada1653bfb9dfd159054184ccfeb16ae1a",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_selected_consumption.rs": "6fbb9e706304847c7be45d7fb7157b3efd5dcc1344869807fcd8e26ad83b763c",
+    "torch-server/consume_selected_wheels.py": "dbb6e37e07123575dace57dc77cfb4d410c10fd41b11acab940d23eb40eede81",
+    "torch-server/install_verified_wheels.py": "8ab7bca77fbe4512674d580ff9ee2eaf1ec27d7a8078df34e73aadc5fda24252",
+    "torch-server/tests/test_consume_selected_wheels.py": "9ee787a72c5cf9f56be61d26c26a2afdc6b0b3835d2a3f411b89fe08afb8e55b"
+  },
+  "source_head": "587144f6ca938451ab61234f90fbd0c1e3745b00",
+  "source_tree": "c7d79f9b5343cc2be480edcebbb91ab08035eb2b"
+}

@@ -1,5 +1,32 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — S3 release profile and bounded-prefix successor admitted
+
+The owner resumes from integrated `7cf17383001d582056ac4299803c83d0f9ae68a7`
+on separate `feat/s3-prefix-main95`, replacing the earlier weekly usage ceiling
+with permission to use the remaining allowance. Repository execution is available;
+no AGENTS or local skills are mounted in this environment. Parent retains PR,
+review and integration coordination. No account credentials or build-time runtime
+downloads are authorized.
+
+The first milestone adds an explicit S3 release attribution profile: 414 notices,
+387 Rust versions, 49 additional versions beyond default. Both profiles validate;
+eight attribution regressions, eleven release contracts, 33 feature graphs,
+dependency ownership, production default-plus-S3 RPC compile and all 302 RPC tests
+pass. Intermediate empty-tree and metadata-omission failures are preserved.
+See [profile qualification](reports/s3-release-attribution-2026-10-06.md) for exact
+base, reproduction, limits, logs and the next exact bounded-prefix write set.
+
+Before prefix source edits, admission is limited to S3 reader/SDK and new
+prefix/XML/test children, optional roxmltree/lock, acquisition exports, focused
+model-workflow fixtures and owning source documentation/evidence. Frozen S3
+manifest, native watcher/importer/recovery, stores, retry/verification/receipt
+formats and ONNX source remain unchanged. Complete bounded pagination and
+conditional immutable HEAD pins will produce discovery observations; caller
+digests and existing explicit acquisition/import owners still authorize content.
+No enumeration result is an atomic package snapshot. Provider/platform gates stay
+pending. No PR mutation is performed.
+
 ## 2026-10-06 — bounded approved-main integration/readiness checkpoint
 
 Parent authorized history-preserving composition of approved main95, SDK9077,

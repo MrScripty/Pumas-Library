@@ -9,6 +9,10 @@ in CI and before Electron packaging; stale inputs, altered texts, and missing
 notices refuse packaging. Cargo manifests are hashed alongside lockfiles so
 changes to feature selection also invalidate the inventory.
 
+This directory covers the default release profile. A backend built with `s3`
+requires the separate [S3-enabled inventory](../0.7.0-s3/README.md) and its notice
+text; the default file does not cover the optional SDK closure.
+
 ## Managed CPython provider
 
 The selected uv provider can download private CPython runtimes after installation,

@@ -3,7 +3,9 @@
   "rust_profile": {
     "package": "pumas-rpc",
     "default_features": true,
-    "features": [],
+    "features": [
+      "s3"
+    ],
     "targets": [
       "x86_64-unknown-linux-gnu",
       "aarch64-apple-darwin",
@@ -22,6 +24,10 @@
     {
       "name": "aho-corasick",
       "version": "1.1.4"
+    },
+    {
+      "name": "allocator-api2",
+      "version": "0.2.21"
     },
     {
       "name": "ambient-authority",
@@ -52,6 +58,10 @@
       "version": "1.0.103"
     },
     {
+      "name": "arc-swap",
+      "version": "1.9.2"
+    },
+    {
       "name": "arrayref",
       "version": "0.3.9"
     },
@@ -72,6 +82,74 @@
       "version": "1.5.0"
     },
     {
+      "name": "aws-credential-types",
+      "version": "1.2.14"
+    },
+    {
+      "name": "aws-runtime",
+      "version": "1.7.5"
+    },
+    {
+      "name": "aws-sdk-s3",
+      "version": "1.137.0"
+    },
+    {
+      "name": "aws-sigv4",
+      "version": "1.4.5"
+    },
+    {
+      "name": "aws-smithy-async",
+      "version": "1.2.14"
+    },
+    {
+      "name": "aws-smithy-checksums",
+      "version": "0.64.8"
+    },
+    {
+      "name": "aws-smithy-eventstream",
+      "version": "0.60.21"
+    },
+    {
+      "name": "aws-smithy-http",
+      "version": "0.63.6"
+    },
+    {
+      "name": "aws-smithy-json",
+      "version": "0.62.7"
+    },
+    {
+      "name": "aws-smithy-observability",
+      "version": "0.2.6"
+    },
+    {
+      "name": "aws-smithy-runtime",
+      "version": "1.11.3"
+    },
+    {
+      "name": "aws-smithy-runtime-api",
+      "version": "1.12.3"
+    },
+    {
+      "name": "aws-smithy-runtime-api-macros",
+      "version": "1.0.0"
+    },
+    {
+      "name": "aws-smithy-schema",
+      "version": "0.1.0"
+    },
+    {
+      "name": "aws-smithy-types",
+      "version": "1.5.0"
+    },
+    {
+      "name": "aws-smithy-xml",
+      "version": "0.60.15"
+    },
+    {
+      "name": "aws-types",
+      "version": "1.3.16"
+    },
+    {
       "name": "axum",
       "version": "0.7.9"
     },
@@ -86,6 +164,10 @@
     {
       "name": "base64",
       "version": "0.22.1"
+    },
+    {
+      "name": "base64-simd",
+      "version": "0.8.0"
     },
     {
       "name": "bitflags",
@@ -104,6 +186,10 @@
       "version": "0.10.4"
     },
     {
+      "name": "block-buffer",
+      "version": "0.12.1"
+    },
+    {
       "name": "block2",
       "version": "0.6.2"
     },
@@ -114,6 +200,10 @@
     {
       "name": "bytes",
       "version": "1.11.1"
+    },
+    {
+      "name": "bytes-utils",
+      "version": "0.1.4"
     },
     {
       "name": "bzip2",
@@ -168,12 +258,20 @@
       "version": "0.7.7"
     },
     {
+      "name": "cmov",
+      "version": "0.5.4"
+    },
+    {
       "name": "colorchoice",
       "version": "1.0.4"
     },
     {
       "name": "compact_str",
       "version": "0.9.0"
+    },
+    {
+      "name": "const-oid",
+      "version": "0.10.2"
     },
     {
       "name": "constant_time_eq",
@@ -192,12 +290,20 @@
       "version": "0.2.17"
     },
     {
+      "name": "cpufeatures",
+      "version": "0.3.1"
+    },
+    {
       "name": "crc",
       "version": "3.4.0"
     },
     {
       "name": "crc-catalog",
       "version": "2.4.0"
+    },
+    {
+      "name": "crc-fast",
+      "version": "1.10.0"
     },
     {
       "name": "crc32fast",
@@ -224,8 +330,16 @@
       "version": "0.1.7"
     },
     {
+      "name": "crypto-common",
+      "version": "0.2.2"
+    },
+    {
       "name": "ctrlc",
       "version": "3.5.1"
+    },
+    {
+      "name": "ctutils",
+      "version": "0.4.2"
     },
     {
       "name": "daachorse",
@@ -260,6 +374,10 @@
       "version": "0.1.10"
     },
     {
+      "name": "deranged",
+      "version": "0.5.8"
+    },
+    {
       "name": "derive_builder",
       "version": "0.20.2"
     },
@@ -274,6 +392,10 @@
     {
       "name": "digest",
       "version": "0.10.7"
+    },
+    {
+      "name": "digest",
+      "version": "0.11.3"
     },
     {
       "name": "dirs",
@@ -338,6 +460,10 @@
     {
       "name": "fnv",
       "version": "1.0.7"
+    },
+    {
+      "name": "foldhash",
+      "version": "0.2.0"
     },
     {
       "name": "foreign-types",
@@ -448,8 +574,20 @@
       "version": "0.4.3"
     },
     {
+      "name": "hmac",
+      "version": "0.13.0"
+    },
+    {
+      "name": "http",
+      "version": "0.2.12"
+    },
+    {
       "name": "http",
       "version": "1.4.0"
+    },
+    {
+      "name": "http-body",
+      "version": "0.4.6"
     },
     {
       "name": "http-body",
@@ -466,6 +604,10 @@
     {
       "name": "httpdate",
       "version": "1.0.3"
+    },
+    {
+      "name": "hybrid-array",
+      "version": "0.4.10"
     },
     {
       "name": "hyper",
@@ -608,6 +750,10 @@
       "version": "0.4.29"
     },
     {
+      "name": "lru",
+      "version": "0.16.4"
+    },
+    {
       "name": "lzma-rs",
       "version": "0.3.0"
     },
@@ -638,6 +784,10 @@
     {
       "name": "maybe-owned",
       "version": "0.3.4"
+    },
+    {
+      "name": "md-5",
+      "version": "0.11.0"
     },
     {
       "name": "memchr",
@@ -720,6 +870,10 @@
       "version": "0.4.6"
     },
     {
+      "name": "num-conv",
+      "version": "0.2.2"
+    },
+    {
       "name": "num-integer",
       "version": "0.1.46"
     },
@@ -780,6 +934,10 @@
       "version": "2.0.0-rc.12"
     },
     {
+      "name": "outref",
+      "version": "0.5.2"
+    },
+    {
       "name": "parking_lot",
       "version": "0.12.5"
     },
@@ -814,6 +972,10 @@
     {
       "name": "potential_utf",
       "version": "0.1.4"
+    },
+    {
+      "name": "powerfmt",
+      "version": "0.2.1"
     },
     {
       "name": "ppv-lite86",
@@ -884,6 +1046,10 @@
       "version": "0.4.13"
     },
     {
+      "name": "regex-lite",
+      "version": "0.1.9"
+    },
+    {
       "name": "regex-syntax",
       "version": "0.8.8"
     },
@@ -894,6 +1060,10 @@
     {
       "name": "rusqlite",
       "version": "0.32.1"
+    },
+    {
+      "name": "rustc_version",
+      "version": "0.4.1"
     },
     {
       "name": "rustix",
@@ -964,8 +1134,16 @@
       "version": "0.7.1"
     },
     {
+      "name": "sha1",
+      "version": "0.11.0"
+    },
+    {
       "name": "sha2",
       "version": "0.10.9"
+    },
+    {
+      "name": "sha2",
+      "version": "0.11.0"
     },
     {
       "name": "sharded-slab",
@@ -994,6 +1172,10 @@
     {
       "name": "socket2",
       "version": "0.6.1"
+    },
+    {
+      "name": "spin",
+      "version": "0.10.1"
     },
     {
       "name": "spinning_top",
@@ -1062,6 +1244,14 @@
     {
       "name": "thread_local",
       "version": "1.1.9"
+    },
+    {
+      "name": "time",
+      "version": "0.3.55"
+    },
+    {
+      "name": "time-core",
+      "version": "0.1.9"
     },
     {
       "name": "tinystr",
@@ -1192,6 +1382,10 @@
       "version": "0.9.5"
     },
     {
+      "name": "vsimd",
+      "version": "0.8.0"
+    },
+    {
       "name": "walkdir",
       "version": "2.5.0"
     },
@@ -1298,6 +1492,10 @@
     {
       "name": "xattr",
       "version": "1.6.1"
+    },
+    {
+      "name": "xmlparser",
+      "version": "0.13.6"
     },
     {
       "name": "xz2",
@@ -1421,6 +1619,23 @@
         {
           "path": "UNLICENSE",
           "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c"
+        }
+      ]
+    },
+    {
+      "name": "allocator-api2",
+      "version": "0.2.21",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/allocator-api2/0.2.21/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "20fe7b00e904ed690e3b9fd6073784d3fc428141dbd10b81c01fd143d0797f58"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "36516aefdc84c5d5a1e7485425913a22dbda69eb1930c5e84d6ae4972b5194b9"
         }
       ]
     },
@@ -1552,6 +1767,23 @@
       ]
     },
     {
+      "name": "arc-swap",
+      "version": "1.9.2",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/arc-swap/1.9.2/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "ff3f1cd12af8866d9bde961d6cc40df774cd131d484de31d3170c4b02b21a7b5"
+        }
+      ]
+    },
+    {
       "name": "arrayref",
       "version": "0.3.9",
       "license_declared": "BSD-2-Clause",
@@ -1637,6 +1869,231 @@
       ]
     },
     {
+      "name": "aws-credential-types",
+      "version": "1.2.14",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-credential-types/1.2.14/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-runtime",
+      "version": "1.7.5",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-runtime/1.7.5/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-sdk-s3",
+      "version": "1.137.0",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-sdk-s3/1.137.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "929e8ca5ef8ec9905c00a89d004d1f6933bae951996992c8579734875bbf46a8"
+        },
+        {
+          "path": "tests/blns/LICENSE",
+          "sha256": "b920d5d4030f994a4844f677b3ac91c6f2b723eda93dd978478226283863be77"
+        }
+      ]
+    },
+    {
+      "name": "aws-sigv4",
+      "version": "1.4.5",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-sigv4/1.4.5/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-async",
+      "version": "1.2.14",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-async/1.2.14/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-checksums",
+      "version": "0.64.8",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-checksums/0.64.8/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-eventstream",
+      "version": "0.60.21",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-eventstream/0.60.21/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-http",
+      "version": "0.63.6",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-http/0.63.6/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-json",
+      "version": "0.62.7",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-json/0.62.7/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-observability",
+      "version": "0.2.6",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-observability/0.2.6/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-runtime",
+      "version": "1.11.3",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-runtime/1.11.3/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-runtime-api",
+      "version": "1.12.3",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-runtime-api/1.12.3/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-runtime-api-macros",
+      "version": "1.0.0",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-runtime-api-macros/1.0.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-schema",
+      "version": "0.1.0",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-schema/0.1.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-types",
+      "version": "1.5.0",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-types/1.5.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-smithy-xml",
+      "version": "0.60.15",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-smithy-xml/0.60.15/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "name": "aws-types",
+      "version": "1.3.16",
+      "license_declared": "Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/aws-types/1.3.16/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
       "name": "axum",
       "version": "0.7.9",
       "license_declared": "MIT",
@@ -1693,6 +2150,19 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7"
+        }
+      ]
+    },
+    {
+      "name": "base64-simd",
+      "version": "0.8.0",
+      "license_declared": "MIT",
+      "source": "https://crates.io/api/v1/crates/base64-simd/0.8.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "simd-LICENSE",
+          "sha256": "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d"
         }
       ]
     },
@@ -1769,6 +2239,23 @@
       ]
     },
     {
+      "name": "block-buffer",
+      "version": "0.12.1",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/block-buffer/0.12.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "98181e7249d0c01737645ec982499ce99a0f07eb8f7d625b8840d799d10dbc01"
+        }
+      ]
+    },
+    {
       "name": "block2",
       "version": "0.6.2",
       "license_declared": "MIT",
@@ -1812,6 +2299,23 @@
         {
           "path": "LICENSE",
           "sha256": "45f522cacecb1023856e46df79ca625dfc550c94910078bd8aec6e02880b3d42"
+        }
+      ]
+    },
+    {
+      "name": "bytes-utils",
+      "version": "0.1.4",
+      "license_declared": "Apache-2.0/MIT",
+      "source": "https://crates.io/api/v1/crates/bytes-utils/0.1.4/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "ff3f1cd12af8866d9bde961d6cc40df774cd131d484de31d3170c4b02b21a7b5"
         }
       ]
     },
@@ -2045,6 +2549,23 @@
       ]
     },
     {
+      "name": "cmov",
+      "version": "0.5.4",
+      "license_declared": "Apache-2.0 OR MIT",
+      "source": "https://crates.io/api/v1/crates/cmov/0.5.4/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "70c9d40f1f9545c3f133b8a67206e89da850f6468eed072281bb3701514114a9"
+        }
+      ]
+    },
+    {
       "name": "colorchoice",
       "version": "1.0.4",
       "license_declared": "MIT OR Apache-2.0",
@@ -2071,6 +2592,23 @@
         {
           "path": "LICENSE",
           "sha256": "0d52feec79589df30138dad3800323fe5686b764b73347330a2dfef8ac83efe8"
+        }
+      ]
+    },
+    {
+      "name": "const-oid",
+      "version": "0.10.2",
+      "license_declared": "Apache-2.0 OR MIT",
+      "source": "https://crates.io/api/v1/crates/const-oid/0.10.2/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "73b9dc2e79c7308998dd30296e073aefaefb944a68fb89aa412c23c0edcabcaa"
         }
       ]
     },
@@ -2147,6 +2685,23 @@
       ]
     },
     {
+      "name": "cpufeatures",
+      "version": "0.3.1",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/cpufeatures/0.3.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "73b9dc2e79c7308998dd30296e073aefaefb944a68fb89aa412c23c0edcabcaa"
+        }
+      ]
+    },
+    {
       "name": "crc",
       "version": "3.4.0",
       "license_declared": "MIT OR Apache-2.0",
@@ -2177,6 +2732,23 @@
         {
           "path": "LICENSES/MIT.txt",
           "sha256": "5ef8fcfb6cccec8fcae043c834099a60c8b7406408db576e026d2b7e67dc5cf5"
+        }
+      ]
+    },
+    {
+      "name": "crc-fast",
+      "version": "1.10.0",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/crc-fast/1.10.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-Apache",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "60cbee3cadaf204efc23e2b24d616648b2e4c9bd033ca3831c864b9fafa3e0a7"
         }
       ]
     },
@@ -2287,6 +2859,23 @@
       ]
     },
     {
+      "name": "crypto-common",
+      "version": "0.2.2",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/crypto-common/0.2.2/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "d2e7ec5355c96eeade56b09187ceb48a6a30299da3ce7531a66d3d11405ab963"
+        }
+      ]
+    },
+    {
       "name": "ctrlc",
       "version": "3.5.1",
       "license_declared": "MIT/Apache-2.0",
@@ -2300,6 +2889,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "ctutils",
+      "version": "0.4.2",
+      "license_declared": "Apache-2.0 OR MIT",
+      "source": "https://crates.io/api/v1/crates/ctutils/0.4.2/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "91585c36e4fb9ab4ca0d3dfac5d66d3c0c62cc51f640a0e1196542daf2267eae"
         }
       ]
     },
@@ -2416,6 +3022,23 @@
       ]
     },
     {
+      "name": "deranged",
+      "version": "0.5.8",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/deranged/0.5.8/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-Apache",
+          "sha256": "edd65bdd88957a205c47d53fa499eed8865a70320f0f03f6391668cb304ea376"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "231c837c45eb53f108fb48929e488965bc4fcc14e9ea21d35f50e6b99d98685b"
+        }
+      ]
+    },
+    {
       "name": "derive_builder",
       "version": "0.20.2",
       "license_declared": "MIT OR Apache-2.0",
@@ -2480,6 +3103,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba"
+        }
+      ]
+    },
+    {
+      "name": "digest",
+      "version": "0.11.3",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/digest/0.11.3/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "af59cea35d7f5e2777a713b8d155d65efa2c339eb43f3c14e868c6ac8506edad"
         }
       ]
     },
@@ -2752,6 +3392,19 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "65fdb6c76cd61612070c066eec9ecdb30ee74fb27859d0d9af58b9f499fd0c3e"
+        }
+      ]
+    },
+    {
+      "name": "foldhash",
+      "version": "0.2.0",
+      "license_declared": "Zlib",
+      "source": "https://crates.io/api/v1/crates/foldhash/0.2.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "b1181a40b2a7b25cf66fd01481713bc1005df082c53ef73e851e55071b102744"
         }
       ]
     },
@@ -3207,6 +3860,40 @@
       ]
     },
     {
+      "name": "hmac",
+      "version": "0.13.0",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/hmac/0.13.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba"
+        }
+      ]
+    },
+    {
+      "name": "http",
+      "version": "0.2.12",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/http/0.2.12/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "8bb1b50b0e5c9399ae33bd35fab2769010fa6c14e8860c729a52295d84896b7a"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "dc91f8200e4b2a1f9261035d4c18c33c246911a6c0f7b543d75347e61b249cff"
+        }
+      ]
+    },
+    {
       "name": "http",
       "version": "1.4.0",
       "license_declared": "MIT OR Apache-2.0",
@@ -3220,6 +3907,19 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "dc91f8200e4b2a1f9261035d4c18c33c246911a6c0f7b543d75347e61b249cff"
+        }
+      ]
+    },
+    {
+      "name": "http-body",
+      "version": "0.4.6",
+      "license_declared": "MIT",
+      "source": "https://crates.io/api/v1/crates/http-body/0.4.6/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "0345e2b98685e3807fd802a2478085dcae35023e3da59b5a00f712504314d83a"
         }
       ]
     },
@@ -3280,6 +3980,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "934887691e05d69d7c86ad3f2c360980fa30c15b035e351f3c9865e99da4debc"
+        }
+      ]
+    },
+    {
+      "name": "hybrid-array",
+      "version": "0.4.10",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/hybrid-array/0.4.10/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "70c9d40f1f9545c3f133b8a67206e89da850f6468eed072281bb3701514114a9"
         }
       ]
     },
@@ -3851,6 +4568,19 @@
       ]
     },
     {
+      "name": "lru",
+      "version": "0.16.4",
+      "license_declared": "MIT",
+      "source": "https://crates.io/api/v1/crates/lru/0.16.4/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "061dc50af2cd9340703daf61978af3200cf681b12ea67a323c33ba109a23a45e"
+        }
+      ]
+    },
+    {
       "name": "lzma-rs",
       "version": "0.3.0",
       "license_declared": "MIT",
@@ -3999,6 +4729,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "ef2b3bbd7b718a7881253226313f103e89b379e1279681a3c1ebcb65a27d209d"
+        }
+      ]
+    },
+    {
+      "name": "md-5",
+      "version": "0.11.0",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/md-5/0.11.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "831e0f43ad0bf014c1c4fec5767aae470434c1d66d6e671be2d823e729063e25"
         }
       ]
     },
@@ -4327,6 +5074,23 @@
       ]
     },
     {
+      "name": "num-conv",
+      "version": "0.2.2",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/num-conv/0.2.2/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-Apache",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "e2e245f2b566d0bfafb0f6a04c16b82d710c4e6e7d799e39bb4ef6e541b85b98"
+        }
+      ]
+    },
+    {
       "name": "num-integer",
       "version": "0.1.46",
       "license_declared": "MIT OR Apache-2.0",
@@ -4562,6 +5326,19 @@
       ]
     },
     {
+      "name": "outref",
+      "version": "0.5.2",
+      "license_declared": "MIT",
+      "source": "https://crates.io/api/v1/crates/outref/0.5.2/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "a00511478c83ebb464ef19d840f061c7444adc4636bb561900e75c5808cfc6cc"
+        }
+      ]
+    },
+    {
       "name": "parking_lot",
       "version": "0.12.5",
       "license_declared": "MIT OR Apache-2.0",
@@ -4707,6 +5484,23 @@
         {
           "path": "LICENSE",
           "sha256": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2"
+        }
+      ]
+    },
+    {
+      "name": "powerfmt",
+      "version": "0.2.1",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/powerfmt/0.2.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-Apache",
+          "sha256": "155420c6403d4e0fca34105e3c03fdd6939b64c393c7ec6f95f5b72c5474eab0"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "070dbc7dda03a29296f2d58bdb9b7331af90f2abc9f31df22875d1eabaf29852"
         }
       ]
     },
@@ -5016,6 +5810,23 @@
       ]
     },
     {
+      "name": "regex-lite",
+      "version": "0.1.9",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/regex-lite/0.1.9/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb"
+        }
+      ]
+    },
+    {
       "name": "regex-syntax",
       "version": "0.8.8",
       "license_declared": "MIT OR Apache-2.0",
@@ -5063,6 +5874,23 @@
         {
           "path": "LICENSE",
           "sha256": "f59ba65550f2a5adff98ec6478d783402c8e0a3eb515025c0b3438f3d30dc39e"
+        }
+      ]
+    },
+    {
+      "name": "rustc_version",
+      "version": "0.4.1",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/rustc_version/0.4.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5"
         }
       ]
     },
@@ -5372,6 +6200,23 @@
       ]
     },
     {
+      "name": "sha1",
+      "version": "0.11.0",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/sha1/0.11.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "831e0f43ad0bf014c1c4fec5767aae470434c1d66d6e671be2d823e729063e25"
+        }
+      ]
+    },
+    {
       "name": "sha2",
       "version": "0.10.9",
       "license_declared": "MIT OR Apache-2.0",
@@ -5385,6 +6230,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "b4eb00df6e2a4d22518fcaa6a2b4646f249b3a3c9814509b22bd2091f1392ff1"
+        }
+      ]
+    },
+    {
+      "name": "sha2",
+      "version": "0.11.0",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/sha2/0.11.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "831e0f43ad0bf014c1c4fec5767aae470434c1d66d6e671be2d823e729063e25"
         }
       ]
     },
@@ -5492,6 +6354,19 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
+        }
+      ]
+    },
+    {
+      "name": "spin",
+      "version": "0.10.1",
+      "license_declared": "MIT",
+      "source": "https://crates.io/api/v1/crates/spin/0.10.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "6ac8711fb340c62ce0a4ecd463342d3fa0e8e70de697c863a2e1c0c53006003c"
         }
       ]
     },
@@ -5761,6 +6636,40 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5"
+        }
+      ]
+    },
+    {
+      "name": "time",
+      "version": "0.3.55",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/time/0.3.55/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-Apache",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "2537228d9a1b44a5dc595241349cae7090b326c8de165aaf89bfddef4a00d0fc"
+        }
+      ]
+    },
+    {
+      "name": "time-core",
+      "version": "0.1.9",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/time-core/0.1.9/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-Apache",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "2537228d9a1b44a5dc595241349cae7090b326c8de165aaf89bfddef4a00d0fc"
         }
       ]
     },
@@ -6277,6 +7186,19 @@
       ]
     },
     {
+      "name": "vsimd",
+      "version": "0.8.0",
+      "license_declared": "MIT",
+      "source": "https://crates.io/api/v1/crates/vsimd/0.8.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "simd-LICENSE",
+          "sha256": "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d"
+        }
+      ]
+    },
+    {
       "name": "walkdir",
       "version": "2.5.0",
       "license_declared": "Unlicense/MIT",
@@ -6728,6 +7650,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "8b427f5bc501764575e52ba4f9d95673cf8f6d80a86d0d06599852e1a9a20a36"
+        }
+      ]
+    },
+    {
+      "name": "xmlparser",
+      "version": "0.13.6",
+      "license_declared": "MIT/Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/xmlparser/0.13.6/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "0b5f24524360e15bcf9fb79bca875f5aa62f01f94f2988e23238c7ec0e6e8784"
         }
       ]
     },
@@ -7996,5 +8935,5 @@
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
     "scripts/release/torch-managed-python-acceptance.py": "b0486387627d6ae98b4b6533adcceed93e93ebf868385626f3b13f1fb949893b"
   },
-  "notices_sha256": "306acbf0b5da2bbdea5d69cbb8325468278a49e5c1d33e521a60ddbf96047709"
+  "notices_sha256": "6239fd1fbaf10df00e84e300d2211c69848e8852fed6fbafd90e4abfdca9aa67"
 }

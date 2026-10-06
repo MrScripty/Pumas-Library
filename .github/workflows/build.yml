@@ -34,6 +34,7 @@ jobs:
       - run: npm run check:dependency-ownership
       - run: npm run check:release-versions
       - run: node scripts/release/check-attribution.cjs
+      - run: node scripts/release/check-attribution.cjs --features s3
       - run: node --test scripts/release/*.test.mjs
 
   rust-quality:
@@ -66,11 +67,13 @@ jobs:
           workspaces: rust -> target
           key: headless
       - run: cargo fetch --locked --manifest-path rust/Cargo.toml
-      - run: python3 scripts/release/check-dependency-features.py
+      - run: python3 scripts/release/check-dependency-features.py --s3
       # Ordinary default/headless jobs omit the optional reader. These explicit
       # local-protocol checks qualify enabled S3 without cloud credentials.
       - name: Test enabled S3 reader and shared acquisition
         run: cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3 --test s3_reader --test s3_acquisition -- --test-threads=1
+      - name: Test enabled S3 signing and bounded prefix discovery
+        run: cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3 --lib acquisition::s3:: -- --test-threads=1
       - name: Lint enabled S3 implementation
         run: cargo clippy --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3,test-support --all-targets -- -D warnings
       # Separate package invocations prevent workspace feature unification from

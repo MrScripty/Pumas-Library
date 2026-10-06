@@ -86,7 +86,8 @@ function fixture(t) {
   json(`${directory}/inventory.json`, inventory);
   fs.copyFileSync(new URL('./check-attribution.cjs', import.meta.url), path.join(root, 'scripts/release/check-attribution.cjs'));
   fs.copyFileSync(path.join(source, '.gitattributes'), path.join(root, '.gitattributes'));
-  const run = () => spawnSync(process.execPath, [path.join(root, 'scripts/release/check-attribution.cjs')], { encoding: 'utf8' });
+  const run = (features = []) => spawnSync(process.execPath, [path.join(root, 'scripts/release/check-attribution.cjs'),
+    '--directory', path.join(root, directory), ...(features.length ? ['--features', ...features] : [])], { encoding: 'utf8' });
   return { root, run, write, json, inventory, paths };
 }
 
@@ -107,6 +108,35 @@ test('attribution survives a Windows-style checkout with original legal bytes', 
   const windowsLegal = paths['x86_64-pc-windows-msvc'].legalPath;
   assert.deepEqual(fs.readFileSync(path.join(checkout, windowsLegal)), fs.readFileSync(path.join(root, windowsLegal)));
   assert.equal(Object.keys(inventory.input_sha256).length, 12 + targets.length * 4);
+});
+
+test('S3 notices require the explicit feature profile and complete Rust closure', t => {
+  const data = fixture(t);
+  assert.match(data.run(['s3']).stderr, /feature profile mismatch/);
+  data.inventory.rust_profile = { package: 'pumas-rpc', default_features: true, features: ['s3'],
+    targets: ['x86_64-unknown-linux-gnu', 'aarch64-apple-darwin', 'x86_64-pc-windows-msvc'] };
+  data.inventory.rust_dependencies = [{ name: 'aws-sdk-s3', version: '1.137.0' }];
+  const notice = { name: 'aws-sdk-s3', version: '1.137.0', scope: 'Rust normal/build dependency, all desktop targets' };
+  data.inventory.packages.push(notice);
+  const save = () => data.json(`${directory}/inventory.json`, data.inventory);
+  save();
+  assert.equal(data.run(['s3']).status, 0);
+  assert.match(data.run().stderr, /feature profile mismatch/);
+  data.inventory.packages.pop();
+  save();
+  assert.match(data.run(['s3']).stderr, /Incomplete Rust release attribution closure/);
+  data.inventory.packages.push(notice);
+  data.inventory.rust_dependencies.push({ ...data.inventory.rust_dependencies[0] });
+  save();
+  assert.match(data.run(['s3']).stderr, /Incomplete Rust release attribution closure/);
+});
+
+test('generator refuses selected dependencies absent from metadata instead of omitting notices', t => {
+  const data = fixture(t);
+  const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+  const probe = `import importlib.util, pathlib, sys\nspec = importlib.util.spec_from_file_location('notices', sys.argv[1])\nmodule = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\nmodule.LICENSES = pathlib.Path(sys.argv[2])\n(module.LICENSES / 'sources.json').write_text('[]')\nseen = []\ndef run(*args):\n seen.append(args)\n if args[1] == 'metadata':\n  assert '--features' in args and 'pumas-rpc/s3' in args\n  return '{"packages": []}'\n return 'aws-sdk-s3 v1.137.0\\n'\nmodule.run = run\ntry:\n module.collect(('s3',))\nexcept ValueError as error:\n assert 'Incomplete Rust attribution closure' in str(error), str(error)\nelse:\n raise AssertionError('selected SDK was silently omitted')`;
+  const result = spawnSync(python, ['-c', probe, path.join(source, 'scripts/release/generate-notices.py'), path.join(data.root, 'scripts/release/licenses')], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test('checker rejects stale, missing and mismatched CPython evidence', t => {

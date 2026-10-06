@@ -173,11 +173,27 @@ def prepare(request, observation):
             rows = []
         elif item["status"] == 200:
             doc = decode(raw)
-            check(type(doc) is dict and doc.keys() == {"meta", "name", "files"}
+            check(type(doc) is dict and {"meta", "name", "files"} <= doc.keys()
+                  and doc.keys() <= {"meta", "name", "files", "versions"}
                   and type(doc["meta"]) is dict and set(doc["meta"]) <= {"api-version", "_last-serial"}
                   and doc["meta"].get("api-version") in {"1.0", "1.1", "1.2", "1.3"}
                   and packaging.utils.canonicalize_name(doc["name"]) == name and type(doc["files"]) is list,
                   "Unsupported/incomplete Simple JSON response")
+            api_version = doc["meta"]["api-version"]
+            check(api_version == "1.0" or "versions" in doc, "Simple JSON 1.1+ requires versions")
+            versions = None
+            if "versions" in doc:
+                declared = doc["versions"]
+                check(type(declared) is list and all(isinstance(v, str) for v in declared),
+                      "Invalid Simple versions collection")
+                bounded(len(declared), MAX_ROWS, "Version list budget exceeded")
+                check(len(declared) == len(set(declared)), "Duplicate Simple version string")
+                versions = set()
+                for version in declared:
+                    try:
+                        versions.add(packaging.version.Version(version))
+                    except packaging.version.InvalidVersion:
+                        pass  # Legacy strings/no-file versions are valid protocol data.
             rows = doc["files"]
         else:
             raise Incomplete("Project response does not prove complete enumeration or absence")
@@ -194,11 +210,15 @@ def prepare(request, observation):
                   "Unsupported candidate/index tracking fields")
             filename = row["filename"]
             check(isinstance(filename, str) and 0 < len(filename) <= 256, "Invalid candidate filename")
+            if item["status"] == 200 and api_version != "1.0" and (
+                    type(row.get("size")) is not int or row["size"] < 0):
+                raise Incomplete("Simple JSON 1.1+ file lacks size evidence")
             if not filename.endswith(".whl"):
                 exclusions.append({"repository": repo, "project": name, "filename": filename, "reason": "wheel-only"})
                 continue
             parsed_name, version, _, tags = packaging.utils.parse_wheel_filename(filename)
             check(parsed_name == name, "Candidate project/filename mismatch")
+            check(versions is None or version in versions, "Simple versions does not list wheel version")
             check(payload_allowed(row["url"], name, build, target) == filename, "Candidate URL/filename mismatch")
             restrictions = [r for r in roots + constraints if packaging.utils.canonicalize_name(r.name) == name and not r.url and active(r, target)]
             if not target.supports(tags) or any(not r.specifier.contains(version, prereleases=True) for r in restrictions):
@@ -256,6 +276,18 @@ def inspect_candidate(candidate, path, target):
         metadata = [m for m in members if m.filename.endswith(".dist-info/METADATA")]
         wheel = [m for m in members if m.filename.endswith(".dist-info/WHEEL")]
         check(len(metadata) == len(wheel) == 1 and metadata[0].filename.rsplit("/", 1)[0] == wheel[0].filename.rsplit("/", 1)[0], "Ambiguous wheel metadata identity")
+        directory = metadata[0].filename.rsplit("/", 1)[0]
+        identity = directory.removesuffix(".dist-info").split("-")
+        check("/" not in directory and len(identity) == 2, "Wheel dist-info identity must be at archive root")
+        info_name, info_version = identity
+        normalized_version = packaging.version.Version(info_version)
+        check(packaging.utils.canonicalize_name(info_name, validate=True) == candidate["name"]
+              and str(normalized_version) == info_version
+              and normalized_version == packaging.version.Version(candidate["version"]),
+              "Wheel dist-info directory differs from distribution identity")
+        info_roots = {m.filename.split("/", 1)[0] for m in members
+                      if m.filename.split("/", 1)[0].endswith(".dist-info")}
+        check(info_roots == {directory}, "Wheel contains additional dist-info identity")
         bounded(metadata[0].file_size, MAX_PAGE, "METADATA byte budget exceeded")
         bounded(wheel[0].file_size, 64 * 1024, "WHEEL byte budget exceeded")
         body = archive.read(metadata[0])

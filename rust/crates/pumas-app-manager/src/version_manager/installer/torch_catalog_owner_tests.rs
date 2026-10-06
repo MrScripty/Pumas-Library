@@ -15,6 +15,7 @@ enum Case {
     ChangedWheelAfterInspection,
     WrongSize,
     AbandonInspector,
+    WrongDistInfo,
     Redirect,
 }
 
@@ -77,6 +78,16 @@ async fn fixture(case: Case) {
     let code = r#"import importlib.util,json,pathlib,sys
 s=importlib.util.spec_from_file_location('fixture',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
 p=pathlib.Path(sys.argv[2]); rows=[m.make_wheel(p,'torch',version='2.14.0+cpu',requires=['branch>=1']),m.make_wheel(p,'branch',version='1',requires=['dependency<2']),m.make_wheel(p,'branch',version='2',requires=['dependency>=2']),m.make_wheel(p,'dependency',version='1'),m.make_wheel(p,'dependency',version='2')]
+if sys.argv[3]=='wrong-info':
+ import hashlib,zipfile
+ a=rows[0]; path=p/a['url'].rsplit('/',1)[-1]
+ with zipfile.ZipFile(path) as archive: members={m.filename:archive.read(m) for m in archive.infolist()}
+ old='torch-2.14.0+cpu.dist-info'; new='wrong-1.0.dist-info'
+ members={n.replace(old,new,1):body for n,body in members.items()}
+ members[new+'/RECORD']=members[new+'/RECORD'].replace(old.encode(),new.encode())
+ with zipfile.ZipFile(path,'w',zipfile.ZIP_DEFLATED) as archive:
+  for name,body in members.items(): archive.writestr(name,body)
+ a['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
 for a in rows:
  filename=a['url'].rsplit('/',1)[-1]; a['size']=(p/filename).stat().st_size
  a['url']=('https://download.pytorch.org/whl/cpu/' if a['name']=='torch' else 'https://files.pythonhosted.org/packages/')+filename
@@ -86,6 +97,11 @@ print(json.dumps(rows))
         .args(["-I", "-c", code])
         .arg(fixture_source)
         .arg(&source)
+        .arg(if case == Case::WrongDistInfo {
+            "wrong-info"
+        } else {
+            "valid"
+        })
         .output()
         .unwrap();
     assert!(
@@ -111,10 +127,17 @@ print(json.dumps(rows))
                 if case == Case::WrongSize { row["size"] = serde_json::json!(a["size"].as_u64().unwrap() + 1); }
                 row
             }).collect();
+            let versions: std::collections::BTreeSet<_> = artifacts
+                .iter()
+                .filter(|a| {
+                    a["name"] == name && repo == if name == "torch" { "pytorch" } else { "pypi" }
+                })
+                .map(|a| a["version"].as_str().unwrap().to_owned())
+                .collect();
             observations.push(serde_json::json!({"repository":repo,"project":name,"url":format!("{base}{name}/"),
                 "status":if case == Case::FailedPage && repo == "pypi" && name == "torch" { 503 } else { 200 },
                 "observed_at":"2026-10-06T12:00:00Z",
-                "body":serde_json::json!({"meta":{"api-version":"1.3"},"name":name,"files":files}).to_string()}));
+                "body":serde_json::json!({"meta":{"api-version":"1.3"},"name":name,"files":files,"versions":versions}).to_string()}));
         }
     }
     let observed_path = produced.path.clone();
@@ -274,6 +297,7 @@ print(json.dumps(rows))
                     Case::ChangedTarget
                         | Case::ChangedExecutableAfterInspection
                         | Case::ChangedWheelAfterInspection
+                        | Case::WrongDistInfo
                 ) {
                     CatalogFailure::Refused
                 } else {
@@ -322,6 +346,7 @@ print(json.dumps(rows))
                 | Case::ChangedExecutableAfterInspection
                 | Case::ChangedWheelAfterInspection
                 | Case::AbandonInspector
+                | Case::WrongDistInfo
         ) {
             assert!(matches!(row.phase, AcquisitionPhase::Using { .. }));
             let cold = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
@@ -394,4 +419,9 @@ async fn index_size_conflicting_with_body_refuses_complete() {
 #[tokio::test]
 async fn abandoned_inspector_retains_child_stage_and_using_until_drain() {
     fixture(Case::AbandonInspector).await;
+}
+
+#[tokio::test]
+async fn actual_wrong_dist_info_refuses_snapshot_and_cold_replay() {
+    fixture(Case::WrongDistInfo).await;
 }

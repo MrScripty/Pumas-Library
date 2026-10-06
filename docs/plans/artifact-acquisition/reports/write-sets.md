@@ -1,5 +1,26 @@
 # Acquisition implementation write sets and coordination
 
+## Q2 catalog format review successor — admitted 2026-10-06
+
+Preserve frozen 4c85b60d47a736c066a17e673754099f8f6e5870, tree
+8b8fa5fc6de0ff52db04f5d6f800d44f420023e8. Parent identifies Simple JSON
+1.1+ mandatory versions admission and actual wheel .dist-info directory identity
+gaps. On fix/torch-catalog-format-4c85b60d admit only this record, owning plan,
+torch-server/{wheel_catalog_owner.py,tests/test_wheel_catalog_owner.py},
+rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs
+for conformant version lists and actual malformed-wheel fixtures, and a separate
+torch-catalog-format-2026-10-06 report with adjacent raw reproduction/final
+evidence. Verify against official Simple/PEP700 and wheel normalization contracts,
+reproduce on unchanged owner before repair, and check conformant 1.0–1.3,
+required/list/unique version data, wheel version association and normalized
+directory name/version with legacy name case/dots and local versions.
+Do not change Rust production authority/custody, source/profile/target/limits/
+completion/fallback policy, automatic/preview callers, dependencies or frozen
+native/importer/watcher/S3/manifest files. Existing stricter unknown-source and
+protocol admission is retained. Pre-build 33 feature graphs, focused/all affected
+Python and shared Rust controls, serialized offline/locked strict checks required.
+Independent budget/completion review and provider/production gates remain open.
+
 ## Q2 catalog owner, finite observation slice — admitted 2026-10-06
 
 Parent accepts the e6b5b876 design and final executable repair 92e4389c.

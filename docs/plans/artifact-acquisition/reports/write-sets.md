@@ -1250,3 +1250,17 @@ No installer.rs/native cleanup, dependency/lock/recipe, experimental resolver,
 credential, external reviewer, model/provider payload or real backend changes.
 Controlled tiny-wheel producer→finite catalog→shared consumer evidence cannot
 qualify full recipe/provider/native-platform execution or AQ/P1 gates.
+
+## Q2 final selected-executable review repair — admitted 2026-10-06
+
+Parent freezes 2ce91b431afacdb4eb402af91f55b1258afe04fc, tree
+e1dc46a0e45926bf1d1906813c456d2fed7e259c. After saved catalog design checkpoint
+e6b5b876, separate fix/torch-final-executable-2ce91b43 may change only
+installer/torch.rs's final target proof check and torch_wheel_handoff_tests.rs's
+actual selected-executable probe replacement control, docs/contracts/wheel-target.md,
+this admission, owning-plan note and a separate report/evidence. Reproduce against
+the unchanged frozen final validator first; then revalidate actual selected
+consumer bytes after all validation/probe children and before publication under
+existing input/stage/blocking custody. Keep provider hash distinct and legacy
+absent-context behavior unchanged. No resolver/catalog/recipe/dependency/native
+cleanup/importer/watcher/S3/manifest or installer.rs source changes.

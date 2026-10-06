@@ -2268,6 +2268,7 @@ fn validate_torch_final_proof(
     manifest_path: &Path,
     validated_manifest: &[u8],
     provenance: &[(PathBuf, Vec<u8>)],
+    selected_target: Option<(&AcceptedTorchTarget, &Path)>,
 ) -> Result<()> {
     validate_torch_owned_path(runtime, packages)?;
     validate_torch_owned_path(runtime, manifest_path)?;
@@ -2310,6 +2311,9 @@ fn validate_torch_final_proof(
                 "Installed Torch member changed during runtime probe",
             ));
         }
+    }
+    if let Some((target, python)) = selected_target {
+        validate_torch_target_evidence(runtime, target, python)?;
     }
     Ok(())
 }
@@ -2839,8 +2843,10 @@ impl VersionInstaller {
                 let manifest_for_check = manifest_path.clone();
                 let manifest_for_receipt = validated_manifest.clone();
                 let recipe_digest = format!("{:x}", Sha256::digest(&provenance[3].1));
+                let target_for_check = prepared.resolution.accepted_target.clone();
                 inputs.run_blocking("recheck Torch packages and provenance after probe", move || {
-                    validate_torch_final_proof(&runtime_for_check, &packages_after_move, &manifest_for_check, &validated_manifest, &provenance)
+                    validate_torch_final_proof(&runtime_for_check, &packages_after_move, &manifest_for_check, &validated_manifest, &provenance,
+                        target_for_check.as_ref().map(|target| (target, python.as_path())))
                 }).await?;
                 let mut proof = serde_json::json!({
                     "format": "pumas-torch-wheel-install-1", "tag": tag,

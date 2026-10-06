@@ -28,6 +28,7 @@ enum Case {
     QualifiedConsumerChangedBeforeAcquisition,
     QualifiedChangedProducerBeforeConsumption,
     QualifiedChangedProducerAfterProbe,
+    QualifiedConsumerChangedAfterProbe,
 }
 
 struct InputDropProbe {
@@ -103,6 +104,7 @@ async fn fixture(case: Case) {
             | Case::QualifiedConsumerChangedBeforeAcquisition
             | Case::QualifiedChangedProducerBeforeConsumption
             | Case::QualifiedChangedProducerAfterProbe
+            | Case::QualifiedConsumerChangedAfterProbe
     );
     let source = root.path().join("fixture-source");
     std::fs::create_dir(&source).unwrap();
@@ -606,8 +608,12 @@ assert len(called)==len(rows)*2
                         | Case::ChangedProvenance
                         | Case::TargetChangedApproval
                         | Case::QualifiedChangedProducerAfterProbe
+                        | Case::QualifiedConsumerChangedAfterProbe
                 ) {
                     let changed = match case {
+                        Case::QualifiedConsumerChangedAfterProbe => {
+                            pumas_library::platform::paths::venv_python(runtime)
+                        }
                         Case::ChangedInstalledMember => final_packages.join("root_wheel.py"),
                         Case::ChangedProof => proof_file.clone(),
                         Case::QualifiedChangedProducerAfterProbe => {
@@ -618,8 +624,19 @@ assert len(called)==len(rows)*2
                         }
                         _ => runtime.join("resolution.json"),
                     };
-                    let mut probe = Command::new("python3");
-                    probe.args(["-I", "-B", "-c", "import pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(b'probe mutation')"]).arg(changed);
+                    let mut probe = if case == Case::QualifiedConsumerChangedAfterProbe {
+                        Command::new(resolution["interpreter"].as_str().unwrap())
+                    } else {
+                        Command::new("python3")
+                    };
+                    let code = if case == Case::QualifiedConsumerChangedAfterProbe {
+                        // Replace the running stage-owned copy atomically; never
+                        // write the executing inode or the managed provider.
+                        "import os,pathlib,sys; p=pathlib.Path(sys.argv[1]); q=p.with_name('probe-replacement'); q.write_bytes(b'changed selected consumer executable'); os.replace(q,p)"
+                    } else {
+                        "import pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(b'probe mutation')"
+                    };
+                    probe.args(["-I", "-B", "-c", code]).arg(changed);
                     let status = installer
                         .run_runtime_command_status_with_custody(
                             probe,
@@ -666,12 +683,35 @@ assert len(called)==len(rows)*2
                         return Err(failed("Fixture ancestry probe failed"));
                     }
                 }
+                if case == Case::QualifiedConsumerChangedAfterProbe {
+                    let target = approved_target.as_ref().unwrap();
+                    assert_ne!(
+                        torch_interpreter_hash(Path::new(
+                            resolution["interpreter"].as_str().unwrap()
+                        ))
+                        .unwrap(),
+                        target.interpreter_sha256
+                    );
+                    let provider = native_observation_fixture();
+                    assert_eq!(provider["interpreter_sha256"], target.interpreter_sha256);
+                    validate_torch_provenance(runtime, &provenance)?;
+                    assert_eq!(
+                        std::fs::read(&proof_file).map_err(PumasError::from)?,
+                        validated_manifest
+                    );
+                }
                 validate_torch_final_proof(
                     runtime,
                     &final_packages,
                     &proof_file,
                     &validated_manifest,
                     &provenance,
+                    approved_target.as_ref().map(|target| {
+                        (
+                            target,
+                            Path::new(resolution["interpreter"].as_str().unwrap()),
+                        )
+                    }),
                 )?;
                 let mut proof = serde_json::json!({"format":"fixture-wheel-publication-1", "installed_sha256":hash_regular_file(&proof_file)?});
                 if let Some(target) = &approved_target {
@@ -864,6 +904,9 @@ assert len(called)==len(rows)*2
             }
         }
     } else {
+        if case == Case::QualifiedConsumerChangedAfterProbe {
+            eprintln!("Executable-only probe control: result_success={} adopted={} receipt={} installed={} output={} cleanup_drained={drained}", result.is_ok(), matches!(row.phase, AcquisitionPhase::Adopted { .. }), receipt.is_some(), installed.is_some(), output_present);
+        }
         assert!(result.is_err());
         assert!(wheels.exists(), "retained inputs disappeared");
         if case == Case::ChangedWheel {
@@ -959,6 +1002,10 @@ async fn qualified_changed_selected_consumer_refuses_without_changing_provider()
 #[tokio::test]
 async fn qualified_changed_producer_refuses_before_consumption() {
     fixture(Case::QualifiedChangedProducerBeforeConsumption).await;
+}
+#[tokio::test]
+async fn qualified_changed_selected_consumer_probe_refuses_publication_and_receipt() {
+    fixture(Case::QualifiedConsumerChangedAfterProbe).await;
 }
 #[tokio::test]
 async fn qualified_changed_producer_probe_refuses_publication_and_receipt() {

@@ -109,7 +109,11 @@ after cataloguing, before acquisition and before local consumption. Provider
 identity is rechecked after preparation independently of the selected consumer.
 Changed observations/executable bytes refuse without recapture or resolver
 fallback. Shared stage/input custody remains live through child effects,
-publication, cleanup and settlement. The existing opaque consumer receipt payload
+publication, cleanup and settlement. The final owned proof check revalidates the
+actual selected executable after all runtime validation/probe children, before
+publishing an observation-bound runtime or issuing its receipt. This uses the
+retained selected-consumer hash; the separate managed-provider hash cannot satisfy
+that check. The existing opaque consumer receipt payload
 adds the observation digest; the neutral durable schema does not change.
 
 The local CLI takes `--target-observation` from that owner-held provenance. It

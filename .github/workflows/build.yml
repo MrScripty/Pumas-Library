@@ -36,6 +36,10 @@ jobs:
       - run: node scripts/release/check-attribution.cjs
       - run: node scripts/release/check-attribution.cjs --features s3
       - run: node --test scripts/release/*.test.mjs
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - run: python scripts/release/test_s3_build_provenance.py
 
   rust-quality:
     name: Rust quality

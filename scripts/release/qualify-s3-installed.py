@@ -4,6 +4,7 @@
 This is controlled protocol evidence, not qualification of an S3 provider or
 an inference runtime. Never pass real credentials or a real bucket endpoint.
 """
+
 import argparse
 import hashlib
 import hmac
@@ -25,11 +26,17 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from s3_build_provenance import ATTRIBUTION, validate_provenance
+
 ROOT = Path(__file__).resolve().parents[2]
 ACCESS = "installed-s3-synthetic-access"
 SECRET = "installed-s3-synthetic-secret"
 TOKEN = "installed-s3-synthetic-token"
-AMBIENT = ("synthetic-unselected-ambient-access", "synthetic-unselected-ambient-secret", "synthetic-unselected-ambient-token")
+AMBIENT = (
+    "synthetic-unselected-ambient-access",
+    "synthetic-unselected-ambient-secret",
+    "synthetic-unselected-ambient-token",
+)
 SECRETS = tuple(value.encode() for value in (ACCESS, SECRET, TOKEN, *AMBIENT))
 WEIGHTS = b"GGUF" + struct.pack("<IQQ", 3, 0, 0)
 EMPTY_SHA = hashlib.sha256(b"").hexdigest()
@@ -47,18 +54,31 @@ def digest(path):
 
 
 def secret_free(data):
-    check(all(secret not in data for secret in SECRETS), "synthetic credential escaped ephemeral boundary")
+    check(
+        all(secret not in data for secret in SECRETS),
+        "synthetic credential escaped ephemeral boundary",
+    )
 
 
 def valid_signature(handler, secret):
     # This fixture owns a simple path and one already canonical version query.
-    fields = dict(field.split("=", 1) for field in handler.headers["Authorization"].removeprefix("AWS4-HMAC-SHA256 ").split(", "))
+    fields = dict(
+        field.split("=", 1)
+        for field in handler.headers["Authorization"].removeprefix("AWS4-HMAC-SHA256 ").split(", ")
+    )
     access, scope = fields["Credential"].split("/", 1)
     date, region, service, terminal = scope.split("/")
-    check(access == ACCESS and (region, service, terminal) == ("fixture-region", "s3", "aws4_request"), "unexpected signing scope")
+    check(
+        access == ACCESS
+        and (region, service, terminal) == ("fixture-region", "s3", "aws4_request"),
+        "unexpected signing scope",
+    )
     signed = fields["SignedHeaders"]
     names = signed.split(";")
-    check(names == sorted(names) and "host" in names and "x-amz-date" in names, "invalid signed header set")
+    check(
+        names == sorted(names) and "host" in names and "x-amz-date" in names,
+        "invalid signed header set",
+    )
     if handler.server.token:
         check("x-amz-security-token" in names, "session token was not signed")
     parts = urllib.parse.urlsplit(handler.path)
@@ -68,7 +88,9 @@ def valid_signature(handler, secret):
     key = ("AWS4" + secret).encode()
     for component in (date, region, service, terminal):
         key = hmac.digest(key, component.encode(), "sha256")
-    return hmac.compare_digest(hmac.new(key, message.encode(), "sha256").hexdigest(), fields["Signature"])
+    return hmac.compare_digest(
+        hmac.new(key, message.encode(), "sha256").hexdigest(), fields["Signature"]
+    )
 
 
 class Source(http.server.ThreadingHTTPServer):
@@ -117,9 +139,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             authorization = self.headers.get("Authorization", "")
             check(bool(authorization) == source.authenticated, "unexpected signing mode")
             if source.authenticated:
-                check(authorization.startswith("AWS4-HMAC-SHA256 ") and f"Credential={ACCESS}/" in authorization, "missing explicit SigV4 identity")
-                check(valid_signature(self, SECRET) and not valid_signature(self, "wrong-synthetic-secret"), "invalid SigV4 signature")
-            check(self.headers.get("x-amz-security-token") == (TOKEN if source.token else None), "unexpected session token")
+                check(
+                    authorization.startswith("AWS4-HMAC-SHA256 ")
+                    and f"Credential={ACCESS}/" in authorization,
+                    "missing explicit SigV4 identity",
+                )
+                check(
+                    valid_signature(self, SECRET)
+                    and not valid_signature(self, "wrong-synthetic-secret"),
+                    "invalid SigV4 signature",
+                )
+            check(
+                self.headers.get("x-amz-security-token") == (TOKEN if source.token else None),
+                "unexpected session token",
+            )
             check(SECRET not in authorization, "secret key appeared on wire")
             source.requests.append({"method": "HEAD" if head else "GET", "version": version})
             if source.mode == "missing" and primary:
@@ -147,10 +180,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("ETag", '"selected"')
             self.send_header("Connection", "close")
             if not head:
-                self.send_header("Content-Range", f"bytes {start}-{len(body)-1}/{len(body)}")
+                self.send_header("Content-Range", f"bytes {start}-{len(body) - 1}/{len(body)}")
             self.end_headers()
             if not head:
-                self.wfile.write(body[start:start+1] if source.mode in ("truncated", "cancel") else body[start:])
+                self.wfile.write(
+                    body[start : start + 1]
+                    if source.mode in ("truncated", "cancel")
+                    else body[start:]
+                )
                 self.wfile.flush()
                 if source.mode == "cancel":
                     source.started.set()
@@ -166,11 +203,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
 class Backend:
     def __init__(self, binary, root, ca):
         self.root, self.output, self.overflow = root, bytearray(), False
-        env = {**os.environ, "XDG_CONFIG_HOME": str(root / "config"), "APPDATA": str(root / "config"),
-               "PUMAS_REGISTRY_DB_PATH": str(root / "registry.db"), "SSL_CERT_FILE": str(ca),
-               "AWS_ACCESS_KEY_ID": AMBIENT[0], "AWS_SECRET_ACCESS_KEY": AMBIENT[1], "AWS_SESSION_TOKEN": AMBIENT[2]}
-        self.process = subprocess.Popen([str(binary), "--launcher-root", str(root), "--port", "0", "--debug"],
-                                        cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+        env = {
+            **os.environ,
+            "XDG_CONFIG_HOME": str(root / "config"),
+            "APPDATA": str(root / "config"),
+            "PUMAS_REGISTRY_DB_PATH": str(root / "registry.db"),
+            "SSL_CERT_FILE": str(ca),
+            "AWS_ACCESS_KEY_ID": AMBIENT[0],
+            "AWS_SECRET_ACCESS_KEY": AMBIENT[1],
+            "AWS_SESSION_TOKEN": AMBIENT[2],
+        }
+        self.process = subprocess.Popen(
+            [str(binary), "--launcher-root", str(root), "--port", "0", "--debug"],
+            cwd=root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
         self.reader = threading.Thread(target=self.capture, daemon=True)
         self.reader.start()
         try:
@@ -196,7 +246,13 @@ class Backend:
         self.process.stdout.close()
 
     def rpc(self, method, params):
-        request = urllib.request.Request(self.base + "/rpc", data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(), headers={"Content-Type": "application/json"})
+        request = urllib.request.Request(
+            self.base + "/rpc",
+            data=json.dumps(
+                {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+            ).encode(),
+            headers={"Content-Type": "application/json"},
+        )
         with HTTP.open(request, timeout=10) as response:
             payload = response.read(1024 * 1024 + 1)
         check(len(payload) <= 1024 * 1024, "RPC response exceeded fixture budget")
@@ -220,11 +276,42 @@ class Backend:
 
 
 def params(source, operation, single):
-    primary = {"key": "models/shared", "version_id": "weights-v1", "logical_path": "weights.gguf", "sha256": hashlib.sha256(WEIGHTS if source.mode != "empty-primary" else b"").hexdigest()}
-    common = {"operation_id": operation, "endpoint": source.endpoint, "region": "fixture-region", "bucket": "fixture-bucket", "addressing": "path", "family": "fixture", "official_name": "Installed synthetic GGUF"}
+    primary = {
+        "key": "models/shared",
+        "version_id": "weights-v1",
+        "logical_path": "weights.gguf",
+        "sha256": hashlib.sha256(WEIGHTS if source.mode != "empty-primary" else b"").hexdigest(),
+    }
+    common = {
+        "operation_id": operation,
+        "endpoint": source.endpoint,
+        "region": "fixture-region",
+        "bucket": "fixture-bucket",
+        "addressing": "path",
+        "family": "fixture",
+        "official_name": "Installed synthetic GGUF",
+    }
     if single:
-        return {**common, "key": primary["key"], "version_id": primary["version_id"], "filename": primary["logical_path"], "sha256": primary["sha256"]}
-    return {**common, "primary_logical_path": "weights.gguf", "files": [primary, {"key": "models/shared", "version_id": "data-v2", "logical_path": "config/data.json", "sha256": "b" * 64 if source.mode == "digest" else EMPTY_SHA}]}
+        return {
+            **common,
+            "key": primary["key"],
+            "version_id": primary["version_id"],
+            "filename": primary["logical_path"],
+            "sha256": primary["sha256"],
+        }
+    return {
+        **common,
+        "primary_logical_path": "weights.gguf",
+        "files": [
+            primary,
+            {
+                "key": "models/shared",
+                "version_id": "data-v2",
+                "logical_path": "config/data.json",
+                "sha256": "b" * 64 if source.mode == "digest" else EMPTY_SHA,
+            },
+        ],
+    }
 
 
 def case(binary, directory, ca, key, mode, authenticated=False, token=False, single=False):
@@ -237,24 +324,66 @@ def case(binary, directory, ca, key, mode, authenticated=False, token=False, sin
         operation = str(uuid.uuid4())
         request = params(source, operation, single)
         if not single:
-            for path in ["metadata.json", "overrides.json", "metadata.json/data.json", "OVERRIDES.JSON/data.json", "_metadata_.json", "metadata.json.bak/data.json", ".pumas_import_publication.json/data.json"]:
+            for path in [
+                "metadata.json",
+                "overrides.json",
+                "metadata.json/data.json",
+                "OVERRIDES.JSON/data.json",
+                "_metadata_.json",
+                "metadata.json.bak/data.json",
+                ".pumas_import_publication.json/data.json",
+            ]:
                 invalid = json.loads(json.dumps(request))
                 invalid["files"][1]["logical_path"] = path
                 response = backend.rpc("start_s3_model_bundle_import", invalid)
-                check(response.get("error", {}).get("code") == -32602, "reserved destination did not fail decoding")
-                check(backend.rpc("get_s3_model_import", {})["result"]["status"] == "idle", "invalid request admitted a job")
-                check(not (root / "launcher-data" / f".s3-import-{operation}").exists(), "invalid request created workspace")
+                check(
+                    response.get("error", {}).get("code") == -32602,
+                    "reserved destination did not fail decoding",
+                )
+                check(
+                    backend.rpc("get_s3_model_import", {})["result"]["status"] == "idle",
+                    "invalid request admitted a job",
+                )
+                check(
+                    not (root / "launcher-data" / f".s3-import-{operation}").exists(),
+                    "invalid request created workspace",
+                )
                 check(not source.requests, "invalid request performed source IO")
         method = "start_s3_model_import" if single else "start_s3_model_bundle_import"
         if authenticated:
-            method = "start_authenticated_s3_model_import" if single else "start_authenticated_s3_model_bundle_import"
-            request = {"source": request, "credentials": {"access_key_id": ACCESS, "secret_access_key": SECRET, "session_token": TOKEN if token else None}}
-        check(backend.rpc(method, request)["result"]["status"] == "running", "corrected request failed admission")
+            method = (
+                "start_authenticated_s3_model_import"
+                if single
+                else "start_authenticated_s3_model_bundle_import"
+            )
+            request = {
+                "source": request,
+                "credentials": {
+                    "access_key_id": ACCESS,
+                    "secret_access_key": SECRET,
+                    "session_token": TOKEN if token else None,
+                },
+            }
+        check(
+            backend.rpc(method, request)["result"]["status"] == "running",
+            "corrected request failed admission",
+        )
         if mode == "cancel":
             check(source.started.wait(10), "cancel source never began")
-            snapshot = backend.rpc("get_s3_model_bundle_import", {"operation_id": operation})["result"]
-            check(snapshot["bundle_progress"]["files_acquired"] == 1 and snapshot["bundle_progress"]["bytes_acquired"] == "0", "empty member aggregate progress is wrong")
-            check(backend.rpc("cancel_s3_model_import", {"operation_id": operation})["result"]["accepted"], "cancel was refused before finalization")
+            snapshot = backend.rpc("get_s3_model_bundle_import", {"operation_id": operation})[
+                "result"
+            ]
+            check(
+                snapshot["bundle_progress"]["files_acquired"] == 1
+                and snapshot["bundle_progress"]["bytes_acquired"] == "0",
+                "empty member aggregate progress is wrong",
+            )
+            check(
+                backend.rpc("cancel_s3_model_import", {"operation_id": operation})["result"][
+                    "accepted"
+                ],
+                "cancel was refused before finalization",
+            )
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             result = backend.rpc("get_s3_model_import", {"operation_id": operation})["result"]
@@ -264,7 +393,11 @@ def case(binary, directory, ca, key, mode, authenticated=False, token=False, sin
         else:
             raise TimeoutError("installed acquisition terminal deadline")
         success = mode == "success"
-        check(result["result"]["status"] == ("completed" if success else "cancelled" if mode == "cancel" else "failed"), "terminal result contradicts source outcome")
+        check(
+            result["result"]["status"]
+            == ("completed" if success else "cancelled" if mode == "cancel" else "failed"),
+            "terminal result contradicts source outcome",
+        )
         if success:
             model = result["result"]["model_id"]
             target = root / "shared-resources/models" / model
@@ -272,21 +405,42 @@ def case(binary, directory, ca, key, mode, authenticated=False, token=False, sin
             receipt_path = target / ".pumas_import_publication.json"
             receipt_bytes = receipt_path.read_bytes()
             receipt = json.loads(receipt_bytes)["acquisition"]
-            check(receipt["demand"]["consumer"] == "model.s3.workflow" and receipt["demand"]["operation"] == operation, "receipt demand changed")
-            check(len(receipt["verified_files"]) == (1 if single else 2), "receipt set is incomplete")
+            check(
+                receipt["demand"]["consumer"] == "model.s3.workflow"
+                and receipt["demand"]["operation"] == operation,
+                "receipt demand changed",
+            )
+            check(
+                len(receipt["verified_files"]) == (1 if single else 2), "receipt set is incomplete"
+            )
             if not single:
-                check((target / "config/data.json").read_bytes() == b"", "empty auxiliary was omitted")
-                check(receipt["verified_files"][0]["bytes"] == 0 and receipt["verified_files"][0]["sha256"] == EMPTY_SHA, "empty receipt lacks exact verification")
-                check([json.loads(file["source_key"])[1] for file in receipt["manifest"]["files"]] == ["data-v2", "weights-v1"], "receipt pins changed")
+                check(
+                    (target / "config/data.json").read_bytes() == b"", "empty auxiliary was omitted"
+                )
+                check(
+                    receipt["verified_files"][0]["bytes"] == 0
+                    and receipt["verified_files"][0]["sha256"] == EMPTY_SHA,
+                    "empty receipt lacks exact verification",
+                )
+                check(
+                    [json.loads(file["source_key"])[1] for file in receipt["manifest"]["files"]]
+                    == ["data-v2", "weights-v1"],
+                    "receipt pins changed",
+                )
             backend.stop()
             before = len(source.requests)
             backend = Backend(binary, root, ca)
             models = backend.rpc("get_models", {})
             check(model in json.dumps(models), "cold owner lost registered model")
-            check(receipt_path.read_bytes() == receipt_bytes and len(source.requests) == before, "cold owner replayed or replaced publication proof")
+            check(
+                receipt_path.read_bytes() == receipt_bytes and len(source.requests) == before,
+                "cold owner replayed or replaced publication proof",
+            )
         else:
             check(result["result"]["retained_work"], "failure lost cleanup custody")
-            check(not result["result"].get("published_model_id"), "invalid source published a model")
+            check(
+                not result["result"].get("published_model_id"), "invalid source published a model"
+            )
             replay = backend.rpc(method, request)
             check(replay["result"]["status"] == "rejected", "retained failure silently replayed")
         status = backend.stop(expected_failure=mode == "empty-primary")
@@ -296,24 +450,64 @@ def case(binary, directory, ca, key, mode, authenticated=False, token=False, sin
         for path in root.rglob("*"):
             if path.is_file():
                 secret_free(path.read_bytes())
-        return {"mode": mode, "authenticated": authenticated, "session_token": token, "single": single, "requests": source.requests, "drained_exit": status, "result": "passed"}
+        return {
+            "mode": mode,
+            "authenticated": authenticated,
+            "session_token": token,
+            "single": single,
+            "requests": source.requests,
+            "drained_exit": status,
+            "result": "passed",
+        }
     finally:
         if backend is not None:
             backend.stop(expected_failure=mode == "empty-primary")
         source.stop()
 
 
+def package_inputs(binary):
+    """One complete S3 notice profile, with no historical reader-only fallback."""
+    directory = ROOT / ATTRIBUTION
+    return [
+        (binary, "pumas-rpc"),
+        (ROOT / "LICENSE", "LICENSE.txt"),
+        (directory / "THIRD-PARTY-NOTICES.txt", "THIRD-PARTY-NOTICES.txt"),
+        (directory / "README.md", "ATTRIBUTION-README.md"),
+        (directory / "inventory.json", "ATTRIBUTION-inventory.json"),
+    ]
+
+
+def verify_installed_inputs(installed, expected):
+    check(
+        {path.name for path in installed.iterdir()} == set(expected) | {"qualification.json"},
+        "installed archive member set differs from qualification inputs",
+    )
+    for name, expected_hash in expected.items():
+        check(digest(installed / name) == expected_hash, "installed input hash mismatch")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--provenance", type=Path, required=True)
+    parser.add_argument("--source-head", required=True)
     args = parser.parse_args()
-    args.output.mkdir(parents=True, exist_ok=True)
     binary = args.binary.resolve()
     check(binary.is_file(), "missing production binary")
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT, text=True).strip()
-    payload = {"source_head": head, "source_tree": tree, "binary_sha256": digest(binary), "provider": "controlled TLS protocol fixture; not an actual S3-compatible service", "target": "Linux x86_64", "production_profile": "release --no-default-features --features s3; no test-support"}
+    provenance = validate_provenance(
+        json.loads(args.provenance.read_text()), binary, ROOT, args.source_head
+    )
+    args.output.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "source_head": provenance["source"]["head"],
+        "source_tree": provenance["source"]["tree"],
+        "binary_sha256": provenance["binary_sha256"],
+        "build_provenance": provenance,
+        "provider": "controlled TLS protocol fixture; not an actual S3-compatible service",
+        "target": "Linux x86_64",
+        "production_profile": "release with defaults and explicit s3; no test-support; no inference claim",
+    }
     archive_path = args.output / "pumas-s3-qualification-linux.tar.gz"
     check(not archive_path.exists(), "refusing to overwrite qualification archive")
     with tempfile.TemporaryDirectory(prefix="pumas-installed-s3-") as temporary:
@@ -321,7 +515,7 @@ def main():
         stage, installed = workspace / "stage", workspace / "installed"
         stage.mkdir()
         installed.mkdir()
-        inputs = [(binary, "pumas-rpc"), (ROOT / "LICENSE", "LICENSE.txt"), (ROOT / "docs/release-attribution/0.7.0/THIRD-PARTY-NOTICES.txt", "THIRD-PARTY-NOTICES.txt"), (ROOT / "docs/plans/artifact-acquisition/reports/s3-reader-third-party-notices.txt", "S3-THIRD-PARTY-NOTICES.txt")]
+        inputs = package_inputs(binary)
         for original, name in inputs:
             shutil.copy2(original, stage / name)
         payload["packaged_files"] = {path.name: digest(path) for path in stage.iterdir()}
@@ -331,17 +525,54 @@ def main():
                 archive.add(path, arcname=path.name)
         with tarfile.open(archive_path) as archive:
             archive.extractall(installed, filter="data")
-        check(digest(installed / "pumas-rpc") == payload["binary_sha256"], "installed binary differs from build")
+        verify_installed_inputs(installed, payload["packaged_files"])
+        check(
+            digest(installed / "pumas-rpc") == payload["binary_sha256"],
+            "installed binary differs from build",
+        )
         ca = ROOT / "rust/crates/pumas-core/tests/fixtures/http-tls/localhost.pem"
         key = workspace / "fixture.key"
-        subprocess.run(["openssl", "pkcs12", "-in", str(ca.with_suffix(".p12")), "-passin", "pass:fixture", "-nocerts", "-nodes", "-out", str(key)], check=True, capture_output=True)
-        scenarios = [("success", False, False, True), ("success", False, False, False), ("success", True, False, False), ("success", True, True, False)]
-        scenarios += [(mode, True, True, False) for mode in ("digest", "missing", "unknown", "truncated", "cancel", "empty-primary")]
-        payload["scenarios"] = [case(installed / "pumas-rpc", workspace, ca, key, *scenario) for scenario in scenarios]
+        subprocess.run(
+            [
+                "openssl",
+                "pkcs12",
+                "-in",
+                str(ca.with_suffix(".p12")),
+                "-passin",
+                "pass:fixture",
+                "-nocerts",
+                "-nodes",
+                "-out",
+                str(key),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        scenarios = [
+            ("success", False, False, True),
+            ("success", False, False, False),
+            ("success", True, False, False),
+            ("success", True, True, False),
+        ]
+        scenarios += [
+            (mode, True, True, False)
+            for mode in ("digest", "missing", "unknown", "truncated", "cancel", "empty-primary")
+        ]
+        payload["scenarios"] = [
+            case(installed / "pumas-rpc", workspace, ca, key, *scenario) for scenario in scenarios
+        ]
     payload["archive_sha256"] = digest(archive_path)
     payload["result"] = "passed"
     (args.output / "installed-result.json").write_text(json.dumps(payload, indent=2) + "\n")
-    print(json.dumps({"result": "passed", "scenarios": len(payload["scenarios"]), "binary_sha256": payload["binary_sha256"]}))
+    print(
+        json.dumps(
+            {
+                "result": "passed",
+                "scenarios": len(payload["scenarios"]),
+                "binary_sha256": payload["binary_sha256"],
+            }
+        )
+    )
 
 
 if __name__ == "__main__":
@@ -351,5 +582,7 @@ if __name__ == "__main__":
         message = str(error)
         for value in (ACCESS, SECRET, TOKEN, *AMBIENT):
             message = message.replace(value, "[REDACTED]")
-        print(json.dumps({"result": "failed", "error_type": type(error).__name__, "error": message}))
+        print(
+            json.dumps({"result": "failed", "error_type": type(error).__name__, "error": message})
+        )
         raise SystemExit(1)

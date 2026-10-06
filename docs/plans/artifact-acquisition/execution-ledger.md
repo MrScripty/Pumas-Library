@@ -1,5 +1,17 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — independent installed default-plus-S3 Q4 successor admitted
+
+Separate `feat/s3-installed-prefix-main95` preserves prefix repair 0901f659.
+Admitted write set: installed harness, one build-provenance helper and focused
+controls, existing Linux release-contract test hook, and owning documentation.
+The builder binds actual Cargo events, clean source, profile, binary and full S3
+notices; the installed harness refuses guessed source/headless/default notices.
+Fourteen synthetic controls, full pinned Ruff lint/format and workflow YAML pass.
+Actual release build and ten unchanged HTTPS scenarios remain pending at this
+source milestone. Rust/native/ONNX/dependency source is unchanged. Parent owns
+PRs and hosted/provider/platform acceptance. See [scope](reports/s3-installed-default-profile-2026-10-06.md).
+
 ## 2026-10-06 — independently reviewed prefix byte-capacity repair
 
 A private typed byte-budget cause is preserved through the maintained SDK error

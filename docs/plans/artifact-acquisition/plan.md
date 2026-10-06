@@ -1,5 +1,14 @@
 # Plan: source-neutral artifact acquisition
 
+**Q4 installed default-plus-S3 successor (2026-10-06):** Independently admitted
+`feat/s3-installed-prefix-main95` binds build provenance and complete S3 notices
+to the existing installed HTTPS fixture harness. Fourteen negative/positive
+controls, full Ruff and YAML parse pass; actual release/installed execution is
+pending. See [scope and qualification](reports/s3-installed-default-profile-2026-10-06.md).
+The current prefix branch and all frozen evidence remain separate. Provider,
+UI/platform/inference and hosted acceptance gates remain open.
+
+
 **Q3 prefix byte-capacity review repair (2026-10-06):** The maintained SDK now
 preserves typed listing byte overflow and the prefix API reports Incomplete at
 page/remaining-total capacity; malformed XML remains a protocol failure. Three

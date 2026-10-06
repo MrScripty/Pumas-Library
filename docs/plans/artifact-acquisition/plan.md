@@ -1,5 +1,14 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 resolver boundary blocker (2026-10-06):** Independent review reproduced
+source-candidate preparation before report validation despite pip dry-run and
+binary-only flags. Automatic and retained-preview resolver modes remain exposed.
+Qualified-recipe work is paused. A separately tested, unactivated private-pip
+admission proposal requires an explicit exception to the public-tooling contract;
+production source is unchanged. Nine inert placement controls pass without URL
+retrieval/build hooks. See [proposal and limits](reports/torch-resolver-source-boundary-proposal-2026-10-06.md).
+This corrects the scope of earlier automatic qualification; AQ-PACKAGES stays open.
+
 **Q2 automatic resolution source milestone (2026-10-06):** Separate branch
 `feat/torch-automatic-wheel-handoff-7a3264ac` normal-merges frozen pip repair99a55b78
 without rewriting its evidence. Tested source `5946c4738870bdcfc613430bb98fd873d9e6d6f3`

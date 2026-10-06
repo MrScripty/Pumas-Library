@@ -1,0 +1,20 @@
+{
+  "base": "cf3afb3f45762b61e882cf0ad4e738a6f18086f1",
+  "base_tree": "6fbb0dfb95646e7009dc14f9610cdeab5c6c591a",
+  "python": "3.12.14",
+  "pip": "26.2.1",
+  "activated": false,
+  "network_or_source_preparation": false,
+  "tests": {
+    "passed": 9,
+    "command": "python3 test_admission_proposal.py",
+    "scope": "candidate constructors intercepted; transport adapters in memory; no complete resolver closure or report generated"
+  },
+  "files": {
+    "admission_proposal.py": "bb8228071ad1c55b594a9ccab24adbcb5d78efe9d23eb67229cbc8179f0e885d",
+    "test_admission_proposal.py": "0241abd4d2724f95e9c5da7fce4ff2f57a2e20f8dc476daaf60d4c074e20cd53",
+    "proposal-tests.log": "a373f24dbc1d705f0f7975fa9b5acef61a09c05a3e70c7e091d9e5c0ec5eacb8",
+    "proposal-tests-initial-fixture-errors.log": "96f69ef99287c4bddb2f2580699f106db2424e876b0d0daf5ec1d40ff1a5b8b1"
+  },
+  "ruff": "All checks passed (Ruff 0.15.2); unactivated proposal only"
+}

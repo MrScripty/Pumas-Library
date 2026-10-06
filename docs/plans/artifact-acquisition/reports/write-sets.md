@@ -1017,3 +1017,23 @@ Resumed after parent instruction: normal merge `2b380b59fdc2e2896b4d3fbde53de272
 ### Automatic source completion
 
 Tested/pushed source5946c4738870bdcfc613430bb98fd873d9e6d6f3, tree295eb32167dc49ced598d1082f6f3bf086ce4679, completes the admitted bounded automatic slice. Final reviewed blobs and exact checks/failed controls are bound in the separate automatic qualification report/evidence. Owning plan/ledger/matrix/gates record limits; no frozen repair report/source rewrite, gate advancement or native/shared cleanup edits. Evidence-only successor preserves source; original temporary dependency cache restored with matching paths/modes/content/links.
+
+## Q2 resolver pre-preparation boundary investigation — 2026-10-06
+
+Independent review of frozen automatic handoff found that public pip dry-run /
+binary-only flags do not prevent preparation of direct-URL source dependencies.
+Separate investigation branch `fix/torch-resolver-source-boundary-cf3afb3f` starts
+at `cf3afb3f45762b61e882cf0ad4e738a6f18086f1`, tree
+`6fbb0dfb95646e7009dc14f9610cdeab5c6c591a`. Frozen automatic, local-pip repair
+and qualified-recipe branches remain untouched. The qualified slice is paused.
+
+Admitted evidence writes: this report, the owning plan's current-blocker notice,
+and `torch-resolver-source-boundary-proposal-2026-10-06.md` with adjacent inert
+proposal/test evidence. No production source edit is admitted by this entry.
+Contract §11 requires supported public tooling. A private, exact-version-tested
+pip admission adapter therefore needs an explicit parent contract exception;
+that decision is pending. Safe candidate/request sentinels may demonstrate
+placement without any URL retrieval, source preparation, hooks or build installs.
+The investigation does not qualify the automatic or retained-preview boundary.
+Parent owns the exception, PR/review/CI/integration and any later implementation
+admission. Native cleanup remains with its separate owner.

@@ -1,0 +1,34 @@
+   Compiling pumas-library v0.7.0 (/tmp/pumas-q2-target-packet-638b/rust/crates/pumas-core)
+   Compiling pumas-app-manager v0.7.0 (/tmp/pumas-q2-target-packet-638b/rust/crates/pumas-app-manager)
+    Finished `test` profile [unoptimized] target(s) in 1m 45s
+     Running unittests src/lib.rs (/tmp/pumas-uv-offline-build/target/debug/deps/pumas_app_manager-a6c29384ac95defc)
+
+running 25 tests
+test version_manager::installer::torch::torch_wheel_handoff_tests::accepted_packet_preserves_venv_identity_and_refuses_changed_evidence ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::accepted_target_packet_refuses_mismatch_missing_context_and_late_downgrade ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::automatic_candidate_loop_propagates_inconclusive_or_validation_errors ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::automatic_candidate_loop_stops_at_first_accepted_packet ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::embedded_qualified_runtime_contains_public_tooling_and_single_record_owner ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_recipe_catalog_preserves_complete_pins_and_selected_direct_identity ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::target_observation_projection_matches_python_unicode_fixture ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_changed_approval_retains_custody_without_receipt ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_mismatch_refuses_before_local_stage ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_missing_context_refuses_before_local_stage ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_unsupported_context_refuses_before_local_stage ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_valid_handoff_binds_receipt_and_settles ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_abandoned_waiter_holds_inputs_through_child_cleanup ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_cancel_child_retains_composite_custody_until_cleanup ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_changed_bytes_never_start_local_installation ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_failed_publication_retains_inputs_and_cold_output ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_install_then_publish_and_settle_exact_receipt ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_missing_dependency_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_preserve_existing_qualified_nunchaku_source_and_digest ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_member_mutation_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_package_ancestor_escape_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_proof_ancestor_escape_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_proof_mutation_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_provenance_mutation_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_published_without_ack_refuses_cold_replay ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 289 filtered out; finished in 13.86s
+

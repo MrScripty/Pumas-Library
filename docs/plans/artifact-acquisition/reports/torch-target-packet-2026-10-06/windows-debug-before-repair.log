@@ -1,0 +1,26 @@
+test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported (test_wheel_target.TargetTests.test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported) ... 
+  test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported (test_wheel_target.TargetTests.test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported) (detector='refcount') ... FAIL
+  test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported (test_wheel_target.TargetTests.test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported) (detector='extension-suffix') ... FAIL
+
+======================================================================
+FAIL: test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported (test_wheel_target.TargetTests.test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported) (detector='refcount')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-target-packet-638b/torch-server/tests/test_wheel_target.py", line 143, in test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported
+    with self.assertRaisesRegex(owner.UnsupportedTarget, "Debug/free-threaded"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: UnsupportedTarget not raised
+
+======================================================================
+FAIL: test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported (test_wheel_target.TargetTests.test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported) (detector='extension-suffix')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-target-packet-638b/torch-server/tests/test_wheel_target.py", line 143, in test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported
+    with self.assertRaisesRegex(owner.UnsupportedTarget, "Debug/free-threaded"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: UnsupportedTarget not raised
+
+----------------------------------------------------------------------
+Ran 1 test in 0.003s
+
+FAILED (failures=2)

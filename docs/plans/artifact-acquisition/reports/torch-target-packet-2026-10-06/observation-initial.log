@@ -1,0 +1,27 @@
+test_absent_context_remains_explicit_legacy_consumption (test_target_observation.ObservationTests.test_absent_context_remains_explicit_legacy_consumption) ... ok
+test_actual_selected_interpreter_observer_and_canonical_projection (test_target_observation.ObservationTests.test_actual_selected_interpreter_observer_and_canonical_projection) ... ok
+test_approved_native_target_survives_provider_to_venv_handoff (test_target_observation.ObservationTests.test_approved_native_target_survives_provider_to_venv_handoff) ... ok
+test_binding_preserves_artifact_identity_and_snapshots_approval (test_target_observation.ObservationTests.test_binding_preserves_artifact_identity_and_snapshots_approval) ... ok
+test_changed_interpreter_bytes_or_packet_path_refuse_before_pip (test_target_observation.ObservationTests.test_changed_interpreter_bytes_or_packet_path_refuse_before_pip) ... Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+ok
+test_missing_null_or_removed_context_never_defaults_to_legacy (test_target_observation.ObservationTests.test_missing_null_or_removed_context_never_defaults_to_legacy) ... Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+ok
+test_packet_cannot_replace_target_and_recompute_its_own_acceptance (test_target_observation.ObservationTests.test_packet_cannot_replace_target_and_recompute_its_own_acceptance) ... Invalid or incomplete verified local wheel set
+ok
+test_unsupported_or_incomplete_owner_context_refuses (test_target_observation.ObservationTests.test_unsupported_or_incomplete_owner_context_refuses) ... Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 3.868s
+
+OK

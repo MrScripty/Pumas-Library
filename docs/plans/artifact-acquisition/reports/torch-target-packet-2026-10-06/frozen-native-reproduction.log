@@ -1,0 +1,37 @@
+test_wow64_native_machine_cannot_admit_win_amd64_for_win32_python (test_wheel_target.TargetTests.test_wow64_native_machine_cannot_admit_win_amd64_for_win32_python) ... FAIL
+test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported (test_wheel_target.TargetTests.test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported) ... 
+  test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported (test_wheel_target.TargetTests.test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported) (detector='refcount') ... FAIL
+  test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported (test_wheel_target.TargetTests.test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported) (detector='extension-suffix') ... FAIL
+
+======================================================================
+FAIL: test_wow64_native_machine_cannot_admit_win_amd64_for_win32_python (test_wheel_target.TargetTests.test_wow64_native_machine_cannot_admit_win_amd64_for_win32_python)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-target-packet-638b/torch-server/tests/test_wheel_target.py", line 122, in test_wow64_native_machine_cannot_admit_win_amd64_for_win32_python
+    with self.assertRaisesRegex(owner.UnsupportedTarget, "actual interpreter"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: UnsupportedTarget not raised
+
+======================================================================
+FAIL: test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported (test_wheel_target.TargetTests.test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported) (detector='refcount')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-target-packet-638b/torch-server/tests/test_wheel_target.py", line 143, in test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported
+    with self.assertRaisesRegex(owner.UnsupportedTarget, "Debug/free-threaded"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: UnsupportedTarget not raised
+
+======================================================================
+FAIL: test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported (test_wheel_target.TargetTests.test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported) (detector='extension-suffix')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-target-packet-638b/torch-server/tests/test_wheel_target.py", line 143, in test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported
+    with self.assertRaisesRegex(owner.UnsupportedTarget, "Debug/free-threaded"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: UnsupportedTarget not raised
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.004s
+
+FAILED (failures=3)
+Confirmed frozen admission defects: WOW64 + Windows debug refcount and suffix detection. No incompatible installation attempted.

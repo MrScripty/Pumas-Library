@@ -1,5 +1,19 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 target packet/custody successor (2026-10-06):** Frozen `638bb7c` stays intact.
+Separate repair `1c40f5bc` confirms/refuses WOW64 interpreter-tag mismatch and
+Windows debug fallback detection before stage/pip. Source `24a5b5c7` binds
+separately approved complete target observation to private accepted packet,
+whole report marker environment, selected interpreter path/hash, local-consumer
+provenance and receipt digest. Missing/changed/unsupported explicit context
+refuses; absent-context automatic/preview producers and finite recipe stay
+unchanged. 52 Python tests, 25 Rust packet/shared-handoff tests, 33 feature graphs
+and strict scoped checks pass. See
+[corrections, exact packet boundary and evidence](reports/torch-target-packet-2026-10-06.md).
+No resolver adoption, observation-producer activation or catalog-completeness
+claim; approved upstream catalog authority, P1, native/provider/platform evidence
+and Q2/AQ gates remain open.
+
 **Q2 explicit target prerequisite (2026-10-06):** Source `6a688100` adds a strict
 complete wheel-target data contract and optional native-consumer validation,
 with its trusted helper materialized beside existing scripts. Experimental

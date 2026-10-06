@@ -1,0 +1,94 @@
+test_actual_local_install_validates_an_explicit_native_target (test_wheel_target.TargetTests.test_actual_local_install_validates_an_explicit_native_target) ... Processing /tmp/tmpui0q6moz/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmpui0q6moz/proof/local-requirements.txt (line 1))
+Installing collected packages: root-wheel
+Successfully installed root-wheel-1.0
+ok
+test_cli_explicit_missing_or_foreign_target_refuses_before_pip (test_wheel_target.TargetTests.test_cli_explicit_missing_or_foreign_target_refuses_before_pip) ... Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+ok
+test_complete_markers_and_tags_ignore_inspection_host (test_wheel_target.TargetTests.test_complete_markers_and_tags_ignore_inspection_host) ... ok
+test_explicit_consumer_preflight_uses_full_target_markers (test_wheel_target.TargetTests.test_explicit_consumer_preflight_uses_full_target_markers) ... ok
+test_foreign_explicit_target_cannot_install_in_native_consumer (test_wheel_target.TargetTests.test_foreign_explicit_target_cannot_install_in_native_consumer) ... ok
+test_linux_libc_floors_aliases_and_foreign_wheels (test_wheel_target.TargetTests.test_linux_libc_floors_aliases_and_foreign_wheels) ... ok
+test_macos_arm64_deployment_and_universal2 (test_wheel_target.TargetTests.test_macos_arm64_deployment_and_universal2) ... ok
+test_native_capture_reuses_public_observed_target_tags (test_wheel_target.TargetTests.test_native_capture_reuses_public_observed_target_tags) ... ok
+test_python_patch_specifiers_and_explicit_normal_abi (test_wheel_target.TargetTests.test_python_patch_specifiers_and_explicit_normal_abi) ... ok
+test_unknown_incomplete_contradictory_targets_fail_closed (test_wheel_target.TargetTests.test_unknown_incomplete_contradictory_targets_fail_closed) ... ok
+test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported (test_wheel_target.TargetTests.test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported) ... ok
+test_wire_and_marker_data_cannot_mutate_validated_target (test_wheel_target.TargetTests.test_wire_and_marker_data_cannot_mutate_validated_target) ... ok
+test_wow64_native_machine_cannot_admit_win_amd64_for_win32_python (test_wheel_target.TargetTests.test_wow64_native_machine_cannot_admit_win_amd64_for_win32_python) ... ok
+test_absent_context_remains_explicit_legacy_consumption (test_target_observation.ObservationTests.test_absent_context_remains_explicit_legacy_consumption) ... ok
+test_actual_selected_interpreter_observer_and_canonical_projection (test_target_observation.ObservationTests.test_actual_selected_interpreter_observer_and_canonical_projection) ... ok
+test_approved_native_target_survives_provider_to_venv_handoff (test_target_observation.ObservationTests.test_approved_native_target_survives_provider_to_venv_handoff) ... ok
+test_binding_preserves_artifact_identity_and_snapshots_approval (test_target_observation.ObservationTests.test_binding_preserves_artifact_identity_and_snapshots_approval) ... ok
+test_changed_interpreter_bytes_or_packet_path_refuse_before_pip (test_target_observation.ObservationTests.test_changed_interpreter_bytes_or_packet_path_refuse_before_pip) ... Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+ok
+test_missing_null_or_removed_context_never_defaults_to_legacy (test_target_observation.ObservationTests.test_missing_null_or_removed_context_never_defaults_to_legacy) ... Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+ok
+test_packet_cannot_replace_target_and_recompute_its_own_acceptance (test_target_observation.ObservationTests.test_packet_cannot_replace_target_and_recompute_its_own_acceptance) ... Invalid or incomplete verified local wheel set
+ok
+test_unsupported_or_incomplete_owner_context_refuses (test_target_observation.ObservationTests.test_unsupported_or_incomplete_owner_context_refuses) ... Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+ok
+test_actual_dependent_wheels_install_with_exact_local_report_and_record_proof (test_install_verified_wheels.LocalWheelTests.test_actual_dependent_wheels_install_with_exact_local_report_and_record_proof) ... Processing /tmp/tmpgs5svcf1/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmpgs5svcf1/proof/local-requirements.txt (line 1))
+Processing /tmp/tmpgs5svcf1/wheels/dependency_wheel-1.0-py3-none-any.whl (from -r /tmp/tmpgs5svcf1/proof/local-requirements.txt (line 2))
+Installing collected packages: root-wheel, dependency-wheel
+
+Successfully installed dependency-wheel-1.0 root-wheel-1.0
+ok
+test_actual_install_ignores_owned_local_hostile_requirements (test_install_verified_wheels.LocalWheelTests.test_actual_install_ignores_owned_local_hostile_requirements) ... Processing /tmp/tmpltlyiw8y/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmpltlyiw8y/proof/local-requirements.txt (line 1))
+Installing collected packages: root-wheel
+Successfully installed root-wheel-1.0
+ok
+test_actual_pip_report_must_have_supported_version (test_install_verified_wheels.LocalWheelTests.test_actual_pip_report_must_have_supported_version) ... Processing /tmp/tmp4dvra6ta/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmp4dvra6ta/proof/local-requirements.txt (line 1))
+Installing collected packages: root-wheel
+Successfully installed root-wheel-1.0
+Processing /tmp/tmp43tybw3v/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmp43tybw3v/proof/local-requirements.txt (line 1))
+Installing collected packages: root-wheel
+Successfully installed root-wheel-1.0
+Processing /tmp/tmpbz7qv5zk/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmpbz7qv5zk/proof/local-requirements.txt (line 1))
+Installing collected packages: root-wheel
+Successfully installed root-wheel-1.0
+ok
+test_alternate_same_name_version_bytes_refuse_before_pip (test_install_verified_wheels.LocalWheelTests.test_alternate_same_name_version_bytes_refuse_before_pip) ... ok
+test_ambient_pip_configuration_cannot_add_requirements (test_install_verified_wheels.LocalWheelTests.test_ambient_pip_configuration_cannot_add_requirements) ... ok
+test_distribution_canonicalization_accepts_existing_dotted_names (test_install_verified_wheels.LocalWheelTests.test_distribution_canonicalization_accepts_existing_dotted_names) ... ok
+test_duplicate_distribution_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_duplicate_distribution_refuses_before_pip) ... ok
+test_extra_unselected_file_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_extra_unselected_file_refuses_before_pip) ... ok
+test_hidden_direct_url_dependency_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_hidden_direct_url_dependency_refuses_before_pip) ... ok
+test_inactive_direct_url_is_also_refused (test_install_verified_wheels.LocalWheelTests.test_inactive_direct_url_is_also_refused) ... ok
+test_inactive_marker_does_not_require_a_missing_distribution (test_install_verified_wheels.LocalWheelTests.test_inactive_marker_does_not_require_a_missing_distribution) ... ok
+test_linked_wheel_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_linked_wheel_refuses_before_pip) ... ok
+test_missing_required_closure_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_missing_required_closure_refuses_before_pip) ... ok
+test_missing_selected_file_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_missing_selected_file_refuses_before_pip) ... ok
+test_required_extra_must_be_provided (test_install_verified_wheels.LocalWheelTests.test_required_extra_must_be_provided) ... ok
+test_selected_interpreter_rejects_incompatible_wheel_tags (test_install_verified_wheels.LocalWheelTests.test_selected_interpreter_rejects_incompatible_wheel_tags) ... ok
+test_transitive_extras_require_the_full_activated_closure (test_install_verified_wheels.LocalWheelTests.test_transitive_extras_require_the_full_activated_closure) ... ok
+test_wrong_dependency_version_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_wrong_dependency_version_refuses_before_pip) ... ok
+test_acquired_pin_hash_or_complete_set_difference_refuses_before_install (test_qualified_wheel_catalog.QualifiedCatalogTests.test_acquired_pin_hash_or_complete_set_difference_refuses_before_install) ... ok
+test_actual_dependency_urls_even_inactive_refuse_without_pip_or_locator_diagnostic (test_qualified_wheel_catalog.QualifiedCatalogTests.test_actual_dependency_urls_even_inactive_refuse_without_pip_or_locator_diagnostic) ... ok
+test_actual_metadata_identity_python_and_wheel_tags_refuse_before_install (test_qualified_wheel_catalog.QualifiedCatalogTests.test_actual_metadata_identity_python_and_wheel_tags_refuse_before_install) ... ok
+test_ambiguous_approved_sources_refuse_without_selection_fallback (test_qualified_wheel_catalog.QualifiedCatalogTests.test_ambiguous_approved_sources_refuse_without_selection_fallback) ... ok
+test_catalog_never_fetches_dependency_or_payload_urls (test_qualified_wheel_catalog.QualifiedCatalogTests.test_catalog_never_fetches_dependency_or_payload_urls) ... ok
+test_changed_acquired_bytes_refuse_before_public_pip (test_qualified_wheel_catalog.QualifiedCatalogTests.test_changed_acquired_bytes_refuse_before_public_pip) ... ok
+test_complete_named_catalog_and_actual_local_closure_with_extras_install (test_qualified_wheel_catalog.QualifiedCatalogTests.test_complete_named_catalog_and_actual_local_closure_with_extras_install) ... ok
+test_direct_roots_preserve_fragment_digest_and_exact_source (test_qualified_wheel_catalog.QualifiedCatalogTests.test_direct_roots_preserve_fragment_digest_and_exact_source) ... ok
+test_existing_recipe_is_finite_and_hash_pinned_without_network (test_qualified_wheel_catalog.QualifiedCatalogTests.test_existing_recipe_is_finite_and_hash_pinned_without_network) ... ok
+test_legacy_noninstall_resolver_starts_without_copied_record_owner (test_qualified_wheel_catalog.QualifiedCatalogTests.test_legacy_noninstall_resolver_starts_without_copied_record_owner) ... ok
+test_missing_active_extra_closure_refuses_even_when_recipe_set_is_complete (test_qualified_wheel_catalog.QualifiedCatalogTests.test_missing_active_extra_closure_refuses_even_when_recipe_set_is_complete) ... ok
+test_unsupported_lock_options_versions_extras_and_hashes_refuse_before_fetch (test_qualified_wheel_catalog.QualifiedCatalogTests.test_unsupported_lock_options_versions_extras_and_hashes_refuse_before_fetch) ... ok
+test_wrong_hash_foreign_source_and_source_archives_never_enter_catalog (test_qualified_wheel_catalog.QualifiedCatalogTests.test_wrong_hash_foreign_source_and_source_archives_never_enter_catalog) ... ok
+
+----------------------------------------------------------------------
+Ran 52 tests in 10.996s
+
+OK

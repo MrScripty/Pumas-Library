@@ -73,3 +73,13 @@ assertion or production dependency changed. The earlier blocker entry is
 historical. The source comparison remains 7cf17383..253cc3d1; later commits only
 add qualification evidence. Parent can publish the draft after coordinating its
 base/head; hosted review/CI, MinIO/AWS/non-AWS and Q4 remain separate open gates.
+
+
+Independent-review repair: listing XML byte exhaustion now preserves a private
+typed cause through SDK transport and maps to Incomplete, including valid page
+and remaining-total one-over boundaries. Malformed XML remains protocol error.
+Final repaired S3 units pass 30; all 66 integrations, core/production RPC Clippy
+and 324 RPC cases pass, with existing ignores unchanged. No API shape/dependency
+change. Separate Ruff0.15.2 formatting commit 6f260de6 preserves both changed
+Python ASTs; the unchanged installed harness baseline formatting issue remains.
+See [repair qualification](s3-prefix-budget-review-repair-2026-10-06.md).

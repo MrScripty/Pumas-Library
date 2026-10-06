@@ -1,5 +1,23 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — independently reviewed prefix byte-capacity repair
+
+A private typed byte-budget cause is preserved through the maintained SDK error
+chain and mapped only by prefix enumeration to documented Incomplete. Completed
+valid XML one byte over page or remaining-total capacity and unfinished overflow
+now have the correct typed outcome; malformed XML stays a protocol failure.
+The three strengthened controls fail on the original source and pass repaired.
+Full S3 units pass 30, integrations 66, strict core Clippy and production RPC
+Clippy with inherited dead-code allowance pass. Exact default-plus-S3 RPC passes
+324 tests and 12 existing ignores. Identity/retries/authentication/native/ONNX
+policies and dependencies are unchanged. See [review repair](reports/s3-prefix-budget-review-repair-2026-10-06.md).
+
+Separate pinned Python formatting checkpoint 6f260de6 changes only two edited
+release scripts and preserves their ASTs. Full Ruff lint passes; a pre-existing
+formatting failure in unchanged qualify-s3-installed.py is retained and remains
+for the independently admitted installed-harness successor. Parent owns reviews,
+publication and integration. No PR mutation occurred.
+
 ## 2026-10-06 — prefix RPC recovery and local qualification complete
 
 The owner explicitly authorized reproducible Rust cache deletion. With no active

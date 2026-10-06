@@ -1,5 +1,16 @@
 # Plan: source-neutral artifact acquisition
 
+**Q3 prefix byte-capacity review repair (2026-10-06):** The maintained SDK now
+preserves typed listing byte overflow and the prefix API reports Incomplete at
+page/remaining-total capacity; malformed XML remains a protocol failure. Three
+old-source red controls, final 30 S3 units, 66 integrations, strict core Clippy,
+production RPC Clippy and 324 RPC cases pass (12 existing RPC ignores).
+See [repair qualification](reports/s3-prefix-budget-review-repair-2026-10-06.md).
+No source identity, retry/verification, credential or native/ONNX policy changes.
+The next independent Q4 slice is truthful installed default-plus-S3 provenance
+and complete notice packaging; actual-provider/platform gates remain open.
+
+
 **Q3 bounded prefix source checkpoint (2026-10-06):** Separate
 `feat/s3-prefix-main95` preserves integrated 7cf17383 and tested attribution
 prerequisite a39121b4. Explicit bounded SDK pagination with reviewed XML agreement

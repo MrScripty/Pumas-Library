@@ -28,6 +28,11 @@ pub(super) struct ListXmlGuard {
 #[derive(Clone, Debug)]
 pub(super) struct ListingBodyBudget(pub(super) usize);
 
+/// Private capacity evidence, preserved through the SDK's body error chain.
+#[derive(Debug, thiserror::Error)]
+#[error("S3 listing byte budget exhausted")]
+pub(super) struct ListingByteBudgetExceeded;
+
 fn invalid() -> BoxError {
     std::io::Error::other("invalid or ambiguous listing evidence").into()
 }
@@ -97,7 +102,7 @@ impl Intercept for ListXmlGuard {
         }
         let bytes = context.response().body().bytes().ok_or_else(invalid)?;
         if bytes.len() > self.max_bytes {
-            return Err(invalid());
+            return Err(Box::new(ListingByteBudgetExceeded));
         }
         self.observed_bytes.store(bytes.len(), Ordering::Release);
         let text = std::str::from_utf8(bytes).map_err(|_| invalid())?;

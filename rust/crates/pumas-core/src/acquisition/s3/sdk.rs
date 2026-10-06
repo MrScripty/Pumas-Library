@@ -142,16 +142,22 @@ impl HttpConnector for ScopedTransport {
             } else {
                 Some(1024 * 1024usize)
             };
-            let body = response.bytes_stream().scan(limit, |remaining, item| {
-                let frame = match item {
+            let successful_listing = listing_budget.is_some() && status.is_success();
+            let body = response.bytes_stream().scan(limit, move |remaining, item| {
+                let frame: Result<_, aws_smithy_runtime_api::box_error::BoxError> = match item {
                     Ok(bytes) if remaining.is_none_or(|limit| bytes.len() <= limit) => {
                         if let Some(limit) = remaining {
                             *limit -= bytes.len();
                         }
                         Ok(http_body::Frame::data(bytes))
                     }
-                    Ok(_) => Err(std::io::Error::other("error response byte bound exceeded")),
-                    Err(_) => Err(std::io::Error::other("response stream failed")),
+                    Ok(_) if successful_listing => {
+                        Err(Box::new(super::list_xml::ListingByteBudgetExceeded))
+                    }
+                    Ok(_) => {
+                        Err(std::io::Error::other("error response byte bound exceeded").into())
+                    }
+                    Err(_) => Err(std::io::Error::other("response stream failed").into()),
                 };
                 futures::future::ready(Some(frame))
             });
@@ -239,6 +245,19 @@ pub(super) fn body_stream(
 }
 pub(super) fn protocol_failure() -> S3ReaderError {
     S3ReaderError::Protocol("S3 request or response failed".into())
+}
+pub(super) fn prefix_error<E>(error: SdkError<E, HttpResponse>) -> super::S3PrefixError
+where
+    E: std::error::Error + 'static,
+{
+    let mut cause = std::error::Error::source(&error);
+    while let Some(source) = cause {
+        if source.is::<super::list_xml::ListingByteBudgetExceeded>() {
+            return super::S3PrefixError::Incomplete("XML byte bound exhausted");
+        }
+        cause = source.source();
+    }
+    protocol_error(error).into()
 }
 pub(super) fn protocol_error<E>(error: SdkError<E, HttpResponse>) -> S3ReaderError {
     match error

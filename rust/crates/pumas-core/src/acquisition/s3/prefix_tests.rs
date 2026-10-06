@@ -475,6 +475,14 @@ async fn capacity_exhaustion_and_exact_xml_boundaries_do_not_shorten_results() {
             )
             .await;
         assert_eq!(result.is_ok(), accepted);
+        if accepted {
+            let listing = result.unwrap();
+            assert_eq!(listing.xml_bytes(), complete.len());
+            assert_eq!(listing.objects().len(), 1);
+            assert_eq!(listing.objects()[0].version(), "v1");
+        } else {
+            assert!(matches!(result, Err(S3PrefixError::Incomplete(_))));
+        }
         assert_eq!(fixture.finish().await.len(), 1 + usize::from(accepted));
     }
     let too_many = page(
@@ -496,6 +504,56 @@ async fn capacity_exhaustion_and_exact_xml_boundaries_do_not_shorten_results() {
         )
         .await
         .is_err());
+    assert_eq!(fixture.finish().await.len(), 1);
+}
+
+#[tokio::test]
+async fn remaining_total_xml_byte_limit_is_typed_and_exact() {
+    let first = page("models", &[("models/a", 8)], true, None, Some("next"), 1);
+    let second = page("models", &[("models/b", 8)], false, Some("next"), None, 1);
+    for accepted in [false, true] {
+        let mut responses = vec![xml(&first), xml(&second)];
+        if accepted {
+            responses.extend([
+                head(Some("v1"), Some("\"selected\"")),
+                head(Some("v2"), Some("\"selected\"")),
+            ]);
+        }
+        let fixture = Fixture::serve(responses).await;
+        let result = anonymous(fixture.endpoint.clone())
+            .enumerate_prefix(
+                "models",
+                S3PrefixLimits {
+                    page_size: 1,
+                    max_objects: 2,
+                    max_page_bytes: first.len().max(second.len()),
+                    max_total_bytes: first.len() + second.len() - usize::from(!accepted),
+                    ..limits()
+                },
+            )
+            .await;
+        if accepted {
+            let listing = result.unwrap();
+            assert_eq!(listing.xml_bytes(), first.len() + second.len());
+            assert_eq!(listing.objects().len(), 2);
+            assert_eq!(listing.objects()[0].version(), "v1");
+            assert_eq!(listing.objects()[1].version(), "v2");
+        } else {
+            assert!(matches!(result, Err(S3PrefixError::Incomplete(_))));
+        }
+        assert_eq!(fixture.finish().await.len(), 2 + 2 * usize::from(accepted));
+    }
+}
+
+#[tokio::test]
+async fn malformed_xml_within_byte_capacity_remains_protocol_failure() {
+    let fixture = Fixture::serve(vec![xml("<ListBucketResult>")]).await;
+    assert!(matches!(
+        anonymous(fixture.endpoint.clone())
+            .enumerate_prefix("models", limits())
+            .await,
+        Err(S3PrefixError::Reader(S3ReaderError::Protocol(_)))
+    ));
     assert_eq!(fixture.finish().await.len(), 1);
 }
 
@@ -792,10 +850,7 @@ async fn wire_byte_overflow_is_refused_before_body_eof() {
     )
     .await
     .unwrap();
-    assert!(matches!(
-        result,
-        Err(S3PrefixError::Reader(S3ReaderError::Protocol(_)))
-    ));
+    assert!(matches!(result, Err(S3PrefixError::Incomplete(_))));
     tokio::time::timeout(Duration::from_secs(5), source)
         .await
         .unwrap()

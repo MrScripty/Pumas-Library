@@ -179,7 +179,7 @@ impl S3Reader {
                     .send(),
             )
             .await
-            .map_err(protocol_error)?;
+            .map_err(sdk::prefix_error)?;
             pages += 1;
             xml_bytes += observed_bytes.load(Ordering::Acquire);
             if output.name() != Some(self.bucket.as_str())

@@ -20,6 +20,7 @@ mod bundles;
 mod download;
 mod lifecycle;
 mod metadata;
+mod package_selection;
 mod search;
 mod types;
 

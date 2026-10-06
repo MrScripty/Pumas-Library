@@ -78,6 +78,33 @@ describe('useModelDownloads', () => {
     vi.useRealTimers();
   });
 
+  it.each(['paused', 'error', 'completed', 'empty'] as const)('keeps pushed %s controls when the older startup list resolves late', async (status) => {
+    let resolveList!: (value: { success: true; downloads: DownloadProgressOutcome[] }) => void;
+    listModelDownloadsMock.mockReturnValueOnce(new Promise(resolve => { resolveList = resolve; }));
+    const { result, unmount } = renderHook(() => useModelDownloads());
+    act(() => downloadUpdateCallback?.({
+      cursor: 'download:2', snapshot: { cursor: 'download:2', revision: 2,
+        downloads: status === 'empty' ? [] : [progressOutcome({ status, progress: 0.5,
+          error: status === 'error' ? 'Package validation failed' : null })],
+      }, stale_cursor: false, snapshot_required: false,
+    }));
+    await act(async () => resolveList({ success: true, downloads: [
+      progressOutcome({ status: 'downloading', progress: 0.42 }),
+    ] }));
+    if (status === 'completed' || status === 'empty') {
+      expect(result.current.downloadStatusByRepo).toEqual({});
+    } else {
+      expect(result.current.downloadStatusByRepo['artifact-1']?.status).toBe(status);
+      if (status === 'error') expect(result.current.downloadErrors['artifact-1']).toBe('Package validation failed');
+      await act(async () => { await result.current.resumeDownload('artifact-1'); });
+      expect(resumeModelDownloadMock).toHaveBeenCalledWith('dl-1');
+      expect(pauseModelDownloadMock).not.toHaveBeenCalled();
+    }
+    expect(listModelDownloadsMock).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(unsubscribeMock).toHaveBeenCalledTimes(1);
+  });
+
   it('propagates authoritative catalog association from startup and canonical pushes', async () => {
     listModelDownloadsMock.mockResolvedValueOnce({ success: true, downloads: [
       progressOutcome({ libraryModelId: 'llm/org/model' }),

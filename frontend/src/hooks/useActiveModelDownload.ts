@@ -76,6 +76,9 @@ export function useActiveModelDownload() {
 
   useEffect(() => {
     let cancelled = false;
+    // The startup list has no revision. Once the subscription supplies a full
+    // snapshot, that source owns presentation for this mounted effect.
+    let startupSuperseded = false;
 
     const loadSnapshot = async () => {
       if (!isAPIAvailable()) {
@@ -91,6 +94,10 @@ export function useActiveModelDownload() {
         if (cancelled) {
           return;
         }
+        if (startupSuperseded) {
+          logger.debug('Startup download snapshot superseded by subscribed snapshot');
+          return;
+        }
 
         applyDownloads(result.downloads.map(projectDownloadProgress));
       } catch (error) {
@@ -102,6 +109,7 @@ export function useActiveModelDownload() {
 
     const unsubscribe = getElectronAPI()?.onModelDownloadUpdate((notification) => {
       if (!cancelled) {
+        startupSuperseded = true;
         applyDownloads(notification.snapshot.downloads.map(projectDownloadProgress));
       }
     });

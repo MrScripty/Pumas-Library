@@ -13,6 +13,37 @@ tensor support. Enable `onnx-runtime` explicitly to expose `onnx_runtime` and it
 re-exported execution types. Provider descriptions and model metadata remain
 available without that feature. RPC enables it through `inference-plugins`.
 
+## Explicit Hugging Face file selections
+
+`DownloadRequest::filenames` selects both regular repository files and LFS files
+from one resolved commit. Every distinct requested path must exist in that pinned
+tree before admission. LFS selections retain the tree's size and SHA-256;
+regular files retain unknown size/digest until shared acquisition verifies their
+actual bytes. A mixed set has no selected-set size denominator while any file
+size is unknown. Explicitly selected config/tokenizer files are fetched once,
+alongside the existing automatic auxiliaries. Completion still waits for model
+import and its consumer receipt; selecting a file does not authorize code execution.
+
+Counted shard sets must be complete. Selected SafeTensors/PyTorch shards include
+only their matching `*.safetensors.index.json` / `*.bin.index.json`, and missing
+indexes fail before admission. Acquired indexes must map tensors to the exact
+selected shards, including every selected member of their shard family; invalid,
+empty, duplicate-key or out-of-selection maps cannot reach final import/completion. Existing partial metadata and recovery
+markers remain available after such a failure.
+Index validation reads verified local descriptors once without a second payload
+fetch and uses the existing 16 MiB package JSON input ceiling.
+
+A whole Diffusers request (without a file or quant selector) includes both regular
+and LFS files from the pinned tree, including component configs and tokenizer
+assets. Classification preserves explicit selectors; an incomplete explicit
+component set fails rather than becoming a whole-repository download. Acquired
+`model_index.json` must name a supported pipeline with its declared non-optional
+components in the selected set, using existing component/path semantics. An
+explicit bundle format skips the preliminary classification read; automatic
+classification retains its existing metadata observation before the one acquired
+model-index payload. Public request types, signatures and receipt identity are
+unchanged. This is package selection/import support, not inference qualification.
+
 ## Optional S3 protocol reader
 
 Enable `s3` explicitly to use `acquisition::{S3Reader, S3ReaderConfig}`. This

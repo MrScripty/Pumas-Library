@@ -90,14 +90,20 @@ export function useModelDownloads() {
   // Startup recovery plus backend-owned pushed updates.
   useEffect(() => {
     let cancelled = false;
+    // The startup list has no revision. Once the subscription supplies a full
+    // snapshot, that source owns presentation for this mounted effect.
+    let startupSuperseded = false;
 
     const restoreDownloads = async () => {
       if (!isAPIAvailable()) return;
       try {
         const result = await api.list_model_downloads();
-        if (!cancelled) {
-          applyDownloadSnapshot(result.downloads.map(projectDownloadProgress), { preserveExisting: true });
+        if (cancelled) return;
+        if (startupSuperseded) {
+          logger.debug('Startup download snapshot superseded by subscribed snapshot');
+          return;
         }
+        applyDownloadSnapshot(result.downloads.map(projectDownloadProgress), { preserveExisting: true });
       } catch (error) {
         logger.warn('Failed to restore downloads on startup', { error });
       }
@@ -106,6 +112,8 @@ export function useModelDownloads() {
     void restoreDownloads();
 
     const unsubscribe = getElectronAPI()?.onModelDownloadUpdate((notification) => {
+      if (cancelled) return;
+      startupSuperseded = true;
       applyDownloadSnapshot(notification.snapshot.downloads.map(projectDownloadProgress));
     });
 

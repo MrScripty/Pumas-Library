@@ -1,0 +1,25 @@
+lock-version = "1.0"
+created-by = "uv"
+requires-python = ">=3.12.14"
+
+[[packages]]
+name = "native-child"
+version = "1.0"
+wheels = [{ url = "file:///workspace/pumas-native-publication-reproduction/wheels/native_child-1.0-py3-none-any.whl", hashes = { sha256 = "6a1488d31acce764bc1dbf16d994f0be5a3cb05c094fe01fb79f694c9632095b" } }]
+
+[[packages]]
+name = "native-floor41"
+version = "1.0"
+wheels = [{ url = "file:///workspace/pumas-native-publication-reproduction/wheels/native_floor41-1.0-cp312-cp312-manylinux_2_41_x86_64.whl", hashes = { sha256 = "8e78085a0b68a62d5a34e4b37ebfaa9b07c67a5d138ee446bc43a65082f8657d" } }]
+
+[[packages]]
+name = "native-linux"
+version = "1.0"
+marker = "sys_platform == 'linux'"
+wheels = [{ url = "file:///workspace/pumas-native-publication-reproduction/wheels/native_linux-1.0-cp312-cp312-linux_x86_64.whl", hashes = { sha256 = "26cb4ec114b2bccbb925236d14b79e727f51a5bd3915e85e5db56336925a646a" } }]
+
+[[packages]]
+name = "native-patch"
+version = "1.0"
+marker = "python_full_version == '3.12.14'"
+wheels = [{ url = "file:///workspace/pumas-native-publication-reproduction/wheels/native_patch-1.0-py3-none-any.whl", hashes = { sha256 = "0a9357aa58efd70f0503c654d55b73bb3237fbea064c7e73925027743211cdfb" } }]

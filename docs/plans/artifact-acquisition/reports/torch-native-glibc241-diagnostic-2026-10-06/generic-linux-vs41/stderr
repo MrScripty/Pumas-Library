@@ -1,0 +1,4 @@
+error: No solution found when resolving dependencies
+  cause: Because native-floor41[tools]==1.0 has no wheels with a matching platform tag (e.g., `manylinux_2_28_x86_64`) and you require native-floor41[tools]==1.0, we can conclude that your requirements are unsatisfiable.
+
+hint: Wheels are available for `native-floor41` (v1.0) on the following platform: `manylinux_2_41_x86_64`

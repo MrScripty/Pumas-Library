@@ -1,0 +1,43 @@
+30069 execve("/workspace/pumas-reconcile-tools/bin/uv", ["/workspace/pumas-reconcile-tools"..., "--no-config", "--no-cache", "--offline", "--no-python-downloads", "--no-managed-python", "--color", "never", "pip", "compile", "roots.in", "--no-index", "--no-build", "--no-sources", "--keyring-provider", "disabled", "--python", "/opt/codex/runtimes/codex-primar"..., "--find-links", "/workspace/pumas-native-diagnost"..., "--format", "pylock.toml", "--generate-hashes", "--no-header", "--no-annotate", "-o", "pylock.toml"], 0x7ffed7788368 /* 5 vars */) = 0
+30069 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f0c1b47f990, parent_tid=0x7f0c1b47f990, exit_signal=0, stack=0x7f0c1b07f000, stack_size=0x3ff280, tls=0x7f0c1b47f6c0} => {parent_tid=[30070]}, 88) = 30070
+30070 socketpair(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0, [6, 7]) = 0
+30070 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f0c1abff990, parent_tid=0x7f0c1abff990, exit_signal=0, stack=0x7f0c1a7ff000, stack_size=0x3ff280, tls=0x7f0c1abff6c0} => {parent_tid=[30071]}, 88) = 30071
+30070 clone3({flags=CLONE_VM|CLONE_VFORK|CLONE_CLEAR_SIGHAND, exit_signal=SIGCHLD, stack=0x7f0c1c5b4000, stack_size=0x9000}, 88 <unfinished ...>
+30072 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python", ["/opt/codex/runtimes/codex-primar"..., "-I", "-B", "-c", "import sys; sys.path = [__import"...], 0x55add0d8db10 /* 6 vars */ <unfinished ...>
+30070 <... clone3 resumed>)             = 30072
+30072 <... execve resumed>)             = 0
+30072 socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 3
+30072 connect(3, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
+30072 socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 3
+30072 connect(3, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
+30072 exit_group(0)                     = ?
+30072 +++ exited with 0 +++
+30070 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=30072, si_uid=1000, si_status=0, si_utime=5 /* 0.05 s */, si_stime=1 /* 0.01 s */} ---
+30070 wait4(30072, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 30072
+30070 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f0c1a1ff990, parent_tid=0x7f0c1a1ff990, exit_signal=0, stack=0x7f0c19fff000, stack_size=0x1ff280, tls=0x7f0c1a1ff6c0} => {parent_tid=[30073]}, 88) = 30073
+30073 exit(0)                           = ?
+30073 +++ exited with 0 +++
+30070 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f0c1a1ff990, parent_tid=0x7f0c1a1ff990, exit_signal=0, stack=0x7f0c19fff000, stack_size=0x1ff280, tls=0x7f0c1a1ff6c0} => {parent_tid=[30074]}, 88) = 30074
+30070 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f0c19ffe990, parent_tid=0x7f0c19ffe990, exit_signal=0, stack=0x7f0c19dfe000, stack_size=0x1ff280, tls=0x7f0c19ffe6c0} => {parent_tid=[30075]}, 88) = 30075
+30070 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f0c197ff990, parent_tid=0x7f0c197ff990, exit_signal=0, stack=0x7f0c193ff000, stack_size=0x3ff280, tls=0x7f0c197ff6c0} => {parent_tid=[30076]}, 88) = 30076
+30070 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f0c18dff990, parent_tid=0x7f0c18dff990, exit_signal=0, stack=0x7f0c189ff000, stack_size=0x3ff280, tls=0x7f0c18dff6c0} => {parent_tid=[30077]}, 88) = 30077
+30070 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f0c189fe990, parent_tid=0x7f0c189fe990, exit_signal=0, stack=0x7f0c185fe000, stack_size=0x3ff280, tls=0x7f0c189fe6c0} => {parent_tid=[30078]}, 88) = 30078
+30070 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f0c03dff990, parent_tid=0x7f0c03dff990, exit_signal=0, stack=0x7f0c039ff000, stack_size=0x3ff280, tls=0x7f0c03dff6c0} => {parent_tid=[30079]}, 88) = 30079
+30074 exit(0)                           = ?
+30074 +++ exited with 0 +++
+30075 exit(0)                           = ?
+30075 +++ exited with 0 +++
+30077 exit(0)                           = ?
+30077 +++ exited with 0 +++
+30079 exit(0)                           = ?
+30079 +++ exited with 0 +++
+30076 exit(0)                           = ?
+30076 +++ exited with 0 +++
+30078 exit(0)                           = ?
+30078 +++ exited with 0 +++
+30071 exit(0)                           = ?
+30071 +++ exited with 0 +++
+30070 exit(0)                           = ?
+30070 +++ exited with 0 +++
+30069 exit_group(0)                     = ?
+30069 +++ exited with 0 +++

@@ -1,0 +1,10 @@
+30532 execve("/workspace/pumas-reconcile-tools/bin/uv", ["/workspace/pumas-reconcile-tools"..., "--no-config", "--no-cache", "--offline", "--no-python-downloads", "--no-managed-python", "--color", "never", "pip", "compile", "roots.in", "--no-index", "--no-build", "--no-sources", "--keyring-provider", "disabled", "--python", "/workspace/pumas-native-publicat"..., "--find-links", "/workspace/pumas-native-publicat"..., "--format", "pylock.toml", "--generate-hashes", "--no-header", "--no-annotate", "-o", "pylock.toml"], 0x7ffd5e6f8268 /* 5 vars */) = 0
+30532 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f2cf5c7f990, parent_tid=0x7f2cf5c7f990, exit_signal=0, stack=0x7f2cf587f000, stack_size=0x3ff280, tls=0x7f2cf5c7f6c0} => {parent_tid=[30533]}, 88) = 30533
+30533 socketpair(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0, [6, 7]) = 0
+30533 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f2cf53ff990, parent_tid=0x7f2cf53ff990, exit_signal=0, stack=0x7f2cf4fff000, stack_size=0x3ff280, tls=0x7f2cf53ff6c0} => {parent_tid=[30534]}, 88) = 30534
+30534 exit(0)                           = ?
+30534 +++ exited with 0 +++
+30533 exit(0)                           = ?
+30533 +++ exited with 0 +++
+30532 exit_group(2)                     = ?
+30532 +++ exited with 2 +++

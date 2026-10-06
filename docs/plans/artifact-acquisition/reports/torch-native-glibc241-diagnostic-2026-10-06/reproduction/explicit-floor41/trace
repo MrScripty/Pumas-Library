@@ -1,0 +1,3 @@
+30432 execve("/workspace/pumas-reconcile-tools/bin/uv", ["/workspace/pumas-reconcile-tools"..., "--no-config", "--no-cache", "--offline", "--no-python-downloads", "--no-managed-python", "--color", "never", "pip", "compile", "roots.in", "--no-index", "--no-build", "--no-sources", "--keyring-provider", "disabled", "--python", "/opt/codex/runtimes/codex-primar"..., "--find-links", "/workspace/pumas-native-publicat"..., "--format", "pylock.toml", "--generate-hashes", "--no-header", "--no-annotate", "-o", "pylock.toml", "--python-version", "3.12.14", "--python-platform", "x86_64-manylinux_2_41"], 0x7ffc4687ed38 /* 5 vars */) = 0
+30432 exit_group(2)                     = ?
+30432 +++ exited with 2 +++

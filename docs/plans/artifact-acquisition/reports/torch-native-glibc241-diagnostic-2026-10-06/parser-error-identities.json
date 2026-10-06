@@ -1,0 +1,63 @@
+{
+  "baseline": {
+    "source": "04fde63b151fa019b73fcf71aca636b46a35c548",
+    "tree": "910a9abef17f94af4a4f88ee14312ea0e84299dc",
+    "files": {
+      "torch-server/tests/test_embedded_runtime_imports.py": {
+        "git_blob": "b0b896b628be80f956acf919591347f319d62f67",
+        "sha256": "959854ede6983efd9b88b5d21b5bfa8de1456d73c2e86f9aa23a23b472a66fc0"
+      },
+      "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": {
+        "git_blob": "98b5b03354015188a2d5c9bfa7686ec3e4925cb5",
+        "sha256": "38832a31be38a7ad40bf215b6fa6a55117abf10f73e3e3b554bf2f84c266aa06"
+      }
+    },
+    "command": [
+      "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+      "-B",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "/workspace/pumas-reconcile-baseline/torch-server/tests",
+      "-p",
+      "test_embedded_runtime_imports.py",
+      "-v"
+    ],
+    "exit_code": 1
+  },
+  "frozen": {
+    "source": "9310c1d6a0dbbef6e602a2a9c464643e21f2d341",
+    "tree": "93c3ac702f5f17694f0062b94df2216430a7bfda",
+    "files": {
+      "torch-server/tests/test_embedded_runtime_imports.py": {
+        "git_blob": "b0b896b628be80f956acf919591347f319d62f67",
+        "sha256": "959854ede6983efd9b88b5d21b5bfa8de1456d73c2e86f9aa23a23b472a66fc0"
+      },
+      "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": {
+        "git_blob": "31e22607ecbd7840f791a84308f67a352d1e2785",
+        "sha256": "2dc2e719feabc3cd23f8b937b3eedd96daf407ce262cfe2b0fb90ce5a81680dd"
+      }
+    },
+    "command": [
+      "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+      "-B",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "/workspace/Pumas-Library/torch-server/tests",
+      "-p",
+      "test_embedded_runtime_imports.py",
+      "-v"
+    ],
+    "exit_code": 1
+  },
+  "causal_refactor": "568a5f1fca76b2253088d97f71b1d950e5beacc9",
+  "parser_last_change": "6320f938bbb27b387722c7b21f717f6d97bec3f1",
+  "test_ids": [
+    "test_embedded_runtime_imports.EmbeddedRuntimeImportTests.test_embedded_image_text_startup_imports_only_installed_local_modules",
+    "test_embedded_runtime_imports.EmbeddedRuntimeImportTests.test_missing_binding_cannot_fall_back_to_repository_pythonpath"
+  ],
+  "cause": "test line63 split expects for (name, contents) in [; lifecycle commit568a5f1 extracted table into embedded_torch_runtime_files() and changed loop delimiter. IndexError occurs during stage line94 before either isolated import probe executes."
+}

@@ -1,0 +1,109 @@
+{
+  "uv_version": "uv 0.12.23 (x86_64-unknown-linux-gnu)",
+  "uv_sha256": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f",
+  "interpreter": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+  "interpreter_sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7",
+  "python_version": "3.12.14",
+  "native_libc": {
+    "family": "glibc",
+    "version": "2.41"
+  },
+  "frozen_adapter_refusal": "Unsupported public solver libc floor",
+  "cases": [
+    {
+      "case": "native-floor41-closure",
+      "exit_code": 0,
+      "packages": [
+        "native-child",
+        "native-floor41",
+        "native-linux",
+        "native-patch"
+      ],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-floor41-no-overrides",
+      "exit_code": 0,
+      "packages": [
+        "native-child",
+        "native-floor41",
+        "native-linux",
+        "native-patch"
+      ],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "explicit-floor41",
+      "exit_code": 2,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "wheel-style-floor41",
+      "exit_code": 2,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "explicit-floor40-vs41",
+      "exit_code": 1,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "generic-linux-vs41",
+      "exit_code": 1,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "generic-gnu-vs41",
+      "exit_code": 1,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-floor42-refusal",
+      "exit_code": 1,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-wrongabi-refusal",
+      "exit_code": 1,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-floor40",
+      "exit_code": 0,
+      "packages": [
+        "native-floor40"
+      ],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "explicit-floor40",
+      "exit_code": 0,
+      "packages": [
+        "native-floor40"
+      ],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-linux-tag",
+      "exit_code": 0,
+      "packages": [
+        "native-linux"
+      ],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-missing-interpreter",
+      "exit_code": 2,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    }
+  ],
+  "scope": "Public CLI diagnostic only; no installation, catalog capability, adoption, provider qualification or enforced network denial."
+}

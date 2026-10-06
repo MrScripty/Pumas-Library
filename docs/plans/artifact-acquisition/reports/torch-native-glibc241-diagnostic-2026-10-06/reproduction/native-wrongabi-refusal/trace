@@ -1,0 +1,31 @@
+30486 execve("/workspace/pumas-reconcile-tools/bin/uv", ["/workspace/pumas-reconcile-tools"..., "--no-config", "--no-cache", "--offline", "--no-python-downloads", "--no-managed-python", "--color", "never", "pip", "compile", "roots.in", "--no-index", "--no-build", "--no-sources", "--keyring-provider", "disabled", "--python", "/opt/codex/runtimes/codex-primar"..., "--find-links", "/workspace/pumas-native-publicat"..., "--format", "pylock.toml", "--generate-hashes", "--no-header", "--no-annotate", "-o", "pylock.toml", "--python-version", "3.12.14"], 0x7ffe668ce978 /* 5 vars */) = 0
+30486 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f4cb2c7f990, parent_tid=0x7f4cb2c7f990, exit_signal=0, stack=0x7f4cb287f000, stack_size=0x3ff280, tls=0x7f4cb2c7f6c0} => {parent_tid=[30487]}, 88) = 30487
+30487 socketpair(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0, [6, 7]) = 0
+30487 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f4cb23ff990, parent_tid=0x7f4cb23ff990, exit_signal=0, stack=0x7f4cb1fff000, stack_size=0x3ff280, tls=0x7f4cb23ff6c0} => {parent_tid=[30488]}, 88) = 30488
+30487 clone3({flags=CLONE_VM|CLONE_VFORK|CLONE_CLEAR_SIGHAND, exit_signal=SIGCHLD, stack=0x7f4cb3d45000, stack_size=0x9000}, 88 <unfinished ...>
+30489 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python", ["/opt/codex/runtimes/codex-primar"..., "-I", "-B", "-c", "import sys; sys.path = [__import"...], 0x55fd2ef46b10 /* 6 vars */ <unfinished ...>
+30487 <... clone3 resumed>)             = 30489
+30489 <... execve resumed>)             = 0
+30489 socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 3
+30489 connect(3, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
+30489 socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 3
+30489 connect(3, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
+30489 exit_group(0)                     = ?
+30489 +++ exited with 0 +++
+30487 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=30489, si_uid=1000, si_status=0, si_utime=4 /* 0.04 s */, si_stime=1 /* 0.01 s */} ---
+30487 wait4(30489, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 30489
+30487 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f4cb19ff990, parent_tid=0x7f4cb19ff990, exit_signal=0, stack=0x7f4cb17ff000, stack_size=0x1ff280, tls=0x7f4cb19ff6c0} => {parent_tid=[30490]}, 88) = 30490
+30490 exit(0)                           = ?
+30490 +++ exited with 0 +++
+30487 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f4cb19ff990, parent_tid=0x7f4cb19ff990, exit_signal=0, stack=0x7f4cb17ff000, stack_size=0x1ff280, tls=0x7f4cb19ff6c0} => {parent_tid=[30491]}, 88) = 30491
+30487 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f4cb17fe990, parent_tid=0x7f4cb17fe990, exit_signal=0, stack=0x7f4cb15fe000, stack_size=0x1ff280, tls=0x7f4cb17fe6c0} => {parent_tid=[30492]}, 88) = 30492
+30491 exit(0)                           = ?
+30491 +++ exited with 0 +++
+30492 exit(0)                           = ?
+30492 +++ exited with 0 +++
+30488 exit(0)                           = ?
+30488 +++ exited with 0 +++
+30487 exit(0)                           = ?
+30487 +++ exited with 0 +++
+30486 exit_group(1)                     = ?
+30486 +++ exited with 1 +++

@@ -1,0 +1,42 @@
+{
+  "argv": [
+    "/workspace/pumas-reconcile-tools/bin/uv",
+    "--no-config",
+    "--no-cache",
+    "--offline",
+    "--no-python-downloads",
+    "--no-managed-python",
+    "--color",
+    "never",
+    "pip",
+    "compile",
+    "roots.in",
+    "--no-index",
+    "--no-build",
+    "--no-sources",
+    "--keyring-provider",
+    "disabled",
+    "--python",
+    "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+    "--find-links",
+    "/workspace/pumas-native-diagnostic/wheels",
+    "--format",
+    "pylock.toml",
+    "--generate-hashes",
+    "--no-header",
+    "--no-annotate",
+    "-o",
+    "pylock.toml",
+    "--python-version",
+    "3.12.14",
+    "--python-platform",
+    "x86_64-unknown-linux-gnu"
+  ],
+  "environment": {
+    "PATH": "/usr/bin:/bin",
+    "LANG": "C.UTF-8",
+    "XDG_CONFIG_HOME": "/workspace/pumas-native-diagnostic/generic-gnu-vs41/config",
+    "UV_CACHE_DIR": "/workspace/pumas-native-diagnostic/generic-gnu-vs41/cache",
+    "TMPDIR": "/workspace/pumas-native-diagnostic/generic-gnu-vs41/tmp"
+  }
+}

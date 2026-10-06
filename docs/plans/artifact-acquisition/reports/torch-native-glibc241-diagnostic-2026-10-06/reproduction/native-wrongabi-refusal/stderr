@@ -1,0 +1,4 @@
+error: No solution found when resolving dependencies
+  cause: Because native-wrongabi==1.0 has no wheels with a matching Python implementation tag (e.g., `cp312`) and you require native-wrongabi==1.0, we can conclude that your requirements are unsatisfiable.
+
+hint: You require CPython 3.12 (`cp312`), but we only found wheels for `native-wrongabi` (v1.0) with the following Python implementation tag: `cp313`

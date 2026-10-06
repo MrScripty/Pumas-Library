@@ -1,0 +1,8 @@
+lock-version = "1.0"
+created-by = "uv"
+requires-python = ">=3.12.14"
+
+[[packages]]
+name = "native-linux"
+version = "1.0"
+wheels = [{ url = "file:///workspace/pumas-native-diagnostic/wheels/native_linux-1.0-cp312-cp312-linux_x86_64.whl", hashes = { sha256 = "21ba538fbe3bf23324c418e579a9d7586e2468523759fb4a12bc4e18b2502522" } }]

@@ -1,0 +1,129 @@
+{
+  "uv_version": "uv 0.12.23 (x86_64-unknown-linux-gnu)",
+  "uv_sha256": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f",
+  "interpreter": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+  "interpreter_sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7",
+  "python_version": "3.12.14",
+  "native_libc": {
+    "family": "glibc",
+    "version": "2.41"
+  },
+  "frozen_adapter_refusal": "Unsupported public solver libc floor",
+  "cases": [
+    {
+      "case": "native-floor41-closure",
+      "exit_code": 0,
+      "packages": [
+        "native-child",
+        "native-floor41",
+        "native-linux",
+        "native-patch"
+      ],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-floor41-no-overrides",
+      "exit_code": 0,
+      "packages": [
+        "native-child",
+        "native-floor41",
+        "native-linux",
+        "native-patch"
+      ],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "explicit-floor41",
+      "exit_code": 2,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "wheel-style-floor41",
+      "exit_code": 2,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "explicit-floor40-vs41",
+      "exit_code": 1,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "generic-linux-vs41",
+      "exit_code": 1,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "generic-gnu-vs41",
+      "exit_code": 1,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-floor42-refusal",
+      "exit_code": 1,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-wrongabi-refusal",
+      "exit_code": 1,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-floor40",
+      "exit_code": 0,
+      "packages": [
+        "native-floor40"
+      ],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "explicit-floor40",
+      "exit_code": 0,
+      "packages": [
+        "native-floor40"
+      ],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-linux-tag",
+      "exit_code": 0,
+      "packages": [
+        "native-linux"
+      ],
+      "ip_socket_calls_observed": 0
+    },
+    {
+      "case": "native-missing-interpreter",
+      "exit_code": 2,
+      "packages": [],
+      "ip_socket_calls_observed": 0
+    }
+  ],
+  "scope": "Public CLI diagnostic only; no installation, catalog capability, adoption, provider qualification or enforced network denial.",
+  "frozen_source": "9310c1d6a0dbbef6e602a2a9c464643e21f2d341",
+  "frozen_tree": "93c3ac702f5f17694f0062b94df2216430a7bfda",
+  "official_references": [
+    "https://raw.githubusercontent.com/astral-sh/uv/0.12.23/crates/uv-configuration/src/target_triple.rs",
+    "https://raw.githubusercontent.com/astral-sh/uv/0.12.23/crates/uv/src/commands/pip/mod.rs",
+    "https://raw.githubusercontent.com/astral-sh/uv/0.12.23/crates/uv/src/commands/pip/compile.rs",
+    "https://docs.astral.sh/uv/concepts/resolution/#platform-specific-resolution",
+    "https://docs.astral.sh/uv/reference/cli/#uv-pip-compile--python"
+  ],
+  "blocked_source_lookup": "Shell GitHub API tree lookup received proxy403; route stopped without retry/settings changes. No upstream tag commit SHA independently obtained. Version-tagged official source and exact local binary hash used.",
+  "repository_contract": {
+    "file": "docs/contracts/wheel-target.md",
+    "lines": [
+      154,
+      181
+    ],
+    "python_projection": "torch-server/offline_wheel_selection.py:29",
+    "rust_projection_fence": "rust/crates/pumas-app-manager/src/version_manager/installer/torch_offline_selection.rs:399",
+    "rust_invocation": "rust/crates/pumas-app-manager/src/version_manager/installer/torch_offline_selection.rs:462"
+  }
+}

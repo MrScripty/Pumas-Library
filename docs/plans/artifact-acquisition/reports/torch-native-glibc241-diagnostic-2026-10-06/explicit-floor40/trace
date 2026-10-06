@@ -1,0 +1,33 @@
+30152 execve("/workspace/pumas-reconcile-tools/bin/uv", ["/workspace/pumas-reconcile-tools"..., "--no-config", "--no-cache", "--offline", "--no-python-downloads", "--no-managed-python", "--color", "never", "pip", "compile", "roots.in", "--no-index", "--no-build", "--no-sources", "--keyring-provider", "disabled", "--python", "/opt/codex/runtimes/codex-primar"..., "--find-links", "/workspace/pumas-native-diagnost"..., "--format", "pylock.toml", "--generate-hashes", "--no-header", "--no-annotate", "-o", "pylock.toml", "--python-version", "3.12.14", "--python-platform", "x86_64-manylinux_2_40"], 0x7fffea9b63a8 /* 5 vars */) = 0
+30152 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f062887f990, parent_tid=0x7f062887f990, exit_signal=0, stack=0x7f062847f000, stack_size=0x3ff280, tls=0x7f062887f6c0} => {parent_tid=[30153]}, 88) = 30153
+30153 socketpair(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0, [6, 7]) = 0
+30153 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f0623dff990, parent_tid=0x7f0623dff990, exit_signal=0, stack=0x7f06239ff000, stack_size=0x3ff280, tls=0x7f0623dff6c0} => {parent_tid=[30154]}, 88) = 30154
+30153 clone3({flags=CLONE_VM|CLONE_VFORK|CLONE_CLEAR_SIGHAND, exit_signal=SIGCHLD, stack=0x7f0629ac1000, stack_size=0x9000}, 88 <unfinished ...>
+30155 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python", ["/opt/codex/runtimes/codex-primar"..., "-I", "-B", "-c", "import sys; sys.path = [__import"...], 0x55838dcb2b10 /* 6 vars */ <unfinished ...>
+30153 <... clone3 resumed>)             = 30155
+30155 <... execve resumed>)             = 0
+30155 socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 3
+30155 connect(3, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
+30155 socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 3
+30155 connect(3, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
+30155 exit_group(0)                     = ?
+30155 +++ exited with 0 +++
+30153 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=30155, si_uid=1000, si_status=0, si_utime=5 /* 0.05 s */, si_stime=3 /* 0.03 s */} ---
+30153 wait4(30155, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 30155
+30153 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f06233ff990, parent_tid=0x7f06233ff990, exit_signal=0, stack=0x7f06231ff000, stack_size=0x1ff280, tls=0x7f06233ff6c0} => {parent_tid=[30156]}, 88) = 30156
+30156 exit(0)                           = ?
+30156 +++ exited with 0 +++
+30153 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f06233ff990, parent_tid=0x7f06233ff990, exit_signal=0, stack=0x7f06231ff000, stack_size=0x1ff280, tls=0x7f06233ff6c0} => {parent_tid=[30157]}, 88) = 30157
+30153 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f06231fe990, parent_tid=0x7f06231fe990, exit_signal=0, stack=0x7f0622ffe000, stack_size=0x1ff280, tls=0x7f06231fe6c0} => {parent_tid=[30158]}, 88) = 30158
+30153 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7f06229ff990, parent_tid=0x7f06229ff990, exit_signal=0, stack=0x7f06225ff000, stack_size=0x3ff280, tls=0x7f06229ff6c0} => {parent_tid=[30159]}, 88) = 30159
+30157 exit(0)                           = ?
+30157 +++ exited with 0 +++
+30158 exit(0)                           = ?
+30158 +++ exited with 0 +++
+30159 exit(0)                           = ?
+30159 +++ exited with 0 +++
+30153 exit(0)                           = ?
+30153 +++ exited with 0 +++
+30152 exit_group(0)                     = ?
+30154 +++ exited with 0 +++
+30152 +++ exited with 0 +++

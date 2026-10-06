@@ -1,0 +1,47 @@
+{
+  "base_commit": "cdbeabe638ca82d6706fc8618c119ff3079fe589",
+  "base_tree": "f56826efc9d781bf5776a71983c10631109707b5",
+  "tested_source_commit": "6a6881009da788356269f76a1b0497fa70e7a926",
+  "tested_source_tree": "7cf43f459e343e90e349b88e8584ca6b65ca8dcc",
+  "source_files": {
+    "torch-server/wheel_target.py": "49ee9e6d8ae672480cd55540cb3353a83e9f668ead23430220e91ff8923f84c2",
+    "torch-server/install_verified_wheels.py": "5a9094aed5db4efb10982505409dcb95a4e750ee5e90933134cdc3f4971d3ed6",
+    "torch-server/tests/test_wheel_target.py": "95ea1d30dca53b53a795d7e276d5d5ea2f3c763438d7f92751c1c3871f0cf8c3",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": "9278761e515583c9379c7057f4d2db4a0a43f732b1b1359dda31c89cff22893c",
+    "docs/plans/artifact-acquisition/reports/torch-offline-catalog-2026-10-06/evaluate_offline.py": "34f8f5c9ae0600dd2234aa2941f9eff7fc7d631e1eea2eeb836a98eac3692c0e",
+    "docs/plans/artifact-acquisition/reports/torch-direct-root-binding-2026-10-06/check_direct_roots.py": "54d0e64d4eb133d579377e5f7954c2fa5b28a152744e1196fd002e357ecdb0af",
+    "docs/plans/artifact-acquisition/reports/torch-explicit-target-2026-10-06/fixture_target.py": "197e080de43ab4dec16b5ce26a9522331f091e69e994c90d540f4b5a78f1845b"
+  },
+  "raw_archive": {
+    "sha256": "9519813d3557c865c2146ef39b024f255063196da9f50484a8b3d22d175e33cf",
+    "bytes": 382737,
+    "members": 1730,
+    "authoritative_runs": [
+      "final-targets",
+      "final-direct-root"
+    ],
+    "earlier_runs": "refinement/regression observations retained; no failed control assertions"
+  },
+  "test_groups": {
+    "target_unit": 11,
+    "existing_consumer": 18,
+    "qualified_catalog": 13,
+    "rust_handoff": 1,
+    "feature_graphs": 33,
+    "target_cli_cases": 36,
+    "target_cli_assertions": 341,
+    "direct_root_controls": 6,
+    "direct_root_assertions": 50
+  },
+  "unchanged_uv_sha256": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f",
+  "unchanged_shared_experiment_harness_sha256": "bd6adca9a7a3f1206280a4779887becfef65280adcbe12f0780ec600cc25cbfa",
+  "shared_experiment_harness_provenance": "../torch-offline-catalog-2026-10-06/provenance.json",
+  "production_materialization_test": "version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_install_then_publish_and_settle_exact_receipt",
+  "cargo_command": "CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=/tmp/pumas-uv-offline-build/target flock /tmp/pumas-cargo-admission/cargo.lock cargo test --offline --locked --manifest-path rust/Cargo.toml -p pumas-app-manager --features test-support verified_wheels_install_then_publish_and_settle_exact_receipt",
+  "executor_continuity": "Same executor remained accessible. Original active Rust command joined successfully; no restart, environment switch or authentication/security change.",
+  "protected_changed_paths": [],
+  "silent_success_logs": {
+    "rustfmt.log": "Scoped rustfmt command returned exit code 0 with no output."
+  },
+  "raw_log_whitespace": "Original joined Rust log retains its trailing blank line. Scoped source/document diff checks exclude raw *.log output."
+}

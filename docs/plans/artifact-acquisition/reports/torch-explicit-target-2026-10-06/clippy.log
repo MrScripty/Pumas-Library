@@ -1,0 +1,23 @@
+    Checking tokio v1.49.0
+    Checking tokio-util v0.7.18
+    Checking h2 v0.4.16
+    Checking hyper v1.8.1
+    Checking hyper-util v0.1.19
+    Checking tower v0.5.3
+    Checking tokio-native-tls v0.3.1
+    Checking crc-catalog v2.4.0
+    Checking crc v3.4.0
+    Checking tower-http v0.6.8
+    Checking hyper-tls v0.6.0
+    Checking lzma-sys v0.1.20
+    Checking bzip2-sys v0.1.13+1.0.8
+    Checking byteorder v1.5.0
+    Checking lzma-rs v0.3.0
+    Checking reqwest v0.12.28
+    Checking bzip2 v0.5.2
+    Checking xz2 v0.1.7
+    Checking deflate64 v0.1.10
+    Checking zip v2.4.2
+    Checking pumas-library v0.7.0 (/tmp/pumas-q2-target-cdbe/rust/crates/pumas-core)
+    Checking pumas-app-manager v0.7.0 (/tmp/pumas-q2-target-cdbe/rust/crates/pumas-app-manager)
+    Finished `dev` profile [unoptimized] target(s) in 55.21s

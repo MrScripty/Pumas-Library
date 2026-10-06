@@ -1,0 +1,40 @@
+test_actual_dependent_wheels_install_with_exact_local_report_and_record_proof (test_install_verified_wheels.LocalWheelTests.test_actual_dependent_wheels_install_with_exact_local_report_and_record_proof) ... Processing /tmp/tmpn9qo1wiq/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmpn9qo1wiq/proof/local-requirements.txt (line 1))
+Processing /tmp/tmpn9qo1wiq/wheels/dependency_wheel-1.0-py3-none-any.whl (from -r /tmp/tmpn9qo1wiq/proof/local-requirements.txt (line 2))
+Installing collected packages: root-wheel, dependency-wheel
+
+Successfully installed dependency-wheel-1.0 root-wheel-1.0
+ok
+test_actual_install_ignores_owned_local_hostile_requirements (test_install_verified_wheels.LocalWheelTests.test_actual_install_ignores_owned_local_hostile_requirements) ... Processing /tmp/tmp2j51odx6/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmp2j51odx6/proof/local-requirements.txt (line 1))
+Installing collected packages: root-wheel
+Successfully installed root-wheel-1.0
+ok
+test_actual_pip_report_must_have_supported_version (test_install_verified_wheels.LocalWheelTests.test_actual_pip_report_must_have_supported_version) ... Processing /tmp/tmpvjd0b4_h/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmpvjd0b4_h/proof/local-requirements.txt (line 1))
+Installing collected packages: root-wheel
+Successfully installed root-wheel-1.0
+Processing /tmp/tmpua935i44/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmpua935i44/proof/local-requirements.txt (line 1))
+Installing collected packages: root-wheel
+Successfully installed root-wheel-1.0
+Processing /tmp/tmpcj5mvoht/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmpcj5mvoht/proof/local-requirements.txt (line 1))
+Installing collected packages: root-wheel
+Successfully installed root-wheel-1.0
+ok
+test_alternate_same_name_version_bytes_refuse_before_pip (test_install_verified_wheels.LocalWheelTests.test_alternate_same_name_version_bytes_refuse_before_pip) ... ok
+test_ambient_pip_configuration_cannot_add_requirements (test_install_verified_wheels.LocalWheelTests.test_ambient_pip_configuration_cannot_add_requirements) ... ok
+test_distribution_canonicalization_accepts_existing_dotted_names (test_install_verified_wheels.LocalWheelTests.test_distribution_canonicalization_accepts_existing_dotted_names) ... ok
+test_duplicate_distribution_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_duplicate_distribution_refuses_before_pip) ... ok
+test_extra_unselected_file_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_extra_unselected_file_refuses_before_pip) ... ok
+test_hidden_direct_url_dependency_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_hidden_direct_url_dependency_refuses_before_pip) ... ok
+test_inactive_direct_url_is_also_refused (test_install_verified_wheels.LocalWheelTests.test_inactive_direct_url_is_also_refused) ... ok
+test_inactive_marker_does_not_require_a_missing_distribution (test_install_verified_wheels.LocalWheelTests.test_inactive_marker_does_not_require_a_missing_distribution) ... ok
+test_linked_wheel_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_linked_wheel_refuses_before_pip) ... ok
+test_missing_required_closure_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_missing_required_closure_refuses_before_pip) ... ok
+test_missing_selected_file_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_missing_selected_file_refuses_before_pip) ... ok
+test_required_extra_must_be_provided (test_install_verified_wheels.LocalWheelTests.test_required_extra_must_be_provided) ... ok
+test_selected_interpreter_rejects_incompatible_wheel_tags (test_install_verified_wheels.LocalWheelTests.test_selected_interpreter_rejects_incompatible_wheel_tags) ... ok
+test_transitive_extras_require_the_full_activated_closure (test_install_verified_wheels.LocalWheelTests.test_transitive_extras_require_the_full_activated_closure) ... ok
+test_wrong_dependency_version_refuses_before_pip (test_install_verified_wheels.LocalWheelTests.test_wrong_dependency_version_refuses_before_pip) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 4.219s
+
+OK

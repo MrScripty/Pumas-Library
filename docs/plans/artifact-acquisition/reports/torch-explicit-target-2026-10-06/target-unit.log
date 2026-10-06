@@ -1,0 +1,22 @@
+test_actual_local_install_validates_an_explicit_native_target (test_wheel_target.TargetTests.test_actual_local_install_validates_an_explicit_native_target) ... Processing /tmp/tmp5rl6luix/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmp5rl6luix/proof/local-requirements.txt (line 1))
+Installing collected packages: root-wheel
+Successfully installed root-wheel-1.0
+ok
+test_cli_explicit_missing_or_foreign_target_refuses_before_pip (test_wheel_target.TargetTests.test_cli_explicit_missing_or_foreign_target_refuses_before_pip) ... Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+ok
+test_complete_markers_and_tags_ignore_inspection_host (test_wheel_target.TargetTests.test_complete_markers_and_tags_ignore_inspection_host) ... ok
+test_explicit_consumer_preflight_uses_full_target_markers (test_wheel_target.TargetTests.test_explicit_consumer_preflight_uses_full_target_markers) ... ok
+test_foreign_explicit_target_cannot_install_in_native_consumer (test_wheel_target.TargetTests.test_foreign_explicit_target_cannot_install_in_native_consumer) ... ok
+test_linux_libc_floors_aliases_and_foreign_wheels (test_wheel_target.TargetTests.test_linux_libc_floors_aliases_and_foreign_wheels) ... ok
+test_macos_arm64_deployment_and_universal2 (test_wheel_target.TargetTests.test_macos_arm64_deployment_and_universal2) ... ok
+test_native_capture_reuses_public_observed_target_tags (test_wheel_target.TargetTests.test_native_capture_reuses_public_observed_target_tags) ... ok
+test_python_patch_specifiers_and_explicit_normal_abi (test_wheel_target.TargetTests.test_python_patch_specifiers_and_explicit_normal_abi) ... ok
+test_unknown_incomplete_contradictory_targets_fail_closed (test_wheel_target.TargetTests.test_unknown_incomplete_contradictory_targets_fail_closed) ... ok
+test_wire_and_marker_data_cannot_mutate_validated_target (test_wheel_target.TargetTests.test_wire_and_marker_data_cannot_mutate_validated_target) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.366s
+
+OK

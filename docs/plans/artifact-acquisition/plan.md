@@ -1,5 +1,17 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 explicit target prerequisite (2026-10-06):** Source `6a688100` adds a strict
+complete wheel-target data contract and optional native-consumer validation,
+with its trusted helper materialized beside existing scripts. Experimental
+acquired-wheel/marker/ABI/libc/selected-closure checks share that target and full
+patch version; unknown/incomplete data and unprojectable host marker policies
+refuse. Target/consumer/finite suites, actual shared handoff, feature graphs and
+42 CLI/checker controls pass. See
+[exact contract slice and evidence](reports/torch-explicit-target-2026-10-06.md).
+Frozen experiments and qualified recipe behavior remain unchanged. No production
+resolver adoption or dependency change; upstream catalog authority, automatic/
+preview P1, actual native/provider/platform acceptance and AQ gates remain open.
+
 **Q2 exact direct-root checker successor (2026-10-06):** Independent review
 accepts9eda2944 only as bounded evidence and identifies a static validation gap,
 not observed uv misselection: name==version closure could accept another admitted

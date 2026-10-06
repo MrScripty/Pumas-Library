@@ -1,0 +1,30 @@
+   Compiling tokio v1.49.0
+   Compiling tokio-util v0.7.18
+   Compiling h2 v0.4.16
+   Compiling hyper v1.8.1
+   Compiling lzma-sys v0.1.20
+   Compiling bzip2-sys v0.1.13+1.0.8
+   Compiling tower v0.5.3
+   Compiling hyper-util v0.1.19
+   Compiling tokio-native-tls v0.3.1
+   Compiling crc-catalog v2.4.0
+   Compiling tower-http v0.6.8
+   Compiling crc v3.4.0
+   Compiling hyper-tls v0.6.0
+   Compiling byteorder v1.5.0
+   Compiling zip v2.4.2
+   Compiling lzma-rs v0.3.0
+   Compiling reqwest v0.12.28
+   Compiling bzip2 v0.5.2
+   Compiling xz2 v0.1.7
+   Compiling deflate64 v0.1.10
+   Compiling pumas-library v0.7.0 (/tmp/pumas-q2-target-cdbe/rust/crates/pumas-core)
+   Compiling pumas-app-manager v0.7.0 (/tmp/pumas-q2-target-cdbe/rust/crates/pumas-app-manager)
+    Finished `test` profile [unoptimized] target(s) in 2m 05s
+     Running unittests src/lib.rs (/tmp/pumas-uv-offline-build/target/debug/deps/pumas_app_manager-a6c29384ac95defc)
+
+running 1 test
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_install_then_publish_and_settle_exact_receipt ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 306 filtered out; finished in 0.93s
+

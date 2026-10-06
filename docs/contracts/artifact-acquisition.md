@@ -395,6 +395,39 @@ unchanged and is not reset by selection. No selected packet can add sources or
 renew approval. Installing/reacquiring selected payloads, consumer settlement,
 real-provider parity and coordinated caller migration remain separate gates.
 
+The dormant local selected-packet consumer takes that live private packet by
+value and retains it with the catalog grant and pending runtime. It stages only
+its exact `id/filename` local files into a fresh owned package directory. Original
+source URLs remain catalog provenance; no synthetic resolver report or renewed
+shared `Using` authority is created. The independent checker revalidates original
+request, target, actual whole catalog, public lock and selected extras/closure
+before and after local use. Existing local tooling accepts explicit selected
+paths and seeded extras only through an opt-in keyword path; legacy admission
+and production caller behavior are unchanged.
+
+Public pip performs a real installation with the existing isolated/config-free,
+no-index/no-deps/hash-required/wheel-only flags. Its genuine version1 report must
+match every selected local URL/hash/name/version and the selected native marker
+environment. The single installed RECORD owner validates distribution identities
+and every installed member. A separate read-only verification child checks report,
+requirements and RECORD-derived manifest again; Rust retains their exact bounded
+bytes before that child and fences all outputs and installed members afterward.
+Final producer/interpreter/request/catalog/selected/lock/projection checks precede
+a private `InstalledSelectedPacket`. Children (including pip descendants) and
+registered jobs retain the live packet through cancellation/abandonment drain.
+No serialized proof can reconstruct the capability. The consumer has a separate
+120-second deadline, 2MiB report/requirements/packet caps, a 32MiB installed
+manifest cap, 200,000 members and a 64MiB selected expanded/installed byte cap.
+The deadline does not promise to interrupt an in-progress blocking filesystem job.
+
+This proof covers staged local installation only. The catalog remains an Adopted
+snapshot with its original acquisition receipt; no installation receipt replaces
+it. Publication, runtime/provider validation, recovery/adoption protocol, exact
+platform/tool provisioning, real-provider qualification and automatic/preview
+migration remain separate gates. Tiny synthetic compatible native controls cannot
+close those gates or AQ-PACKAGES/Q2 acceptance. Actual native glibc2.41 still
+refuses the pinned solver's unsupported exact target projection.
+
 The decisive test denies network during the final installation leg and rejects hidden direct-URL retrieval, alternate same-name/version wheels, and missing closure members. Resolver metadata and managed-Python bootstrap traffic remain separately recorded; the claim is exact payload handoff, not interception of every package-tool request. Sources: [pip report](https://pip.pypa.io/en/stable/reference/installation-report/) and [pip install](https://pip.pypa.io/en/stable/cli/pip_install/).
 
 The bounded retained-preview and automatic-selection Torch implementation uses

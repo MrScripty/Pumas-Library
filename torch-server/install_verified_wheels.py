@@ -48,9 +48,14 @@ class UnsupportedDependencyReference(ValueError):
     pass
 
 
-def validate_closure(metadata: dict, versions: dict, *, environment=None) -> None:
+def validate_closure(metadata: dict, versions: dict, *, environment=None, requested_extras=None) -> None:
     """Evaluate required markers and propagate requested extras to a fixed point."""
     extras = {name: {""} for name in metadata}
+    if requested_extras is not None:
+        if set(requested_extras) != set(metadata):
+            raise ValueError("Selected extras differ from the exact distribution set")
+        for name, values in requested_extras.items():
+            extras[name].update(canonicalize_name(value) for value in values)
     environment = default_environment() if environment is None else environment
     changed = True
     while changed:
@@ -96,14 +101,17 @@ def explicit_target(document):
     return target_owner().WheelTarget(document)
 
 
-def local_requirements(artifacts: list[dict], wheels: Path, *, wheel_target=None) -> tuple[list[str], dict]:
+def local_requirements(artifacts: list[dict], wheels: Path, *, wheel_target=None,
+                       local_paths=None, requested_extras=None) -> tuple[list[str], dict]:
     if not artifacts or wheels.is_symlink() or not wheels.is_dir():
         raise ValueError("Verified wheel set is missing")
     names, filenames, versions, metadata, lines = set(), set(), {}, {}, []
     selected_target = explicit_target(wheel_target) if wheel_target is not None else None
     compatible = set(selected_target.tags if selected_target is not None else sys_tags())
     environment = dict(selected_target.markers) if selected_target is not None else default_environment()
-    for artifact in artifacts:
+    if local_paths is not None and len(local_paths) != len(artifacts):
+        raise ValueError("Selected local paths differ from the exact input set")
+    for index, artifact in enumerate(artifacts):
         name = canonicalize_name(artifact["name"])
         if name in names:
             raise ValueError("Accepted distribution names are not canonically unique")
@@ -120,7 +128,14 @@ def local_requirements(artifacts: list[dict], wheels: Path, *, wheel_target=None
             or not tags & compatible
         ):
             raise ValueError("Wheel filename differs from accepted distribution or interpreter")
-        path = wheels / filename
+        path = wheels / filename if local_paths is None else Path(local_paths[index])
+        if local_paths is not None:
+            # Selected catalog directories contain alternative versions. Only
+            # explicit id/filename bindings may reach pip; never scan/find-links.
+            if (not path.is_absolute() or path.name != filename
+                    or path.parent.parent != wheels or path.parent.is_symlink()
+                    or not path.parent.is_dir()):
+                raise ValueError("Selected local wheel escaped its catalog namespace")
         if path.is_symlink() or not path.is_file():
             raise ValueError("Verified wheel member is missing or linked")
         hashed = hashlib.sha256()
@@ -176,16 +191,18 @@ def local_requirements(artifacts: list[dict], wheels: Path, *, wheel_target=None
         filenames.add(filename)
         versions[name], metadata[name] = version, document
         lines.append(f"{name} @ {path.resolve().as_uri()} --hash=sha256:{digest.lower()}")
-    if {p.name for p in wheels.iterdir()} != filenames:
+    if local_paths is None and {p.name for p in wheels.iterdir()} != filenames:
         raise ValueError("Verified local wheel directory differs from the exact accepted set")
-    validate_closure(metadata, versions, environment=environment)
+    validate_closure(metadata, versions, environment=environment, requested_extras=requested_extras)
     return lines, metadata
 
 
-def install(artifacts: list[dict], wheels: Path, target: Path, output: Path, *, wheel_target=None) -> dict:
+def install(artifacts: list[dict], wheels: Path, target: Path, output: Path, *, wheel_target=None,
+            local_paths=None, requested_extras=None) -> dict:
     if wheel_target is not None:
         explicit_target(wheel_target).require_native_consumer()
-    lines, _ = local_requirements(artifacts, wheels, wheel_target=wheel_target)
+    lines, _ = local_requirements(artifacts, wheels, wheel_target=wheel_target,
+                                 local_paths=local_paths, requested_extras=requested_extras)
     if target.is_symlink() or (target.exists() and (not target.is_dir() or any(target.iterdir()))):
         raise ValueError("Local package target must be an empty owned directory")
     output.mkdir(parents=True, exist_ok=True)
@@ -234,30 +251,7 @@ def install(artifacts: list[dict], wheels: Path, target: Path, output: Path, *, 
     )
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
-    local_report = json.loads(report.read_text(encoding="utf-8"))
-    if local_report.get("version") != "1":
-        raise ValueError("Unsupported local pip installation report version")
-    installed = local_report["install"]
-    expected = {
-        canonicalize_name(artifact["name"]): (
-            artifact["version"],
-            (wheels / wheel_filename(artifact["url"])).resolve().as_uri(),
-            artifact["sha256"].lower(),
-        )
-        for artifact in artifacts
-    }
-    observed = {}
-    for item in installed:
-        name = canonicalize_name(item["metadata"]["name"])
-        if name in observed:
-            raise ValueError("Local installation report repeats a distribution")
-        observed[name] = (
-            item["metadata"]["version"],
-            item["download_info"]["url"],
-            item["download_info"]["archive_info"]["hashes"]["sha256"].lower(),
-        )
-    if observed != expected:
-        raise ValueError("Local installation report differs from exact accepted inputs")
+    validate_installation_report(artifacts, wheels, report, local_paths=local_paths)
     manifest = owner.installed_file_manifest(
         target,
         artifacts,
@@ -269,6 +263,50 @@ def install(artifacts: list[dict], wheels: Path, target: Path, output: Path, *, 
         json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8", newline="\n"
     )
     return manifest
+
+
+def validate_installation_report(artifacts, wheels, report, *, local_paths=None):
+    """Check a genuine public-pip result against the exact original local inputs."""
+    if local_paths is not None:
+        if report.is_symlink() or not report.is_file() or report.stat().st_size > 2 * 1024 * 1024:
+            raise ValueError("Selected installation report is missing, linked or oversized")
+        with report.open("rb") as source:
+            body = source.read(2 * 1024 * 1024 + 1)
+        if len(body) > 2 * 1024 * 1024:
+            raise ValueError("Selected installation report exceeds its byte budget")
+        local_report = json.loads(body)
+    else:
+        local_report = json.loads(report.read_text(encoding="utf-8"))
+    if local_report.get("version") != "1":
+        raise ValueError("Unsupported local pip installation report version")
+    installed = local_report["install"]
+    expected = {
+        canonicalize_name(artifact["name"]): (
+            artifact["version"],
+            (wheels / wheel_filename(artifact["url"]) if local_paths is None
+             else Path(local_paths[index])).resolve().as_uri(),
+            artifact["sha256"].lower(),
+        )
+        for index, artifact in enumerate(artifacts)
+    }
+    observed = {}
+    for item in installed:
+        if local_paths is not None and (
+            item["is_direct"] is not True or item["is_yanked"] is not False
+            or item["requested"] is not True
+            or set(item["download_info"]) != {"url", "archive_info"}
+        ):
+            raise ValueError("Selected installation report contains another input kind")
+        name = canonicalize_name(item["metadata"]["name"])
+        if name in observed:
+            raise ValueError("Local installation report repeats a distribution")
+        observed[name] = (
+            item["metadata"]["version"],
+            item["download_info"]["url"],
+            item["download_info"]["archive_info"]["hashes"]["sha256"].lower(),
+        )
+    if observed != expected:
+        raise ValueError("Local installation report differs from exact accepted inputs")
 
 
 def main() -> None:

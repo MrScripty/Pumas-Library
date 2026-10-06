@@ -25,6 +25,15 @@ enum Case {
     SelectedChangedWheel,
     SelectedProjectionMutation { file: &'static str, grow: bool },
     SelectedAbandonedChecker,
+    Consumption(ConsumeCase),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ConsumeCase {
+    Success,
+    Mutation { file: &'static str, grow: bool },
+    Abandon,
+    Cancel,
 }
 
 async fn fixture(case: Case) {
@@ -83,6 +92,7 @@ async fn fixture(case: Case) {
             | Case::SelectedChangedWheel
             | Case::SelectedProjectionMutation { .. }
             | Case::SelectedAbandonedChecker
+            | Case::Consumption(_)
     ) {
         // Explicit test-only target declaration: uv 0.12.23 cannot represent
         // this executor's actual glibc 2.41. A synthetic 2.40 floor is validated
@@ -307,6 +317,7 @@ print(json.dumps(rows))
                     | Case::SelectedChangedWheel
                     | Case::SelectedProjectionMutation { .. }
                     | Case::SelectedAbandonedChecker
+                    | Case::Consumption(_)
             ));
             assert_eq!(complete.receipt.owner, CATALOG_OWNER);
             assert_eq!(complete.evidence["request_sha256"], request_hash);
@@ -360,6 +371,7 @@ print(json.dumps(rows))
             | Case::SelectedChangedWheel
             | Case::SelectedProjectionMutation { .. }
             | Case::SelectedAbandonedChecker
+            | Case::Consumption(_)
     ) {
         use super::offline_selection::{
             QualifiedOfflineSolver, SelectionContext, SelectionFailure,
@@ -438,7 +450,7 @@ print(json.dumps(rows))
         } else {
             match complete.select(context).await {
                 Ok(packet) => {
-                    assert_eq!(case, Case::Selected);
+                    assert!(matches!(case, Case::Selected | Case::Consumption(_)));
                     assert_eq!(packet.evidence["schema"], "pumas.selected-wheel-packet.v1");
                     assert_eq!(packet.evidence["request_sha256"], request_hash);
                     assert_eq!(packet.evidence["target_observation_sha256"], approved_hash);
@@ -454,8 +466,22 @@ print(json.dumps(rows))
                         "Solver must not add source traffic"
                     );
                     println!("selected packet: {}", packet.evidence);
-                    packet.catalog._grant.validate().unwrap();
-                    packet.catalog._grant.clear_contents().unwrap();
+                    if let Case::Consumption(action) = case {
+                        consume_fixture(
+                            action,
+                            packet,
+                            &installer,
+                            &consumer,
+                            &runtime,
+                            &python,
+                            &granted_path,
+                            &mut retained_stage,
+                        )
+                        .await;
+                    } else {
+                        packet.catalog._grant.validate().unwrap();
+                        packet.catalog._grant.clear_contents().unwrap();
+                    }
                 }
                 Err(refusal) => {
                     assert!(matches!(
@@ -509,7 +535,34 @@ print(json.dumps(rows))
             }
         }
     }
+    let consumer_pids: Vec<u32> = if matches!(
+        case,
+        Case::Consumption(ConsumeCase::Abandon | ConsumeCase::Cancel)
+    ) {
+        std::fs::read_to_string(runtime.join("consumer-child-alive"))
+            .unwrap()
+            .split_whitespace()
+            .map(|pid| pid.parse().unwrap())
+            .collect()
+    } else {
+        vec![]
+    };
     installer.shutdown_torch_cleanup().await.unwrap();
+    for pid in consumer_pids {
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            assert_eq!(
+                stat.rsplit_once(") ").unwrap().1.chars().next(),
+                Some('Z'),
+                "Consumer descendant must not remain live after drain"
+            );
+        }
+    }
+    if case == Case::Consumption(ConsumeCase::Abandon) {
+        assert!(
+            !runtime.exists(),
+            "Stage can reclaim only after managed group drain"
+        );
+    }
     consumer.shutdown().await.unwrap();
     service.shutdown().await.unwrap();
     let _ = stop_tx.send(());
@@ -540,6 +593,7 @@ print(json.dumps(rows))
                     | Case::SelectedChangedWheel
                     | Case::SelectedProjectionMutation { .. }
                     | Case::SelectedAbandonedChecker
+                    | Case::Consumption(_)
             )
         );
         assert_eq!(
@@ -555,6 +609,7 @@ print(json.dumps(rows))
                     | Case::SelectedChangedWheel
                     | Case::SelectedProjectionMutation { .. }
                     | Case::SelectedAbandonedChecker
+                    | Case::Consumption(_)
             )
         );
         assert_eq!(
@@ -594,7 +649,7 @@ print(json.dumps(rows))
     }
     drop(retained_stage);
     println!(
-        "catalog control {case:?}: requests={} complete={} installed=false cleanup_drained=true",
+        "catalog control {case:?}: requests={} complete={} runtime_published=false cleanup_drained=true",
         requests.load(Ordering::SeqCst),
         matches!(
             case,
@@ -607,8 +662,214 @@ print(json.dumps(rows))
                 | Case::SelectedChangedWheel
                 | Case::SelectedProjectionMutation { .. }
                 | Case::SelectedAbandonedChecker
+                | Case::Consumption(_)
         )
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn consume_fixture(
+    action: ConsumeCase,
+    packet: super::offline_selection::SelectedWheelPacket,
+    installer: &VersionInstaller,
+    consumer: &AcquisitionConsumer,
+    runtime: &Path,
+    python: &Path,
+    granted: &Path,
+    stage: &mut Option<Arc<TorchPendingStage>>,
+) {
+    use super::offline_selection::{QualifiedOfflineSolver, SelectionContext};
+    let original_receipt = serde_json::to_vec(&packet.catalog.receipt.payload).unwrap();
+    if action != ConsumeCase::Success {
+        let helper = runtime.join("consume_selected_wheels.py");
+        let mut script = std::fs::read_to_string(&helper).unwrap();
+        if let ConsumeCase::Mutation { file, grow } = action {
+            let expression = match file {
+                "report" => "args.output / 'local-pip-report.json'",
+                "manifest" => "args.output / 'installed-files.json'",
+                "requirements" => "args.output / 'local-requirements.txt'",
+                "packet" => "args.packet",
+                "lock" => "args.directory / 'pylock.toml'",
+                "projection" => "args.directory / 'projection.json'",
+                "roots" => "args.directory / 'roots.in'",
+                "constraints" => "args.directory / 'constraints.in'",
+                "target" => "args.observation",
+                "producer" => "Path(__file__).with_name('selected-target-observation.json')",
+                "wheel" => "next(args.wheels.glob('*/dependency-1-*.whl'))",
+                "installed" => "args.target / 'torch.py'",
+                "record" => "next(args.target.glob('torch-*.dist-info/RECORD'))",
+                "executable" => "Path(sys.executable)",
+                _ => panic!("Unknown controlled mutation"),
+            };
+            // Parse the same actual private helper arguments after successful
+            // verification. These are fixture-only post-verifier mutations.
+            script.push_str(&format!(
+                "\nif '--verify-only' in sys.argv:\n import os\n Path(__file__).with_name('consumer-verified').write_text('actual verifier completed')\n from types import SimpleNamespace\n args=SimpleNamespace(**{{k[2:].replace('-','_'):Path(sys.argv[i+1]) for i,k in enumerate(sys.argv) if k.startswith('--') and k!='--verify-only'}})\n p={expression}\n if {grow}:\n  with p.open('ab') as f: f.truncate(32 * 1024 * 1024)\n else:\n  q=p.with_name(p.name+'.replacement'); q.write_bytes(b'X'*p.stat().st_size); os.replace(q,p)\n",
+                grow = if grow { "True" } else { "False" },
+            ));
+        } else {
+            script.push_str("\nif '--verify-only' in sys.argv:\n import os,time,subprocess\n child=subprocess.Popen([sys.executable,'-I','-c','import time; time.sleep(120)'])\n Path(__file__).with_name('consumer-child-alive').write_text(str(os.getpid())+' '+str(child.pid)); time.sleep(120)\n");
+        }
+        std::fs::write(helper, script).unwrap();
+    }
+    let context = SelectionContext {
+        installer,
+        consumer,
+        runtime,
+        python,
+        solver: QualifiedOfflineSolver {
+            path: PathBuf::from(std::env::var("PUMAS_QUALIFIED_UV").unwrap()),
+        },
+    };
+    let mut flow = Box::pin(packet.consume(context));
+    if matches!(action, ConsumeCase::Abandon | ConsumeCase::Cancel) {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                tokio::select! {
+                    _ = &mut flow => panic!("Consumer completed before custody control"),
+                    _ = tokio::time::sleep(Duration::from_millis(25)) => {
+                        if runtime.join("consumer-child-alive").is_file() { break; }
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(runtime
+            .join("selected-consumption/proof/local-pip-report.json")
+            .is_file());
+        if action == ConsumeCase::Abandon {
+            drop(stage.take());
+            drop(flow);
+            assert!(
+                runtime.is_dir() && granted.is_dir(),
+                "Unjoined child must retain live packet and stage"
+            );
+        } else {
+            installer.cancel_flag.store(true, Ordering::SeqCst);
+            let refusal = flow.await.err().expect("Cancellation must refuse proof");
+            assert_eq!(
+                serde_json::to_vec(&refusal._packet.catalog.receipt.payload).unwrap(),
+                original_receipt
+            );
+            assert!(runtime.is_dir() && granted.is_dir());
+        }
+    } else {
+        match flow.await {
+            Ok(installed) => {
+                assert_eq!(action, ConsumeCase::Success);
+                assert_eq!(
+                    installed.evidence["schema"],
+                    "pumas.selected-local-install.v1"
+                );
+                assert!(installed.evidence["installed_files"].as_u64().unwrap() > 0);
+                assert!(installed.packages.join("torch.py").is_file());
+                assert!(installed
+                    .packages
+                    .join("branch-2.dist-info/RECORD")
+                    .is_file());
+                assert!(!installed.packages.join("branch-1.dist-info").exists());
+                assert_eq!(
+                    serde_json::to_vec(&installed._packet.catalog.receipt.payload).unwrap(),
+                    original_receipt
+                );
+                if let Ok(destination) = std::env::var("PUMAS_SELECTED_CONSUMER_EVIDENCE") {
+                    let destination = PathBuf::from(destination);
+                    std::fs::create_dir_all(&destination).unwrap();
+                    for (name, source) in [
+                        (
+                            "installation-report.json",
+                            runtime.join("selected-consumption/proof/local-pip-report.json"),
+                        ),
+                        (
+                            "installed-files.json",
+                            runtime.join("selected-consumption/proof/installed-files.json"),
+                        ),
+                        (
+                            "local-requirements.txt",
+                            runtime.join("selected-consumption/proof/local-requirements.txt"),
+                        ),
+                        (
+                            "packet.json",
+                            runtime.join("selected-consumption/packet.json"),
+                        ),
+                        ("pylock.toml", runtime.join("offline-selection/pylock.toml")),
+                        ("catalog.json", runtime.join("catalog-evidence.json")),
+                        ("request.json", runtime.join("catalog-request.json")),
+                        ("target.json", runtime.join("catalog-approved-target.json")),
+                    ] {
+                        std::fs::copy(source, destination.join(name)).unwrap();
+                    }
+                    std::fs::write(
+                        destination.join("installation-proof.json"),
+                        serde_json::to_vec(&installed.evidence).unwrap(),
+                    )
+                    .unwrap();
+                }
+                println!("actual selected installation proof: {}", installed.evidence);
+            }
+            Err(refusal) => {
+                assert!(matches!(action, ConsumeCase::Mutation { .. }));
+                assert_eq!(
+                    serde_json::to_vec(&refusal._packet.catalog.receipt.payload).unwrap(),
+                    original_receipt
+                );
+                assert!(runtime.is_dir() && granted.is_dir());
+                assert!(
+                    runtime
+                        .join("selected-consumption/proof/local-pip-report.json")
+                        .is_file(),
+                    "Mutation must follow actual installation"
+                );
+                assert!(
+                    runtime.join("consumer-verified").is_file(),
+                    "Mutation must follow actual successful verification"
+                );
+                if let ConsumeCase::Mutation { file, grow } = action {
+                    let path = match file {
+                        "report" => {
+                            runtime.join("selected-consumption/proof/local-pip-report.json")
+                        }
+                        "manifest" => {
+                            runtime.join("selected-consumption/proof/installed-files.json")
+                        }
+                        "requirements" => {
+                            runtime.join("selected-consumption/proof/local-requirements.txt")
+                        }
+                        "packet" => runtime.join("selected-consumption/packet.json"),
+                        "lock" => runtime.join("offline-selection/pylock.toml"),
+                        "projection" => runtime.join("offline-selection/projection.json"),
+                        "roots" => runtime.join("offline-selection/roots.in"),
+                        "constraints" => runtime.join("offline-selection/constraints.in"),
+                        "target" => runtime.join("catalog-approved-target.json"),
+                        "producer" => runtime.join("selected-target-observation.json"),
+                        "wheel" => walkdir::WalkDir::new(granted)
+                            .into_iter()
+                            .map(|e| e.unwrap())
+                            .find(|e| e.file_name().to_string_lossy().starts_with("dependency-1-"))
+                            .unwrap()
+                            .path()
+                            .to_owned(),
+                        "installed" => runtime.join("selected-consumption/packages/torch.py"),
+                        "record" => runtime.join(
+                            "selected-consumption/packages/torch-2.14.0+cpu.dist-info/RECORD",
+                        ),
+                        "executable" => python.to_owned(),
+                        _ => unreachable!(),
+                    };
+                    if grow {
+                        assert_eq!(std::fs::metadata(path).unwrap().len(), 32 * 1024 * 1024);
+                    } else {
+                        let mut first = [0_u8; 1];
+                        File::open(path).unwrap().read_exact(&mut first).unwrap();
+                        assert_eq!(first, [b'X']);
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(std::fs::read_dir(granted).unwrap().count(), 5);
+    println!("selected consumer control {action:?}: original_receipt_unchanged=true installation_executed=true");
 }
 
 #[tokio::test]
@@ -719,4 +980,56 @@ async fn selected_checker_cannot_hide_retained_projection_replacement() {
     for file in ["projection.json", "roots.in", "constraints.in"] {
         fixture(Case::SelectedProjectionMutation { file, grow: false }).await;
     }
+}
+
+#[tokio::test]
+#[ignore = "Explicit qualified uv, actual public pip, synthetic compatible 2.40 native target"]
+async fn complete_selected_packet_installs_exact_local_subset_with_real_report_and_record() {
+    fixture(Case::Consumption(ConsumeCase::Success)).await;
+}
+
+#[tokio::test]
+#[ignore = "Actual local install followed by verifier output/input mutations"]
+async fn selected_consumer_final_mutations_refuse_without_receipt_rewrite() {
+    for file in [
+        "report",
+        "manifest",
+        "requirements",
+        "packet",
+        "lock",
+        "projection",
+        "roots",
+        "constraints",
+        "target",
+        "producer",
+        "wheel",
+        "installed",
+        "record",
+        "executable",
+    ] {
+        fixture(Case::Consumption(ConsumeCase::Mutation {
+            file,
+            grow: false,
+        }))
+        .await;
+    }
+    for file in ["report", "manifest", "requirements"] {
+        fixture(Case::Consumption(ConsumeCase::Mutation {
+            file,
+            grow: true,
+        }))
+        .await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "Managed actual local verifier and descendant cleanup custody"]
+async fn abandoned_selected_consumer_retains_live_packet_until_descendant_drain() {
+    fixture(Case::Consumption(ConsumeCase::Abandon)).await;
+}
+
+#[tokio::test]
+#[ignore = "Managed actual local verifier cancellation and descendant cleanup"]
+async fn cancelled_selected_consumer_refuses_proof_and_preserves_catalog_receipt() {
+    fixture(Case::Consumption(ConsumeCase::Cancel)).await;
 }

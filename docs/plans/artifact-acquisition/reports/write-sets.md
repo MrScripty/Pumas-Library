@@ -1,5 +1,31 @@
 # Acquisition implementation write sets and coordination
 
+## Q2 private selected-packet local consumption — admitted 2026-10-06
+
+Parent ACKs 1769b77ee037fa7fda33df84d9bdaeff22de5006,
+tree 6eabe90bf2629da17f28a18999cfe757e33ceda2. Separate branch
+feat/torch-selected-consumer-1769b77 admits this record, owning plan,
+docs/contracts/artifact-acquisition.md, separate torch-selected-consumer-
+2026-10-06 report/evidence, torch-server/{consume_selected_wheels.py,
+install_verified_wheels.py,tests/test_consume_selected_wheels.py} and installer/
+{torch.rs,torch_offline_selection.rs,torch_selected_consumption.rs,
+torch_catalog_owner_tests.rs}. torch.rs only embeds the private helper.
+Retain live packet/catalog/grant/stage through managed children, descendants and
+registered jobs. Add an explicit local-path/root-extras mode to existing public-
+pip consumption without changing legacy admission. Recheck original catalog,
+lock, selected identities, target, interpreter and provenance; obtain a genuine
+installation report and use the sole installed RECORD owner. Final bounded
+proof/member checks return only a private staged-install capability. No resolver
+report fabrication, new acquisition, stale Using reconstruction, catalog receipt
+rewrite, publication, automatic/preview activation or main/provider acceptance.
+Qualify actual tiny local installation, independent output/member/input mutations,
+cancellation/abandonment and unchanged receipt; existing affected Python/Rust
+aggregates, 33 pre-build graphs and offline/locked strict checks. Native target
+2.41 remains unsupported in pinned uv; positive synthetic 2.40 controls stay
+explicit. Q2 original blocker classification and paused Library transfers remain.
+No dependencies, global proof/cleanup interfaces, frozen native/import/watch/S3/
+manifest writes, external provider/model downloads or host network/config edits.
+
 ## Q2 selected-projection read-bound review repair — 2026-10-06
 
 Parent freezes reviewed head 31b5c12536b07a69e7c691e90e4219490f3f3e36,

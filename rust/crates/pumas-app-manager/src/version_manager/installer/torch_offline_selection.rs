@@ -27,12 +27,20 @@ fn selection_bytes(path: &Path, maximum: usize) -> Result<Vec<u8>> {
 }
 
 fn validate_selection_provenance(runtime: &Path, provenance: &[(PathBuf, Vec<u8>)]) -> Result<()> {
+    validate_bounded_provenance(runtime, provenance, MAX_EVIDENCE)
+}
+
+fn validate_bounded_provenance(
+    runtime: &Path,
+    provenance: &[(PathBuf, Vec<u8>)],
+    maximum: usize,
+) -> Result<()> {
     for (path, expected) in provenance {
         validate_torch_owned_path(runtime, path)?;
-        // Retained inputs were admitted under MAX_EVIDENCE. Use their exact
+        // Retained inputs were admitted under their caller's cap. Use their exact
         // length here, including the bounded reader's one-byte growth sentinel;
         // a blocking comparison must never allocate the replacement's full size.
-        if expected.len() > MAX_EVIDENCE || selection_bytes(path, expected.len())? != *expected {
+        if expected.len() > maximum || selection_bytes(path, expected.len())? != *expected {
             return Err(failed("Owned offline projection changed during selection"));
         }
     }
@@ -93,6 +101,8 @@ pub(super) enum SelectionFailure {
 pub(super) struct SelectedWheelPacket {
     pub(super) evidence: serde_json::Value,
     pub(super) catalog: Arc<CompleteCatalog>,
+    // Retain exact admitted solver/checker bytes for subsequent local use.
+    provenance: Vec<(PathBuf, Vec<u8>)>,
 }
 
 pub(super) struct SelectionRefusal {
@@ -127,8 +137,20 @@ struct Projection {
 
 fn fence(catalog: &CompleteCatalog, runtime: &Path, python: &Path, wheels: &Path) -> Result<()> {
     catalog._grant.validate()?;
-    validate_torch_target_evidence(runtime, &catalog._target, python)?;
-    validate_torch_provenance(
+    if torch_interpreter_hash(python)? != catalog._target.interpreter_sha256 {
+        return Err(failed("Selected catalog consumer executable changed"));
+    }
+    if let Some(path) = &catalog._target.producer_path {
+        validate_bounded_provenance(
+            runtime,
+            &[(
+                path.clone(),
+                catalog._target.observation.as_bytes().to_vec(),
+            )],
+            64 * 1024,
+        )?;
+    }
+    validate_bounded_provenance(
         runtime,
         &[
             (
@@ -141,6 +163,7 @@ fn fence(catalog: &CompleteCatalog, runtime: &Path, python: &Path, wheels: &Path
                 catalog._target.observation.as_bytes().to_vec(),
             ),
         ],
+        MAX_REQUEST,
     )?;
     if read_bounded(&runtime.join("catalog-evidence.json"), MAX_EVIDENCE)? != catalog.evidence
         || catalog.receipt.payload != catalog.evidence
@@ -208,10 +231,10 @@ fn fence(catalog: &CompleteCatalog, runtime: &Path, python: &Path, wheels: &Path
 impl SelectionContext<'_> {
     // The managed child itself retains the whole catalog grant and pending
     // runtime through cleanup if timeout/cancellation/abandonment drops waiting.
-    async fn child(
+    async fn child<L: Send + Sync + 'static>(
         &self,
         mut command: Command,
-        catalog: Arc<CompleteCatalog>,
+        lease: Arc<L>,
         directory: &Path,
     ) -> Result<std::process::ExitStatus> {
         self.installer.check_cancelled()?;
@@ -236,7 +259,7 @@ impl SelectionContext<'_> {
             custody.clone(),
         )
         .map_err(|_| failed("Offline selection child could not start"))?;
-        child.attach_cleanup_lease(catalog);
+        child.attach_cleanup_lease(lease);
         loop {
             let observed = child.observe_exit();
             let cancelled = self.installer.cancel_flag.load(Ordering::SeqCst);
@@ -291,7 +314,7 @@ impl SelectionContext<'_> {
     async fn select_inner(
         &self,
         catalog: Arc<CompleteCatalog>,
-    ) -> std::result::Result<serde_json::Value, SelectionFailure> {
+    ) -> std::result::Result<(serde_json::Value, Vec<(PathBuf, Vec<u8>)>), SelectionFailure> {
         if self.consumer.owner() != CATALOG_OWNER {
             return Err(SelectionFailure::Refused);
         }
@@ -528,9 +551,21 @@ impl SelectionContext<'_> {
                         return Err(failed("Selected packet escaped acquired catalog identity"));
                     }
                 }
+                let mut provenance = retained;
+                for name in ["pylock.toml", "selected.json"] {
+                    let path = directory.join(name);
+                    let bytes = selection_bytes(&path, MAX_EVIDENCE)?;
+                    if (name == "pylock.toml" && format!("{:x}", Sha256::digest(&bytes)) != packet["lock_sha256"])
+                        || (name == "selected.json" && serde_json::from_slice::<serde_json::Value>(&bytes)
+                            .map_err(|_| failed("Invalid retained selected packet"))? != packet)
+                    {
+                        return Err(failed("Selected evidence changed during retention"));
+                    }
+                    provenance.push((path, bytes));
+                }
                 packet.as_object_mut().ok_or_else(|| failed("Invalid selected packet"))?.insert(
                     "qualified_solver".into(), serde_json::json!({"kind":"uv","version":"0.12.23","sha256":QUALIFIED_UV_SHA256}));
-                Ok(packet)
+                Ok((packet, provenance))
             },
         )
         .await
@@ -548,7 +583,11 @@ impl CompleteCatalog {
             .await
             .unwrap_or(Err(SelectionFailure::Incomplete));
         match result {
-            Ok(evidence) => Ok(SelectedWheelPacket { evidence, catalog }),
+            Ok((evidence, provenance)) => Ok(SelectedWheelPacket {
+                evidence,
+                catalog,
+                provenance,
+            }),
             Err(kind) => Err(SelectionRefusal {
                 kind,
                 _catalog: catalog,
@@ -556,3 +595,6 @@ impl CompleteCatalog {
         }
     }
 }
+
+#[path = "torch_selected_consumption.rs"]
+pub(super) mod local_consumption;

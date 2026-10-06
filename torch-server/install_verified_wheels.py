@@ -17,12 +17,23 @@ import sys
 from urllib.parse import unquote, urlparse
 import zipfile
 
-from pip._vendor.packaging.markers import default_environment
-from pip._vendor.packaging.requirements import Requirement
-from pip._vendor.packaging.specifiers import SpecifierSet
-from pip._vendor.packaging.tags import sys_tags
-from pip._vendor.packaging.utils import canonicalize_name, parse_wheel_filename
-from pip._vendor.packaging.version import Version
+# Embedded standalone tooling is available before target packages are installed.
+_tooling = Path(__file__).with_name("packaging-tooling.zip")
+if not _tooling.is_file():
+    _tooling = Path(__file__).parent / "tooling" / "packaging.zip"
+if _tooling.is_file():
+    sys.path.insert(0, str(_tooling))
+
+Metadata = importlib.import_module("packaging.metadata").Metadata
+default_environment = importlib.import_module("packaging.markers").default_environment
+Requirement = importlib.import_module("packaging.requirements").Requirement
+SpecifierSet = importlib.import_module("packaging.specifiers").SpecifierSet
+sys_tags = importlib.import_module("packaging.tags").sys_tags
+parse_tag = importlib.import_module("packaging.tags").parse_tag
+canonicalize_name = importlib.import_module("packaging.utils").canonicalize_name
+parse_wheel_filename = importlib.import_module("packaging.utils").parse_wheel_filename
+Version = importlib.import_module("packaging.version").Version
+InvalidVersion = importlib.import_module("packaging.version").InvalidVersion
 
 
 def wheel_filename(url: str) -> str:
@@ -31,6 +42,10 @@ def wheel_filename(url: str) -> str:
         raise ValueError("Invalid accepted wheel filename")
     parse_wheel_filename(name)
     return name
+
+
+class UnsupportedDependencyReference(ValueError):
+    pass
 
 
 def validate_closure(metadata: dict, versions: dict) -> None:
@@ -49,7 +64,9 @@ def validate_closure(metadata: dict, versions: dict) -> None:
                 # Even an inactive URL is refused: local consumption never
                 # accepts a hidden locator or delegates retrieval to pip.
                 if requirement.url is not None:
-                    raise ValueError("Dependency direct URLs are unsupported for local consumption")
+                    raise UnsupportedDependencyReference(
+                        "Dependency direct URLs are unsupported for local consumption"
+                    )
                 if requirement.marker and not any(
                     requirement.marker.evaluate({**environment, "extra": extra})
                     for extra in extras[name]
@@ -103,7 +120,33 @@ def local_requirements(artifacts: list[dict], wheels: Path) -> tuple[list[str], 
             members = [m for m in archive.infolist() if m.filename.endswith(".dist-info/METADATA")]
             if len(members) != 1 or members[0].file_size > 4 * 1024 * 1024:
                 raise ValueError("Wheel METADATA is missing, duplicated or oversized")
-            document = Parser().parsestr(archive.read(members[0]).decode("utf-8"))
+            wheel_members = [
+                m for m in archive.infolist() if m.filename.endswith(".dist-info/WHEEL")
+            ]
+            if (
+                len(wheel_members) != 1
+                or wheel_members[0].file_size > 64 * 1024
+                or wheel_members[0].filename.rsplit("/", 1)[0]
+                != members[0].filename.rsplit("/", 1)[0]
+            ):
+                raise ValueError("Wheel tag metadata is missing, duplicated or oversized")
+            wheel_document = Parser().parsestr(archive.read(wheel_members[0]).decode("utf-8"))
+            declared_tags = set()
+            for value in wheel_document.get_all("Tag", []):
+                declared_tags.update(parse_tag(value))
+            versions_declared = wheel_document.get_all("Wheel-Version", [])
+            if (
+                declared_tags != tags
+                or len(versions_declared) != 1
+                or not re.fullmatch(r"1\.\d+", versions_declared[0])
+            ):
+                raise ValueError("Wheel tag metadata differs from its compatible filename")
+            body = archive.read(members[0])
+            try:
+                Metadata.from_email(body, validate=True)
+            except ExceptionGroup:
+                raise ValueError("Wheel METADATA is invalid") from None
+            document = Parser().parsestr(body.decode("utf-8"))
         if len(document.get_all("Name", [])) != 1 or len(document.get_all("Version", [])) != 1:
             raise ValueError("Wheel METADATA distribution identity is ambiguous")
         if canonicalize_name(document["Name"]) != name or Version(document["Version"]) != version:
@@ -172,7 +215,7 @@ def install(artifacts: list[dict], wheels: Path, target: Path, output: Path) -> 
     # The existing package owner validates RECORD files without importing any
     # installed package or allowing stage code to execute during verification.
     spec = importlib.util.spec_from_file_location(
-        "pumas_resolution_owner", Path(__file__).with_name("resolve_runtime.py")
+        "pumas_resolution_owner", Path(__file__).with_name("wheel_records.py")
     )
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
@@ -200,7 +243,13 @@ def install(artifacts: list[dict], wheels: Path, target: Path, output: Path) -> 
         )
     if observed != expected:
         raise ValueError("Local installation report differs from exact accepted inputs")
-    manifest = owner.installed_file_manifest(target, artifacts)
+    manifest = owner.installed_file_manifest(
+        target,
+        artifacts,
+        canonicalize_name=canonicalize_name,
+        Version=Version,
+        InvalidVersion=InvalidVersion,
+    )
     (output / "installed-files.json").write_text(
         json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8", newline="\n"
     )
@@ -213,10 +262,35 @@ def main() -> None:
     parser.add_argument("--wheels", type=Path, required=True)
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--recipe-lock", type=Path)
+    parser.add_argument("--preview", type=Path)
     args = parser.parse_args()
+    if (args.recipe_lock is None) != (args.preview is None):
+        parser.error("Qualified wheel consumption requires both lock and preview")
     try:
         resolution = json.loads(args.resolution.read_text(encoding="utf-8"))
+        if args.recipe_lock is not None:
+            spec = importlib.util.spec_from_file_location(
+                "pumas_qualified_catalog", Path(__file__).with_name("qualified_wheel_catalog.py")
+            )
+            catalog = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(catalog)
+            lock = args.recipe_lock.read_text(encoding="utf-8")
+            preview = json.loads(args.preview.read_text(encoding="utf-8"))
+            if (
+                preview["requirementsLock"] != lock
+                or resolution.get("format") != "pumas-qualified-wheel-catalog-1"
+                or resolution.get("recipe_lock_sha256") != hashlib.sha256(lock.encode()).hexdigest()
+            ):
+                raise ValueError("Qualified catalog provenance differs from the original recipe")
+            catalog.validate_recipe_artifacts(
+                lock, preview["directArtifacts"], resolution["artifacts"]
+            )
         install(resolution["artifacts"], args.wheels, args.target, args.output)
+    except UnsupportedDependencyReference:
+        parser.exit(
+            3, "Dependency direct URLs are unsupported for local consumption; no source fallback\n"
+        )
     except (KeyError, TypeError, ValueError, OSError, zipfile.BadZipFile):
         # Package/URL metadata is untrusted. Keep stdout/stderr diagnostics
         # bounded and do not print locators or arbitrary metadata text.

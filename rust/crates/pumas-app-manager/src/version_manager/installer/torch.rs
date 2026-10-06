@@ -1232,6 +1232,14 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
             "loaders/sherry_loader.py",
             include_str!("../../../../../../torch-server/loaders/sherry_loader.py"),
         ),
+        (
+            "qualified_wheel_catalog.py",
+            include_str!("../../../../../../torch-server/qualified_wheel_catalog.py"),
+        ),
+        (
+            "wheel_records.py",
+            include_str!("../../../../../../torch-server/wheel_records.py"),
+        ),
         ("requirements.txt", lock),
     ] {
         let path = destination.join(name);
@@ -1240,6 +1248,11 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
         }
         std::fs::write(path, contents).map_err(PumasError::from)?;
     }
+    std::fs::write(
+        destination.join("packaging-tooling.zip"),
+        include_bytes!("../../../../../../torch-server/tooling/packaging.zip"),
+    )
+    .map_err(PumasError::from)?;
     let recipe = serde_json::json!({
         "recipe_id": TORCH_291.recipe_id,
         "protocol": SUPPORTED_TORCH_PROTOCOL,
@@ -1435,6 +1448,131 @@ struct PreparedTorchWheelInstall {
     requirements: String,
     interpreter_hash: String,
     provider_label: Option<String>,
+    qualified_recipe: bool,
+}
+
+// Narrow validation of the embedded recipe's finite syntax before acquiring bytes.
+// Standards-level wheel/metadata/marker/extras checks remain with public packaging.
+fn validate_qualified_artifacts(
+    lock: &str,
+    roots: &[crate::version_manager::TorchArtifact],
+    artifacts: &[crate::version_manager::TorchArtifact],
+) -> Result<()> {
+    let mut entries: std::collections::HashMap<String, (String, Option<String>, Vec<String>)> =
+        std::collections::HashMap::new();
+    let mut current: Option<String> = None;
+    for raw in lock.lines() {
+        let line = raw.trim().trim_end_matches('\\').trim();
+        if line.is_empty()
+            || line.starts_with('#')
+            || line.starts_with("--index-url ")
+            || line.starts_with("--extra-index-url ")
+        {
+            continue;
+        }
+        if let Some(hash) = line.strip_prefix("--hash=sha256:") {
+            let entry = current
+                .as_ref()
+                .and_then(|name| entries.get_mut(name))
+                .ok_or_else(|| failed("Qualified lock hash lacks an entry"))?;
+            if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(failed("Qualified lock hash is invalid"));
+            }
+            entry.2.push(hash.to_ascii_lowercase());
+            continue;
+        }
+        let (name, version, source) = if let Some((name, version)) = line.split_once("==") {
+            (name, version.to_owned(), None)
+        } else if let Some((name, url)) = line.split_once(" @ ") {
+            let root = roots
+                .iter()
+                .find(|r| r.name == name)
+                .ok_or_else(|| failed("Qualified direct root is missing"))?;
+            (name, root.version.clone(), Some(url.to_owned()))
+        } else {
+            return Err(failed("Qualified lock entry is unsupported"));
+        };
+        if entries
+            .insert(name.to_owned(), (version, source, Vec::new()))
+            .is_some()
+        {
+            return Err(failed("Qualified lock repeats a distribution"));
+        }
+        current = Some(name.to_owned());
+    }
+    if entries.is_empty() || entries.len() != artifacts.len() || entries.len() > 128 {
+        return Err(failed(
+            "Qualified wheel set differs from its complete recipe",
+        ));
+    }
+    let mut names = std::collections::HashSet::new();
+    for artifact in artifacts {
+        let (version, source, hashes) = entries
+            .get(&artifact.name)
+            .ok_or_else(|| failed("Qualified wheel is absent from the recipe"))?;
+        if !names.insert(&artifact.name)
+            || &artifact.version != version
+            || !hashes.contains(&artifact.sha256)
+        {
+            return Err(failed(
+                "Qualified wheel pin or hash differs from its recipe",
+            ));
+        }
+        let url = reqwest::Url::parse(&artifact.url)
+            .map_err(|_| failed("Qualified wheel URL is invalid"))?;
+        if url.scheme() != "https"
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || !matches!(url.port(), None | Some(443))
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || artifact
+                .url
+                .chars()
+                .any(|c| c.is_whitespace() || c.is_control())
+            || !url.path().ends_with(".whl")
+        {
+            return Err(failed("Qualified wheel source is unsupported"));
+        }
+        if let Some(source) = source {
+            let mut expected = reqwest::Url::parse(source)
+                .map_err(|_| failed("Qualified direct root URL is invalid"))?;
+            if let Some(fragment) = expected.fragment() {
+                if fragment != format!("sha256={}", artifact.sha256) {
+                    return Err(failed("Qualified root fragment differs from its digest"));
+                }
+            }
+            expected.set_fragment(None);
+            let root = roots
+                .iter()
+                .find(|r| r.name == artifact.name)
+                .ok_or_else(|| failed("Qualified selected direct root is missing"))?;
+            if expected != url
+                || root.url != *source
+                || root.sha256 != artifact.sha256
+                || root.version != artifact.version
+            {
+                return Err(failed("Qualified selected direct root changed"));
+            }
+        } else if !((url.host_str() == Some("files.pythonhosted.org")
+            && url.path().starts_with("/packages/"))
+            || (matches!(
+                url.host_str(),
+                Some("download.pytorch.org" | "download-r2.pytorch.org")
+            ) && url.path().starts_with("/whl/")))
+        {
+            return Err(failed("Qualified wheel index source is untrusted"));
+        }
+    }
+    if roots.len()
+        != entries
+            .values()
+            .filter(|(_, source, _)| source.is_some())
+            .count()
+    {
+        return Err(failed("Qualified selected roots differ from the recipe"));
+    }
+    Ok(())
 }
 
 fn accepted_torch_resolution(
@@ -2244,6 +2382,7 @@ impl VersionInstaller {
             requirements: plan.requirements.clone(),
             interpreter_hash: plan.interpreter_hash.clone(),
             provider_label: Some(format!("Python {}", plan.managed_python.version)),
+            qualified_recipe: false,
         };
         self.install_verified_prepared_torch(
             prepared,
@@ -2282,7 +2421,11 @@ impl VersionInstaller {
                 prepared.resolution_json.as_bytes().to_vec(),
             ),
             (
-                runtime.join("pip-resolution.json"),
+                runtime.join(if prepared.qualified_recipe {
+                    "qualified-preview.json"
+                } else {
+                    "pip-resolution.json"
+                }),
                 prepared.report.as_bytes().to_vec(),
             ),
             (
@@ -2363,6 +2506,10 @@ impl VersionInstaller {
                 command.arg("-I").arg(runtime.join("install_verified_wheels.py"))
                     .arg("--resolution").arg(runtime.join("resolution.json"))
                     .arg("--wheels").arg(&wheels).arg("--target").arg(&packages).arg("--output").arg(&output);
+                if prepared.qualified_recipe {
+                    command.arg("--recipe-lock").arg(runtime.join("requirements.txt"))
+                        .arg("--preview").arg(runtime.join("qualified-preview.json"));
+                }
                 let status = self.run_runtime_command_status_with_custody(command, log, "Installing exact verified local wheels", progress,
                     Some(TorchChildLease { stage: stage.clone(), _inputs: Some(inputs.clone()) }), None).await?;
                 if !status.success() { return Err(failed("Exact local wheel installation refused; see installation log")); }
@@ -2379,6 +2526,15 @@ impl VersionInstaller {
                     validate_staged_files(&packages_for_check, &installed)?;
                     move_verified_packages(&packages_for_check, &runtime_for_move, &minor)
                 }).await?;
+                if prepared.qualified_recipe {
+                    let mut validate = Command::new(&python);
+                    validate.arg("-B").arg(runtime.join("validate_runtime.py")).current_dir(&runtime)
+                        .env("HF_HUB_OFFLINE", "1").env("PYTHONNOUSERSITE", "1")
+                        .env("PYTHONDONTWRITEBYTECODE", "1");
+                    let status = self.run_runtime_command_status_with_custody(validate, log, "Validating qualified GPU and sidecar protocol", progress,
+                        Some(TorchChildLease { stage: stage.clone(), _inputs: Some(inputs.clone()) }), None).await?;
+                    if !status.success() { return Err(failed("Qualified runtime validation refused")); }
+                }
                 let mut probe = Command::new(&python);
                 probe.arg("-B").arg(runtime.join("probe_runtime.py"));
                 let status = self.run_runtime_command_status_with_custody(probe, log, "Checking installed Torch identity and CPU operation", progress,
@@ -2406,6 +2562,142 @@ impl VersionInstaller {
                 self.publish_staged_torch_runtime(runtime, tag, release, destination, versions, progress, stage, prepared.provider_label.clone()).await
             },
         ).await
+    }
+
+    async fn prepare_qualified_torch_runtime(
+        &self,
+        plan: &TorchInstallPlan,
+        stage: &Arc<TorchPendingStage>,
+        log: &Path,
+        progress: &mpsc::Sender<ProgressUpdate>,
+    ) -> Result<PreparedTorchWheelInstall> {
+        if self.acquisition_consumer.is_none() {
+            return Err(failed(
+                "Qualified Torch installation requires the shared acquisition service",
+            ));
+        }
+        let lock = include_str!("../../../../../../torch-server/runtime/requirements.lock");
+        let preview: serde_json::Value = serde_json::from_str(&plan.report)
+            .map_err(|_| failed("Qualified retained preview is invalid"))?;
+        if plan.preview.qualification != "qualified"
+            || plan.preview.tag != "v2.9.1"
+            || plan.preview.build != "cu130"
+            || plan.preview.python != "python3.12"
+            || plan.preview.adapter != "bundled"
+            || !plan.resolution.is_empty()
+            || plan.requirements != lock
+            || preview["requirementsLock"].as_str() != Some(lock)
+            || preview["directArtifacts"]
+                != serde_json::to_value(&plan.preview.artifacts)
+                    .map_err(|_| failed("Qualified direct roots are invalid"))?
+        {
+            return Err(failed(
+                "Retained qualified recipe differs from its original selection",
+            ));
+        }
+        let observed_hash = format!(
+            "{:x}",
+            Sha256::digest(std::fs::read(&plan.interpreter_path).map_err(PumasError::from)?)
+        );
+        if observed_hash != plan.interpreter_hash
+            || std::fs::canonicalize(&plan.interpreter_path).map_err(PumasError::from)?
+                != plan.managed_python.executable
+        {
+            return Err(failed("Selected Python executable changed after preview"));
+        }
+        let runtime = stage.path().join("runtime");
+        let capture = runtime.clone();
+        spawn_blocking_with_stage(stage.clone(), move || {
+            write_embedded_torch_runtime(&capture)
+        })
+        .await
+        .map_err(|_| failed("Qualified runtime staging task failed"))??;
+        let recipe: RuntimeRecipe = serde_json::from_slice(
+            &std::fs::read(runtime.join("runtime.json")).map_err(PumasError::from)?,
+        )
+        .map_err(|_| failed("Qualified runtime recipe is invalid"))?;
+        if recipe.recipe_id != TORCH_291.recipe_id
+            || recipe.protocol != SUPPORTED_TORCH_PROTOCOL
+            || !recipe
+                .capabilities
+                .iter()
+                .any(|c| c == TORCH_IMAGE_GENERATION_CAPABILITY)
+            || recipe.python != "3.12"
+            || recipe.platform != "linux-x86_64"
+        {
+            return Err(failed(
+                "Qualified runtime recipe differs from its original target and protocol",
+            ));
+        }
+        record_managed_python(&runtime, plan)?;
+        std::fs::write(runtime.join("qualified-preview.json"), &plan.report)
+            .map_err(PumasError::from)?;
+        let mut venv = Command::new(&plan.interpreter_path);
+        venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
+        self.run_runtime_command(
+            venv,
+            log,
+            "Creating qualified managed environment",
+            progress,
+            Some(stage.clone()),
+        )
+        .await?;
+        let python = pumas_library::platform::paths::venv_python(&runtime);
+        let mut command = Command::new(&python);
+        command
+            .arg("-I")
+            .arg(runtime.join("qualified_wheel_catalog.py"))
+            .arg("--lock")
+            .arg(runtime.join("requirements.txt"))
+            .arg("--preview")
+            .arg(runtime.join("qualified-preview.json"))
+            .arg("--output")
+            .arg(runtime.join("resolution.json"));
+        self.run_runtime_command(
+            command,
+            log,
+            "Cataloguing finite hash-pinned recipe wheels",
+            progress,
+            Some(stage.clone()),
+        )
+        .await?;
+        self.check_cancelled()?;
+        let resolution_json =
+            std::fs::read_to_string(runtime.join("resolution.json")).map_err(PumasError::from)?;
+        if resolution_json.len() > 1024 * 1024 {
+            return Err(failed("Qualified wheel catalog is oversized"));
+        }
+        let document: serde_json::Value = serde_json::from_str(&resolution_json)
+            .map_err(|_| failed("Qualified wheel catalog is invalid"))?;
+        let resolution: DirectTorchResolution = serde_json::from_str(&resolution_json)
+            .map_err(|_| failed("Qualified wheel identity is invalid"))?;
+        if document["format"] != "pumas-qualified-wheel-catalog-1"
+            || document["recipe_lock_sha256"] != format!("{:x}", Sha256::digest(lock.as_bytes()))
+            || resolution.release != "2.9.1"
+            || resolution.torch != TORCH_291.torch_version
+            || resolution.build != "cu130"
+            || resolution.python != "3.12"
+            || resolution.adapter != "bundled"
+            || resolution.implementation != "cpython"
+            || resolution.machine != "x86_64"
+            || !resolution.platform.starts_with("Linux-")
+            || Path::new(&resolution.interpreter) != python
+        {
+            return Err(failed(
+                "Qualified catalog differs from its recipe or target interpreter",
+            ));
+        }
+        validate_qualified_artifacts(lock, &plan.preview.artifacts, &resolution.artifacts)?;
+        Ok(PreparedTorchWheelInstall {
+            runtime,
+            resolution,
+            resolution_json,
+            report: plan.report.clone(),
+            requirements: lock.to_owned(),
+            interpreter_hash: plan.interpreter_hash.clone(),
+            provider_label: Some(format!("Python {}", plan.managed_python.version)),
+            qualified_recipe: true,
+        })
     }
 
     async fn run_provider_with_cancel<F, T>(&self, operation: F) -> Result<T>
@@ -2660,6 +2952,7 @@ impl VersionInstaller {
                 requirements,
                 interpreter_hash,
                 provider_label: Some(format!("Python {}", managed_python.version)),
+                qualified_recipe: false,
             },
         )))
     }
@@ -2944,6 +3237,25 @@ impl VersionInstaller {
                 )
                 .await
             }
+        } else if let Some(plan) = plan.filter(|_| !fixture_override) {
+            async {
+                self.check_cancelled()?;
+                let prepared = self
+                    .prepare_qualified_torch_runtime(plan, &staging, &log_path, &progress_tx)
+                    .await?;
+                self.install_verified_prepared_torch(
+                    prepared,
+                    tag,
+                    release,
+                    &destination,
+                    &versions_dir,
+                    &progress_tx,
+                    &staging,
+                    &log_path,
+                )
+                .await
+            }
+            .await
         } else {
             let staged = self
                 .stage_torch_runtime(recipe, plan, selection, &staging, &log_path, &progress_tx)
@@ -3098,158 +3410,10 @@ impl VersionInstaller {
                 "Automatic Torch wheels require the verified acquisition handoff",
             ));
         }
-        let recipe_spec = recipe_spec.expect("checked above");
-        let runtime = staging.path().join("runtime");
-        let runtime_for_write = runtime.clone();
-        spawn_blocking_with_stage(staging.clone(), move || {
-            write_embedded_torch_runtime(&runtime_for_write)
-        })
-        .await
-        .map_err(|e| failed(format!("Runtime staging task failed: {e}")))??;
-        self.check_cancelled()?;
-        let recipe: RuntimeRecipe = serde_json::from_slice(
-            &fs::read(runtime.join("runtime.json"))
-                .await
-                .map_err(PumasError::from)?,
-        )
-        .map_err(|e| failed(format!("Invalid runtime recipe: {e}")))?;
-        if recipe.recipe_id != recipe_spec.recipe_id {
-            return Err(failed("Embedded Torch recipe identity mismatch"));
-        }
-        if recipe.protocol != SUPPORTED_TORCH_PROTOCOL {
-            return Err(failed(format!(
-                "Runtime recipe protocol {} does not match required protocol {SUPPORTED_TORCH_PROTOCOL}",
-                recipe.protocol
-            )));
-        }
-        if !recipe
-            .capabilities
-            .iter()
-            .any(|capability| capability == TORCH_IMAGE_GENERATION_CAPABILITY)
-        {
-            return Err(failed(format!(
-                "Runtime recipe is missing required capability {TORCH_IMAGE_GENERATION_CAPABILITY}"
-            )));
-        }
-        if recipe.python != "3.12" || recipe.platform != "linux-x86_64" {
-            return Err(failed(
-                "Runtime recipe does not match Python 3.12 on linux-x86_64",
-            ));
-        }
-        if let Some(plan) = plan {
-            let observed_hash = format!(
-                "{:x}",
-                Sha256::digest(std::fs::read(&plan.interpreter_path).map_err(PumasError::from)?)
-            );
-            if observed_hash != plan.interpreter_hash
-                || std::fs::canonicalize(&plan.interpreter_path).map_err(PumasError::from)?
-                    != plan.managed_python.executable
-            {
-                return Err(failed("Selected Python executable changed after preview"));
-            }
-            record_managed_python(&runtime, plan)?;
-        }
-        let plan = plan.ok_or_else(|| {
-            failed("The bundled Torch runtime requires a retained managed Python preview")
-        })?;
-        let interpreter = plan.interpreter_path.as_path();
-        let mut python_check = Command::new(interpreter);
-        python_check.args([
-            "-I",
-            "-c",
-            "import sys; assert sys.version_info[:2] == (3,12)",
-        ]);
-        self.run_runtime_command(
-            python_check,
-            log_path,
-            "Checking Python 3.12",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        let mut venv = Command::new(interpreter);
-        venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
-        self.run_runtime_command(
-            venv,
-            log_path,
-            "Creating managed environment",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        let python = pumas_library::platform::paths::venv_python(&runtime);
-        let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
-        let download_progress_path = runtime.join("download-progress.json");
-        let mut install = Command::new(&python);
-        install
-            .arg("-I")
-            .arg(runtime.join("resolve_runtime.py"))
-            .arg("--_pumas-pip-progress-worker")
-            .arg(&download_progress_path)
-            .args([
-                "--isolated",
-                "install",
-                "--require-hashes",
-                "--only-binary=:all:",
-                "--disable-pip-version-check",
-                "-r",
-            ])
-            .arg(runtime.join("requirements.txt"))
-            .arg("--cache-dir")
-            .arg(pip_cache);
-        let status = self
-            .run_runtime_command_status_with_download_progress(
-                install,
-                log_path,
-                "Installing locked runtime dependencies",
-                progress_tx,
-                Some(staging.clone()),
-                Some(&download_progress_path),
-            )
-            .await?;
-        if !status.success() {
-            return Err(failed(
-                "Installing locked runtime dependencies failed; see installation log",
-            ));
-        }
-        let mut validate = Command::new(&python);
-        validate
-            .arg(runtime.join("validate_runtime.py"))
-            .current_dir(&runtime)
-            .env("HF_HUB_OFFLINE", "1")
-            .env("PYTHONNOUSERSITE", "1");
-        self.run_runtime_command(
-            validate,
-            log_path,
-            "Validating GPU and sidecar protocol",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        let resolution = serde_json::json!({
-            "torch": recipe_spec.torch_version,
-            "build": "cu130",
-            "python": "3.12",
-            "adapter": "bundled",
-            "managed_python": managed_python_record(plan),
-            "artifacts": plan.preview.artifacts.clone(),
-        });
-        std::fs::write(
-            runtime.join("resolution.json"),
-            serde_json::to_vec_pretty(&resolution).map_err(|e| failed(e.to_string()))?,
-        )
-        .map_err(PumasError::from)?;
-        let mut probe = Command::new(&python);
-        probe.arg(runtime.join("probe_runtime.py"));
-        self.run_runtime_command(
-            probe,
-            log_path,
-            "Recording core and adapter probe evidence",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        Ok(runtime)
+        let _ = (recipe_spec, staging, log_path, progress_tx);
+        Err(failed(
+            "Qualified Torch installation requires the finite verified wheel handoff",
+        ))
     }
 
     pub(super) async fn run_runtime_command(

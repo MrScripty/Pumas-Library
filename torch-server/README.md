@@ -106,6 +106,29 @@ package helper; ordinary exact-wheel preview still requires `--torch-wheel`.
 This bounded implementation has synthetic Linux evidence; enforced network-denial,
 real Torch and supported-platform acceptance remain open under AQ-PACKAGES.
 
+The optional existing `v2.9.1` qualified bundled recipe now takes a separate finite
+catalog path. `qualified_wheel_catalog.py --lock --preview --output` reads only
+bounded Simple Repository metadata from the lock's two original indexes, selects
+compatible wheels matching its exact versions and allowed SHA-256 values, and
+preserves the three selected direct roots. It invokes no pip resolver. Unavailable,
+ambiguous or unsupported catalog evidence refuses without source or automatic
+fallback. The original lock and preview accompany the catalog into shared payload
+acquisition; `install_verified_wheels.py --recipe-lock --preview` checks them again
+before local pip. Actual acquired METADATA, WHEEL tags, Python requirements,
+hashes and complete marker/extras dependency closure must agree. All dependency
+URLs, including inactive branches, are explicitly unsupported. This optional path
+does not replace generic runtime or model selection.
+
+The helpers use the supported standalone `packaging` APIs embedded in
+`tooling/packaging.zip`; its source, file hashes and Apache-2.0/BSD-2-Clause licence
+are recorded in `tooling/packaging-source.json` and inside the archive. Installed
+RECORD proof has one shared owner in `wheel_records.py`; legacy resolver exports
+remain lazy compatibility aliases. Qualified installation retains the existing
+GPU/protocol validation, postprobe proof, child/input custody and receipt publisher.
+Automatic and retained-preview resolution remain unqualified for the separately
+documented source-preparation boundary. The new finite path has inert-wheel local
+controls, not real Torch/GPU, enforced network-denial or release acceptance.
+
 Native managed-Python provisioning, Torch CPU/Core installation, restart,
 and sidecar lifecycle passed on Linux x86_64, Windows x64, and macOS arm64
 for source `21041697` in

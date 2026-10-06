@@ -337,6 +337,16 @@ files; never change host/user/global settings to establish local consumption.
 See [pip configuration](https://pip.pypa.io/en/stable/topics/configuration/).
 Option-parser controls establish configuration isolation, not network denial.
 
+The optional finite qualified Torch recipe uses its existing exact hash-pinned
+lock and selected direct roots rather than dynamic pip resolution. Supported
+standalone packaging APIs select target-compatible wheels from bounded approved
+index metadata. After shared acquisition, the package owner validates actual
+wheel METADATA/WHEEL identity, Python/tags and complete marker/extras closure
+before local `--no-deps` consumption. Unsupported dependency URLs, including
+inactive branches, refuse explicitly without source fallback. Preserve original
+lock/preview/catalog provenance; this capability introduces no mandatory runtime
+version policy and does not qualify automatic or retained-preview resolution.
+
 The decisive test denies network during the final installation leg and rejects hidden direct-URL retrieval, alternate same-name/version wheels, and missing closure members. Resolver metadata and managed-Python bootstrap traffic remain separately recorded; the claim is exact payload handoff, not interception of every package-tool request. Sources: [pip report](https://pip.pypa.io/en/stable/reference/installation-report/) and [pip install](https://pip.pypa.io/en/stable/cli/pip_install/).
 
 The bounded retained-preview and automatic-selection Torch implementation uses

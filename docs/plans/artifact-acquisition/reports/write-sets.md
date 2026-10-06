@@ -1054,3 +1054,35 @@ metadata-only local wheels; direct source/VCS fixture strings stop at preflight
 without invoking pip. No source archive, backend/hook execution, external package
 probe, real credential or installation. Research does not qualify either exposed
 resolver mode or authorize a new resolver/selection policy.
+
+## Q2 finite qualified-recipe handoff — admitted 2026-10-06
+
+Parent explicitly authorizes the existing finite qualified recipe through public
+packaging APIs and existing acquisition custody. Branch
+`feat/torch-qualified-wheel-catalog-d87f560f` starts at
+`d87f560f5e451083eaa2635bf84ba1980784cae8`, tree
+`9c6b4ec4a75054f4e01c5f9d3c8be5e0b2badb0e`. This is a bounded optional recipe
+capability, not generic runtime/model policy or automatic-selection repair.
+
+Production writes admitted before implementation: existing Torch owner
+`installer/torch.rs`, co-located handoff tests; a finite recipe catalog helper and
+its tests; local wheel installer and tests; extraction of its existing installed
+RECORD proof into one shared Python owner with compatibility aliases in
+`resolve_runtime.py`; embedded runtime materialization; owning docs/evidence.
+Public standalone packaging tooling must exist before target installation: ship
+an independently recorded licensed tooling snapshot from the already available
+standalone distribution, verifying each input against its distribution RECORD.
+This introduces no runtime recipe/pin or provider download and does not use
+pip's private vendored namespace. Record source provenance, exact tooling bytes
+and licence in the bounded evidence. All final payload still uses acquisition.
+
+Keep recipe/lock bytes and the three selected direct wheels exact. Catalog only
+its finite named pins from bounded approved index metadata; no dependency
+resolver/preparation or source/VCS fallback. Acquired-wheel public metadata
+preflight validates actual identity/tags/Python/hashes, every dependency URL and
+complete marker/extras closure before public local `--no-deps` install. Preserve
+original recipe/lock/catalog provenance, shared child drainage/use/receipt
+settlement and GPU/live-sidecar/post-probe policy. Native cleanup remains with
+its separate owner; reconcile its interface when an exact successor is supplied.
+No private pip hooks, general dynamic solver, security/auth change, release/gate
+claim, new mandatory version policy or external review contact.

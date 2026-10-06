@@ -769,6 +769,7 @@ fn accepted_packet_fixture() -> PreparedTorchWheelInstall {
         requirements,
         interpreter_hash: "b".repeat(64),
         provider_label: Some("Python 3.12.14".into()),
+        qualified_recipe: false,
     }
 }
 
@@ -873,4 +874,63 @@ async fn automatic_candidate_loop_propagates_inconclusive_or_validation_errors()
     .await;
     assert!(result.is_err());
     assert_eq!(*calls.lock().unwrap(), 1);
+}
+
+#[test]
+fn qualified_recipe_catalog_preserves_complete_pins_and_selected_direct_identity() {
+    let root = crate::version_manager::TorchArtifact {
+        name: "torch".into(), version: "2.9.1+cu130".into(),
+        url: "https://download-r2.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl".into(),
+        sha256: "a".repeat(64),
+    };
+    let dependency = crate::version_manager::TorchArtifact {
+        name: "dependency".into(),
+        version: "1.0".into(),
+        url: "https://files.pythonhosted.org/packages/dependency-1.0-py3-none-any.whl".into(),
+        sha256: "b".repeat(64),
+    };
+    let lock = format!(
+        "torch @ {} \\\n    --hash=sha256:{}\ndependency==1.0 \\\n    --hash=sha256:{}\n",
+        root.url, root.sha256, dependency.sha256
+    );
+    let roots = vec![root.clone()];
+    let artifacts = vec![root, dependency];
+    validate_qualified_artifacts(&lock, &roots, &artifacts).unwrap();
+    assert!(validate_qualified_artifacts(&lock, &roots, &artifacts[..1]).is_err());
+    let mut changed = artifacts.clone();
+    changed[1].sha256 = "c".repeat(64);
+    assert!(validate_qualified_artifacts(&lock, &roots, &changed).is_err());
+    changed = artifacts.clone();
+    changed[0].url = changed[0]
+        .url
+        .replace("download-r2.pytorch.org", "download.pytorch.org");
+    assert!(validate_qualified_artifacts(&lock, &roots, &changed).is_err());
+    changed = artifacts;
+    changed[1].url = changed[1]
+        .url
+        .replace("files.pythonhosted.org", "fixture.invalid");
+    assert!(validate_qualified_artifacts(&lock, &roots, &changed).is_err());
+}
+
+#[test]
+fn embedded_qualified_runtime_contains_public_tooling_and_single_record_owner() {
+    let root = tempfile::tempdir().unwrap();
+    write_embedded_torch_runtime(root.path()).unwrap();
+    assert_eq!(
+        std::fs::read(root.path().join("packaging-tooling.zip")).unwrap(),
+        include_bytes!("../../../../../../torch-server/tooling/packaging.zip")
+    );
+    for file in [
+        "qualified_wheel_catalog.py",
+        "install_verified_wheels.py",
+        "wheel_records.py",
+    ] {
+        let source = std::fs::read_to_string(root.path().join(file)).unwrap();
+        assert!(!source.contains("pip._internal"));
+        assert!(!source.contains("pip._vendor"));
+    }
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("requirements.txt")).unwrap(),
+        include_str!("../../../../../../torch-server/runtime/requirements.lock")
+    );
 }

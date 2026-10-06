@@ -131,3 +131,52 @@ probe or implementation is added in this composition.
 Sources checked 2026-10-06:
 [uv compatibility](https://docs.astral.sh/uv/pip/compatibility/#only-binary-enforcement),
 [public CLI](https://docs.astral.sh/uv/reference/cli/#uv-pip-compile).
+
+## Current-main qualification result
+
+Tested source `02cd31d8edbef1a39ba18d5be06b4caccb29a3b5`, tree
+`4e3f1f84981c73b7ce65330317055df7f9508e6d`, is a one-parent feature commit
+on exact main5e114f6d. Branch integrate/torch-finite-recipe-5e114f6d has no merge
+commit; no PR/main merge was made. Original candidate6308 and every inherited
+qualification/research artifact remain unchanged on their frozen branches.
+All 15 carried source/contract files remain byte-identical to6308; the
+README correction is documentation only. No source integration/compile regression
+was found and no broad baseline cleanup was performed. Main Node/HTTP/Cargo/lock
+and native-owner source identities were verified.
+
+| Current composition check | Result |
+| --- | --- |
+| Main/composed feature graphs, including S3, before builds | 33 pass each |
+| Full scoped Python suite | 229 pass |
+| Full app-manager suite | 306 pass; 1 existing ignored unit and 1 ignored doctest |
+| Strict default workspace all-target Clippy | Pass |
+| Strict headless RPC production binary and integration target | Pass |
+| Full headless RPC all-target Clippy | 11 exact accepted-main generated-contract errors |
+| Whole Torch Ruff, changed-helper Python format, Rust fmt | Pass |
+| Source/contract diff check | Pass |
+| Full inherited raw-log whitespace check | 8 original whitespace findings; logs unchanged |
+
+The headless error list exactly matches the prior pristine7c229e9 baseline;
+contract.rs and feature manifest are identical on baseline, fresh main and this
+composition. No lint was suppressed. The narrow inherited integration helper cfg
+keeps that focused target passing. This does not qualify the blocked all-target
+headless gate. An evidence-check script initially looked for nonexistent RPC
+build.rs; its source inventory was corrected to the actual contract and manifest,
+without changing source.
+
+Checks use Rust1.92, Python3.12.14/pip26.2.1 and scoped Ruff0.15.2 with the earlier
+scoped FastAPI0.128/Starlette0.50 test packages. Cargo is offline/locked, one job,
+no incremental, debug0 and serialized under the shared lock. No ORT/provider
+download, real credential, paid service or network/security bypass was used.
+Own inactive development cache is restored: 41,201 paths/modes/sizes/content
+hashes/symlink targets match manifest SHA-256
+`04a9842e7e71f924328f5ed986eaaff6f8337d0b59dc1c5c7b5cbe6bc7ce9951`.
+Only joined worker-produced unit/core cache artifacts were parked with verified
+copies/identities. The adjacent [evidence index](torch-current-main-composition-2026-10-06/evidence.json)
+binds exact source and raw checks. The evidence-only successor changes no tested
+source. This is a publishable review candidate with mandatory open policy and
+acceptance gates above; no product-wide safe-resolver, package/runtime or release
+claim follows from these fixture/compile passes.
+
+Raw archive: 23 logs/records, 11523 bytes, SHA-256
+`ee40383f45de72e96d4bca801ad035396866f45933fa6105981894791edc0ccf`.

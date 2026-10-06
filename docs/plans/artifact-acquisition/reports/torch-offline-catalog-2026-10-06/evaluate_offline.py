@@ -192,7 +192,14 @@ def invoke(command, directory, env):
     return process.returncode, {"ip_operations": network, "executions": executions}
 
 
-def selected_packet(lock, candidates, directory, environment, roots):
+def artifact_identity(candidate):
+    """Immutable approved identity, independent of a solver's name/version match."""
+    return (candidate["id"], canonicalize_name(candidate["name"]), candidate["version"],
+            candidate["filename"], candidate["url"], candidate["sha256"], candidate["bytes"],
+            str(Path(candidate["local"]).resolve()))
+
+
+def selected_packet(lock, candidates, directory, environment, roots, direct_roots):
     require(lock.get("lock-version") == "1.0" and lock.get("created-by") == "uv", "unsupported public lock schema")
     selected = []
     for package in lock.get("packages", []):
@@ -224,6 +231,15 @@ def selected_packet(lock, candidates, directory, environment, roots):
         selected.append(matches[0])
     require(len({canonicalize_name(c["name"]) for c in selected}) == len(selected), "duplicate selected package")
     by_name = {canonicalize_name(c["name"]): c for c in selected}
+    # Version closure alone cannot authorize a different admitted wheel. Check
+    # each original direct root, including repeated/conflicting roots, before
+    # closure traversal can coalesce requirements for the same distribution.
+    for original_requirement, approved_identity in direct_roots:
+        root = Requirement(original_requirement)
+        if active(root, (), environment):
+            chosen = by_name.get(canonicalize_name(root.name))
+            require(chosen is not None and artifact_identity(chosen) == approved_identity,
+                    "selected direct root does not match exact approved artifact identity/hash")
     queue = list(roots)
     reached = {}
     while queue:
@@ -258,6 +274,7 @@ def inspect(spec_path, uv, wheels):
         environment, tags = context(spec["target"])
         candidates = [inspect_wheel(c, wheels, tags) for c in spec["candidates"]]
         roots = []
+        direct_roots = []
         local_roots = []
         original_roots = []
         for raw in spec["roots"]:
@@ -268,6 +285,7 @@ def inspect(spec_path, uv, wheels):
                            and canonicalize_name(root.name) == canonicalize_name(c["name"])]
                 require(len(matches) == 1 and matches[0]["eligible"], "root source is not exact owner wheel")
                 item = matches[0]
+                direct_roots.append((raw, artifact_identity(item)))
                 extra = "[" + ",".join(sorted(root.extras)) + "]" if root.extras else ""
                 marker = " ; " + str(root.marker) if root.marker else ""
                 local_roots.append(root.name + extra + " @ " + Path(item["local"]).as_uri() + "#sha256=" + item["sha256"] + marker)
@@ -305,7 +323,7 @@ def inspect(spec_path, uv, wheels):
         for item in spec["candidates"]:
             inspect_wheel(item, wheels, tags)
         lock = tomllib.loads(output.read_text())
-        selected = selected_packet(lock, candidates, directory, environment, roots)
+        selected = selected_packet(lock, candidates, directory, environment, roots, direct_roots)
         outcome.update(status="selected", selected=selected, lock_sha256=digest(output.read_bytes()), projection_sha256=digest((directory / "projection.json").read_bytes()))
     except (ValueError, KeyError, zipfile.BadZipFile, ExceptionGroup) as error:
         outcome["reason"] = str(error)

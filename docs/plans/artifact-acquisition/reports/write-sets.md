@@ -1141,3 +1141,21 @@ inconclusive; no fallback. Metadata-only inert fixtures and syscall observations
 measure candidate/extras/marker/platform selection and source/config/cache/
 redirect/substitution refusals. Completeness applies only to the declared finite
 request universe. Parent owns migration review; no production safety acceptance.
+
+## Q2 exact direct-root checker successor — admitted 2026-10-06
+
+Parent's independent review accepts9eda2944 as bounded evidence only and finds
+a static checker gap: reducing a direct root to name==version permits another
+admitted same-name/same-version wheel to satisfy the independent check. No uv
+misselection was observed. Separate experiment/torch-direct-root-9eda2944 starts
+at9eda2944eb9b8ccbaef89d3bcd125742e6086be6, tree
+b837a34884f7b9fa7cdc64fd2610b5afe71eadc7; the original branch/evidence is frozen.
+Before editing, admit only the experimental Python checker/evaluator, a narrow
+adjacent successor control/report/evidence directory, this admission and an
+owning-plan status note. Bind every applicable direct root to its exact approved
+artifact ID/source URL/filename/hash/size/local projection after resolution;
+fail closed on ambiguity. Test a substituted lock entry from two admitted
+same-name/same-version actual inert wheels, preserving actual public uv output
+and original URL/hash provenance. Reuse the unchanged shared Rust harness/tools.
+No production/source/contract/dependency/native cleanup/recipe change, PR/merge
+or safety/gate acceptance. Catalog authority and full target policy remain open.

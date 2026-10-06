@@ -1,5 +1,18 @@
 # Plan: source-neutral artifact acquisition
 
+**AC10 public HF importer measurement (2026-10-06):** Separate
+`qualification/ac10-public-hf-72224551` records the bounded ignored Linux
+512 MiB public-core transfer/importer fixture at `8a147160` (tree `9544e16dde7802baa2033bf7ceea7d44c2ba3767`).
+Default and no-default fresh-process runs preserve partial/final/settled inode,
+match source/file/receipt digests and settle model/index publication to Adopted.
+RSS samples at the importer hold are 99,004 and 96,536 kB respectively; raw
+VmHWM/I/O and complete retained-file inventories are in the
+[report](reports/ac10-public-hf-measurement-2026-10-06.md).
+Both mixed-size controls and strict all-target core Clippy pass. Independent
+source reviews accepted the exact timing repair; the first failed attempt remains
+recorded. This is one synthetic workload, not a complete resource envelope.
+AC10 and AQ-HTTP remain pending; Q2 remains gated. No production/API changes.
+
 **Installed S3 process-loss milestone (2026-10-06):** Separate
 `feat/s3-installed-process-loss-ed31639` preserves frozen ed31639 and its actual
 production binary hash. All eleven installed cases (the original ten plus one

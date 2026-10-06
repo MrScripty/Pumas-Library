@@ -75,3 +75,14 @@ A worker may propose a contract change but cannot independently change the share
 | Runtime S3/S4/S5 | Runtime R3/R4/R5; outcome scope preserved. |
 | Runtime A29/A31/A32/A33/A34 shared-layer claims | Acquisition AC claims own the shared-layer proof; runtime retains explicit consumer obligations and references, not copied gate authority. |
 | Runtime A30 exact installed closure | Runtime keeps the registered-adapter consumption claim; Q2 proves the prerequisite with the current package integration. These are different consumer observations. |
+
+**Additional AC10 measurement (2026-10-06):** Exact source `8a147160c2b3743c549e00a89b1e48f54d7a2390` (tree
+`9544e16dde7802baa2033bf7ceea7d44c2ba3767`) passes one Linux synthetic 512 MiB public HF transfer through the
+real importer/receipt settlement in separate default/no-default processes.
+Inode continuity, retained-file inventory and raw memory/I/O are bound in the
+[report](ac10-public-hf-measurement-2026-10-06.md); broader resource/platform/
+provider claims remain unqualified. AC10 and AQ-HTTP stay pending. Q2 remains
+gated and has no new admitted source work: approved exact wheel closure,
+shared verified local wheel handoff, denied-network local-only child consumption,
+lease-through-exit/cleanup and installed-output proof are still required, with
+resolver/bootstrap traffic separately accounted. AQ-PACKAGES is not ready.

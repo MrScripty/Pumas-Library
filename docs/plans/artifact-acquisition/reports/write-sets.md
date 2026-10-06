@@ -886,3 +886,12 @@ verify effective author and committer before each commit; preserve existing hist
 All AQ-HTTP criteria remain pending. Q2 remains gated: an approved exact wheel
 closure, shared verified local handoff, local-only pip consumption under denied
 network, lease-through-child cleanup and bootstrap traffic accounting are absent.
+
+### AC10 admitted measurement completion — 2026-10-06
+
+Tested source `8a147160c2b3743c549e00a89b1e48f54d7a2390` (tree `9544e16dde7802baa2033bf7ceea7d44c2ba3767`) changes only the one Linux ignored
+test/local helpers in `api/hf.rs`. The owning plan, ledger, matrix, gates and
+[measurement report](ac10-public-hf-measurement-2026-10-06.md) record two fresh
+512 MiB runs, exact raw-log archive/JSON, independent source review, failed timing
+attempt and cache/resource manifests. No production hooks, dependencies,
+public API, S3/native frozen writes or Q2 source changes. All gates remain pending.

@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "merge_head": "6385a4931ca2ebd21f7c8af83b087d5f2cf6b9a1",
+  "merge_tree": "a2d461188d622cf123fb4d7464602fc913fc831a",
+  "parents": [
+    "9470f4882216097f86114ec53e086d9f15b24e00",
+    "1c1c7875ff8fc43b3ad1957fb2a94d44c850716c"
+  ],
+  "accepted_main": "1c1c7875ff8fc43b3ad1957fb2a94d44c850716c",
+  "accepted_main_tree": "8c27d77e7d31ed13f85db77a8c155f15a7fbe693",
+  "rust_subtree": "0bd482ac031078865f944efeec6dad4d7d825530",
+  "rust_subtree_matches_tested_source_0950c4d5": true,
+  "http_owner_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a",
+  "commands": [
+    {
+      "name": "post-main-default",
+      "argv": [
+        "/tmp/pumas-cargo-admission/run-cargo-serialized",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--locked",
+        "-p",
+        "pumas-library",
+        "--lib",
+        "http_elapsed_budget_",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "log": "post-main-default.log",
+      "exit": 0,
+      "environment_overrides": {
+        "CARGO_PROFILE_DEV_DEBUG": "0",
+        "CARGO_PROFILE_TEST_DEBUG": "0"
+      }
+    },
+    {
+      "name": "post-main-no-default",
+      "argv": [
+        "/tmp/pumas-cargo-admission/run-cargo-serialized",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--locked",
+        "-p",
+        "pumas-library",
+        "--lib",
+        "--no-default-features",
+        "http_elapsed_budget_",
+        "--",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "log": "post-main-no-default.log",
+      "exit": 0,
+      "environment_overrides": {
+        "CARGO_PROFILE_DEV_DEBUG": "0",
+        "CARGO_PROFILE_TEST_DEBUG": "0"
+      }
+    }
+  ],
+  "result": "10/10 deadline controls in each default/no-default; original 9 Cargo checks retained on identical Rust subtree; no broad/hosted requalification claim",
+  "archive": {
+    "name": "post-main-logs.tar.gz",
+    "bytes": 1350,
+    "sha256": "4cdb4f46b8e41cd1e81ed0c11fce0a2715839ed4409261beb3268d8585c9f4d3",
+    "members": [
+      {
+        "name": "post-main-default.log",
+        "bytes": 1216,
+        "sha256": "2fb7d436d06e93cd2396a8b23afa8ee4c4443a6e10388dd3c5ea8e76384af169"
+      },
+      {
+        "name": "post-main-no-default.log",
+        "bytes": 1216,
+        "sha256": "925eb8b8d12b3dfe6c1eb23012db3bf696cde5916636570dc395841f4a16b1e6"
+      },
+      {
+        "name": "post-main-commands.json",
+        "bytes": 1086,
+        "sha256": "eebc3837daec2ab5fd57d623f6ee25b9b93c23b0b15c041ee14ecad56bdb7b13"
+      },
+      {
+        "name": "identity-before-main-merge.json",
+        "bytes": 160,
+        "sha256": "7bc8b19ee271e6043d3ba4df21fa61f8cf87a9a4d44d8eb789bdb8e22d62333f"
+      },
+      {
+        "name": "identity-after-main-merge.json",
+        "bytes": 332,
+        "sha256": "fcb3f30cb70dcdbeccc4d4163249283ac332c44e1cd03d67c1f4c8679890a509"
+      }
+    ]
+  },
+  "original_archive_sha256": "57dbd811aff7d00665a881bed8360d1ed701bf9cf0c56aba80d699a5122a1674",
+  "preserved_ancestry": [
+    "0c02dcfb81a0f7ab2a3858c2b5cee329816b3ce5",
+    "63123fd8f9f866064a8315096ab3fb1fc81e8f0f",
+    "05717338c2aea737483fb4b28c3ed4053a65de96"
+  ],
+  "scope": "Normal merge; no source rewrite, failure-log replacement, credential provisioning or ONNX acquisition. Parent monitors postmerge main CI independently."
+}

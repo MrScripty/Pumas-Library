@@ -75,3 +75,30 @@ A worker may propose a contract change but cannot independently change the share
 | Runtime S3/S4/S5 | Runtime R3/R4/R5; outcome scope preserved. |
 | Runtime A29/A31/A32/A33/A34 shared-layer claims | Acquisition AC claims own the shared-layer proof; runtime retains explicit consumer obligations and references, not copied gate authority. |
 | Runtime A30 exact installed closure | Runtime keeps the registered-adapter consumption claim; Q2 proves the prerequisite with the current package integration. These are different consumer observations. |
+
+**Additional AC10 measurement (2026-10-06):** Exact source `8a147160c2b3743c549e00a89b1e48f54d7a2390` (tree
+`9544e16dde7802baa2033bf7ceea7d44c2ba3767`) passes one Linux synthetic 512 MiB public HF transfer through the
+real importer/receipt settlement in separate default/no-default processes.
+Inode continuity, retained-file inventory and raw memory/I/O are bound in the
+[report](ac10-public-hf-measurement-2026-10-06.md); broader resource/platform/
+provider claims remain unqualified. AC10 and AQ-HTTP stay pending. Q2 remains
+gated and has no new admitted source work: approved exact wheel closure,
+shared verified local wheel handoff, denied-network local-only child consumption,
+lease-through-exit/cleanup and installed-output proof are still required, with
+resolver/bootstrap traffic separately accounted. AQ-PACKAGES is not ready.
+
+## AQ-HTTP positive elapsed-budget prerequisite — local feature complete
+
+Source `0950c4d5839608c8dd5f52afcb3fd2424a9a1656` (tree `55c7dea28bae397ee9d70995897c5ff0c8e2a672`) enforces the existing
+positive per-file HTTP budget across headers/body/retries/backoff, preserving
+zero opt-out, attempt limits, exact identity/verification and receipt policy.
+Ten owned loopback controls plus 153 acquisition-filter and 192 HF download
+cases in each default/no-default mode, one public HF status/import control in
+each, and strict Clippy in three feature modes pass. This supports bounded
+AC02/AC06/AC10/AC15 behavior only. Already registered writes drain before return;
+no hard filesystem/verification/import/child-cleanup return deadline is claimed.
+See [http-elapsed-budget-qualification-2026-10-06](http-elapsed-budget-qualification-2026-10-06.md) for exact logs and independent source reviews.
+No public shape, S3/native frozen source, generator or Q2 writes. AQ-HTTP remains
+not ready; broader acceptance, current-head hosted checks, resource/platform/UI,
+public-client and deployment dispositions remain pending. Q2 exact local package
+handoff/denied-network installation remains the next gated implementation feature.

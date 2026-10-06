@@ -860,3 +860,74 @@ unit exercises all owned roots/aliases. RPC README/shared contract, plan/ledger/
 write set and correction qualification report record this reviewed gap. Reader,
 manifest, watcher, importer.rs, existing publication protocol, dependencies,
 frontend/Electron/generated DTOs and all zero-length work are excluded.
+
+## AC10 public-HF importer measurement successor — 2026-10-06
+
+The coordinator explicitly admits the existing AC10 512 MiB measurement on separate
+`qualification/ac10-public-hf-72224551`, based on frozen
+`722245514b3bae42511aa5ea188570292ce276d4` (tree
+`14e8a1b36b580f2397264dd38b18329ec07bc75e`). AC01 d1e9106b is an
+ancestor of this base and recorded hosted candidate 0dd38c7 (Build 37141872406);
+the previous conditional source-edit hold is satisfied. The exact source/test
+write set remains the one Linux ignored test and its local helpers in `api/hf.rs`.
+Owning documentation is this report, plan, ledger, acceptance matrix and dependency
+gates, plus `reports/ac10-public-hf-measurement-2026-10-06.md` for bounded evidence.
+Independent specification and standards reviews precede implementation. No production
+owner, dependency, schema, S3 frozen write set, runtime or Q2 source changes are admitted.
+
+The earlier 8/128 MiB shared-layer probe on separate d56b2b91 remains distinct;
+this successor measures public HF admission, real importer and receipt settlement.
+Initial overlay headroom is 1.2 GiB, RAM available 16 GiB, with no active Rust
+build. Only previously authorized inactive reproducible Rust cache binaries may
+be removed with a path/hash manifest; source and evidence remain intact. The
+fixture root stays on the workspace filesystem, not the separate tmpfs. Set only
+repository-local user.name/user.email to the owner-selected MrScripty identity and
+verify effective author and committer before each commit; preserve existing history.
+All AQ-HTTP criteria remain pending. Q2 remains gated: an approved exact wheel
+closure, shared verified local handoff, local-only pip consumption under denied
+network, lease-through-child cleanup and bootstrap traffic accounting are absent.
+
+### AC10 admitted measurement completion — 2026-10-06
+
+Tested source `8a147160c2b3743c549e00a89b1e48f54d7a2390` (tree `9544e16dde7802baa2033bf7ceea7d44c2ba3767`) changes only the one Linux ignored
+test/local helpers in `api/hf.rs`. The owning plan, ledger, matrix, gates and
+[measurement report](ac10-public-hf-measurement-2026-10-06.md) record two fresh
+512 MiB runs, exact raw-log archive/JSON, independent source review, failed timing
+attempt and cache/resource manifests. No production hooks, dependencies,
+public API, S3/native frozen writes or Q2 source changes. All gates remain pending.
+
+## Q1 positive HTTP elapsed-budget enforcement — admitted 2026-10-06
+
+The coordinator requests the smallest missing AQ-HTTP behavior needed before Q2,
+on separate `feat/acquisition-http-budget-0c02dcfb`, preserving AC10 source/evidence
+and the separately reviewed PR42 generator evidence. Base is
+`0c02dcfb81a0f7ab2a3858c2b5cee329816b3ce5` (tree
+`78c663ed397264284cb95662d49a3354380755d4`). Exact manifest/file-set iteration,
+verification, held use and receipts already exist. The concrete gap is that a
+positive HTTP `AcquisitionRetryPolicy.elapsed` does not bound request headers,
+body streaming or the retry backoff: it is checked only after retryable errors.
+
+Production write set is only `src/acquisition/service.rs`: an absolute per-file
+HTTP source-wait deadline reused across attempts, request/body waits and capped
+backoff; overflow refusal before public durable admission. Tests remain in the
+same file, exercising actual owned loopback streams, existing owned-write gates,
+cancellation, zero-budget compatibility and exact multi-file receipt settlement.
+Owning contract/core README, plan, ledger, acceptance matrix, dependency gates and
+`reports/http-elapsed-budget-qualification-2026-10-06.md` record evidence/limits.
+No public shape, attempt defaults, schema, dependency, S3 source/deadline policy,
+native repair, generator, installer/Q2 or ONNX acquisition policy changes.
+Positive HF configuration is enforced; explicit elapsed zero retains legacy
+behavior. Source expiry waits for registered effects to drain and does not impose
+a disk/verification/import/child-cleanup deadline or declare AQ-HTTP ready.
+Independent specification/standards design reviews precede implementation;
+parent retains PRs, hosted qualification, review coordination and integration.
+
+### HTTP elapsed-budget admitted completion — 2026-10-06
+
+Tested source `0950c4d5839608c8dd5f52afcb3fd2424a9a1656` (tree `55c7dea28bae397ee9d70995897c5ff0c8e2a672`) changes only the
+admitted shared service owner and co-located tests, plus core README, contract
+and admission notes. Final source blob `83478facd105a08f8a52e36e6ce9780d09e76d2a` is
+independently reviewed. Owning plan/ledger/matrix/gates and
+[qualification](http-elapsed-budget-qualification-2026-10-06.md) record affected
+checks, historical failures, cache restoration and pending broader gate scope.
+Evidence-only successor preserves source, dependencies and frozen refs.

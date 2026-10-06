@@ -1,0 +1,878 @@
+{
+  "provenance": {
+    "base": "722245514b3bae42511aa5ea188570292ce276d4",
+    "base_tree": "14e8a1b36b580f2397264dd38b18329ec07bc75e",
+    "admission": "d3d93f8b5da09f7d71c96631aab141c6bae9fb6c",
+    "source_blob": "855fe4272889d7518d572461160b35a02a299d23",
+    "source_sha256": "6d6f4bf94d43a3095e81cb853dd9738687c0ccc7d2f35f4871911d9fe3299bce",
+    "branch": "qualification/ac10-public-hf-72224551",
+    "build_settings": {
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_PROFILE_DEV_DEBUG": "0",
+      "CARGO_PROFILE_TEST_DEBUG": "0",
+      "CARGO_TARGET_DIR": "/workspace/Pumas-Library/rust/target"
+    },
+    "kernel": "Linux 6.18.44 x86_64 GNU/Linux",
+    "workspace_available_bytes_after_cache_cleanup": 1837703168,
+    "command": "/tmp/pumas-cargo-admission/run-cargo-serialized test --offline --manifest-path rust/Cargo.toml --locked -p pumas-library --lib [--no-default-features] public_hf_large_transfer_preserves_file_identity_and_records_resource_usage -- --ignored --nocapture --test-threads=1",
+    "resumed_after_pr42_evidence": "91db604ae301500d003b0ecbd76287426d86aeed",
+    "transfer_deadline_definition": "300s through actual verified handoff/marker removal; then unchanged30s importerentry",
+    "versions": {
+      "rustc": "1.92.0 (ded5c06cf 2025-12-08)",
+      "cargo": "1.92.0 (344c4567c 2025-10-21)"
+    },
+    "default_exit": 0,
+    "workspace_headroom_sample": {
+      "available_bytes": 967688192,
+      "utc": "2026-10-06T08:34:44.149473+00:00",
+      "phase": "no-default compilation"
+    },
+    "source_head": "8a147160c2b3743c549e00a89b1e48f54d7a2390",
+    "source_tree": "9544e16dde7802baa2033bf7ceea7d44c2ba3767",
+    "pr42_owned_dependency_cache_restored": {
+      "utc": "2026-10-06T08:42:48.208852+00:00",
+      "restored": [
+        {
+          "from": "/tmp/pr42-build-cache/node_modules",
+          "to": "/workspace/Pumas-Library-pr42-desktop-contract/node_modules"
+        },
+        {
+          "from": "/tmp/pr42-build-cache/electron/node_modules",
+          "to": "/workspace/Pumas-Library-pr42-desktop-contract/electron/node_modules"
+        },
+        {
+          "from": "/tmp/pr42-build-cache/frontend/node_modules",
+          "to": "/workspace/Pumas-Library-pr42-desktop-contract/frontend/node_modules"
+        }
+      ],
+      "available_bytes_before": 660766720,
+      "available_bytes_after": 249712640,
+      "active_cargo_rustc_clippy": false
+    }
+  },
+  "commands": {
+    "cwd": "/workspace/Pumas-Library-s3-installed-prefix-main95",
+    "commands": [
+      {
+        "name": "default-measurement",
+        "command": "CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 /tmp/pumas-cargo-admission/run-cargo-serialized test --offline --manifest-path rust/Cargo.toml --locked -p pumas-library --lib public_hf_large_transfer_preserves_file_identity_and_records_resource_usage -- --ignored --nocapture --test-threads=1",
+        "log": "default.log",
+        "exit": 0
+      },
+      {
+        "name": "no-default-measurement",
+        "command": "CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 /tmp/pumas-cargo-admission/run-cargo-serialized test --offline --manifest-path rust/Cargo.toml --locked -p pumas-library --lib --no-default-features public_hf_large_transfer_preserves_file_identity_and_records_resource_usage -- --ignored --nocapture --test-threads=1",
+        "log": "no-default.log",
+        "exit": 0
+      },
+      {
+        "name": "scoped-rustfmt",
+        "command": "source /workspace/.pumas-tools/env.sh; rustfmt --edition 2021 --check rust/crates/pumas-core/src/api/hf.rs",
+        "log": "rustfmt-initial.log",
+        "exit": 0
+      },
+      {
+        "name": "default-clippy",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "clippy",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "default-clippy.log",
+        "exit": 0
+      },
+      {
+        "name": "default-mixed-size-control",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "public_hf_status_poll_tracks_mixed_size_download_through_receipt_settlement",
+          "--",
+          "--nocapture",
+          "--test-threads=1"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "default-mixed-size-control.log",
+        "exit": 0
+      },
+      {
+        "name": "no-default-clippy",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "clippy",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--all-targets",
+          "--no-default-features",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "no-default-clippy.log",
+        "exit": 0
+      },
+      {
+        "name": "no-default-mixed-size-control",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "--no-default-features",
+          "public_hf_status_poll_tracks_mixed_size_download_through_receipt_settlement",
+          "--",
+          "--nocapture",
+          "--test-threads=1"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "no-default-mixed-size-control.log",
+        "exit": 0
+      },
+      {
+        "name": "source-diff-check",
+        "command": "git diff --check",
+        "log": "diff-check.log",
+        "exit": 0
+      }
+    ]
+  },
+  "reviews": {
+    "source_blob": "855fe4272889d7518d572461160b35a02a299d23",
+    "admission": "d3d93f8b5da09f7d71c96631aab141c6bae9fb6c",
+    "spec": {
+      "agent": "/root/q4_next_scope",
+      "result": "ACK; no new concrete finding; same300s phase verified handoff before unchanged30s importer-entry; all gates pending"
+    },
+    "standards": {
+      "agent": "/root/installed_harness_audit",
+      "result": "ACK; no remaining concrete standards/lifecycle finding; reversing timing delta exactly reproduces prior reviewed c092b47d7088f54a62da53c3774578c437f53b05"
+    },
+    "scope": "Read-only independent source review, no builds or gate acceptance"
+  },
+  "measurements": {
+    "default": {
+      "acquisition_id": "f546deac-cbb3-47bc-bd28-dd627d85acab",
+      "after_settlement": {
+        "allocated_bytes": 536875008,
+        "dev": 27,
+        "inode": 145253,
+        "logical_bytes": 536870912
+      },
+      "artifact_relative_path": "shared-resources/models/llm/acme/acme--model__weights_gguf__a876ce07cf93__revision_0123456789abcdef0123456789abcdef01234567/weights.gguf",
+      "at_import": {
+        "allocated_bytes": 536875008,
+        "dev": 27,
+        "inode": 145253,
+        "logical_bytes": 536870912
+      },
+      "buffer_bytes": 65536,
+      "cancellation": null,
+      "changed_baseline_files": [
+        {
+          "after": {
+            "allocated_bytes": 163840,
+            "dev": 27,
+            "inode": 145251,
+            "logical_bytes": 160712,
+            "paths": [
+              "shared-resources/models/models.db-wal"
+            ]
+          },
+          "before": {
+            "allocated_bytes": 0,
+            "dev": 27,
+            "inode": 145251,
+            "logical_bytes": 0,
+            "paths": [
+              "shared-resources/models/models.db-wal"
+            ]
+          }
+        }
+      ],
+      "configured_capacity": {
+        "blocking": 16,
+        "rescue_blocking": 4,
+        "rescue_workers": 32,
+        "scopes": 256,
+        "workers": 32
+      },
+      "download_id": "b791ba5c-d485-4525-9f62-43a0a54e713e",
+      "filesystem": {
+        "mount": "/workspace",
+        "type": "overlay"
+      },
+      "inventory_after": [
+        {
+          "allocated_bytes": 163840,
+          "dev": 27,
+          "inode": 145251,
+          "logical_bytes": 160712,
+          "paths": [
+            "shared-resources/models/models.db-wal"
+          ]
+        },
+        {
+          "allocated_bytes": 0,
+          "dev": 27,
+          "inode": 145252,
+          "logical_bytes": 0,
+          "paths": [
+            "state/.downloads.lock"
+          ]
+        },
+        {
+          "allocated_bytes": 536875008,
+          "dev": 27,
+          "inode": 145253,
+          "logical_bytes": 536870912,
+          "paths": [
+            "shared-resources/models/llm/acme/acme--model__weights_gguf__a876ce07cf93__revision_0123456789abcdef0123456789abcdef01234567/weights.gguf"
+          ]
+        },
+        {
+          "allocated_bytes": 4096,
+          "dev": 27,
+          "inode": 146784,
+          "logical_bytes": 23,
+          "paths": [
+            "authored-sentinel.txt"
+          ]
+        },
+        {
+          "allocated_bytes": 32768,
+          "dev": 27,
+          "inode": 146786,
+          "logical_bytes": 32768,
+          "paths": [
+            "shared-resources/models/models.db-shm"
+          ]
+        },
+        {
+          "allocated_bytes": 8192,
+          "dev": 27,
+          "inode": 146806,
+          "logical_bytes": 5031,
+          "paths": [
+            "state/downloads.json"
+          ]
+        },
+        {
+          "allocated_bytes": 249856,
+          "dev": 27,
+          "inode": 146817,
+          "logical_bytes": 249856,
+          "paths": [
+            "shared-resources/models/models.db"
+          ]
+        },
+        {
+          "allocated_bytes": 0,
+          "dev": 27,
+          "inode": 146833,
+          "logical_bytes": 0,
+          "paths": [
+            "shared-resources/models/.pumas-library-id.lock"
+          ]
+        },
+        {
+          "allocated_bytes": 4096,
+          "dev": 27,
+          "inode": 146849,
+          "logical_bytes": 81,
+          "paths": [
+            "shared-resources/models/.pumas-library-id.json"
+          ]
+        },
+        {
+          "allocated_bytes": 4096,
+          "dev": 27,
+          "inode": 146850,
+          "logical_bytes": 329,
+          "paths": [
+            "cache/hf_acme_model@0123456789abcdef0123456789abcdef01234567_files.json"
+          ]
+        },
+        {
+          "allocated_bytes": 8192,
+          "dev": 27,
+          "inode": 146881,
+          "logical_bytes": 5025,
+          "paths": [
+            "shared-resources/models/llm/acme/acme--model__weights_gguf__a876ce07cf93__revision_0123456789abcdef0123456789abcdef01234567/metadata.json"
+          ]
+        }
+      ],
+      "inventory_before": [
+        {
+          "allocated_bytes": 0,
+          "dev": 27,
+          "inode": 145251,
+          "logical_bytes": 0,
+          "paths": [
+            "shared-resources/models/models.db-wal"
+          ]
+        },
+        {
+          "allocated_bytes": 4096,
+          "dev": 27,
+          "inode": 146784,
+          "logical_bytes": 23,
+          "paths": [
+            "authored-sentinel.txt"
+          ]
+        },
+        {
+          "allocated_bytes": 32768,
+          "dev": 27,
+          "inode": 146786,
+          "logical_bytes": 32768,
+          "paths": [
+            "shared-resources/models/models.db-shm"
+          ]
+        },
+        {
+          "allocated_bytes": 249856,
+          "dev": 27,
+          "inode": 146817,
+          "logical_bytes": 249856,
+          "paths": [
+            "shared-resources/models/models.db"
+          ]
+        },
+        {
+          "allocated_bytes": 0,
+          "dev": 27,
+          "inode": 146833,
+          "logical_bytes": 0,
+          "paths": [
+            "shared-resources/models/.pumas-library-id.lock"
+          ]
+        },
+        {
+          "allocated_bytes": 4096,
+          "dev": 27,
+          "inode": 146849,
+          "logical_bytes": 81,
+          "paths": [
+            "shared-resources/models/.pumas-library-id.json"
+          ]
+        }
+      ],
+      "inventory_outcome": {
+        "Ok": null
+      },
+      "io_after_promotion_before_final_hash_bytes": {
+        "rchar": 2687343488,
+        "read_bytes": 0,
+        "wchar": 537960551,
+        "write_bytes": 538148864
+      },
+      "io_first_chunk_bytes": {
+        "rchar": 2377968,
+        "read_bytes": 0,
+        "wchar": 993072,
+        "write_bytes": 1314816
+      },
+      "memory_at_import_kb": {
+        "VmHWM": 99864,
+        "VmRSS": 99004
+      },
+      "memory_before_kb": {
+        "VmHWM": 56140,
+        "VmRSS": 56140
+      },
+      "model_id": "llm/acme/acme--model__weights_gguf__a876ce07cf93__revision_0123456789abcdef0123456789abcdef01234567",
+      "other_new_files_allocated_bytes": 20480,
+      "other_new_files_logical_bytes": 10385,
+      "outcome": {
+        "Ok": null
+      },
+      "partial": {
+        "allocated_bytes": 65536,
+        "dev": 27,
+        "inode": 145253,
+        "logical_bytes": 65536
+      },
+      "payload_bytes": 536870912,
+      "sha256": "cf4ca2aa6340e8946b852787296e6e2555ba9675d64ebedd795c14ad71996be3",
+      "shutdown_attempts": [
+        "Ok(Ok(()))"
+      ],
+      "source_outcome": {
+        "Ok": null
+      },
+      "source_payload_bytes": 536870912,
+      "source_requests": [
+        "GET /api/models/acme/model/revision/main HTTP/1.1",
+        "GET /api/models/acme/model/revision/0123456789abcdef0123456789abcdef01234567 HTTP/1.1",
+        "GET /api/models/acme/model/tree/0123456789abcdef0123456789abcdef01234567?recursive=true HTTP/1.1",
+        "GET /acme/model/resolve/0123456789abcdef0123456789abcdef01234567/weights.gguf HTTP/1.1"
+      ],
+      "transfer_release_to_import_hold_ms": 60268,
+      "wall_elapsed_ms": 79265
+    },
+    "no-default": {
+      "acquisition_id": "0824e245-5387-45e6-b5c6-e62c0ddfdf8e",
+      "after_settlement": {
+        "allocated_bytes": 536875008,
+        "dev": 27,
+        "inode": 146789,
+        "logical_bytes": 536870912
+      },
+      "artifact_relative_path": "shared-resources/models/llm/acme/acme--model__weights_gguf__a876ce07cf93__revision_0123456789abcdef0123456789abcdef01234567/weights.gguf",
+      "at_import": {
+        "allocated_bytes": 536875008,
+        "dev": 27,
+        "inode": 146789,
+        "logical_bytes": 536870912
+      },
+      "buffer_bytes": 65536,
+      "cancellation": null,
+      "changed_baseline_files": [
+        {
+          "after": {
+            "allocated_bytes": 163840,
+            "dev": 27,
+            "inode": 145242,
+            "logical_bytes": 160712,
+            "paths": [
+              "shared-resources/models/models.db-wal"
+            ]
+          },
+          "before": {
+            "allocated_bytes": 0,
+            "dev": 27,
+            "inode": 145242,
+            "logical_bytes": 0,
+            "paths": [
+              "shared-resources/models/models.db-wal"
+            ]
+          }
+        }
+      ],
+      "configured_capacity": {
+        "blocking": 16,
+        "rescue_blocking": 4,
+        "rescue_workers": 32,
+        "scopes": 256,
+        "workers": 32
+      },
+      "download_id": "bb573653-f1b0-400b-a05f-ef5aabf50432",
+      "filesystem": {
+        "mount": "/workspace",
+        "type": "overlay"
+      },
+      "inventory_after": [
+        {
+          "allocated_bytes": 4096,
+          "dev": 27,
+          "inode": 145238,
+          "logical_bytes": 23,
+          "paths": [
+            "authored-sentinel.txt"
+          ]
+        },
+        {
+          "allocated_bytes": 249856,
+          "dev": 27,
+          "inode": 145241,
+          "logical_bytes": 249856,
+          "paths": [
+            "shared-resources/models/models.db"
+          ]
+        },
+        {
+          "allocated_bytes": 163840,
+          "dev": 27,
+          "inode": 145242,
+          "logical_bytes": 160712,
+          "paths": [
+            "shared-resources/models/models.db-wal"
+          ]
+        },
+        {
+          "allocated_bytes": 32768,
+          "dev": 27,
+          "inode": 145243,
+          "logical_bytes": 32768,
+          "paths": [
+            "shared-resources/models/models.db-shm"
+          ]
+        },
+        {
+          "allocated_bytes": 0,
+          "dev": 27,
+          "inode": 145245,
+          "logical_bytes": 0,
+          "paths": [
+            "shared-resources/models/.pumas-library-id.lock"
+          ]
+        },
+        {
+          "allocated_bytes": 4096,
+          "dev": 27,
+          "inode": 145246,
+          "logical_bytes": 81,
+          "paths": [
+            "shared-resources/models/.pumas-library-id.json"
+          ]
+        },
+        {
+          "allocated_bytes": 4096,
+          "dev": 27,
+          "inode": 145248,
+          "logical_bytes": 329,
+          "paths": [
+            "cache/hf_acme_model@0123456789abcdef0123456789abcdef01234567_files.json"
+          ]
+        },
+        {
+          "allocated_bytes": 0,
+          "dev": 27,
+          "inode": 145250,
+          "logical_bytes": 0,
+          "paths": [
+            "state/.downloads.lock"
+          ]
+        },
+        {
+          "allocated_bytes": 8192,
+          "dev": 27,
+          "inode": 146788,
+          "logical_bytes": 5031,
+          "paths": [
+            "state/downloads.json"
+          ]
+        },
+        {
+          "allocated_bytes": 536875008,
+          "dev": 27,
+          "inode": 146789,
+          "logical_bytes": 536870912,
+          "paths": [
+            "shared-resources/models/llm/acme/acme--model__weights_gguf__a876ce07cf93__revision_0123456789abcdef0123456789abcdef01234567/weights.gguf"
+          ]
+        },
+        {
+          "allocated_bytes": 8192,
+          "dev": 27,
+          "inode": 146790,
+          "logical_bytes": 5025,
+          "paths": [
+            "shared-resources/models/llm/acme/acme--model__weights_gguf__a876ce07cf93__revision_0123456789abcdef0123456789abcdef01234567/metadata.json"
+          ]
+        }
+      ],
+      "inventory_before": [
+        {
+          "allocated_bytes": 4096,
+          "dev": 27,
+          "inode": 145238,
+          "logical_bytes": 23,
+          "paths": [
+            "authored-sentinel.txt"
+          ]
+        },
+        {
+          "allocated_bytes": 249856,
+          "dev": 27,
+          "inode": 145241,
+          "logical_bytes": 249856,
+          "paths": [
+            "shared-resources/models/models.db"
+          ]
+        },
+        {
+          "allocated_bytes": 0,
+          "dev": 27,
+          "inode": 145242,
+          "logical_bytes": 0,
+          "paths": [
+            "shared-resources/models/models.db-wal"
+          ]
+        },
+        {
+          "allocated_bytes": 32768,
+          "dev": 27,
+          "inode": 145243,
+          "logical_bytes": 32768,
+          "paths": [
+            "shared-resources/models/models.db-shm"
+          ]
+        },
+        {
+          "allocated_bytes": 0,
+          "dev": 27,
+          "inode": 145245,
+          "logical_bytes": 0,
+          "paths": [
+            "shared-resources/models/.pumas-library-id.lock"
+          ]
+        },
+        {
+          "allocated_bytes": 4096,
+          "dev": 27,
+          "inode": 145246,
+          "logical_bytes": 81,
+          "paths": [
+            "shared-resources/models/.pumas-library-id.json"
+          ]
+        }
+      ],
+      "inventory_outcome": {
+        "Ok": null
+      },
+      "io_after_promotion_before_final_hash_bytes": {
+        "rchar": 2687360174,
+        "read_bytes": 0,
+        "wchar": 537936687,
+        "write_bytes": 538173440
+      },
+      "io_first_chunk_bytes": {
+        "rchar": 2377968,
+        "read_bytes": 0,
+        "wchar": 993072,
+        "write_bytes": 1310720
+      },
+      "memory_at_import_kb": {
+        "VmHWM": 96868,
+        "VmRSS": 96536
+      },
+      "memory_before_kb": {
+        "VmHWM": 54872,
+        "VmRSS": 54872
+      },
+      "model_id": "llm/acme/acme--model__weights_gguf__a876ce07cf93__revision_0123456789abcdef0123456789abcdef01234567",
+      "other_new_files_allocated_bytes": 20480,
+      "other_new_files_logical_bytes": 10385,
+      "outcome": {
+        "Ok": null
+      },
+      "partial": {
+        "allocated_bytes": 65536,
+        "dev": 27,
+        "inode": 146789,
+        "logical_bytes": 65536
+      },
+      "payload_bytes": 536870912,
+      "sha256": "cf4ca2aa6340e8946b852787296e6e2555ba9675d64ebedd795c14ad71996be3",
+      "shutdown_attempts": [
+        "Ok(Ok(()))"
+      ],
+      "source_outcome": {
+        "Ok": null
+      },
+      "source_payload_bytes": 536870912,
+      "source_requests": [
+        "GET /api/models/acme/model/revision/main HTTP/1.1",
+        "GET /api/models/acme/model/revision/0123456789abcdef0123456789abcdef01234567 HTTP/1.1",
+        "GET /api/models/acme/model/tree/0123456789abcdef0123456789abcdef01234567?recursive=true HTTP/1.1",
+        "GET /acme/model/resolve/0123456789abcdef0123456789abcdef01234567/weights.gguf HTTP/1.1"
+      ],
+      "transfer_release_to_import_hold_ms": 62240,
+      "wall_elapsed_ms": 81782
+    }
+  },
+  "archive": {
+    "path": "command-logs.tar.gz",
+    "bytes": 16821,
+    "sha256": "9e1bf5e60f1c84b37d95f3f9d6a338ead534f6dd72b28e86e67540a2839e64c2",
+    "members": [
+      {
+        "name": "debug0-core-interrupted-before-fixture.log",
+        "bytes": 111,
+        "sha256": "e87d5468e1301e2bafce235a4b3ebda53b334542c71702a82b09e3eb44b86043"
+      },
+      {
+        "name": "debug0-dependencies-interrupted-before-fixture.log",
+        "bytes": 283,
+        "sha256": "678fc0d8e520895edfe929908b65cd67c26f5851a335429f26a9f568af7bdd6e"
+      },
+      {
+        "name": "default-clippy.log",
+        "bytes": 344,
+        "sha256": "780a32c77eab59dd58ddf9119d093a3968c490c00dcca86539fcc990b389df90"
+      },
+      {
+        "name": "default-compile-error.log",
+        "bytes": 5576,
+        "sha256": "b57695f7c9cb9cb79fd52a7346b992acafca188edee920cd9182ac30535e0d57"
+      },
+      {
+        "name": "default-interrupted-before-fixture.log",
+        "bytes": 111,
+        "sha256": "e87d5468e1301e2bafce235a4b3ebda53b334542c71702a82b09e3eb44b86043"
+      },
+      {
+        "name": "default-mixed-size-control.log",
+        "bytes": 395,
+        "sha256": "2d745538fd7d838cb3704962a3a257de385ea9c20c676c3e5b6ebb8cb743f540"
+      },
+      {
+        "name": "default-premature-import-deadline.log",
+        "bytes": 4886,
+        "sha256": "c58215f163218d5e625dc31a13ab26038e54513e389f60693fddd7ab57a5e893"
+      },
+      {
+        "name": "default.log",
+        "bytes": 5011,
+        "sha256": "84ce33c6eeea9cdd1c06b8bd8e19b0a35c4e725f18c896ff80bc4167b0e7f6de"
+      },
+      {
+        "name": "diff-check.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "headroom-samples.json",
+        "bytes": 86,
+        "sha256": "081db49b98d3a531dd43b808e014bfc662a7c0751365bd3998aebca21cf4c37f"
+      },
+      {
+        "name": "identity-resolution.json",
+        "bytes": 4449,
+        "sha256": "fb19c87818e07803906969111218814b544a1025bb25e2ddcad3dc4df091a3e0"
+      },
+      {
+        "name": "no-default-clippy.log",
+        "bytes": 202,
+        "sha256": "f29cdf7dc2056b109a1244c2e496067011bdb4c7330cc48d7c8a74ff4fbe656d"
+      },
+      {
+        "name": "no-default-mixed-size-control.log",
+        "bytes": 395,
+        "sha256": "c440c2d9308eb86168bd0e905d3e8cea9db7cfca1c6b0a72428cf63c55a710df"
+      },
+      {
+        "name": "no-default.log",
+        "bytes": 5069,
+        "sha256": "541828a4abea1b506b4f09b5d0cef763d05c2a7549dc78bc1d6a599921279e1f"
+      },
+      {
+        "name": "paused-for-pr42.json",
+        "bytes": 372,
+        "sha256": "842d19a1b146b6b80eaace32c95dfbe537891eb1fa9398016fd575c0a770ad43"
+      },
+      {
+        "name": "preserved-work-in-progress.patch",
+        "bytes": 34469,
+        "sha256": "6799be231b06b02ae96e1a0482d052cd3a900f7ae9e56aa4bd2ec6dc8503e1fd"
+      },
+      {
+        "name": "removed-inactive-core-rlibs.json",
+        "bytes": 1086,
+        "sha256": "bdc02b9541eb998d846d2567a1b925c6d02a5bcb67150b6aa134ab6b65c83005"
+      },
+      {
+        "name": "removed-inactive-test-binaries.json",
+        "bytes": 1043,
+        "sha256": "d0b5087434925b323c733f07fadb7b9c2b007112a86fa9eea2f101980a00b6ec"
+      },
+      {
+        "name": "removed-interrupted-core-objects.json",
+        "bytes": 2009,
+        "sha256": "da1d05a097665d6401991061031c3a579990a3905d4a6fb0aa01f29afd48e287"
+      },
+      {
+        "name": "resource-stop.json",
+        "bytes": 72,
+        "sha256": "0153e54cde9fea61e4635c3365367d8f48da2ae971142bddad038f019df564d1"
+      },
+      {
+        "name": "resumption-cache-headroom.json",
+        "bytes": 2349,
+        "sha256": "63ffd10a4b54d08fc23dff6486396cf1c5d1900d95fe5718676dce4b21d1b27b"
+      },
+      {
+        "name": "run-cargo-serialized",
+        "bytes": 235,
+        "sha256": "42c3338ccaa7ea1d34f0a7a9b3f8e8fb0551a6f40b8aaeee9afda1359d690730"
+      },
+      {
+        "name": "run-supporting-checks.py",
+        "bytes": 1347,
+        "sha256": "f322fdb6c63583b1a539e19f85a3f7677bde40246929a20cf7af14700f4632b6"
+      },
+      {
+        "name": "rustfmt-initial.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "source-identity-after-commit.txt",
+        "bytes": 317,
+        "sha256": "5bea9e90b996c11d229f8751829d89604bc711e164735f53e5fad41a91fdd4d2"
+      },
+      {
+        "name": "source-identity-before-commit.txt",
+        "bytes": 124,
+        "sha256": "3ea55b64a84942e7be631b756d817bd332ecd0ae41ef61a9a57d99d95a5c1a61"
+      },
+      {
+        "name": "pr42-cache-restored.json",
+        "bytes": 636,
+        "sha256": "f271bcf396601dc3ee06828f4af91791cfcccde778cb40cf713e903a282a19f8"
+      }
+    ]
+  },
+  "historical_failures": [
+    {
+      "log": "default-compile-error.log",
+      "kind": "UUID Serialize compile error, repaired before measurements"
+    },
+    {
+      "log": "default-premature-import-deadline.log",
+      "source_blob": "c092b47d7088f54a62da53c3774578c437f53b05",
+      "kind": "30s importer-entry wait began before verification/handoff; not qualified"
+    },
+    {
+      "logs": [
+        "debug0-core-interrupted-before-fixture.log",
+        "debug0-dependencies-interrupted-before-fixture.log",
+        "default-interrupted-before-fixture.log"
+      ],
+      "kind": "Interrupted builds under disk guards/PR42 priority; not qualification"
+    }
+  ],
+  "scope": "One synthetic Linux public-core HF managed transfer/importer workload. All acceptance gates pending. No public API or production changes."
+}

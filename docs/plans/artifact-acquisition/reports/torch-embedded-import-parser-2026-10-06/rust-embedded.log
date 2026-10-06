@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized] target(s) in 0.32s
+     Running unittests src/lib.rs (/workspace/pumas-reconcile-target/debug/deps/pumas_app_manager-a6c29384ac95defc)
+
+running 2 tests
+test version_manager::installer::torch::torch_wheel_handoff_tests::embedded_qualified_runtime_contains_public_tooling_and_single_record_owner ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::embedded_sidecar_and_lock_materialize_outside_the_checkout ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 353 filtered out; finished in 0.01s
+

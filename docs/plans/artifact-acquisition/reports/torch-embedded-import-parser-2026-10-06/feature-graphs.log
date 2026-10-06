@@ -1,0 +1,33 @@
+x86_64-unknown-linux-gnu pumas-library headless=True fixture=False: feature contract passed
+x86_64-unknown-linux-gnu pumas-rpc headless=True fixture=False: feature contract passed
+x86_64-unknown-linux-gnu pumas-rpc headless=False fixture=False: feature contract passed
+x86_64-unknown-linux-gnu pumas-rpc headless=True fixture=True: feature contract passed
+x86_64-unknown-linux-gnu ['--workspace']: ONNX no-download contract passed
+x86_64-unknown-linux-gnu ['--workspace', '--all-features']: ONNX no-download contract passed
+x86_64-unknown-linux-gnu ['-p', 'pumas-library', '--no-default-features', '--features', 'onnx-runtime']: ONNX no-download contract passed
+x86_64-unknown-linux-gnu pumas-library s3=True headless=False: feature contract passed
+x86_64-unknown-linux-gnu pumas-library s3=True headless=True: feature contract passed
+x86_64-unknown-linux-gnu pumas-rpc s3=True headless=False: feature contract passed
+x86_64-unknown-linux-gnu pumas-rpc s3=True headless=True: feature contract passed
+aarch64-apple-darwin pumas-library headless=True fixture=False: feature contract passed
+aarch64-apple-darwin pumas-rpc headless=True fixture=False: feature contract passed
+aarch64-apple-darwin pumas-rpc headless=False fixture=False: feature contract passed
+aarch64-apple-darwin pumas-rpc headless=True fixture=True: feature contract passed
+aarch64-apple-darwin ['--workspace']: ONNX no-download contract passed
+aarch64-apple-darwin ['--workspace', '--all-features']: ONNX no-download contract passed
+aarch64-apple-darwin ['-p', 'pumas-library', '--no-default-features', '--features', 'onnx-runtime']: ONNX no-download contract passed
+aarch64-apple-darwin pumas-library s3=True headless=False: feature contract passed
+aarch64-apple-darwin pumas-library s3=True headless=True: feature contract passed
+aarch64-apple-darwin pumas-rpc s3=True headless=False: feature contract passed
+aarch64-apple-darwin pumas-rpc s3=True headless=True: feature contract passed
+x86_64-pc-windows-msvc pumas-library headless=True fixture=False: feature contract passed
+x86_64-pc-windows-msvc pumas-rpc headless=True fixture=False: feature contract passed
+x86_64-pc-windows-msvc pumas-rpc headless=False fixture=False: feature contract passed
+x86_64-pc-windows-msvc pumas-rpc headless=True fixture=True: feature contract passed
+x86_64-pc-windows-msvc ['--workspace']: ONNX no-download contract passed
+x86_64-pc-windows-msvc ['--workspace', '--all-features']: ONNX no-download contract passed
+x86_64-pc-windows-msvc ['-p', 'pumas-library', '--no-default-features', '--features', 'onnx-runtime']: ONNX no-download contract passed
+x86_64-pc-windows-msvc pumas-library s3=True headless=False: feature contract passed
+x86_64-pc-windows-msvc pumas-library s3=True headless=True: feature contract passed
+x86_64-pc-windows-msvc pumas-rpc s3=True headless=False: feature contract passed
+x86_64-pc-windows-msvc pumas-rpc s3=True headless=True: feature contract passed

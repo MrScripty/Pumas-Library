@@ -1,0 +1,18 @@
+{
+  "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+  "executable": "/workspace/pumas-parser-test-venv/bin/python",
+  "packages": {
+    "fastapi": "0.128.0",
+    "starlette": "0.50.0",
+    "numpy": "2.3.5",
+    "uvicorn": "0.40.0",
+    "psutil": "7.2.1",
+    "pydantic": "2.13.5",
+    "ruff": "0.15.2",
+    "pip": "26.2.1"
+  },
+  "provisioning": "Task-local venv without pip installation; .pth reuses existing qualified dependency target then original interpreter site-packages. No tool/package versions changed; isolated import children receive no repository path through .pth.",
+  "pth_contents": "/workspace/pumas-reconcile-python-full\n/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages\n",
+  "underlying_python_sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7",
+  "uv_sha256": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f"
+}

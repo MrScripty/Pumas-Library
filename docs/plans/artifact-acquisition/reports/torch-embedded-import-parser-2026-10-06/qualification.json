@@ -1,0 +1,44 @@
+{
+  "tested_source": "6699ffc89423557f45a596295c3f89698d5d342b",
+  "tested_tree": "6f69d66f38a7f466e1e03003b97e15e614f28d01",
+  "parent_source": "9310c1d6a0dbbef6e602a2a9c464643e21f2d341",
+  "parent_tree": "93c3ac702f5f17694f0062b94df2216430a7bfda",
+  "changed_files": [
+    "torch-server/tests/test_embedded_runtime_imports.py"
+  ],
+  "test_blob": "0b18c156cc95dd9797e58dcf13c723c61b463205",
+  "test_sha256": "b12ac76ae824893a965a774ae57861a490aa96d6f41c567f6d3eb2f10db0457e",
+  "gates": {
+    "actual-import-probes": 0,
+    "python-affected": 0,
+    "python-full": 0,
+    "ruff": 0,
+    "source-unchanged": 0,
+    "feature-graphs": 0,
+    "rust-embedded": 0,
+    "workspace-test": 0,
+    "workspace-clippy": 0,
+    "rustfmt": 0
+  },
+  "full_python": {
+    "tests": 316,
+    "passed": 316,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "affected_python": {
+    "tests": 126,
+    "passed": 126,
+    "skipped": 0
+  },
+  "rust_embeddings": {
+    "passed": 2,
+    "ignored": 0
+  },
+  "feature_graphs": 33,
+  "runtime_source_unchanged": true,
+  "native_mode_implemented": false,
+  "automatic_adoption": false,
+  "prior_failure_evidence": "Byte-identical in diagnostic commitc248d28cc4577861be9eba5c5da0e292def61a18 and reconciliation evidence; neither amended."
+}

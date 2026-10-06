@@ -1,0 +1,8 @@
+test_embedded_image_text_startup_imports_only_installed_local_modules (test_embedded_runtime_imports.EmbeddedRuntimeImportTests.test_embedded_image_text_startup_imports_only_installed_local_modules) ... ok
+test_missing_binding_cannot_fall_back_to_repository_pythonpath (test_embedded_runtime_imports.EmbeddedRuntimeImportTests.test_missing_binding_cannot_fall_back_to_repository_pythonpath) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 1.063s
+
+OK
+Both original test assertions passed after real isolated subprocess execution.

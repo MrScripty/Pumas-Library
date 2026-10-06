@@ -38,6 +38,7 @@ enum LifecycleCase {
     Cancel,
     Abandon,
     AbandonPublication,
+    Reconcile(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -702,7 +703,7 @@ print(json.dumps(rows))
     }
     assert_eq!(metadata.get_installed_version("v2.14.0", Some(AppId::Torch)).unwrap().is_some(),
         matches!(case, Case::Lifecycle(LifecycleCase::Success | LifecycleCase::AbandonPublication |
-            LifecycleCase::Publication(super::offline_selection::local_consumption::runtime::PublicationFault::AfterMetadata))));
+            LifecycleCase::Publication(super::offline_selection::local_consumption::runtime::PublicationFault::AfterMetadata))) || matches!(case, Case::Lifecycle(LifecycleCase::Reconcile(c)) if !matches!(c, "before-rename" | "after-rename" | "rollback-missing-record" | "rollback-mutated-marker" | "rollback-missing-directory" | "rollback-missing-marker" | "cleanup-interruption" | "missing-metadata")));
     if let Some(complete) = completion.take() {
         complete._grant.validate().unwrap();
         complete._grant.clear_contents().unwrap();
@@ -1107,7 +1108,7 @@ async fn lifecycle_fixture(
 ) {
     use super::offline_selection::local_consumption::runtime::{
         ProviderApproval, PublicationFault, PublicationPause, RuntimeFailure,
-        RuntimeLifecycleContext,
+        RuntimeLifecycleContext, RuntimeReconciliation,
     };
     use super::offline_selection::{QualifiedOfflineSolver, SelectionContext};
     let original_receipt = serde_json::to_vec(&packet.catalog.receipt).unwrap();
@@ -1210,10 +1211,19 @@ async fn lifecycle_fixture(
         release: &release,
         adapter: "none",
         fixture_sources: sources,
-        fault: if let LifecycleCase::Publication(fault) = action {
-            fault
-        } else {
-            PublicationFault::None
+        fault: match action {
+            LifecycleCase::Publication(fault) => fault,
+            LifecycleCase::Reconcile("before-rename") => PublicationFault::InterruptedBeforeRename,
+            LifecycleCase::Reconcile(
+                "after-rename"
+                | "rollback-missing-record"
+                | "rollback-mutated-marker"
+                | "rollback-missing-directory"
+                | "rollback-missing-marker"
+                | "cleanup-interruption",
+            ) => PublicationFault::InterruptedAfterRename,
+            LifecycleCase::Reconcile(_) => PublicationFault::AfterMetadata,
+            _ => PublicationFault::None,
         },
         publication_pause: pause.clone(),
     };
@@ -1284,6 +1294,181 @@ async fn lifecycle_fixture(
             }
             assert!(!destination.exists() && !pending.exists());
         }
+    } else if let LifecycleCase::Reconcile(case) = action {
+        let refusal = flow
+            .await
+            .err()
+            .expect("Controlled interruption retains owner");
+        let versions = installer.versions_dir();
+        let before_marker = std::fs::read(&pending).unwrap();
+        let record = destination.join("selected-runtime-install.json");
+        match case {
+            "missing-marker" | "rollback-missing-marker" => std::fs::remove_file(&pending).unwrap(),
+            "mutated-marker" | "rollback-mutated-marker" => {
+                std::fs::write(&pending, b"changed marker").unwrap()
+            }
+            "missing-record" | "rollback-missing-record" => std::fs::remove_file(&record).unwrap(),
+            "mutated-record" => std::fs::write(&record, b"changed record").unwrap(),
+            "mutated-member" => {
+                let member = walkdir::WalkDir::new(&destination)
+                    .into_iter()
+                    .map(|e| e.unwrap())
+                    .find(|e| e.file_name() == "torch.py")
+                    .unwrap()
+                    .into_path();
+                std::fs::write(member, b"changed installed member").unwrap();
+            }
+            "foreign-directory" => {
+                std::fs::rename(&destination, versions.join("retained-original")).unwrap();
+                std::fs::create_dir(&destination).unwrap();
+                std::fs::write(destination.join("keeper"), b"foreign").unwrap();
+            }
+            "missing-directory" | "rollback-missing-directory" => {
+                std::fs::rename(&destination, versions.join("retained-original")).unwrap()
+            }
+            "missing-metadata" => installer
+                .metadata_manager
+                .remove_installed_version("v2.14.0", Some(AppId::Torch))
+                .unwrap(),
+            "foreign-metadata" => {
+                let mut metadata = installer
+                    .metadata_manager
+                    .get_installed_version("v2.14.0", Some(AppId::Torch))
+                    .unwrap()
+                    .unwrap();
+                metadata.release_notes = Some("subsequent authored metadata".into());
+                installer
+                    .metadata_manager
+                    .update_installed_version("v2.14.0", metadata, Some(AppId::Torch))
+                    .unwrap();
+            }
+            _ => {}
+        }
+        if case == "cleanup-interruption" {
+            refusal.interrupt_cleanup();
+        }
+        let metadata_before = installer
+            .metadata_manager
+            .get_installed_version("v2.14.0", Some(AppId::Torch))
+            .unwrap();
+        let marker_before = std::fs::read(&pending).ok();
+        drop(stage.take());
+        assert!(granted.is_dir(), "Refusal keeps original catalog custody");
+        if case == "abandon-reconciliation" {
+            let pause = Arc::new(PublicationPause::default());
+            refusal.pause_reconciliation(pause.clone());
+            let mut flow = Box::pin(refusal.reconcile(consumer));
+            tokio::time::timeout(Duration::from_secs(30), async {
+                loop {
+                    tokio::select! {
+                        _ = &mut flow => panic!("Reconciliation completed before abandonment"),
+                        _ = tokio::time::sleep(Duration::from_millis(25)) => {
+                            if pause.entered.load(Ordering::SeqCst) { break; }
+                        }
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            drop(flow);
+            assert!(destination.is_dir() && pending.is_file() && granted.is_dir());
+            pause.release();
+            consumer.shutdown().await.unwrap();
+            assert!(destination.is_dir() && !pending.exists());
+        } else {
+            let outcome = refusal.reconcile(consumer).await;
+            match outcome {
+                RuntimeReconciliation::Committed(published) => {
+                    assert!(matches!(case, "committed" | "missing-marker"));
+                    assert!(destination.is_dir() && !pending.exists());
+                    let expected = std::fs::read(&record).unwrap();
+                    let RuntimeReconciliation::Committed(published) =
+                        published.reconcile(consumer).await
+                    else {
+                        panic!("Repeated committed reconciliation must be stable");
+                    };
+                    assert_eq!(std::fs::read(&record).unwrap(), expected);
+                    assert_eq!(
+                        published.record["catalog_receipt_sha256"],
+                        target_observation_digest(
+                            &serde_json::from_slice::<serde_json::Value>(&original_receipt)
+                                .unwrap()
+                        )
+                        .unwrap()
+                    );
+                }
+                RuntimeReconciliation::RolledBack(refusal) => {
+                    assert!(matches!(case, "before-rename" | "after-rename"));
+                    assert!(!destination.exists() && !pending.exists());
+                    assert_eq!(
+                        serde_json::to_vec(&refusal._installed._packet.catalog.receipt).unwrap(),
+                        original_receipt
+                    );
+                    assert!(matches!(
+                        refusal.reconcile(consumer).await,
+                        RuntimeReconciliation::RolledBack(_)
+                    ));
+                }
+                RuntimeReconciliation::Unresolved(refusal) if case == "cleanup-interruption" => {
+                    assert!(!destination.exists() && pending.is_file() && granted.is_dir());
+                    assert_eq!(std::fs::read(&pending).unwrap(), before_marker);
+                    let RuntimeReconciliation::RolledBack(refusal) =
+                        refusal.reconcile(consumer).await
+                    else {
+                        panic!("Exact live removal progress must safely finish cleanup");
+                    };
+                    assert!(!pending.exists());
+                    assert_eq!(
+                        serde_json::to_vec(&refusal._installed._packet.catalog.receipt).unwrap(),
+                        original_receipt
+                    );
+                }
+                RuntimeReconciliation::Unresolved(refusal) => {
+                    assert!(!matches!(
+                        case,
+                        "before-rename" | "after-rename" | "committed" | "missing-marker"
+                    ));
+                    assert_eq!(std::fs::read(&pending).ok(), marker_before);
+                    assert_eq!(
+                        serde_json::to_vec(&refusal._installed._packet.catalog.receipt).unwrap(),
+                        original_receipt
+                    );
+                    let RuntimeReconciliation::Unresolved(refusal) =
+                        refusal.reconcile(consumer).await
+                    else {
+                        panic!("Repeated uncertain reconciliation must preserve output");
+                    };
+                    assert!(granted.is_dir());
+                    drop(refusal);
+                    assert!(
+                        runtime.parent().unwrap().is_dir(),
+                        "Pending publication preserves source evidence after last owner drop"
+                    );
+                    retry_pending_torch_cleanup(&versions, &installer.metadata_manager).unwrap();
+                    assert!(
+                        runtime.parent().unwrap().is_dir(),
+                        "Legacy cleanup must retain unresolved selected evidence"
+                    );
+                    if case == "foreign-directory" {
+                        assert_eq!(
+                            std::fs::read(destination.join("keeper")).unwrap(),
+                            b"foreign"
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            serde_json::to_value(
+                installer
+                    .metadata_manager
+                    .get_installed_version("v2.14.0", Some(AppId::Torch))
+                    .unwrap()
+            )
+            .unwrap(),
+            serde_json::to_value(metadata_before).unwrap()
+        );
+        println!("reconciliation control {case}: actual_install_probe=true unchanged_catalog=true original_marker_bytes={}", before_marker.len());
     } else {
         match flow.await {
             Ok(published) => {
@@ -1380,9 +1565,9 @@ async fn lifecycle_fixture(
                     LifecycleCase::Publication(PublicationFault::AfterMetadata) => {
                         RuntimeFailure::CommittedWithoutAck
                     }
-                    LifecycleCase::Publication(PublicationFault::ForeignDirectory) => {
-                        RuntimeFailure::RecoveryRequired
-                    }
+                    LifecycleCase::Publication(
+                        PublicationFault::ForeignDirectory | PublicationFault::MovedRecord,
+                    ) => RuntimeFailure::RecoveryRequired,
                     _ => RuntimeFailure::Refused,
                 };
                 assert_eq!(refusal.kind, expected);
@@ -1402,7 +1587,12 @@ async fn lifecycle_fixture(
                                 .join("fixture-moved-original/selected-runtime-install.json")
                                 .is_file()
                     );
-                } else if action == LifecycleCase::Publication(PublicationFault::AfterMetadata) {
+                } else if matches!(
+                    action,
+                    LifecycleCase::Publication(
+                        PublicationFault::AfterMetadata | PublicationFault::MovedRecord
+                    )
+                ) {
                     assert!(
                         destination.join("selected-runtime-install.json").is_file()
                             && pending.is_file()
@@ -1492,4 +1682,56 @@ async fn selected_runtime_cancelled_and_abandoned_probe_keep_custody_until_drain
 #[ignore = "Registered owned publisher completes while caller acknowledgment is abandoned"]
 async fn selected_runtime_abandoned_publication_job_retains_custody_through_metadata() {
     fixture(Case::Lifecycle(LifecycleCase::AbandonPublication)).await;
+}
+
+#[tokio::test]
+#[ignore = "Actual local installation/probe and interrupted publication reconciliation"]
+async fn selected_runtime_reconciliation_committed_and_owned_rollback() {
+    for case in [
+        "committed",
+        "missing-marker",
+        "before-rename",
+        "after-rename",
+    ] {
+        fixture(Case::Lifecycle(LifecycleCase::Reconcile(case))).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "Actual local installation/probe and ambiguous evidence preservation"]
+async fn selected_runtime_reconciliation_missing_mutated_foreign_evidence_is_unresolved() {
+    for case in [
+        "mutated-marker",
+        "missing-record",
+        "mutated-record",
+        "mutated-member",
+        "missing-directory",
+        "foreign-directory",
+        "foreign-metadata",
+        "rollback-missing-record",
+        "rollback-mutated-marker",
+        "rollback-missing-directory",
+        "rollback-missing-marker",
+        "missing-metadata",
+    ] {
+        fixture(Case::Lifecycle(LifecycleCase::Reconcile(case))).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "Registered reconciliation retains live custody after caller abandonment"]
+async fn selected_runtime_reconciliation_abandoned_waiter_keeps_job_custody() {
+    fixture(Case::Lifecycle(LifecycleCase::Reconcile(
+        "abandon-reconciliation",
+    )))
+    .await;
+}
+
+#[tokio::test]
+#[ignore = "Actual owned rollback interrupted after deletion, with original live progress retained"]
+async fn selected_runtime_reconciliation_interrupted_cleanup_retains_custody() {
+    fixture(Case::Lifecycle(LifecycleCase::Reconcile(
+        "cleanup-interruption",
+    )))
+    .await;
 }

@@ -440,7 +440,7 @@ remains unchanged. Isolated probing uses a fresh owned `-X pycache_prefix` and
 `-B`; the source namespace and empty cache are fenced after probing.
 
 A registered publication job retains the whole live packet and validated runtime
-through rename, durable installed metadata acknowledgment and failure cleanup.
+through rename, live installed metadata readback/acknowledgment and failure cleanup.
 The separate `pumas.selected-runtime-install.v1` record binds the original catalog
 receipt hash/id, genuine local proof and probe, approved provider, exact metadata
 and native directory identity. It never rewrites catalog settlement. Known
@@ -448,6 +448,24 @@ pre-metadata failures reclaim only the matching owned destination; foreign
 identity, unknown metadata and committed-without-acknowledgment outcomes retain
 pending evidence for owner recovery. The distinct marker is deliberately
 non-authorizing to legacy cleanup. No cold reconstruction or replay API is added.
+The private retained owner can reconcile its original publication intent under
+registered blocking custody and the retained versions lock. Exact installed
+metadata, native directory and record bytes plus the full live runtime fence
+permit committed acknowledgment; exact uncommitted source/destination ownership
+permits rollback. A started metadata publication with absent readback remains
+unresolved: absence is not permission to undo subsequently authored state.
+Missing/changed evidence, foreign output, metadata mismatch and operational
+uncertainty preserve output and typed custody. Successful deletion progress is
+retained in the same live intent so interruption before marker cleanup can finish
+without guessing from an absent directory. A distinct selected-stage custody
+marker keeps legacy stage cleanup from deleting pending source evidence, even
+if the publication marker is missing. Legacy cleanup never accepts these records.
+No saved JSON reconstructs catalog authority or reruns installation/probing.
+This is live same-owner reconciliation and conservative cold preservation, not
+cold acceptance or complete crash recovery. The existing installed-metadata
+writer does not synchronize its parent directory; no power-loss durability is
+claimed for installed metadata.
+
 Only a private CPU/no-adapter profile is admitted. Automatic/preview rollout,
 complete recovery, bootstrap baseline and real/native provider qualification
 remain separate. Synthetic arithmetic/protocol fixtures support local publication

@@ -1429,3 +1429,17 @@ contact, PR/merge or production/native/provider acceptance is admitted. Syntheti
 Torch and protocol fixtures exercise real probing and metadata publication while
 remaining explicitly fixture evidence. Network traces are observation, not an
 enforced network-denial claim. Parent owns review, hosted CI and integration.
+
+## Q2 private selected-runtime reconciliation — admitted 2026-10-06
+
+Exact published base `04fde63b151fa019b73fcf71aca636b46a35c548`, tree
+`910a9abef17f94af4a4f88ee14312ea0e84299dc`; new branch
+`feat/torch-selected-reconcile-04fde63b`. User authorizes the smallest existing-owner
+reconciliation of selected publication, with source/evidence publication only.
+Admitted: private `torch_selected_runtime.rs`, existing catalog-owner local fixtures,
+Torch stage/cleanup custody in `torch.rs`, this admission, contract section11,
+owning plan and separate report/evidence. Reconcile only the retained live owner
+and exact publication intent; saved records cannot recreate catalog authority.
+No install/probe replay, catalog receipt change, public Rust surface, caller adoption,
+Q3/S3, dependency/lock/provider/model change, main merge, PR or external review.
+Legacy metadata publication supports live readback, not power-loss durability.

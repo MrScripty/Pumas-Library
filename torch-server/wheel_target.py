@@ -137,6 +137,11 @@ def capture_native():
     import sysconfig
     require(not sysconfig.get_config_var("Py_DEBUG") and not sysconfig.get_config_var("Py_GIL_DISABLED"),
             "Debug/free-threaded native ABI is unsupported")
+    actual_tags = set(tags_api.sys_tags())
+    # Windows omits Py_DEBUG. Public interpreter tags account for its debug
+    # refcount/suffix probes; debug builds may also accept a normal ABI.
+    require(not any(re.fullmatch(r"cp\d+[td]+", tag.abi) for tag in actual_tags),
+            "Debug/free-threaded native ABI is unsupported")
     markers = markers_api.default_environment()
     systems = {"linux": "linux", "win32": "windows", "darwin": "macos"}
     require(sys.platform in systems, "Unsupported native consumer platform")
@@ -146,7 +151,7 @@ def capture_native():
     libc = None
     macos = None
     if system == "linux":
-        platforms = {tag.platform for tag in tags_api.sys_tags()}
+        platforms = {tag.platform for tag in actual_tags}
         for family, prefix in (("glibc", "manylinux"), ("musl", "musllinux")):
             versions = [tuple(map(int, match.groups())) for p in platforms
                         if (match := re.fullmatch(prefix + r"_(\d+)_(\d+)_x86_64", p))]
@@ -156,6 +161,9 @@ def capture_native():
         require(libc is not None, "Native Linux libc policy cannot be established")
     elif system == "macos":
         macos = ".".join(platform.mac_ver()[0].split(".")[:2])
-    return WheelTarget({"schema": "pumas.wheel-target.v1", "python": markers["python_full_version"],
+    observed = WheelTarget({"schema": "pumas.wheel-target.v1", "python": markers["python_full_version"],
         "abi": "cp" + markers["python_version"].replace(".", ""), "os": system, "arch": arch,
         "libc": libc, "macos_deployment": macos, "native_linux_tag": system == "linux", "markers": markers})
+    require(set(observed.tags) <= actual_tags,
+            "Native target differs from actual interpreter compatibility tags")
+    return observed

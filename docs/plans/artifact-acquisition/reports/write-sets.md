@@ -2,6 +2,32 @@
 
 These are the admitted exact paths/closed path families. The actual source files selected for the current Q1 slice are listed in the execution ledger; remaining paths below are authorized Q1 boundaries, not claims that those implementations exist. Before a slice edits files, its integrator records the exact members and actual tests in its ledger. New authority/consumer boundaries trigger re-plan.
 
+## Q2 target observation binding successor — 2026-10-06
+
+Parent freezes `638bb7c442be11af00f88017316fc4de04c15807`; this successor starts
+there on `feat/torch-target-packet-638bb7c4`. First independently commit the
+reviewed WOW64 admission repair in `torch-server/wheel_target.py` and its direct
+`torch-server/tests/test_wheel_target.py` regressions: native observation must
+check constructed compatibility against actual selected-interpreter public tags
+before staging or pip. No platform-policy expansion is admitted.
+
+The following packet slice may edit only those two files,
+`torch-server/install_verified_wheels.py`, a focused
+`torch-server/tests/test_target_observation.py`,
+`rust/crates/pumas-app-manager/src/version_manager/installer/{torch.rs,torch_wheel_handoff_tests.rs}`,
+`docs/contracts/{wheel-target.md,artifact-acquisition.md}`, this write-set,
+the owning plan and `reports/torch-target-packet-2026-10-06.md` plus its adjacent
+source/test evidence. It binds independently approved selected-interpreter target
+observation to accepted resolution/provenance and retained consumer custody.
+Absent target context retains explicit legacy behavior; present incomplete or
+unapproved context refuses. Current automatic/preview resolver producers and
+finite-recipe selection remain unchanged. No experimental resolver adoption,
+catalog-completeness invention, dependencies, DTO/store schemas, frozen native
+cleanup, watcher/importer/S3 or other frozen candidate edits. Required checks are
+actual packet mismatch/missing/unsupported controls, local consumer refusal
+before pip/stage, unchanged valid shared handoff, existing consumer/finite tests,
+feature graph before serialized offline Cargo, and scoped lint/format checks.
+
 ## Installed S3 process-loss acceptance — 2026-10-06
 
 Parent admits exactly one pre-FilesReady Linux process-loss milestone from frozen

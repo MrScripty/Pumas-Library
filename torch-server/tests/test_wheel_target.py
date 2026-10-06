@@ -1,9 +1,11 @@
 """Explicit cross-target preflight; no remote wheels, resolver or package code."""
 import copy
+from contextlib import nullcontext
 import importlib.util
 from pathlib import Path
 import sys
 import sysconfig
+import platform
 import unittest
 from unittest.mock import patch
 
@@ -110,6 +112,44 @@ class TargetTests(unittest.TestCase):
         self.assertEqual(set(target.tags), set(owner.tags_api.sys_tags()))
         self.assertEqual(dict(target.markers), owner.markers_api.default_environment())
         target.require_native_consumer()
+
+    def test_wow64_native_machine_cannot_admit_win_amd64_for_win32_python(self):
+        document = factory.target("windows", python="3.12.7")
+        selected = owner.WheelTarget(document)
+        actual = [*owner.tags_api.cpython_tags(python_version=(3, 12), abis=["cp312"], platforms=["win32"]),
+                  *owner.tags_api.compatible_tags(python_version=(3, 12), interpreter="cp312", platforms=["win32"])]
+        with patch.object(sys, "platform", "win32"), patch.object(platform, "machine", return_value="AMD64"), patch.object(sysconfig, "get_config_var", return_value=0), patch.object(owner.markers_api, "default_environment", return_value=document["markers"]), patch.object(owner.tags_api, "sys_tags", return_value=iter(actual)):
+            with self.assertRaisesRegex(owner.UnsupportedTarget, "actual interpreter"):
+                owner.capture_native()
+        with fixtures.tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = fixtures.make_wheel(root, "root-wheel")
+            with patch.object(fixtures.consumer, "explicit_target", return_value=selected), patch.object(sys, "platform", "win32"), patch.object(platform, "machine", return_value="AMD64"), patch.object(sysconfig, "get_config_var", return_value=0), patch.object(owner.markers_api, "default_environment", return_value=document["markers"]), patch.object(owner.tags_api, "sys_tags", return_value=iter(actual)), patch.object(fixtures.consumer.subprocess, "run", side_effect=AssertionError("pip must not run")):
+                with self.assertRaisesRegex(owner.UnsupportedTarget, "actual interpreter"):
+                    fixtures.consumer.install([artifact], root, root / "packages", root / "proof", wheel_target=document)
+            self.assertFalse((root / "packages").exists())
+            self.assertFalse((root / "proof").exists())
+
+    def test_windows_debug_public_tags_refuse_even_when_normal_abi_is_supported(self):
+        document = factory.target("windows", python="3.12.7")
+        selected = owner.WheelTarget(document)
+        for detector in ("refcount", "extension-suffix"):
+            with self.subTest(detector=detector), patch.object(sys, "platform", "win32"), patch.object(platform, "machine", return_value="AMD64"), patch.object(sysconfig, "get_config_var", return_value=None), patch.object(owner.markers_api, "default_environment", return_value=document["markers"]), patch.object(owner.tags_api, "EXTENSION_SUFFIXES", ["_d.pyd"] if detector == "extension-suffix" else []), (patch.object(sys, "gettotalrefcount", return_value=0, create=True) if detector == "refcount" else nullcontext()):
+                actual = [*owner.tags_api.cpython_tags(python_version=(3, 12), platforms=["win_amd64"]),
+                          *owner.tags_api.compatible_tags(python_version=(3, 12), interpreter="cp312", platforms=["win_amd64"])]
+                self.assertTrue(any(tag.abi == "cp312d" for tag in actual))
+                self.assertTrue(set(selected.tags) <= set(actual))
+                with patch.object(owner.tags_api, "sys_tags", return_value=iter(actual)):
+                    with self.assertRaisesRegex(owner.UnsupportedTarget, "Debug/free-threaded"):
+                        owner.capture_native()
+                with fixtures.tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    artifact = fixtures.make_wheel(root, "root-wheel")
+                    with patch.object(fixtures.consumer, "explicit_target", return_value=selected), patch.object(owner.tags_api, "sys_tags", return_value=iter(actual)), patch.object(fixtures.consumer.subprocess, "run", side_effect=AssertionError("pip must not run")):
+                        with self.assertRaisesRegex(owner.UnsupportedTarget, "Debug/free-threaded"):
+                            fixtures.consumer.install([artifact], root, root / "packages", root / "proof", wheel_target=document)
+                    self.assertFalse((root / "packages").exists())
+                    self.assertFalse((root / "proof").exists())
 
     def test_actual_local_install_validates_an_explicit_native_target(self):
         with fixtures.tempfile.TemporaryDirectory() as directory:

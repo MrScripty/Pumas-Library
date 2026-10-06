@@ -1,5 +1,23 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — bounded installed process-loss milestone complete
+
+Source 81aea4c0d97aae2a27d1a0c0eebdd784e90f705d, tree
+65cea0342055e4b76de0f0476a3a480fcce9cfdc, passes all eleven actual installed
+HTTPS scenarios and 24 controls. Exact original production binary hash is
+preserved; ed31639 branch/ref/archive remain untouched. One actual written byte
+and transferring custody precede owned SIGKILL/reap (-9). Two cold owners drain
+0, preserve full store/acquisition/manifest/physical partial/sentinel/model-row
+observations, and perform no source replay or publication. Same-demand cold
+submission retains failure custody; subsequent submission is rejected.
+The source sees only one HEAD and one GET. Offline recomputation and secret/hash
+checks pass; Rust/dependencies/native/ONNX/network settings are unchanged.
+See [report](reports/s3-installed-process-loss-2026-10-06.md) and
+[evidence](reports/s3-installed-process-loss-evidence-2026-10-06.json).
+Next documented feature is Q2 exact wheel-set/local-only Torch consumption,
+blocked by AQ-HTTP. Actual-provider Q3, desktop/platform/inference/hosted and
+deployment gates remain open. Parent owns review/publication/integration.
+
 ## 2026-10-06 — one installed pre-FilesReady process-loss milestone admitted
 
 Parent delegates one bounded AC05/AC17 fixture after frozen ed31639. Separate

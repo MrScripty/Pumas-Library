@@ -1,5 +1,17 @@
 # Plan: source-neutral artifact acquisition
 
+**Installed S3 process-loss milestone (2026-10-06):** Separate
+`feat/s3-installed-process-loss-ed31639` preserves frozen ed31639 and its actual
+production binary hash. All eleven installed cases (the original ten plus one
+pre-FilesReady SIGKILL), 24 controls and pinned CI Ruff pass at 81aea4c0. Actual
+one-byte/transferring custody remains exact after two cold owners, with no source
+replay or model/receipt publication. See [frozen qualification](reports/s3-installed-process-loss-2026-10-06.md).
+This closes the bounded local milestone only. The next documented implementation
+feature is Q2 wheel-file-set acquisition/local-only Torch consumption, gated by
+AQ-HTTP, still not ready. Remaining S3 continuation is actual-provider Q3/AQ-S3
+acceptance; credentials/fixtures and supported platform/deployment inputs are
+not supplied. No additional fault campaign is admitted.
+
 **Q4 installed default-plus-S3 successor (2026-10-06):** Independently admitted
 `feat/s3-installed-prefix-main95` binds build provenance and complete S3 notices
 to the existing installed HTTPS fixture harness. Actual production release,
@@ -9,8 +21,8 @@ The original query-order fixture failure and its red/green repair are retained.
 See [frozen qualification](reports/s3-installed-default-profile-2026-10-06.md).
 The current prefix branch and all frozen evidence remain separate. Provider,
 UI/platform/inference and hosted acceptance gates remain open.
-The next feasible existing AC05/AC17 slice is installed S3 pre-FilesReady process
-loss and exact cold-custody qualification; it remains separate future work.
+The installed S3 pre-FilesReady process-loss successor is now locally qualified
+in its separate branch/report above; broader gates remain open.
 
 
 **Q3 prefix byte-capacity review repair (2026-10-06):** The maintained SDK now

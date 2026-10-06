@@ -44,8 +44,8 @@ and diff checks pass on the final source.
 Commands used the existing pnpm 10.33.0/Vitest 4.1.11 scripts with cached workspace
 dependencies whose manifests/lock match this branch. Node was 24.19.0; the
 repository pin is 24.15.0, so this is local supporting evidence rather than
-exact pinned-toolchain qualification. Cache links are ignored workspace-only
-setup; no dependency, lockfile, permission or account setting changed. An
+exact pinned-toolchain qualification. Workspace-only cache links were retired
+following verification; no dependency, lockfile, permission or account setting changed. An
 intermediate renderer fixture property typo and missing cached Electron type
 link were corrected before final checks. Logs are under
 `/workspace/scratch/ac08-startup-snapshot/`: `red.log`, `focused.log`,

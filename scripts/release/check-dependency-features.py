@@ -141,9 +141,24 @@ def check(s3=False):
             for package in ("pumas-library", "pumas-rpc"):
                 for headless in (False, True):
                     command = [
-                        "cargo", "tree", "--locked", "--offline", "--manifest-path", "rust/Cargo.toml",
-                        "-p", package, "--features", "s3", "--target", target,
-                        "--edges", "normal,build", "--prefix", "none", "--format", "{p}|{f}",
+                        "cargo",
+                        "tree",
+                        "--locked",
+                        "--offline",
+                        "--manifest-path",
+                        "rust/Cargo.toml",
+                        "-p",
+                        package,
+                        "--features",
+                        "s3",
+                        "--target",
+                        target,
+                        "--edges",
+                        "normal,build",
+                        "--prefix",
+                        "none",
+                        "--format",
+                        "{p}|{f}",
                     ]
                     if headless:
                         command.append("--no-default-features")
@@ -151,19 +166,29 @@ def check(s3=False):
                     scope = f"{target} {package} s3=True headless={headless}"
                     check_ort_features(tree, scope)
                     names = {line.split()[0] for line in tree.splitlines() if line.strip()}
-                    if "aws-sdk-s3" not in names or names & {"object_store", "aws-config", "aws-smithy-http-client"}:
-                        raise RuntimeError(f"{scope}: S3 must retain one explicit SDK/transport owner")
+                    if "aws-sdk-s3" not in names or names & {
+                        "object_store",
+                        "aws-config",
+                        "aws-smithy-http-client",
+                    }:
+                        raise RuntimeError(
+                            f"{scope}: S3 must retain one explicit SDK/transport owner"
+                        )
                     if headless and names & {"ort", "ort-sys", "pumas-app-manager"}:
                         raise RuntimeError(f"{scope}: headless S3 enabled inference")
                     for line in tree.splitlines():
                         if line.strip():
                             identity, features = line.split("|", 1)
-                            if identity.split()[0].startswith("pumas-") and "test-support" in features.split(","):
+                            if identity.split()[0].startswith(
+                                "pumas-"
+                            ) and "test-support" in features.split(","):
                                 raise RuntimeError(f"{scope}: production S3 enabled fixtures")
                     print(f"{scope}: feature contract passed")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--s3", action="store_true", help="Also qualify the S3 release and headless graphs")
+    parser.add_argument(
+        "--s3", action="store_true", help="Also qualify the S3 release and headless graphs"
+    )
     check(parser.parse_args().s3)

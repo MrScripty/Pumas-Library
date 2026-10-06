@@ -322,7 +322,8 @@ def collect(features=()):
             name = (
                 "binrw-LICENSE"
                 if package["name"].startswith("binrw")
-                else "simd-LICENSE" if package["name"] in ("base64-simd", "vsimd")
+                else "simd-LICENSE"
+                if package["name"] in ("base64-simd", "vsimd")
                 else package["name"] + "-LICENSE"
             )
             provenance = next(source for source in sources if source["file"] == name)
@@ -340,10 +341,14 @@ def collect(features=()):
             "Rust normal/build dependency, all desktop targets; conservative superset",
         )
 
-    required_rust = {(name, version[1:]) for name, version in selected if not name.startswith("pumas-")}
+    required_rust = {
+        (name, version[1:]) for name, version in selected if not name.startswith("pumas-")
+    }
     covered_rust = {(record["name"], record["version"]) for record in records}
     if required_rust != covered_rust:
-        raise ValueError(f"Incomplete Rust attribution closure: {sorted(required_rust - covered_rust)}")
+        raise ValueError(
+            f"Incomplete Rust attribution closure: {sorted(required_rust - covered_rust)}"
+        )
 
     # Include the production JS closure, not just tree-shaken renderer modules.
     # Resolve from each package's own directory to follow pnpm's exact graph.
@@ -487,7 +492,9 @@ selected install-only distributions; each archive identity is recorded below.
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--features", choices=("s3",), help="Include the optional S3 release closure")
+    parser.add_argument(
+        "--features", choices=("s3",), help="Include the optional S3 release closure"
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.output:

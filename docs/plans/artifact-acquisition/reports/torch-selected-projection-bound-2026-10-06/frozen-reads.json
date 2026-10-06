@@ -1,0 +1,48 @@
+{
+  "cases": [
+    {
+      "file": "projection.json",
+      "fixture_path": "/tmp/.tmpmDg5bd/torch-versions/.torch-install-nbcTtM/runtime/offline-selection/projection.json",
+      "growth": true,
+      "total_data_read_bytes": 33566165,
+      "largest_read_result": 33554432
+    },
+    {
+      "file": "roots.in",
+      "fixture_path": "/tmp/.tmp3RLRUN/torch-versions/.torch-install-tnUKzM/runtime/offline-selection/roots.in",
+      "growth": true,
+      "total_data_read_bytes": 33554486,
+      "largest_read_result": 33554432
+    },
+    {
+      "file": "constraints.in",
+      "fixture_path": "/tmp/.tmpm0aX0m/torch-versions/.torch-install-rxLyvL/runtime/offline-selection/constraints.in",
+      "growth": true,
+      "total_data_read_bytes": 33554435,
+      "largest_read_result": 33554432
+    },
+    {
+      "file": "projection.json",
+      "fixture_path": "/tmp/.tmpmEGCj6/torch-versions/.torch-install-7wxeFc/runtime/offline-selection/projection.json",
+      "growth": false,
+      "total_data_read_bytes": 19555,
+      "largest_read_result": 3911
+    },
+    {
+      "file": "roots.in",
+      "fixture_path": "/tmp/.tmpFNNQW1/torch-versions/.torch-install-ITH5tL/runtime/offline-selection/roots.in",
+      "growth": false,
+      "total_data_read_bytes": 90,
+      "largest_read_result": 18
+    },
+    {
+      "file": "constraints.in",
+      "fixture_path": "/tmp/.tmpWNMmoG/torch-versions/.torch-install-X5UyWi/runtime/offline-selection/constraints.in",
+      "growth": false,
+      "total_data_read_bytes": 5,
+      "largest_read_result": 1
+    }
+  ],
+  "scope": "All observed processes, matching fixture path only; includes small reads before mutation",
+  "sparse_growth_bytes": 33554432
+}

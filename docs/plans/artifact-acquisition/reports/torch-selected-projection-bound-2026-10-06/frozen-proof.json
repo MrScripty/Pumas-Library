@@ -1,0 +1,18 @@
+{
+  "base": "31b5c12536b07a69e7c691e90e4219490f3f3e36",
+  "tree": "f28400db93069442502b747107e02b9b8c27aabf",
+  "production_sha256": "d8006c135c15b5d7ba48d2937f13b374054b0d65d8e780111bf78717d0c6aa89",
+  "production_unchanged_for_reproduction": true,
+  "regression_patch_sha256": "27de5a3ba6caad95c41256e12e1c14d5cc50157a20bd69d89ec284e5d4b1381e",
+  "retained_files": {
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": "d74649ebfc25e8395a57741378464793d843ae7068ce0d7a671dc170a3e330ce",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner.rs": "221d06fbc65601d0755ee02acdca15e36b267b83a61e0ad9655ec8ebda6fd2d8",
+    "rust/crates/pumas-app-manager/src/version_manager/installer.rs": "4c2ed18d55f8465100e7f29481ee6d9c7f038e397a119d853aa4f5c62e56324a",
+    "torch-server/offline_wheel_selection.py": "32facab6165c3d3439bac49a334df801a732a8f08c32165775f8a787c45f9364",
+    "torch-server/wheel_target.py": "a381edb267f13316a582c3ee4d40450554004d1dc7c2788d4408ed101ebe94b1",
+    "torch-server/wheel_catalog_owner.py": "239d9b897e0f47394d8c3e081d97c6110c360602c4cb41c5dfcb0ae292f228eb",
+    "torch-server/install_verified_wheels.py": "5d1a14549acff11f08ba19ff2226f9b480852e16fb48745ace3c2cc1fadadbc3",
+    "rust/crates/pumas-core/src/acquisition/s3.rs": "4e30e93fe73772cf03628f93dda26299645da6d4736d6b6b3c3dd54bc7a06bab",
+    "rust/crates/pumas-core/src/acquisition/manifest.rs": "be07454900f848324440faab91a3e07b5d48fc11aa39b37158696580a4dcda88"
+  }
+}

@@ -1,5 +1,21 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 final selected-projection bound correction (2026-10-06):** Independent
+review found frozen 31b5c125 delegates the final projection/roots/constraints
+comparison to a global unbounded reader. Actual kernel traces reproduce 32 MiB
+reads before semantic refusal for all three inputs. Same-lineage tested source
+`b724d5056fd898625ed9d1a51d82425563901aa6`, tree `fffe76996b6d62f470ab5b9cdb1b23e699938325`, uses
+selection-local bounded reads at retained expected length with owned-path and
+exact-content checks. Post-checker growth/replacement controls, unchanged valid
+selection, 60 Rust/110 Python controls, 33 pre-build graphs and strict checks pass.
+[Exact frozen reproduction, read-volume proof and source](reports/torch-selected-projection-bound-2026-10-06.md).
+The historical whole-selection read-bound claim is corrected at this call;
+global interfaces/readers and native/source/target/fallback policies stay frozen.
+No production adoption/main/provider or AQ/P1 advancement. Library transfers
+remain paused; existing parity/provisioning and selected-packet consumer gates
+are unchanged.
+
+
 **Q2 qualified public offline selected-packet slice (2026-10-06):** Separate
 `feat/torch-offline-selected-3f573449` source `ca49df3290d087a1773980ef12f829bb53602932`,
 tree `f033cbedb85f03b48d5b9bcfb39e1052b5c69559`, consumes the accepted live CompleteCatalog under

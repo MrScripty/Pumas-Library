@@ -1,0 +1,6 @@
+remote: 
+remote: GitHub found 38 vulnerabilities on MrScripty/Pumas-Library's default branch (25 high, 12 moderate, 1 low). To find out more, visit:        
+remote:      https://github.com/MrScripty/Pumas-Library/security/dependabot        
+remote: 
+To https://github.com/MrScripty/Pumas-Library.git
+   31b5c125..b724d505  feat/torch-offline-selected-3f573449 -> feat/torch-offline-selected-3f573449

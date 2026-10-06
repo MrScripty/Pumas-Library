@@ -1,0 +1,25 @@
+
+running 2 tests
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_checker_cannot_hide_retained_projection_growth ... post-checker projection fixture: file=/tmp/.tmpmDg5bd/torch-versions/.torch-install-nbcTtM/runtime/offline-selection/projection.json grow=true
+post-checker projection refusal: file=projection.json grow=true kind=Refused checker_completed=true
+catalog control SelectedProjectionMutation { file: "projection.json", grow: true }: requests=5 complete=true installed=false cleanup_drained=true
+post-checker projection fixture: file=/tmp/.tmp3RLRUN/torch-versions/.torch-install-tnUKzM/runtime/offline-selection/roots.in grow=true
+post-checker projection refusal: file=roots.in grow=true kind=Refused checker_completed=true
+catalog control SelectedProjectionMutation { file: "roots.in", grow: true }: requests=5 complete=true installed=false cleanup_drained=true
+post-checker projection fixture: file=/tmp/.tmpm0aX0m/torch-versions/.torch-install-rxLyvL/runtime/offline-selection/constraints.in grow=true
+post-checker projection refusal: file=constraints.in grow=true kind=Refused checker_completed=true
+catalog control SelectedProjectionMutation { file: "constraints.in", grow: true }: requests=5 complete=true installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_checker_cannot_hide_retained_projection_replacement ... post-checker projection fixture: file=/tmp/.tmpmEGCj6/torch-versions/.torch-install-7wxeFc/runtime/offline-selection/projection.json grow=false
+post-checker projection refusal: file=projection.json grow=false kind=Refused checker_completed=true
+catalog control SelectedProjectionMutation { file: "projection.json", grow: false }: requests=5 complete=true installed=false cleanup_drained=true
+post-checker projection fixture: file=/tmp/.tmpFNNQW1/torch-versions/.torch-install-ITH5tL/runtime/offline-selection/roots.in grow=false
+post-checker projection refusal: file=roots.in grow=false kind=Refused checker_completed=true
+catalog control SelectedProjectionMutation { file: "roots.in", grow: false }: requests=5 complete=true installed=false cleanup_drained=true
+post-checker projection fixture: file=/tmp/.tmpWNMmoG/torch-versions/.torch-install-X5UyWi/runtime/offline-selection/constraints.in grow=false
+post-checker projection refusal: file=constraints.in grow=false kind=Refused checker_completed=true
+catalog control SelectedProjectionMutation { file: "constraints.in", grow: false }: requests=5 complete=true installed=false cleanup_drained=true
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 339 filtered out; finished in 106.75s
+

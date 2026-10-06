@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "file": "projection.json",
+      "fixture_path": "/tmp/.tmp2v1JDG/torch-versions/.torch-install-D3fe9T/runtime/offline-selection/projection.json",
+      "growth": true,
+      "total_data_read_bytes": 11733,
+      "largest_read_result": 3911
+    },
+    {
+      "file": "roots.in",
+      "fixture_path": "/tmp/.tmpDxnk6Y/torch-versions/.torch-install-Mo4W9j/runtime/offline-selection/roots.in",
+      "growth": true,
+      "total_data_read_bytes": 54,
+      "largest_read_result": 18
+    },
+    {
+      "file": "constraints.in",
+      "fixture_path": "/tmp/.tmpKumUHe/torch-versions/.torch-install-qfzj18/runtime/offline-selection/constraints.in",
+      "growth": true,
+      "total_data_read_bytes": 3,
+      "largest_read_result": 1
+    }
+  ],
+  "scope": "All observed processes, matching fixture path only; includes small reads before mutation",
+  "sparse_growth_bytes": 33554432
+}

@@ -1,0 +1,3 @@
+   Compiling pumas-app-manager v0.7.0 (/tmp/pumas-q2-offline-selected-3f57/rust/crates/pumas-app-manager)
+    Finished `test` profile [unoptimized] target(s) in 26.79s
+  Executable unittests src/lib.rs (/tmp/pumas-uv-offline-build/target/debug/deps/pumas_app_manager-a6c29384ac95defc)

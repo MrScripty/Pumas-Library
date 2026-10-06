@@ -1,0 +1,15 @@
+
+running 1 test
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_checker_cannot_hide_retained_projection_growth ... post-checker projection fixture: file=/tmp/.tmp2v1JDG/torch-versions/.torch-install-D3fe9T/runtime/offline-selection/projection.json grow=true
+post-checker projection refusal: file=projection.json grow=true kind=Refused checker_completed=true
+catalog control SelectedProjectionMutation { file: "projection.json", grow: true }: requests=5 complete=true installed=false cleanup_drained=true
+post-checker projection fixture: file=/tmp/.tmpDxnk6Y/torch-versions/.torch-install-Mo4W9j/runtime/offline-selection/roots.in grow=true
+post-checker projection refusal: file=roots.in grow=true kind=Refused checker_completed=true
+catalog control SelectedProjectionMutation { file: "roots.in", grow: true }: requests=5 complete=true installed=false cleanup_drained=true
+post-checker projection fixture: file=/tmp/.tmpKumUHe/torch-versions/.torch-install-qfzj18/runtime/offline-selection/constraints.in grow=true
+post-checker projection refusal: file=constraints.in grow=true kind=Refused checker_completed=true
+catalog control SelectedProjectionMutation { file: "constraints.in", grow: true }: requests=5 complete=true installed=false cleanup_drained=true
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 340 filtered out; finished in 53.30s
+

@@ -1,0 +1,91 @@
+{
+  "base": "31b5c12536b07a69e7c691e90e4219490f3f3e36",
+  "base_tree": "f28400db93069442502b747107e02b9b8c27aabf",
+  "source": "b724d5056fd898625ed9d1a51d82425563901aa6",
+  "source_tree": "fffe76996b6d62f470ab5b9cdb1b23e699938325",
+  "branch": "feat/torch-offline-selected-3f573449",
+  "production_diff": {
+    "added_lines": 14,
+    "changed_lines": 1,
+    "paths": [
+      "rust/crates/pumas-app-manager/src/version_manager/installer/torch_offline_selection.rs"
+    ]
+  },
+  "source_paths": [
+    "docs/plans/artifact-acquisition/reports/write-sets.md",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_offline_selection.rs"
+  ],
+  "checks": {
+    "rust": 60,
+    "catalog_selection": 21,
+    "new_projection_cases": 6,
+    "python": 110,
+    "feature_graphs": 33,
+    "strict_clippy": true,
+    "ruff": true,
+    "rustfmt": true,
+    "diff": true
+  },
+  "read_volume": [
+    {
+      "file": "projection.json",
+      "frozen_largest_read": 33554432,
+      "frozen_total_read": 33566165,
+      "repaired_largest_read": 3911,
+      "repaired_total_read": 11733
+    },
+    {
+      "file": "roots.in",
+      "frozen_largest_read": 33554432,
+      "frozen_total_read": 33554486,
+      "repaired_largest_read": 18,
+      "repaired_total_read": 54
+    },
+    {
+      "file": "constraints.in",
+      "frozen_largest_read": 33554432,
+      "frozen_total_read": 33554435,
+      "repaired_largest_read": 1,
+      "repaired_total_read": 3
+    }
+  ],
+  "read_volume_scope": "All traced processes, matching fixture path only; small reads before mutation included. Oversized final reads removed. Metadata checks refuse grown files before opening data.",
+  "API_changes": false,
+  "global_provenance_reader_changed": false,
+  "production_activation": false,
+  "real_provider_claim": false,
+  "library_transfers": "Paused; no retries or alternate routes",
+  "main_preserved": "5e114f6d8e4559e0a4d67e56000b423120a0fde0",
+  "source_sha256": {
+    "docs/plans/artifact-acquisition/reports/write-sets.md": "bac0a61ed1fa54cb979b6489cdeaf0c4989870fc6fd749bcaa668dabb059e31c",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs": "30047dba0ea6a22a6a766cdbf0aef7f74e8f3abf048604cf331cc57538df00d6",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_offline_selection.rs": "88abce35876a255ff72dc058ad66c364d59db5c3157d339f8f38fc31a1da4c27"
+  },
+  "evidence_sha256": {
+    "verify_read_bounds.py": "8e4b9b6e85f295af8b4fb8b4834eae49d8a8456f1911ce847d767a48300a6eb8",
+    "repaired-reads.focused.trace": "167b263a3e68d60a2cd7dc2afda719db11ff73e490baefca2f8ee73c23761621",
+    "frozen-reads.focused.trace": "1bddc12e945a3f84a54d7f4d8a9d2021f11a426ab21918a1aa807f941d47b07e",
+    "repaired-reads.json": "4456db72d156970548e38d671b0f17b45b9a14a89f8b32871ced03ff300d5d07",
+    "frozen-reads.json": "59ca8f5a57fdfca261a1090843b08b7c5796eccb245d52492a29c119869c3440",
+    "analyze.py": "0fbae6dca1b00bcede3d8ae12fcbae51f21ba8d08c0e3e37beaabc68a8c125ed",
+    "regression.patch": "27de5a3ba6caad95c41256e12e1c14d5cc50157a20bd69d89ec284e5d4b1381e",
+    "frozen-proof.json": "ab229d3ebe8075fad282765b709252643efd7a1c6912a7bc1bbca3bc659c10e4",
+    "push-source.log": "e644fe075b32d768da09ad953d6de2ee0dedf48a34e90241eb2027a1220d5d96",
+    "diff-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "rustfmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "clippy.log": "aa7f6871bbd3330e871e3455963fe82f2708e980fa21a70875fca2aa696e2747",
+    "rust.log": "b513babb9cf0520b02e385052398552f01bb405b734af32de1280aaeb3efc5f7",
+    "python.log": "31a8471c3c3dbd23223cb2a7b32b8f25bce239a40682eeff3afc09bd417055f7",
+    "repaired.log": "119bf99a13f794157c8d8dc34d0ef5c87bcbd8f2d7a2bf486cfc441570607d38",
+    "frozen.log": "e53f2d462946f7ab38e23ee8d22d4f88506ef7de8481a66a7845823d51db420b",
+    "repaired-build.log": "9ea5b30def0f770e8245d80ce849d45cd85ee9fceebff6e5f38cba2267ad0f85",
+    "reproduction-build.log": "3686202bfcec61082c7fdb32b93191c3b9ce3d64b983ebd4519cfc87f23fdccd",
+    "feature-graphs.log": "173ed427a61ed780b4583f312ae27454b3b191dcaa5af80f51ff123e23a97b60"
+  },
+  "full_local_trace_sha256": {
+    "frozen": "688196e4da9a7edb5b556158df881901c27aa5e7a440cb2837b9fc5e842b1e21",
+    "repaired": "c51fb7fae7ff643b77a4d3755ededb0344efdd9aff482d2ef4fbe7b11f9a56f7"
+  }
+}

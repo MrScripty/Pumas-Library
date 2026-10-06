@@ -1,0 +1,38 @@
+{
+  "version": "0.12.23",
+  "version_output": "uv 0.12.23 (x86_64-unknown-linux-gnu)",
+  "source": "Official uv distribution from https://pypi.org/pypi/uv/json and HTTPS files.pythonhosted.org; metadata project source https://github.com/astral-sh/uv",
+  "upstream_tag": "https://github.com/astral-sh/uv/releases/tag/0.12.23",
+  "filename": "uv-0.12.23-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+  "url": "https://files.pythonhosted.org/packages/e5/83/85a6c63c24905af4924fddb11a499b934913f59a134248367a1ef1a4716f/uv-0.12.23-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+  "upload_time": "2026-10-03T17:31:39.705167Z",
+  "wheel_bytes": 20579564,
+  "wheel_sha256": "565c6e2874dbeae86c02f3dea97255e878fec672659a73d4930c6b93fcab2fff",
+  "binary_member": "uv-0.12.23.data/scripts/uv",
+  "binary_bytes": 47993144,
+  "binary_sha256": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f",
+  "verification": "PyPI SHA256/size, every hashed wheel RECORD member, installed binary equals original wheel member; no publisher-signature or full transitive license claim",
+  "license_expression": "MIT OR Apache-2.0",
+  "licenses": {
+    "uv-0.12.23.dist-info/licenses/LICENSE-APACHE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "uv-0.12.23.dist-info/licenses/LICENSE-MIT": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c"
+  },
+  "tooling_only": true,
+  "production_dependency_added": false,
+  "fixture_git": {
+    "path": "/usr/bin/git",
+    "version": "git version 2.47.3",
+    "sha256": "356db14e102d68a1a37d8a1ac577dfd678d45d46e92f468bef8b7154e7bfdc60",
+    "scope": "Existing trusted execution-environment Git; only metadata-only local file repository, empty hooks and global/system config disabled; no production dependency change"
+  },
+  "isolated_tool_environment_packages": [
+    {
+      "name": "pip",
+      "version": "25.0.1"
+    },
+    {
+      "name": "uv",
+      "version": "0.12.23"
+    }
+  ]
+}

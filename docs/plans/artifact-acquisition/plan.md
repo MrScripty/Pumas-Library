@@ -1,5 +1,17 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 public uv experiment (2026-10-06):** Frozen composition a1da98 remains
+unchanged and has no merge-ready PR. Separate evidence-only uv0.12.23 evaluation
+uses official isolated tooling, inert local wheels/indexes and data-only source /
+VCS traps. Binary-only refuses dynamic builds before build dependency requests,
+but source bytes/VCS may be retrieved first. Public PEP751 lock output is an
+artifact inventory, hashes still need acquisition verification, default index
+priority differs, and exit codes cannot reuse legacy candidate-fallback mapping.
+See [measured compatibility and supported proposal](reports/torch-public-uv-evaluation-2026-10-06.md).
+No production dependency/adapter or new policy is added. Parent migration decision,
+source authority/selection/fallback/platform and objective AQ gates remain open;
+the known P1 is not accepted as safe coexistence.
+
 **Q2 current-main composition (2026-10-06):** A separate patch candidate on
 current main5e114f6d carries reviewed finite6308 and its shared Q2 handoff history,
 with original evidence intact. Main and composed feature graphs pass33 each

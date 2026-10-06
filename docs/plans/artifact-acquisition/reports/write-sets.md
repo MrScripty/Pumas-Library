@@ -1102,3 +1102,18 @@ direct-acquisition capability migration explicit, preserve main Node/HTTP/Cargo
 source and original recipe, avoid native3a601625/shared cleanup writes, and add no
 uv dependency or private-hook activation. Current/composed graphs pass33 each
 before the first build. No package/runtime/release/security acceptance is claimed.
+
+## Q2 supported public uv CLI experiment — admitted 2026-10-06
+
+Parent freezes a1da98 and delegates an evidence-only uv evaluation on separate
+experiment/torch-public-uv-a1da98aa, basea1da98/tree0ccb3da586e01343e6acc13b93877526df56237f.
+Official reputable tool installation is authorized in an isolated /tmp environment;
+record exact official version/source/wheel/binary/RECORD/licence provenance. Only
+this admission, separate inert controls/provenance/raw evidence/report, and bounded
+owning-plan status may change. No production uv dependency/adapter, main/finite
+ref rewrite, PR/merge, private hook or ORT policy change. Fixtures expose only
+metadata-only wheels/indexes; source bodies/backends are never served and trusted
+VCS command traps record attempts without fetching or executing package code.
+Measure source/build refusal, marker/extras/target/tag/direct-root closure, index
+priority, schemas and no-fallback semantics, compare with existing selection and
+return a supported proposal. No hostile external fetch or real GPU/runtime install.

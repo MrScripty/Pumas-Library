@@ -70,7 +70,7 @@ async fn version_bound_range_uses_exact_keys_and_both_addressing_styles() {
         );
         assert!(
             requests[1].starts_with(&format!(
-                "GET {expected_path}?versionId=v%2B1%2F%3D HTTP/1.1\r\n"
+                "GET {expected_path}?x-id=GetObject&versionId=v%2B1%2F%3D HTTP/1.1\r\n"
             )),
             "{}",
             requests[1]
@@ -317,6 +317,49 @@ async fn incomplete_excess_and_ignored_range_bodies_do_not_succeed() {
         assert!(output.len() <= 3, "reader wrote beyond the admitted range");
         assert_eq!(fixture.finish().await.len(), 2);
     }
+}
+
+#[tokio::test]
+async fn caller_budget_allows_a_body_stall_beyond_sdk_default_grace() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let first = request(&mut socket).await;
+        socket
+            .write_all(head(Some(VERSION), Some("\"selected\"")).as_bytes())
+            .await
+            .unwrap();
+        drop(socket);
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let second = request(&mut socket).await;
+        let response = range_response(VERSION, "\"selected\"", 8, "2-4", "cde");
+        let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+        socket
+            .write_all(format!("{headers}\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        socket.write_all(body.as_bytes()).await.unwrap();
+        vec![first, second]
+    });
+    let fixture = Fixture {
+        endpoint,
+        task,
+        stop: None,
+    };
+    let mut source = config(fixture.endpoint.clone(), S3Addressing::Path);
+    source.operation_timeout = Duration::from_secs(12);
+    let reader = S3Reader::new(source).unwrap();
+    let selected = reader
+        .select(KEY, VERSION, "weights.bin", digest())
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    let result = selected.read_range(2..5, &mut bytes).await;
+    assert_eq!(fixture.finish().await.len(), 2);
+    assert_eq!(result.unwrap(), 3);
+    assert_eq!(bytes, b"cde");
 }
 
 struct BlockedWriter {

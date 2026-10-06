@@ -32,6 +32,15 @@ without echoing its value. Authenticated construction requires HTTPS, even with
 `allow_http: true`; it uses normal peer verification. The public `test-support`
 feature does not enable plaintext credential transport.
 
+The optional reader uses pinned `aws-sdk-s3` 1.137.0 as its sole protocol and
+credential owner, without `aws-config`, a default AWS HTTP transport, or a storage
+backend fallback. Requests use the existing reqwest transport pool, constrained
+to the configured origin and GET/HEAD. SDK construction, complete request futures
+and body polls use scoped diagnostics to prevent credential-header tracing while
+preserving outer acquisition status events. Error bodies are bounded to 1 MiB;
+provider diagnostics are never propagated. Prefix listing and its reviewed XML
+validation guard remain separate planned work.
+
 The maintained SDK signs HEAD and conditional range GET with SigV4 and includes
 the optional session token. Credentials remain in the in-memory reader/selection
 capability until its last owner drops; they have no serialization or discovery

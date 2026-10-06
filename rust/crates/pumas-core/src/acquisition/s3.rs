@@ -3,13 +3,9 @@
 
 use std::{ops::Range, sync::Arc, time::Duration};
 
+use aws_credential_types::Credentials;
 use futures::StreamExt;
-use object_store::{
-    aws::{AmazonS3, AmazonS3Builder, AwsCredential},
-    client::{HttpClient, HttpConnector, HttpError, HttpRequest, HttpResponse, HttpService},
-    path::Path,
-    ClientOptions, GetOptions, ObjectStore, RetryConfig, StaticCredentialProvider,
-};
+use sdk::{protocol_error, Path};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use url::Url;
 
@@ -19,6 +15,7 @@ use super::{
 };
 
 mod manifest;
+mod sdk;
 pub use manifest::{S3ManifestEntry, S3ManifestSelection};
 
 #[cfg(test)]
@@ -50,7 +47,7 @@ pub struct S3ReaderConfig {
 /// Explicit credentials for one bounded acquisition. No discovery, persistence,
 /// serialization, or refresh is performed. Reader selections retain the credentials
 /// only while their in-memory protocol capability remains alive.
-pub struct S3Credentials(AwsCredential);
+pub struct S3Credentials(Credentials);
 
 impl S3Credentials {
     /// Accept nonempty printable ASCII credentials without whitespace. Access-key
@@ -71,11 +68,13 @@ impl S3Credentials {
         {
             return Err(S3ReaderError::Configuration("invalid explicit credentials"));
         }
-        Ok(Self(AwsCredential {
-            key_id: access_key_id,
-            secret_key: secret_access_key,
-            token: session_token,
-        }))
+        Ok(Self(Credentials::new(
+            access_key_id,
+            secret_access_key,
+            session_token,
+            None,
+            "request-scoped",
+        )))
     }
 }
 
@@ -94,7 +93,7 @@ enum Authentication {
 
 /// One configured protocol reader. It owns no tasks, runtime, or durable state.
 pub struct S3Reader {
-    store: Arc<AmazonS3>,
+    store: Arc<aws_sdk_s3::Client>,
     endpoint: Url,
     bucket: String,
     addressing: S3Addressing,
@@ -105,8 +104,9 @@ pub struct S3Reader {
 /// A selection binds its reads to the exact reader and cannot be forged by callers.
 #[derive(Clone)]
 pub struct S3ObjectSelection {
-    store: Arc<AmazonS3>,
+    store: Arc<aws_sdk_s3::Client>,
     key: Path,
+    bucket: String,
     version: String,
     etag: String,
     size: u64,
@@ -138,29 +138,6 @@ pub enum S3ReaderError {
     TimedOut,
     #[error("S3 destination write failed: {0}")]
     Write(#[from] std::io::Error),
-}
-
-#[derive(Clone, Debug)]
-struct ScopedConnector(reqwest::Client);
-
-impl HttpConnector for ScopedConnector {
-    fn connect(&self, _options: &ClientOptions) -> object_store::Result<HttpClient> {
-        Ok(HttpClient::new(self.clone()))
-    }
-}
-
-// The pinned signer does not mark its credential headers sensitive. Mark them
-// before passing to maintained transport so request Debug cannot disclose them.
-#[async_trait::async_trait]
-impl HttpService for ScopedConnector {
-    async fn call(&self, mut request: HttpRequest) -> Result<HttpResponse, HttpError> {
-        for name in ["authorization", "x-amz-security-token"] {
-            if let Some(value) = request.headers_mut().get_mut(name) {
-                value.set_sensitive(true);
-            }
-        }
-        self.0.call(request).await
-    }
 }
 
 impl S3Reader {
@@ -243,23 +220,15 @@ impl S3Reader {
                 "HTTP requires explicit source authority",
             ));
         }
-        let (credential, skip_signature, allow_http) = match authentication {
-            Authentication::Anonymous => (
-                AwsCredential {
-                    key_id: String::new(),
-                    secret_key: String::new(),
-                    token: None,
-                },
-                true,
-                config.allow_http,
-            ),
+        let (credential, allow_http) = match authentication {
+            Authentication::Anonymous => (None, config.allow_http),
             Authentication::Explicit(credentials) => {
                 if endpoint.scheme() != "https" {
                     return Err(S3ReaderError::Configuration(
                         "authenticated S3 requires HTTPS",
                     ));
                 }
-                (credentials.0, false, false)
+                (Some(credentials.0), false)
             }
             #[cfg(test)]
             Authentication::LoopbackFixture(credentials) => {
@@ -274,13 +243,13 @@ impl S3Reader {
                         "fixture requires literal loopback HTTP",
                     ));
                 }
-                (credentials.0, false, true)
+                (Some(credentials.0), true)
             }
         };
         if config.region.is_empty() || config.region.chars().any(char::is_control) {
             return Err(S3ReaderError::Configuration("region must be nonempty text"));
         }
-        if !skip_signature
+        if credential.is_some()
             && !config
                 .region
                 .bytes()
@@ -318,25 +287,7 @@ impl S3Reader {
             .timeout(config.operation_timeout)
             .connect_timeout(config.operation_timeout)
             .build()?;
-        let store = AmazonS3Builder::new()
-            .with_bucket_name(&config.bucket)
-            .with_region(config.region)
-            .with_endpoint(endpoint.as_str().trim_end_matches('/'))
-            .with_virtual_hosted_style_request(matches!(
-                config.addressing,
-                S3Addressing::VirtualHosted
-            ))
-            .with_allow_http(allow_http)
-            .with_skip_signature(skip_signature)
-            // Prevent even constructing an ambient/metadata credential provider.
-            .with_credentials(Arc::new(StaticCredentialProvider::new(credential)))
-            .with_http_connector(ScopedConnector(client))
-            .with_retry(RetryConfig {
-                max_retries: 0,
-                ..RetryConfig::default()
-            })
-            .build()
-            .map_err(protocol_error)?;
+        let store = sdk::build(&config, &endpoint, client, credential);
         Ok(Self {
             store: Arc::new(store),
             endpoint,
@@ -366,24 +317,28 @@ impl S3Reader {
         )?;
         let result = tokio::time::timeout(
             self.timeout,
-            self.store.get_opts(
-                &key,
-                GetOptions {
-                    version: Some(version.to_owned()),
-                    head: true,
-                    ..GetOptions::default()
-                },
-            ),
+            sdk::scoped(async {
+                self.store
+                    .head_object()
+                    .bucket(&self.bucket)
+                    .key(key.as_ref())
+                    .version_id(version)
+                    .send()
+                    .await
+            }),
         )
         .await
         .map_err(|_| S3ReaderError::TimedOut)?
         .map_err(protocol_error)?;
-        if result.meta.version.as_deref() != Some(version) {
+        if result.version_id() != Some(version) {
             return Err(S3ReaderError::Changed);
         }
+        let size = result
+            .content_length()
+            .filter(|size| *size >= 0)
+            .ok_or_else(sdk::protocol_failure)? as u64;
         let etag = result
-            .meta
-            .e_tag
+            .e_tag()
             .filter(|tag| {
                 tag.len() >= 2
                     && tag.starts_with('"')
@@ -392,13 +347,14 @@ impl S3Reader {
                         .bytes()
                         .all(|b| b == 0x21 || (0x23..=0x7e).contains(&b) || b >= 0x80)
             })
-            .ok_or(S3ReaderError::Changed)?;
+            .ok_or(S3ReaderError::Changed)?
+            .to_owned();
         let manifest = ArtifactManifest::new(
             source,
             vec![ArtifactFile::new(
                 file.logical_path(),
                 source_key,
-                Some(result.meta.size),
+                Some(size),
                 Some(expected_sha256),
                 FileVerificationRequirement::Sha256,
             )?],
@@ -406,9 +362,10 @@ impl S3Reader {
         Ok(S3ObjectSelection {
             store: Arc::clone(&self.store),
             key,
+            bucket: self.bucket.clone(),
             version: version.to_owned(),
             etag,
-            size: result.meta.size,
+            size,
             timeout: self.timeout,
             manifest,
         })
@@ -436,9 +393,9 @@ impl S3ObjectSelection {
             let result = self.open_checked_range(range.clone()).await?;
             let expected = range.end - range.start;
             let mut written = 0;
-            let mut stream = result.into_stream();
+            let mut stream = sdk::body_stream(result);
             while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(protocol_error)?;
+                let chunk = chunk?;
                 let count = chunk.len() as u64;
                 if count > expected - written {
                     return Err(S3ReaderError::BodyLength);
@@ -458,31 +415,38 @@ impl S3ObjectSelection {
     async fn open_checked_range(
         &self,
         range: Range<u64>,
-    ) -> Result<object_store::GetResult, S3ReaderError> {
+    ) -> Result<aws_smithy_types::byte_stream::ByteStream, S3ReaderError> {
         if range.start >= range.end || range.end > self.size {
             return Err(S3ReaderError::InvalidRange);
         }
-        let result = self
-            .store
-            .get_opts(
-                &self.key,
-                GetOptions {
-                    version: Some(self.version.clone()),
-                    if_match: Some(self.etag.clone()),
-                    range: Some(range.clone().into()),
-                    ..GetOptions::default()
-                },
-            )
-            .await
-            .map_err(protocol_error)?;
-        if result.meta.version.as_deref() != Some(&self.version)
-            || result.meta.e_tag.as_deref() != Some(&self.etag)
-            || result.meta.size != self.size
-            || result.range != range
+        let result = sdk::scoped(async {
+            self.store
+                .get_object()
+                .bucket(&self.bucket)
+                .key(self.key.as_ref())
+                .version_id(&self.version)
+                .if_match(&self.etag)
+                .range(format!("bytes={}-{}", range.start, range.end - 1))
+                .send()
+                .await
+        })
+        .await
+        .map_err(protocol_error)?;
+        let (actual, size) = result
+            .content_range()
+            .and_then(parse_content_range)
+            .ok_or_else(sdk::protocol_failure)?;
+        if result.content_length().is_none_or(|size| size < 0) {
+            return Err(sdk::protocol_failure());
+        }
+        if result.version_id() != Some(&self.version)
+            || result.e_tag() != Some(&self.etag)
+            || size != self.size
+            || actual != range
         {
             return Err(S3ReaderError::Changed);
         }
-        Ok(result)
+        Ok(result.body)
     }
 
     pub(crate) fn acquisition_identity(&self) -> String {
@@ -532,9 +496,8 @@ impl S3ObjectSelection {
                     .await
                     .map_err(|_| acquisition_error(S3ReaderError::TimedOut))?
                     .map_err(acquisition_error)?;
-            result
-                .into_stream()
-                .map(|chunk| chunk.map_err(protocol_error).map_err(acquisition_error))
+            sdk::body_stream(result)
+                .map(|chunk| chunk.map_err(acquisition_error))
                 .boxed()
         };
         Ok(super::http::HttpArtifactResponse {
@@ -567,14 +530,12 @@ fn acquisition_error(error: S3ReaderError) -> crate::PumasError {
     }
 }
 
-fn protocol_error(error: object_store::Error) -> S3ReaderError {
-    match error {
-        object_store::Error::Precondition { .. } => S3ReaderError::Changed,
-        object_store::Error::NotFound { .. } => S3ReaderError::Unavailable,
-        // Upstream errors may contain echoed response bodies, headers or URLs.
-        // Never expose remote diagnostics through public errors or durable state.
-        _ => S3ReaderError::Protocol("S3 request or response failed".into()),
-    }
+fn parse_content_range(value: &str) -> Option<(Range<u64>, u64)> {
+    let (range, size) = value.trim().strip_prefix("bytes ")?.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    let start = start.parse().ok()?;
+    let end: u64 = end.parse().ok()?;
+    Some((start..end.checked_add(1)?, size.parse().ok()?))
 }
 
 #[cfg(test)]

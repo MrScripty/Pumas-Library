@@ -13,6 +13,102 @@ const TOKEN: &str = "pumas-synthetic-session/+=";
 const KEY: &str = "models/a b%?.bin";
 const VERSION: &str = "v+1/=";
 
+#[derive(Clone)]
+struct MemoryLog(Arc<std::sync::Mutex<Vec<u8>>>);
+impl std::io::Write for MemoryLog {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for MemoryLog {
+    type Writer = Self;
+    fn make_writer(&'a self) -> Self {
+        self.clone()
+    }
+}
+
+#[test]
+fn production_sdk_paths_preserve_safe_statuses_under_global_trace() {
+    let result = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "acquisition::s3::auth_tests::global_trace_child",
+            "--ignored",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "isolated production global-TRACE fixture failed"
+    );
+    assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
+}
+
+#[tokio::test]
+#[ignore = "fresh-process global subscriber fixture; parent executes it"]
+async fn global_trace_child() {
+    let memory = MemoryLog(Arc::new(std::sync::Mutex::new(Vec::new())));
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(memory.clone())
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    tracing::info!(phase = "selecting", "Pumas safe acquisition status");
+    let reflected = format!(
+        "<Error><Code>AccessDenied</Code><Message>{ACCESS} {SECRET} {TOKEN}</Message></Error>"
+    );
+    let denied = format!(
+        "HTTP/1.1 403 Forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reflected}",
+        reflected.len()
+    );
+    let fixture = Fixture::serve(vec![
+        head(Some(VERSION), Some("\"selected\"")),
+        range_response(VERSION, "\"selected\"", 8, "0-7", "abcdefgh"),
+        range_response(VERSION, "\"selected\"", 8, "0-7", "abcdefgh"),
+        denied,
+    ])
+    .await;
+    let reader = reader(fixture.endpoint.clone(), S3Addressing::Path, Some(TOKEN));
+    let selected = reader
+        .select(KEY, VERSION, "weights.bin", digest())
+        .await
+        .unwrap();
+    let mut bytes = Vec::new();
+    selected.read_range(0..8, &mut bytes).await.unwrap();
+    assert_eq!(bytes, b"abcdefgh");
+    // Exercise the body capability consumed by the shared acquisition writer.
+    let mut response = selected.open_acquisition(0, None, None).await.unwrap();
+    let mut acquired = Vec::new();
+    while let Some(chunk) = response.body.next().await {
+        acquired.extend_from_slice(&chunk.unwrap());
+    }
+    assert_eq!(acquired, b"abcdefgh");
+    let error = reader
+        .select(KEY, VERSION, "weights.bin", digest())
+        .await
+        .err()
+        .unwrap();
+    let public = format!("{error} {error:?}");
+    assert_eq!(fixture.finish().await.len(), 4);
+    tracing::info!(phase = "verified", "Pumas safe acquisition status");
+    let buffer = memory.0.lock().unwrap();
+    let logs = String::from_utf8_lossy(&buffer);
+    assert!(logs.contains("selecting") && logs.contains("verified"));
+    for value in [ACCESS, SECRET, TOKEN] {
+        assert!(
+            !logs.contains(value),
+            "synthetic credential leaked in production tracing"
+        );
+        assert!(!public.contains(value));
+    }
+}
+
 fn config(endpoint: String, addressing: S3Addressing) -> S3ReaderConfig {
     S3ReaderConfig {
         endpoint,
@@ -38,7 +134,7 @@ fn digest() -> Sha256Evidence {
 }
 
 // Test-only RFC 2104 HMAC oracle using the existing maintained SHA-256 primitive.
-// Production signing is exclusively object_store. The known vector below anchors
+// Production signing is exclusively the maintained AWS SDK. The known vector below anchors
 // this small oracle independently of the SDK before checking captured requests.
 fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
     let mut block = [0; 64];
@@ -87,6 +183,10 @@ fn valid_signature(request: &str, secret: &str) -> bool {
         .split(';')
         .map(|name| format!("{name}:{}\n", headers[name]))
         .collect();
+    // SigV4 sorts encoded query pairs independently of their wire order.
+    let mut query_parts: Vec<_> = query.split('&').collect();
+    query_parts.sort_unstable();
+    let query = query_parts.join("&");
     let canonical = format!(
         "{method}\n{path}\n{query}\n{canonical_headers}\n{signed}\n{}",
         headers["x-amz-content-sha256"]
@@ -272,6 +372,83 @@ async fn authenticated_failures_are_redacted_and_never_redirected_or_retried() {
 #[tokio::test]
 async fn authentication_does_not_change_manifest_or_receipt_identity() {
     check_identity().await;
+}
+
+#[tokio::test]
+async fn sdk_endpoint_resolver_refuses_a_different_bucket_before_io() {
+    let fixture = Fixture::serve(vec![]).await;
+    let reader = reader(fixture.endpoint.clone(), S3Addressing::Path, Some(TOKEN));
+    let result = sdk::scoped(async {
+        reader
+            .store
+            .head_object()
+            .bucket("outside-authority")
+            .key(KEY)
+            .version_id(VERSION)
+            .send()
+            .await
+    })
+    .await;
+    assert!(result.is_err());
+    assert!(fixture.finish().await.is_empty());
+}
+
+#[tokio::test]
+async fn sdk_error_body_bound_closes_a_stalled_response_before_operation_deadline() {
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let source = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let _ = fixture::request(&mut socket).await;
+        socket
+            .write_all(head(Some(VERSION), Some("\"selected\"")).as_bytes())
+            .await
+            .unwrap();
+        drop(socket);
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let _ = fixture::request(&mut socket).await;
+        socket
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nTransfer-Encoding: chunked\r\n\r\n")
+            .await
+            .unwrap();
+        // No terminal chunk: without the byte bound, SDK error collection waits
+        // until the caller's five-second operation timeout rather than refusing.
+        let bytes = vec![b'x'; 1024 * 1024 + 1];
+        socket
+            .write_all(format!("{:x}\r\n", bytes.len()).as_bytes())
+            .await
+            .unwrap();
+        socket.write_all(&bytes).await.unwrap();
+        socket.write_all(b"\r\n").await.unwrap();
+        let mut probe = [0];
+        match tokio::time::timeout(Duration::from_secs(2), socket.read(&mut probe))
+            .await
+            .unwrap()
+        {
+            Ok(0) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => true,
+            _ => false,
+        }
+    });
+    let reader = reader(endpoint, S3Addressing::Path, Some(TOKEN));
+    let selected = reader
+        .select(KEY, VERSION, "weights.bin", digest())
+        .await
+        .unwrap();
+    let mut output = Vec::new();
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        selected.read_range(0..8, &mut output),
+    )
+    .await;
+    let closed = source.await.unwrap();
+    assert!(closed);
+    assert!(output.is_empty());
+    assert!(matches!(result.unwrap(), Err(S3ReaderError::Protocol(_))));
 }
 
 async fn check_identity() {

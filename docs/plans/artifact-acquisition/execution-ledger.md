@@ -1,5 +1,61 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — admitted production S3 SDK reader replacement
+
+Parent accepted SDK suitability checkpoint `ba1a9d908010f23f2391059cb93bfe61dcca6aa1`
+(tree `fee4b11a76306bcf224abbd8b11811e329ca0483`) and authorized one isolated
+production replacement after bounded AC08 renderer repair. This branch,
+`feat/s3-sdk-reader-493b935c`, starts at the composed authenticated production
+reader `493b935c6a41d4d4aeca8e8a66f10b4aba114365`, tree
+`ecb51f20c0740fa7d88e6d0eface06c45feb2e07`. It does not start from the older
+anonymous core bundled with the standalone spike.
+
+Exact writes: core Cargo manifest, production Rust lock, `acquisition/s3.rs`,
+private `acquisition/s3/sdk.rs`, synthetic `acquisition/s3/auth_tests.rs`, reader
+integrations `tests/{s3_reader,s3_acquisition}.rs`, core README, this ledger and the production
+replacement qualification report. Frozen watcher/importer and S3 manifest
+write sets are preserved byte-for-byte. `object_store` is removed; one maintained
+AWS SDK owns protocol/credentials over the existing no-proxy/no-redirect reqwest
+pool, with no fallback. Public constructors, endpoint authority, exact immutable
+versions, conditional range evidence, retry/verification/receipt policy remain
+compatible. Credential discovery, persistence and real credentials are excluded.
+
+Scoped diagnostics apply to SDK construction, entire HEAD/GET futures and body
+polls. The reviewed XML guard validates ListObjectsV2; there is no production
+listing path in this slice. It is retained in the accepted spike for the next
+prefix enumeration feature rather than interpreting raw model bytes as XML.
+Untrusted SDK error bodies are bounded and errors remain generic. No live-provider,
+platform, UI accessibility, inference or acquisition gate acceptance is claimed.
+
+The replacement qualifies 13 focused S3 units, 156 broader acquisition units,
+44 acquisition integrations, seven native workflow cases, 14 public/anonymous
+reader cases and 202 inference-disabled RPC cases. Fresh-process diagnostics,
+ambient/proxy and cold-recovery child cases are executed by their parents.
+Strict core all-target and RPC production-binary Clippy, feature-off compilation,
+format/diff, 12 repository feature contracts and three explicit SDK platform
+graphs pass. The broader strict RPC test-target pass retains 11 unchanged
+inference-disabled Torch DTO dead-code warnings; no frozen owner or lint
+suppression was changed. Behavior tests precede only a field-shorthand cleanup,
+with final lint/type checks covering delivered source.
+
+Actual lock delta: 482 to 511 versions (51 added, 22 removed); selected core
+normal/build closure: 239 to 276, with 43 new names. A canonical attribution
+candidate validates separately; authoritative texts cover every new lock version
+and the 311-version external optional-S3 platform union. Shared generator and
+release outputs remain parent-owned. The two SIMD crates' absent packaged MIT
+texts were retrieved from their declared immutable upstream commit over ordinary
+verified HTTPS. Exact deltas, evidence, intermediates and remaining scope are in
+[production replacement qualification](reports/s3-sdk-reader-replacement-2026-10-06.md).
+
+Public constructors/DTOs/receipt formats and frozen manifest/importer/watcher
+source remain unchanged. The SDK GET operation marker is documented and signed
+query-order tests follow SigV4; object identity remains the original explicit
+pin. SDK stalled-stream protection is disabled to preserve the caller budget.
+No gate is marked ready. Parent owns reviews/PRs/integration; next feature is
+bounded explicit prefix enumeration with the accepted XML guard, followed by
+separate provider/platform acceptance.
+
+
 ## 2026-10-05 — frozen sibling normal composition and installed qualification
 
 Coordinator-authorized normal merge cd9d8191 has ordered parents frozen

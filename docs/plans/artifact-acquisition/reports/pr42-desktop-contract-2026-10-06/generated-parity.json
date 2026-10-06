@@ -1,0 +1,38 @@
+[
+  {
+    "path": "electron/src/generated/desktop-contract.ts",
+    "baseline_sha256": "0e1458103f2a89aac072bcb4efdfc2855aac1d6a7246f480058539ad1b25efbc",
+    "generated_sha256": "0e1458103f2a89aac072bcb4efdfc2855aac1d6a7246f480058539ad1b25efbc",
+    "identical": true
+  },
+  {
+    "path": "electron/src/generated/desktop-contract.validators.d.ts",
+    "baseline_sha256": "e0be7d121fcb4719aac68940bf8a254622fffae41e7728b220f2710209ee4995",
+    "generated_sha256": "e0be7d121fcb4719aac68940bf8a254622fffae41e7728b220f2710209ee4995",
+    "identical": true
+  },
+  {
+    "path": "electron/src/generated/desktop-contract.validators.js",
+    "baseline_sha256": "47ec935b38f6109b533843406dd78b55c0a72d380d30cbfb9bf7051f828088f2",
+    "generated_sha256": "47ec935b38f6109b533843406dd78b55c0a72d380d30cbfb9bf7051f828088f2",
+    "identical": true
+  },
+  {
+    "path": "frontend/src/generated/desktop-contract.ts",
+    "baseline_sha256": "0e1458103f2a89aac072bcb4efdfc2855aac1d6a7246f480058539ad1b25efbc",
+    "generated_sha256": "0e1458103f2a89aac072bcb4efdfc2855aac1d6a7246f480058539ad1b25efbc",
+    "identical": true
+  },
+  {
+    "path": "frontend/src/generated/desktop-contract.validators.d.ts",
+    "baseline_sha256": "e0be7d121fcb4719aac68940bf8a254622fffae41e7728b220f2710209ee4995",
+    "generated_sha256": "e0be7d121fcb4719aac68940bf8a254622fffae41e7728b220f2710209ee4995",
+    "identical": true
+  },
+  {
+    "path": "frontend/src/generated/desktop-contract.validators.js",
+    "baseline_sha256": "47ec935b38f6109b533843406dd78b55c0a72d380d30cbfb9bf7051f828088f2",
+    "generated_sha256": "47ec935b38f6109b533843406dd78b55c0a72d380d30cbfb9bf7051f828088f2",
+    "identical": true
+  }
+]

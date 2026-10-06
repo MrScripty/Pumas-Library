@@ -1,0 +1,87 @@
+{
+  "base": "722245514b3bae42511aa5ea188570292ce276d4",
+  "base_tree": "14e8a1b36b580f2397264dd38b18329ec07bc75e",
+  "head": "75d7e426acdb4f2ed25c6063653ae517a56528aa",
+  "tree": "93018997501ae9ec503508028767345298828abc",
+  "branch": "fix/pr42-desktop-contract-72224551",
+  "author_committer": "MrScripty <TheEnvironmentGuy@protonmail.com>|MrScripty <TheEnvironmentGuy@protonmail.com>",
+  "source": {
+    "electron/scripts/generate-desktop-contract.mjs": {
+      "blob": "447775724e07953defad7895e2db32f28146b8d2",
+      "sha256": "6893e2e4cf7c60628b03eadd77c44db2bb8cb81e874e1f82ad6779ac81f8f2fc"
+    },
+    "electron/scripts/generate-desktop-contract.test.mjs": {
+      "blob": "3e515ebfab8dac633c563542fe20405a83c406cd",
+      "sha256": "ee98926c401a794f6948cad7109c591a55d220d074fdeb1febce3ef34425b126"
+    }
+  },
+  "tests": {
+    "generator": {
+      "passed": 9,
+      "failed": 0
+    },
+    "electron_actual_producer_conformance": {
+      "passed": 41,
+      "failed": 0
+    },
+    "renderer_actual_bundled_preload_conformance": {
+      "passed": 48,
+      "failed": 0
+    },
+    "parity_root_cwd": "pass",
+    "parity_electron_cwd": "pass",
+    "normally_regenerated_outputs": "6/6 identical to base",
+    "electron_build": "tsc + normal bundle-preload pass",
+    "electron_lint": "pass, warnings denied",
+    "node_syntax": "pass",
+    "git_diff_check": "pass"
+  },
+  "diagnosis": "esbuild used invocation cwd to print dependency module paths; absWorkingDir is now the repository root; the byte-for-byte stale check is unchanged",
+  "hosted_failure": {
+    "run": 37432261429,
+    "job": 112165944055,
+    "head": "722245514b3bae42511aa5ea188570292ce276d4"
+  },
+  "environment": "local commands, source builds, owned loopback and Git push work; shell gh API reads return Forbidden; authorized GitHub connector reads succeed",
+  "public_api_changes": false,
+  "hosted_repair_validation": "not requested/run; parent owns PR42 integration and hosted qualification",
+  "ac10": "WIP preserved separately at qualification/ac10-public-hf-72224551, admission d3d93f8b5da09f7d71c96631aab141c6bae9fb6c; no successful final measurement yet; source a885 needs verified-handoff marker condition before 30s importer wait",
+  "commands": [
+    "(cwd electron) node scripts/generate-desktop-contract.mjs",
+    "(cwd electron) node scripts/generate-desktop-contract.mjs --check",
+    "(cwd repo) node electron/scripts/generate-desktop-contract.mjs --check",
+    "(cwd electron) node scripts/generate-desktop-contract.test.mjs",
+    "(cwd electron) node scripts/with-desktop-contract-fixtures.mjs node scripts/desktop-contract-conformance.test.mjs",
+    "(cwd electron) node node_modules/typescript/bin/tsc && node scripts/bundle-preload.mjs",
+    "(cwd electron) node node_modules/eslint/bin/eslint.js . --report-unused-disable-directives --max-warnings 0",
+    "(cwd frontend) node ../electron/scripts/with-desktop-contract-fixtures.mjs node node_modules/vitest/vitest.mjs run --config vitest.conformance.config.ts"
+  ],
+  "build_settings": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_TARGET_DIR": "/workspace/Pumas-Library/rust/target",
+    "cargo_serialization": "flock /tmp/pumas-cargo-admission/cargo.lock"
+  },
+  "limits": "PNPM wrapper tried dependency setup and failed before the check; checks were run directly through the unchanged Node script bodies and existing locked dependencies. First renderer setup used unbundled tsc output and failed; normal preload bundling fixed setup before final 48/48 pass. Initial lint found missing URL import, fixed before final lint.",
+  "evidence_files": {
+    "check-after-electron.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "check-after-root.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "check-before.log": "a7d53a00a9f8cdbc9fb608a64f94e317f55b1900ad6944affb3304acac8d3f45",
+    "cwd-regression-before.log": "03848b889c90c9c9d3333756826a02ee9ec5a90b5392bd79b37f023b57df26bb",
+    "electron-build.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "electron-conformance.log": "0b63b10ed087250d7cc67b2a55a15dd1b0b728b966c5aaa86b80c3a53f4857a9",
+    "electron-lint-before-url-import.log": "7e0bc4ee5510d7c180bdaa841d90adce78330f6e5b549dcd904c4785a97d243f",
+    "electron-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "frontend-before-preload-bundle.log": "0c0a688debc95cc5a083c83cd1f7b8dc23ba21e950ccf7bf6f3eb766a90862ba",
+    "frontend-conformance.log": "aca53346fd587074747ebe90ab1167724bd5e976895cc2561f0e03bd12ae4d58",
+    "generate.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "generated-parity.json": "ce45addf6b7905fd88c809b0238df681a8c956e37444ffe1b3df4e8f8e5d3c6b",
+    "generator-tests.log": "708ddda8a689326282453267d609ffec0a169fda4dc5323d42b93dffd9376515",
+    "hosted-failure-excerpt.log": "d12f84582664c73168bbaa156ff1c2a4f03c0aa100f223975ddef7971358292b",
+    "identity-before-commit.txt": "46a371a3e13dfba73e0461ba4868a01eaeb36894ce950374020cbdda0dbec140",
+    "pnpm-dependency-setup-error.log": "1e0d6b8430858d0a51abaac92b48a30a64cb4da158dc1c49cb01f55de2b5ed06",
+    "scoped-lint.log": "f1747fe38113e193c296778410fe504c8ab702a18c54b52e2372c048480ecdb2"
+  }
+}

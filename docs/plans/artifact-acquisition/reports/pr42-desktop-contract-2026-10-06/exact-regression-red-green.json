@@ -1,0 +1,61 @@
+{
+  "source_head": "75d7e426acdb4f2ed25c6063653ae517a56528aa",
+  "cwd": "/workspace/Pumas-Library-pr42-desktop-contract/electron",
+  "command": [
+    "node",
+    "--test",
+    "--test-name-pattern=independent of the invocation working directory",
+    "scripts/generate-desktop-contract.test.mjs"
+  ],
+  "test_sha256": "ee98926c401a794f6948cad7109c591a55d220d074fdeb1febce3ef34425b126",
+  "generator_green_sha256": "6893e2e4cf7c60628b03eadd77c44db2bb8cb81e874e1f82ad6779ac81f8f2fc",
+  "node": "v24.19.0",
+  "esbuild": "0.25.12",
+  "ajv": "8.20.0",
+  "generator_red_sha256": "a29dcff1fcb1f63620015ebc39e5d6aab917ac68194f132423bf51f3da09c5b5",
+  "red_exit": 1,
+  "green_exit": 0,
+  "logs_sha256": {
+    "exact-regression-red.log": "50e3ad6f39d668a51631bb48b6e9f98cd2ecca83f371b1ada676b1fdac389761",
+    "exact-regression-green.log": "676224b938edc9d66cce7de4a7d77b46ae4d0d5b59b165c7ae383a24ec89555d"
+  },
+  "six_generated_outputs": [
+    {
+      "path": "electron/src/generated/desktop-contract.ts",
+      "baseline_sha256": "0e1458103f2a89aac072bcb4efdfc2855aac1d6a7246f480058539ad1b25efbc",
+      "generated_sha256": "0e1458103f2a89aac072bcb4efdfc2855aac1d6a7246f480058539ad1b25efbc",
+      "identical": true
+    },
+    {
+      "path": "electron/src/generated/desktop-contract.validators.d.ts",
+      "baseline_sha256": "e0be7d121fcb4719aac68940bf8a254622fffae41e7728b220f2710209ee4995",
+      "generated_sha256": "e0be7d121fcb4719aac68940bf8a254622fffae41e7728b220f2710209ee4995",
+      "identical": true
+    },
+    {
+      "path": "electron/src/generated/desktop-contract.validators.js",
+      "baseline_sha256": "47ec935b38f6109b533843406dd78b55c0a72d380d30cbfb9bf7051f828088f2",
+      "generated_sha256": "47ec935b38f6109b533843406dd78b55c0a72d380d30cbfb9bf7051f828088f2",
+      "identical": true
+    },
+    {
+      "path": "frontend/src/generated/desktop-contract.ts",
+      "baseline_sha256": "0e1458103f2a89aac072bcb4efdfc2855aac1d6a7246f480058539ad1b25efbc",
+      "generated_sha256": "0e1458103f2a89aac072bcb4efdfc2855aac1d6a7246f480058539ad1b25efbc",
+      "identical": true
+    },
+    {
+      "path": "frontend/src/generated/desktop-contract.validators.d.ts",
+      "baseline_sha256": "e0be7d121fcb4719aac68940bf8a254622fffae41e7728b220f2710209ee4995",
+      "generated_sha256": "e0be7d121fcb4719aac68940bf8a254622fffae41e7728b220f2710209ee4995",
+      "identical": true
+    },
+    {
+      "path": "frontend/src/generated/desktop-contract.validators.js",
+      "baseline_sha256": "47ec935b38f6109b533843406dd78b55c0a72d380d30cbfb9bf7051f828088f2",
+      "generated_sha256": "47ec935b38f6109b533843406dd78b55c0a72d380d30cbfb9bf7051f828088f2",
+      "identical": true
+    }
+  ],
+  "red_mutation": "Only absWorkingDir:root removed; exact repair test unchanged; generator restored byte-for-byte before green."
+}

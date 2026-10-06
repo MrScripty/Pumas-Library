@@ -56,7 +56,7 @@ def main():
         original = candidates[0]
         raw_root = "root @ " + original["url"] + "#sha256=" + original["sha256"]
         spec = {"case": "exact-direct-root", "candidates": candidates,
-                "approved_urls": [c["url"] for c in candidates], "target": "linux",
+                "approved_urls": [c["url"] for c in candidates], "target": owner.fixture_target("linux", python="3.12.7"),
                 "complete_declaration": True, "roots": [raw_root],
                 "catalog_digest": owner.digest(owner.canonical(candidates))}
         declaration = (json.dumps(spec, indent=2) + "\n").encode()
@@ -75,8 +75,8 @@ def main():
         original_lock = lock_path.read_bytes()
         projection = (directory / "projection.json").read_bytes()
         lock = tomllib.loads(original_lock.decode())
-        environment, tags = owner.context("linux")
-        inspected = [owner.inspect_wheel(c, directory / "acquisition/catalog", tags) for c in candidates]
+        environment, tags = owner.context(spec["target"])
+        inspected = [owner.inspect_wheel(c, directory / "acquisition/catalog", tags, python=spec["target"]["python"]) for c in candidates]
         approved, alternative = inspected
         owner.require(all(c["eligible"] for c in inspected), "both same-version wheels must be eligible")
         owner.require(approved["sha256"] != alternative["sha256"], "substitution must change actual bytes/hash")

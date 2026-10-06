@@ -1159,3 +1159,25 @@ same-name/same-version actual inert wheels, preserving actual public uv output
 and original URL/hash provenance. Reuse the unchanged shared Rust harness/tools.
 No production/source/contract/dependency/native cleanup/recipe change, PR/merge
 or safety/gate acceptance. Catalog authority and full target policy remain open.
+
+## Q2 explicit target contract prerequisite — admitted 2026-10-06
+
+Parent authorizes the next automatic/preview source-boundary prerequisite while
+cdbeabe6 is independently reviewed. Separate feat/torch-explicit-target-cdbeabe6
+starts atcdbeabe638ca82d6706fc8618c119ff3079fe589, tree
+f56826efc9d781bf5776a71983c10631109707b5. Read existing package/native-target
+contracts first; preserve the native qualified recipe and frozen experiment refs.
+Admitted writes: a strict reusable Python wheel-target owner and focused tests;
+optional explicit-target preflight/consumer integration and tests in
+install_verified_wheels.py; only its script materialization in installer/torch.rs;
+experimental target/context/CLI controls and direct-root control call-site wiring;
+contract section11 and linked wheel-target.md, this admission, owning-plan status
+and separate report/evidence.
+No automatic production resolver rollout, dependency/lock, source authority,
+native cleanup or recipe/pin migration. Target validation must use complete owner
+data, reject unknown/incomplete OS/Python/ABI/libc policy and avoid inspection-host
+marker/ABI defaults. Preserve full original source identity and exact direct-root
+checks. Native consumer must verify the selected interpreter before explicit-target
+installation. Windows/Linux and supported macOS contracts receive scoped tests;
+unsupported ABI/target/resolver projections are explicit. Catalog authority and
+P1/AQ gates remain open; no production safety acceptance follows this prerequisite.

@@ -21,15 +21,25 @@ import subprocess
 import sys
 import threading
 import tomllib
+import tokenize
 from urllib.parse import unquote, urlparse
 import zipfile
 
-from packaging.markers import default_environment
 from packaging.metadata import Metadata
 from packaging.requirements import Requirement
-from packaging.tags import compatible_tags, cpython_tags, parse_tag
+from packaging.tags import parse_tag
 from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import Version
+
+_root = Path(__file__).resolve().parents[5]
+_spec = importlib.util.spec_from_file_location("pumas_explicit_target", _root / "torch-server/wheel_target.py")
+_owner = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_owner)
+WheelTarget = _owner.WheelTarget
+_fixture_spec = importlib.util.spec_from_file_location("explicit_fixture_target", Path(__file__).parent.parent / "torch-explicit-target-2026-10-06/fixture_target.py")
+_fixture = importlib.util.module_from_spec(_fixture_spec)
+_fixture_spec.loader.exec_module(_fixture)
+fixture_target = _fixture.target
 
 
 class Refused(ValueError):
@@ -50,17 +60,36 @@ def require(condition, reason):
 
 
 def context(target):
-    win = target == "windows"
-    environment = default_environment()
-    environment.update(python_version="3.12", python_full_version="3.12.0",
-                       implementation_version="3.12.0", implementation_name="cpython",
-                       platform_python_implementation="CPython", platform_machine="AMD64" if win else "x86_64",
-                       sys_platform="win32" if win else "linux", os_name="nt" if win else "posix",
-                       platform_system="Windows" if win else "Linux")
-    platforms = ["win_amd64"] if win else ["manylinux_2_17_x86_64", "linux_x86_64"]
-    tags = set(cpython_tags((3, 12), abis=["cp312"], platforms=platforms))
-    tags.update(compatible_tags((3, 12), interpreter="cp312", platforms=platforms))
-    return environment, tags
+    selected = WheelTarget(target)
+    return dict(selected.markers), set(selected.tags)
+
+
+def resolver_platform(target):
+    if target.system == "windows":
+        return "x86_64-pc-windows-msvc"
+    policy = target.to_dict()
+    require(target.system == "linux" and policy["libc"]["family"] == "glibc",
+            "Explicit target has no qualified uv libc/deployment projection")
+    require(policy["native_linux_tag"], "Native-Linux tag exclusion has no qualified uv projection")
+    minor = int(policy["libc"]["version"].split(".")[1])
+    require(minor in {17, 28, *range(31, 41)}, "Explicit glibc policy is not supported by the pinned public uv CLI")
+    return "x86_64-manylinux_2_" + str(minor)
+
+
+def resolver_marker(marker):
+    # uv has no public override for target kernel release/platform build strings.
+    # Tokenize the public normalized marker representation, retaining literal
+    # boundaries; reject unprojectable variables even in inactive branches.
+    if marker:
+        try:
+            variables = {part.string for part in tokenize.generate_tokens(io.StringIO(str(marker)).readline)
+                         if part.type == tokenize.NAME}
+        except tokenize.TokenError:
+            raise Refused("Marker cannot be projected to public uv") from None
+        require(variables <= _owner.MARKER_KEYS | {"extra", "and", "or", "not", "in"},
+                "Marker context cannot be projected to public uv")
+        require(not variables.intersection({"platform_release", "platform_version"}),
+                "Marker variable cannot be projected to public uv without inspection-host leakage")
 
 
 def requirements(metadata):
@@ -69,7 +98,7 @@ def requirements(metadata):
     return result
 
 
-def inspect_wheel(item, directory, tags):
+def inspect_wheel(item, directory, tags, *, python):
     name, version, _build, filename_tags = parse_wheel_filename(item["filename"])
     path = directory / item["filename"]
     require(path.is_file() and not path.is_symlink(), "catalog member must be regular")
@@ -111,7 +140,7 @@ def inspect_wheel(item, directory, tags):
                 expected = base64.urlsafe_b64encode(hashlib.sha256(body).digest()).rstrip(b"=").decode()
                 require(hash_value == "sha256=" + expected and size == str(len(body)), "actual fixture RECORD mismatch")
     dependencies = requirements(metadata)
-    eligible = bool(tags & filename_tags) and (not metadata.requires_python or metadata.requires_python.contains("3.12.0"))
+    eligible = bool(tags & filename_tags) and (not metadata.requires_python or metadata.requires_python.contains(python))
     return {**item, "local": str(path), "eligible": eligible, "metadata": metadata,
             "requirements": dependencies, "tags": sorted(map(str, filename_tags))}
 
@@ -272,7 +301,12 @@ def inspect(spec_path, uv, wheels):
         expected = {c["filename"] for c in spec["candidates"]}
         require({p.name for p in wheels.iterdir()} == expected, "unexpected/incomplete local catalog namespace")
         environment, tags = context(spec["target"])
-        candidates = [inspect_wheel(c, wheels, tags) for c in spec["candidates"]]
+        selected_target = WheelTarget(spec["target"])
+        platform_argument = resolver_platform(selected_target)
+        candidates = [inspect_wheel(c, wheels, tags, python=selected_target.python) for c in spec["candidates"]]
+        for candidate in candidates:
+            for dependency in candidate["requirements"]:
+                resolver_marker(dependency.marker)
         roots = []
         direct_roots = []
         local_roots = []
@@ -280,6 +314,7 @@ def inspect(spec_path, uv, wheels):
         for raw in spec["roots"]:
             require("\n" not in raw and "\r" not in raw, "requirement option injection")
             root = Requirement(raw)
+            resolver_marker(root.marker)
             if root.url:
                 matches = [c for c in candidates if root.url == c["url"] + "#sha256=" + c["sha256"]
                            and canonicalize_name(root.name) == canonicalize_name(c["name"])]
@@ -296,7 +331,10 @@ def inspect(spec_path, uv, wheels):
                 local_roots.append(str(root))
                 original_roots.append({"original_requirement": raw})
         coverage = bounded_coverage(roots, candidates, environment)
-        projection = {"schema": "pumas.experiment.offline-input.v1", "catalog_digest": spec["catalog_digest"],
+        target_wire = selected_target.to_dict()
+        target_sha256 = digest(canonical(target_wire))
+        projection = {"schema": "pumas.experiment.offline-input.v2", "catalog_digest": spec["catalog_digest"],
+                      "wheel_target": target_wire, "wheel_target_sha256": target_sha256,
                       "target_environment": environment, "original_roots": original_roots,
                       "local_requirements": local_roots, "conservative_coverage": coverage,
                       "candidates": [{k: c[k] for k in ("id", "url", "sha256", "bytes", "filename", "local", "tags", "eligible")} for c in candidates]}
@@ -309,8 +347,7 @@ def inspect(spec_path, uv, wheels):
                    "--color", "never", "pip", "compile", str(requirements_path), "--no-index", "--find-links", str(wheels),
                    "--no-build", "--no-sources", "--keyring-provider", "disabled",
                    "--python", str(directory / "missing-owned-python") if spec.get("solver_fault") == "missing-python" else sys.executable,
-                   "--python-version", "3.12", "--python-platform",
-                   "x86_64-pc-windows-msvc" if spec["target"] == "windows" else "x86_64-manylinux_2_17",
+                   "--python-version", selected_target.python, "--python-platform", platform_argument,
                    "--format", "pylock.toml", "--generate-hashes", "--no-header", "--no-annotate", "-o", str(output)]
         env = isolated_environment(directory)
         (directory / "invocation.json").write_text(json.dumps({"argv": command, "environment": env}, indent=2) + "\n")
@@ -321,10 +358,11 @@ def inspect(spec_path, uv, wheels):
         # Reinspect actual bytes after solver; owned namespace/provenance must stay exact.
         require({p.name for p in wheels.iterdir()} == expected, "solver changed catalog namespace")
         for item in spec["candidates"]:
-            inspect_wheel(item, wheels, tags)
+            inspect_wheel(item, wheels, tags, python=selected_target.python)
         lock = tomllib.loads(output.read_text())
         selected = selected_packet(lock, candidates, directory, environment, roots, direct_roots)
-        outcome.update(status="selected", selected=selected, lock_sha256=digest(output.read_bytes()), projection_sha256=digest((directory / "projection.json").read_bytes()))
+        outcome.update(status="selected", selected=selected, wheel_target=target_wire, wheel_target_sha256=target_sha256,
+                       lock_sha256=digest(output.read_bytes()), projection_sha256=digest((directory / "projection.json").read_bytes()))
     except (ValueError, KeyError, zipfile.BadZipFile, ExceptionGroup) as error:
         outcome["reason"] = str(error)
         if outcome["uv_invoked"]:
@@ -373,7 +411,7 @@ def evaluate(harness, uv, output):
     records = []
 
     def run(name, make, *, expected=None, refused=None, target="linux", roots=None, modify=None,
-            reason=None, expected_exit=None):
+            reason=None, expected_exit=None, target_profile=None):
         directory = output / name
         directory.mkdir(parents=True)
         source = Source()
@@ -400,7 +438,7 @@ def evaluate(harness, uv, output):
             return project + " @ " + url + "#sha256=" + item["sha256"]
 
         returned_roots = make(add, source)
-        spec = {"case": name, "candidates": candidates, "approved_urls": allowed, "target": target,
+        spec = {"case": name, "candidates": candidates, "approved_urls": allowed, "target": target_profile if target_profile is not None else fixture_target(target, python="3.12.7"),
                 "complete_declaration": True, "roots": roots or returned_roots or ["root"],
                 "catalog_digest": digest(canonical(candidates))}
         if modify:
@@ -451,6 +489,7 @@ def evaluate(harness, uv, output):
                 checks["exact_projection_provenance"] = all(
                     original["url"] == projected["url"] and original["sha256"] == projected["sha256"]
                     for original, projected in zip(candidates, projection["candidates"], strict=True))
+                checks["exact_target_provenance"] = projection["wheel_target"] == spec["target"] and projection["wheel_target_sha256"] == digest(canonical(spec["target"]))
             if name.startswith("primed-cache"):
                 prime = json.loads((directory / "priming/evidence.json").read_text())
                 checks["actual_public_uv_cache_prime"] = prime["exit"] == 0 and prime["version"] == "9.0" and prime["cache_files"] > 0
@@ -527,6 +566,42 @@ def evaluate(harness, uv, output):
         add("choice", "3.0", python=">=3.13")
         return [direct]
     run("python-and-tags", python_tags, expected={"root": "1.0", "choice": "1.0"})
+    def patch_markers(add, _):
+        direct = add("root", requires=(
+            'patch-seven ; python_full_version < "3.12.8"',
+            'patch-fourteen ; python_full_version >= "3.12.8"',
+            'impl-seven ; implementation_version < "3.12.8"',
+            'impl-fourteen ; implementation_version >= "3.12.8"', "choice"))
+        for name in ("patch-seven", "patch-fourteen", "impl-seven", "impl-fourteen"):
+            add(name)
+        add("choice", "1.0", python=">=3.12")
+        add("choice", "2.0", python=">=3.12.8")
+        return [direct]
+    run("explicit-patch-seven", patch_markers,
+        expected={"root": "1.0", "patch-seven": "1.0", "impl-seven": "1.0", "choice": "1.0"})
+    run("explicit-patch-fourteen", patch_markers,
+        target_profile=fixture_target("linux", python="3.12.14"),
+        expected={"root": "1.0", "patch-fourteen": "1.0", "impl-fourteen": "1.0", "choice": "2.0"})
+    def libc_choice(add, _):
+        direct = add("root", requires=("choice",))
+        add("choice", "1.0", tag="cp312-cp312-manylinux_2_17_x86_64")
+        add("choice", "2.0", tag="cp312-cp312-manylinux_2_28_x86_64")
+        return [direct]
+    run("explicit-glibc217", libc_choice, expected={"root": "1.0", "choice": "1.0"})
+    run("explicit-glibc228", libc_choice, target_profile=fixture_target("linux", python="3.12.7", libc_version="2.28"),
+        expected={"root": "1.0", "choice": "2.0"})
+    for system, profile in (("musl", fixture_target("linux", python="3.12.7", libc="musl", libc_version="1.2")),
+                            ("macos", fixture_target("macos", python="3.12.7"))):
+        run("unsupported-uv-projection-" + system, lambda add, _: [add("root")], target_profile=profile,
+            refused="before_uv", reason="no qualified uv libc/deployment projection")
+    for key, value in (("os", "unknown"), ("python", "3.12"), ("abi", "cp312d"), ("markers", {})):
+        profile = fixture_target("linux", python="3.12.7")
+        profile[key] = value
+        run("invalid-target-" + key, lambda add, _: [add("root")], target_profile=profile, refused="before_uv")
+    for variable in ("platform_release", "platform_version"):
+        run("unsupported-marker-" + variable,
+            lambda add, _, variable=variable: [add("root", requires=('absent ; ' + variable + ' == "fixture-value"',))],
+            refused="before_uv", reason="inspection-host leakage")
     def conflict(add, _):
         direct = add("root", requires=("left", "right"))
         add("left", requires=("leaf==1.0",))

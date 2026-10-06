@@ -48,10 +48,10 @@ class UnsupportedDependencyReference(ValueError):
     pass
 
 
-def validate_closure(metadata: dict, versions: dict) -> None:
+def validate_closure(metadata: dict, versions: dict, *, environment=None) -> None:
     """Evaluate required markers and propagate requested extras to a fixed point."""
     extras = {name: {""} for name in metadata}
-    environment = default_environment()
+    environment = default_environment() if environment is None else environment
     changed = True
     while changed:
         changed = False
@@ -85,11 +85,20 @@ def validate_closure(metadata: dict, versions: dict) -> None:
                     changed = True
 
 
-def local_requirements(artifacts: list[dict], wheels: Path) -> tuple[list[str], dict]:
+def explicit_target(document):
+    spec = importlib.util.spec_from_file_location("pumas_wheel_target", Path(__file__).with_name("wheel_target.py"))
+    owner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(owner)
+    return owner.WheelTarget(document)
+
+
+def local_requirements(artifacts: list[dict], wheels: Path, *, wheel_target=None) -> tuple[list[str], dict]:
     if not artifacts or wheels.is_symlink() or not wheels.is_dir():
         raise ValueError("Verified wheel set is missing")
     names, filenames, versions, metadata, lines = set(), set(), {}, {}, []
-    compatible = set(sys_tags())
+    selected_target = explicit_target(wheel_target) if wheel_target is not None else None
+    compatible = set(selected_target.tags if selected_target is not None else sys_tags())
+    environment = dict(selected_target.markers) if selected_target is not None else default_environment()
     for artifact in artifacts:
         name = canonicalize_name(artifact["name"])
         if name in names:
@@ -155,7 +164,7 @@ def local_requirements(artifacts: list[dict], wheels: Path) -> tuple[list[str], 
         if len(python) > 1 or (
             python
             and not SpecifierSet(python[0]).contains(
-                default_environment()["python_full_version"], prereleases=True
+                environment["python_full_version"], prereleases=True
             )
         ):
             raise ValueError("Wheel Requires-Python differs from the selected interpreter")
@@ -165,12 +174,14 @@ def local_requirements(artifacts: list[dict], wheels: Path) -> tuple[list[str], 
         lines.append(f"{name} @ {path.resolve().as_uri()} --hash=sha256:{digest.lower()}")
     if {p.name for p in wheels.iterdir()} != filenames:
         raise ValueError("Verified local wheel directory differs from the exact accepted set")
-    validate_closure(metadata, versions)
+    validate_closure(metadata, versions, environment=environment)
     return lines, metadata
 
 
-def install(artifacts: list[dict], wheels: Path, target: Path, output: Path) -> dict:
-    lines, _ = local_requirements(artifacts, wheels)
+def install(artifacts: list[dict], wheels: Path, target: Path, output: Path, *, wheel_target=None) -> dict:
+    if wheel_target is not None:
+        explicit_target(wheel_target).require_native_consumer()
+    lines, _ = local_requirements(artifacts, wheels, wheel_target=wheel_target)
     if target.is_symlink() or (target.exists() and (not target.is_dir() or any(target.iterdir()))):
         raise ValueError("Local package target must be an empty owned directory")
     output.mkdir(parents=True, exist_ok=True)
@@ -269,6 +280,8 @@ def main() -> None:
         parser.error("Qualified wheel consumption requires both lock and preview")
     try:
         resolution = json.loads(args.resolution.read_text(encoding="utf-8"))
+        if "wheel_target" in resolution:
+            explicit_target(resolution["wheel_target"])
         if args.recipe_lock is not None:
             spec = importlib.util.spec_from_file_location(
                 "pumas_qualified_catalog", Path(__file__).with_name("qualified_wheel_catalog.py")
@@ -286,7 +299,8 @@ def main() -> None:
             catalog.validate_recipe_artifacts(
                 lock, preview["directArtifacts"], resolution["artifacts"]
             )
-        install(resolution["artifacts"], args.wheels, args.target, args.output)
+        install(resolution["artifacts"], args.wheels, args.target, args.output,
+                wheel_target=resolution.get("wheel_target"))
     except UnsupportedDependencyReference:
         parser.exit(
             3, "Dependency direct URLs are unsupported for local consumption; no source fallback\n"

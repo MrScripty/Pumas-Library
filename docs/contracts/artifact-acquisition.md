@@ -328,6 +328,15 @@ Shutdown closes new admission, signals appropriate work, drains tracked async an
 
 ## 11. Package consumption
 
+The [explicit wheel target contract](wheel-target.md) supplies complete
+versioned Python/ABI/OS/architecture/libc/deployment and marker data for the
+next automatic/preview prerequisite. Explicit-target preflight and optional native
+consumer checks use that same validated data; unknown/incomplete targets refuse
+without inspection-host inference. Absent target fields retain the existing
+qualified native recipe behavior. This data/API slice does not adopt an
+experimental resolver, authorize catalog construction or qualify the exposed
+automatic/preview source boundary or AQ-PACKAGES.
+
 The package owner supplies a version-checked accepted resolution and trusted immutable artifact set. Acquisition obtains files; package tooling installs them into an owned empty stage from exact local inputs. Preserve original URLs/digests as provenance and validate the installed set afterward. Use only supported public tooling. A report is evidence about a resolution, not by itself a consumable lock format.
 
 The local package-tool child disables ambient pip configuration: `--isolated`

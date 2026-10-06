@@ -1,6 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, URL } from 'node:url';
 import { schemaType, generate } from './generate-desktop-contract.mjs';
+
+test('generated contract is independent of the invocation working directory', () => {
+  const generator = new URL('./generate-desktop-contract.mjs', import.meta.url).href;
+  const contract = {
+    format:'pumas-desktop-contract-1', dialect:'http://json-schema.org/draft-07/schema#',
+    schemas:{Text:{type:'string', minLength:1}},
+  };
+  const script = `import { generate } from ${JSON.stringify(generator)}; process.stdout.write(JSON.stringify(await generate(${JSON.stringify(contract)})));`;
+  const outputs = ['../../', '../'].map(directory => {
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
+      cwd:fileURLToPath(new URL(directory, import.meta.url)), encoding:'utf8', maxBuffer:4*1024*1024, timeout:30_000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  });
+  assert.deepEqual(outputs[0], outputs[1]);
+});
 
 test('type projection preserves optional null and tagged alternatives', () => {
   assert.equal(schemaType({type:'object', required:['state'], properties:{state:{enum:['partial']}, progress:{type:['number','null']}}}), '{ "state": "partial"; "progress"?: number | null }');

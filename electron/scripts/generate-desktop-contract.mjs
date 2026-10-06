@@ -131,7 +131,7 @@ export async function generate(contract) {
     ajv.addSchema(schema, name);
     exports[`validate${name}`] = name;
   }
-  const compiled = await build({stdin:{contents:standaloneCode(ajv, exports), resolveDir:resolve(root,'electron'), sourcefile:'desktop-contract.validators.js'}, bundle:true, platform:'browser', format:'esm', write:false, target:'es2022'});
+  const compiled = await build({absWorkingDir:root, stdin:{contents:standaloneCode(ajv, exports), resolveDir:resolve(root,'electron'), sourcefile:'desktop-contract.validators.js'}, bundle:true, platform:'browser', format:'esm', write:false, target:'es2022'});
   const hash = createHash('sha256').update(JSON.stringify(contract)).digest('hex');
   const banner = `// Generated from pumas-rpc contract.rs; SHA256 ${hash}. DO NOT EDIT.\n`;
   const names = Object.keys(contract.schemas).sort();

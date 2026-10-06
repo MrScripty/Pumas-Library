@@ -1,0 +1,82 @@
+{
+  "version": "1",
+  "pip_version": "25.0.1",
+  "install": [
+    {
+      "download_info": {
+        "url": "file:///tmp/.tmp3rzuGd/torch-versions/.torch-catalog-fixture/eed924c3068fc6cdab36ad022019da68f20b3bc1dbdd55fd8f766227a68b2864/branch-2-py3-none-any.whl",
+        "archive_info": {
+          "hash": "sha256=655a65fc805f9bbbe77acc2e2ce11d50b6f98b9fa6b9b7d26d40472b0845e5e3",
+          "hashes": {
+            "sha256": "655a65fc805f9bbbe77acc2e2ce11d50b6f98b9fa6b9b7d26d40472b0845e5e3"
+          }
+        }
+      },
+      "is_direct": true,
+      "is_yanked": false,
+      "requested": true,
+      "metadata": {
+        "metadata_version": "2.1",
+        "name": "branch",
+        "version": "2",
+        "requires_dist": [
+          "dependency>=2"
+        ]
+      }
+    },
+    {
+      "download_info": {
+        "url": "file:///tmp/.tmp3rzuGd/torch-versions/.torch-catalog-fixture/658d0a715bb114aa15d53aab0dabafc626cb5704f9fc4f305e9398ac6fcb1e49/dependency-2-py3-none-any.whl",
+        "archive_info": {
+          "hash": "sha256=200506eb4d94393561dbab172a03f5bff79713f011921aea94ad7688cd9b7700",
+          "hashes": {
+            "sha256": "200506eb4d94393561dbab172a03f5bff79713f011921aea94ad7688cd9b7700"
+          }
+        }
+      },
+      "is_direct": true,
+      "is_yanked": false,
+      "requested": true,
+      "metadata": {
+        "metadata_version": "2.1",
+        "name": "dependency",
+        "version": "2"
+      }
+    },
+    {
+      "download_info": {
+        "url": "file:///tmp/.tmp3rzuGd/torch-versions/.torch-catalog-fixture/6b85ba6ad748b9d962d14b7ddec0ff2285aaed44b101ded2ac58f2302b65b858/torch-2.14.0%2Bcpu-py3-none-any.whl",
+        "archive_info": {
+          "hash": "sha256=6c0a3e08d6ca6724f4a4b57054c547e64073245ae23938e592dc7e518d7a6a9d",
+          "hashes": {
+            "sha256": "6c0a3e08d6ca6724f4a4b57054c547e64073245ae23938e592dc7e518d7a6a9d"
+          }
+        }
+      },
+      "is_direct": true,
+      "is_yanked": false,
+      "requested": true,
+      "metadata": {
+        "metadata_version": "2.1",
+        "name": "torch",
+        "version": "2.14.0+cpu",
+        "requires_dist": [
+          "branch>=1"
+        ]
+      }
+    }
+  ],
+  "environment": {
+    "implementation_name": "cpython",
+    "implementation_version": "3.12.14",
+    "os_name": "posix",
+    "platform_machine": "x86_64",
+    "platform_release": "6.18.44",
+    "platform_system": "Linux",
+    "platform_version": "#1 SMP Sat Sep 26 20:02:31 UTC 2026",
+    "python_full_version": "3.12.14",
+    "platform_python_implementation": "CPython",
+    "python_version": "3.12",
+    "sys_platform": "linux"
+  }
+}

@@ -1,0 +1,11 @@
+test_actual_exact_subset_install_original_direct_root_extra_report_record_and_no_ip_traffic (test_consume_selected_wheels.SelectedConsumerTests.test_actual_exact_subset_install_original_direct_root_extra_report_record_and_no_ip_traffic) ... Processing /tmp/tmpu3wx_su9/wheels/611067035925da8ab6856f1f2b689cc50303649514df11b478ddd79d019b7223/leaf-1-py3-none-any.whl (from -r /tmp/tmpu3wx_su9/proof/local-requirements.txt (line 1))
+Processing /tmp/tmpu3wx_su9/wheels/41817a4d5e30192452bce3973dc48833410513c84ab056d5b4f41b098283cb51/torch-2.14.0+cpu-py3-none-any.whl (from -r /tmp/tmpu3wx_su9/proof/local-requirements.txt (line 2))
+Installing collected packages: torch, leaf
+
+Successfully installed leaf-1 torch-2.14.0+cpu
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 2.303s
+
+OK

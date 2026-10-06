@@ -1,0 +1,194 @@
+{
+  "catalog_acquisition_id": "892fa7b4-a209-4071-a158-ab6083dd3e1e",
+  "catalog_receipt_sha256": "b070026795c12de40dbd2e6a40384a24aa5e7bdb7bcb3753722c645c9b0b0136",
+  "directory": {
+    "file": 964080,
+    "volume": 33
+  },
+  "local_installation": {
+    "catalog_request_sha256": "a0368c83b04cb2e602c8a6934fca881d7838c315cee31043ed2cb849f864d25c",
+    "installation_report_sha256": "2d8ceb1d92feee8a76b69179c8151f45c06e86aa7ddee2a5bb957d3b03e9597d",
+    "installed_files": 21,
+    "installed_manifest_sha256": "c8115bbf4726409aa94e5534c870750c2263dd977c06e5283fdb9e2f56936313",
+    "interpreter_sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7",
+    "local_requirements_sha256": "a830bf2137836066bfcf3964f305e46b8389510140ba53eaac053cc554463541",
+    "schema": "pumas.selected-local-install.v1",
+    "selected_packet_sha256": "bea341c293d3e5e9d789e8c37a6c69bd4ee267ed07e80219ee1ef838c7e85fd4",
+    "target_observation_sha256": "92d77d5c8467a9b4ee8e56ffefd4d6bffaadaf9cc6c943d1bded1f3c19cf9291"
+  },
+  "metadata": {
+    "dependenciesInstalled": true,
+    "downloadUrl": "https://download.pytorch.org/whl/cpu/torch-2.14.0+cpu-py3-none-any.whl",
+    "gitCommit": null,
+    "installedDate": "2026-10-06T21:32:27.535332781+00:00",
+    "path": "v2.14.0",
+    "pythonVersion": "Python 3.12.14",
+    "releaseDate": "2026-10-06T00:00:00Z",
+    "releaseNotes": null,
+    "releaseTag": "v2.14.0",
+    "requirementsHash": null,
+    "size": null
+  },
+  "probe": {
+    "adapter_status": "not selected",
+    "capabilities": {
+      "cpu_tensor": {
+        "status": "passed"
+      },
+      "cuda_tensor": {
+        "reason": "CUDA is not available",
+        "scope": "CUDA tensor operation",
+        "status": "unavailable"
+      },
+      "flux2_klein": {
+        "scope": "optional adapter",
+        "status": "not selected"
+      },
+      "image_device": {
+        "reason": "No NVIDIA sm_120 CUDA device detected",
+        "scope": "adapter device requirement",
+        "status": "unavailable"
+      },
+      "image_generation": {
+        "scope": "no model loaded or inference performed",
+        "status": "not tested"
+      },
+      "nunchaku_z_image": {
+        "scope": "optional adapter",
+        "status": "not selected"
+      },
+      "sidecar_app": {
+        "health": {
+          "protocol": 3,
+          "status": "ok"
+        },
+        "scope": "in-process app construction and health endpoint",
+        "status": "passed"
+      },
+      "sidecar_startup": {
+        "scope": "socket startup requires an explicit trial",
+        "status": "not tested"
+      },
+      "torch_import": {
+        "status": "passed",
+        "version": "2.14.0+cpu"
+      }
+    },
+    "context": {
+      "all_installed_distributions": {
+        "branch": "2",
+        "dependency": "2",
+        "pip": "25.0.1",
+        "torch": "2.14.0+cpu"
+      },
+      "distributions_sha256": "e8290665982ff6491b43810c50627db489713f076ee5072425a2d89e02cd39f8",
+      "driver_version": null,
+      "executable": "/tmp/.tmp3rzuGd/torch-versions/.torch-install-rtyDCP/runtime/venv/bin/python",
+      "hardware": {
+        "cuda": null,
+        "devices": [],
+        "hip": null
+      },
+      "hardware_fingerprint": "494fb1d79639aecf4bb2b6043473616914037c874c14d9805f8e3f9d38b2c602",
+      "installed_distributions": {
+        "branch": "2",
+        "dependency": "2",
+        "torch": "2.14.0+cpu"
+      },
+      "interpreter_sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7",
+      "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+      "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+      "runtime_files_sha256": {
+        "consume_selected_wheels.py": "dbb6e37e07123575dace57dc77cfb4d410c10fd41b11acab940d23eb40eede81",
+        "control_api.py": "ee5160f121a749d8d11cd929abfb9d98a1a109235dac3690c9e2118f9cca54d0",
+        "device_manager.py": "9ab6d63eb943989bc19f1fed89098aca27b168536fa2529734d1ee4f37585379",
+        "diffusion.py": "b34658117797f3e952fa3f74fee6b45a402888fcb31d3b479fae4b3c788c66d3",
+        "flux2.py": "8e2a5cb5b08c78b04ed8f3acac57fab3fd3b7acd784f62144b98f37c1b3d6edb",
+        "image_api.py": "bb39ac05aee7ea4d4357360accfa27ee261f58d1cd9cc35af28470012673a7ec",
+        "install_verified_wheels.py": "8ab7bca77fbe4512674d580ff9ee2eaf1ec27d7a8078df34e73aadc5fda24252",
+        "loaders/__init__.py": "a1cb02e03ea8f1ffbdc31f817a054130df0048c3055d73b1943ec33405f6f338",
+        "loaders/dllm_loader.py": "88ebe4a104af25a0a659519026bfc7a9eaa0f0bcd983a0b272524c1f9b4e7136",
+        "loaders/safetensors_loader.py": "4d28e7388301276cd97febca7834648628c236d32605403d821d6b6ea484239a",
+        "loaders/sherry_loader.py": "c18a2ff96e28c8241489091d2248d6e7c730763c236c896bf47b4d3f3dddbe44",
+        "model_manager.py": "4d65c909f9ec9d1a35b2cc0a96b26e7542e0679a69e016cf877532c0731b3b3f",
+        "nunchaku_compat.py": "27b42f9cae80e474c0b2162e6bf572f822d525134bf2fc3bddd551c031bb5d70",
+        "offline_wheel_selection.py": "32facab6165c3d3439bac49a334df801a732a8f08c32165775f8a787c45f9364",
+        "openai_api.py": "a3c712e6307fe3b60d1b7acdcbeb9413b011eb370ad656f862ef9399f3342f8c",
+        "probe_runtime.py": "635f20dd94a05900e9bbfbcad62d6806b83ee6504e83c9d63aa0642ed75f2085",
+        "qualified_wheel_catalog.py": "c92fae33e8906b20e0caf89ba51261249fa65f1259d4204f90259bdf41670843",
+        "resolve_runtime.py": "eda80c72173711a1c20168760750f8e2f0b246db8acf2375712fbeb0d1c1a6ee",
+        "serve.py": "f3e52fa9533988c7b4f642243061c491f23d66fd67d450e7393d4658dadd6d04",
+        "speech_binding.py": "14745f1948f24c548e75b67f27fecaf2475e767355a3ae0ca582b5098d622b70",
+        "validate_runtime.py": "dbb9b45222f00788471983765cd157c9c04c87c1fbdf744a2e1b58ff751a2571",
+        "validation.py": "f53cca26ddbddbc3c924ff07d32aaf9ced6061a7f1628379b4c0db2c9da7feb1",
+        "wheel_catalog_owner.py": "239d9b897e0f47394d8c3e081d97c6110c360602c4cb41c5dfcb0ae292f228eb",
+        "wheel_records.py": "f955958b637016b2760ff8a72e21d2e8b794f5e34d45a6eba54fa99c8238db50",
+        "wheel_target.py": "a381edb267f13316a582c3ee4d40450554004d1dc7c2788d4408ed101ebe94b1"
+      },
+      "runtime_profile_sha256": "5e75a2d901ff715281166e7bfeb5e34962324d3d0bebf90108093b44694c93d8",
+      "sidecar_sha256": "f3e52fa9533988c7b4f642243061c491f23d66fd67d450e7393d4658dadd6d04"
+    },
+    "core_status": "passed",
+    "environment": {
+      "adapter": "none",
+      "artifacts": [
+        {
+          "filename": "branch-2-py3-none-any.whl",
+          "id": "eed924c3068fc6cdab36ad022019da68f20b3bc1dbdd55fd8f766227a68b2864",
+          "local": "/tmp/.tmp3rzuGd/torch-versions/.torch-catalog-fixture/eed924c3068fc6cdab36ad022019da68f20b3bc1dbdd55fd8f766227a68b2864/branch-2-py3-none-any.whl",
+          "name": "branch",
+          "repository": "pypi",
+          "requires_python_hint": null,
+          "sha256": "655a65fc805f9bbbe77acc2e2ce11d50b6f98b9fa6b9b7d26d40472b0845e5e3",
+          "size": 853,
+          "url": "https://files.pythonhosted.org/packages/branch-2-py3-none-any.whl",
+          "version": "2",
+          "yanked": false
+        },
+        {
+          "filename": "dependency-2-py3-none-any.whl",
+          "id": "658d0a715bb114aa15d53aab0dabafc626cb5704f9fc4f305e9398ac6fcb1e49",
+          "local": "/tmp/.tmp3rzuGd/torch-versions/.torch-catalog-fixture/658d0a715bb114aa15d53aab0dabafc626cb5704f9fc4f305e9398ac6fcb1e49/dependency-2-py3-none-any.whl",
+          "name": "dependency",
+          "repository": "pypi",
+          "requires_python_hint": null,
+          "sha256": "200506eb4d94393561dbab172a03f5bff79713f011921aea94ad7688cd9b7700",
+          "size": 859,
+          "url": "https://files.pythonhosted.org/packages/dependency-2-py3-none-any.whl",
+          "version": "2",
+          "yanked": false
+        },
+        {
+          "filename": "torch-2.14.0+cpu-py3-none-any.whl",
+          "id": "6b85ba6ad748b9d962d14b7ddec0ff2285aaed44b101ded2ac58f2302b65b858",
+          "local": "/tmp/.tmp3rzuGd/torch-versions/.torch-catalog-fixture/6b85ba6ad748b9d962d14b7ddec0ff2285aaed44b101ded2ac58f2302b65b858/torch-2.14.0+cpu-py3-none-any.whl",
+          "name": "torch",
+          "repository": "pytorch",
+          "requires_python_hint": null,
+          "sha256": "6c0a3e08d6ca6724f4a4b57054c547e64073245ae23938e592dc7e518d7a6a9d",
+          "size": 1183,
+          "url": "https://download.pytorch.org/whl/cpu/torch-2.14.0+cpu-py3-none-any.whl",
+          "version": "2.14.0+cpu",
+          "yanked": false
+        }
+      ],
+      "provider": {
+        "kind": "existing-local-fixture-provider",
+        "path": "/tmp/.tmp3rzuGd/torch-versions/fixture-provider-python",
+        "sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7"
+      },
+      "schema": "pumas.selected-runtime-profile.v1",
+      "selected_packet_sha256": "bea341c293d3e5e9d789e8c37a6c69bd4ee267ed07e80219ee1ef838c7e85fd4",
+      "target_observation_sha256": "92d77d5c8467a9b4ee8e56ffefd4d6bffaadaf9cc6c943d1bded1f3c19cf9291",
+      "torch": "2.14.0+cpu"
+    },
+    "recorded_at": "2026-10-06T21:32:28.479912+00:00",
+    "status": "passed"
+  },
+  "provider": {
+    "kind": "existing-local-fixture-provider",
+    "path": "/tmp/.tmp3rzuGd/torch-versions/fixture-provider-python",
+    "sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7"
+  },
+  "schema": "pumas.selected-runtime-install.v1"
+}

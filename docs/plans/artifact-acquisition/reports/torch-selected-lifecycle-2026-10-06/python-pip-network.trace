@@ -1,0 +1,33 @@
+213317 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3", ["/opt/codex/runtimes/codex-primar"..., "-I", "-m", "pip", "--isolated", "install", "--no-index", "--no-deps", "--require-hashes", "--only-binary=:all:", "--no-cache-dir", "--disable-pip-version-check", "--ignore-installed", "--no-compile", "--target", "/tmp/tmpu3wx_su9/packages", "--report", "/tmp/tmpu3wx_su9/proof/local-pip"..., "-r", "/tmp/tmpu3wx_su9/proof/local-req"...], 0x7ffdb0c57d50 /* 64 vars */) = 0
+213317 socket(AF_INET6, SOCK_STREAM|SOCK_CLOEXEC, IPPROTO_IP) = 3
+213317 bind(3, {sa_family=AF_INET6, sin6_port=htons(0), sin6_flowinfo=htonl(0), inet_pton(AF_INET6, "::1", &sin6_addr), sin6_scope_id=0}, 28) = 0
+213318 execve("/home/agent/.local/bin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/opt/codex/bin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/usr/local/sbin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/usr/local/bin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/usr/sbin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/usr/bin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/sbin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/bin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/home/agent/.local/bin/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback/lsb_release", ["lsb_release", "-a"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213318 +++ exited with 255 +++
+213317 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=213318, si_uid=1000, si_status=255, si_utime=0, si_stime=0} ---
+213319 execve("/home/agent/.local/bin/uname", ["uname", "-rs"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213319 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override/uname", ["uname", "-rs"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213319 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/uname", ["uname", "-rs"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213319 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/uname", ["uname", "-rs"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213319 execve("/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/uname", ["uname", "-rs"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213319 execve("/opt/codex/bin/uname", ["uname", "-rs"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213319 execve("/usr/local/sbin/uname", ["uname", "-rs"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213319 execve("/usr/local/bin/uname", ["uname", "-rs"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213319 execve("/usr/sbin/uname", ["uname", "-rs"], 0x7ffc57360a10 /* 64 vars */) = -1 ENOENT (No such file or directory)
+213319 execve("/usr/bin/uname", ["uname", "-rs"], 0x7ffc57360a10 /* 64 vars */) = 0
+213319 +++ exited with 0 +++
+213317 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=213319, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+213320 +++ exited with 0 +++
+213317 +++ exited with 0 +++

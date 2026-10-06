@@ -1,5 +1,26 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 private selected-runtime lifecycle (2026-10-06):** Parent ACKs
+`6bddf85867364f9b31f000ed6aa7436a5fb50872`. Separate tested source
+`568a5f1fca76b2253088d97f71b1d950e5beacc9`, tree
+`5e5d26a3540d468a7a737ff5d54ccbebe0d78260`, carries the live installed packet
+through approved provider/runtime source checks, genuine selected-profile probing,
+relocated original-evidence/member fences and registered owned metadata publication.
+The separate installation record binds the unchanged original catalog receipt,
+actual local proof/probe, provider, metadata and native directory identity.70 Rust
+and126 Python controls,33 pre-build graphs and strict checks pass, including28
+full-flow lifecycle controls:17 post-probe mutations, movement/failure uncertainty,
+cancellation, child abandonment and lost publisher acknowledgment/caller custody.
+[Exact source, API, retained wheel/member bytes, logs and limits](reports/torch-selected-lifecycle-2026-10-06.md).
+This remains a private CPU/no-adapter slice. Synthetic compatible2.40 arithmetic/
+protocol fixtures cannot qualify actual native2.41, real Torch/provider/platform
+parity, GPU/model execution, enforced network denial or complete cold recovery.
+Q2/AQ/P1 classifications remain unchanged; new automatic/preview caller adoption
+stays OFF. Next existing-plan work is retained publication reconciliation under
+the existing owner, then remaining exact target/tool/source/provider parity before
+coordinated caller adoption. Main, frozen native/S3/manifest files and paused
+Library transfers remain unchanged; parent owns review/CI/PRs/integration.
+
 **Q2 private selected-packet local consumer (2026-10-06):** Parent ACKs
 `1769b77ee037fa7fda33df84d9bdaeff22de5006`. Separate tested source
 `587144f6ca938451ab61234f90fbd0c1e3745b00`, tree

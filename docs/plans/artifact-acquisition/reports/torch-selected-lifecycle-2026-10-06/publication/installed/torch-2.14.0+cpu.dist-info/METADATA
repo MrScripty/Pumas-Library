@@ -1,0 +1,4 @@
+Metadata-Version: 2.1
+Name: torch
+Version: 2.14.0+cpu
+Requires-Dist: branch>=1

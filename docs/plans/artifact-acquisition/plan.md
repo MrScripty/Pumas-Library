@@ -1,5 +1,17 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 exact direct-root checker successor (2026-10-06):** Independent review
+accepts9eda2944 only as bounded evidence and identifies a static validation gap,
+not observed uv misselection: name==version closure could accept another admitted
+same-version wheel for a direct root. Separate3190bbfc retains each original
+direct root's exact approved candidate/source URL/filename/hash/size/local binding
+and checks it after resolution before requirement coalescing. Six focused
+controls/50 assertions plus all24 regressions/220 assertions pass; copied-lock
+substitution reproduces the old acceptance and is refused by the successor.
+See [exact source, controls and remaining authority/target scope](reports/torch-direct-root-binding-2026-10-06.md).
+The original experiment remains frozen; production P1/AQ gates, catalog authority
+and full target policy remain open. No production migration/dependency is added.
+
 **Q2 acquired offline-catalog experiment (2026-10-06):** Parent rejects live-index
 uv as P1 closure. Separate evidence-only8eb93f5a acquires an owner-declared finite
 wheel universe through shared custody and inspects actual candidate hashes,

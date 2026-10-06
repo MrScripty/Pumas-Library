@@ -1,0 +1,24 @@
+{
+  "base_commit": "9eda2944eb9b8ccbaef89d3bcd125742e6086be6",
+  "base_tree": "b837a34884f7b9fa7cdc64fd2610b5afe71eadc7",
+  "tested_source_commit": "3190bbfc9c88776b714c945b933c58846c11e066",
+  "tested_source_tree": "306ec391a504e0905e3c0fb39f713378e9853b07",
+  "checker_sha256": "638e5a8b0d38e092a759c4a7125d3e3f8b295843116b6aaa1ba29d35a640116d",
+  "control_sha256": "f5534f188e2cfc7074da41eb0d4ac3573c55967b2320465e2459daee2f6fdfb4",
+  "frozen_checker_sha256": "7700ac186adc19b271f696a00dd221675b6720fa0b0c7b34ba3def56963da34f",
+  "unchanged_harness_sha256": "bd6adca9a7a3f1206280a4779887becfef65280adcbe12f0780ec600cc25cbfa",
+  "unchanged_uv_sha256": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f",
+  "unchanged_packaging_sha256": "3453711fd71407b7d84253d5b498e7c0430fff187e3fb73dbd6f463b924014b2",
+  "prior_harness_tool_provenance": "../torch-offline-catalog-2026-10-06/provenance.json",
+  "raw_archive": {
+    "sha256": "fc78c0d7e0ff7aada940239525bd3f4440a17cde9a1a3dc868c5c5827cb49996",
+    "bytes": 159812,
+    "members": 489,
+    "authoritative_runs": [
+      "focused-final",
+      "regression"
+    ],
+    "initial_focused_run": "Test oracle indexed an intentionally empty inactive-root selection; corrected. Not acceptance evidence."
+  },
+  "no_rust_build_or_production_dependency_change": true
+}

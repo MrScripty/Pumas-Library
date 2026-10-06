@@ -1,0 +1,144 @@
+{
+  "controls": [
+    {
+      "case": "actual-uv-approved-root",
+      "legacy_accepted": true,
+      "successor_accepted": true,
+      "reason": null,
+      "assertions": {
+        "expected_legacy_outcome": true,
+        "expected_successor_outcome": true,
+        "specific_reason": true,
+        "immutable_uv_output": true,
+        "immutable_projection": true,
+        "immutable_original_url_hash": true,
+        "no_new_source_request": true,
+        "exact_approved_selection": true
+      },
+      "failed_assertions": []
+    },
+    {
+      "case": "admitted-same-version-lock-substitution",
+      "legacy_accepted": true,
+      "successor_accepted": false,
+      "reason": "selected direct root does not match exact approved artifact identity/hash",
+      "assertions": {
+        "expected_legacy_outcome": true,
+        "expected_successor_outcome": true,
+        "specific_reason": true,
+        "immutable_uv_output": true,
+        "immutable_projection": true,
+        "immutable_original_url_hash": true,
+        "no_new_source_request": true
+      },
+      "failed_assertions": []
+    },
+    {
+      "case": "different-wheel-with-original-hash",
+      "legacy_accepted": false,
+      "successor_accepted": false,
+      "reason": "lock member has no exact original-source mapping",
+      "assertions": {
+        "expected_legacy_outcome": true,
+        "expected_successor_outcome": true,
+        "specific_reason": true,
+        "immutable_uv_output": true,
+        "immutable_projection": true,
+        "immutable_original_url_hash": true,
+        "no_new_source_request": true
+      },
+      "failed_assertions": []
+    },
+    {
+      "case": "ambiguous-compatible-root-files",
+      "legacy_accepted": false,
+      "successor_accepted": false,
+      "reason": "ambiguous/ineligible exact selected wheel",
+      "assertions": {
+        "expected_legacy_outcome": true,
+        "expected_successor_outcome": true,
+        "specific_reason": true,
+        "immutable_uv_output": true,
+        "immutable_projection": true,
+        "immutable_original_url_hash": true,
+        "no_new_source_request": true
+      },
+      "failed_assertions": []
+    },
+    {
+      "case": "conflicting-direct-roots-not-coalesced",
+      "legacy_accepted": true,
+      "successor_accepted": false,
+      "reason": "selected direct root does not match exact approved artifact identity/hash",
+      "assertions": {
+        "expected_legacy_outcome": true,
+        "expected_successor_outcome": true,
+        "specific_reason": true,
+        "immutable_uv_output": true,
+        "immutable_projection": true,
+        "immutable_original_url_hash": true,
+        "no_new_source_request": true
+      },
+      "failed_assertions": []
+    },
+    {
+      "case": "inactive-direct-root-marker",
+      "legacy_accepted": true,
+      "successor_accepted": true,
+      "reason": null,
+      "assertions": {
+        "expected_legacy_outcome": true,
+        "expected_successor_outcome": true,
+        "specific_reason": true,
+        "immutable_uv_output": true,
+        "immutable_projection": true,
+        "immutable_original_url_hash": true,
+        "no_new_source_request": true
+      },
+      "failed_assertions": []
+    }
+  ],
+  "pipeline_checks": {
+    "actual_uv_exact_candidate": true,
+    "actual_uv_no_ip_io": true,
+    "held_using": true,
+    "exact_receipt": true,
+    "settled_adopted": true,
+    "only_owner_sources": true,
+    "no_credentials": true
+  },
+  "approved": {
+    "id": "candidate-0",
+    "name": "root",
+    "version": "1.0",
+    "filename": "root-1.0-py3-none-any.whl",
+    "url": "http://127.0.0.1:36877/owner/root-1.0-py3-none-any.whl",
+    "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b",
+    "bytes": 697
+  },
+  "alternative": {
+    "id": "candidate-1",
+    "name": "root",
+    "version": "1.0",
+    "filename": "root-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+    "url": "http://127.0.0.1:36877/owner/root-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+    "sha256": "9620dfebe12941a8f00222224caedd69f4166f80dd873f2fb3c63286a1ba9e1f",
+    "bytes": 718
+  },
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/owner/root-1.0-py3-none-any.whl",
+      "authorization": false
+    },
+    {
+      "method": "GET",
+      "path": "/owner/root-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+      "authorization": false
+    }
+  ],
+  "uv_output_sha256": "8dc06e6e616ac95f68731e006c363aefaf2b3b8686953b0084c874c2b87d736a",
+  "projection_sha256": "2fff7aaa202cfde7ac9af5edf284f9ade31c96c9c8fa5379e7d80dc9d5964713",
+  "frozen_checker_sha256": "7700ac186adc19b271f696a00dd221675b6720fa0b0c7b34ba3def56963da34f",
+  "failed_assertions": 0
+}

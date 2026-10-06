@@ -1,0 +1,245 @@
+{
+  "format": "pumas-bounded-qualification-evidence-1",
+  "scope": "Optional finite qualified Torch recipe source candidate; no AQ-PACKAGES/real-provider/denial acceptance",
+  "base": "d87f560f5e451083eaa2635bf84ba1980784cae8",
+  "base_tree": "9c6b4ec4a75054f4e01c5f9d3c8be5e0b2badb0e",
+  "source": "498b79611ded25151e28531b8f961dac1462061c",
+  "source_tree": "97dbe68916150da6a1375abd026066293553f9a2",
+  "branch": "feat/torch-qualified-wheel-catalog-d87f560f",
+  "source_blobs": {
+    "docs/contracts/artifact-acquisition.md": {
+      "git_blob": "c119842979bc3535410f54d65fc8e3042f5adc46",
+      "sha256": "3619948ef58a9a14a5f0c3161e074e1c7f1fd1ee500af7b2bb8745b8f31fc5f0"
+    },
+    "docs/plans/artifact-acquisition/reports/write-sets.md": {
+      "git_blob": "cd660d5e1b420efa85b408aab7eb0a0a6944c1c1",
+      "sha256": "824f86a437eefaeaa1191be726e893e84157372d3a8c787ece058733906fc4c8"
+    },
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": {
+      "git_blob": "b9d8fb122bd5e3ff51d332d6d8c905adac6ef931",
+      "sha256": "7b8a648d242e74af5ef95c5e003949799e3fa9d7e35bf6a4c48fce96086c058a"
+    },
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_wheel_handoff_tests.rs": {
+      "git_blob": "5984f7b12624d0d732b98e228c5554f382847e90",
+      "sha256": "abf6ab932ff689254e0b947b4a184a19cf65bc2c58e296778a1d363c60e244ed"
+    },
+    "torch-server/README.md": {
+      "git_blob": "a26674d91371dce78879426f8083993697b72ff2",
+      "sha256": "3c3869fe77692511d908a54592a2cbf41a04b86e6803c292c655b23be8b2c276"
+    },
+    "torch-server/install_verified_wheels.py": {
+      "git_blob": "1d7b7dc3931348da0402264a2196c6a36a1486a9",
+      "sha256": "41b844ad874e1389493cffe4720c880e96b41dc6485e80e861aa4d07f1cfa41c"
+    },
+    "torch-server/qualified_wheel_catalog.py": {
+      "git_blob": "44426b5c46caa89bd444892f6e144ecb1c04581a",
+      "sha256": "fcc338c374403444c2618a6fdbd0fa2da29d2cddb1bddb911822a318e11aec80"
+    },
+    "torch-server/resolve_runtime.py": {
+      "git_blob": "13d2bdd60a7807406c53a30b7f0c582ca0bcc28a",
+      "sha256": "eda80c72173711a1c20168760750f8e2f0b246db8acf2375712fbeb0d1c1a6ee"
+    },
+    "torch-server/tests/test_qualified_wheel_catalog.py": {
+      "git_blob": "05ad1fba58651ec5c24b4d2cc2074d00c41023c8",
+      "sha256": "91d18eed17beb8e9483078f5dd13abe81a77c847b6ca1721554350a319e1ad23"
+    },
+    "torch-server/tooling/packaging-source.json": {
+      "git_blob": "0250a6d8342704c08c5a085d490ac4cc321ed500",
+      "sha256": "b7017558f442b859e8a24a29fcb0581d167129fc262fda4854c99834eb0187ff"
+    },
+    "torch-server/tooling/packaging.zip": {
+      "git_blob": "912e18de2913a0814634460217554290d8a7a097",
+      "sha256": "3453711fd71407b7d84253d5b498e7c0430fff187e3fb73dbd6f463b924014b2"
+    },
+    "torch-server/wheel_records.py": {
+      "git_blob": "1c07cad5c66d0878ec53b9fcf400a28498a8f145",
+      "sha256": "f955958b637016b2760ff8a72e21d2e8b794f5e34d45a6eba54fa99c8238db50"
+    }
+  },
+  "logs": [
+    {
+      "name": "clippy-default-final.log",
+      "bytes": 183,
+      "sha256": "a1c68aae1df49ca316342e1512a113089387c51b704d4f6cf8e5fa8e562de3a8"
+    },
+    {
+      "name": "clippy-default.log",
+      "bytes": 1384,
+      "sha256": "001e16726354e2d76f1be9f3567fefbfc91e5a554836b494c7ea2b979dc17fa5"
+    },
+    {
+      "name": "clippy-workspace-default.log",
+      "bytes": 2781,
+      "sha256": "3d9ee490e742bef9adeb25590945bd69d6f6195923db5fb8108ca3cb1fa524cf"
+    },
+    {
+      "name": "clippy-workspace-final-formatted.log",
+      "bytes": 289,
+      "sha256": "8b839c7337a74a8abf52cde2f6d1d474c64fde0e94647f075ce4b3fb4f71623a"
+    },
+    {
+      "name": "clippy-wrong-directory.log",
+      "bytes": 116,
+      "sha256": "4be968318010bcdca883bf50d3e49ea81d2a7c5a27ef80ad4427fba250ff842b"
+    },
+    {
+      "name": "initial-rust.log",
+      "bytes": 33525,
+      "sha256": "80cf467757f68ed361d577542bac69378c5d07d826ef32d07f28f5f241686cbe"
+    },
+    {
+      "name": "python-final-formatted.log",
+      "bytes": 2859,
+      "sha256": "c80043b47b483da62ffba166163d2c0cab928fd7c8f8ba9351eac45aaa0377c2"
+    },
+    {
+      "name": "python-final.log",
+      "bytes": 2858,
+      "sha256": "5beaeba52de5c3e3ca72655e6583530f5f4b3a70d92a83aa9a1c38a6fc1653a4"
+    },
+    {
+      "name": "python-qualified-final.log",
+      "bytes": 2859,
+      "sha256": "8f96aa025a36010caa9034c228511512adde49786aecc83be9d2b66c2e6b55e7"
+    },
+    {
+      "name": "python-source-final.log",
+      "bytes": 2859,
+      "sha256": "be214dd10a1b2b0ffb6c36890a1ad2441c1e702f932cdc6686e167decdbfd913"
+    },
+    {
+      "name": "ruff-final.log",
+      "bytes": 19,
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "name": "ruff-format-correction.log",
+      "bytes": 20,
+      "sha256": "a68018e0301d06e8ccd1518cd8a969c43dde8ed9a317509ad15bbc8d7198ea0f"
+    },
+    {
+      "name": "ruff-format-final.log",
+      "bytes": 26,
+      "sha256": "f114d83b30c5c657ee43a847a45bafccaea255d82673feb87c26d252c61e29c1"
+    },
+    {
+      "name": "ruff-format-source-final.log",
+      "bytes": 302,
+      "sha256": "a5c9ba0503f6582c7972e69d347a8f3c028eb4655626877fb0de6385ba186eeb"
+    },
+    {
+      "name": "ruff-source-final.log",
+      "bytes": 19,
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "name": "rust-final-formatted.log",
+      "bytes": 32870,
+      "sha256": "dd25f0b854f6b9a46b1cfade027330867eb3b97e816a7deee059b7f5c5e5d363"
+    },
+    {
+      "name": "rust-final.log",
+      "bytes": 32870,
+      "sha256": "23c3e4020a5758275d52f46748c10e50153c1d700964eb25784002f7aad5673a"
+    },
+    {
+      "name": "rust-source-final.log",
+      "bytes": 32870,
+      "sha256": "db5f7ae41b15457f8194051b5e9196e41a037e89444b35375b97a7e8e6a58403"
+    },
+    {
+      "name": "rustfmt-source-final.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "cache-parking.json",
+      "bytes": 241,
+      "sha256": "b0e06ab2c5cc9d917a992f77107bb07458b7ba582dc4826659cd7f7ad0b50796"
+    },
+    {
+      "name": "cache-restored.json",
+      "bytes": 253,
+      "sha256": "21a3cc9de70b492d4e2b5f7ed38698d8ef91443eae319328ca8e6186f7250af0"
+    },
+    {
+      "name": "unit-cache-parking.json",
+      "bytes": 278,
+      "sha256": "b2a75af0e34ef8751b5e0450dd8bda30a074d8fe965607b095d63c46f2511a42"
+    },
+    {
+      "name": "unit-cache-preformat.json",
+      "bytes": 288,
+      "sha256": "f42cd9a71a002918b1728035f533221d1a31f4c26b01d04ec4661402ee6f9e92"
+    },
+    {
+      "name": "final-cargo-cache-parking.json",
+      "bytes": 605,
+      "sha256": "69976a1661332b308b4b1a85e3eba2e1083dce4b71b93a83944f7d69ac7058be"
+    }
+  ],
+  "archive": {
+    "name": "logs.tar.gz",
+    "bytes": 28588,
+    "sha256": "e34ee8fbff772b1beb60293eac6515237fcf3f9762c91b4aac55dbed95f3405f"
+  },
+  "final_checks": [
+    {
+      "command": "PYTHONPATH=/tmp/pumas-q2-test-packages python3 -m unittest discover -s torch-server/tests",
+      "log": "python-final-formatted.log",
+      "result": "229 pass"
+    },
+    {
+      "command": "XDG_CONFIG_HOME=/tmp/pumas-q2-test-config CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 /tmp/pumas-cargo-admission/run-cargo-serialized test -p pumas-app-manager --offline --locked",
+      "log": "rust-final-formatted.log",
+      "result": "306 pass; 1 ignored unit, 1 ignored doctest"
+    },
+    {
+      "command": "CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 /tmp/pumas-cargo-admission/run-cargo-serialized clippy --workspace --all-targets --offline --locked -- -D warnings",
+      "log": "clippy-workspace-final-formatted.log",
+      "result": "pass"
+    },
+    {
+      "command": "PYTHONPATH=/tmp/pumas-q2-test-packages python3 -m ruff check torch-server",
+      "log": "ruff-final.log",
+      "result": "pass"
+    },
+    {
+      "command": "PYTHONPATH=/tmp/pumas-q2-test-packages python3 -m ruff format --check torch-server/qualified_wheel_catalog.py torch-server/install_verified_wheels.py torch-server/wheel_records.py torch-server/tests/test_qualified_wheel_catalog.py torch-server/resolve_runtime.py",
+      "log": "ruff-format-final.log",
+      "result": "5 files already formatted"
+    },
+    {
+      "command": "cargo fmt --all --check",
+      "log": "rustfmt-source-final.log",
+      "result": "pass"
+    }
+  ],
+  "environment": {
+    "os": "Linux x86_64",
+    "rust": "1.92.0",
+    "python": "3.12.14",
+    "pip": "26.2.1",
+    "ruff": "0.15.2",
+    "cargo_policy": "offline locked, serialized flock, jobs=1, incremental=0, debug=0",
+    "python_test_scope": "/tmp/pumas-q2-test-packages FastAPI0.128/Starlette0.50; no runtime pin change"
+  },
+  "unchanged_lock": {
+    "git_blob": "bfb65ea42ff3ca82d6687b59cdcb997cf19d6fb2",
+    "sha256": "05c4ba8556998179cac8db5798177500e1154caca3d9164e00455240dab4a07e"
+  },
+  "cache_restoration": {
+    "restored": "/workspace/Pumas-Library-pr42-desktop-contract/node_modules",
+    "entries": 41201,
+    "manifest_sha256": "04a9842e7e71f924328f5ed986eaaff6f8337d0b59dc1c5c7b5cbe6bc7ce9951",
+    "verified": "path/mode/content/size/symlink target equality"
+  },
+  "remaining": [
+    "Independent parent review/hosted CI/integration",
+    "Real acquired 66-wheel recipe and managed-provider/GPU sequence",
+    "Enforced network-denied final installation",
+    "Supported platforms/whole-venv integrity",
+    "Automatic/retained-preview public resolver admission",
+    "Separate native cleanup successor composition if supplied"
+  ]
+}

@@ -1,5 +1,23 @@
 # Acquisition acceptance matrix
 
+**Q2 finite qualified recipe candidate (2026-10-06):** Tested source
+`498b79611ded25151e28531b8f961dac1462061c`, tree
+`97dbe68916150da6a1375abd026066293553f9a2`, on separate
+`feat/torch-qualified-wheel-catalog-d87f560f` implements the optional existing
+finite bundled recipe through public standalone packaging metadata APIs and
+shared payload acquisition/local installation. Original lock/direct roots remain
+exact; actual acquired identity/tags/Python/hash and complete marker/extras closure
+validate before local --no-deps. All dependency URLs, including inactive branches,
+refuse explicitly without fallback. Final229 Python/306 app-manager and strict
+default workspace all-targets Clippy, Ruff/fmt pass. See
+[bounded qualification](torch-qualified-wheel-catalog-2026-10-06.md).
+Automatic and retained-preview resolution remain unqualified for source
+preparation; private hooks remain unactivated. Actual Torch/GPU/provider,
+enforced network denial, hosted/platform acceptance and independent review remain
+open. AQ-HTTP and AQ-PACKAGES are not advanced; no shared/native cleanup changes.
+Next existing Q2 work is review/composition and exact network-denied/provider
+acceptance, with generic public resolver admission a separate decision.
+
 **2026-10-06 automatic Q2 source:** Tested5946c473 separates resolver-only
 acceptance from shared verified payload/local installation, preserving original
 identities and custody with no postacceptance fallback. Final216 Python/304

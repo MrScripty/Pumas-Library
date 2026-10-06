@@ -1,9 +1,27 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 finite qualified recipe candidate (2026-10-06):** Tested source
+`498b79611ded25151e28531b8f961dac1462061c`, tree
+`97dbe68916150da6a1375abd026066293553f9a2`, on separate
+`feat/torch-qualified-wheel-catalog-d87f560f` implements the optional existing
+finite bundled recipe through public standalone packaging metadata APIs and
+shared payload acquisition/local installation. Original lock/direct roots remain
+exact; actual acquired identity/tags/Python/hash and complete marker/extras closure
+validate before local --no-deps. All dependency URLs, including inactive branches,
+refuse explicitly without fallback. Final229 Python/306 app-manager and strict
+default workspace all-targets Clippy, Ruff/fmt pass. See
+[bounded qualification](reports/torch-qualified-wheel-catalog-2026-10-06.md).
+Automatic and retained-preview resolution remain unqualified for source
+preparation; private hooks remain unactivated. Actual Torch/GPU/provider,
+enforced network denial, hosted/platform acceptance and independent review remain
+open. AQ-HTTP and AQ-PACKAGES are not advanced; no shared/native cleanup changes.
+Next existing Q2 work is review/composition and exact network-denied/provider
+acceptance, with generic public resolver admission a separate decision.
+
 **Q2 public-tooling research disposition (2026-10-06):** Parent retained §11 and
 forbids private-hook activation. Research recommends the finite existing recipe
 as acquired/preflighted exact local wheels, with public pip consumption; no
-production source or dependency change is admitted. Five inert local controls
+production source or dependency change was admitted by that research entry. Five inert local controls
 show why `--no-index` alone is insufficient and validate a preflighted wheelhouse
 boundary. Dynamic automatic/retained-preview selection remains unqualified.
 See [supported alternatives and recommendation](reports/torch-public-resolution-alternatives-2026-10-06.md).
@@ -11,7 +29,7 @@ See [supported alternatives and recommendation](reports/torch-public-resolution-
 **Q2 resolver boundary blocker (2026-10-06):** Independent review reproduced
 source-candidate preparation before report validation despite pip dry-run and
 binary-only flags. Automatic and retained-preview resolver modes remain exposed.
-Qualified-recipe work is paused. A separately tested, unactivated private-pip
+Qualified-recipe work was paused during that investigation. A separately tested, unactivated private-pip
 admission proposal requires an explicit exception to the public-tooling contract;
 production source is unchanged. Nine inert placement controls pass without URL
 retrieval/build hooks. See [proposal and limits](reports/torch-resolver-source-boundary-proposal-2026-10-06.md).

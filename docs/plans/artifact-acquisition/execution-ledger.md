@@ -1,5 +1,20 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — Q2 ambient pip configuration correction
+
+Independent review found that `--isolated` on pip26.2.1 retains global/site and
+PIP_CONFIG_FILE settings; `install.requirement` appended a remote locator before
+exact-report validation. Separate branch `fix/torch-wheel-pip-config-7a3264ac`
+retains frozen Q2 and accepted main7c229e9 through normal merge8eb1e00. The
+helper gives only its child a copied environment without inherited PIP_* keys,
+then sets PIP_CONFIG_FILE=os.devnull. No parent/global settings are changed.
+[Qualification](reports/torch-wheel-pip-config-repair-2026-10-06.md) retains red/green controls and exact evidence.
+The prior local-only source claim is corrected; parser tests never execute
+remote requirements and do not prove network denial. Enforced-denial, actual
+Torch/provider/platform/hosted acceptance remain open. No public API change.
+Automatic-resolution/final-payload separation remains the next existing-plan
+feature on its paused separate branch.
+
 ## 2026-10-06 — bounded installed process-loss milestone complete
 
 Source 81aea4c0d97aae2a27d1a0c0eebdd784e90f705d, tree

@@ -1,0 +1,153 @@
+{
+  "branch": "fix/torch-wheel-pip-config-7a3264ac",
+  "frozen_handoff": "7a3264ac8d04383bd01c8ab71b7287a48c66f2db",
+  "accepted_main": "7c229e92726e1af7447d37e3dc03fd4bd2ccfffa",
+  "base": "8eb1e00fd61400532b4c55b9dc167f0a9438fc0c",
+  "base_tree": "b6d37961c54d6e5fe0e894e5223c08f1213d804b",
+  "source_head": "fef0fb15833128b8a329a686e69ae95cb0c90624",
+  "source_tree": "6c961236f13e638253882cedfaeb4b89b0646bdb",
+  "source_blobs": {
+    "torch-server/install_verified_wheels.py": "b64d242f68d556a4fe7148ab13490b05c0918133",
+    "torch-server/tests/test_install_verified_wheels.py": "5b07036ad41fe456399ccbbaae671aad5c2e1273"
+  },
+  "archive": {
+    "path": "logs.tar.gz",
+    "bytes": 5288,
+    "sha256": "3d2fec12d15c670bda7a7b938f08e671bcfcb2f0218e759b82b942af60dbb0e5",
+    "members": [
+      {
+        "name": "cache-restoration.json",
+        "bytes": 530,
+        "sha256": "754dca48c6b7b26d296a377851ab8aa193eddf76f42465c6cd0b0b58f4fc1c76"
+      },
+      {
+        "name": "clippy-app-manager.log",
+        "bytes": 183,
+        "sha256": "2811b01e44042586dac94ff6ce2f62b4b555b7785cd5a8eff9b7b4d7d083775b"
+      },
+      {
+        "name": "clippy-rpc-default.log",
+        "bytes": 289,
+        "sha256": "85e7efa614536d6ed339040ffd13b1ed24c3dea069fe030f616895f3987707e7"
+      },
+      {
+        "name": "commands.txt",
+        "bytes": 2018,
+        "sha256": "7da42af0dc50b3c2bd4fc2e696151777dfa9389b652bf56441b779980bf10e49"
+      },
+      {
+        "name": "environment.json",
+        "bytes": 610,
+        "sha256": "35446442c6d637320158714c82889f584bc810b974a8303f662eb0d0d0b5b007"
+      },
+      {
+        "name": "headless-baseline-all-targets-clippy.log",
+        "bytes": 2956,
+        "sha256": "c1789e58ac6930e487b6e0b531dd47e9e28f14763cc8de7c5b9e4fd05e3e4c6c"
+      },
+      {
+        "name": "headless-baseline-integration-clippy.log",
+        "bytes": 572,
+        "sha256": "fb22eb94cbea9d9951570657a238802bab3f683604094feba1f76e7801fe74d4"
+      },
+      {
+        "name": "helper-after-fix.log",
+        "bytes": 1355,
+        "sha256": "0f422d15c86648c921e94b90e3c88f39818f457bbbe51793284ae5375127542b"
+      },
+      {
+        "name": "helper-before-fix.log",
+        "bytes": 8829,
+        "sha256": "5293195b435b9e18946665f324f2f5bd97e885c29b9dec85007bc992a35d185a"
+      },
+      {
+        "name": "own-cache-eviction.json",
+        "bytes": 323,
+        "sha256": "bd46d84eeecc7cdb65eda80fdc6874ec7c0b7c1bfaa27c076355c375754f6a43"
+      },
+      {
+        "name": "own-core-cache-eviction.json",
+        "bytes": 358,
+        "sha256": "43669cced7b37ce14ae72db6010ece78a49e1ac4ef4d1948a6a64d5d9322c87d"
+      },
+      {
+        "name": "python-full-final.log",
+        "bytes": 2842,
+        "sha256": "4a1ad6d98bb33a2baed22489229a7c5728e2a9294ae95b0bb1eb3bdf2b319677"
+      },
+      {
+        "name": "python-full.log",
+        "bytes": 2842,
+        "sha256": "79b7ec5108831b74e04b6f9ebd75cb51dc3aa8220c5b4f78373eeb9a519a8e15"
+      },
+      {
+        "name": "review-acks.txt",
+        "bytes": 465,
+        "sha256": "a201871c4aa3b65d044791faa6b6a5e3d1c1f9c9685d90a833b6d0f003c151b1"
+      },
+      {
+        "name": "ruff-check-final.log",
+        "bytes": 19,
+        "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      {
+        "name": "ruff-check.log",
+        "bytes": 19,
+        "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      {
+        "name": "ruff-format-applied.log",
+        "bytes": 20,
+        "sha256": "96a977f329ec3c59092d40e041a019b49dcf03ca04055e177aa0ccb8c27234df"
+      },
+      {
+        "name": "ruff-format-final.log",
+        "bytes": 26,
+        "sha256": "3bc53bf3e981a98a34a852e175bf9b77af841edea74fca595d9aedcbaf9a4938"
+      },
+      {
+        "name": "ruff-format.log",
+        "bytes": 152,
+        "sha256": "cd291e40da3fae8099eb00c44bd271501d0b8fcde15d10d68c4e161fb8972591"
+      },
+      {
+        "name": "rust-handoff.log",
+        "bytes": 2310,
+        "sha256": "adedd5e11fdd7c8fab97ed24f17465ac516c6d549a6f9dbd312fc7c606b21505"
+      }
+    ]
+  },
+  "qualification": {
+    "before_fix_helper": {
+      "tests": 18,
+      "failures": 3,
+      "errors": 1
+    },
+    "after_fix_helper": 18,
+    "full_python": 212,
+    "shared_rust_controls": 13,
+    "ruff_check": "pass",
+    "ruff_format": "pass after recorded formatting correction",
+    "clippy_app_manager_default_all_targets": "pass",
+    "clippy_rpc_default_all_targets": "pass",
+    "headless_baseline_all_targets": "11 pre-existing generated-contract dead-code errors",
+    "headless_baseline_integration_tests": "existing unused helper error",
+    "independent_reviews": 2,
+    "network_denial": false
+  },
+  "public_api_changes": [],
+  "limits": [
+    "Parser controls do not prove network denial; URLs parsed only",
+    "Actual pip hostile fixture used local owned files only",
+    "Actual Torch/provider/platform/hosted qualification separate",
+    "Automatic-resolution feature remains separate and paused"
+  ],
+  "cache_restoration": {
+    "source": "/workspace/Pumas-Library-pr42-desktop-contract/node_modules",
+    "entries": 41202,
+    "before_digest": "7b37fb0447757adef9ab516e10d683403128f6c6843f836410e4518fb9be908f",
+    "after_digest": "7b37fb0447757adef9ab516e10d683403128f6c6843f836410e4518fb9be908f",
+    "all_modes_paths_content_links_match": true,
+    "historical_failed_parking": "Initial /tmp/pr42-q2-automatic-cache copy assertion failed before source deletion; full later copy independently verified original source and restored it. No original data lost."
+  }
+}

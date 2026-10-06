@@ -1,5 +1,12 @@
 # Acquisition prerequisites and runtime handoffs
 
+**2026-10-06 Q2 repair:** Independent review found ambient requirements
+injection in frozen `7a3264ac`. Child-only pip config isolation and hostile
+controls are recorded in [qualification](torch-wheel-pip-config-repair-2026-10-06.md).
+Custody/proof semantics remain unchanged. AQ-PACKAGES remains not ready; real
+network-denied/provider/platform/hosted evidence remains separate. Automatic
+resolution work is paused separately pending this repair's review.
+
 **Owner:** acquisition integration, with one serial cross-plan integrator. This is the single status record for acquisition-provided gates. The runtime plan references these rows and does not independently declare them ready.
 
 **Local S3 follow-up:** The staging-event and version-qualified identity fixes at verified remote `a606c80b0be41580c7af0583703d9f9af5f2cb44` have focused regression evidence. A test-only successor covers a valid large binding/bundle under the normal live watcher and public GetModel/cold output proof; [qualification](s3-staging-discovery-qualification.md) records 57 focused integration tests, strict Clippy, the failed notifier-replacement experiment and remaining limits. This supports parts of AC13/AC14, without closing AQ-S3 or authorizing live-provider credentials/configuration.

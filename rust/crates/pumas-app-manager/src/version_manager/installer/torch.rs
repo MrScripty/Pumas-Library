@@ -254,6 +254,7 @@ pub(super) fn write_pending_publish_marker(path: &Path, runtime: &Path) -> std::
 pub(super) struct TorchPendingStage {
     directory: tempfile::TempDir,
     marker: PathBuf,
+    selected_publication: AtomicBool,
     // Drop last, after stage and marker cleanup (including TempDir's Drop).
     _lock: TorchVersionsLock,
 }
@@ -274,6 +275,7 @@ impl TorchPendingStage {
         Ok(Self {
             directory,
             marker,
+            selected_publication: AtomicBool::new(false),
             _lock: lock,
         })
     }
@@ -305,6 +307,12 @@ impl TorchPendingStage {
 
 impl Drop for TorchPendingStage {
     fn drop(&mut self) {
+        if self.selected_publication.load(Ordering::SeqCst) {
+            // Pending selected publication retains source evidence, even when
+            // its publication marker is missing or changed.
+            self.directory.disable_cleanup(true);
+            return;
+        }
         match std::fs::remove_dir_all(self.path()) {
             Ok(()) => {
                 let _ = std::fs::remove_file(&self.marker);
@@ -462,6 +470,15 @@ fn retry_pending_torch_cleanup_locked(
         }
         let tag = std::fs::read_to_string(&marker)?;
         if stable_torch_tag(&tag).is_none() {
+            continue;
+        }
+        // Publication evidence takes priority over stage reclamation. Only a
+        // definite NotFound permits cleanup; lookup errors remain ambiguous.
+        let publication_pending = [
+            versions_dir.join(format!(".torch-pending-selected-stage-{stage_name}")),
+            versions_dir.join(format!(".torch-pending-publish-{tag}")),
+        ].iter().any(|path| !matches!(path.symlink_metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound));
+        if publication_pending {
             continue;
         }
         let stage = versions_dir.join(&stage_name);

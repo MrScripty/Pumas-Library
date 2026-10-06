@@ -69,6 +69,8 @@ pub(in super::super::super) enum PublicationFault {
     MovedMember,
     MovedRecord,
     ForeignDirectory,
+    InterruptedBeforeRename,
+    InterruptedAfterRename,
 }
 
 #[cfg(test)]
@@ -104,12 +106,14 @@ pub(in super::super::super) struct RuntimeRefusal {
     pub(in super::super::super) kind: RuntimeFailure,
     pub(in super::super::super) _installed: Arc<InstalledSelectedPacket>,
     _validated: Option<Arc<ValidatedRuntime>>,
+    publication: Arc<std::sync::Mutex<Option<PublicationIntent>>>,
 }
 
 pub(in super::super::super) struct PublishedSelectedRuntime {
     pub(in super::super::super) path: PathBuf,
     pub(in super::super::super) record: serde_json::Value,
     _validated: Arc<ValidatedRuntime>,
+    publication: Arc<std::sync::Mutex<Option<PublicationIntent>>>,
 }
 
 struct ValidatedRuntime {
@@ -122,6 +126,263 @@ struct ValidatedRuntime {
     provenance: Vec<(PathBuf, Vec<u8>)>,
     metadata: InstalledVersionMetadata,
     probe: serde_json::Value,
+}
+
+// This intent is created from the live validated capability before publication.
+// It has no deserialization path; on-disk evidence never grants new authority.
+struct PublicationIntent {
+    versions: PathBuf,
+    metadata: Arc<MetadataManager>,
+    directory: TorchDirectoryIdentity,
+    record: serde_json::Value,
+    record_bytes: Vec<u8>,
+    marker_bytes: Vec<u8>,
+    metadata_started: bool,
+    output_removed: bool,
+    rolled_back: bool,
+    stage_pending: PathBuf,
+    stage_released: bool,
+    #[cfg(test)]
+    pause: Option<Arc<PublicationPause>>,
+    #[cfg(test)]
+    interrupt_cleanup: bool,
+}
+
+pub(in super::super::super) enum RuntimeReconciliation {
+    Committed(PublishedSelectedRuntime),
+    RolledBack(RuntimeRefusal),
+    Unresolved(RuntimeRefusal),
+}
+
+impl RuntimeRefusal {
+    #[cfg(test)]
+    pub(in super::super::super) fn interrupt_cleanup(&self) {
+        self.publication
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .interrupt_cleanup = true;
+    }
+    #[cfg(test)]
+    pub(in super::super::super) fn pause_reconciliation(&self, pause: Arc<PublicationPause>) {
+        self.publication.lock().unwrap().as_mut().unwrap().pause = Some(pause);
+    }
+    pub(in super::super::super) async fn reconcile(
+        mut self,
+        consumer: &AcquisitionConsumer,
+    ) -> RuntimeReconciliation {
+        if consumer.owner() != self._installed._packet.catalog.receipt.owner {
+            return RuntimeReconciliation::Unresolved(self);
+        }
+        let Some(validated) = self._validated.clone() else {
+            return RuntimeReconciliation::Unresolved(self);
+        };
+        let publication = self.publication.clone();
+        let lease = validated.clone();
+        let result = consumer
+            .run_blocking("reconcile owned selected runtime", move || {
+                let mut intent = publication
+                    .lock()
+                    .map_err(|_| failed("Publication intent poisoned"))?;
+                let intent = intent
+                    .as_mut()
+                    .ok_or_else(|| failed("Publication intent absent"))?;
+                #[cfg(test)]
+                if let Some(pause) = intent.pause.take() {
+                    pause.wait();
+                }
+                reconcile_publication(&lease, intent)
+            })
+            .await;
+        match result {
+            Ok(true) => {
+                let intent = self.publication.lock().unwrap();
+                let intent = intent.as_ref().unwrap();
+                RuntimeReconciliation::Committed(PublishedSelectedRuntime {
+                    path: intent.versions.join(&validated.metadata.path),
+                    record: intent.record.clone(),
+                    _validated: validated,
+                    publication: self.publication.clone(),
+                })
+            }
+            Ok(false) => {
+                self.kind = RuntimeFailure::Refused;
+                RuntimeReconciliation::RolledBack(self)
+            }
+            Err(_) => {
+                self.kind = RuntimeFailure::RecoveryRequired;
+                RuntimeReconciliation::Unresolved(self)
+            }
+        }
+    }
+}
+
+impl PublishedSelectedRuntime {
+    pub(in super::super::super) async fn reconcile(
+        self,
+        consumer: &AcquisitionConsumer,
+    ) -> RuntimeReconciliation {
+        RuntimeRefusal {
+            kind: RuntimeFailure::CommittedWithoutAck,
+            _installed: self._validated.installed.clone(),
+            _validated: Some(self._validated),
+            publication: self.publication,
+        }
+        .reconcile(consumer)
+        .await
+    }
+}
+
+fn absent(path: &Path) -> Result<bool> {
+    match path.symlink_metadata() {
+        Ok(_) => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(PumasError::from(error)),
+    }
+}
+
+fn publication_record_fence(runtime: &Path, intent: &PublicationIntent) -> Result<()> {
+    validate_torch_owned_path(&intent.versions, runtime)?;
+    validate_torch_owned_path(runtime, &runtime.join("selected-runtime-install.json"))?;
+    if torch_directory_identity(runtime)? != intent.directory
+        || selection_bytes(
+            &runtime.join("selected-runtime-install.json"),
+            intent.record_bytes.len(),
+        )? != intent.record_bytes
+    {
+        return Err(failed("Retained publication output differs"));
+    }
+    Ok(())
+}
+
+fn release_selected_stage(lease: &ValidatedRuntime, intent: &mut PublicationIntent) -> Result<()> {
+    if !intent.stage_released {
+        if selection_bytes(&intent.stage_pending, intent.marker_bytes.len())? != intent.marker_bytes
+        {
+            return Err(failed("Selected stage custody marker differs"));
+        }
+        std::fs::remove_file(&intent.stage_pending).map_err(PumasError::from)?;
+        intent.stage_released = true;
+    } else if !absent(&intent.stage_pending)? {
+        return Err(failed("Selected stage custody marker replaced"));
+    }
+    sync_native_directory(&intent.versions)?;
+    lease
+        .installed
+        ._packet
+        .catalog
+        ._stage
+        .selected_publication
+        .store(false, Ordering::SeqCst);
+    Ok(())
+}
+
+// All readback, fences and cleanup run in one registered job under the original
+// stage's versions lock. No installation, probe or catalog settlement is replayed.
+fn reconcile_publication(lease: &ValidatedRuntime, intent: &mut PublicationIntent) -> Result<bool> {
+    if !lease
+        .installed
+        ._packet
+        .catalog
+        ._grant
+        .binding()
+        .matches_root(&intent.versions)?
+    {
+        return Err(failed("Retained publication root differs"));
+    }
+    validate_torch_owned_path(&intent.versions, &intent.versions)?;
+    let stage_absent = absent(&intent.stage_pending)?;
+    if stage_absent != intent.stage_released
+        || (!stage_absent
+            && selection_bytes(&intent.stage_pending, intent.marker_bytes.len())?
+                != intent.marker_bytes)
+    {
+        return Err(failed("Selected stage custody marker uncertain"));
+    }
+    let metadata = &intent.metadata;
+    let destination = intent.versions.join(&lease.metadata.path);
+    let pending = intent
+        .versions
+        .join(format!(".torch-pending-publish-{}", lease.metadata.path));
+    let marker_absent = absent(&pending)?;
+    if !marker_absent {
+        validate_torch_owned_path(&intent.versions, &pending)?;
+    }
+    if !marker_absent
+        && selection_bytes(&pending, intent.marker_bytes.len())? != intent.marker_bytes
+    {
+        return Err(failed("Retained publication marker differs"));
+    }
+    let current = metadata.get_installed_version(&lease.metadata.path, Some(AppId::Torch))?;
+    if let Some(current) = current {
+        if !metadata_matches(&current, &lease.metadata) || !absent(&lease.original)? {
+            return Err(failed("Retained installed metadata differs"));
+        }
+        publication_record_fence(&destination, intent)?;
+        lease.fence(&destination, &intent.versions)?;
+        // Read again at the decision boundary; this is live reconciliation only.
+        let current = metadata
+            .get_installed_version(&lease.metadata.path, Some(AppId::Torch))?
+            .ok_or_else(|| failed("Installed metadata disappeared"))?;
+        if !metadata_matches(&current, &lease.metadata) {
+            return Err(failed("Installed metadata changed during reconciliation"));
+        }
+        if !marker_absent {
+            if selection_bytes(&pending, intent.marker_bytes.len())? != intent.marker_bytes {
+                return Err(failed("Publication marker changed before acknowledgment"));
+            }
+            std::fs::remove_file(&pending).map_err(PumasError::from)?;
+        }
+        release_selected_stage(lease, intent)?;
+        return Ok(true);
+    }
+    if intent.metadata_started {
+        return Err(failed(
+            "Metadata publication was attempted but committed readback is absent",
+        ));
+    }
+    if marker_absent {
+        if intent.rolled_back && absent(&destination)? {
+            if !absent(&lease.original)? {
+                publication_record_fence(&lease.original, intent)?;
+            } else if !intent.output_removed {
+                return Err(failed("Rolled back source disappeared"));
+            }
+            release_selected_stage(lease, intent)?;
+            return Ok(false);
+        }
+        return Err(failed("Uncommitted publication marker missing"));
+    }
+    let source_absent = absent(&lease.original)?;
+    let destination_absent = absent(&destination)?;
+    if !source_absent && destination_absent && !intent.output_removed {
+        publication_record_fence(&lease.original, intent)?;
+    } else if source_absent && !destination_absent && !intent.output_removed {
+        publication_record_fence(&destination, intent)?;
+        if metadata
+            .get_installed_version(&lease.metadata.path, Some(AppId::Torch))?
+            .is_some()
+        {
+            return Err(failed("Metadata appeared before rollback"));
+        }
+        std::fs::remove_dir_all(&destination).map_err(PumasError::from)?;
+        intent.output_removed = true;
+        sync_native_directory(&intent.versions)?;
+        #[cfg(test)]
+        if std::mem::take(&mut intent.interrupt_cleanup) {
+            return Err(failed("Controlled interruption after owned output removal"));
+        }
+    } else if !(source_absent && destination_absent && intent.output_removed) {
+        return Err(failed("Uncommitted publication location uncertain"));
+    }
+    if selection_bytes(&pending, intent.marker_bytes.len())? != intent.marker_bytes {
+        return Err(failed("Publication marker changed during rollback"));
+    }
+    std::fs::remove_file(&pending).map_err(PumasError::from)?;
+    intent.rolled_back = true;
+    release_selected_stage(lease, intent)?;
+    Ok(false)
 }
 
 fn relocated_provenance(
@@ -493,6 +754,7 @@ impl InstalledSelectedPacket {
         context: RuntimeLifecycleContext<'_>,
     ) -> std::result::Result<PublishedSelectedRuntime, RuntimeRefusal> {
         let installed = Arc::new(self);
+        let publication = Arc::new(std::sync::Mutex::new(None));
         let consumer = context.selection.consumer;
         let metadata_manager = context.selection.installer.metadata_manager.clone();
         let versions = context.selection.installer.versions_dir();
@@ -510,10 +772,12 @@ impl InstalledSelectedPacket {
                     kind: RuntimeFailure::Refused,
                     _installed: installed,
                     _validated: None,
+                    publication,
                 })
             }
         };
         let lease = validated.clone();
+        let retained_publication = publication.clone();
         let result = consumer.run_blocking("publish owned selected runtime", move || Ok((|| {
             lease.fence(&lease.original, &versions).map_err(|_| RuntimeFailure::Refused)?;
             let destination = versions.join(&lease.metadata.path);
@@ -532,15 +796,30 @@ impl InstalledSelectedPacket {
             if record_bytes.len() > MAX_EVIDENCE { return Err(RuntimeFailure::Refused); }
             let marker = serde_json::json!({"owner":"selected runtime metadata pending", "directory":directory,
                 "source_stage":lease.original.parent().and_then(Path::file_name).and_then(|s| s.to_str()), "record_sha256":format!("{:x}",Sha256::digest(&record_bytes))});
+            let marker_bytes = serde_json::to_vec_pretty(&marker).map_err(|_| RuntimeFailure::Refused)?;
+            let stage_pending = versions.join(format!(".torch-pending-selected-stage-{}", lease.original.parent().unwrap().file_name().unwrap().to_string_lossy()));
+            *retained_publication.lock().map_err(|_| RuntimeFailure::RecoveryRequired)? = Some(PublicationIntent {
+                versions: versions.clone(), metadata: metadata_manager.clone(), directory, record: record.clone(), record_bytes: record_bytes.clone(),
+                marker_bytes: marker_bytes.clone(), metadata_started: false, output_removed: false, rolled_back: false, stage_pending: stage_pending.clone(), stage_released: false,
+                #[cfg(test)] pause: None,
+                #[cfg(test)] interrupt_cleanup: false,
+            });
+            lease.installed._packet.catalog._stage.selected_publication.store(true, Ordering::SeqCst);
+            write_torch_new_provenance(&stage_pending, &marker_bytes).map_err(|_| RuntimeFailure::RecoveryRequired)?;
+            sync_native_directory(&versions).map_err(|_| RuntimeFailure::RecoveryRequired)?;
             pumas_library::metadata::atomic_write_json(&lease.original.join("selected-runtime-install.json"), &record, false).map_err(|_| RuntimeFailure::RecoveryRequired)?;
             pumas_library::metadata::atomic_write_json(&pending, &marker, false).map_err(|_| RuntimeFailure::RecoveryRequired)?;
             sync_native_directory(&versions).map_err(|_| RuntimeFailure::RecoveryRequired)?;
+            #[cfg(test)]
+            if fault == PublicationFault::InterruptedBeforeRename { return Err(RuntimeFailure::RecoveryRequired); }
             let publication = (|| -> Result<()> {
                 #[cfg(test)]
                 if fault == PublicationFault::BeforeRename { return Err(failed("Controlled pre-rename refusal")); }
                 pumas_library::platform::filesystem::rename_directory_noreplace(&lease.original, &destination).map_err(PumasError::from)?;
                 sync_native_directory(lease.original.parent().unwrap())?;
                 sync_native_directory(&versions)?;
+                #[cfg(test)]
+                if fault == PublicationFault::InterruptedAfterRename { return Err(failed("Controlled interruption after rename")); }
                 #[cfg(test)]
                 if let Some(pause) = publication_pause { pause.wait(); }
                 #[cfg(test)]
@@ -560,6 +839,8 @@ impl InstalledSelectedPacket {
                     return Err(failed("Published directory or installation record changed"));
                 }
                 lease.fence(&destination, &versions)?;
+                retained_publication.lock().map_err(|_| failed("Publication intent poisoned"))?
+                    .as_mut().ok_or_else(|| failed("Publication intent absent"))?.metadata_started = true;
                 metadata_manager.update_installed_version(&lease.metadata.path, lease.metadata.clone(), Some(AppId::Torch))?;
                 #[cfg(test)]
                 if fault == PublicationFault::AfterMetadata { return Err(failed("Controlled lost publication acknowledgment")); }
@@ -572,20 +853,22 @@ impl InstalledSelectedPacket {
                     return Err(failed("Published runtime changed before acknowledgment"));
                 }
                 std::fs::remove_file(&pending).map_err(PumasError::from)?;
-                sync_native_directory(&versions)
+                let mut retained = retained_publication.lock().map_err(|_| failed("Publication intent poisoned"))?;
+                release_selected_stage(&lease, retained.as_mut().ok_or_else(|| failed("Publication intent absent"))?)
             })();
             if publication.is_err() {
+                #[cfg(test)]
+                if fault == PublicationFault::InterruptedAfterRename { return Err(RuntimeFailure::RecoveryRequired); }
                 let current = metadata_manager.get_installed_version(&lease.metadata.path, Some(AppId::Torch));
+                let mut retained = retained_publication.lock().map_err(|_| RuntimeFailure::RecoveryRequired)?;
+                let intent = retained.as_mut().ok_or(RuntimeFailure::RecoveryRequired)?;
                 if current.as_ref().is_ok_and(|m| m.as_ref().is_some_and(|m| metadata_matches(m, &lease.metadata))) {
+                    publication_record_fence(&destination, intent).map_err(|_| RuntimeFailure::RecoveryRequired)?;
+                    lease.fence(&destination, &versions).map_err(|_| RuntimeFailure::RecoveryRequired)?;
                     return Err(RuntimeFailure::CommittedWithoutAck);
                 }
                 if current.is_ok_and(|m| m.is_none()) {
-                    if destination.symlink_metadata().is_ok() {
-                        if torch_directory_identity(&destination).ok() != Some(directory) { return Err(RuntimeFailure::RecoveryRequired); }
-                        std::fs::remove_dir_all(&destination).map_err(|_| RuntimeFailure::RecoveryRequired)?;
-                    }
-                    std::fs::remove_file(&pending).map_err(|_| RuntimeFailure::RecoveryRequired)?;
-                    sync_native_directory(&versions).map_err(|_| RuntimeFailure::RecoveryRequired)?;
+                    reconcile_publication(&lease, intent).map_err(|_| RuntimeFailure::RecoveryRequired)?;
                     return Err(RuntimeFailure::Refused);
                 }
                 return Err(RuntimeFailure::RecoveryRequired);
@@ -597,16 +880,19 @@ impl InstalledSelectedPacket {
                 path,
                 record,
                 _validated: validated,
+                publication,
             }),
             Ok(Err(kind)) => Err(RuntimeRefusal {
                 kind,
                 _installed: installed,
                 _validated: Some(validated),
+                publication,
             }),
             Err(_) => Err(RuntimeRefusal {
                 kind: RuntimeFailure::RecoveryRequired,
                 _installed: installed,
                 _validated: Some(validated),
+                publication,
             }),
         }
     }

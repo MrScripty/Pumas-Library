@@ -1037,3 +1037,20 @@ placement without any URL retrieval, source preparation, hooks or build installs
 The investigation does not qualify the automatic or retained-preview boundary.
 Parent owns the exception, PR/review/CI/integration and any later implementation
 admission. Native cleanup remains with its separate owner.
+
+## Q2 supported-public-tooling alternatives — admitted research 2026-10-06
+
+Parent explicitly keeps contract §11 and disallows private-hook activation.
+Evidence-only branch `docs/torch-public-resolution-alternatives-1abcf960` starts
+at `1abcf960ba9bf0e4504aef505d24f9b78a9e89ca`, tree
+`8816ef0e6124a60d3ed8acc38ceeacf5d98a41ee`. Research may write this admission,
+a bounded owning-plan status note, and a separate public-tooling comparison report
+with inert local-wheel controls and source inventory. No production source,
+contract waiver, runtime/tooling dependency, provider/network/auth policy,
+recipe/pin, private prototype or native/shared cleanup change is admitted.
+
+Controls use public standalone packaging APIs and subprocess pip CLI on generated
+metadata-only local wheels; direct source/VCS fixture strings stop at preflight
+without invoking pip. No source archive, backend/hook execution, external package
+probe, real credential or installation. Research does not qualify either exposed
+resolver mode or authorize a new resolver/selection policy.

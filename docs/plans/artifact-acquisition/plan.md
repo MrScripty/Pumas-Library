@@ -1,5 +1,13 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 public-tooling research disposition (2026-10-06):** Parent retained §11 and
+forbids private-hook activation. Research recommends the finite existing recipe
+as acquired/preflighted exact local wheels, with public pip consumption; no
+production source or dependency change is admitted. Five inert local controls
+show why `--no-index` alone is insufficient and validate a preflighted wheelhouse
+boundary. Dynamic automatic/retained-preview selection remains unqualified.
+See [supported alternatives and recommendation](reports/torch-public-resolution-alternatives-2026-10-06.md).
+
 **Q2 resolver boundary blocker (2026-10-06):** Independent review reproduced
 source-candidate preparation before report validation despite pip dry-run and
 binary-only flags. Automatic and retained-preview resolver modes remain exposed.

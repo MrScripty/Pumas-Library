@@ -61,7 +61,8 @@ def secret_free(data):
 
 
 def valid_signature(handler, secret):
-    # This fixture owns a simple path and one already canonical version query.
+    # The fixture owns a simple path and already encoded query pairs. SigV4
+    # sorts those pairs independently of their order in the request URI.
     fields = dict(
         field.split("=", 1)
         for field in handler.headers["Authorization"].removeprefix("AWS4-HMAC-SHA256 ").split(", ")
@@ -82,8 +83,9 @@ def valid_signature(handler, secret):
     if handler.server.token:
         check("x-amz-security-token" in names, "session token was not signed")
     parts = urllib.parse.urlsplit(handler.path)
+    query = "&".join(sorted(parts.query.split("&")))
     headers = "".join(f"{name}:{' '.join(handler.headers[name].split())}\n" for name in names)
-    canonical = f"{handler.command}\n{parts.path}\n{parts.query}\n{headers}\n{signed}\n{handler.headers['x-amz-content-sha256']}"
+    canonical = f"{handler.command}\n{parts.path}\n{query}\n{headers}\n{signed}\n{handler.headers['x-amz-content-sha256']}"
     message = f"AWS4-HMAC-SHA256\n{handler.headers['x-amz-date']}\n{scope}\n{hashlib.sha256(canonical.encode()).hexdigest()}"
     key = ("AWS4" + secret).encode()
     for component in (date, region, service, terminal):

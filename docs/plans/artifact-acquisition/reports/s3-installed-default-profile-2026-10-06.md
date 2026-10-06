@@ -34,10 +34,10 @@ sets and hashes are rechecked after extraction. This is local build evidence,
 not a signed attestation or proof that arbitrary caller-authored JSON is genuine.
 No model fixture, credential or runtime state is packaged.
 
-Fourteen synthetic controls pass, including wrong source/binary/profile/features,
+Fifteen synthetic controls passed at 4f5a2a74, including wrong source/binary/profile/features,
 changed/dirty source, active config/flags, failed build diagnostic retention,
 stale/omitted/default notices and missing/replaced/extra installed members.
-Pinned Ruff0.15.2 full repository lint/format checks now pass (56 files), including
+Pinned Ruff0.15.2 full CI Python scope lint/format checks now pass (56 files), including
 the existing installed harness whose earlier baseline formatting failure is
 resolved by formatting this functionally changed file. Full workflow YAML parses;
 the new Python controls are in the existing Linux release-contract gate. Hosted
@@ -53,3 +53,24 @@ Production release LTO/codegen/strip settings remain unchanged. No ONNX runtime
 is obtained or inference executed. AWS/non-AWS/MinIO, installed desktop/browser,
 Windows/macOS and live runtime/model/client/deployment gates remain open.
 Parent owns PR publication, review and integration; none is performed here.
+
+## Installed oracle correction before qualification
+
+The first actual release build passed at 4f5a2a7415193873e81e3737e1a41cfe3b5c18f3
+(tree 12bf1bd1bb465dde4604a91f8dd3d8dd85ba0634), binary SHA-256
+69df92ec6ece85cfc257e841cfd33f76d624e57a634fa7a319e8bd7a7e00ef57.
+The installed harness then refused the first authenticated success case: its
+historical HMAC oracle hashed query parameters in wire order. The maintained SDK
+and existing Rust fixture independently canonicalize encoded query pairs in
+sorted order as SigV4 requires. An external diagnostic using sorted pairs passes
+all ten unchanged scenarios; this is diagnostic evidence, not final qualification.
+
+A fixed synthetic HMAC vector reproduces the old failure for reversed query
+order and passes after the narrow fixture correction. Wrong secret, token and
+VersionId remain refused. All 16 provenance/oracle controls and the existing
+full CI Ruff scope (torch-server plus scripts/release, 56 files) pass. The earlier
+failed archive, red control and diagnostic logs are retained externally. An extra
+whole-repository lint invocation encountered an unchanged unused sys import in
+scripts/acceptance/flux2_v214_rpc_acceptance.py; that file is outside the CI scope
+and this write set. No source/dependency/runtime policy changed. Final installed
+qualification requires a fresh clean-head builder record after this correction.

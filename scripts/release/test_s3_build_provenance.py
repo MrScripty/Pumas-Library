@@ -314,6 +314,38 @@ class InstalledInputsTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
 
+    def test_sigv4_query_order_does_not_change_signed_identity(self):
+        # Fixed synthetic HMAC vector for the canonical query below. The test
+        # does not calculate its own expected signature using the oracle.
+        headers = {
+            "host": "localhost:443",
+            "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+            "x-amz-date": "20260101T000000Z",
+            "x-amz-security-token": self.harness.TOKEN,
+            "Authorization": (
+                f"AWS4-HMAC-SHA256 Credential={self.harness.ACCESS}/"
+                "20260101/fixture-region/s3/aws4_request, "
+                "SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-security-token, "
+                "Signature=8f26803a48d7b13979af61f661f89b824603af92b7d8b70b94cc520c82a55ff6"
+            ),
+        }
+        handler = SimpleNamespace(
+            command="GET", headers=headers, server=SimpleNamespace(token=True)
+        )
+        for query in (
+            "versionId=weights-v1&x-id=GetObject",
+            "x-id=GetObject&versionId=weights-v1",
+        ):
+            with self.subTest(query=query):
+                handler.path = f"/fixture-bucket/models/shared?{query}"
+                self.assertTrue(self.harness.valid_signature(handler, self.harness.SECRET))
+                self.assertFalse(self.harness.valid_signature(handler, "wrong-synthetic-secret"))
+        headers["x-amz-security-token"] = "wrong-synthetic-token"
+        self.assertFalse(self.harness.valid_signature(handler, self.harness.SECRET))
+        headers["x-amz-security-token"] = self.harness.TOKEN
+        handler.path = "/fixture-bucket/models/shared?x-id=GetObject&versionId=changed"
+        self.assertFalse(self.harness.valid_signature(handler, self.harness.SECRET))
+
     def test_archive_inputs_select_complete_s3_profile_and_exact_member_set(self):
         with patch.object(self.harness, "ROOT", self.root):
             inputs = self.harness.package_inputs(self.root / "binary")

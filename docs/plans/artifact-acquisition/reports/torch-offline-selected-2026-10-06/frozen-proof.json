@@ -1,0 +1,56 @@
+{
+  "base": "3f573449b2fe96c3114fc2f5b952ce66da78da68",
+  "base_tree": "68e746e52327c848804157c3ec8c259fd4512203",
+  "files": [
+    {
+      "path": "torch-server/wheel_catalog_owner.py",
+      "sha256": "239d9b897e0f47394d8c3e081d97c6110c360602c4cb41c5dfcb0ae292f228eb",
+      "identical_to_base": true
+    },
+    {
+      "path": "torch-server/wheel_target.py",
+      "sha256": "a381edb267f13316a582c3ee4d40450554004d1dc7c2788d4408ed101ebe94b1",
+      "identical_to_base": true
+    },
+    {
+      "path": "torch-server/install_verified_wheels.py",
+      "sha256": "5d1a14549acff11f08ba19ff2226f9b480852e16fb48745ace3c2cc1fadadbc3",
+      "identical_to_base": true
+    },
+    {
+      "path": "torch-server/resolve_runtime.py",
+      "sha256": "eda80c72173711a1c20168760750f8e2f0b246db8acf2375712fbeb0d1c1a6ee",
+      "identical_to_base": true
+    },
+    {
+      "path": "torch-server/qualified_wheel_catalog.py",
+      "sha256": "c92fae33e8906b20e0caf89ba51261249fa65f1259d4204f90259bdf41670843",
+      "identical_to_base": true
+    },
+    {
+      "path": "torch-server/runtime/requirements.lock",
+      "sha256": "05c4ba8556998179cac8db5798177500e1154caca3d9164e00455240dab4a07e",
+      "identical_to_base": true
+    },
+    {
+      "path": "torch-server/tooling/packaging.zip",
+      "sha256": "3453711fd71407b7d84253d5b498e7c0430fff187e3fb73dbd6f463b924014b2",
+      "identical_to_base": true
+    },
+    {
+      "path": "rust/crates/pumas-app-manager/src/version_manager/installer.rs",
+      "sha256": "4c2ed18d55f8465100e7f29481ee6d9c7f038e397a119d853aa4f5c62e56324a",
+      "identical_to_base": true
+    },
+    {
+      "path": "rust/crates/pumas-core/src/acquisition/s3.rs",
+      "sha256": "4e30e93fe73772cf03628f93dda26299645da6d4736d6b6b3c3dd54bc7a06bab",
+      "identical_to_base": true
+    },
+    {
+      "path": "rust/crates/pumas-core/src/acquisition/manifest.rs",
+      "sha256": "be07454900f848324440faab91a3e07b5d48fc11aa39b37158696580a4dcda88",
+      "identical_to_base": true
+    }
+  ]
+}

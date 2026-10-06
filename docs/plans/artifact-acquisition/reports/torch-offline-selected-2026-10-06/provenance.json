@@ -1,0 +1,112 @@
+{
+  "base": "3f573449b2fe96c3114fc2f5b952ce66da78da68",
+  "base_tree": "68e746e52327c848804157c3ec8c259fd4512203",
+  "source": "ca49df3290d087a1773980ef12f829bb53602932",
+  "source_tree": "f033cbedb85f03b48d5b9bcfb39e1052b5c69559",
+  "branch": "feat/torch-offline-selected-3f573449",
+  "main_preserved": "5e114f6d8e4559e0a4d67e56000b423120a0fde0",
+  "source_paths": [
+    "docs/contracts/artifact-acquisition.md",
+    "docs/contracts/wheel-target.md",
+    "docs/plans/artifact-acquisition/reports/write-sets.md",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner.rs",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_offline_selection.rs",
+    "torch-server/offline_wheel_selection.py",
+    "torch-server/tests/test_offline_wheel_selection.py"
+  ],
+  "source_hashes": {
+    "docs/contracts/artifact-acquisition.md": "f5155d255a6a44531c1edd5fad7aef9aea5262589d20655dd3579feb4fe74d6d",
+    "docs/contracts/wheel-target.md": "0596ff4a95f76d143ad8320a5a78835d6f5e7a43b025e461342999fe1abe161f",
+    "docs/plans/artifact-acquisition/reports/write-sets.md": "14fcce465e451262b0f3a868a4030cabf85cf7f91d2faade5aa7c437859e6975",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": "d74649ebfc25e8395a57741378464793d843ae7068ce0d7a671dc170a3e330ce",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner.rs": "221d06fbc65601d0755ee02acdca15e36b267b83a61e0ad9655ec8ebda6fd2d8",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs": "0b86c539e4e0a50b8f3de9e1e70389709902a70cffd05474a51eebc390d8866e",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_offline_selection.rs": "d8006c135c15b5d7ba48d2937f13b374054b0d65d8e780111bf78717d0c6aa89",
+    "torch-server/offline_wheel_selection.py": "32facab6165c3d3439bac49a334df801a732a8f08c32165775f8a787c45f9364",
+    "torch-server/tests/test_offline_wheel_selection.py": "d7ff57f256da286b482ffbfc863fb7813984bd7396561b22e8fece7c329791a9"
+  },
+  "checks": {
+    "python": 110,
+    "rust": 58,
+    "catalog_and_selection": 19,
+    "new_shared_selection_controls": 7,
+    "pre_build_feature_graphs": 33,
+    "strict_clippy": true,
+    "ruff": true,
+    "rustfmt": true,
+    "syntax": true,
+    "diff": true
+  },
+  "qualified_tool": {
+    "name": "uv",
+    "version": "0.12.23",
+    "binary_sha256": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f",
+    "provisioning": "Already provisioned official tooling, no new downloads or production dependency"
+  },
+  "public_solver": {
+    "synthetic_glibc_floor": "2.40",
+    "actual_native_glibc": "2.41",
+    "actual_native_projection": "Refused without downgrade",
+    "IP_operations_observed": false,
+    "enforced_network_denial_claimed": false,
+    "selected": [
+      {
+        "name": "child",
+        "version": "1.0",
+        "id": "a83201a73d1f896cec7ef1de3e75ad4d72e113fe55852e44345b9be118a2248e",
+        "url": "https://files.pythonhosted.org/packages/child-1.0-py3-none-any.whl",
+        "sha256": "2494f38afa4c83d24d62d11289c79911816c34ebafd3a7924d6ae14db1f0dfc1",
+        "size": 828
+      },
+      {
+        "name": "leaf",
+        "version": "1",
+        "id": "5d7e561cbf7e4cd5e00d2941714b16cfdd96af1545187868ac3c0ef358401bc0",
+        "url": "https://files.pythonhosted.org/packages/leaf-1-py3-none-any.whl",
+        "sha256": "59ad9404f843bfab8350b749f8f1b7a7a9e9c501ddcd9c64aa2af22444a3cec8",
+        "size": 856
+      },
+      {
+        "name": "torch",
+        "version": "2.14.0+cpu",
+        "id": "9953911ff4d65e150de4173ef38fdf54f98bb9701b2efdcd5e18eb99c6eeb9c3",
+        "url": "https://download.pytorch.org/whl/cpu/torch-2.14.0+cpu-py3-none-any.whl",
+        "sha256": "980f5e3d0e4ef49fa49093342df1c6b8533b29fa47f48ec52624e6fdfee44214",
+        "size": 914
+      }
+    ],
+    "extras": {
+      "child": [],
+      "leaf": [
+        "tools"
+      ],
+      "torch": []
+    },
+    "lock_sha256": "cb58f4fa70c98e510873f26eb81f81afca9c7b982391823d651d1b178f6fc279"
+  },
+  "API": "Private non-deserializable CompleteCatalog -> SelectedWheelPacket or retained SelectionRefusal; no public Rust/IPC/store API changes",
+  "production_adoption": false,
+  "installation_or_real_provider_acceptance": false,
+  "library_transfers": "Paused, no retries or alternative route",
+  "evidence_sha256": {
+    "clippy.log": "744422d232820db697356f5bc36fa1ae133acaecd3f45d48985f2c4cec02dd56",
+    "diff-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "feature-graphs.log": "173ed427a61ed780b4583f312ae27454b3b191dcaa5af80f51ff123e23a97b60",
+    "frozen-proof.json": "83420a4fa427e9161bfd95b725f0f95b238de092fb117f4472433b4d2778665c",
+    "public-selected-packet.json": "22d19b0a0bd23eac2b6f1bbaf4fd207f51ec7a30bfb6f39ef421bf0ad5a92322",
+    "public-solver-raw-evidence.tar.gz": "11d14da91804155261ba66c0712adb450794af21f3e2bcb8a251487116d83346",
+    "push-source.log": "af2bcf1ebf5ef695968b2f6197b892da19d658fc59b87d174aa81377a92b5276",
+    "python-initial.log": "cd00a8cbeed419580a6e18e2487de3ab83ac9a82c5628aa901f3b3dfa53f1395",
+    "python.log": "8ef3db7bf6bcd02a6572e552d95ee6aed3e4b545c8673d91a357d4ef6849e484",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "rust-before-bounded.log": "f674e8c7b20bb15dd7b7c84d6ca7ee92a62c4e41892d3f04d86041dbef0bdee2",
+    "rust-focused.log": "eea6c6594ff66b12681c6cb18a2f96499d423c1fbf641ca5af283856f6898744",
+    "rust-initial.log": "fd95d77c23827c720feb2bb95b72c50f798de50cf88659d5443d180a805f1622",
+    "rust.log": "9a3ecc3ae57fe7b8609ba2511672ab8ec3067ce0d2ea0e11f0cd3ef2eb5070e8",
+    "rustfmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "shared-selected-packet.json": "021279b9efc252ed7eea28c7af7cbab4f35a6f4a392417d5ce6445b0bd557e71",
+    "syntax.log": "480cb1f014b6507b7e870acc14839962b295524eb8d5f924547a71b2ca30e384"
+  }
+}

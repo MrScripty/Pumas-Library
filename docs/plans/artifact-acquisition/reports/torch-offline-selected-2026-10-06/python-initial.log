@@ -1,0 +1,37 @@
+test_actual_selection_and_extras_closure (test_offline_wheel_selection.SelectionTests.test_actual_selection_and_extras_closure) ... ok
+test_ambiguous_public_lock_files_refuse (test_offline_wheel_selection.SelectionTests.test_ambiguous_public_lock_files_refuse) ... ok
+test_changed_catalog_and_acquired_bytes_refuse (test_offline_wheel_selection.SelectionTests.test_changed_catalog_and_acquired_bytes_refuse) ... ok
+test_changed_target_or_executable_binding_refuses (test_offline_wheel_selection.SelectionTests.test_changed_target_or_executable_binding_refuses) ... ok
+test_exact_direct_root_preserves_identity_before_coalescing (test_offline_wheel_selection.SelectionTests.test_exact_direct_root_preserves_identity_before_coalescing) ... ok
+test_inactive_row_cannot_add_remote_source (test_offline_wheel_selection.SelectionTests.test_inactive_row_cannot_add_remote_source) ... ok
+test_incomplete_coverage_refuses_before_solver (test_offline_wheel_selection.SelectionTests.test_incomplete_coverage_refuses_before_solver) ... ERROR
+test_local_hash_and_source_substitution_refuse (test_offline_wheel_selection.SelectionTests.test_local_hash_and_source_substitution_refuse) ... ok
+test_lock_python_and_unprojectable_markers_refuse (test_offline_wheel_selection.SelectionTests.test_lock_python_and_unprojectable_markers_refuse) ... ok
+test_missing_extra_closure_and_unrelated_member_refuse (test_offline_wheel_selection.SelectionTests.test_missing_extra_closure_and_unrelated_member_refuse) ... ok
+test_original_constraint_rechecked (test_offline_wheel_selection.SelectionTests.test_original_constraint_rechecked) ... ok
+test_real_native_target_without_exact_projection_refuses (test_offline_wheel_selection.SelectionTests.test_real_native_target_without_exact_projection_refuses) ... ok
+test_real_public_uv_isolated_selection_and_resolver_errors (test_offline_wheel_selection.SelectionTests.test_real_public_uv_isolated_selection_and_resolver_errors) ... ok
+test_same_version_file_choice_is_not_new_authority (test_offline_wheel_selection.SelectionTests.test_same_version_file_choice_is_not_new_authority) ... ok
+test_selected_version_requirement_rechecked (test_offline_wheel_selection.SelectionTests.test_selected_version_requirement_rechecked) ... ok
+test_undeclared_requested_extra_refuses (test_offline_wheel_selection.SelectionTests.test_undeclared_requested_extra_refuses) ... ok
+test_unknown_schema_sources_and_duplicate_packages_refuse (test_offline_wheel_selection.SelectionTests.test_unknown_schema_sources_and_duplicate_packages_refuse) ... ok
+test_unsupported_projection_and_inactive_dependency_marker_refuse (test_offline_wheel_selection.SelectionTests.test_unsupported_projection_and_inactive_dependency_marker_refuse) ... ok
+test_yanked_policy_not_silently_lost (test_offline_wheel_selection.SelectionTests.test_yanked_policy_not_silently_lost) ... ok
+
+======================================================================
+ERROR: test_incomplete_coverage_refuses_before_solver (test_offline_wheel_selection.SelectionTests.test_incomplete_coverage_refuses_before_solver)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-offline-selected-3f57/torch-server/tests/test_offline_wheel_selection.py", line 161, in test_incomplete_coverage_refuses_before_solver
+    self.inspect(req, artifacts)
+  File "/tmp/pumas-q2-offline-selected-3f57/torch-server/tests/test_wheel_catalog_owner.py", line 73, in inspect
+    result = owner.inspect(request, self.observation, plan, self.wheels)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/pumas-q2-offline-selected-3f57/torch-server/wheel_catalog_owner.py", line 360, in inspect
+    raise Incomplete("Reachable project lacks a complete response from every approved repository")
+wheel_catalog_owner.Incomplete: Reachable project lacks a complete response from every approved repository
+
+----------------------------------------------------------------------
+Ran 19 tests in 8.701s
+
+FAILED (errors=1)

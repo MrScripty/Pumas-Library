@@ -1,0 +1,87 @@
+   Compiling pumas-app-manager v0.7.0 (/tmp/pumas-q2-offline-selected-3f57/rust/crates/pumas-app-manager)
+    Finished `test` profile [unoptimized] target(s) in 35.65s
+     Running unittests src/lib.rs (/tmp/pumas-uv-offline-build/target/debug/deps/pumas_app_manager-a6c29384ac95defc)
+
+running 58 tests
+test version_manager::installer::torch::torch_catalog_owner::tests::abandoned_inspector_retains_child_stage_and_using_until_drain ... catalog control AbandonInspector: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::abandoned_selected_checker_retains_catalog_grant_and_runtime_until_drain ... catalog control SelectedAbandonedChecker: requests=5 complete=true installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::actual_glibc_241_complete_catalog_refuses_without_target_downgrade ... catalog control SelectedUnsupportedTarget: requests=5 complete=true installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::actual_wrong_dist_info_refuses_snapshot_and_cold_replay ... catalog control WrongDistInfo: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_held_wheel_after_inspection_refuses_complete ... catalog control ChangedWheelAfterInspection: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_original_payload_never_publishes_snapshot ... catalog control ChangedBody: requests=1 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_owned_target_refuses_before_any_payload ... catalog control ChangedTarget: requests=0 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_selected_executable_after_inspection_refuses_complete ... catalog control ChangedExecutableAfterInspection: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_alternative_catalog_uses_shared_payloads_and_snapshot_receipt ... catalog control Success: requests=5 complete=true installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_catalog_cannot_use_an_unqualified_solver_executable ... catalog control SelectedWrongSolver: requests=5 complete=true installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_catalog_to_independently_checked_public_offline_selection ... selected packet: {"catalog_sha256":"25fe28dc7b5cc399071ffdf4dc327fba39cde817b5d70b9a6e9f57e0addff29b","extras":{"branch":[],"dependency":[],"torch":[]},"lock_sha256":"671e77051d27d3a709be2cf7921b4331482fe5dcf3a4dfb88a25ae113309fa2e","projection_sha256":"ce1faabc9ca24e8f4ba07acc1be638737eaddee7172535810b1165af1620b366","qualified_solver":{"kind":"uv","sha256":"abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f","version":"0.12.23"},"request_sha256":"ea2bea3d8b740e0d8f67c73f37db51872f65d850096f645af0e643dcb953c739","schema":"pumas.selected-wheel-packet.v1","selected":[{"filename":"branch-2-py3-none-any.whl","id":"725aba759eec5dd612ace9caa908f568a1943fe4467ef93c0c8b9000073032c8","local":"/tmp/.tmp1HywBC/torch-versions/.torch-catalog-fixture/725aba759eec5dd612ace9caa908f568a1943fe4467ef93c0c8b9000073032c8/branch-2-py3-none-any.whl","name":"branch","repository":"pypi","requires_python_hint":null,"sha256":"ca9d0680a4ca6e42f1f0f03786456f2b39457e082dae35d75deda20534d2757c","size":853,"url":"https://files.pythonhosted.org/packages/branch-2-py3-none-any.whl","version":"2","yanked":false},{"filename":"dependency-2-py3-none-any.whl","id":"cb3edd25c0a1f34ed551aa6726b97a4b0387fa0afcad24f1ad2bad8ae403eb1b","local":"/tmp/.tmp1HywBC/torch-versions/.torch-catalog-fixture/cb3edd25c0a1f34ed551aa6726b97a4b0387fa0afcad24f1ad2bad8ae403eb1b/dependency-2-py3-none-any.whl","name":"dependency","repository":"pypi","requires_python_hint":null,"sha256":"6a75e6a2d5f8eff4c7d611413e60a5d401d3c13024befdecc2e595cb0d3b9abf","size":859,"url":"https://files.pythonhosted.org/packages/dependency-2-py3-none-any.whl","version":"2","yanked":false},{"filename":"torch-2.14.0+cpu-py3-none-any.whl","id":"bc3df9d9c7f9a6f87bce8272aab7c29407ec21965a0774a6a8548f0c5b458d8a","local":"/tmp/.tmp1HywBC/torch-versions/.torch-catalog-fixture/bc3df9d9c7f9a6f87bce8272aab7c29407ec21965a0774a6a8548f0c5b458d8a/torch-2.14.0+cpu-py3-none-any.whl","name":"torch","repository":"pytorch","requires_python_hint":null,"sha256":"56e455c4b026f91e68cf8140d3d4c3c69fc68857c52a9ea667038a0f1bb2420e","size":908,"url":"https://download.pytorch.org/whl/cpu/torch-2.14.0+cpu-py3-none-any.whl","version":"2.14.0+cpu","yanked":false}],"target_observation_sha256":"f4b742a635dd8e69a283636503d585a21c55c217ec37deb4d36deaa33c99260e"}
+catalog control Selected: requests=5 complete=true installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_unsatisfiable_catalog_solver_error_never_accepts_or_falls_back ... catalog control SelectedSolverError: requests=5 complete=true installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::failed_second_repository_never_acquires_or_completes ... catalog control FailedPage: requests=0 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::index_size_conflicting_with_body_refuses_complete ... catalog control WrongSize: requests=1 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::missing_dependency_coverage_retains_using_and_refuses_cold_replay ... catalog control MissingDependency: requests=3 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::payload_redirect_cannot_extend_catalog_authority ... catalog control Redirect: requests=1 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_checker_cannot_hide_unselected_acquired_wheel_replacement ... catalog control SelectedChangedWheel: requests=5 complete=true installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_proof_cannot_hide_final_selected_executable_replacement ... catalog control SelectedChangedExecutable: requests=5 complete=true installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::unknown_size_refuses_before_any_payload ... catalog control MissingSize: requests=0 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_upstream_contract_tests::cancel_after_publication_begins_is_rejected ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::concurrent_direct_install_rejection_does_not_disrupt_active_torch_attempt ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::direct_installer_preserves_existing_upstream_directory ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::embedded_sidecar_and_lock_materialize_outside_the_checkout ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::manager_filters_upstream_releases_and_preserves_legacy_runtime_state ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::official_release_metadata_does_not_need_pumas_bundle_assets ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::unverified_release_installs_without_becoming_active_or_default ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::v291_resolves_only_to_its_immutable_independent_recipe ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::accepted_packet_preserves_venv_identity_and_refuses_changed_evidence ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::accepted_target_packet_refuses_mismatch_missing_context_and_late_downgrade ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::automatic_candidate_loop_propagates_inconclusive_or_validation_errors ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::automatic_candidate_loop_stops_at_first_accepted_packet ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::embedded_qualified_runtime_contains_public_tooling_and_single_record_owner ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_producer_probe_refuses_publication_and_receipt ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_producer_refuses_before_acquisition ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_producer_refuses_before_consumption ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_selected_consumer_probe_refuses_publication_and_receipt ... Executable-only probe control: result_success=false adopted=false receipt=false installed=false output=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_selected_consumer_refuses_without_changing_provider ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_owned_producer_finite_catalog_shared_consumer_receipt ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_recipe_catalog_preserves_complete_pins_and_selected_direct_identity ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::target_observation_projection_matches_python_unicode_fixture ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_changed_approval_retains_custody_without_receipt ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_mismatch_refuses_before_local_stage ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_missing_context_refuses_before_local_stage ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_unsupported_context_refuses_before_local_stage ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_valid_handoff_binds_receipt_and_settles ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_abandoned_waiter_holds_inputs_through_child_cleanup ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_cancel_child_retains_composite_custody_until_cleanup ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_changed_bytes_never_start_local_installation ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_failed_publication_retains_inputs_and_cold_output ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_install_then_publish_and_settle_exact_receipt ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_missing_dependency_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_preserve_existing_qualified_nunchaku_source_and_digest ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_member_mutation_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_package_ancestor_escape_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_proof_ancestor_escape_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_proof_mutation_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_provenance_mutation_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_published_without_ack_refuses_cold_replay ... ok
+
+test result: ok. 58 passed; 0 failed; 0 ignored; 0 measured; 281 filtered out; finished in 183.82s
+

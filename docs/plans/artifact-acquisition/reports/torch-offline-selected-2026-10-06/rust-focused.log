@@ -1,0 +1,45 @@
+   Compiling pumas-app-manager v0.7.0 (/tmp/pumas-q2-offline-selected-3f57/rust/crates/pumas-app-manager)
+    Finished `test` profile [unoptimized] target(s) in 34.32s
+     Running unittests src/lib.rs (/tmp/pumas-uv-offline-build/target/debug/deps/pumas_app_manager-a6c29384ac95defc)
+
+running 18 tests
+test version_manager::installer::torch::torch_catalog_owner::tests::abandoned_inspector_retains_child_stage_and_using_until_drain ... catalog control AbandonInspector: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::abandoned_selected_checker_retains_catalog_grant_and_runtime_until_drain ... catalog control SelectedAbandonedChecker: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::actual_glibc_241_complete_catalog_refuses_without_target_downgrade ... catalog control SelectedUnsupportedTarget: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::actual_wrong_dist_info_refuses_snapshot_and_cold_replay ... catalog control WrongDistInfo: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_held_wheel_after_inspection_refuses_complete ... catalog control ChangedWheelAfterInspection: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_original_payload_never_publishes_snapshot ... catalog control ChangedBody: requests=1 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_owned_target_refuses_before_any_payload ... catalog control ChangedTarget: requests=0 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_selected_executable_after_inspection_refuses_complete ... catalog control ChangedExecutableAfterInspection: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_alternative_catalog_uses_shared_payloads_and_snapshot_receipt ... catalog control Success: requests=5 complete=true installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_catalog_cannot_use_an_unqualified_solver_executable ... catalog control SelectedWrongSolver: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_catalog_to_independently_checked_public_offline_selection ... selected packet: {"catalog_sha256":"b8f5d6893ccba743d1f43939aa7eb4ed5d82f85c6c04d96a640c21a2968bea14","extras":{"branch":[],"dependency":[],"torch":[]},"lock_sha256":"c15360e7fc4a1863ca4fc3deb518ca33df9834d07cb3d3f8d53c7cc278335899","projection_sha256":"25464cad705d1062e4e0e90b4b741d394976d17406ef5826622b1c78a7b71d63","request_sha256":"9d63a6f57dca84473e6f5b301fce206c37d898ecc9c8d6b99c6391bfc96a133d","schema":"pumas.selected-wheel-packet.v1","selected":[{"filename":"branch-2-py3-none-any.whl","id":"e8afa506c1472ed54f81ab3d8d11a5e100eb54c2e8c3c98334a33e51c3e41572","local":"/tmp/.tmp41MuUt/torch-versions/.torch-catalog-fixture/e8afa506c1472ed54f81ab3d8d11a5e100eb54c2e8c3c98334a33e51c3e41572/branch-2-py3-none-any.whl","name":"branch","repository":"pypi","requires_python_hint":null,"sha256":"1e98b3febf063e901f9dc3e8abbfeb4d8a762a20688a9bf8b1d90b4f66dd240c","size":853,"url":"https://files.pythonhosted.org/packages/branch-2-py3-none-any.whl","version":"2","yanked":false},{"filename":"dependency-2-py3-none-any.whl","id":"b4bc02f90d79c264f91edecf9f8fbf99f9ea412cdd27d3943270f41093faaf51","local":"/tmp/.tmp41MuUt/torch-versions/.torch-catalog-fixture/b4bc02f90d79c264f91edecf9f8fbf99f9ea412cdd27d3943270f41093faaf51/dependency-2-py3-none-any.whl","name":"dependency","repository":"pypi","requires_python_hint":null,"sha256":"cf4d67da73ec9c19bbdf5ab15a44b94fa95016799dd1d1a134ade6e7a4e686b7","size":859,"url":"https://files.pythonhosted.org/packages/dependency-2-py3-none-any.whl","version":"2","yanked":false},{"filename":"torch-2.14.0+cpu-py3-none-any.whl","id":"18500b2041938188e0d5f2bff29d5549393c9e6692ee31ac7e3890e3e1044eb3","local":"/tmp/.tmp41MuUt/torch-versions/.torch-catalog-fixture/18500b2041938188e0d5f2bff29d5549393c9e6692ee31ac7e3890e3e1044eb3/torch-2.14.0+cpu-py3-none-any.whl","name":"torch","repository":"pytorch","requires_python_hint":null,"sha256":"6cbe95cb9743d9d82cc719f90339b0656a0a9978376dfc03482a36ab547fbe8f","size":908,"url":"https://download.pytorch.org/whl/cpu/torch-2.14.0+cpu-py3-none-any.whl","version":"2.14.0+cpu","yanked":false}],"target_observation_sha256":"cc8ef935e4ddd8687635a8bbb82eb57de421d39eceaf0bc634ac8b1d50c9279c"}
+catalog control Selected: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_unsatisfiable_catalog_solver_error_never_accepts_or_falls_back ... catalog control SelectedSolverError: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::failed_second_repository_never_acquires_or_completes ... catalog control FailedPage: requests=0 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::index_size_conflicting_with_body_refuses_complete ... catalog control WrongSize: requests=1 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::missing_dependency_coverage_retains_using_and_refuses_cold_replay ... catalog control MissingDependency: requests=3 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::payload_redirect_cannot_extend_catalog_authority ... catalog control Redirect: requests=1 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_proof_cannot_hide_final_selected_executable_replacement ... catalog control SelectedChangedExecutable: requests=5 complete=false installed=false cleanup_drained=true
+ok
+test version_manager::installer::torch::torch_catalog_owner::tests::unknown_size_refuses_before_any_payload ... catalog control MissingSize: requests=0 complete=false installed=false cleanup_drained=true
+ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 320 filtered out; finished in 118.94s
+

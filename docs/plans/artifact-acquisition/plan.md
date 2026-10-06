@@ -1,5 +1,24 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 qualified public offline selected-packet slice (2026-10-06):** Separate
+`feat/torch-offline-selected-3f573449` source `ca49df3290d087a1773980ef12f829bb53602932`,
+tree `f033cbedb85f03b48d5b9bcfb39e1052b5c69559`, consumes the accepted live CompleteCatalog under
+retained grant/stage custody. Explicit pinned public uv sees only acquired,
+preflighted local wheels with config/cache/network/build/source isolation; an
+independent checker binds exact original roots, target, constraints, extras,
+closure and selected artifact identities. 110 Python/58 shared Rust controls,
+33 pre-build feature graphs and strict checks pass. Final producer/executable/
+all-input fences and abandonment retain custody. Actual native glibc2.41 has no
+exact projection in pinned uv and refuses without downgrade; positive controls
+explicitly declare a synthetic compatible2.40 target. [Exact source, selected
+packets, invocation/trace and limits](reports/torch-offline-selected-2026-10-06.md).
+No production tool provisioning, automatic/preview adoption, source/version/
+fallback or native/S3/manifest change, installation/provider/platform/P1/AQ
+acceptance. Next existing Q2 work is selected-packet local-consumer composition
+and separately qualified tooling/target/selection/provider parity before
+coordinated caller adoption. Both approved Library transfers remain paused.
+
+
 **Q2 catalog format review successor (2026-10-06):** Frozen `4c85b60d`
 reproduces rejection of valid Simple 1.1+ version lists, acceptance of missing
 mandatory lists and wrong/nested `.dist-info` identities. Separate tested source

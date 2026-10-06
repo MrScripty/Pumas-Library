@@ -1,0 +1,56 @@
+{
+  "catalog_sha256": "851f57f17a61dbca7944ccd730885744fbffc0eb1459a061418ffe101052bf16",
+  "extras": {
+    "child": [],
+    "leaf": [
+      "tools"
+    ],
+    "torch": []
+  },
+  "lock_sha256": "cb58f4fa70c98e510873f26eb81f81afca9c7b982391823d651d1b178f6fc279",
+  "projection_sha256": "0d2504b5886d3df88363af2e00e2a79128c851eac7e3d0163523d306d71422a6",
+  "request_sha256": "fbcddbb147930743111218f785185084efc50e443b228eefec55edd8c7dcedee",
+  "schema": "pumas.selected-wheel-packet.v1",
+  "selected": [
+    {
+      "filename": "child-1.0-py3-none-any.whl",
+      "id": "a83201a73d1f896cec7ef1de3e75ad4d72e113fe55852e44345b9be118a2248e",
+      "local": "/tmp/tmpjvsl3_jj/wheels/a83201a73d1f896cec7ef1de3e75ad4d72e113fe55852e44345b9be118a2248e/child-1.0-py3-none-any.whl",
+      "name": "child",
+      "repository": "pypi",
+      "requires_python_hint": null,
+      "sha256": "2494f38afa4c83d24d62d11289c79911816c34ebafd3a7924d6ae14db1f0dfc1",
+      "size": 828,
+      "url": "https://files.pythonhosted.org/packages/child-1.0-py3-none-any.whl",
+      "version": "1.0",
+      "yanked": false
+    },
+    {
+      "filename": "leaf-1-py3-none-any.whl",
+      "id": "5d7e561cbf7e4cd5e00d2941714b16cfdd96af1545187868ac3c0ef358401bc0",
+      "local": "/tmp/tmpjvsl3_jj/wheels/5d7e561cbf7e4cd5e00d2941714b16cfdd96af1545187868ac3c0ef358401bc0/leaf-1-py3-none-any.whl",
+      "name": "leaf",
+      "repository": "pypi",
+      "requires_python_hint": null,
+      "sha256": "59ad9404f843bfab8350b749f8f1b7a7a9e9c501ddcd9c64aa2af22444a3cec8",
+      "size": 856,
+      "url": "https://files.pythonhosted.org/packages/leaf-1-py3-none-any.whl",
+      "version": "1",
+      "yanked": false
+    },
+    {
+      "filename": "torch-2.14.0+cpu-py3-none-any.whl",
+      "id": "9953911ff4d65e150de4173ef38fdf54f98bb9701b2efdcd5e18eb99c6eeb9c3",
+      "local": "/tmp/tmpjvsl3_jj/wheels/9953911ff4d65e150de4173ef38fdf54f98bb9701b2efdcd5e18eb99c6eeb9c3/torch-2.14.0+cpu-py3-none-any.whl",
+      "name": "torch",
+      "repository": "pytorch",
+      "requires_python_hint": null,
+      "sha256": "980f5e3d0e4ef49fa49093342df1c6b8533b29fa47f48ec52624e6fdfee44214",
+      "size": 914,
+      "url": "https://download.pytorch.org/whl/cpu/torch-2.14.0+cpu-py3-none-any.whl",
+      "version": "2.14.0+cpu",
+      "yanked": false
+    }
+  ],
+  "target_observation_sha256": "cef5c0adbe8a7ce90af0f82520a7e16f6167b6015bdbba50e21f30a4aaef6701"
+}

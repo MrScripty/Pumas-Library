@@ -1,0 +1,32 @@
+   Compiling pumas-library v0.7.0 (/tmp/pumas-q2-offline-selected-3f57/rust/crates/pumas-core)
+   Compiling pumas-app-manager v0.7.0 (/tmp/pumas-q2-offline-selected-3f57/rust/crates/pumas-app-manager)
+error[E0624]: method `select` is private
+   --> crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs:372:46
+    |
+372 |               let mut flow = Box::pin(complete.select(context));
+    |                                                ^^^^^^ private method
+    |
+   ::: crates/pumas-app-manager/src/version_manager/installer/torch_offline_selection.rs:426:5
+    |
+426 | /     async fn select(
+427 | |         self,
+428 | |         context: SelectionContext<'_>,
+429 | |     ) -> std::result::Result<SelectedWheelPacket, SelectionRefusal> {
+    | |___________________________________________________________________- private method defined here
+
+error[E0624]: method `select` is private
+   --> crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs:397:28
+    |
+397 |               match complete.select(context).await {
+    |                              ^^^^^^ private method
+    |
+   ::: crates/pumas-app-manager/src/version_manager/installer/torch_offline_selection.rs:426:5
+    |
+426 | /     async fn select(
+427 | |         self,
+428 | |         context: SelectionContext<'_>,
+429 | |     ) -> std::result::Result<SelectedWheelPacket, SelectionRefusal> {
+    | |___________________________________________________________________- private method defined here
+
+For more information about this error, try `rustc --explain E0624`.
+error: could not compile `pumas-app-manager` (lib test) due to 2 previous errors

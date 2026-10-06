@@ -1,5 +1,15 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 local-pip correction (2026-10-06):** Independent review of frozen handoff
+`7a3264ac` found ambient global/site/PIP_CONFIG_FILE requirements injection despite
+`--isolated`. Separate repair disables config files and inherited pip options only
+in the child environment. Host settings, custody and proof/publication policies
+remain unchanged. See [repair qualification](reports/torch-wheel-pip-config-repair-2026-10-06.md). The earlier handoff
+evidence remains historical; parser controls do not qualify enforced network
+denial. AQ-PACKAGES remains not ready. Next existing-plan source feature remains
+automatic-resolution/final-payload separation, paused on its separate branch
+while this repair receives coordinator review.
+
 **Q2 retained-preview wheel handoff (2026-10-06):** Separately admitted while
 AQ-HTTP8756 remains frozen, branch `feat/torch-verified-wheel-handoff-8756f33b`
 retains base8756f33 and accepted main1c1c7875. Tested source

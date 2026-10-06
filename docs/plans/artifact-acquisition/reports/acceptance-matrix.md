@@ -1,5 +1,12 @@
 # Acquisition acceptance matrix
 
+**2026-10-06 Q2 local-pip correction:** Frozen handoff `7a3264ac` allowed
+ambient config to append requirements despite `--isolated`. The separate
+[repair qualification](torch-wheel-pip-config-repair-2026-10-06.md) records
+child-only config isolation and hostile-config controls. This corrects the
+earlier local-only source claim; parser tests do not establish network denial.
+AC11/AC12 and AQ-PACKAGES remain pending.
+
 **2026-10-05 bounded S3 update:** Explicit normal sibling composition cd9d8191
 and qualification successor 7358bd3d pass combined protocol and Linux production
 installed-backend checks, including ten independently signed TLS scenarios.

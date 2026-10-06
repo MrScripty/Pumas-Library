@@ -983,3 +983,21 @@ Enforced-denial, actual Torch/provider/platform/hosted acceptance and whole Q2
 migration remain open. Evidence-only successor preserves all source blobs and
 frozen refs; own temporary PR42 dependency caches are restored with matching
 mode/path/content/link digests. No gate advancement, merge or external review.
+
+## Q2 child pip configuration repair — admitted 2026-10-06
+
+Parent independent review reproduced ambient `install.requirement` injection on
+frozen Q2 `7a3264ac8d04383bd01c8ab71b7287a48c66f2db`: `--isolated` still
+loads global/site/PIP_CONFIG_FILE settings. Separate branch
+`fix/torch-wheel-pip-config-7a3264ac` begins at normal merge
+`8eb1e00fd61400532b4c55b9dc167f0a9438fc0c`, tree
+`b6d37961c54d6e5fe0e894e5223c08f1213d804b`, preserving accepted main
+`7c229e92726e1af7447d37e3dc03fd4bd2ccfffa` and frozen handoff source.
+Admitted production write: `torch-server/install_verified_wheels.py` child-only
+pip environment isolation; tests: `torch-server/tests/test_install_verified_wheels.py`.
+Owning plan, contract/README, ledger/matrix/gates and qualification evidence may
+record the correction and exact checks. Preserve all custody, exact-set, installed
+proof and postprobe validation. No Rust/native/S3/dependency/pin changes.
+Host/user/global settings remain untouched; hostile URL tests parse options only,
+never retrieve remote requirements. Parser evidence is not network-denial proof.
+Automatic-resolution branch remains paused and separate.

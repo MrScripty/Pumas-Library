@@ -23,6 +23,7 @@ enum Case {
     SelectedUnsupportedTarget,
     SelectedChangedExecutable,
     SelectedChangedWheel,
+    SelectedProjectionMutation { file: &'static str, grow: bool },
     SelectedAbandonedChecker,
 }
 
@@ -80,6 +81,7 @@ async fn fixture(case: Case) {
             | Case::SelectedSolverError
             | Case::SelectedChangedExecutable
             | Case::SelectedChangedWheel
+            | Case::SelectedProjectionMutation { .. }
             | Case::SelectedAbandonedChecker
     ) {
         // Explicit test-only target declaration: uv 0.12.23 cannot represent
@@ -303,6 +305,7 @@ print(json.dumps(rows))
                     | Case::SelectedUnsupportedTarget
                     | Case::SelectedChangedExecutable
                     | Case::SelectedChangedWheel
+                    | Case::SelectedProjectionMutation { .. }
                     | Case::SelectedAbandonedChecker
             ));
             assert_eq!(complete.receipt.owner, CATALOG_OWNER);
@@ -355,6 +358,7 @@ print(json.dumps(rows))
             | Case::SelectedUnsupportedTarget
             | Case::SelectedChangedExecutable
             | Case::SelectedChangedWheel
+            | Case::SelectedProjectionMutation { .. }
             | Case::SelectedAbandonedChecker
     ) {
         use super::offline_selection::{
@@ -366,17 +370,29 @@ print(json.dumps(rows))
             case,
             Case::SelectedChangedExecutable
                 | Case::SelectedChangedWheel
+                | Case::SelectedProjectionMutation { .. }
                 | Case::SelectedAbandonedChecker
         ) {
             let helper = runtime.join("offline_wheel_selection.py");
             let mut script = std::fs::read_to_string(&helper).unwrap();
-            script.push_str(if case == Case::SelectedChangedExecutable {
+            if let Case::SelectedProjectionMutation { file, grow } = case {
+                script.push_str(&format!(
+                    "\nif '--check' in sys.argv:\n import os\n p=Path(sys.argv[sys.argv.index('--directory')+1]) / {file:?}\n if {grow}:\n  with p.open('ab') as f: f.truncate(32 * 1024 * 1024)\n else:\n  q=p.with_name(p.name+'.replacement'); q.write_bytes(b'X'*p.stat().st_size); os.replace(q,p)\n",
+                    grow = if grow { "True" } else { "False" },
+                ));
+                println!(
+                    "post-checker projection fixture: file={} grow={grow}",
+                    runtime.join("offline-selection").join(file).display()
+                );
+            } else {
+                script.push_str(if case == Case::SelectedChangedExecutable {
                 "\nif '--check' in sys.argv:\n import os\n p=Path(sys.executable); q=p.with_name('selection-python-replacement'); q.write_bytes(b'changed executable after selected proof'); os.replace(q,p)\n"
             } else if case == Case::SelectedChangedWheel {
                 "\nif '--check' in sys.argv:\n p=next(Path(sys.argv[sys.argv.index('--wheels')+1]).glob('*/dependency-1-*.whl')); p.write_bytes(p.read_bytes()+b'changed unselected acquired input')\n"
             } else {
                 "\nif '--check' in sys.argv:\n import os,time\n Path(__file__).with_name('selected-checker-alive').write_text(str(os.getpid())); time.sleep(120)\n"
             });
+            }
             std::fs::write(helper, script).unwrap();
         }
         let solver = if case == Case::SelectedWrongSolver {
@@ -449,6 +465,7 @@ print(json.dumps(rows))
                             | Case::SelectedUnsupportedTarget
                             | Case::SelectedChangedExecutable
                             | Case::SelectedChangedWheel
+                            | Case::SelectedProjectionMutation { .. }
                     ));
                     assert_eq!(
                         refusal.kind,
@@ -458,6 +475,27 @@ print(json.dumps(rows))
                             SelectionFailure::Refused
                         }
                     );
+                    if let Case::SelectedProjectionMutation { file, grow } = case {
+                        let selected = runtime.join("offline-selection/selected.json");
+                        assert!(
+                            selected.is_file(),
+                            "Mutation must follow successful independent checking"
+                        );
+                        let modified = runtime.join("offline-selection").join(file);
+                        assert!(std::fs::symlink_metadata(&modified)
+                            .unwrap()
+                            .file_type()
+                            .is_file());
+                        if grow {
+                            assert_eq!(
+                                std::fs::metadata(&modified).unwrap().len(),
+                                32 * 1024 * 1024
+                            );
+                        } else {
+                            assert!(std::fs::read(&modified).unwrap().iter().all(|b| *b == b'X'));
+                        }
+                        println!("post-checker projection refusal: file={file} grow={grow} kind={:?} checker_completed=true", refusal.kind);
+                    }
                     refusal._catalog._grant.validate().unwrap();
                     assert_eq!(std::fs::read_dir(&granted_path).unwrap().count(), 5);
                     assert!(
@@ -500,6 +538,7 @@ print(json.dumps(rows))
                     | Case::SelectedUnsupportedTarget
                     | Case::SelectedChangedExecutable
                     | Case::SelectedChangedWheel
+                    | Case::SelectedProjectionMutation { .. }
                     | Case::SelectedAbandonedChecker
             )
         );
@@ -514,6 +553,7 @@ print(json.dumps(rows))
                     | Case::SelectedUnsupportedTarget
                     | Case::SelectedChangedExecutable
                     | Case::SelectedChangedWheel
+                    | Case::SelectedProjectionMutation { .. }
                     | Case::SelectedAbandonedChecker
             )
         );
@@ -565,6 +605,7 @@ print(json.dumps(rows))
                 | Case::SelectedUnsupportedTarget
                 | Case::SelectedChangedExecutable
                 | Case::SelectedChangedWheel
+                | Case::SelectedProjectionMutation { .. }
                 | Case::SelectedAbandonedChecker
         )
     );
@@ -662,4 +703,20 @@ async fn actual_glibc_241_complete_catalog_refuses_without_target_downgrade() {
 #[ignore = "Requires explicitly provisioned qualified public uv; final acquired-input fence"]
 async fn selected_checker_cannot_hide_unselected_acquired_wheel_replacement() {
     fixture(Case::SelectedChangedWheel).await;
+}
+
+#[tokio::test]
+#[ignore = "Requires explicitly provisioned qualified public uv; bounded projection growth"]
+async fn selected_checker_cannot_hide_retained_projection_growth() {
+    for file in ["projection.json", "roots.in", "constraints.in"] {
+        fixture(Case::SelectedProjectionMutation { file, grow: true }).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "Requires explicitly provisioned qualified public uv; exact projection replacement"]
+async fn selected_checker_cannot_hide_retained_projection_replacement() {
+    for file in ["projection.json", "roots.in", "constraints.in"] {
+        fixture(Case::SelectedProjectionMutation { file, grow: false }).await;
+    }
 }

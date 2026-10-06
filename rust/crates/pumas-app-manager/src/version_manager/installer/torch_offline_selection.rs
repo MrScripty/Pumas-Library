@@ -26,6 +26,19 @@ fn selection_bytes(path: &Path, maximum: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn validate_selection_provenance(runtime: &Path, provenance: &[(PathBuf, Vec<u8>)]) -> Result<()> {
+    for (path, expected) in provenance {
+        validate_torch_owned_path(runtime, path)?;
+        // Retained inputs were admitted under MAX_EVIDENCE. Use their exact
+        // length here, including the bounded reader's one-byte growth sentinel;
+        // a blocking comparison must never allocate the replacement's full size.
+        if expected.len() > MAX_EVIDENCE || selection_bytes(path, expected.len())? != *expected {
+            return Err(failed("Owned offline projection changed during selection"));
+        }
+    }
+    Ok(())
+}
+
 fn selection_hash(path: &Path, maximum: u64) -> Result<String> {
     let metadata = std::fs::symlink_metadata(path).map_err(PumasError::from)?;
     if !metadata.file_type().is_file() || metadata.len() > maximum {
@@ -463,7 +476,7 @@ impl SelectionContext<'_> {
             move |c| {
                 fence(c, &runtime, &python, &root)?;
                 solver.validate()?;
-                validate_torch_provenance(&runtime, &retained)?;
+                validate_selection_provenance(&runtime, &retained)?;
                 let mut packet = read_bounded(&directory.join("selected.json"), MAX_EVIDENCE)?;
                 let selected = packet["selected"]
                     .as_array()

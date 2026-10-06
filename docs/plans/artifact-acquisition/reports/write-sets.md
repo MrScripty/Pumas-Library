@@ -1,5 +1,27 @@
 # Acquisition implementation write sets and coordination
 
+## Q2 selected-projection read-bound review repair — 2026-10-06
+
+Parent freezes reviewed head 31b5c12536b07a69e7c691e90e4219490f3f3e36,
+tree f28400db93069442502b747107e02b9b8c27aabf, on the existing
+feat/torch-offline-selected-3f573449 lineage. The final comparison of retained
+projection.json/roots.in/constraints.in delegates to the global unbounded
+validate_torch_provenance reader, contradicting the claimed selection-local bound.
+Admit only this record, owning plan, a separate torch-selected-projection-bound-
+2026-10-06 report with adjacent raw source/reproduction/final evidence, and
+rust/crates/pumas-app-manager/src/version_manager/installer/
+{torch_offline_selection.rs,torch_catalog_owner_tests.rs}.
+Use the existing bounded selection reader with original owned-path and exact-
+content validation; cap reads to expected retained bytes/admitted maximum, including
+post-checker growth/replacement. Reproduce actual frozen read volume with synthetic
+sparse projection files; test all three retained inputs plus correct unchanged
+selection, refusal custody/receipt identity and existing aggregate regressions.
+33 pre-build feature graphs before serialized offline/locked Cargo, strict checks
+and affected aggregate Python/Rust gates are required. Global interfaces/readers,
+Python/tooling/dependencies, other owner/native/import/S3/manifest writes,
+production adoption/main/provider acceptance and paused Library transfers remain
+unchanged. No new downloads or network/configuration changes are authorized.
+
 ## Q2 qualified offline selection — admitted 2026-10-06
 
 Parent accepts catalog format head 3f573449b2fe96c3114fc2f5b952ce66da78da68,

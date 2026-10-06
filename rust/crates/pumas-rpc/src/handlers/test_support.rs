@@ -62,6 +62,8 @@ pub(crate) async fn build_test_app_state(launcher_root: &Path) -> AppState {
     #[cfg(not(feature = "inference-plugins"))]
     {
         AppState {
+            #[cfg(feature = "s3")]
+            s3_imports: crate::s3_imports::S3Imports::unavailable(),
             shutdown_request: crate::server::ShutdownRequest::default(),
             api,
             catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
@@ -77,6 +79,8 @@ pub(crate) async fn build_test_app_state(launcher_root: &Path) -> AppState {
             OnnxSessionManager::new(OnnxEmbeddingBackendKind::fake(), 2).unwrap();
 
         AppState {
+            #[cfg(feature = "s3")]
+            s3_imports: crate::s3_imports::S3Imports::unavailable(),
             shutdown_request: crate::server::ShutdownRequest::default(),
             catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
             api,

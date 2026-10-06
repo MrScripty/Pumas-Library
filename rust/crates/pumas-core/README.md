@@ -16,12 +16,41 @@ available without that feature. RPC enables it through `inference-plugins`.
 ## Optional S3 protocol reader
 
 Enable `s3` explicitly to use `acquisition::{S3Reader, S3ReaderConfig}`. This
-reader supports anonymous access to explicitly configured versioned objects;
-it does not discover credentials or endpoints from the environment. Configure
+reader supports anonymous or explicitly authenticated access to configured
+versioned objects. It does not discover credentials or endpoints from the environment. Configure
 an HTTP(S) origin, region, bucket, addressing style, and positive operation
 budget. Virtual-hosted endpoints must already identify the bucket; HTTP requires
 explicit opt-in. Redirects, ambient proxies, SDK retries, and automatic HTTP
 protocol retries are disabled.
+
+`S3Reader::new(config)` retains anonymous behavior. For authentication, construct
+`S3Credentials::new(access_key_id, secret_access_key, optional_session_token)`
+and pass the owned value to `S3Reader::new_authenticated(config, credentials)`.
+Credentials must be nonempty printable ASCII without whitespace; access-key IDs
+also exclude `/`, `,`, and `=`. Invalid input returns `S3ReaderError::Configuration`
+without echoing its value. Authenticated construction requires HTTPS, even with
+`allow_http: true`; it uses normal peer verification. The public `test-support`
+feature does not enable plaintext credential transport.
+
+The optional reader uses pinned `aws-sdk-s3` 1.137.0 as its sole protocol and
+credential owner, without `aws-config`, a default AWS HTTP transport, or a storage
+backend fallback. Requests use the existing reqwest transport pool, constrained
+to the configured origin and GET/HEAD. SDK construction, complete request futures
+and body polls use scoped diagnostics to prevent credential-header tracing while
+preserving outer acquisition status events. Error bodies are bounded to 1 MiB;
+provider diagnostics are never propagated. Prefix listing and its reviewed XML
+validation guard remain separate planned work.
+
+The maintained SDK signs HEAD and conditional range GET with SigV4 and includes
+the optional session token. Credentials remain in the in-memory reader/selection
+capability until its last owner drops; they have no serialization or discovery
+API and are never part of manifests, receipts, checkpoint identity, or persisted
+state. Their `Debug` output redacts all fields. Remote protocol diagnostics are
+replaced with bounded safe messages, including for anonymous readers, because
+response errors can echo access material. Existing error variants are retained.
+Selections can outlive their reader. Callers should scope those selections to
+their acquisition; expiration or revocation fails the selected request and does
+not refresh credentials, retry anonymously, or select a different object.
 
 `select(key, version_id, logical_path, sha256)` validates the local path and
 exact remote key, resolves HEAD for that VersionId, and refuses mutable `null`
@@ -35,6 +64,45 @@ under the caller's custody.
 
 The reader owns no acquisition store, tasks, retry policy, verifier, or
 publication. Default and headless builds omit the SDK.
+
+### Native explicit S3 model workflow
+
+With `s3` enabled, `PumasApi::import_s3_model(request, control)` composes explicit
+source selection, shared acquisition/verification and the existing model importer.
+`S3ModelImportRequest` supplies endpoint/region/bucket/addressing/timeout facts,
+`Vec<S3ManifestEntry>` with exact key/VersionId/logical path/SHA-256 evidence,
+`ModelImportSpec` naming the selected primary GGUF, a caller-reserved
+`AcquisitionWorkspace`, positive finite `AcquisitionRetryPolicy` budgets and a
+caller-retained `operation_id: Uuid`. One GGUF and optional explicit data/text
+auxiliaries use the existing importer eligibility and receipt rules.
+
+Set `credentials: None` for anonymous access, or move explicit `S3Credentials`
+into `Some(...)` for HTTPS authentication. The request has no Debug or serde
+implementation. Credentials never become the importer payload, manifest,
+receipt, progress or model metadata; there is no account discovery or saved
+source/credential configuration. Production authentication requires HTTPS even
+when the source config has `allow_http: true`.
+
+Create one `S3ModelImportControl::new()` per operation and call `subscribe()`
+before starting work to observe coalesced phase and current-file byte progress.
+The receiver contains no URLs, keys, credentials or errors; bytes can reset
+between files/retries and do not prove verification. `cancel()` returns true
+only when cancellation wins before finalization. Keep awaiting the result to
+observe owned drainage. Once finalization starts, control cancellation is
+refused; the existing importer/receipt pipeline owns publication and settlement.
+Disconnecting a progress receiver does not cancel the operation.
+
+Success returns the existing `ModelImportResult` after receipt settlement.
+`S3ModelImportError` distinguishes source selection, operation and scope drainage
+failures. A drainage error preserves an already published result or original
+operation failure. Errors/cancellation can leave retained staging or Using custody;
+there is no blanket cleanup or automatic reimport. Keep the same operation UUID
+for the same logical request, and reconcile retained work through the existing
+`model.s3.workflow` acquisition consumer and exact model-output proof pipeline.
+A reused control is refused; never use a new UUID to replay uncertain publication.
+Dropping the result waiter reports `Interrupted`, not completion; shared
+`shutdown_acquisition()` drains registered effects. RPC/desktop source entry,
+credential refresh and real-provider acceptance remain separate.
 
 ### Shared S3 acquisition and one-file GGUF import
 

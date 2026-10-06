@@ -22,6 +22,7 @@ import type { ModelLibraryLoadStatus } from '../hooks/useModels';
 import { ModelSearchBar } from './ModelSearchBar';
 import { LocalModelsList } from './LocalModelsList';
 import { RemoteModelsList } from './RemoteModelsList';
+import { S3ModelImportDialog } from './S3ModelImportDialog';
 import { ModelImportDialog } from './ModelImportDialog';
 import { ModelConversionDialog, formatConversionDirection } from './ModelConversionDialog';
 import { LinkHealthStatus } from './LinkHealthStatus';
@@ -77,6 +78,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   activeVersion,
   onChooseExistingLibrary,
 }) => {
+  const [showS3Import, setShowS3Import] = useState(false);
   const [conversionModel, setConversionModel] = useState<ModelInfo | null>(null);
   const libraryRegionRef = useRef<HTMLDivElement>(null);
   const conversionDirection = formatConversionDirection(conversionModel?.primaryFormat);
@@ -210,6 +212,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   return (
     <>
+      {showS3Import && <S3ModelImportDialog onClose={() => setShowS3Import(false)} onImported={onModelsImported} />}
       {/* Import dialog (for file picker button) */}
       {showImportDialog && importPaths.length > 0 && (
         <ModelImportDialog
@@ -254,6 +257,11 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         onHfAuthClick={openHfAuth}
         showModeToggle={Boolean(onAddModels)}
       />
+
+      {!isDownloadMode && <div className="px-4 py-2"><button type="button" onClick={() => setShowS3Import(true)}
+        className="rounded border border-[hsl(var(--launcher-border))] px-3 py-2 focus-visible:outline focus-visible:outline-2">
+        Import from S3
+      </button></div>}
 
       {isPicking && <p role="status" className="px-4 py-2 text-sm text-[hsl(var(--launcher-text-secondary))]">Choosing model files…</p>}
       {pickerError && (

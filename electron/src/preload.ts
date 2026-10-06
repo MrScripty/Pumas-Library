@@ -13,6 +13,19 @@ import type {
 } from './launcher-root-recovery';
 import type { LauncherRootCommittedPresentation } from './window-presentation';
 import {
+  decodeS3ImportParams,
+  decodeS3BundleImportParams,
+  decodeS3AuthenticatedBundleImportParams,
+  decodeS3BundleImportObservation,
+  type S3BundleImportParams,
+  type S3AuthenticatedBundleImportParams,
+  decodeS3AuthenticatedImportParams,
+  type S3AuthenticatedImportParams,
+  decodeS3ImportOutcome,
+  decodeS3ImportStatusParams,
+  decodeS3ImportCancelParams,
+  decodeS3ImportCancelOutcome,
+  type S3ImportParams,
   decodeCatalogSearchOutcome,
   decodeConversionProgressResponse,
   decodeConversionSetupStartedOutcome,
@@ -1008,6 +1021,27 @@ const electronAPI = {
   // ========================================
   // Model Import (Phase 2)
   // ========================================
+  start_s3_model_bundle_import: (request: S3BundleImportParams) =>
+    validatedApiCall('start_s3_model_bundle_import', decodeS3ImportOutcome,
+      requireDecoded(decodeS3BundleImportParams(request), 'start_s3_model_bundle_import')),
+  start_authenticated_s3_model_bundle_import: (request: S3AuthenticatedBundleImportParams) =>
+    validatedApiCall('start_authenticated_s3_model_bundle_import', decodeS3ImportOutcome,
+      requireDecoded(decodeS3AuthenticatedBundleImportParams(request), 'start_authenticated_s3_model_bundle_import')),
+  get_s3_model_bundle_import: (operationId?: string) =>
+    validatedApiCall('get_s3_model_bundle_import', decodeS3BundleImportObservation,
+      requireDecoded(decodeS3ImportStatusParams({operation_id: operationId ?? null}), 'get_s3_model_bundle_import')),
+  start_s3_model_import: (request: S3ImportParams) =>
+    validatedApiCall('start_s3_model_import', decodeS3ImportOutcome,
+      requireDecoded(decodeS3ImportParams(request), 'start_s3_model_import')),
+  start_authenticated_s3_model_import: (request: S3AuthenticatedImportParams) =>
+    validatedApiCall('start_authenticated_s3_model_import', decodeS3ImportOutcome,
+      requireDecoded(decodeS3AuthenticatedImportParams(request), 'start_authenticated_s3_model_import')),
+  get_s3_model_import: (operationId?: string) =>
+    validatedApiCall('get_s3_model_import', decodeS3ImportOutcome,
+      requireDecoded(decodeS3ImportStatusParams({ operation_id: operationId ?? null }), 'get_s3_model_import')),
+  cancel_s3_model_import: (operationId: string) =>
+    validatedApiCall('cancel_s3_model_import', decodeS3ImportCancelOutcome,
+      requireDecoded(decodeS3ImportCancelParams({ operation_id: operationId }), 'cancel_s3_model_import')),
   import_model: (localPath: string, family: string, officialName: string, repoId?: string) =>
     apiCall('import_model', {
       local_path: localPath,

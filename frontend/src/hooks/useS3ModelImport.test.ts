@@ -1,0 +1,179 @@
+import { act, renderHook } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { S3BundleImportParams, S3AuthenticatedBundleImportParams, S3BundleImportObservation, S3ImportOutcome, S3ImportParams, S3ImportCancelOutcome, S3AuthenticatedImportParams } from '../generated/desktop-contract';
+import { useS3ModelImport, type S3ImportDraft } from './useS3ModelImport';
+
+const { startBundle, startAuthenticatedBundle, getBundle, start, startAuthenticated, get, cancel } = vi.hoisted(() => ({
+  startBundle: vi.fn<(request: S3BundleImportParams) => Promise<S3ImportOutcome>>(),
+  startAuthenticatedBundle: vi.fn<(request: S3AuthenticatedBundleImportParams) => Promise<S3ImportOutcome>>(),
+  getBundle: vi.fn<(id?: string) => Promise<S3BundleImportObservation>>(),
+  start: vi.fn<(request: S3ImportParams) => Promise<S3ImportOutcome>>(),
+  startAuthenticated: vi.fn<(request: S3AuthenticatedImportParams) => Promise<S3ImportOutcome>>(),
+  get: vi.fn<(id?: string) => Promise<S3ImportOutcome>>(),
+  cancel: vi.fn<(id: string) => Promise<S3ImportCancelOutcome>>(),
+}));
+vi.mock('../api/import', () => ({ importAPI: {
+  startS3ModelBundleImport:startBundle, startAuthenticatedS3ModelBundleImport:startAuthenticatedBundle, getS3ModelBundleImport:getBundle,
+  startS3ModelImport: start, getS3ModelImport: get, cancelS3ModelImport: cancel,
+  startAuthenticatedS3ModelImport: startAuthenticated,
+} }));
+const id = 'c3f7d104-1234-4321-abcd-aaaaaaaaaaaa';
+const draft: S3ImportDraft = {
+  endpoint: 'https://source.invalid', region: 'fixture-region', bucket: 'fixture-bucket',
+  addressing: 'path', key: 'models/exact object.gguf', version_id: 'exact+version/id',
+  filename: 'weights.gguf', sha256: 'a'.repeat(64), family: 'fixture', official_name: 'Fixture GGUF',
+};
+const running: S3ImportOutcome = { status: 'running', operation_id: id,
+  progress: { phase: 'acquiring', downloaded_for_current_file: '18446744073709551615' } };
+const completed: S3ImportOutcome = { status: 'finished', operation_id: id,
+  result: { status: 'completed', model_id: 'fixture/model' } };
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+async function settle() { await act(async () => { await Promise.resolve(); }); }
+
+describe('explicit S3 import observation', () => {
+  it('admits credentials only through the distinct path and observes a lost acknowledgement without replay or secret state', async () => {
+    const credentials = { access_key_id: 'synthetic-renderer-key', secret_access_key: 'synthetic-renderer-secret', session_token: 'synthetic-renderer-token' };
+    startAuthenticated.mockRejectedValueOnce(new Error(JSON.stringify(credentials)));
+    get.mockResolvedValueOnce({ status: 'idle' }).mockResolvedValue(running);
+    const { result } = renderHook(() => useS3ModelImport());
+    await settle();
+    for (const patch of [{ secret_access_key: '' }, { secret_access_key: 'bad\n' }, { session_token: '' }, { session_token: 'bad\n' }, { access_key_id: 'bad/key' }]) {
+      await act(async () => { await result.current.startAuthenticated(draft, { ...credentials, ...patch }); });
+    }
+    expect(startAuthenticated).not.toHaveBeenCalled();
+    await act(async () => { await result.current.startAuthenticated(draft, credentials); });
+    expect(startAuthenticated).toHaveBeenCalledTimes(1);
+    expect(startAuthenticated).toHaveBeenCalledWith({ source: { ...draft, operation_id: id }, credentials });
+    expect(start).not.toHaveBeenCalled();
+    expect(get).toHaveBeenLastCalledWith(id);
+    for (const secret of Object.values(credentials)) expect(JSON.stringify(result.current)).not.toContain(secret);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(startAuthenticated).toHaveBeenCalledTimes(1);
+    act(() => result.current.observeAgain()); await settle();
+    expect(startAuthenticated).toHaveBeenCalledTimes(1);
+  });
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue(id);
+    get.mockResolvedValue({ status: 'idle' });
+  });
+  afterEach(() => { vi.clearAllMocks(); vi.restoreAllMocks(); vi.useRealTimers(); });
+
+  it('validates pins before admission and forwards exact source facts once while a command is pending', async () => {
+    const pending = deferred<S3ImportOutcome>();
+    start.mockReturnValueOnce(pending.promise);
+    get.mockResolvedValueOnce({ status: 'idle' }).mockResolvedValue(running);
+    const { result } = renderHook(() => useS3ModelImport());
+    await settle();
+    for (const invalid of [{ sha256: 'bad' }, { version_id: '' }, { version_id: 'null' }, { key: '../weights.gguf' }, { endpoint: 'http://source.invalid' },
+      { endpoint: 'https://user:secret@source.invalid' }, { session_token: 'synthetic-secret' }]) {
+      await act(async () => { await result.current.start({ ...draft, ...invalid }); });
+    }
+    expect(start).not.toHaveBeenCalled();
+    let command!: Promise<void>;
+    act(() => { command = result.current.start(draft); });
+    await act(async () => { await result.current.start(draft); });
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledWith({ ...draft, operation_id: id });
+    await act(async () => { pending.resolve(running); await command; });
+    expect(result.current.snapshot).toEqual(running);
+    expect(result.current.commandBusy).toBe(false);
+  });
+
+  it('fences an older status response when cancellation takes ownership; acknowledgement is not completion', async () => {
+    const old = deferred<S3ImportOutcome>();
+    get.mockResolvedValueOnce(running).mockReturnValueOnce(old.promise).mockResolvedValue(running);
+    cancel.mockResolvedValue({ accepted: true, outcome: {
+      ...running, progress: { phase: 'cancelling', downloaded_for_current_file: '1' },
+    } });
+    const onImported = vi.fn();
+    const { result } = renderHook(() => useS3ModelImport(onImported));
+    await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    await act(async () => { await result.current.cancel(); });
+    await act(async () => { old.resolve(completed); });
+    expect(result.current.snapshot?.status).toBe('running');
+    expect(result.current.error).toContain('Cancellation requested');
+    expect(onImported).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledWith(id);
+  });
+
+  it('observes the same identity after an ambiguous admission and never resubmits', async () => {
+    start.mockRejectedValue(new Error('private transport detail'));
+    get.mockResolvedValueOnce({ status: 'idle' }).mockResolvedValue(completed);
+    const onImported = vi.fn();
+    const { result } = renderHook(() => useS3ModelImport(onImported));
+    await settle();
+    await act(async () => { await result.current.start(draft); });
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(get).toHaveBeenLastCalledWith(id);
+    expect(result.current.snapshot).toEqual(completed);
+    expect(result.current.error).toBeNull();
+    expect(onImported).toHaveBeenCalledTimes(1);
+    act(() => result.current.observeAgain());
+    await settle();
+    expect(onImported).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops polling on close and reopens the retained backend result without admission', async () => {
+    const pending = deferred<S3ImportOutcome>();
+    get.mockResolvedValueOnce(running).mockReturnValueOnce(pending.promise).mockResolvedValue(completed);
+    const onImported = vi.fn();
+    const old = renderHook(() => useS3ModelImport(onImported));
+    await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    old.unmount();
+    await act(async () => { pending.resolve(completed); await vi.advanceTimersByTimeAsync(5000); });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(onImported).not.toHaveBeenCalled();
+    const reopened = renderHook(() => useS3ModelImport(onImported));
+    await settle();
+    expect(reopened.result.current.snapshot).toEqual(completed);
+    expect(start).not.toHaveBeenCalled();
+    expect(onImported).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not accept an observation for another identity or leak rejection diagnostics', async () => {
+    get.mockResolvedValueOnce(running)
+      .mockResolvedValueOnce({ ...completed, operation_id: 'different' })
+      .mockRejectedValueOnce(new Error('private diagnostic'));
+    const { result } = renderHook(() => useS3ModelImport());
+    await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(result.current.snapshot).toBeNull();
+    expect(result.current.error).toContain('did not match');
+    act(() => result.current.observeAgain());
+    await settle();
+    expect(result.current.error).toContain('observation is unavailable');
+    expect(result.current.error).not.toContain('private diagnostic');
+    expect(get).toHaveBeenLastCalledWith(id);
+  });
+});
+
+it('observes aggregate bundles with unchanged UUID cancellation and no credential replay after lost acknowledgement', async () => {
+  vi.useFakeTimers(); vi.spyOn(crypto,'randomUUID').mockReturnValue(id);
+  try {
+    const progress={file_index:1,files_total:2,files_acquired:1,bytes_acquired:'2',total_expected_bytes:'26',total_bytes_observed:'3'};
+    getBundle.mockResolvedValueOnce({outcome:{status:'idle'},bundle_progress:null}).mockResolvedValue({outcome:running,bundle_progress:progress});
+    const credentials={access_key_id:'synthetic-bundle-hook-key',secret_access_key:'synthetic-bundle-hook-secret',session_token:null};
+    startAuthenticatedBundle.mockRejectedValueOnce(new Error(JSON.stringify(credentials)));
+    const auxiliary={key:'models/shared',version_id:'data-v2',logical_path:'config/data.json',sha256:'b'.repeat(64)};
+    const {result}=renderHook(() => useS3ModelImport(undefined,true)); await settle();
+    await act(async () => {await result.current.startBundle(draft,[{...auxiliary,logical_path:'../data.json'}],credentials);});
+    expect(startAuthenticatedBundle).not.toHaveBeenCalled();
+    await act(async () => {await result.current.startBundle(draft,[auxiliary],credentials);});
+    expect(startAuthenticatedBundle).toHaveBeenCalledTimes(1);
+    expect(startAuthenticatedBundle).toHaveBeenCalledWith({source:{operation_id:id,endpoint:draft.endpoint,region:draft.region,bucket:draft.bucket,addressing:'path',family:draft.family,official_name:draft.official_name,primary_logical_path:draft.filename,
+      files:[{key:draft.key,version_id:draft.version_id,logical_path:draft.filename,sha256:draft.sha256},auxiliary]},credentials});
+    expect(startBundle).not.toHaveBeenCalled();expect(start).not.toHaveBeenCalled();expect(startAuthenticated).not.toHaveBeenCalled();
+    expect(result.current.bundleProgress).toEqual(progress);expect(getBundle).toHaveBeenLastCalledWith(id);
+    for(const secret of [credentials.access_key_id,credentials.secret_access_key]) expect(JSON.stringify(result.current)).not.toContain(secret);
+    await act(async () => {await vi.advanceTimersByTimeAsync(1000);});expect(startAuthenticatedBundle).toHaveBeenCalledTimes(1);
+    cancel.mockResolvedValueOnce({accepted:true,outcome:{...running,progress:{phase:'cancelling',downloaded_for_current_file:'1'}}});
+    await act(async () => {await result.current.cancel();});expect(cancel).toHaveBeenCalledWith(id);
+  } finally {vi.clearAllMocks();vi.restoreAllMocks();vi.useRealTimers();}
+});

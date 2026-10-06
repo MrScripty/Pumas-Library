@@ -1,5 +1,15 @@
 # Acquisition acceptance matrix
 
+**2026-10-05 bounded S3 update:** Explicit normal sibling composition cd9d8191
+and qualification successor 7358bd3d pass combined protocol and Linux production
+installed-backend checks, including ten independently signed TLS scenarios.
+The [provider/platform report](s3-composed-provider-qualification-2026-10-05.md)
+separates fixtures, native process evidence, the unreleased qualification archive,
+blocked sandbox-enabled browser and official MinIO installation, unrun AWS/other
+providers and unsupported-by-this-run targets. It records exact external missing
+inputs. AC13/AC14, AQ-S3 and full AC17/Q4 remain pending; neither DOM tests nor
+the qualification archive advance actual-provider or shipping-platform gates.
+
 **Acceptance status:** [Build 37141872406](https://github.com/MrScripty/Pumas-Library/actions/runs/37141872406) passed all seven ordinary jobs on `0dd38c707125facfdaae29c82704213e85ceb155` (tree `7611df7a568d56807589bb2dca2bfbb03e484dd0`): workflow/release contracts, frontend/desktop, strict Rust quality, headless without inference, and native Linux/macOS/Windows. This is exact-head supporting AC15 evidence for the checks that ran. Release archives and native model E2E remain unqualified; AQ-HTTP, external review disposition and maintainer integration remain pending. Review repairs after this head require fresh exact-head qualification. AC03 retains its recorded Linux x86_64 source-built RPC scope. AC01–AC02, AC04–AC14, and AC16–AC18 remain pending. Earlier failures and narrower local runs below are historical; they are not the status of the qualified integration head. Deployment, real resource-bound, complete public-interface and real-cluster claims are not established.
 
 | ID | Observable claim / deciding procedure | Evidence kind | Environment | Mode | Milestone / owner | Status |

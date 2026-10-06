@@ -19,6 +19,8 @@ async fn serving_test_state() -> (TempDir, AppState) {
     (
         temp_dir,
         AppState {
+            #[cfg(feature = "s3")]
+            s3_imports: crate::s3_imports::S3Imports::unavailable(),
             shutdown_request: crate::server::ShutdownRequest::default(),
             catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
             api,

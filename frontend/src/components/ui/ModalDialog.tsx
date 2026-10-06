@@ -41,7 +41,8 @@ function getTopModal(): ModalEntry | undefined {
 
 function getFocusableElements(dialog: HTMLElement): HTMLElement[] {
   return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-    (element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true'
+    // :disabled includes inherited fieldset state and its first-legend exception.
+    (element) => !element.matches(':disabled') && !element.hidden && element.getAttribute('aria-hidden') !== 'true'
   );
 }
 
@@ -52,7 +53,7 @@ function focusModal(entry: ModalEntry): void {
   }
 
   const requestedTarget = entry.initialFocusRef?.current;
-  if (requestedTarget?.isConnected && dialog.contains(requestedTarget)) {
+  if (requestedTarget?.isConnected && dialog.contains(requestedTarget) && !requestedTarget.matches(':disabled')) {
     requestedTarget.focus();
     return;
   }

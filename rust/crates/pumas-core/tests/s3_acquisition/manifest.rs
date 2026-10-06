@@ -51,6 +51,9 @@ fn head_version(size: usize, version: &str) -> Vec<u8> {
     format!("HTTP/1.1 200 OK\r\nContent-Length: {size}\r\nLast-Modified: Wed, 01 Jan 2025 00:00:00 GMT\r\nx-amz-version-id: {version}\r\nETag: \"selected\"\r\nConnection: close\r\n\r\n").into_bytes()
 }
 fn responses(entries: &[S3ManifestEntry]) -> Vec<Vec<u8>> {
+    responses_with_aux(entries, AUX)
+}
+fn responses_with_aux(entries: &[S3ManifestEntry], aux: &[u8]) -> Vec<Vec<u8>> {
     let mut order: Vec<_> = entries.iter().collect();
     order.sort_by(|a, b| a.logical_path.cmp(&b.logical_path));
     let mut wire = Vec::new();
@@ -58,7 +61,7 @@ fn responses(entries: &[S3ManifestEntry]) -> Vec<Vec<u8>> {
         let size = if entry.logical_path == LOGICAL {
             gguf().len()
         } else {
-            AUX.len()
+            aux.len()
         };
         wire.push(head_version(size, &entry.version));
     }
@@ -66,9 +69,11 @@ fn responses(entries: &[S3ManifestEntry]) -> Vec<Vec<u8>> {
         let bytes = if entry.logical_path == LOGICAL {
             gguf()
         } else {
-            AUX.to_vec()
+            aux.to_vec()
         };
-        wire.push(range(&entry.version, 0, bytes.len(), &bytes));
+        if !bytes.is_empty() {
+            wire.push(range(&entry.version, 0, bytes.len(), &bytes));
+        }
     }
     wire
 }
@@ -260,6 +265,15 @@ async fn bundle_publication_and_cold_proof_with_same_key(
     fault: &str,
     same_key: bool,
 ) {
+    bundle_publication_and_cold_proof_with_aux(interrupt, fault, same_key, AUX).await;
+}
+
+async fn bundle_publication_and_cold_proof_with_aux(
+    interrupt: bool,
+    fault: &str,
+    same_key: bool,
+    aux: &[u8],
+) {
     let root = tempfile::TempDir::new().unwrap();
     let stage = tempfile::TempDir::new().unwrap();
     let first = api(root.path()).await;
@@ -267,7 +281,9 @@ async fn bundle_publication_and_cold_proof_with_same_key(
     if same_key {
         entries[1].source_key = entries[0].source_key.clone();
     }
-    let fixture = Fixture::serve(responses(&entries)).await;
+    entries[1].expected_sha256 =
+        Sha256Evidence::new("fixture.sha256", hex::encode(Sha256::digest(aux))).unwrap();
+    let fixture = Fixture::serve(responses_with_aux(&entries, aux)).await;
     let selected = reader(&fixture.endpoint)
         .select_manifest(entries)
         .await
@@ -319,6 +335,12 @@ async fn bundle_publication_and_cold_proof_with_same_key(
         .unwrap();
     assert_eq!(record.manifest, manifest);
     assert_eq!(record.files.len(), 2);
+    assert_eq!(record.files[0].bytes, aux.len() as u64);
+    assert_eq!(record.files[0].sha256, hex::encode(Sha256::digest(aux)));
+    assert_eq!(
+        record.manifest.files()[0].expected_size(),
+        Some(aux.len() as u64)
+    );
     assert_eq!(
         matches!(record.phase, AcquisitionPhase::Using { .. }),
         interrupt
@@ -326,7 +348,7 @@ async fn bundle_publication_and_cold_proof_with_same_key(
     let issued = consumer.completion_receipt(&record).unwrap().unwrap();
     let target = first.model_library().library_root().join(&id);
     assert_eq!(std::fs::read(target.join(LOGICAL)).unwrap(), gguf());
-    assert_eq!(std::fs::read(target.join(AUX_PATH)).unwrap(), AUX);
+    assert_eq!(std::fs::read(target.join(AUX_PATH)).unwrap(), aux);
     let receipt_bytes = std::fs::read(target.join(".pumas_import_publication.json")).unwrap();
     let output: serde_json::Value = serde_json::from_slice(&receipt_bytes).unwrap();
     super::bounds::check_publication_schema_reserve(&output);
@@ -416,7 +438,11 @@ async fn bundle_publication_and_cold_proof_with_same_key(
     consumer.shutdown().await.unwrap();
     close(&cold).await;
     let requests = fixture.finish().await;
-    assert_eq!(requests.len(), 4, "bundle recovery replayed the source");
+    assert_eq!(
+        requests.len(),
+        if aux.is_empty() { 3 } else { 4 },
+        "bundle recovery replayed the source"
+    );
     if same_key {
         assert!(requests
             .iter()
@@ -427,7 +453,11 @@ async fn bundle_publication_and_cold_proof_with_same_key(
                     .iter()
                     .filter(|request| request.contains(&format!("versionId={version}")))
                     .count(),
-                2
+                if version == AUX_VERSION && aux.is_empty() {
+                    1
+                } else {
+                    2
+                }
             );
         }
     }
@@ -446,7 +476,7 @@ async fn bundle_publication_and_cold_proof_with_same_key(
     );
     assert_eq!(
         std::fs::read(stage.path().join("stage").join(AUX_PATH)).unwrap(),
-        AUX
+        aux
     );
     if fault != "none" {
         if fault.contains("identity") {
@@ -650,5 +680,12 @@ async fn bundle_refuses_other_weights_executable_auxiliaries_and_reserved_metada
             std::fs::read(stage.path().join("stage").join(auxiliary)).unwrap(),
             AUX
         );
+    }
+}
+
+#[tokio::test]
+async fn empty_auxiliary_mixed_bundle_publishes_and_recovers_exact_receipts() {
+    for (interrupt, fault) in [(false, "none"), (true, "none"), (true, "auxiliary")] {
+        bundle_publication_and_cold_proof_with_aux(interrupt, fault, true, b"").await;
     }
 }

@@ -30,6 +30,8 @@ use tokio::{
 const VERSION: &str = "selected-v1";
 const LOGICAL: &str = "weights.gguf";
 
+#[path = "s3_acquisition/empty.rs"]
+mod empty;
 #[path = "s3_acquisition/manifest.rs"]
 mod manifest;
 
@@ -325,8 +327,9 @@ async fn s3_protocol_through_shared_custody_imports_a_ready_indexed_model() {
         .unwrap();
     let requests = fixture.finish().await;
     assert_eq!(requests.len(), 2);
-    assert!(requests[1]
-        .starts_with("GET /fixture-bucket/models/model.gguf?versionId=selected-v1 HTTP/1.1"));
+    assert!(requests[1].starts_with(
+        "GET /fixture-bucket/models/model.gguf?x-id=GetObject&versionId=selected-v1 HTTP/1.1"
+    ));
     assert!(requests[1]
         .to_ascii_lowercase()
         .contains("\r\nif-match: \"selected\"\r\n"));

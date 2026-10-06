@@ -696,3 +696,156 @@ PR39 review 5409255854 identified a structurally valid generic manifest or callb
 Production write set is only `acquisition/service.rs`: actual pretty JSON and unique parent-prefix accounting before new facade admission; actual completion binding accounting before issuance. Both run in the existing owned blocking scope. No deserializer, store schema, producer schema, late defensive check, retained settlement, lifecycle owner, dependency or generator changes. Test set is `tests/s3_acquisition.rs`, its existing `manifest.rs`, and new `bounds.rs`: actual red generic/source and callback/issuance failures, namespace expansion, existing real admitted bundle import and cold proof with the current output-schema reserve oracle, and missing/null identity with intact payload. README, this write set, active plan, ledger and qualification report document contracts and results. The interrupted README sentence and joined ledger number/SHA tokens are corrected without altering the identities. Parent owns PR39 review and integration; no external review request or merge is admitted.
 
 A temporary 3 MiB callback/bundle stress extension ran 36 passes and exposed an independent live stage-discovery ENOTDIR owner failure at shutdown. Its exact fixture source, patch and failed log are retained outside this repair; it is not admitted as a passing qualification fixture or weakened/retried into a success claim. AQ-S3 remains blocked on that separate observation.
+## Q3 explicit authenticated-reader successor — 2026-10-05
+
+The coordinator's explicit delegation admits `docs/plans/artifact-acquisition/plan.md`
+Q3 execution on exact PR40 `63123fd8f9f866064a8315096ab3fb1fc81e8f0f`
+(tree `163ef2442695b44555ac0e42ff79a6a88de9e817`), retaining main
+`05717338c2aea737483fb4b28c3ed4053a65de96`. This slice adds explicit
+request-scoped access-key/secret credentials with optional session token in the
+existing reader, with HTTPS mandatory in production. The exact source write set
+is `rust/crates/pumas-core/src/acquisition/{s3.rs,mod.rs,s3/auth_tests.rs}`,
+`rust/crates/pumas-core/tests/{s3_reader.rs,s3_reader/fixture.rs}`, the existing
+core README and `docs/contracts/artifact-acquisition.md`. Plan/ledger updates
+and the linked qualification report record evidence and handoff. The small
+fixture extraction shares existing protocol setup with private unit tests; it
+does not expose plaintext credential transport through any product feature.
+No watcher, importer, reconciliation, S3 manifest, receipt/schema, dependency,
+lockfile, native-repair, or provider-provisioning changes are admitted. Signing
+stays with maintained `object_store`; reader selections carry only ephemeral
+access material, and the existing acquisition owner retains retry, verification,
+receipt and publication responsibilities. Parent owns PRs/reviews/merges.
+
+## Q3 native explicit source workflow successor — 2026-10-05
+
+The coordinator freezes reader `ffecce07220f6504fb1db2e348759473bd284de6` and
+admits its separate `feat/s3-model-workflow-ffecce07` successor. Exact production
+members are core `src/api/s3_models.rs` (new native facade and request/control/
+progress/error types), `src/api/mod.rs`, `src/lib.rs` (additive feature-gated
+exports), and `src/acquisition/service.rs` (crate-private selection under the
+existing bounded consumer scope). No second transfer, persistence or publication
+owner is introduced. Tests are new `tests/s3_model_workflow.rs`, a co-located
+control test, and the requested token SignedHeaders/tamper assertion in existing
+`src/acquisition/s3/auth_tests.rs`. Contracts/core README, active plan, ledger
+and the workflow qualification report document the surface and evidence.
+
+Reader and S3 manifest production code, watcher, importer, reconciliation,
+staging/VersionId fixtures, schemas, dependencies/lockfiles, native-repair
+write sets and generated contracts remain unchanged. Real credentials/provider,
+external reviewer contact, account provisioning, PR/review/merge and hosting
+are excluded; parent retains those coordination responsibilities. Fixture TLS
+uses the existing synthetic localhost certificate with verification enabled in
+an isolated child, with no production certificate or transport policy change.
+
+## Q3 anonymous desktop/RPC successor — 2026-10-05
+
+Exact base is frozen native workflow `eabc395966f2f3f155b298144bc81c4941121225`;
+branch is `feat/s3-desktop-workflow-eabc3959`. Production members are RPC
+`src/s3_imports.rs`, `src/contract/s3.rs`, command/export/handler dispatch,
+`src/main.rs` and `src/server.rs`; RPC Cargo manifest and its three existing
+lockfile references; Electron IPC registry/validation/preload; frontend import
+adapter/bridge types, Model Manager, `S3ModelImportDialog` and
+`useS3ModelImport`; and the six canonical generated desktop contract files.
+The same-file and cap-std packages already exist in the locked/default notice
+closure; no resolved package identity changes. Existing owned directory grants
+hold workspace authority; existing native API owns selection, transfer,
+verification, publication, registration and receipts.
+
+Tests are RPC `src/s3_imports/tests.rs`, one no-S3 handler regression, the three
+existing AppState test literals that require the new feature-gated client,
+Electron `s3-import-contract.test.mjs` and one bundled-preload test, and the
+new renderer hook/dialog tests. README/contracts/plan/ledger and desktop report
+document the scope. Attribution regeneration proves package records and notice
+bytes identical; only RPC-manifest/Cargo.lock input hashes are refreshed.
+
+No core or app-manager production/test/manifest files, reader signing code,
+S3 manifest, watcher/importer/discovery/reconciliation, staged VersionId repairs,
+native-repair write set, ambient credential path or account setup is changed.
+Anonymous UI is the admitted small slice; an authenticated secret boundary and
+real-provider/packaged/browser/platform qualification are separate. No security
+bypass, real credentials, paid service or external reviewer contact is admitted.
+Parent owns PR/review/merge/hosted/Library coordination.
+
+## Q3 authenticated desktop/RPC successor — 2026-10-05
+
+Scope was traced and reported before implementation in
+[s3-credential-boundaries-2026-10-05.md](s3-credential-boundaries-2026-10-05.md).
+Independent review fixes are frozen on `fix/s3-desktop-review-106a6ca4` at
+`887308dc`; authenticated successor descends from that tested commit and frozen
+anonymous `106a6ca4`. Prerequisite `0023bcf9` edits Electron `python-bridge.ts`,
+`main.ts`, new `s3-import-rpc.ts`, receiving/transport tests and the boundary trace.
+
+Authenticated implementation `39f7689a` edits only RPC contract/export/handler,
+`s3_imports.rs`/co-located tests; Electron registry/IPC/preload and three source
+contract/transport tests; frontend ImportAPI/bridge types, S3 dialog/hook and
+co-located tests; the six generated DTO/validator files; root/RPC READMEs and
+shared contract. Plan/ledger/boundary/qualification records document that scope.
+No core/app-manager, reader/signing/manifest, native repair, importer/watcher,
+discovery, dependency/lockfile or hosted workflow write is admitted. Credentials
+are bounded explicit ephemeral request data, with no ambient discovery,
+persistence, logging, automatic replay or refresh. Synthetic fixture credentials
+only; existing normally verified HTTPS trust remains unchanged. Parent owns
+review, hosted/browser/provider qualification, PRs/merges and Library delivery.
+
+## Q3 pinned multi-file desktop/native composition — 2026-10-05
+
+Scope was reported before implementation on separate branch
+`feat/s3-desktop-bundle-d30412e9`, frozen base d30412e9. Core prerequisite dd90f416
+writes only `acquisition/s3.rs`, default observation methods/ticks in
+`acquisition/service.rs`, `api/s3_models.rs`, root/API exports and native workflow
+progress assertions. It uses shared manifest validation and unchanged private
+object validation; `s3/manifest.rs`, importer, watcher and all PR40 repair paths
+remain untouched by feature implementation.
+
+Desktop milestone 339032ff writes RPC S3 contract/export/command/handler,
+`s3_imports.rs` and tests; Electron registry/validation/preload/source result
+projection and three source tests; frontend ImportAPI/bridge types, existing S3
+hook/dialog and tests; six canonical generated files; root/RPC README and shared
+contract. No new dependency, config persistence, transfer/retry/publication
+writer or credential storage is admitted.
+
+After PR40 merged into accepted main 838eb299, the coordinator explicitly
+requested normal composition. Merge d9d907cf has ordered parents 339032ff and
+838eb299, tree 82511113e7e82a44ee526f91a8ce7f480282e0ec. It includes PR40's
+reconciliation/HF/library/publication-observation/test/report changes solely by
+normal merge, with frozen milestones and refs preserved. Follow-up 5104a21e adds
+only empty-object refusal fixture and help/docs text. Affected composed lifecycle
+and full RPC checks were rerun. Qualification/plan/ledger records are the final
+docs set. See [report](s3-desktop-bundle-qualification-2026-10-05.md) for public
+surfaces, raw evidence, exact composition and pending browser/default/provider
+limits. Parent owns PRs/reviews/merges/hosted/Library coordination.
+
+
+### Q3 frozen sibling composition and qualification — 2026-10-05
+
+`qualification/s3-composed-e6acb0ba`: normal merge of frozen e6acb0ba and
+7dc6acef, ordered exactly as authorized. Five documentation conflicts combine
+both historical scopes and their current contract/README behavior. No additional
+production code change beyond the two siblings. New successor writes only
+`scripts/release/qualify-s3-installed.py`, the composed provider qualification
+report and current plan/ledger/write-set/acceptance-matrix annotations. Owned
+scratch logs/archive/build receipts remain outside the repository. Existing PR40
+watcher/importer/manifest/publication protocol is preserved; frozen refs stay
+unchanged. No service, dependency manifest, provider grant, release tag or real
+credential is added.
+
+### Q3 zero-length selected-member successor — 2026-10-05
+
+Separate `feat/s3-empty-members-e8082649`, frozen base e808: only production
+`acquisition/s3.rs` adapter, S3 acquisition test entry/empty/manifest fixtures,
+RPC source-import tests, the dialog's obsolete help sentence, RPC README/shared
+contract, plan/ledger/write set and its qualification report. No new public API,
+schema, dependency, importer/publication/watcher/manifest or security policy.
+The reserved-destination admission correction is independently scoped and
+qualified on sibling `fix/s3-bundle-reserved-e8082649`.
+
+### Q3 reserved acquired destination preflight correction — 2026-10-05
+
+Separate `fix/s3-bundle-reserved-e8082649`, frozen base e808: importer `staging.rs`
+extracts/reuses its existing reserved-root check and adds pure public preflight;
+native `api/s3_models.rs` and RPC `contract/s3.rs` call it before source/admission.
+Native workflow and RPC source tests exercise refusal/corrected success; importer
+unit exercises all owned roots/aliases. RPC README/shared contract, plan/ledger/
+write set and correction qualification report record this reviewed gap. Reader,
+manifest, watcher, importer.rs, existing publication protocol, dependencies,
+frontend/Electron/generated DTOs and all zero-length work are excluded.

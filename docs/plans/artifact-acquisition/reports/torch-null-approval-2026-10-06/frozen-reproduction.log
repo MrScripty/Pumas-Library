@@ -1,0 +1,11 @@
+Frozen head: 64d62cdc90fa2c3ec9424d99cde0865bd919e793
+Supplied approval JSON: null; both binding fields absent
+CLI exit: 0
+Processing /tmp/tmpurxztynv/wheels/root_wheel-1.0-py3-none-any.whl (from -r /tmp/tmpurxztynv/proof/local-requirements.txt (line 1))
+Installing collected packages: root-wheel
+Successfully installed root-wheel-1.0
+
+
+package stage: True
+installed RECORD proof: True
+Confirmed explicit-approval downgrade with actual tiny local wheel consumption; package code not imported.

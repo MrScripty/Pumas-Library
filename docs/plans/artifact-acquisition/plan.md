@@ -1,5 +1,15 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 supplied-null approval repair (2026-10-06):** Frozen `64d62cdc` remains intact.
+Source `c35a2801` confirms and closes the CLI downgrade where supplied JSON null
+and absent resolution binding fields selected legacy consumption. Supplied
+approval data must be an object before target resolution; missing/null/malformed
+data refuse before stage/pip. Valid legacy/bound behavior, native/tag and packet
+repairs, finite recipe and resolver/catalog authority remain unchanged. 54 Python
+tests, 25 embedded/shared handoff tests, 33 feature graphs and scoped checks pass.
+See [exact reproduction and repair evidence](reports/torch-null-approval-2026-10-06.md).
+No production resolver/observation-producer adoption; P1 and Q2/AQ gates stay open.
+
 **Q2 target packet/custody successor (2026-10-06):** Frozen `638bb7c` stays intact.
 Separate repair `1c40f5bc` confirms/refuses WOW64 interpreter-tag mismatch and
 Windows debug fallback detection before stage/pip. Source `24a5b5c7` binds

@@ -1,0 +1,50 @@
+test_cli_supplied_invalid_observation_data_never_selects_legacy (test_target_observation.ObservationTests.test_cli_supplied_invalid_observation_data_never_selects_legacy) ... 
+  test_cli_supplied_invalid_observation_data_never_selects_legacy (test_target_observation.ObservationTests.test_cli_supplied_invalid_observation_data_never_selects_legacy) (context='legacy', raw='null') ... FAIL
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+test_cli_supplied_missing_observation_file_refuses_in_both_modes (test_target_observation.ObservationTests.test_cli_supplied_missing_observation_file_refuses_in_both_modes) ... Invalid or incomplete verified local wheel set
+Invalid or incomplete verified local wheel set
+ok
+
+======================================================================
+FAIL: test_cli_supplied_invalid_observation_data_never_selects_legacy (test_target_observation.ObservationTests.test_cli_supplied_invalid_observation_data_never_selects_legacy) (context='legacy', raw='null')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-null-approval-64d6/torch-server/tests/test_target_observation.py", line 68, in test_cli_supplied_invalid_observation_data_never_selects_legacy
+    self.refuse_command(args)
+  File "/tmp/pumas-q2-null-approval-64d6/torch-server/tests/test_target_observation.py", line 52, in refuse_command
+    fixtures.consumer.main()
+  File "/tmp/pumas-q2-null-approval-64d6/torch-server/install_verified_wheels.py", line 320, in main
+    install(resolution["artifacts"], args.wheels, args.target, args.output,
+  File "/tmp/pumas-q2-null-approval-64d6/torch-server/install_verified_wheels.py", line 202, in install
+    completed = subprocess.run(
+                ^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/unittest/mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/unittest/mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/unittest/mock.py", line 1198, in _execute_mock_call
+    raise effect
+AssertionError: pip must not start
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.140s
+
+FAILED (failures=1)

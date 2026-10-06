@@ -1,0 +1,6 @@
+Successor CLI: supplied JSON null, both resolution binding fields absent
+CLI exit: 3
+stderr: Invalid or incomplete verified local wheel set
+package stage: False
+output stage: False
+Exact case now refuses before stage creation or pip.

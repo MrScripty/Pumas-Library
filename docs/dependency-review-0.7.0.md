@@ -1,5 +1,85 @@
 # Dependency review for 0.7.0
 
+## Node build dependency maintenance (2026-10-06)
+
+This candidate refreshes only transitive build/dev dependencies from main
+`1c1c7875ff8fc43b3ad1957fb2a94d44c850716c`, using pnpm 10.33.0. Importers,
+direct dependencies, package majors, public APIs and the Rust tree are unchanged.
+The five reviewed package names are absent from the production dependency closure
+of both workspaces; this does not exempt the build machine from their risks.
+
+| Package | Previous lock resolution | Candidate resolution | Advisory disposition |
+| --- | --- | --- | --- |
+| `brace-expansion` | 1.1.18 / 2.1.4 / 5.0.9 | 1.1.21 / 2.1.7 / 5.0.12 | Meets the patched branches for [GHSA-q2hr-2g5m-vwhr](https://github.com/advisories/GHSA-q2hr-2g5m-vwhr), [GHSA-qhr7-859c-m2p7](https://github.com/advisories/GHSA-qhr7-859c-m2p7), and [GHSA-6j4f-fj2g-mc7p](https://github.com/advisories/GHSA-6j4f-fj2g-mc7p). |
+| `fast-uri` | 3.1.7 | 3.1.8 | Meets the patched 3.x branch for [GHSA-hrr3-gc8f-f4qj](https://github.com/advisories/GHSA-hrr3-gc8f-f4qj). |
+| `source-map-js` | 1.2.1 | 1.2.2 | Patched version for [GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q). |
+| `http-cache-semantics` | 4.2.0 | 4.3.0 | Includes the separate [Vary wildcard/inherited-header fix](https://github.com/kornelski/http-cache-semantics/commit/9fb520be70eff3ff502fe965d9c3265ca2c64e26). |
+| `sprintf-js` | 1.1.3 | 1.1.3 retained | [GHSA-hp3w-g68c-fv3c](https://github.com/advisories/GHSA-hp3w-g68c-fv3c) has no patched version. |
+
+[GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp)
+for http-cache-semantics lists no confirmed patched version. Its maintainer
+[disputes the max-stale report](https://github.com/kornelski/http-cache-semantics/issues/56#issuecomment-5975759591).
+The candidate's 4.3.0 resolution falls outside the database's current `<=4.2.0`
+range, but that scanner result does not prove remediation of the disputed issue.
+Its checked path is Electron build tooling through `cacheable-request`/`got`.
+
+The remaining sprintf-js path is
+`electron-builder -> app-builder-lib -> @electron/get -> global-agent@3.0.0 -> roarr@2.15.4 -> sprintf-js@1.1.3`.
+The current compatible roarr 2.x/global-agent 3.x releases retain that dependency.
+No minimal compatible removal was established; retain this build-only advisory
+for upstream follow-up instead of forcing a major parent upgrade or suppressing it.
+
+The root npm-style `overrides` entry for brace-expansion 1.1.18 does not constrain
+this pnpm workspace: no `pnpm.overrides`, workspace `overrides`, or lockfile override
+policy is configured. The targeted update selected 1.1.21 and a frozen install
+accepted it while the manifests remained unchanged. This slice introduces no new
+override policy.
+
+The refresh command was:
+
+```sh
+corepack pnpm -r update brace-expansion fast-uri source-map-js http-cache-semantics --depth Infinity --lockfile-only --ignore-scripts --store-dir /workspace/.pumas-tools/pnpm-store
+```
+
+Every lock delta was reviewed. An incidental optional fs-extra 11.4.1 refresh was
+removed, retaining 11.4.0; the final diff contains only the six version/integrity
+changes and their dependency references. All six integrities match current npm
+registry metadata. Frozen installation used `--ignore-scripts`.
+
+Fresh `corepack pnpm audit --json` still exits 1: 57 raw findings comprise one
+actual resolved sprintf-js advisory and 56 Electron workspace-importer false
+positives (`0.7.0` rather than the resolved runtime 43.7.0). The production audit
+also exits 1 with those 56 importer findings. No actual production-package
+advisory was identified by these audits. The disputed http-cache-semantics finding
+remains an unresolved upstream claim despite its absence from the candidate scan.
+
+The reported Dependabot [run 37442880153, job 112200616213](https://github.com/MrScripty/Pumas-Library/actions/runs/37442880153/job/112200616213)
+failed to generate security updates; it was not an application CI failure.
+Its exit-0 update commands with unchanged locks match the behavior described in
+[dependabot-core issue 15766](https://github.com/dependabot/dependabot-core/issues/15766).
+The npm-only missing-lockfile auditor message does not describe this pnpm workspace.
+
+Verification used Node 24.15.0 and pnpm 10.33.0. Frontend lint/types, all 870 tests,
+and both renderer build modes passed. Electron lint/types/build and 242 tests
+passed; the optional native Electron preload oracle was skipped. The nine contract
+generator tests passed. Both attribution checks and all eight attribution tests
+passed after refreshing only the pnpm-lock fingerprint in the default and S3
+inventories. The 21 production JS license records, Electron license, and notice
+hashes were verified unchanged; Rust/native attribution was retained unchanged.
+The initial Electron test failure for stale attribution is preserved in local
+evidence and was resolved by that fingerprint refresh.
+
+`corepack pnpm --dir electron check:desktop-contract`,
+`corepack pnpm --dir electron test:desktop-contract-conformance`, and
+`corepack pnpm --dir frontend test:desktop-contract` each exited 1 at the Rust
+producer export step. Cargo was absent from the verification PATH; the existing
+historical RPC binary rejected `--export-desktop-contract`. These gates require
+an exporter-enabled current producer and remain unverified here. No Rust build,
+ONNX/ORT download, installer qualification, native Electron oracle, PR, or merge
+was performed in this maintenance slice.
+
+The sections below retain historical release review evidence.
+
 Current dependency-minimization results and macOS follow-up are tracked in
 [the minimization report](release-evidence/0.7.0/dependency-minimization.md).
 

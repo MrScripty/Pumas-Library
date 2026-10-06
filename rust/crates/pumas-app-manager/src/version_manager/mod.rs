@@ -1648,7 +1648,7 @@ mod tests {
         String,
     ) {
         let (server, observed, release, base_url, _requests, _stop_server, _digest) =
-            native_archive_fixture_inner(root, false, true).await;
+            native_archive_fixture_inner(root, false, true, false).await;
         (server, observed, release, base_url)
     }
 
@@ -1664,7 +1664,7 @@ mod tests {
         tokio::sync::oneshot::Sender<()>,
     ) {
         let (server, observed, release, base_url, requests, stop_server, _digest) =
-            native_archive_fixture_inner(root, true, true).await;
+            native_archive_fixture_inner(root, true, true, false).await;
         (server, observed, release, base_url, requests, stop_server)
     }
 
@@ -1680,7 +1680,7 @@ mod tests {
         tokio::sync::oneshot::Sender<()>,
         String,
     ) {
-        native_archive_fixture_inner(root, true, false).await
+        native_archive_fixture_inner(root, true, false, false).await
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -1688,6 +1688,7 @@ mod tests {
         root: &Path,
         monitor_requests: bool,
         include_server_binary: bool,
+        fail_source: bool,
     ) -> (
         tokio::task::JoinHandle<()>,
         tokio::sync::oneshot::Receiver<()>,
@@ -1847,7 +1848,14 @@ mod tests {
             } else {
                 wait.await.unwrap()
             };
-            if send_archive {
+            if send_archive && fail_source {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+            } else if send_archive {
                 stream
                     .write_all(
                         format!(
@@ -5215,7 +5223,7 @@ mod tests {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
-    async fn native_shutdown_cancels_stalled_transfer_and_retains_failed_outcome() {
+    async fn native_shutdown_cancels_stalled_transfer_and_withdraws_owned_workspace() {
         let root = TempDir::new().unwrap();
         let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
         let api = pumas_library::PumasApi::builder(root.path())
@@ -5266,7 +5274,13 @@ mod tests {
             .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
             .unwrap()
             .is_none());
-        assert!(std::fs::read_dir(manager.versions_dir())
+        let records = api.acquisition().store().acquisitions().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records.values().next().unwrap().phase,
+            pumas_library::acquisition::AcquisitionPhase::Withdrawn
+        );
+        assert!(!std::fs::read_dir(manager.versions_dir())
             .unwrap()
             .any(|entry| {
                 entry
@@ -5279,6 +5293,168 @@ mod tests {
         api.shutdown_acquisition().await.unwrap();
         assert!(!manager.is_installing().await);
         assert!(manager.get_installation_progress().await.unwrap().success == Some(false));
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_early_cancel_failed_cleanup_retains_exact_workspace_and_error() {
+        let root = TempDir::new().unwrap();
+        let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
+        let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        let before = api.acquisition().store().acquisitions().unwrap();
+        let record = before.values().next().unwrap();
+        let stage = manager
+            .versions_dir()
+            .join(&record.workspace.relative_target);
+        std::fs::write(
+            stage.join("owned-sentinel"),
+            b"retain owned data on binding loss",
+        )
+        .unwrap();
+        let retired = root.path().join("retired-workspace");
+        std::fs::rename(&stage, &retired).unwrap();
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::write(stage.join("replacement-sentinel"), b"another owner").unwrap();
+        assert!(manager.cancel_installation().await.unwrap());
+        let error = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match updates.recv().await.unwrap() {
+                    ProgressUpdate::Error { message } => break message,
+                    ProgressUpdate::Completed { success } => {
+                        panic!("cancelled transfer completed: {success}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(error.contains("Download cancelled"), "{error}");
+        assert!(error.contains("binding changed"), "{error}");
+        assert!(error.contains("cancelled transfer cleanup"), "{error}");
+        release.send(false).unwrap();
+        server.await.unwrap();
+        let shutdown_error = manager
+            .shutdown_installations()
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(shutdown_error.contains(&error), "{shutdown_error}");
+        assert_eq!(api.acquisition().store().acquisitions().unwrap(), before);
+        assert_eq!(
+            std::fs::read(stage.join("replacement-sentinel")).unwrap(),
+            b"another owner"
+        );
+        assert_eq!(
+            std::fs::read(retired.join("owned-sentinel")).unwrap(),
+            b"retain owned data on binding loss"
+        );
+        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+        api.shutdown_acquisition().await.unwrap();
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_source_failure_retains_transfer_and_source_error() {
+        let root = TempDir::new().unwrap();
+        let (server, observed, release, base_url, _, _, _) =
+            native_archive_fixture_inner(root.path(), false, true, true).await;
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
+        let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        let before = api.acquisition().store().acquisitions().unwrap();
+        let record = before.values().next().unwrap();
+        let stage = manager
+            .versions_dir()
+            .join(&record.workspace.relative_target);
+        std::fs::write(
+            stage.join("retained-sentinel"),
+            b"source failure retains custody",
+        )
+        .unwrap();
+        release.send(true).unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match updates.recv().await.unwrap() {
+                    ProgressUpdate::Error { message } => break message,
+                    ProgressUpdate::Completed { success } => {
+                        panic!("source failure completed: {success}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(error.contains("404"), "{error}");
+        assert!(!error.contains("cancelled transfer cleanup"), "{error}");
+        server.await.unwrap();
+        assert!(manager
+            .shutdown_installations()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains(&error));
+        assert_eq!(api.acquisition().store().acquisitions().unwrap(), before);
+        assert_eq!(
+            std::fs::read(stage.join("retained-sentinel")).unwrap(),
+            b"source failure retains custody"
+        );
+        assert!(!manager.version_path("b1234+cpu").exists());
+        api.shutdown_acquisition().await.unwrap();
     }
 
     #[tokio::test]

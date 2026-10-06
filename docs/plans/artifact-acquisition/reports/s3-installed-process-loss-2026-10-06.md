@@ -33,4 +33,8 @@ Failure evidence is retained and each child/listener has bounded drainage.
 Scope: one Linux process-loss boundary before FilesReady, not power loss,
 resumable transfer or a fault campaign. Provider credentials/services,
 desktop/platform/inference, hosted acceptance and full AQ-S3/Q4 remain separate.
-Parent owns PR publication/reviews/merges. Implementation and execution pending.
+Parent owns PR publication/reviews/merges. The harness is implemented; all 24
+controls (16 existing plus eight boundary/custody/process controls), pinned CI
+Ruff lint/format and diff checks pass. Read-only source review found no
+substantive issue. Actual clean-source installed execution remains pending at
+this source milestone.

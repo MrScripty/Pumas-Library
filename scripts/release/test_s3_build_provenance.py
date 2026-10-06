@@ -5,10 +5,11 @@ import json
 import importlib.util
 from pathlib import Path
 import subprocess
+import sqlite3
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import s3_build_provenance as subject
 
@@ -408,6 +409,204 @@ class InstalledInputsTests(unittest.TestCase):
             inputs[2][0].write_text("replacement notices after build validation")
             with self.assertRaisesRegex(AssertionError, "differs from build"):
                 self.harness.stage_verified_inputs(stage, inputs[0][0], provenance)
+
+
+class InstalledProcessLossTests(unittest.TestCase):
+    setUp = InstalledInputsTests.setUp
+
+    def custody_fixture(self):
+        self.operation = "00000000-0000-4000-8000-000000000001"
+        acquisition = "00000000-0000-4000-8000-000000000002"
+        self.store = self.root / "launcher-data/downloads.json"
+        workspace_name = f".s3-import-{self.operation}"
+        self.workspace = self.root / "launcher-data" / workspace_name
+        self.workspace.mkdir(parents=True)
+        self.partial = self.workspace / "weights.gguf.part"
+        self.partial.write_bytes(self.harness.WEIGHTS[:1])
+        (self.root / "custody-sentinel").write_bytes(b"owned fixture sentinel")
+        self.models = self.root / "shared-resources/models"
+        self.models.mkdir(parents=True)
+        with sqlite3.connect(self.models / "models.db") as db:
+            db.execute("CREATE TABLE models (id TEXT, path TEXT, metadata_json TEXT)")
+        self.document = {
+            "schema_version": 7,
+            "consumer_receipts": {},
+            "acquisitions": {
+                acquisition: {
+                    "id": acquisition,
+                    "demand": {"consumer": "model.s3.workflow", "operation": self.operation},
+                    "phase": {"state": "transferring"},
+                    "files": [],
+                    "workspace": {
+                        "root_identity": "owned-fixture-root",
+                        "relative_target": workspace_name,
+                    },
+                    "manifest": {
+                        "schema_version": 1,
+                        "source": {
+                            "provider": "s3",
+                            "source_id": "owned-fixture",
+                            "revision": {
+                                "authority": "s3.explicit_versions",
+                                "value": "owned-pin",
+                                "strength": "immutable",
+                            },
+                        },
+                        "files": [
+                            {
+                                "logical_path": "weights.gguf",
+                                "source_key": json.dumps(["models/shared", "weights-v1"]),
+                                "expected_size": len(self.harness.WEIGHTS),
+                                "expected_sha256": {
+                                    "authority": "caller.sha256",
+                                    "value": self.harness.hashlib.sha256(
+                                        self.harness.WEIGHTS
+                                    ).hexdigest(),
+                                },
+                                "verification": "sha256",
+                            }
+                        ],
+                    },
+                }
+            },
+        }
+        self.store.write_text(json.dumps(self.document))
+        self.progress = {
+            "status": "running",
+            "progress": {"phase": "acquiring", "downloaded_for_current_file": "1"},
+        }
+        return self.harness.custody_snapshot(self.root, self.operation)
+
+    def test_boundary_requires_live_progress_and_actual_prefix(self):
+        before = self.custody_fixture()
+        self.harness.verify_crash_boundary(self.progress, before)
+        for phase, count, status in (
+            ("acquiring", "0", "running"),
+            ("acquiring", "2", "running"),
+            ("finalizing", "1", "running"),
+            ("acquiring", "1", "finished"),
+        ):
+            progress = {
+                "status": status,
+                "progress": {"phase": phase, "downloaded_for_current_file": count},
+            }
+            with self.subTest(phase=phase, count=count, status=status):
+                with self.assertRaisesRegex(AssertionError, "live acquiring"):
+                    self.harness.verify_crash_boundary(progress, before)
+        self.partial.write_bytes(b"")
+        with self.assertRaisesRegex(AssertionError, "exactly one byte"):
+            self.harness.custody_snapshot(self.root, self.operation)
+
+    def test_ready_verified_or_receipt_state_refuses_crash_boundary(self):
+        self.custody_fixture()
+        record = next(iter(self.document["acquisitions"].values()))
+        for field, value, message in (
+            ("phase", {"state": "files_ready"}, "not transferring"),
+            ("files", [{"bytes": 1}], "premature byte proof"),
+        ):
+            original = record[field]
+            record[field] = value
+            self.store.write_text(json.dumps(self.document))
+            with self.assertRaisesRegex(AssertionError, message):
+                self.harness.custody_snapshot(self.root, self.operation)
+            record[field] = original
+        self.document["consumer_receipts"] = {"unexpected": {}}
+        self.store.write_text(json.dumps(self.document))
+        with self.assertRaisesRegex(AssertionError, "premature byte proof"):
+            self.harness.custody_snapshot(self.root, self.operation)
+
+    def test_actual_inode_and_complete_document_changes_refuse_cold_proof(self):
+        before = self.custody_fixture()
+        self.partial.rename(self.workspace / "retained-original-partial")
+        self.partial.write_bytes(self.harness.WEIGHTS[:1])
+        after = self.harness.custody_snapshot(self.root, self.operation)
+        with self.assertRaisesRegex(AssertionError, "exact retained custody"):
+            self.harness.verify_cold_custody(before, after, [], [], {"success": True, "models": {}})
+        self.document["unrelated_partition"] = {"changed": True}
+        self.store.write_text(json.dumps(self.document))
+        changed = self.harness.custody_snapshot(self.root, self.operation)
+        with self.assertRaisesRegex(AssertionError, "exact retained custody"):
+            self.harness.verify_cold_custody(
+                after, changed, [], [], {"success": True, "models": {}}
+            )
+
+    def test_source_replay_or_public_model_refuses_cold_proof(self):
+        before = self.custody_fixture()
+        with self.assertRaisesRegex(AssertionError, "replayed source"):
+            self.harness.verify_cold_custody(
+                before, before, [], [{"method": "HEAD"}], {"success": True, "models": {}}
+            )
+        with self.assertRaisesRegex(AssertionError, "published a model"):
+            self.harness.verify_cold_custody(
+                before, before, [], [], {"success": True, "models": {"unexpected": {}}}
+            )
+
+    def test_read_only_index_observation_sees_wal_and_receipt_refusal(self):
+        self.custody_fixture()
+        with sqlite3.connect(self.models / "models.db") as db:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("INSERT INTO models VALUES ('unexpected', 'unexpected', '{}')")
+            db.commit()
+            with self.assertRaisesRegex(AssertionError, "indexed model"):
+                self.harness.custody_snapshot(self.root, self.operation)
+            db.execute("DELETE FROM models")
+            db.commit()
+        (self.models / ".pumas_import_publication.json").write_text("{}")
+        with self.assertRaisesRegex(AssertionError, "publication receipt"):
+            self.harness.custody_snapshot(self.root, self.operation)
+
+    def test_full_or_completed_input_refuses_partial_custody(self):
+        self.custody_fixture()
+        self.partial.write_bytes(self.harness.WEIGHTS)
+        with self.assertRaisesRegex(AssertionError, "exactly one byte"):
+            self.harness.custody_snapshot(self.root, self.operation)
+        self.partial.write_bytes(self.harness.WEIGHTS[:1])
+        (self.workspace / "weights.gguf").write_bytes(self.harness.WEIGHTS)
+        with self.assertRaisesRegex(AssertionError, "completed input"):
+            self.harness.custody_snapshot(self.root, self.operation)
+
+    def mock_backend(self):
+        backend = self.harness.Backend.__new__(self.harness.Backend)
+        backend.process = Mock(pid=111)
+        backend.process.poll.return_value = None
+        backend.process.wait.return_value = -self.harness.signal.SIGKILL
+        backend.reader = Mock()
+        backend.reader.is_alive.return_value = False
+        backend.output, backend.overflow = bytearray(), False
+        return backend
+
+    def test_kill_requires_owned_live_group_and_sigkill_status(self):
+        backend = self.mock_backend()
+        with patch.object(self.harness.os, "killpg") as kill:
+            self.assertEqual(backend.kill(), -self.harness.signal.SIGKILL)
+            kill.assert_called_once_with(111, self.harness.signal.SIGKILL)
+        backend.process.wait.assert_called_once_with(5)
+        backend.reader.join.assert_called_once_with(5)
+        backend = self.mock_backend()
+        backend.process.poll.return_value = 0
+        with patch.object(self.harness.os, "killpg") as kill:
+            with self.assertRaisesRegex(AssertionError, "already stopped"):
+                backend.kill()
+            kill.assert_not_called()
+        backend = self.mock_backend()
+        backend.process.wait.return_value = 0
+        with patch.object(self.harness.os, "killpg"):
+            with self.assertRaisesRegex(AssertionError, "exit from SIGKILL"):
+                backend.kill()
+
+    def test_reader_join_overflow_and_secret_refusals(self):
+        backend = self.mock_backend()
+        backend.reader.is_alive.return_value = True
+        with self.assertRaisesRegex(AssertionError, "reader failed to drain"):
+            backend.finish_capture()
+        backend.reader.is_alive.return_value = False
+        backend.overflow = True
+        with self.assertRaisesRegex(AssertionError, "log exceeded"):
+            backend.finish_capture()
+        backend.overflow = False
+        backend.output.extend(self.harness.TOKEN.encode())
+        with self.assertRaisesRegex(AssertionError, "credential escaped"):
+            backend.finish_capture()
 
 
 if __name__ == "__main__":

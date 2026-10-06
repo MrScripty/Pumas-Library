@@ -15,7 +15,9 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import sqlite3
 import ssl
+import stat
 import struct
 import subprocess
 import tarfile
@@ -187,14 +189,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not head:
                 self.wfile.write(
                     body[start : start + 1]
-                    if source.mode in ("truncated", "cancel")
+                    if source.mode in ("truncated", "cancel", "process-loss")
                     else body[start:]
                 )
                 self.wfile.flush()
-                if source.mode == "cancel":
+                if source.mode in ("cancel", "process-loss"):
                     source.started.set()
-                    self.connection.settimeout(10)
-                    check(self.connection.recv(1) == b"", "cancel did not close source body")
+                    self.connection.settimeout(25 if source.mode == "process-loss" else 10)
+                    try:
+                        check(self.connection.recv(1) == b"", "peer did not close held body")
+                    except (ConnectionResetError, ssl.SSLEOFError):
+                        check(source.mode == "process-loss", "unexpected cancellation reset")
                     source.closed.set()
             self.close_connection = True
         except Exception as error:
@@ -270,10 +275,22 @@ class Backend:
             os.killpg(self.process.pid, signal.SIGKILL)
             self.process.wait(5)
             raise TimeoutError("installed backend required forced shutdown")
+        self.finish_capture()
+        check(status == (1 if expected_failure else 0), "unexpected drained backend exit status")
+        return status
+
+    def finish_capture(self):
         self.reader.join(5)
+        check(not self.reader.is_alive(), "backend output reader failed to drain")
         secret_free(self.output)
         check(not self.overflow, "backend log exceeded fixture budget")
-        check(status == (1 if expected_failure else 0), "unexpected drained backend exit status")
+
+    def kill(self):
+        check(self.process.poll() is None, "process-loss backend was already stopped")
+        os.killpg(self.process.pid, signal.SIGKILL)
+        status = self.process.wait(5)
+        self.finish_capture()
+        check(status == -signal.SIGKILL, "process-loss backend did not exit from SIGKILL")
         return status
 
 
@@ -467,6 +484,263 @@ def case(binary, directory, ca, key, mode, authenticated=False, token=False, sin
         source.stop()
 
 
+def physical_identity(path, directory=False):
+    metadata = path.lstat()
+    check(
+        (stat.S_ISDIR if directory else stat.S_ISREG)(metadata.st_mode),
+        "custody path has the wrong physical type",
+    )
+    return {"device": metadata.st_dev, "inode": metadata.st_ino}
+
+
+def custody_snapshot(root, operation):
+    """Observe one owned fixture root; never reopen production filesystem authority."""
+    store_bytes = (root / "launcher-data/downloads.json").read_bytes()
+    secret_free(store_bytes)
+    document = json.loads(store_bytes)
+    check(document["schema_version"] == 7, "unexpected custody schema")
+    check(len(document["acquisitions"]) == 1, "expected exactly one retained acquisition")
+    acquisition_id, record = next(iter(document["acquisitions"].items()))
+    check(record["id"] == acquisition_id, "acquisition map identity mismatch")
+    check(
+        record["demand"] == {"consumer": "model.s3.workflow", "operation": operation},
+        "retained demand changed",
+    )
+    check(record["phase"] == {"state": "transferring"}, "crash boundary was not transferring")
+    check(record["files"] == [] and document["consumer_receipts"] == {}, "premature byte proof")
+    manifest = record["manifest"]
+    check(manifest["schema_version"] == 1, "unexpected selected manifest schema")
+    check(
+        manifest["source"]["provider"] == "s3"
+        and manifest["source"]["revision"]["authority"] == "s3.explicit_versions"
+        and manifest["source"]["revision"]["strength"] == "immutable",
+        "selected source evidence changed",
+    )
+    check(len(manifest["files"]) == 1, "selected file set changed")
+    selected = manifest["files"][0]
+    check(
+        selected["logical_path"] == "weights.gguf"
+        and json.loads(selected["source_key"]) == ["models/shared", "weights-v1"]
+        and selected["expected_size"] == len(WEIGHTS)
+        and selected["expected_sha256"]
+        == {"authority": "caller.sha256", "value": hashlib.sha256(WEIGHTS).hexdigest()}
+        and selected["verification"] == "sha256",
+        "selected immutable file identity changed",
+    )
+    workspace = root / "launcher-data" / f".s3-import-{operation}"
+    check(
+        record["workspace"]["relative_target"] == workspace.name
+        and bool(record["workspace"]["root_identity"]),
+        "retained workspace identity changed",
+    )
+    workspace_identity = physical_identity(workspace, directory=True)
+    partial = workspace / "weights.gguf.part"
+    partial_identity = physical_identity(partial)
+    prefix = partial.read_bytes()
+    check(physical_identity(partial) == partial_identity, "partial replaced during observation")
+    check(prefix == WEIGHTS[:1], "actual retained prefix is not exactly one byte")
+    check(not (workspace / "weights.gguf").exists(), "completed input exists before FilesReady")
+    models = root / "shared-resources/models"
+    check(not list(models.rglob(".pumas_import_publication.json")), "premature publication receipt")
+    check(not list(models.rglob("weights.gguf")), "premature model output")
+    with sqlite3.connect((models / "models.db").as_uri() + "?mode=ro", uri=True, timeout=2) as db:
+        rows = db.execute("SELECT id, path, metadata_json FROM models ORDER BY id").fetchall()
+    check(rows == [], "premature indexed model")
+    for path in root.rglob("*"):
+        if path.is_file():
+            secret_free(path.read_bytes())
+    return {
+        "acquisition": record,
+        "store_sha256": hashlib.sha256(store_bytes).hexdigest(),
+        "workspace": workspace_identity,
+        "partial": {
+            **partial_identity,
+            "bytes": len(prefix),
+            "sha256": hashlib.sha256(prefix).hexdigest(),
+        },
+        "model_rows": rows,
+        "sentinel_sha256": digest(root / "custody-sentinel"),
+    }
+
+
+def verify_crash_boundary(progress, snapshot):
+    check(
+        progress["status"] == "running"
+        and progress["progress"] == {"phase": "acquiring", "downloaded_for_current_file": "1"},
+        "first-byte crash progress is not live acquiring",
+    )
+    check(
+        snapshot["acquisition"]["phase"] == {"state": "transferring"}
+        and snapshot["acquisition"]["files"] == []
+        and snapshot["partial"]["bytes"] == 1,
+        "first-byte crash lacks unresolved partial custody",
+    )
+
+
+def verify_cold_custody(before, after, expected_requests, requests, public_models):
+    check(after == before, "cold owner changed exact retained custody")
+    check(requests == expected_requests, "cold owner replayed source I/O")
+    check(public_models == {"success": True, "models": {}}, "cold owner published a model")
+
+
+def process_loss_case(binary, root, ca, key, evidence):
+    """One pre-FilesReady SIGKILL, then two cold owners; retain disposable custody."""
+    root.mkdir()
+    (root / "custody-sentinel").write_bytes(b"owned process-loss sentinel\n")
+    source = Source(ca, key, "process-loss", True, True)
+    backend, failure, result = None, None, None
+    try:
+        backend = Backend(binary, root, ca)
+        check(
+            backend.rpc("get_models", {})["result"] == {"success": True, "models": {}},
+            "process-loss root was not empty",
+        )
+        operation = str(uuid.uuid4())
+        request = {
+            "source": params(source, operation, True),
+            "credentials": {
+                "access_key_id": ACCESS,
+                "secret_access_key": SECRET,
+                "session_token": TOKEN,
+            },
+        }
+        method = "start_authenticated_s3_model_import"
+        check(
+            backend.rpc(method, request)["result"]["status"] == "running", "crash admission failed"
+        )
+        check(source.started.wait(10), "process-loss body never began")
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            progress = backend.rpc("get_s3_model_import", {"operation_id": operation})["result"]
+            partial = root / "launcher-data" / f".s3-import-{operation}" / "weights.gguf.part"
+            if (
+                progress.get("status") == "running"
+                and progress.get("progress", {}).get("downloaded_for_current_file") == "1"
+                and partial.is_file()
+                and partial.stat().st_size == 1
+            ):
+                break
+            time.sleep(0.05)
+        else:
+            raise TimeoutError("actual first-byte custody observation deadline")
+        before = custody_snapshot(root, operation)
+        verify_crash_boundary(progress, before)
+        check(not source.closed.is_set(), "source body ended before process loss")
+        requests = list(source.requests)
+        check(
+            requests
+            == [
+                {"method": "HEAD", "version": "weights-v1"},
+                {"method": "GET", "version": "weights-v1", "range_start": 0},
+            ],
+            "unexpected pre-crash source I/O",
+        )
+        killed_exit = backend.kill()
+        backend = None
+        check(source.closed.wait(5), "source body did not close after process loss")
+        verify_cold_custody(
+            before,
+            custody_snapshot(root, operation),
+            requests,
+            source.requests,
+            {"success": True, "models": {}},
+        )
+        observations = []
+        for cold in range(2):
+            backend = Backend(binary, root, ca)
+            missing = backend.rpc("get_s3_model_import", {"operation_id": operation})["result"]
+            idle = backend.rpc("get_s3_model_import", {})["result"]
+            check(
+                missing == {"status": "not_found", "operation_id": operation},
+                "cold owner fabricated task history",
+            )
+            check(idle == {"status": "idle"}, "cold owner fabricated current task")
+            models = backend.rpc("get_models", {})["result"]
+            verify_cold_custody(
+                before, custody_snapshot(root, operation), requests, source.requests, models
+            )
+            observation = {"not_found": missing, "idle": idle}
+            if cold == 1:
+                check(
+                    backend.rpc(method, request)["result"]["status"] == "running",
+                    "retained demand admission contract changed",
+                )
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    outcome = backend.rpc("get_s3_model_import", {"operation_id": operation})[
+                        "result"
+                    ]
+                    if outcome["status"] == "finished":
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise TimeoutError("retained demand refusal deadline")
+                refused = outcome["result"]
+                check(
+                    refused["status"] == "failed"
+                    and refused["retained_work"]
+                    and not refused.get("published_model_id"),
+                    "retained demand resumed or published",
+                )
+                check(
+                    backend.rpc(method, request)["result"]["status"] == "rejected",
+                    "retained failed demand silently replayed",
+                )
+                observation["retained_refusal"] = outcome
+            time.sleep(0.25)  # One bounded observation window, not continuous monitoring.
+            models = backend.rpc("get_models", {})["result"]
+            observation["drained_exit"] = backend.stop()
+            backend = None
+            verify_cold_custody(
+                before, custody_snapshot(root, operation), requests, source.requests, models
+            )
+            observations.append(observation)
+        result = {
+            "mode": "process-loss",
+            "authenticated": True,
+            "session_token": True,
+            "single": True,
+            "boundary": "one written byte before FilesReady",
+            "progress": progress,
+            "custody": before,
+            "killed_exit": killed_exit,
+            "cold_owners": observations,
+            "requests": requests,
+            "result": "passed",
+        }
+    except BaseException as error:
+        failure = error
+    finally:
+        cleanup_errors = []
+        if backend is not None:
+            try:
+                backend.stop()
+            except Exception as error:
+                cleanup_errors.append(error)
+        try:
+            source.stop()
+        except Exception as error:
+            cleanup_errors.append(error)
+        if failure is None and cleanup_errors:
+            failure = cleanup_errors[0]
+        if failure is not None:
+            message = str(failure)
+            for value in (ACCESS, SECRET, TOKEN, *AMBIENT):
+                message = message.replace(value, "[REDACTED]")
+            result = {
+                "result": "failed",
+                "error_type": type(failure).__name__,
+                "error": message,
+                "cleanup_errors": [type(error).__name__ for error in cleanup_errors],
+            }
+        encoded = (json.dumps(result, indent=2) + "\n").encode()
+        secret_free(encoded)
+        evidence.write_bytes(encoded)
+    if failure is not None:
+        raise failure
+    return result
+
+
 def package_inputs(binary):
     """One complete S3 notice profile, with no historical reader-only fallback."""
     directory = ROOT / ATTRIBUTION
@@ -575,6 +849,15 @@ def main():
         payload["scenarios"] = [
             case(installed / "pumas-rpc", workspace, ca, key, *scenario) for scenario in scenarios
         ]
+        payload["scenarios"].append(
+            process_loss_case(
+                installed / "pumas-rpc",
+                args.output.resolve() / "process-loss-root",
+                ca,
+                key,
+                args.output / "process-loss-result.json",
+            )
+        )
     payload["archive_sha256"] = digest(archive_path)
     payload["result"] = "passed"
     (args.output / "installed-result.json").write_text(json.dumps(payload, indent=2) + "\n")

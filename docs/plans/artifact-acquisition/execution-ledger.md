@@ -1674,3 +1674,83 @@ log and retired failed-link file hashes are retained. Final core units/Clippy,
 66 integrations and production RPC Clippy remain passed; RPC tests are blocked,
 not passed. Resume after restoring link headroom, using the exact report command.
 No service-limit rejection was observed; no PR mutation occurred.
+
+## 2026-10-06 — AC10 public HF importer measurement
+
+Separate branch `qualification/ac10-public-hf-72224551` retains base
+`722245514b3bae42511aa5ea188570292ce276d4` (tree
+`14e8a1b36b580f2397264dd38b18329ec07bc75e`) and admission d3d93f8b.
+Tested source `8a147160c2b3743c549e00a89b1e48f54d7a2390`, tree `9544e16dde7802baa2033bf7ceea7d44c2ba3767`, adds only the Linux ignored 512 MiB
+public HF/importer regression and its local helpers in `api/hf.rs` (blob
+`855fe4272889d7518d572461160b35a02a299d23`). Independent specification and standards source reviews ACK this
+exact blob. Default and no-default opt-in runs pass 1/1 each, as do the existing
+mixed-size public status/import controls; strict all-target core Clippy passes
+with warnings denied in both modes, plus scoped rustfmt and diff checks.
+Rust/Cargo 1.92.0, one job, incremental disabled and explicit dev/test debug=0
+are bound to the metrics. All Cargo commands are serialized, offline and locked.
+
+The exact 512 MiB body is streamed/generated/hashed with a fixed 64 KiB buffer;
+partial/import/settled identities remain one inode per run, receipt/source/final
+SHA-256 match, full bytes remain Downloading/Using without receipt at the importer
+hold, then stable Completed/model/index/Adopted and admission settlement follow.
+At-hold RSS is 99,004 kB default and 96,536 kB no-default. Inventories find one
+artifact-sized retained file, with 10,385 other new logical bytes in each run.
+Raw proc counters are descriptive for this source/client process, not physical
+media or transfer-only peak RAM. The initial c092 premature importer deadline
+failed and drained; the repair includes verified handoff in the unchanged 300s
+phase before the unchanged 30 s importer entry. Compile/interruption/failure logs,
+cache hash manifests and both successful measurements remain in the
+[report and exact evidence](reports/ac10-public-hf-measurement-2026-10-06.md).
+Repository-local owner identity is verified; no dependency, production owner,
+S3/native frozen write set or public API changes. Parent owns PRs/hosted reviews/
+integration. AC10 and AQ-HTTP remain pending. Next existing-plan feature is Q2
+exact wheel closure/local-only Torch consumption, gated by AQ-HTTP; required
+verified-local handoff, denied-network child consumption and lease/output proof
+remain absent. No Q2 implementation or provider/platform acceptance is claimed.
+
+## 2026-10-06 — positive HTTP elapsed-budget feature
+
+Branch `feat/acquisition-http-budget-0c02dcfb` retains base
+`0c02dcfb81a0f7ab2a3858c2b5cee329816b3ce5` (tree `78c663ed397264284cb95662d49a3354380755d4`).
+Tested source `0950c4d5839608c8dd5f52afcb3fd2424a9a1656`, tree `55c7dea28bae397ee9d70995897c5ff0c8e2a672`;
+owner blob `83478facd105a08f8a52e36e6ce9780d09e76d2a`. The already present
+exact file-set/verification/lease/receipt pipeline now honors its positive
+per-file HTTP source-wait budget through headers, body, retries and capped
+backoff, without resetting on retry. Overflow refuses before worker/store
+admission. Explicit zero and all S3/native production paths remain unchanged;
+registered writes retain capability/custody until drainage. No new public shape,
+schema, dependency, verification or receipt identity policy.
+
+Final-source acquisition-filter tests pass **153/153 in default and 153/153 in no-default** (including all ten new controls). HF download tests pass **192/192 in each configuration**; mixed-size public HF status/import/receipt controls pass **1/1 in each**. Strict all-target core Clippy with warnings denied passes in default, no-default and default-plus-S3. Scoped rustfmt and `git diff --check` pass. These are affected-slice checks, not full workspace or hosted qualification.
+
+Initial test-only old-owner run failed six controls and passed three (exit101);
+its pre-refinement patch/blob/raw log are retained. Intermediate TempDir move
+compile failure (exit101), repaired nine-control pass and pre-clock-refinement
+153-pass run are separately identified. Independent specification and standards
+reviews ACK final blob. Exact argv, profiles, wrapper, logs, hashes, failures,
+clock/fixture limits, ONNX manifest policy and resource/cache restoration are in
+[qualification](reports/http-elapsed-budget-qualification-2026-10-06.md) and its
+[evidence JSON](reports/http-elapsed-budget-2026-10-06/evidence.json).
+Repository-local MrScripty identity is verified before/after both commits.
+Parent owns PR/review/hosted integration. Linux synthetic/core evidence supports
+bounded AC02/AC06/AC10/AC15 aspects; those broader criteria and AQ-HTTP remain
+pending. Q2 accepted exact wheel closure/local-only Torch consumption is the next
+existing-plan feature, gated by AQ-HTTP. Separate PR42 generator evidence and
+frozen AC10 evidence refs are preserved.
+
+## Accepted current-main composition — 2026-10-06
+
+After parent accepted PR42, normal merge `6385a4931ca2ebd21f7c8af83b087d5f2cf6b9a1` (tree
+`a2d461188d622cf123fb4d7464602fc913fc831a`) incorporates current main
+`1c1c7875ff8fc43b3ad1957fb2a94d44c850716c` (tree
+`8c27d77e7d31ed13f85db77a8c155f15a7fbe693`) with parents
+`9470f4882216097f86114ec53e086d9f15b24e00` and `1c1c7875ff8fc43b3ad1957fb2a94d44c850716c`.
+The merge adds only the accepted generator repair and its evidence. The entire
+Rust subtree `0bd482ac031078865f944efeec6dad4d7d825530` matches tested HTTP source `0950c4d5`;
+the owner blob and all S3/native sources remain byte-identical. All ten deadline
+controls pass again in default and no-default (10/10 each) on this merge. The
+original failed controls, qualified checks, raw archive and AC10/PR42 evidence
+are preserved. [Post-main evidence](reports/http-elapsed-budget-2026-10-06/post-main-evidence.json)
+binds exact commands/logs, identities, merge parents/tree and Rust subtree
+agreement. Parent separately monitors main's postmerge CI; no new hosted or full
+AQ-HTTP acceptance is claimed. Q2 remains the next gated implementation feature.

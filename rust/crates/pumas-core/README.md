@@ -46,6 +46,24 @@ classification retains its existing metadata observation before the one acquired
 model-index payload. Public request types, signatures and receipt identity are
 unchanged. This is package selection/import support, not inference qualification.
 
+## Shared HTTP source-wait budgets
+
+`AcquisitionConsumer::acquire_http` accepts an exact manifest/file-source set and
+holds verified inputs through consumer publication. For each selected file,
+positive `AcquisitionRetryPolicy.elapsed` starts one source-wait deadline before
+local file preparation. The deadline bounds response headers, body streaming,
+all attempts and backoff; retries do not reset it, and another file receives its
+own budget. The clock range is checked before public worker/store admission.
+HTTP `elapsed = Duration::ZERO` preserves the existing opt-out. Attempt limits,
+source identity, verification requirements, receipts and public shapes are unchanged.
+
+Expiry prevents a new source/body effect from starting, but already registered
+filesystem effects are still drained before retry or return. Partial inputs keep
+exact Transferring custody and cannot reach consumer preparation/publication or
+receipt settlement on timeout. This is a source-wait budget, not a hard bound on
+filesystem drainage, verification, import or child cleanup. The existing positive
+HF configuration is enforced; explicit native zero-budget behavior is preserved.
+
 ## Optional S3 protocol reader
 
 Enable `s3` explicitly to use `acquisition::{S3Reader, S3ReaderConfig}`. This

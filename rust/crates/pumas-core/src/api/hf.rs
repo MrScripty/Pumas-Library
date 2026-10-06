@@ -2947,6 +2947,714 @@ pub(super) mod tests {
         assert!(observed[3].contains("/resolve/"));
     }
 
+    /// Descriptive single-workload measurement; explicitly run in a fresh process.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "streams 512 MiB through the real HF importer; Linux opt-in resource measurement"]
+    async fn public_hf_large_transfer_preserves_file_identity_and_records_resource_usage() {
+        use sha2::{Digest, Sha256};
+        use std::collections::BTreeMap;
+        use std::os::unix::fs::MetadataExt;
+        use std::path::{Path, PathBuf};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::{Duration, Instant};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
+        use tokio::sync::oneshot;
+
+        type MeasurementResult<T> =
+            std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+        type Inventory = BTreeMap<(u64, u64), serde_json::Value>;
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        const BYTES: u64 = 512 * 1024 * 1024;
+        const CHUNK: usize = 64 * 1024;
+        const GATE: Duration = Duration::from_secs(30);
+
+        fn require(condition: bool, message: &'static str) -> MeasurementResult<()> {
+            if condition {
+                Ok(())
+            } else {
+                Err(message.into())
+            }
+        }
+
+        fn identity(path: &Path) -> MeasurementResult<serde_json::Value> {
+            let metadata = std::fs::symlink_metadata(path)?;
+            require(
+                metadata.is_file(),
+                "observed artifact must be a regular file",
+            )?;
+            Ok(serde_json::json!({
+                "dev": metadata.dev(), "inode": metadata.ino(),
+                "logical_bytes": metadata.len(), "allocated_bytes": metadata.blocks() * 512,
+            }))
+        }
+
+        fn inventory(root: &Path) -> MeasurementResult<Inventory> {
+            fn visit(root: &Path, path: &Path, files: &mut Inventory) -> MeasurementResult<()> {
+                let metadata = std::fs::symlink_metadata(path)?;
+                if metadata.is_dir() {
+                    for entry in std::fs::read_dir(path)? {
+                        visit(root, &entry?.path(), files)?;
+                    }
+                } else if metadata.is_file() {
+                    let record = files.entry((metadata.dev(), metadata.ino())).or_insert_with(|| {
+                        serde_json::json!({"dev": metadata.dev(), "inode": metadata.ino(),
+                            "logical_bytes": metadata.len(), "allocated_bytes": metadata.blocks() * 512,
+                            "paths": []})
+                    });
+                    record["paths"]
+                        .as_array_mut()
+                        .ok_or("inventory paths malformed")?
+                        .push(serde_json::json!(path
+                            .strip_prefix(root)?
+                            .to_string_lossy()));
+                }
+                Ok(())
+            }
+            let mut files = BTreeMap::new();
+            visit(root, root, &mut files)?;
+            Ok(files)
+        }
+
+        fn proc_fields(path: &str, names: &[&str]) -> MeasurementResult<serde_json::Value> {
+            let text = std::fs::read_to_string(path)?;
+            let mut fields = serde_json::Map::new();
+            for name in names {
+                let value = text
+                    .lines()
+                    .find_map(|line| {
+                        let (key, value) = line.split_once(':')?;
+                        (key == *name).then_some(value)
+                    })
+                    .ok_or("required proc field missing")?
+                    .split_whitespace()
+                    .next()
+                    .ok_or("required proc value missing")?
+                    .parse::<u64>()?;
+                fields.insert((*name).into(), serde_json::json!(value));
+            }
+            Ok(serde_json::Value::Object(fields))
+        }
+
+        fn filesystem(root: &Path) -> MeasurementResult<serde_json::Value> {
+            let root = root.canonicalize()?;
+            let mounts = std::fs::read_to_string("/proc/self/mountinfo")?;
+            let mut matched = None;
+            for line in mounts.lines() {
+                let (left, right) = line
+                    .split_once(" - ")
+                    .ok_or("mountinfo separator missing")?;
+                // mountinfo escapes whitespace and backslashes in mount paths.
+                let mount = PathBuf::from(
+                    left.split_whitespace()
+                        .nth(4)
+                        .ok_or("mount missing")?
+                        .replace("\\040", " ")
+                        .replace("\\011", "\t")
+                        .replace("\\012", "\n")
+                        .replace("\\134", "\\"),
+                );
+                if root.starts_with(&mount)
+                    && matched.as_ref().is_none_or(|(old, _): &(PathBuf, &str)| {
+                        mount.as_os_str().len() > old.as_os_str().len()
+                    })
+                {
+                    matched = Some((
+                        mount,
+                        right
+                            .split_whitespace()
+                            .next()
+                            .ok_or("filesystem missing")?,
+                    ));
+                }
+            }
+            let (mount, kind) = matched.ok_or("fixture filesystem missing")?;
+            Ok(serde_json::json!({"type": kind, "mount": mount}))
+        }
+
+        async fn accept(listener: &TcpListener, expected: &str) -> MeasurementResult<TcpStream> {
+            let (mut stream, _) =
+                tokio::time::timeout(Duration::from_secs(15), listener.accept()).await??;
+            let header = tokio::time::timeout(GATE, async {
+                let mut bytes = Vec::new();
+                while !bytes.ends_with(b"\r\n\r\n") {
+                    require(bytes.len() < 8192, "source header exceeded bound")?;
+                    bytes.push(stream.read_u8().await?);
+                }
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(bytes)
+            })
+            .await??;
+            require(
+                std::str::from_utf8(&header)?.lines().next() == Some(expected),
+                "unexpected source request",
+            )?;
+            Ok(stream)
+        }
+
+        async fn write(stream: &mut TcpStream, bytes: &[u8]) -> MeasurementResult<()> {
+            tokio::time::timeout(GATE, stream.write_all(bytes)).await??;
+            Ok(())
+        }
+
+        async fn json(stream: &mut TcpStream, body: &str) -> MeasurementResult<()> {
+            write(stream, format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len()).as_bytes()).await?;
+            write(stream, body.as_bytes()).await
+        }
+
+        let wall_started = Instant::now();
+        // No full-body allocation or source file: one buffer is reused by the source.
+        let mut buffer = Box::new([0u8; CHUNK]);
+        let header = intent_test_gguf();
+        buffer[..header.len()].copy_from_slice(&header);
+        let mut source_hash = Sha256::new();
+        source_hash.update(&buffer[..]);
+        buffer.fill(0);
+        for _ in 1..BYTES / CHUNK as u64 {
+            source_hash.update(&buffer[..]);
+        }
+        let source_sha = hex::encode(source_hash.finalize());
+        buffer[..header.len()].copy_from_slice(&header);
+
+        // Keep the artifact on the actual workspace filesystem, not /tmp's tmpfs.
+        let root = tempfile::Builder::new()
+            .prefix("ac10-public-hf-")
+            .tempdir_in(std::env::current_dir().unwrap())
+            .unwrap();
+        let sentinel = root.path().join("authored-sentinel.txt");
+        std::fs::write(&sentinel, b"AC10 authored sentinel\n").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let library = api.primary().model_library.clone();
+        let persistence = api
+            .primary()
+            .hf_client
+            .as_ref()
+            .unwrap()
+            .persistence()
+            .unwrap();
+        let before = inventory(root.path()).unwrap();
+        let filesystem = filesystem(root.path()).unwrap();
+        let memory_before = proc_fields("/proc/self/status", &["VmRSS", "VmHWM"]).unwrap();
+        let (source_started_tx, source_started_rx) = oneshot::channel();
+        let (release_source_tx, release_source_rx) = oneshot::channel();
+        let (transfer_done_tx, transfer_done_rx) = oneshot::channel();
+        let (stop_source_tx, mut stop_source_rx) = oneshot::channel();
+        let served_sha = source_sha.clone();
+        let mut source = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            let mut payload_bytes = 0u64;
+            let result: MeasurementResult<()> = async {
+                for route in [
+                    "GET /api/models/acme/model/revision/main HTTP/1.1".to_owned(),
+                    format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"),
+                    format!("GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"),
+                ] {
+                    let mut stream = accept(&listener, &route).await?;
+                    requests.push(route.clone());
+                    if route.contains("/tree/") {
+                        json(&mut stream, &format!(r#"[{{"path":"weights.gguf","type":"file","lfs":{{"oid":"{served_sha}","size":{BYTES}}}}}]"#)).await?;
+                    } else {
+                        json(&mut stream, &format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}","tags":["gguf"]}}"#)).await?;
+                    }
+                }
+                let route = format!("GET /acme/model/resolve/{COMMIT}/weights.gguf HTTP/1.1");
+                let mut stream = accept(&listener, &route).await?;
+                requests.push(route);
+                write(&mut stream, format!("HTTP/1.1 200 OK\r\ncontent-type: application/octet-stream\r\ncontent-length: {BYTES}\r\nconnection: close\r\n\r\n").as_bytes()).await?;
+                write(&mut stream, &buffer[..]).await?;
+                payload_bytes += CHUNK as u64;
+                source_started_tx.send(()).map_err(|_| "source observer disconnected")?;
+                tokio::time::timeout(GATE, release_source_rx).await??;
+                buffer.fill(0);
+                for _ in 1..BYTES / CHUNK as u64 {
+                    write(&mut stream, &buffer[..]).await?;
+                    payload_bytes += CHUNK as u64;
+                }
+                drop(buffer);
+                transfer_done_tx.send(()).map_err(|_| "transfer observer disconnected")?;
+                // Observe unexpected replay through owner drainage, not just transfer.
+                tokio::select! {
+                    _ = &mut stop_source_rx => Ok(()),
+                    accepted = listener.accept() => {
+                        accepted?;
+                        Err("unexpected source request after payload".into())
+                    }
+                }
+            }.await;
+            (
+                result.map_err(|error| error.to_string()),
+                requests,
+                payload_bytes,
+            )
+        });
+
+        let (import_started_tx, import_started_rx) = oneshot::channel();
+        let import_started_tx = std::sync::Mutex::new(Some(import_started_tx));
+        let (release_import_tx, release_import_rx) = std::sync::mpsc::channel();
+        let release_import_rx = std::sync::Mutex::new(release_import_rx);
+        let barrier_expired = Arc::new(AtomicBool::new(false));
+        let barrier_failed = barrier_expired.clone();
+        let target = Arc::new(std::sync::Mutex::new(None::<PathBuf>));
+        let import_target = target.clone();
+        library.set_metadata_write_notifier(Some(Arc::new(move |metadata_path| {
+            let Ok(target) = import_target.lock() else {
+                barrier_failed.store(true, Ordering::SeqCst);
+                return;
+            };
+            let Some(destination) = target.as_ref() else {
+                return;
+            };
+            if metadata_path != destination.join("metadata.json")
+                || destination.join(".pumas_download").exists()
+                || !destination.join("weights.gguf").is_file()
+            {
+                return;
+            }
+            let Ok(mut sender) = import_started_tx.lock() else {
+                barrier_failed.store(true, Ordering::SeqCst);
+                return;
+            };
+            if let Some(sender) = sender.take() {
+                let _ = sender.send(());
+                if release_import_rx
+                    .lock()
+                    .ok()
+                    .is_none_or(|receiver| receiver.recv_timeout(GATE).is_err())
+                {
+                    barrier_failed.store(true, Ordering::SeqCst);
+                }
+            }
+        })));
+
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: Some("weights.gguf".into()),
+            filenames: None,
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let mut download_id = None;
+        let mut release_source_tx = Some(release_source_tx);
+        let mut measurement = serde_json::json!({"payload_bytes": BYTES, "buffer_bytes": CHUNK,
+            "filesystem": filesystem, "memory_before_kb": memory_before,
+            "inventory_before": before.values().collect::<Vec<_>>()});
+        let outcome: MeasurementResult<()> = async {
+            let id = tokio::time::timeout(Duration::from_secs(60), api.start_hf_download(&request))
+                .await??;
+            download_id = Some(id.clone());
+            tokio::time::timeout(GATE, source_started_rx).await??;
+            let (partial, partial_path, partial_identity) = tokio::time::timeout(GATE, async {
+                loop {
+                    if let Some(progress) = api.get_hf_download_progress(&id).await? {
+                        if progress.downloaded_bytes == Some(CHUNK as u64) {
+                            if let Some(model_id) = progress.library_model_id.as_ref() {
+                                let path = library
+                                    .library_root()
+                                    .join(model_id)
+                                    .join("weights.gguf.part");
+                                if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+                                    if metadata.len() == CHUNK as u64 {
+                                        return Ok::<_, Box<dyn std::error::Error + Send + Sync>>(
+                                            (progress, path.clone(), identity(&path)?),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        require(
+                            !matches!(
+                                progress.status,
+                                models::DownloadStatus::Error | models::DownloadStatus::Cancelled
+                            ),
+                            "transfer terminated before progress hold",
+                        )?;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await??;
+            let model_id = partial
+                .library_model_id
+                .as_ref()
+                .ok_or("model identity missing")?;
+            let destination = library.library_root().join(model_id);
+            *target.lock().map_err(|_| "target lock poisoned")? = Some(destination.clone());
+            measurement["partial"] = partial_identity.clone();
+            measurement["io_first_chunk_bytes"] = proc_fields(
+                "/proc/self/io",
+                &["rchar", "wchar", "read_bytes", "write_bytes"],
+            )?;
+            let transfer_started = Instant::now();
+            release_source_tx
+                .take()
+                .ok_or("source gate missing")?
+                .send(())
+                .map_err(|_| "source gate disconnected")?;
+            let final_path = destination.join("weights.gguf");
+            // Source completion and promotion precede verified handoff. The
+            // worker removes its marker after files_ready/package validation;
+            // include that work in the 300 s phase before importer entry.
+            tokio::time::timeout(Duration::from_secs(300), async {
+                transfer_done_rx.await?;
+                loop {
+                    let progress = api
+                        .get_hf_download_progress(&id)
+                        .await?
+                        .ok_or("transfer progress missing")?;
+                    require(
+                        !matches!(
+                            progress.status,
+                            models::DownloadStatus::Error | models::DownloadStatus::Cancelled
+                        ),
+                        "transfer failed before promotion",
+                    )?;
+                    if progress.downloaded_bytes == Some(BYTES)
+                        && std::fs::symlink_metadata(&final_path)
+                            .is_ok_and(|metadata| metadata.is_file() && metadata.len() == BYTES)
+                        && !partial_path.exists()
+                        && !destination.join(".pumas_download").exists()
+                    {
+                        return Ok::<_, Box<dyn std::error::Error + Send + Sync>>(());
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await??;
+            tokio::time::timeout(GATE, import_started_rx).await??;
+            measurement["artifact_relative_path"] =
+                serde_json::json!(final_path.strip_prefix(root.path())?.to_string_lossy());
+            let final_identity = identity(&final_path)?;
+            measurement["transfer_release_to_import_hold_ms"] =
+                serde_json::json!(transfer_started.elapsed().as_millis());
+            measurement["at_import"] = final_identity.clone();
+            measurement["memory_at_import_kb"] =
+                proc_fields("/proc/self/status", &["VmRSS", "VmHWM"])?;
+            measurement["io_after_promotion_before_final_hash_bytes"] = proc_fields(
+                "/proc/self/io",
+                &["rchar", "wchar", "read_bytes", "write_bytes"],
+            )?;
+            require(
+                final_identity["dev"] == partial_identity["dev"]
+                    && final_identity["inode"] == partial_identity["inode"],
+                "partial promotion changed inode",
+            )?;
+            require(
+                final_identity["logical_bytes"] == BYTES,
+                "promoted file size differs",
+            )?;
+            require(!partial_path.exists(), "partial retained after promotion")?;
+            let at_import = tokio::time::timeout(GATE, api.get_hf_download_progress(&id))
+                .await??
+                .ok_or("import progress missing")?;
+            require(
+                at_import.status == models::DownloadStatus::Downloading
+                    && at_import.downloaded_bytes == Some(BYTES),
+                "full bytes must remain downloading during import",
+            )?;
+            require(
+                at_import.selected_artifact_id == partial.selected_artifact_id
+                    && at_import.library_model_id == partial.library_model_id,
+                "public identity changed during import",
+            )?;
+            let records = persistence.acquisition_store().acquisitions()?;
+            require(records.len() == 1, "expected one acquisition")?;
+            let acquisition = records.values().next().ok_or("acquisition missing")?;
+            require(
+                matches!(
+                    acquisition.phase,
+                    crate::acquisition::AcquisitionPhase::Using { .. }
+                ),
+                "import must hold Using custody",
+            )?;
+            require(
+                persistence
+                    .read_hf_completion_receipt(acquisition.id)?
+                    .is_none(),
+                "receipt published before importer completion",
+            )?;
+            require(
+                persistence
+                    .load_lifecycle_inventory_strict()?
+                    .queue_admissions
+                    .contains_key(&id),
+                "admission missing during import",
+            )?;
+            require(
+                acquisition.files.len() == 1
+                    && acquisition.files[0].bytes == BYTES
+                    && acquisition.files[0].sha256 == source_sha,
+                "verified source digest differs",
+            )?;
+            measurement["download_id"] = serde_json::json!(id);
+            measurement["acquisition_id"] = serde_json::json!(acquisition.id.to_string());
+            measurement["model_id"] = serde_json::json!(model_id);
+            release_import_tx.send(())?;
+            let completed = tokio::time::timeout(Duration::from_secs(60), async {
+                loop {
+                    let progress = api
+                        .get_hf_download_progress(&id)
+                        .await?
+                        .ok_or("terminal progress missing")?;
+                    if progress.status == models::DownloadStatus::Completed {
+                        return Ok::<_, Box<dyn std::error::Error + Send + Sync>>(progress);
+                    }
+                    require(
+                        !matches!(
+                            progress.status,
+                            models::DownloadStatus::Error | models::DownloadStatus::Cancelled
+                        ),
+                        "import failed",
+                    )?;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await??;
+            let repeated = tokio::time::timeout(GATE, api.get_hf_download_progress(&id))
+                .await??
+                .ok_or("repeated terminal progress missing")?;
+            require(
+                repeated.status == models::DownloadStatus::Completed
+                    && repeated.download_id == completed.download_id
+                    && repeated.selected_artifact_id == completed.selected_artifact_id
+                    && repeated.library_model_id == completed.library_model_id
+                    && repeated.downloaded_bytes == Some(BYTES),
+                "terminal status not stable",
+            )?;
+            require(
+                !barrier_expired.load(Ordering::SeqCst),
+                "importer barrier timed out",
+            )?;
+            let settled = persistence.acquisition_store().acquisitions()?;
+            let settled = settled
+                .get(&acquisition.id)
+                .ok_or("settled acquisition missing")?;
+            require(
+                matches!(
+                    settled.phase,
+                    crate::acquisition::AcquisitionPhase::Adopted { .. }
+                ),
+                "acquisition not adopted",
+            )?;
+            let receipt = persistence
+                .read_hf_completion_receipt(acquisition.id)?
+                .ok_or("completion receipt missing")?;
+            receipt.validate_for_record(settled)?;
+            require(
+                receipt.download_id == id
+                    && receipt.model_id == *model_id
+                    && receipt.verified_files == acquisition.files
+                    && receipt.manifest == acquisition.manifest
+                    && receipt.workspace == acquisition.workspace
+                    && receipt.demand == acquisition.demand,
+                "receipt identity differs",
+            )?;
+            require(
+                library.load_metadata(&destination)?.is_some()
+                    && library.index().get(model_id)?.is_some(),
+                "model/index publication missing",
+            )?;
+            require(
+                !persistence
+                    .load_lifecycle_inventory_strict()?
+                    .queue_admissions
+                    .contains_key(&id),
+                "settled admission retained",
+            )?;
+            // Synchronous reads run in this owned future, with cooperative deadlines
+            // between chunks. No detached blocking hash job survives a timeout.
+            // A deadline cannot preempt an individual filesystem syscall.
+            let final_sha = tokio::time::timeout(Duration::from_secs(60), async {
+                let mut file = std::fs::File::open(&final_path)?;
+                let mut hash_buffer = [0u8; CHUNK];
+                let mut final_hash = Sha256::new();
+                let mut hashed_bytes = 0u64;
+                loop {
+                    let count = std::io::Read::read(&mut file, &mut hash_buffer)?;
+                    if count == 0 {
+                        break;
+                    }
+                    hashed_bytes += count as u64;
+                    require(hashed_bytes <= BYTES, "final file grew beyond payload")?;
+                    final_hash.update(&hash_buffer[..count]);
+                    tokio::task::yield_now().await;
+                }
+                let final_sha = hex::encode(final_hash.finalize());
+                require(
+                    hashed_bytes == BYTES
+                        && final_sha == source_sha
+                        && receipt.verified_files[0].sha256 == final_sha,
+                    "source/file/receipt digest differs",
+                )?;
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(final_sha)
+            })
+            .await??;
+            measurement["sha256"] = serde_json::json!(final_sha);
+            Ok(())
+        }
+        .await;
+
+        // Every post-start result reaches cleanup before any assertion/panic.
+        if let Some(release) = release_source_tx.take() {
+            let _ = release.send(());
+        }
+        let _ = release_import_tx.send(());
+        let cancellation = if outcome.is_err() {
+            if let Some(id) = &download_id {
+                Some(format!(
+                    "{:?}",
+                    tokio::time::timeout(Duration::from_secs(15), api.cancel_hf_download(id)).await
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let mut shutdown = tokio::time::timeout(GATE, api.shutdown_downloads()).await;
+        let mut shutdown_attempts = vec![format!("{shutdown:?}")];
+        if !matches!(shutdown, Ok(Ok(()))) {
+            shutdown = tokio::time::timeout(GATE, api.shutdown_downloads()).await;
+            shutdown_attempts.push(format!("{shutdown:?}"));
+        }
+        let drained = matches!(shutdown, Ok(Ok(())));
+        library.set_metadata_write_notifier(None);
+        let _ = stop_source_tx.send(());
+        let source_outcome = match tokio::time::timeout(Duration::from_secs(15), &mut source).await
+        {
+            Ok(result) => result.map_err(|error| error.to_string()),
+            Err(_) => {
+                source.abort();
+                let joined = source.await;
+                Err(format!("source join timed out; abort/join: {joined:?}"))
+            }
+        };
+        measurement["shutdown_attempts"] = serde_json::json!(shutdown_attempts);
+        measurement["cancellation"] = serde_json::json!(cancellation);
+        measurement["outcome"] = serde_json::json!(outcome
+            .as_ref()
+            .map(|_| ())
+            .map_err(|error| error.to_string()));
+        measurement["wall_elapsed_ms"] = serde_json::json!(wall_started.elapsed().as_millis());
+        let capacity = crate::acquisition::AcquisitionCapacity::default();
+        measurement["configured_capacity"] = serde_json::json!({"workers":capacity.workers,"blocking":capacity.blocking,"rescue_workers":capacity.rescue_workers,"rescue_blocking":capacity.rescue_blocking,"scopes":capacity.scopes});
+        if let Ok((result, requests, bytes)) = &source_outcome {
+            measurement["source_outcome"] = serde_json::json!(result);
+            measurement["source_requests"] = serde_json::json!(requests);
+            measurement["source_payload_bytes"] = serde_json::json!(bytes);
+        } else {
+            measurement["source_join_error"] = serde_json::json!(source_outcome.as_ref().err());
+        }
+        let inventory_outcome: MeasurementResult<()> = (|| {
+            let after = inventory(root.path())?;
+            let new: Vec<_> = after
+                .iter()
+                .filter(|(key, _)| !before.contains_key(key))
+                .map(|(_, value)| value.clone())
+                .collect();
+            let artifact: Vec<_> = after
+                .values()
+                .filter(|record| {
+                    record["logical_bytes"]
+                        .as_u64()
+                        .is_some_and(|size| size >= BYTES)
+                })
+                .collect();
+            let other: Vec<_> = new
+                .iter()
+                .filter(|record| {
+                    record["logical_bytes"]
+                        .as_u64()
+                        .is_some_and(|size| size < BYTES)
+                })
+                .collect();
+            measurement["inventory_after"] = serde_json::json!(after.values().collect::<Vec<_>>());
+            measurement["changed_baseline_files"] = serde_json::json!(after
+                .iter()
+                .filter(|(key, record)| before.get(key).is_some_and(|old| old != *record))
+                .map(
+                    |(key, record)| serde_json::json!({"before": before.get(key), "after": record})
+                )
+                .collect::<Vec<_>>());
+            measurement["other_new_files_logical_bytes"] = serde_json::json!(other
+                .iter()
+                .filter_map(|record| record["logical_bytes"].as_u64())
+                .sum::<u64>());
+            measurement["other_new_files_allocated_bytes"] = serde_json::json!(other
+                .iter()
+                .filter_map(|record| record["allocated_bytes"].as_u64())
+                .sum::<u64>());
+            require(
+                artifact.len() == 1
+                    && artifact[0]["dev"] == measurement["partial"]["dev"]
+                    && artifact[0]["inode"] == measurement["partial"]["inode"],
+                "settled root retains an unexpected artifact-sized file",
+            )?;
+            require(
+                artifact[0]["paths"].as_array().is_some_and(|paths| {
+                    paths.len() == 1 && paths[0] == measurement["artifact_relative_path"]
+                }),
+                "artifact retains unexpected aliases",
+            )?;
+            let final_path = root.path().join(
+                measurement["artifact_relative_path"]
+                    .as_str()
+                    .ok_or("artifact path missing")?,
+            );
+            let settled_identity = identity(&final_path)?;
+            require(
+                settled_identity["dev"] == measurement["partial"]["dev"]
+                    && settled_identity["inode"] == measurement["partial"]["inode"]
+                    && settled_identity["logical_bytes"] == BYTES,
+                "settled model no longer matches the promoted regular file",
+            )?;
+            measurement["after_settlement"] = settled_identity;
+            require(
+                after.values().all(|record| {
+                    record["paths"].as_array().is_some_and(|paths| {
+                        paths
+                            .iter()
+                            .all(|path| path.as_str().is_some_and(|path| !path.ends_with(".part")))
+                    })
+                }),
+                "partial file retained after settlement",
+            )?;
+            require(
+                std::fs::read(&sentinel)? == b"AC10 authored sentinel\n",
+                "sentinel changed",
+            )?;
+            Ok(())
+        })();
+        measurement["inventory_outcome"] = serde_json::json!(inventory_outcome
+            .as_ref()
+            .map(|_| ())
+            .map_err(|error| error.to_string()));
+        if !drained {
+            measurement["retained_root"] = serde_json::json!(root.keep());
+        }
+        println!("AC10_PUBLIC_HF_MEASUREMENT {}", measurement);
+        assert!(drained, "owner shutdown failed: {shutdown_attempts:?}");
+        assert!(outcome.is_ok(), "measurement failed: {outcome:?}");
+        assert!(
+            matches!(&source_outcome, Ok((Ok(()), requests, BYTES)) if requests.len() == 4),
+            "source failed: {source_outcome:?}"
+        );
+        assert!(
+            inventory_outcome.is_ok(),
+            "inventory failed: {inventory_outcome:?}"
+        );
+    }
+
     #[tokio::test]
     async fn public_hf_status_poll_tracks_mixed_size_download_through_receipt_settlement() {
         use sha2::{Digest, Sha256};

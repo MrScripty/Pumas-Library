@@ -1,0 +1,572 @@
+{
+  "schema_version": 1,
+  "manifest": {
+    "branch": "feat/acquisition-http-budget-0c02dcfb",
+    "base": "0c02dcfb81a0f7ab2a3858c2b5cee329816b3ce5",
+    "base_tree": "78c663ed397264284cb95662d49a3354380755d4",
+    "final_source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a",
+    "final_source_sha256": "3e611252c15f6c87aa2f4f22519d1ed80b2dbe1f22855089b77cb8aeec839c4f",
+    "selected_feature": "enforce existing positive HTTP per-file elapsed source-wait budget across headers/body/retries/backoff",
+    "versions": {
+      "rustc": "1.92.0 (ded5c06cf 2025-12-08)",
+      "cargo": "1.92.0 (344c4567c 2025-10-21)",
+      "tokio_locked": "1.49.0"
+    },
+    "build_settings": {
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "CARGO_PROFILE_DEV_DEBUG": "0",
+      "CARGO_PROFILE_TEST_DEBUG": "0",
+      "CARGO_TARGET_DIR": "/workspace/Pumas-Library/rust/target",
+      "offline": true,
+      "locked": true
+    },
+    "reviews": {
+      "spec": {
+        "agent": "/root/q4_next_scope",
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a",
+        "result": "ACK; no remaining concrete finding; per-poll clock guard resolves cooperative-timer finding"
+      },
+      "standards": {
+        "agent": "/root/installed_harness_audit",
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a",
+        "result": "ACK; no actionable finding; effect drainage, fixture root retention and S3 preservation confirmed"
+      }
+    },
+    "public_API": "No public shape or signature changes. Positive elapsed now bounds HTTP source waits; explicit zero remains opt-out. Attempt limits and S3 behavior unchanged.",
+    "scope_limits": [
+      "Guard is cooperative: does not preempt an active poll or filesystem syscall.",
+      "Registered effects drain even after expiry; no hard caller return deadline.",
+      "Local verification, consumer/import/install and cleanup have no new transfer deadline.",
+      "Linux synthetic loopback/core evidence only; hosted, real provider, supported platform and full AQ-HTTP acceptance remain pending."
+    ],
+    "source_head": "0950c4d5839608c8dd5f52afcb3fd2424a9a1656",
+    "source_tree": "55c7dea28bae397ee9d70995897c5ff0c8e2a672"
+  },
+  "commands": {
+    "cwd": "/workspace/Pumas-Library-s3-installed-prefix-main95",
+    "commands": [
+      {
+        "name": "red",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "http_elapsed_budget_",
+          "--",
+          "--nocapture",
+          "--test-threads=1"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "red.log",
+        "exit": 101,
+        "source_blob": "5a6bf253b9cd3c0048570388d6cec8f8e0ea784e"
+      },
+      {
+        "name": "intermediate-nine",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "http_elapsed_budget_",
+          "--",
+          "--nocapture",
+          "--test-threads=1"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "green-intermediate-nine-controls.log",
+        "exit": 0,
+        "source_blob": "0c7c312bc980f9c4879f2749c4b8ea96d2b417dd"
+      },
+      {
+        "name": "before-clock-guard",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "acquisition::",
+          "--",
+          "--nocapture",
+          "--test-threads=1"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "default-acquisition-before-clock-guard.log",
+        "exit": 0,
+        "source_blob": "091cab4e73317a9d8f047a01a4deb9392dca1bda"
+      },
+      {
+        "name": "no-default-acquisition",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "--no-default-features",
+          "acquisition::",
+          "--",
+          "--nocapture",
+          "--test-threads=1"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "no-default-acquisition.log",
+        "exit": 0,
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a"
+      },
+      {
+        "name": "intermediate-compile-error",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "http_elapsed_budget_",
+          "--",
+          "--nocapture",
+          "--test-threads=1"
+        ],
+        "log": "green-compile-error.log",
+        "exit": 101,
+        "source_blob": "5f1d0bd5a7a85d8c8ee53c8cb36157d0f1a8ada9",
+        "note": "TempDir moved before later path assertion; repaired using owned state_path"
+      },
+      {
+        "name": "default-acquisition",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "acquisition::",
+          "--",
+          "--nocapture",
+          "--test-threads=1"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "default-acquisition.log",
+        "exit": 0,
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a"
+      },
+      {
+        "name": "default-hf-download",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "model_library::hf::download::tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "default-hf-download.log",
+        "exit": 0,
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a"
+      },
+      {
+        "name": "default-hf-public-control",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "public_hf_status_poll_tracks_mixed_size_download_through_receipt_settlement",
+          "--",
+          "--test-threads=1"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "default-hf-public-control.log",
+        "exit": 0,
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a"
+      },
+      {
+        "name": "default-clippy",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "clippy",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "default-clippy.log",
+        "exit": 0,
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a"
+      },
+      {
+        "name": "no-default-hf-download",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "--no-default-features",
+          "model_library::hf::download::tests::",
+          "--",
+          "--test-threads=1"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "no-default-hf-download.log",
+        "exit": 0,
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a"
+      },
+      {
+        "name": "no-default-hf-public-control",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "test",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--lib",
+          "--no-default-features",
+          "public_hf_status_poll_tracks_mixed_size_download_through_receipt_settlement",
+          "--",
+          "--test-threads=1"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "no-default-hf-public-control.log",
+        "exit": 0,
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a"
+      },
+      {
+        "name": "no-default-clippy",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "clippy",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--all-targets",
+          "--no-default-features",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "no-default-clippy.log",
+        "exit": 0,
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a"
+      },
+      {
+        "name": "s3-clippy",
+        "argv": [
+          "/tmp/pumas-cargo-admission/run-cargo-serialized",
+          "clippy",
+          "--offline",
+          "--manifest-path",
+          "rust/Cargo.toml",
+          "--locked",
+          "-p",
+          "pumas-library",
+          "--features",
+          "s3",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "environment_overrides": {
+          "CARGO_PROFILE_DEV_DEBUG": "0",
+          "CARGO_PROFILE_TEST_DEBUG": "0"
+        },
+        "log": "s3-clippy.log",
+        "exit": 0,
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a"
+      },
+      {
+        "name": "rustfmt-missing-env",
+        "argv": [
+          "/workspace/.pumas-tools/cargo/bin/rustfmt",
+          "--edition",
+          "2021",
+          "--check",
+          "rust/crates/pumas-core/src/acquisition/service.rs"
+        ],
+        "exit": 1,
+        "log": "rustfmt-missing-env.log",
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a",
+        "note": "tool invoked without repository toolchain environment; rustup attempted unwritable default home; no formatting ran"
+      },
+      {
+        "name": "final-rustfmt",
+        "argv": [
+          "rustfmt",
+          "--edition",
+          "2021",
+          "--check",
+          "rust/crates/pumas-core/src/acquisition/service.rs"
+        ],
+        "exit": 0,
+        "log": "final-rustfmt.log",
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a",
+        "environment_setup": "source /workspace/.pumas-tools/env.sh"
+      },
+      {
+        "name": "final-diff-check",
+        "argv": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit": 0,
+        "log": "final-diff-check.log",
+        "source_blob": "83478facd105a08f8a52e36e6ce9780d09e76d2a",
+        "environment_setup": null
+      }
+    ]
+  },
+  "archive": {
+    "name": "command-logs.tar.gz",
+    "bytes": 27892,
+    "sha256": "57dbd811aff7d00665a881bed8360d1ed701bf9cf0c56aba80d699a5122a1674",
+    "members": [
+      {
+        "name": "cache-restoration.json",
+        "bytes": 1730,
+        "sha256": "1d799944ff540946970742161de7a0215788ead1786ccbaaae37ef698d4291b7"
+      },
+      {
+        "name": "commands.json",
+        "bytes": 9629,
+        "sha256": "98caad12ac5b213b9df8c236e3a141c0831a7f8d12b4a9ef5591f47085200d0d"
+      },
+      {
+        "name": "default-acquisition-before-clock-guard.log",
+        "bytes": 19678,
+        "sha256": "b311a4a84ebd1527327b4deeb1ef73d11bc935abe3bbe3060ddbaa11f4d5a946"
+      },
+      {
+        "name": "default-acquisition.log",
+        "bytes": 19678,
+        "sha256": "f95511e288b7d259c0b4b305ccd2486bd8d99566f16b58ddcc056f7d5132b8da"
+      },
+      {
+        "name": "default-clippy.log",
+        "bytes": 172,
+        "sha256": "401ebcf92f2d03393101abf5f589be4b38fd914c9798c7406da81ca48302772f"
+      },
+      {
+        "name": "default-hf-download.log",
+        "bytes": 22221,
+        "sha256": "7652a33821c55e5eaeb2b5d47fbb2b4467fdfdaa2a6ce3118638acc35a9da715"
+      },
+      {
+        "name": "default-hf-public-control.log",
+        "bytes": 395,
+        "sha256": "904874c03a19df116868bae5c7900fd8cba7bb99796cf503dd9819f908514809"
+      },
+      {
+        "name": "final-diff-check.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "final-rustfmt.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "green-compile-error.log",
+        "bytes": 1112,
+        "sha256": "de48093a6ed9fff58a773c4bf4c8edea644a3f4d7fea614e83c6776c22af9bd7"
+      },
+      {
+        "name": "green-intermediate-nine-controls.log",
+        "bytes": 1223,
+        "sha256": "be4084edd9b4f127e17f489912173bdfd132caa0ae5d0cd220f9543744db5823"
+      },
+      {
+        "name": "identity-after-source.json",
+        "bytes": 234,
+        "sha256": "990d29f36403185d49079f7064d902e72b502e3d1ee9e417f4e8b7cec1273231"
+      },
+      {
+        "name": "identity-before-source.json",
+        "bytes": 160,
+        "sha256": "e8b0de26f9aeb4af0a2175e3d9b74815f9d091f60b88ff6370d258a6866e9127"
+      },
+      {
+        "name": "no-default-acquisition.log",
+        "bytes": 19678,
+        "sha256": "11bc3acd208b78ec543bf5168e1a3804886e0bbdfddbf354d9d6fec88d32bd66"
+      },
+      {
+        "name": "no-default-clippy.log",
+        "bytes": 172,
+        "sha256": "87b4fa688e6ddda7bfb9df2c38f9343f25eae14ed7e9f35aed132c46a98d34b9"
+      },
+      {
+        "name": "no-default-hf-download.log",
+        "bytes": 22221,
+        "sha256": "b66a8e7c298043211d0c997fd435e086867844fb42a6560d60a6a15a1be16f59"
+      },
+      {
+        "name": "no-default-hf-public-control.log",
+        "bytes": 395,
+        "sha256": "55bb1e39e79af8e277ad7b4ff82694fcaed462cd63bd90d97072d574847dd299"
+      },
+      {
+        "name": "onnx-build-policy.json",
+        "bytes": 470,
+        "sha256": "b3935f8ee43e2a6e19fcee087e3cc5d32afa9e37f34725f376cde3fafb62d2d9"
+      },
+      {
+        "name": "parked-owned-cache.json",
+        "bytes": 450,
+        "sha256": "7ec032023eca7f782783edf7ddd25dc8c1e17559042f15bb0d6bffb5e40b1df3"
+      },
+      {
+        "name": "red-source-blob.txt",
+        "bytes": 41,
+        "sha256": "7c3ab77ce0784636001e177448e84d3ce19d33c84d032963141cbdd288fae600"
+      },
+      {
+        "name": "red-test-only.patch",
+        "bytes": 19923,
+        "sha256": "b1c75ac0d6cc3b0a7a5c9b495e794273906c92b8650f54f727da86c17a602957"
+      },
+      {
+        "name": "red.log",
+        "bytes": 3235,
+        "sha256": "ce14cbedbcc2fa03e5a37d9b430558df797cdebb4ad74f54931e6c4d3803745e"
+      },
+      {
+        "name": "removed-intermediate-default-cache.json",
+        "bytes": 322,
+        "sha256": "3707da80f5af5fd6dabcfaefdb1d272604f79275fd186490fd2dd8c279683622"
+      },
+      {
+        "name": "removed-owned-unit-cache.json",
+        "bytes": 597,
+        "sha256": "a2253de561099733ef15ef86ed66452736fdc4f8da70705e6c7d19a33d16d20e"
+      },
+      {
+        "name": "run-cargo-serialized.sh",
+        "bytes": 235,
+        "sha256": "42c3338ccaa7ea1d34f0a7a9b3f8e8fb0551a6f40b8aaeee9afda1359d690730"
+      },
+      {
+        "name": "run-checks.py",
+        "bytes": 1654,
+        "sha256": "e6c05ccb468eb87ab296030c65cde16f15d30e7a420d642ad1adb227ba2bf19c"
+      },
+      {
+        "name": "run-manifest.json",
+        "bytes": 2092,
+        "sha256": "082103281f75888f9b9c8341e28dcb57761ab8c02b64d2e6da4b538bd0381743"
+      },
+      {
+        "name": "rustfmt-missing-env.log",
+        "bytes": 99,
+        "sha256": "ff4d4f6fe753fcbc5e86a231ea2e8eb2ab546a884d5aa7c3b545dfae4f45d6fd"
+      },
+      {
+        "name": "rustfmt.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "s3-clippy.log",
+        "bytes": 172,
+        "sha256": "bb89a8d2d9e68bf04ff2f19f6e8aa73c6bfc6e77a6bfa900f2ae6bd2e9d11965"
+      }
+    ]
+  },
+  "final_results": "Final-source acquisition-filter tests pass **153/153 in default and 153/153 in no-default** (including all ten new controls). HF download tests pass **192/192 in each configuration**; mixed-size public HF status/import/receipt controls pass **1/1 in each**. Strict all-target core Clippy with warnings denied passes in default, no-default and default-plus-S3. Scoped rustfmt and `git diff --check` pass. These are affected-slice checks, not full workspace or hosted qualification.",
+  "historical_failures": "red and intermediate compile exit101 retained; historical passes do not qualify final blob",
+  "identity_note": "source commit before/after evidence archived; evidence successor effective identities verified at commit"
+}

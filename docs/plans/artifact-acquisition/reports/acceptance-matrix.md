@@ -395,3 +395,35 @@ Code/test candidate: implementation/evidence commit `d1e9106b6e3c6184e69899ba0a8
 The ordinary core refusal now requires every distinct explicit filename in the exact selected pinned tree before task preparation/admission. The public route retains that resolved selection before destination preparation can relocate the indexed `unknown/...` partial, then passes the same selection into admission. The public refusal preserved the partial path, bytes, metadata, index and destination; observed only the expected identity/tree metadata requests and no payload request or durable admission. The separate positive control admitted both requested payload files intact. Independent spec review found no mismatch. Standards review found and then approved bounded cleanup corrections: monitor handles are aborted and joined on timeout, start failures reach shutdown before assertion, and nested shutdown errors are retried and reported as failures.
 
 This is one synthetic Linux x86_64 ordinary Hugging Face explicit-file selection case. It does not establish the whole AC01 identity/manifest matrix, shard/Diffusers completeness, real-service revision/status behavior, RPC/Electron compatibility, process/power-loss durability, measured resource bounds, deployed migration/old-writer/rollback/root disposition, other supported platforms or AQ-HTTP acceptance. AC01, current-head AC15 and AQ-HTTP remain pending.
+
+## AC10 public HF 512 MiB importer measurement — local evidence, 2026-10-06
+
+Source `8a147160c2b3743c549e00a89b1e48f54d7a2390` (tree `9544e16dde7802baa2033bf7ceea7d44c2ba3767`, `api/hf.rs` blob `855fe4272889d7518d572461160b35a02a299d23`) passes the
+explicit ignored workload 1/1 in default and no-default fresh processes.
+Partial/import/settled inode continuity, full Downloading/Using without receipt
+at actual importer hold, exact source/file/receipt SHA, model/index publication,
+Adopted and settled admission are asserted. Full-root no-follow inventories
+show one artifact-sized retained file. Raw RSS/HWM and I/O counters, allocation,
+source bytes/requests and configured capacity are bound in the
+[report](ac10-public-hf-measurement-2026-10-06.md). Strict all-target core Clippy
+and existing mixed-size status controls pass in both modes. The repaired timing
+failure and compile/interruption logs are retained. One synthetic Linux core
+workload does not establish concurrent admission/resource envelopes, page-cache
+memory, transient copies, physical-media writes, copy fallback, installed UI,
+real providers, other platforms or full AC10. AC10 and AQ-HTTP remain pending.
+
+## Positive HTTP elapsed-budget feature — bounded local support
+
+Source `0950c4d5839608c8dd5f52afcb3fd2424a9a1656` (tree `55c7dea28bae397ee9d70995897c5ff0c8e2a672`) enforces the existing
+positive per-file HTTP budget across headers/body/retries/backoff, preserving
+zero opt-out, attempt limits, exact identity/verification and receipt policy.
+Ten owned loopback controls plus 153 acquisition-filter and 192 HF download
+cases in each default/no-default mode, one public HF status/import control in
+each, and strict Clippy in three feature modes pass. This supports bounded
+AC02/AC06/AC10/AC15 behavior only. Already registered writes drain before return;
+no hard filesystem/verification/import/child-cleanup return deadline is claimed.
+See [http-elapsed-budget-qualification-2026-10-06](http-elapsed-budget-qualification-2026-10-06.md) for exact logs and independent source reviews.
+No public shape, S3/native frozen source, generator or Q2 writes. AQ-HTTP remains
+not ready; broader acceptance, current-head hosted checks, resource/platform/UI,
+public-client and deployment dispositions remain pending. Q2 exact local package
+handoff/denied-network installation remains the next gated implementation feature.

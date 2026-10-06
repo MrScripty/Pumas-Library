@@ -1,5 +1,35 @@
 # Plan: source-neutral artifact acquisition
 
+**Positive HTTP elapsed-budget feature (2026-10-06):** Separate
+`feat/acquisition-http-budget-0c02dcfb` retains frozen AC10 evidence base
+`0c02dcfb81a0f7ab2a3858c2b5cee329816b3ce5` (tree `78c663ed397264284cb95662d49a3354380755d4`). Tested
+source `0950c4d5839608c8dd5f52afcb3fd2424a9a1656` (tree `55c7dea28bae397ee9d70995897c5ff0c8e2a672`) now enforces the existing positive
+per-file HTTP source-wait budget across headers, body, attempts and backoff.
+Exact sets, verification, held handoff and receipts already existed; stalls
+ignoring the configured budget were the missing AQ-HTTP prerequisite. All ten
+controls and affected-slice checks pass; independent reviews ACK the final blob.
+Zero-budget compatibility, registered-effect drainage, S3/native frozen source,
+public API shapes and explicit runtime ONNX policy remain unchanged. See
+[qualification](reports/http-elapsed-budget-qualification-2026-10-06.md).
+Normal merge `6385a493` incorporates accepted main `1c1c7875`; the
+Rust subtree is unchanged and all ten controls pass again in both modes.
+AQ-HTTP remains pending. Next implementation feature is Q2 exact wheel closure /
+verified local handoff / network-denied local-only Torch consumption, gated by
+AQ-HTTP acceptance; no Q2 source change is admitted here.
+
+**AC10 public HF importer measurement (2026-10-06):** Separate
+`qualification/ac10-public-hf-72224551` records the bounded ignored Linux
+512 MiB public-core transfer/importer fixture at `8a147160` (tree `9544e16dde7802baa2033bf7ceea7d44c2ba3767`).
+Default and no-default fresh-process runs preserve partial/final/settled inode,
+match source/file/receipt digests and settle model/index publication to Adopted.
+RSS samples at the importer hold are 99,004 and 96,536 kB respectively; raw
+VmHWM/I/O and complete retained-file inventories are in the
+[report](reports/ac10-public-hf-measurement-2026-10-06.md).
+Both mixed-size controls and strict all-target core Clippy pass. Independent
+source reviews accepted the exact timing repair; the first failed attempt remains
+recorded. This is one synthetic workload, not a complete resource envelope.
+AC10 and AQ-HTTP remain pending; Q2 remains gated. No production/API changes.
+
 **Installed S3 process-loss milestone (2026-10-06):** Separate
 `feat/s3-installed-process-loss-ed31639` preserves frozen ed31639 and its actual
 production binary hash. All eleven installed cases (the original ten plus one

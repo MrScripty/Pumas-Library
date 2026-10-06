@@ -895,3 +895,29 @@ test/local helpers in `api/hf.rs`. The owning plan, ledger, matrix, gates and
 512 MiB runs, exact raw-log archive/JSON, independent source review, failed timing
 attempt and cache/resource manifests. No production hooks, dependencies,
 public API, S3/native frozen writes or Q2 source changes. All gates remain pending.
+
+## Q1 positive HTTP elapsed-budget enforcement — admitted 2026-10-06
+
+The coordinator requests the smallest missing AQ-HTTP behavior needed before Q2,
+on separate `feat/acquisition-http-budget-0c02dcfb`, preserving AC10 source/evidence
+and the separately reviewed PR42 generator evidence. Base is
+`0c02dcfb81a0f7ab2a3858c2b5cee329816b3ce5` (tree
+`78c663ed397264284cb95662d49a3354380755d4`). Exact manifest/file-set iteration,
+verification, held use and receipts already exist. The concrete gap is that a
+positive HTTP `AcquisitionRetryPolicy.elapsed` does not bound request headers,
+body streaming or the retry backoff: it is checked only after retryable errors.
+
+Production write set is only `src/acquisition/service.rs`: an absolute per-file
+HTTP source-wait deadline reused across attempts, request/body waits and capped
+backoff; overflow refusal before public durable admission. Tests remain in the
+same file, exercising actual owned loopback streams, existing owned-write gates,
+cancellation, zero-budget compatibility and exact multi-file receipt settlement.
+Owning contract/core README, plan, ledger, acceptance matrix, dependency gates and
+`reports/http-elapsed-budget-qualification-2026-10-06.md` record evidence/limits.
+No public shape, attempt defaults, schema, dependency, S3 source/deadline policy,
+native repair, generator, installer/Q2 or ONNX acquisition policy changes.
+Positive HF configuration is enforced; explicit elapsed zero retains legacy
+behavior. Source expiry waits for registered effects to drain and does not impose
+a disk/verification/import/child-cleanup deadline or declare AQ-HTTP ready.
+Independent specification/standards design reviews precede implementation;
+parent retains PRs, hosted qualification, review coordination and integration.

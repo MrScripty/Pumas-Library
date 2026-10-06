@@ -256,7 +256,7 @@ impl AcquisitionSource {
         _retry: &AcquisitionRetryPolicy,
     ) -> Result<Option<tokio::time::Instant>> {
         match self {
-            Self::Http { .. } => Ok(None),
+            Self::Http { .. } => http_transfer_deadline(_retry.elapsed),
             #[cfg(feature = "s3")]
             Self::S3(_) => tokio::time::Instant::now()
                 .checked_add(_retry.elapsed)
@@ -275,7 +275,7 @@ impl AcquisitionSource {
     ) -> Result<super::http::HttpArtifactResponse> {
         match self {
             Self::Http { client, source } => {
-                open_http_artifact(
+                let request = open_http_artifact(
                     client,
                     &source.url,
                     manifest,
@@ -283,8 +283,16 @@ impl AcquisitionSource {
                     resume,
                     source.authorization.as_deref(),
                     continuation,
-                )
-                .await
+                );
+                if let Some(deadline) = _deadline {
+                    tokio::select! {
+                        biased;
+                        _ = http_budget_elapsed(deadline) => Err(http_budget_timeout()),
+                        response = request => response,
+                    }
+                } else {
+                    request.await
+                }
             }
             #[cfg(feature = "s3")]
             Self::S3(selection) => {
@@ -293,6 +301,41 @@ impl AcquisitionSource {
                     .await
             }
         }
+    }
+}
+
+// Zero is the existing opt-out used by the native consumer. A positive
+// budget starts once per selected file and is never reset by a retry. Local
+// verification and registered effect drainage remain awaited independently.
+fn http_transfer_deadline(elapsed: Duration) -> Result<Option<tokio::time::Instant>> {
+    if elapsed.is_zero() {
+        return Ok(None);
+    }
+    tokio::time::Instant::now()
+        .checked_add(elapsed)
+        .map(Some)
+        .ok_or_else(|| invalid("HTTP elapsed budget exceeds the supported clock range"))
+}
+
+// Sleep may yield to Tokio cooperative scheduling even when its timer has
+// expired. Check the clock on every poll before touching a source/body future.
+async fn http_budget_elapsed(deadline: tokio::time::Instant) {
+    let sleep = tokio::time::sleep_until(deadline);
+    tokio::pin!(sleep);
+    futures::future::poll_fn(|cx| {
+        if tokio::time::Instant::now() >= deadline {
+            std::task::Poll::Ready(())
+        } else {
+            sleep.as_mut().poll(cx)
+        }
+    })
+    .await
+}
+
+fn http_budget_timeout() -> PumasError {
+    PumasError::Network {
+        message: "HTTP acquisition attempt exceeded its operation budget".into(),
+        cause: None,
     }
 }
 
@@ -471,6 +514,10 @@ impl AcquisitionProof {
 #[derive(Clone)]
 pub struct AcquisitionRetryPolicy {
     pub attempts: Option<u32>,
+    /// Per-file source-wait budget across headers, body, retries and backoff.
+    /// HTTP zero preserves the legacy opt-out; S3 requires a positive value.
+    /// Registered filesystem effects still drain after expiry, and consumer
+    /// verification/publication/cleanup are not given this transfer deadline.
     pub elapsed: Duration,
     pub backoff: crate::network::RetryConfig,
 }
@@ -1137,9 +1184,25 @@ impl AcquisitionService {
         let mut attempt = 0_u32;
         loop {
             if transfer_deadline.is_some_and(|deadline| deadline <= tokio::time::Instant::now()) {
-                return Err(PumasError::DownloadFailed {
-                    url: "S3 selected object".into(),
-                    message: "S3 acquisition elapsed retry budget exhausted".into(),
+                return Err(match source {
+                    AcquisitionSource::Http { .. } => {
+                        if host.cancel_requested() {
+                            self.forget_checkpoint(key)?;
+                            return Err(PumasError::DownloadCancelled);
+                        }
+                        if host.pause_requested_now() {
+                            return Err(PumasError::DownloadPaused);
+                        }
+                        PumasError::DownloadFailed {
+                            url: "artifact source".into(),
+                            message: "HTTP acquisition elapsed retry budget exhausted".into(),
+                        }
+                    }
+                    #[cfg(feature = "s3")]
+                    AcquisitionSource::S3(_) => PumasError::DownloadFailed {
+                        url: "S3 selected object".into(),
+                        message: "S3 acquisition elapsed retry budget exhausted".into(),
+                    },
                 });
             }
             attempt = attempt
@@ -1266,7 +1329,25 @@ impl AcquisitionService {
                         context,
                         hash,
                     };
-                    let outcome = stream_http_artifact(response, resume, &mut sink, host).await;
+                    let stream = stream_http_artifact(response, resume, &mut sink, host);
+                    let outcome = match (source, transfer_deadline) {
+                        (AcquisitionSource::Http { .. }, Some(deadline)) => {
+                            // Tokio timeout_at polls the wrapped future first.
+                            // Check expiry before polling any new byte effect.
+                            let outcome = tokio::select! {
+                                biased;
+                                _ = http_budget_elapsed(deadline) => None,
+                                outcome = stream => Some(outcome),
+                            };
+                            match outcome {
+                                Some(outcome) => outcome,
+                                None if host.cancel_requested() => Ok(HttpBodyOutcome::Cancelled),
+                                None if host.pause_requested_now() => Ok(HttpBodyOutcome::Paused),
+                                None => Err(http_budget_timeout()),
+                            }
+                        }
+                        _ => stream.await,
+                    };
                     if sink.file.is_none() {
                         // A source deadline can cancel the write waiter. Join the
                         // registered descriptor effect before any retry truncates it.
@@ -1866,6 +1947,8 @@ impl AcquisitionConsumer {
                 "HTTP sources must match the exact selected manifest files",
             ));
         }
+        // Reject an unrepresentable positive budget before worker/store admission.
+        let _ = http_transfer_deadline(request.retry.elapsed)?;
         for source in &request.sources {
             client.for_request(&source.url, source.authorization.is_some())?;
         }
@@ -2692,6 +2775,580 @@ mod tests {
             elapsed: Duration::from_secs(5),
             backoff: crate::network::RetryConfig::new(),
         }
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum HttpBudgetFixture {
+        Headers,
+        Body,
+        Backoff,
+        RetryHeaders,
+        HeldWrite,
+        ExpiredBeforeBody,
+        Zero,
+        Happy,
+        Cancel,
+    }
+
+    struct HttpBudgetHost {
+        controls: ControlledHost,
+        backoff: Arc<AtomicBool>,
+    }
+
+    #[async_trait::async_trait]
+    impl HttpAttemptHost for HttpBudgetHost {
+        async fn pause_requested(&self) {
+            self.controls.pause_requested().await;
+        }
+        fn pause_requested_now(&self) -> bool {
+            self.controls.pause_requested_now()
+        }
+        fn cancel_requested(&self) -> bool {
+            self.controls.cancel_requested()
+        }
+        async fn record_progress(&mut self, bytes: u64) -> Result<()> {
+            self.controls.record_progress(bytes).await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AcquisitionHost for HttpBudgetHost {
+        async fn retry(
+            &mut self,
+            _attempt: u32,
+            delay: Option<Duration>,
+            _error: Option<&str>,
+        ) -> Result<()> {
+            if delay.is_some() {
+                self.backoff.store(true, Ordering::SeqCst);
+            }
+            Ok(())
+        }
+    }
+
+    async fn http_budget_fixture(mode: HttpBudgetFixture) {
+        use HttpBudgetFixture::*;
+        let guard = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = Arc::new(service.open_consumer("fixture").unwrap());
+        let reservation_dropped = Arc::new(AtomicBool::new(false));
+        let grant = AcquisitionWorkspace::from_capability(
+            crate::platform::capability_fs::open_directory(&stage).unwrap(),
+            workspace(&stage).identity().clone(),
+            Arc::new(ReservationDropProbe(reservation_dropped.clone())),
+            || Ok(()),
+        )
+        .unwrap();
+        let count = if mode == Happy { 3 } else { 1 };
+        let selected = ArtifactManifest::new(
+            manifest("payload.bin").source().clone(),
+            (0..count)
+                .map(|i| {
+                    ArtifactFile::new(
+                        format!("payload-{i}.bin"),
+                        format!("source-{i}"),
+                        Some(4),
+                        Some(
+                            super::super::Sha256Evidence::new(
+                                "fixture.sha256",
+                                hex::encode(Sha256::digest(b"DATA")),
+                            )
+                            .unwrap(),
+                        ),
+                        FileVerificationRequirement::Sha256,
+                    )
+                    .unwrap()
+                })
+                .collect(),
+        )
+        .unwrap();
+        let expected_manifest = selected.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "http://{}/fixture?seed=seed-http-budget-secret",
+            listener.local_addr().unwrap()
+        );
+        let requests = Arc::new(AtomicUsize::new(0));
+        let seen = requests.clone();
+        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
+        let (happy_tx, mut happy_rx) = tokio::sync::mpsc::channel::<()>(1);
+        let (first_response_tx, mut first_response_rx) = tokio::sync::oneshot::channel();
+        let mut first_response_tx = Some(first_response_tx);
+        let mut source = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = tokio::select! {
+                    biased;
+                    _ = &mut stop_rx => return Ok::<(), PumasError>(()),
+                    accepted = listener.accept() => accepted?,
+                };
+                let mut request = [0_u8; 2048];
+                let read = tokio::select! {
+                    biased;
+                    _ = &mut stop_rx => return Ok(()),
+                    read = socket.read(&mut request) => read?,
+                };
+                if read == 0 {
+                    continue;
+                }
+                let attempt = seen.fetch_add(1, Ordering::SeqCst) + 1;
+                if mode == RetryHeaders && attempt == 1 {
+                    tokio::select! {
+                        _ = &mut stop_rx => return Ok(()),
+                        _ = &mut first_response_rx => {},
+                    }
+                }
+                if mode == Backoff || (mode == RetryHeaders && attempt == 1) {
+                    socket.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await?;
+                    continue;
+                }
+                if matches!(mode, Headers | RetryHeaders | Cancel) {
+                    let _ = stop_rx.await;
+                    return Ok(());
+                }
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\n").await?;
+                if mode == Happy {
+                    tokio::select! {
+                        _ = &mut stop_rx => return Ok(()),
+                        release = happy_rx.recv() => {
+                            if release.is_none() { return Ok(()); }
+                        },
+                    }
+                    socket.write_all(b"DATA").await?;
+                } else {
+                    socket.write_all(b"DA").await?;
+                    let _ = stop_rx.await;
+                    // An expired attempt has closed its body; zero-budget use
+                    // still receives its exact remainder after gate release.
+                    let _ = socket.write_all(b"TA").await;
+                    return Ok(());
+                }
+            }
+        });
+        let write_started = Arc::new(AtomicBool::new(false));
+        let write_expired = Arc::new(AtomicBool::new(false));
+        let (release_write_tx, release_write_rx) = std::sync::mpsc::channel();
+        let release_write_rx = Mutex::new(release_write_rx);
+        if matches!(mode, HeldWrite | ExpiredBeforeBody) {
+            let started = write_started.clone();
+            let expired = write_expired.clone();
+            consumer
+                .scope
+                .set_blocking_observer(Some(Arc::new(move |label| {
+                    if label
+                        == if mode == HeldWrite {
+                            "write acquisition partial file"
+                        } else {
+                            "open checked acquisition partial file"
+                        }
+                    {
+                        started.store(true, Ordering::SeqCst);
+                        if release_write_rx
+                            .lock()
+                            .unwrap()
+                            .recv_timeout(Duration::from_secs(10))
+                            .is_err()
+                        {
+                            expired.store(true, Ordering::SeqCst);
+                        }
+                    }
+                })));
+        }
+        let (progress_tx, progress) = tokio::sync::watch::channel(0_u64);
+        let controls = ControlledHost {
+            paused: Arc::new(AtomicBool::new(false)),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            pause_wake: Arc::new(tokio::sync::Notify::new()),
+            cancel_wake: Arc::new(tokio::sync::Notify::new()),
+            progress: progress_tx,
+        };
+        let backoff = Arc::new(AtomicBool::new(false));
+        let callbacks = Arc::new(AtomicUsize::new(0));
+        let prepared = callbacks.clone();
+        let published = callbacks.clone();
+        let mut policy = retry();
+        policy.attempts = None;
+        if mode == Zero {
+            policy.elapsed = Duration::ZERO;
+        }
+        policy.backoff = crate::network::RetryConfig::new()
+            .with_jitter(false)
+            .with_base_delay(if mode == Backoff {
+                Duration::from_secs(10)
+            } else {
+                Duration::ZERO
+            });
+        let running = consumer.clone();
+        let host = HttpBudgetHost {
+            controls: controls.clone(),
+            backoff: backoff.clone(),
+        };
+        let mut transfer = tokio::spawn(async move {
+            running
+                .acquire_http(
+                    AcquisitionHttpRequest {
+                        demand: AcquisitionDemand {
+                            consumer: "fixture".into(),
+                            operation: "http-budget".into(),
+                        },
+                        manifest: selected,
+                        workspace: grant,
+                        sources: (0..count)
+                            .map(|_| AcquisitionHttpSource {
+                                url: url.clone(),
+                                authorization: None,
+                            })
+                            .collect(),
+                        retry: policy,
+                    },
+                    reqwest::Client::new(),
+                    Box::new(host),
+                    move |_| async move {
+                        prepared.fetch_add(1, Ordering::SeqCst);
+                        Ok(((), Value::Null))
+                    },
+                    move |(), _| async move {
+                        published.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    },
+                )
+                .await
+        });
+        // Observe the actual request/effect before advancing Tokio's clock;
+        // automatic paused-clock advancement must not race socket setup.
+        let setup = tokio::time::timeout(guard, async {
+            while requests.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            if mode == RetryHeaders {
+                tokio::time::pause();
+                tokio::time::advance(Duration::from_secs(4)).await;
+                tokio::time::resume();
+                let _ = first_response_tx.take().unwrap().send(());
+                while requests.load(Ordering::SeqCst) < 2 {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            }
+            while (matches!(mode, Body | Zero) && *progress.borrow() < 2)
+                || (matches!(mode, HeldWrite | ExpiredBeforeBody)
+                    && !write_started.load(Ordering::SeqCst))
+                || (mode == Backoff && !backoff.load(Ordering::SeqCst))
+            {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
+        let mut happy_setup = true;
+        if setup.is_ok() && mode == Happy {
+            for member in 1..=count {
+                // Each file uses 3s of its own 5s budget. The complete set
+                // takes over 9s, rejecting a whole-request deadline mutant.
+                let accepted = tokio::time::timeout(guard, async {
+                    while requests.load(Ordering::SeqCst) < member {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                })
+                .await;
+                if accepted.is_err() {
+                    happy_setup = false;
+                    break;
+                }
+                tokio::time::pause();
+                tokio::time::advance(Duration::from_secs(3)).await;
+                tokio::time::resume();
+                if happy_tx.send(()).await.is_err() {
+                    happy_setup = false;
+                    break;
+                }
+            }
+        }
+        let mut result = None;
+        let mut effect_pending = false;
+        let mut reservation_held = false;
+        if setup.is_ok() && mode != Happy {
+            if mode == Cancel {
+                controls.cancel();
+            }
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(if mode == RetryHeaders {
+                2
+            } else {
+                6
+            }))
+            .await;
+            tokio::time::resume();
+            if matches!(mode, Zero | HeldWrite | ExpiredBeforeBody) {
+                match tokio::time::timeout(Duration::from_millis(30), &mut transfer).await {
+                    Ok(value) => result = Some(value),
+                    Err(_) => effect_pending = true,
+                }
+                reservation_held = !reservation_dropped.load(Ordering::SeqCst);
+            }
+        }
+        // Always release the owned write and source gates before assertions.
+        let _ = release_write_tx.send(());
+        let mut stop_tx = Some(stop_tx);
+        if mode == Zero {
+            let _ = stop_tx.take().unwrap().send(());
+        }
+        if result.is_none() {
+            result = tokio::time::timeout(Duration::from_secs(1), &mut transfer)
+                .await
+                .ok();
+        }
+        let finished_in_budget = result.is_some();
+        if result.is_none() {
+            controls.cancel();
+            result = tokio::time::timeout(guard, &mut transfer).await.ok();
+            if result.is_none() {
+                transfer.abort();
+                let _ = transfer.await;
+            }
+        }
+        if let Some(stop) = stop_tx {
+            let _ = stop.send(());
+        }
+        if let Some(first) = first_response_tx {
+            let _ = first.send(());
+        }
+        consumer.scope.set_blocking_observer(None);
+        let consumer_shutdown = tokio::time::timeout(guard, consumer.shutdown()).await;
+        let service_shutdown = tokio::time::timeout(guard, service.shutdown()).await;
+        let source_result = match tokio::time::timeout(guard, &mut source).await {
+            Ok(value) => Some(value),
+            Err(_) => {
+                source.abort();
+                let _ = source.await;
+                None
+            }
+        };
+        if !matches!(consumer_shutdown, Ok(Ok(()))) || !matches!(service_shutdown, Ok(Ok(()))) {
+            eprintln!(
+                "retained undrained HTTP budget fixture: {}",
+                temp.keep().display()
+            );
+        }
+        assert!(
+            happy_setup,
+            "multi-file source did not finish within per-file budgets"
+        );
+        assert!(
+            setup.is_ok(),
+            "fixture never reached its requested source/effect hold"
+        );
+        assert!(matches!(consumer_shutdown, Ok(Ok(()))));
+        assert!(matches!(service_shutdown, Ok(Ok(()))));
+        assert!(matches!(source_result, Some(Ok(Ok(())))));
+        assert!(
+            finished_in_budget,
+            "HTTP source wait outlived its explicit elapsed budget"
+        );
+        assert!(!write_expired.load(Ordering::SeqCst));
+        let result = result
+            .expect("bounded transfer must return")
+            .expect("transfer task must join");
+        let records = store.acquisitions().unwrap();
+        assert_eq!(records.len(), 1);
+        let record = records.values().next().unwrap();
+        assert_eq!(record.manifest, expected_manifest);
+        if matches!(mode, Happy | Zero) {
+            result.unwrap();
+            assert_eq!(callbacks.load(Ordering::SeqCst), 2);
+            assert!(matches!(record.phase, AcquisitionPhase::Adopted { .. }));
+            let receipt = store.consumer_receipt(record.id).unwrap().unwrap();
+            let AcquisitionPhase::Adopted { lease } = record.phase else {
+                unreachable!()
+            };
+            receipt.validate_for_record(record, lease).unwrap();
+            assert_eq!(receipt.verified_files.len(), count);
+            for i in 0..count {
+                assert_eq!(
+                    std::fs::read(stage.join(format!("payload-{i}.bin"))).unwrap(),
+                    b"DATA"
+                );
+            }
+        } else {
+            if mode == Cancel {
+                assert!(matches!(result, Err(PumasError::DownloadCancelled)));
+            } else {
+                assert!(
+                    matches!(result, Err(PumasError::DownloadFailed { .. })),
+                    "{result:?}"
+                );
+                let diagnostic = result.unwrap_err().to_string();
+                assert!(
+                    !diagnostic.contains("seed-http-budget-secret") && !diagnostic.contains("S3")
+                );
+            }
+            assert_eq!(callbacks.load(Ordering::SeqCst), 0);
+            assert!(matches!(record.phase, AcquisitionPhase::Transferring));
+            assert!(record.files.is_empty());
+            assert!(store.consumer_receipt(record.id).unwrap().is_none());
+            assert!(!stage.join("payload-0.bin").exists());
+            if mode == ExpiredBeforeBody {
+                assert_eq!(
+                    std::fs::metadata(stage.join("payload-0.bin.part"))
+                        .unwrap()
+                        .len(),
+                    0,
+                    "expired budget polled an already-buffered body and wrote new bytes"
+                );
+            }
+            if matches!(mode, Body | HeldWrite) {
+                assert_eq!(
+                    std::fs::read(stage.join("payload-0.bin.part")).unwrap(),
+                    b"DA"
+                );
+            }
+        }
+        if matches!(mode, Zero | HeldWrite | ExpiredBeforeBody) {
+            assert!(
+                effect_pending && reservation_held,
+                "elapsed budget released live consumer custody"
+            );
+        }
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            if mode == RetryHeaders { 2 } else { count }
+        );
+    }
+
+    #[tokio::test]
+    async fn http_elapsed_budget_stops_stalled_headers() {
+        http_budget_fixture(HttpBudgetFixture::Headers).await;
+    }
+    #[tokio::test]
+    async fn http_elapsed_budget_stops_stalled_partial_body() {
+        http_budget_fixture(HttpBudgetFixture::Body).await;
+    }
+    #[tokio::test]
+    async fn http_elapsed_budget_caps_backoff_without_another_request() {
+        http_budget_fixture(HttpBudgetFixture::Backoff).await;
+    }
+    #[tokio::test]
+    async fn http_elapsed_budget_is_not_reset_after_a_retry() {
+        http_budget_fixture(HttpBudgetFixture::RetryHeaders).await;
+    }
+    #[tokio::test]
+    async fn http_elapsed_budget_drains_a_held_write_before_returning() {
+        http_budget_fixture(HttpBudgetFixture::HeldWrite).await;
+    }
+    #[tokio::test]
+    async fn http_elapsed_budget_does_not_write_buffered_body_after_expiry() {
+        http_budget_fixture(HttpBudgetFixture::ExpiredBeforeBody).await;
+    }
+
+    #[tokio::test]
+    async fn http_elapsed_budget_zero_preserves_gated_success() {
+        http_budget_fixture(HttpBudgetFixture::Zero).await;
+    }
+    #[tokio::test]
+    async fn http_elapsed_budget_preserves_exact_multifile_receipt() {
+        http_budget_fixture(HttpBudgetFixture::Happy).await;
+    }
+    #[tokio::test]
+    async fn http_elapsed_budget_preserves_cancellation() {
+        http_budget_fixture(HttpBudgetFixture::Cancel).await;
+    }
+
+    #[tokio::test]
+    async fn http_elapsed_budget_overflow_refuses_before_admission() {
+        let guard = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let state_path = temp.path().join("downloads.json");
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = service.open_consumer("fixture").unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/overflow", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicUsize::new(0));
+        let seen = requests.clone();
+        let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
+        let mut source = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = tokio::select! {
+                    biased;
+                    _ = &mut stop_rx => return Ok::<(), PumasError>(()),
+                    accepted = listener.accept() => accepted?,
+                };
+                seen.fetch_add(1, Ordering::SeqCst);
+                let mut request = [0_u8; 2048];
+                let read = tokio::select! {
+                    _ = &mut stop_rx => return Ok(()),
+                    read = socket.read(&mut request) => read?,
+                };
+                if read > 0 {
+                    socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nDATA").await?;
+                }
+            }
+        });
+        let callbacks = Arc::new(AtomicUsize::new(0));
+        let prepared = callbacks.clone();
+        let published = callbacks.clone();
+        let mut policy = retry();
+        policy.elapsed = Duration::MAX;
+        let result = tokio::time::timeout(
+            guard,
+            consumer.acquire_http(
+                AcquisitionHttpRequest {
+                    demand: AcquisitionDemand {
+                        consumer: "fixture".into(),
+                        operation: "overflow".into(),
+                    },
+                    manifest: manifest("payload.bin"),
+                    workspace: workspace(&stage),
+                    sources: vec![AcquisitionHttpSource {
+                        url,
+                        authorization: None,
+                    }],
+                    retry: policy,
+                },
+                reqwest::Client::new(),
+                Box::new(Host),
+                move |_| async move {
+                    prepared.fetch_add(1, Ordering::SeqCst);
+                    Ok(((), Value::Null))
+                },
+                move |(), _| async move {
+                    published.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+            ),
+        )
+        .await;
+        let consumer_shutdown = tokio::time::timeout(guard, consumer.shutdown()).await;
+        let service_shutdown = tokio::time::timeout(guard, service.shutdown()).await;
+        // Keep the monitor through owner drainage and a bounded quiet window.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let _ = stop_tx.send(());
+        let source_result = match tokio::time::timeout(guard, &mut source).await {
+            Ok(value) => Some(value),
+            Err(_) => {
+                source.abort();
+                let _ = source.await;
+                None
+            }
+        };
+        if !matches!(consumer_shutdown, Ok(Ok(()))) || !matches!(service_shutdown, Ok(Ok(()))) {
+            eprintln!(
+                "retained undrained overflow fixture: {}",
+                temp.keep().display()
+            );
+        }
+        assert!(matches!(result, Ok(Err(PumasError::Validation { .. }))));
+        assert!(matches!(consumer_shutdown, Ok(Ok(()))));
+        assert!(matches!(service_shutdown, Ok(Ok(()))));
+        assert!(matches!(source_result, Some(Ok(Ok(())))));
+        assert_eq!(requests.load(Ordering::SeqCst), 0);
+        assert_eq!(callbacks.load(Ordering::SeqCst), 0);
+        assert!(store.acquisitions().unwrap().is_empty());
+        assert_eq!(std::fs::read_dir(&stage).unwrap().count(), 0);
+        assert!(!state_path.exists());
     }
 
     async fn serve(body: &'static [u8]) -> (String, tokio::task::JoinHandle<()>) {

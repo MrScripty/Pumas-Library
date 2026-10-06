@@ -1,5 +1,22 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — bounded automatic resolution/verified payload separation
+
+Tested source `5946c4738870bdcfc613430bb98fd873d9e6d6f3`, tree
+`295eb32167dc49ced598d1082f6f3bf086ce4679`, on separate auto branch preserves
+frozen pip repair through normal merge2b380b59. Resolver-only mode emits original
+version1 evidence without installing packages; both auto/preview call the shared
+owned-input local installation/proof/publisher outside candidate fallback.
+Final216 Python/304 app-manager, Ruff/fmt, strict default Clippy and focused
+headless integration/binary pass. Full headless has11 exactly matched baseline
+generated errors. Initial full/isolated admissioncancel failures exposed capability
+refusal preceding recorded cancel; unchanged test and full suite pass after the
+narrow precedence correction. Original failures/misfiltered0-test attempt, exact
+source/review/cache records are in [qualification](reports/torch-automatic-wheel-handoff-qualification-2026-10-06.md).
+No actual automatic-provider/Torch, enforced-denial or AQ acceptance claim.
+Remaining Q2 qualified-recipe handoff/disposition and package acceptance are next.
+No shared/native cleanup interface overlap with the separate native worker.
+
 ## 2026-10-06 — Q2 ambient pip configuration correction
 
 Independent review found that `--isolated` on pip26.2.1 retains global/site and

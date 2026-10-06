@@ -1,5 +1,14 @@
 # Acquisition prerequisites and runtime handoffs
 
+**2026-10-06 automatic Q2 source milestone:** Source5946c473 uses accepted
+resolver-only evidence and the common acquired-input installer/proof/publisher.
+[Qualification](torch-automatic-wheel-handoff-qualification-2026-10-06.md) records
+passed default/focused headless checks, unchanged11 generated headless errors,
+original admissioncancel failures and correction. AQ-PACKAGES remains not ready:
+fixtures are not actual automatic-provider/Torch or enforced-denial/platform/
+hosted acceptance; qualified bundled recipe remains scoped. Parent owns review/
+integration, and the separate native cancellation worker has no interface overlap.
+
 **2026-10-06 Q2 repair:** Independent review found ambient requirements
 injection in frozen `7a3264ac`. Child-only pip config isolation and hostile
 controls are recorded in [qualification](torch-wheel-pip-config-repair-2026-10-06.md).

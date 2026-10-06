@@ -1,5 +1,21 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 automatic resolution source milestone (2026-10-06):** Separate branch
+`feat/torch-automatic-wheel-handoff-7a3264ac` normal-merges frozen pip repair99a55b78
+without rewriting its evidence. Tested source `5946c4738870bdcfc613430bb98fd873d9e6d6f3`
+(tree `295eb32167dc49ced598d1082f6f3bf086ce4679`) accepts original resolver-only
+version1 evidence before shared verified wheel acquisition/local installation.
+Acceptance ends fallback; original interpreter/provider identities, owned inputs,
+postprobe proof and receipts are preserved. Final216 Python and304 app-manager
+pass; strict default and focused headless integration/binary checks pass. Full
+headless all-targets retains11 matched baseline generated errors. Original
+admissioncancel failure and narrow correction are preserved in
+[qualification](reports/torch-automatic-wheel-handoff-qualification-2026-10-06.md).
+AQ-PACKAGES remains not ready; actual automatic-provider/Torch/platform/hosted and
+enforced-denial evidence remain separate. Next Q2 slice is remaining qualified
+bundled-recipe payload handoff/disposition and package acceptance. No native/S3/
+core interface/dependency/ORT-policy writes or external review contact.
+
 **Q2 local-pip correction (2026-10-06):** Independent review of frozen handoff
 `7a3264ac` found ambient global/site/PIP_CONFIG_FILE requirements injection despite
 `--isolated`. Separate repair disables config files and inherited pip options only
@@ -433,7 +449,7 @@ Each row is one coherent semantic unit including producer and actual consumers. 
 | Milestone | Goal | Dependencies | Gate / evidence | State |
 | --- | --- | --- | --- | --- |
 | **Q1** | Shared HTTP lifecycle, neutral persistence/handoff, and real HF/native consumer cutover; existing UI outcomes preserved. | Source/retained-state preparation and active recovery-owner handoff. No runtime milestone. | `AQ-HTTP`: AC01–AC10, AC15, AC16, AC18; real HF model import and native archive extraction plus corresponding UI/contract/cancellation/reopen evidence. | In progress; gate not ready |
-| **Q2** | Exact wheel-file-set acquisition and local-only consumption in the existing Torch installer. | AQ-HTTP. | `AQ-PACKAGES`: AC11, AC12 and Q1 regression evidence affected by this composition; network-denied installation and actual package identity. | In progress; bounded retained-preview source complete, gate not ready |
+| **Q2** | Exact wheel-file-set acquisition and local-only consumption in the existing Torch installer. | AQ-HTTP. | `AQ-PACKAGES`: AC11, AC12 and Q1 regression evidence affected by this composition; network-denied installation and actual package identity. | In progress; bounded preview and automatic source complete, gate not ready |
 | **Q3** | S3-compatible acquisition using the same lifecycle, direct explicit source workflow, tested credentials/version semantics, and a real model import through the existing model-facing operations. | AQ-HTTP. Q2 is the default next serial integration; Q3 can be delegated after shared files stabilize. | `AQ-S3`: AC13, AC14 and source-neutrality regressions; native AWS S3, one non-AWS compatible service, local MinIO, and S3-to-model-library evidence. | Planned |
 | **Q4** | Complete affected public/installed/native qualification, migration documentation and removal of superseded authority. | Q1–Q3 implemented. | `AQ-COMPLETE`: all AC01–AC18 satisfied and all four milestones Accepted; packaged/independent-consumer/native-platform evidence in AC17. | Planned |
 

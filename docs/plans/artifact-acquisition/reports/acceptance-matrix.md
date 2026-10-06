@@ -1,5 +1,14 @@
 # Acquisition acceptance matrix
 
+**2026-10-06 automatic Q2 source:** Tested5946c473 separates resolver-only
+acceptance from shared verified payload/local installation, preserving original
+identities and custody with no postacceptance fallback. Final216 Python/304
+app-manager and strict default/focused headless checks pass. Full headless11
+baseline errors remain. [Qualification](torch-automatic-wheel-handoff-qualification-2026-10-06.md)
+keeps original failed evidence and bounded fixture scope. AC11/AC12/AQ-PACKAGES
+remain pending actual automatic-provider/Torch, enforced-denial/platform/hosted
+acceptance and remaining qualified-recipe disposition.
+
 **2026-10-06 Q2 local-pip correction:** Frozen handoff `7a3264ac` allowed
 ambient config to append requirements despite `--isolated`. The separate
 [repair qualification](torch-wheel-pip-config-repair-2026-10-06.md) records

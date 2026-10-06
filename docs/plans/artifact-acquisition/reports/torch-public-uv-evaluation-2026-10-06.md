@@ -174,3 +174,27 @@ Official primary references, checked 2026-10-06:
 [public compile CLI](https://docs.astral.sh/uv/reference/cli/#uv-pip-compile),
 [HTTP credential isolation](https://docs.astral.sh/uv/concepts/authentication/http/),
 [NETRC/environment](https://docs.astral.sh/uv/reference/environment/#netrc).
+
+## Exact bounded result and deliverables
+
+Tested evaluator/provenance source `5bf9b9ad1da9a503d34527e24c8a2259fea71562`,
+tree `acf133210c27b7a659b1e099cadfcaf99ec1e9d3`, is evidence-only on a1da98.
+Final50 CLI cases have zero failed assertions, plus actual hash-negative preflight
+and metadata-only local-pip/RECORD proof. Ruff, format, diff and protected-source
+identity checks pass. Initial36 failed assumptions, refinement43/49 runs and the
+first50-case harmless client-reset trace are retained; the final fixture catches
+client disconnects without altering request or behavioral oracles. This is Linux
+x86_64/Python3.12.14/pip26.2.1 and synthetic target selection; no real target3.13
+interpreter, Windows runtime or GPU/provider installation is qualified.
+
+The [evidence index](torch-public-uv-evaluation-2026-10-06/evidence.json) binds
+all raw case commands, inputs, stdout/stderr, HTTP/git observations, exact lock
+outputs, wheel/metadata inventories, initial evaluator, tool and frozen refs.
+Raw archive: 255 members, 70651 bytes, SHA-256
+`9c1e99da8e36d6596ef68c34802f831b93cfc327a0f34c7e8e804c2c37380e7c`. The evidence-only successor leaves the
+tested evaluator/tool licence/provenance and all production source unchanged.
+No PR/merge/reviewer contact occurred. Next existing-plan work is parent choice
+and separately admitted UV adapter/conclusive-failure design and qualification;
+frozen a1da98 remains undispositioned for its exposed P1 and is not merge-ready.
+
+The observed lock schema is the public [pylock.toml specification](https://packaging.python.org/en/latest/specifications/pylock-toml/).

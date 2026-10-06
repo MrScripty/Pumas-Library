@@ -380,6 +380,14 @@ standard-tool responsibility. Legacy helper install and exact-wheel preview mode
 keep their boundaries. Local fixtures
 do not establish enforced egress denial, real Torch or AQ-PACKAGES acceptance.
 
+The opt-in [wheel target observation contract](wheel-target.md) additionally binds
+separately owner-approved selected-interpreter evidence into accepted resolution,
+whole report marker context and consumer provenance. Target-bearing packets lack
+legacy fallback; absent-context automatic/preview and finite-recipe producers
+retain their existing behavior. Approved bytes remain under the same input/stage
+custody and final provenance fence, with their digest in the existing opaque
+receipt payload. This does not authorize a new resolver/catalog or complete P1/AQ.
+
 ## 12. Compatibility and extension
 
 Internal coordinated DTOs, public Rust/IPC APIs, persisted formats, optional source implementations and consumer install/model records have different evolution obligations. Update actual generated consumers with their producer. New source support within this contract does not change model-adapter registration or runtime installation identity. Unknown schema/protocol versions are explicitly rejected, not decoded into weaker defaults.

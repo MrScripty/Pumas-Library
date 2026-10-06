@@ -85,11 +85,15 @@ def validate_closure(metadata: dict, versions: dict, *, environment=None) -> Non
                     changed = True
 
 
-def explicit_target(document):
+def target_owner():
     spec = importlib.util.spec_from_file_location("pumas_wheel_target", Path(__file__).with_name("wheel_target.py"))
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
-    return owner.WheelTarget(document)
+    return owner
+
+
+def explicit_target(document):
+    return target_owner().WheelTarget(document)
 
 
 def local_requirements(artifacts: list[dict], wheels: Path, *, wheel_target=None) -> tuple[list[str], dict]:
@@ -275,13 +279,27 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--recipe-lock", type=Path)
     parser.add_argument("--preview", type=Path)
+    parser.add_argument("--target-observation", type=Path)
     args = parser.parse_args()
     if (args.recipe_lock is None) != (args.preview is None):
         parser.error("Qualified wheel consumption requires both lock and preview")
     try:
         resolution = json.loads(args.resolution.read_text(encoding="utf-8"))
-        if "wheel_target" in resolution:
-            explicit_target(resolution["wheel_target"])
+        observation = None
+        if args.target_observation is not None:
+            if args.target_observation.is_symlink() or not args.target_observation.is_file():
+                raise ValueError("Approved target observation is missing or linked")
+            with args.target_observation.open("rb") as source:
+                approved = source.read(64 * 1024 + 1)
+            if len(approved) > 64 * 1024:
+                raise ValueError("Approved target observation is oversized")
+            observation = json.loads(approved)
+        owner = target_owner()
+        selected = owner.resolution_target(resolution, observation)
+        if selected is not None:
+            selected.require_native_consumer()
+            if owner.interpreter_digest(sys.executable) != observation["interpreter_sha256"]:
+                raise ValueError("Native consumer executable differs from target approval")
         if args.recipe_lock is not None:
             spec = importlib.util.spec_from_file_location(
                 "pumas_qualified_catalog", Path(__file__).with_name("qualified_wheel_catalog.py")
@@ -300,7 +318,7 @@ def main() -> None:
                 lock, preview["directArtifacts"], resolution["artifacts"]
             )
         install(resolution["artifacts"], args.wheels, args.target, args.output,
-                wheel_target=resolution.get("wheel_target"))
+                wheel_target=selected.to_dict() if selected is not None else None)
     except UnsupportedDependencyReference:
         parser.exit(
             3, "Dependency direct URLs are unsupported for local consumption; no source fallback\n"

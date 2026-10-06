@@ -18,6 +18,11 @@ enum Case {
     ChangedProvenance,
     ChangedPackageAncestor,
     ChangedProofAncestor,
+    TargetSuccess,
+    TargetMismatch,
+    TargetMissingContext,
+    TargetUnsupportedContext,
+    TargetChangedApproval,
 }
 
 struct InputDropProbe {
@@ -202,7 +207,58 @@ async fn fixture(case: Case) {
             backoff: RetryConfig::new(),
         },
     };
-    let resolution = serde_json::json!({"artifacts": artifacts});
+    let bound_target = matches!(
+        case,
+        Case::TargetSuccess
+            | Case::TargetMismatch
+            | Case::TargetMissingContext
+            | Case::TargetUnsupportedContext
+            | Case::TargetChangedApproval
+    );
+    let mut resolution = serde_json::json!({"artifacts": artifacts});
+    let approved_target = if bound_target {
+        let observation = native_observation_fixture();
+        resolution["wheel_target"] = observation["target"].clone();
+        resolution["wheel_target_observation_sha256"] =
+            serde_json::json!(target_observation_digest(&observation).unwrap());
+        resolution["interpreter"] = observation["interpreter"].clone();
+        resolution["python"] = observation["target"]["markers"]["python_version"].clone();
+        resolution["implementation"] = serde_json::json!("cpython");
+        resolution["machine"] = observation["target"]["markers"]["platform_machine"].clone();
+        let raw = observation.to_string();
+        let accepted = accepted_torch_target(
+            &resolution,
+            &serde_json::json!({"environment": observation["target"]["markers"]}),
+            Some(&raw),
+            Path::new(observation["interpreter"].as_str().unwrap()),
+            observation["interpreter_sha256"].as_str().unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        std::fs::write(
+            runtime.join("approved-target-observation.json"),
+            &accepted.observation,
+        )
+        .unwrap();
+        Some(accepted)
+    } else {
+        None
+    };
+    let resolution_provenance = serde_json::to_vec(&resolution).unwrap();
+    if case == Case::TargetMismatch {
+        resolution["wheel_target"]["markers"]["platform_release"] =
+            serde_json::json!("different-approved-target");
+    }
+    if case == Case::TargetUnsupportedContext {
+        let mut changed: serde_json::Value =
+            serde_json::from_str(&approved_target.as_ref().unwrap().observation).unwrap();
+        changed["schema"] = serde_json::json!("future");
+        std::fs::write(
+            runtime.join("approved-target-observation.json"),
+            changed.to_string(),
+        )
+        .unwrap();
+    }
     std::fs::write(
         runtime.join("resolution.json"),
         serde_json::to_vec(&resolution).unwrap(),
@@ -236,6 +292,8 @@ async fn fixture(case: Case) {
                 &log,
                 &progress_tx,
                 &stage,
+                &approved_target,
+                &resolution_provenance,
             );
             async move {
                 let (
@@ -249,6 +307,8 @@ async fn fixture(case: Case) {
                     log,
                     progress_tx,
                     stage,
+                    approved_target,
+                    resolution_provenance,
                 ) = context;
                 prepared.store(true, Ordering::SeqCst);
                 if !matches!(inputs.record().phase, AcquisitionPhase::Using { .. })
@@ -291,6 +351,11 @@ async fn fixture(case: Case) {
                         .arg(&packages)
                         .arg("--output")
                         .arg(&output);
+                    if bound_target && case != Case::TargetMissingContext {
+                        command
+                            .arg("--target-observation")
+                            .arg(runtime.join("approved-target-observation.json"));
+                    }
                 }
                 let status = installer
                     .run_runtime_command_status_with_custody(
@@ -314,19 +379,31 @@ async fn fixture(case: Case) {
                         .map_err(|_| failed("Invalid fixture proof"))?;
                 validate_staged_files(&packages, &installed)?;
                 let validated_manifest = std::fs::read(&proof_file).map_err(PumasError::from)?;
-                let provenance = vec![(
+                let mut provenance = vec![(
                     runtime.join("resolution.json"),
-                    std::fs::read(runtime.join("resolution.json")).map_err(PumasError::from)?,
+                    resolution_provenance.clone(),
                 )];
+                if let Some(target) = &approved_target {
+                    provenance.push((
+                        runtime.join("approved-target-observation.json"),
+                        target.observation.as_bytes().to_vec(),
+                    ));
+                }
                 move_verified_packages(&packages, runtime, "3.fixture")?;
                 let final_packages = torch_site_packages(runtime, "3.fixture");
                 if matches!(
                     case,
-                    Case::ChangedInstalledMember | Case::ChangedProof | Case::ChangedProvenance
+                    Case::ChangedInstalledMember
+                        | Case::ChangedProof
+                        | Case::ChangedProvenance
+                        | Case::TargetChangedApproval
                 ) {
                     let changed = match case {
                         Case::ChangedInstalledMember => final_packages.join("root_wheel.py"),
                         Case::ChangedProof => proof_file.clone(),
+                        Case::TargetChangedApproval => {
+                            runtime.join("approved-target-observation.json")
+                        }
                         _ => runtime.join("resolution.json"),
                     };
                     let mut probe = Command::new("python3");
@@ -384,10 +461,11 @@ async fn fixture(case: Case) {
                     &validated_manifest,
                     &provenance,
                 )?;
-                Ok((
-                    runtime.clone(),
-                    serde_json::json!({"format":"fixture-wheel-publication-1", "installed_sha256":hash_regular_file(&proof_file)?}),
-                ))
+                let mut proof = serde_json::json!({"format":"fixture-wheel-publication-1", "installed_sha256":hash_regular_file(&proof_file)?});
+                if let Some(target) = &approved_target {
+                    proof["wheel_target_observation_sha256"] = serde_json::json!(target.sha256);
+                }
+                Ok((runtime.clone(), proof))
             }
         },
         |runtime, receipt| {
@@ -545,11 +623,25 @@ async fn fixture(case: Case) {
             2
         }
     );
-    if case == Case::Success {
+    if matches!(case, Case::Success | Case::TargetSuccess) {
         result.unwrap();
         assert!(matches!(row.phase, AcquisitionPhase::Adopted { .. }));
         assert!(matches!(drop_phase, Some(AcquisitionPhase::Adopted { .. })));
         assert!(receipt.is_some() && installed.is_some() && output_present && !publication_marker);
+        if case == Case::TargetSuccess {
+            let saved: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(destination.join("acquisition-wheel-receipt.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                saved["payload"]["wheel_target_observation_sha256"],
+                approved_target.as_ref().unwrap().sha256
+            );
+            assert_eq!(
+                std::fs::read(destination.join("approved-target-observation.json")).unwrap(),
+                approved_target.as_ref().unwrap().observation.as_bytes()
+            );
+        }
     } else {
         assert!(result.is_err());
         assert!(wheels.exists(), "retained inputs disappeared");
@@ -568,6 +660,13 @@ async fn fixture(case: Case) {
             matches!(case, Case::FailedPublication | Case::PublishedWithoutAck)
         );
         assert_eq!(installed.is_some(), case == Case::PublishedWithoutAck);
+        if matches!(
+            case,
+            Case::TargetMismatch | Case::TargetMissingContext | Case::TargetUnsupportedContext
+        ) {
+            assert!(!runtime.join("packages").exists());
+            assert!(!runtime.join("local-proof").exists());
+        }
         if matches!(case, Case::CancelChild | Case::AbandonedChild) {
             assert!(observed_held.load(Ordering::SeqCst));
             assert!(matches!(drop_phase, Some(AcquisitionPhase::Using { .. })));
@@ -624,6 +723,27 @@ async fn fixture(case: Case) {
 #[tokio::test]
 async fn verified_wheels_install_then_publish_and_settle_exact_receipt() {
     fixture(Case::Success).await;
+}
+
+#[tokio::test]
+async fn verified_target_wheels_valid_handoff_binds_receipt_and_settles() {
+    fixture(Case::TargetSuccess).await;
+}
+#[tokio::test]
+async fn verified_target_wheels_mismatch_refuses_before_local_stage() {
+    fixture(Case::TargetMismatch).await;
+}
+#[tokio::test]
+async fn verified_target_wheels_missing_context_refuses_before_local_stage() {
+    fixture(Case::TargetMissingContext).await;
+}
+#[tokio::test]
+async fn verified_target_wheels_unsupported_context_refuses_before_local_stage() {
+    fixture(Case::TargetUnsupportedContext).await;
+}
+#[tokio::test]
+async fn verified_target_wheels_changed_approval_retains_custody_without_receipt() {
+    fixture(Case::TargetChangedApproval).await;
 }
 #[tokio::test]
 async fn verified_wheels_changed_bytes_never_start_local_installation() {
@@ -758,6 +878,8 @@ fn accepted_packet_fixture() -> PreparedTorchWheelInstall {
             minor: "3.12",
             adapter: "none",
             python: Path::new("/owned/stage/venv/python"),
+            interpreter_hash: &"b".repeat(64),
+            target_observation: None,
         },
     )
     .unwrap();
@@ -773,6 +895,133 @@ fn accepted_packet_fixture() -> PreparedTorchWheelInstall {
     }
 }
 
+fn native_observation_fixture() -> serde_json::Value {
+    let result = std::process::Command::new("python3")
+        .arg("-I")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../torch-server/wheel_target.py"))
+        .arg("--observe")
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    serde_json::from_slice(&result.stdout).unwrap()
+}
+
+#[test]
+fn accepted_target_packet_refuses_mismatch_missing_context_and_late_downgrade() {
+    let mut packet = accepted_packet_fixture();
+    let observation = native_observation_fixture();
+    let approved = observation.to_string();
+    let markers = &observation["target"]["markers"];
+    let mut resolution: serde_json::Value = serde_json::from_str(&packet.resolution_json).unwrap();
+    resolution["wheel_target"] = observation["target"].clone();
+    resolution["wheel_target_observation_sha256"] =
+        serde_json::json!(target_observation_digest(&observation).unwrap());
+    resolution["python"] = markers["python_version"].clone();
+    resolution["interpreter"] = observation["interpreter"].clone();
+    resolution["machine"] = markers["platform_machine"].clone();
+    let mut report: serde_json::Value = serde_json::from_str(&packet.report).unwrap();
+    report["environment"] = markers.clone();
+    let python = Path::new(observation["interpreter"].as_str().unwrap());
+    let selection = DirectTorchSelection {
+        version: "2.14.0",
+        build: "cpu",
+        minor: markers["python_version"].as_str().unwrap(),
+        adapter: "none",
+        python,
+        interpreter_hash: observation["interpreter_sha256"].as_str().unwrap(),
+        target_observation: Some(&approved),
+    };
+    let check = |resolution: &serde_json::Value,
+                 report: &serde_json::Value,
+                 selection: &DirectTorchSelection<'_>| {
+        accepted_torch_resolution(
+            &resolution.to_string(),
+            &report.to_string(),
+            &packet.requirements,
+            selection,
+        )
+    };
+    let accepted = check(&resolution, &report, &selection).unwrap();
+    assert!(accepted.accepted_target.is_some());
+    for key in [
+        "wheel_target",
+        "wheel_target_observation_sha256",
+        "interpreter",
+        "python",
+        "machine",
+    ] {
+        let mut changed = resolution.clone();
+        changed[key] = serde_json::Value::Null;
+        assert!(check(&changed, &report, &selection).is_err(), "{key}");
+    }
+    let mut changed = resolution.clone();
+    changed["wheel_target"]["markers"]["platform_release"] = serde_json::json!("changed-target");
+    assert!(check(&changed, &report, &selection).is_err());
+    let mut changed_report = report.clone();
+    changed_report["environment"]["platform_release"] = serde_json::json!("changed-report-target");
+    assert!(check(&resolution, &changed_report, &selection).is_err());
+    for raw in [
+        serde_json::json!({}),
+        serde_json::json!({"schema":"future"}),
+        {
+            let mut missing = observation.clone();
+            missing["target"]["markers"]
+                .as_object_mut()
+                .unwrap()
+                .remove("platform_release");
+            missing
+        },
+    ] {
+        let raw = raw.to_string();
+        let unsupported = DirectTorchSelection {
+            target_observation: Some(&raw),
+            ..selection
+        };
+        assert!(check(&resolution, &report, &unsupported).is_err());
+    }
+    let unapproved = DirectTorchSelection {
+        target_observation: None,
+        ..selection
+    };
+    assert!(check(&resolution, &report, &unapproved).is_err());
+    let replaced_binary = DirectTorchSelection {
+        interpreter_hash: &"0".repeat(64),
+        ..selection
+    };
+    assert!(check(&resolution, &report, &replaced_binary).is_err());
+    packet.resolution = accepted;
+    packet.resolution_json = resolution.to_string();
+    packet.report = report.to_string();
+    packet.interpreter_hash = observation["interpreter_sha256"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    revalidate_prepared_torch_target(&packet).unwrap();
+    resolution.as_object_mut().unwrap().remove("wheel_target");
+    resolution
+        .as_object_mut()
+        .unwrap()
+        .remove("wheel_target_observation_sha256");
+    packet.resolution_json = resolution.to_string();
+    assert!(
+        revalidate_prepared_torch_target(&packet).is_err(),
+        "accepted context cannot be downgraded to legacy"
+    );
+}
+
+#[test]
+fn target_observation_projection_matches_python_unicode_fixture() {
+    let value = serde_json::json!({"z":"é", "a":{"b":true,"a":null}});
+    assert_eq!(
+        target_observation_digest(&value).unwrap(),
+        "d10edb991ee049b4c7b97e508696c2d04ca2166fae721b870e3dd70457ff9841"
+    );
+}
+
 #[test]
 fn accepted_packet_preserves_venv_identity_and_refuses_changed_evidence() {
     let packet = accepted_packet_fixture();
@@ -782,6 +1031,8 @@ fn accepted_packet_preserves_venv_identity_and_refuses_changed_evidence() {
         minor: "3.12",
         adapter: "none",
         python: Path::new("/owned/stage/venv/python"),
+        interpreter_hash: &"b".repeat(64),
+        target_observation: None,
     };
     assert_eq!(packet.resolution.interpreter, "/owned/stage/venv/python");
     assert_eq!(packet.interpreter_hash, "b".repeat(64));

@@ -1441,6 +1441,158 @@ struct DirectTorchResolution {
     machine: String,
     adapter: String,
     artifacts: Vec<crate::version_manager::TorchArtifact>,
+    #[serde(skip)]
+    accepted_target: Option<AcceptedTorchTarget>,
+}
+
+// Separate trusted-owner evidence, never reconstructed from a resolver packet.
+#[derive(Clone)]
+struct AcceptedTorchTarget {
+    observation: String,
+    sha256: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TorchTargetObservation {
+    schema: String,
+    interpreter: String,
+    interpreter_sha256: String,
+    target: serde_json::Value,
+}
+
+fn target_observation_digest(value: &serde_json::Value) -> Result<String> {
+    fn sorted(value: &serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut fields: Vec<_> = map.iter().collect();
+                fields.sort_unstable_by(|a, b| a.0.cmp(b.0));
+                serde_json::Value::Object(
+                    fields
+                        .into_iter()
+                        .map(|(k, v)| (k.clone(), sorted(v)))
+                        .collect(),
+                )
+            }
+            serde_json::Value::Array(items) => {
+                serde_json::Value::Array(items.iter().map(sorted).collect())
+            }
+            _ => value.clone(),
+        }
+    }
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(
+            serde_json::to_vec(&sorted(value))
+                .map_err(|_| failed("Invalid target observation projection"))?
+        )
+    ))
+}
+
+fn accepted_torch_target(
+    resolution: &serde_json::Value,
+    report: &serde_json::Value,
+    observation: Option<&str>,
+    python: &Path,
+    interpreter_hash: &str,
+) -> Result<Option<AcceptedTorchTarget>> {
+    let fields = ["wheel_target", "wheel_target_observation_sha256"];
+    let present = fields
+        .iter()
+        .filter(|key| resolution.get(**key).is_some())
+        .count();
+    if present == 0 && observation.is_none() {
+        return Ok(None); // Explicit legacy mode; explicit context never defaults.
+    }
+    let raw = observation
+        .filter(|raw| raw.len() <= 64 * 1024)
+        .ok_or_else(|| failed("Target-bearing resolution lacks approved observation"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|_| failed("Invalid approved target observation"))?;
+    let observed: TorchTargetObservation = serde_json::from_value(value.clone())
+        .map_err(|_| failed("Incomplete or unsupported target observation"))?;
+    let target = &observed.target;
+    let marker_keys = [
+        "implementation_name",
+        "implementation_version",
+        "os_name",
+        "platform_machine",
+        "platform_python_implementation",
+        "platform_release",
+        "platform_system",
+        "platform_version",
+        "python_full_version",
+        "python_version",
+        "sys_platform",
+    ];
+    let target_keys = [
+        "schema",
+        "python",
+        "abi",
+        "os",
+        "arch",
+        "libc",
+        "macos_deployment",
+        "native_linux_tag",
+        "markers",
+    ];
+    let complete = |document: &serde_json::Value, keys: &[&str]| {
+        document.as_object().is_some_and(|map| {
+            map.len() == keys.len() && keys.iter().all(|key| map.contains_key(*key))
+        })
+    };
+    let markers = &target["markers"];
+    let minor = markers["python_version"].as_str().unwrap_or("");
+    let os = match target["os"].as_str() {
+        Some("linux") => ("x86_64", "linux"),
+        Some("windows") => ("x86_64", "win32"),
+        Some("macos") => ("arm64", "darwin"),
+        _ => return Err(failed("Unsupported approved target platform")),
+    };
+    // The trusted selected-interpreter observer owns standards-level target/tag
+    // validation. Rust checks its complete fixed shape and exact packet binding;
+    // the Python consumer revalidates semantics and the actual interpreter.
+    if present != 2
+        || observed.schema != "pumas.wheel-target-observation.v1"
+        || !complete(target, &target_keys)
+        || !complete(markers, &marker_keys)
+        || marker_keys.iter().any(|key| {
+            !markers[*key].as_str().is_some_and(|s| {
+                !s.is_empty() && s.len() <= 1024 && !s.chars().any(char::is_control)
+            })
+        })
+        || target["schema"] != "pumas.wheel-target.v1"
+        || target["arch"] != os.0
+        || markers["sys_platform"] != os.1
+        || target["python"] != markers["python_full_version"]
+        || target["abi"] != format!("cp{}", minor.replace('.', ""))
+        || markers["implementation_name"] != "cpython"
+        || Path::new(&observed.interpreter) != python
+        || observed.interpreter_sha256.len() != 64
+        || !observed
+            .interpreter_sha256
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit())
+        || observed.interpreter_sha256 != interpreter_hash
+        || resolution["interpreter"] != observed.interpreter
+        || resolution["python"] != minor
+        || resolution["implementation"] != markers["implementation_name"]
+        || resolution["machine"] != markers["platform_machine"]
+        || resolution["wheel_target"] != *target
+        || report["environment"] != *markers
+    {
+        return Err(failed(
+            "Resolution target or interpreter differs from approved observation",
+        ));
+    }
+    let sha256 = target_observation_digest(&value)?;
+    if resolution["wheel_target_observation_sha256"] != sha256 {
+        return Err(failed("Resolution target observation digest changed"));
+    }
+    Ok(Some(AcceptedTorchTarget {
+        observation: raw.to_owned(),
+        sha256,
+    }))
 }
 
 // Accepted package-owner evidence; final installation never re-enters selection.
@@ -1453,6 +1605,25 @@ struct PreparedTorchWheelInstall {
     interpreter_hash: String,
     provider_label: Option<String>,
     qualified_recipe: bool,
+}
+
+fn revalidate_prepared_torch_target(prepared: &PreparedTorchWheelInstall) -> Result<()> {
+    let document = serde_json::from_str(&prepared.resolution_json)
+        .map_err(|_| failed("Invalid retained Torch target packet"))?;
+    let report = serde_json::from_str(&prepared.report)
+        .map_err(|_| failed("Invalid retained Torch target report"))?;
+    let accepted = prepared.resolution.accepted_target.as_ref();
+    let observed = accepted_torch_target(
+        &document,
+        &report,
+        accepted.map(|target| target.observation.as_str()),
+        Path::new(&prepared.resolution.interpreter),
+        &prepared.interpreter_hash,
+    )?;
+    if observed.as_ref().map(|target| &target.sha256) != accepted.map(|target| &target.sha256) {
+        return Err(failed("Accepted Torch target changed before acquisition"));
+    }
+    Ok(())
 }
 
 // Narrow validation of the embedded recipe's finite syntax before acquiring bytes.
@@ -1585,7 +1756,9 @@ fn accepted_torch_resolution(
     requirements: &str,
     selection: &DirectTorchSelection<'_>,
 ) -> Result<DirectTorchResolution> {
-    let resolution: DirectTorchResolution = serde_json::from_str(resolution)
+    let document: serde_json::Value = serde_json::from_str(resolution)
+        .map_err(|_| failed("Invalid accepted Torch resolution"))?;
+    let mut resolution: DirectTorchResolution = serde_json::from_value(document.clone())
         .map_err(|_| failed("Invalid accepted Torch resolution"))?;
     let report: serde_json::Value =
         serde_json::from_str(report).map_err(|_| failed("Invalid accepted Torch report"))?;
@@ -1593,6 +1766,13 @@ fn accepted_torch_resolution(
         return Err(failed("Unsupported pip resolution report version"));
     }
     validate_direct_torch_report(&resolution, &report, requirements, selection)?;
+    resolution.accepted_target = accepted_torch_target(
+        &document,
+        &report,
+        selection.target_observation,
+        selection.python,
+        selection.interpreter_hash,
+    )?;
     Ok(resolution)
 }
 
@@ -1602,6 +1782,8 @@ struct DirectTorchSelection<'a> {
     minor: &'a str,
     adapter: &'a str,
     python: &'a Path,
+    interpreter_hash: &'a str,
+    target_observation: Option<&'a str>,
 }
 
 struct TorchAttemptContext<'a> {
@@ -2021,19 +2203,7 @@ fn validate_torch_final_proof(
     {
         return Err(failed("Installed Torch proof changed during runtime probe"));
     }
-    for (path, bytes) in provenance {
-        validate_torch_owned_path(runtime, path)?;
-        if std::fs::symlink_metadata(path)
-            .map_err(PumasError::from)?
-            .file_type()
-            .is_symlink()
-            || std::fs::read(path).map_err(PumasError::from)? != *bytes
-        {
-            return Err(failed(
-                "Torch resolution provenance changed during runtime probe",
-            ));
-        }
-    }
+    validate_torch_provenance(runtime, provenance)?;
     let manifest: StagedFilesManifest = serde_json::from_slice(validated_manifest)
         .map_err(|_| failed("Invalid validated Torch file proof"))?;
     for member in manifest.files {
@@ -2058,6 +2228,22 @@ fn validate_torch_final_proof(
         {
             return Err(failed(
                 "Installed Torch member changed during runtime probe",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_torch_provenance(runtime: &Path, provenance: &[(PathBuf, Vec<u8>)]) -> Result<()> {
+    for (path, bytes) in provenance {
+        validate_torch_owned_path(runtime, path)?;
+        if !std::fs::symlink_metadata(path)
+            .map_err(PumasError::from)?
+            .is_file()
+            || std::fs::read(path).map_err(PumasError::from)? != *bytes
+        {
+            return Err(failed(
+                "Torch resolution provenance changed during consumption",
             ));
         }
     }
@@ -2365,6 +2551,8 @@ impl VersionInstaller {
                 minor,
                 adapter: &plan.preview.adapter,
                 python: &plan.interpreter_path,
+                interpreter_hash: &plan.interpreter_hash,
+                target_observation: None,
             },
         )?;
         if serde_json::to_value(&resolution.artifacts).map_err(|_| failed("Invalid wheel set"))?
@@ -2416,10 +2604,11 @@ impl VersionInstaller {
         let consumer = self.acquisition_consumer.as_ref().ok_or_else(|| {
             failed("Torch wheel installation requires the shared acquisition service")
         })?;
+        revalidate_prepared_torch_target(&prepared)?;
         let manifest = torch_wheel_manifest(&prepared.resolution.artifacts)?;
         let minor = prepared.resolution.python.as_str();
         let runtime = prepared.runtime.clone();
-        let provenance = vec![
+        let mut provenance = vec![
             (
                 runtime.join("resolution.json"),
                 prepared.resolution_json.as_bytes().to_vec(),
@@ -2441,6 +2630,18 @@ impl VersionInstaller {
                 std::fs::read(runtime.join("runtime.json")).map_err(PumasError::from)?,
             ),
         ];
+        if let Some(target) = &prepared.resolution.accepted_target {
+            let path = runtime.join("approved-target-observation.json");
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .map_err(PumasError::from)?;
+            std::io::Write::write_all(&mut file, target.observation.as_bytes())
+                .map_err(PumasError::from)?;
+            provenance.push((path, target.observation.as_bytes().to_vec()));
+            validate_torch_provenance(&runtime, &provenance)?;
+        }
         // A durable sibling is deliberate: failure cannot auto-delete Using
         // inputs when the ordinary Torch TempDir is cleaned after child drainage.
         let relative = format!(
@@ -2503,6 +2704,9 @@ impl VersionInstaller {
             |inputs| async move {
                 grant.validate()?;
                 for index in 0..inputs.record().manifest.files().len() { drop(inputs.open_file(index).await?); }
+                if prepared.resolution.accepted_target.is_some() {
+                    validate_torch_provenance(&runtime, &provenance)?;
+                }
                 let packages = runtime.join("staged-packages");
                 let output = runtime.join("local-wheel-install");
                 let python = pumas_library::platform::paths::venv_python(&runtime);
@@ -2513,6 +2717,9 @@ impl VersionInstaller {
                 if prepared.qualified_recipe {
                     command.arg("--recipe-lock").arg(runtime.join("requirements.txt"))
                         .arg("--preview").arg(runtime.join("qualified-preview.json"));
+                }
+                if prepared.resolution.accepted_target.is_some() {
+                    command.arg("--target-observation").arg(runtime.join("approved-target-observation.json"));
                 }
                 let status = self.run_runtime_command_status_with_custody(command, log, "Installing exact verified local wheels", progress,
                     Some(TorchChildLease { stage: stage.clone(), _inputs: Some(inputs.clone()) }), None).await?;
@@ -2551,7 +2758,7 @@ impl VersionInstaller {
                 inputs.run_blocking("recheck Torch packages and provenance after probe", move || {
                     validate_torch_final_proof(&runtime_for_check, &packages_after_move, &manifest_for_check, &validated_manifest, &provenance)
                 }).await?;
-                let proof = serde_json::json!({
+                let mut proof = serde_json::json!({
                     "format": "pumas-torch-wheel-install-1", "tag": tag,
                     "output_directory": torch_directory_identity(&runtime).map_err(PumasError::from)?,
                     "resolution_sha256": format!("{:x}", Sha256::digest(prepared.resolution_json.as_bytes())),
@@ -2559,6 +2766,9 @@ impl VersionInstaller {
                     "installed_manifest_sha256": format!("{:x}", Sha256::digest(&manifest_for_receipt)), "installed_files": count,
                     "recipe_sha256": recipe_digest,
                 });
+                if let Some(target) = &prepared.resolution.accepted_target {
+                    proof["wheel_target_observation_sha256"] = serde_json::json!(target.sha256);
+                }
                 Ok((runtime, proof))
             },
             |runtime, receipt| async move {
@@ -2913,6 +3123,8 @@ impl VersionInstaller {
                 minor,
                 adapter: &selection.adapter,
                 python: &python,
+                interpreter_hash: &interpreter_hash,
+                target_observation: None,
             },
         )?;
         if format!(
@@ -3799,6 +4011,7 @@ mod managed_python_provenance_tests {
             machine: machine.into(),
             adapter: "none".into(),
             artifacts,
+            accepted_target: None,
         };
         let report = serde_json::json!({
             "install": resolution.artifacts.iter().map(|artifact| serde_json::json!({
@@ -3824,6 +4037,8 @@ mod managed_python_provenance_tests {
             minor: "3.12",
             adapter: "none",
             python,
+            interpreter_hash: &"b".repeat(64),
+            target_observation: None,
         };
         let check = |resolution: &DirectTorchResolution, report: &serde_json::Value, lock: &str| {
             validate_direct_torch_report(resolution, report, lock, &selection)

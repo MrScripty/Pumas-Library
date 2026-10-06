@@ -4,6 +4,7 @@ Native observation is a separate operation, run only in the selected interpreter
 This contract is compatibility data, not source or execution authority.
 """
 import importlib
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -167,3 +168,82 @@ def capture_native():
     require(set(observed.tags) <= actual_tags,
             "Native target differs from actual interpreter compatibility tags")
     return observed
+
+
+def observation_digest(document):
+    """Fixed JSON projection shared with the repository JSON serializer."""
+    return hashlib.sha256(json.dumps(document, sort_keys=True, separators=(",", ":"),
+                                     ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def checked_observation(document):
+    require(isinstance(document, dict) and set(document) == {
+        "schema", "interpreter", "interpreter_sha256", "target"}, "Incomplete target observation")
+    require(document["schema"] == "pumas.wheel-target-observation.v1", "Unsupported target observation")
+    interpreter = document["interpreter"]
+    require(isinstance(interpreter, str) and 0 < len(interpreter) <= 4096
+            and not any(ord(c) < 32 or ord(c) == 127 for c in interpreter), "Invalid observed interpreter")
+    # The observer can describe any admitted platform; path identity remains
+    # exact data rather than an inspection-host Path.is_absolute() decision.
+    require(interpreter.startswith("/") or re.match(r"[A-Za-z]:[\\/]", interpreter)
+            or interpreter.startswith("\\\\"), "Observed interpreter path is not absolute")
+    require(isinstance(document["interpreter_sha256"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", document["interpreter_sha256"]), "Invalid observed interpreter digest")
+    return WheelTarget(document["target"])
+
+
+def capture_observation():
+    """Trusted caller runs this in its selected interpreter under stage custody."""
+    import sys
+    document = {"schema": "pumas.wheel-target-observation.v1", "interpreter": sys.executable,
+                "interpreter_sha256": interpreter_digest(sys.executable),
+                "target": capture_native().to_dict()}
+    checked_observation(document)
+    return document
+
+
+def interpreter_digest(path):
+    hashed = hashlib.sha256()
+    with open(path, "rb") as executable:
+        for chunk in iter(lambda: executable.read(1024 * 1024), b""):
+            hashed.update(chunk)
+    return hashed.hexdigest()
+
+
+def resolution_target(resolution, observation=None):
+    """Require separate owner-approved evidence for target-bearing packets."""
+    keys = {"wheel_target", "wheel_target_observation_sha256"}
+    present = keys.intersection(resolution)
+    if not present and observation is None:
+        return None  # Explicit legacy mode, never an explicit-target fallback.
+    require(present == keys and observation is not None, "Target packet lacks approved observation")
+    target = checked_observation(observation)
+    declared = WheelTarget(resolution["wheel_target"])
+    require(declared.to_dict() == target.to_dict()
+            and resolution["wheel_target_observation_sha256"] == observation_digest(observation),
+            "Target packet differs from approved observation")
+    require(resolution.get("interpreter") == observation["interpreter"]
+            and resolution.get("python") == target.markers["python_version"]
+            and resolution.get("implementation") == "cpython"
+            and resolution.get("machine") == target.markers["platform_machine"],
+            "Target packet interpreter identity differs from approval")
+    return target
+
+
+def bind_resolution(resolution, observation):
+    """Add bindings only; original package/source/report identity stays intact."""
+    target = checked_observation(observation)
+    bound = {**resolution, "wheel_target": target.to_dict(),
+             "wheel_target_observation_sha256": observation_digest(observation)}
+    resolution_target(bound, observation)
+    return bound
+
+
+if __name__ == "__main__":
+    import sys
+    if sys.argv[1:] != ["--observe"]:
+        sys.exit("Expected --observe")
+    try:
+        print(json.dumps(capture_observation(), sort_keys=True, separators=(",", ":"), ensure_ascii=False))
+    except (OSError, ValueError):
+        sys.exit("Selected interpreter target observation refused")

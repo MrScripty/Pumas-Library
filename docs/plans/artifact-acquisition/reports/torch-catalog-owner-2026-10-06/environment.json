@@ -1,0 +1,20 @@
+{
+  "execution": "same selected executor; no saved seed",
+  "worktree": "/tmp/pumas-q2-catalog-owner-92e4",
+  "platform": "Linux x86_64",
+  "python": "3.12.14",
+  "rust": "1.92.0",
+  "cargo": {
+    "version": "1.92.0",
+    "offline": true,
+    "locked": true,
+    "jobs": 1,
+    "incremental": false,
+    "debug": 0,
+    "admission_lock": "/tmp/pumas-cargo-admission/cargo.lock",
+    "target": "/tmp/pumas-uv-offline-build/target"
+  },
+  "ruff": "0.15.2",
+  "instructions": "No applicable filesystem AGENTS.md/.agents skills found; selected .agents/.codex empty",
+  "fixtures": "actual inert ZIP wheels; copied selected venv; controlled complete Simple JSON observations; explicit unit-only anonymous loopback payload mapping; no provider/model/credential/backend downloads or execution"
+}

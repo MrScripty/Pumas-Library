@@ -1,0 +1,67 @@
+{
+  "branch": "feat/torch-catalog-owner-92e4389c",
+  "base": "92e4389c6720d8490785d646e2bc98833af95bb4",
+  "base_tree": "22073b89cd8f92d3ca774fc58ea17a94a379cfd0",
+  "accepted_design": "e6b5b876c282e6eb9786366994a6d212e6f3c0fc",
+  "tested_source": "c82cf0199d973d604d0c9971f06398ee171586d7",
+  "tested_source_tree": "c1e6ee75f62014a710fa008fc236bc6e83f08c1d",
+  "source_files_sha256": {
+    "docs/plans/artifact-acquisition/reports/write-sets.md": "f127a075ef20f896210f9a60d0286358eec48e455b381206dd2a88b436c879a3",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": "1aaf339e1b5ef005a1cdd0ecdaec2ddb6de480bf0b5d383f35a754bc4723bc25",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner.rs": "8af7629e7380d56125dd45b774c840527956ee691961c5a611480ca67799a440",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs": "8608cf3025d5d5eea9baa9355929c11a97c86446ecf66b653ea745c9ffa326a1",
+    "torch-server/tests/test_wheel_catalog_owner.py": "2f0ca44b55b2ca62a4ab22d8d0a5fe639725a9f28a00cd84b2129dd0c5a9433a",
+    "torch-server/wheel_catalog_owner.py": "6fdd06e02942fc5e1cac4f2f582950f585ea1caf6abda2d392619c8763481d8d"
+  },
+  "retained_files_unchanged_from_base_sha256": {
+    "rust/crates/pumas-app-manager/src/version_manager/installer.rs": "4c2ed18d55f8465100e7f29481ee6d9c7f038e397a119d853aa4f5c62e56324a",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_wheel_handoff_tests.rs": "6a6a493665db8b4032fa930eb68e49531fa431cb7db691f0d23887c7df5fee3c",
+    "torch-server/resolve_runtime.py": "eda80c72173711a1c20168760750f8e2f0b246db8acf2375712fbeb0d1c1a6ee",
+    "torch-server/qualified_wheel_catalog.py": "c92fae33e8906b20e0caf89ba51261249fa65f1259d4204f90259bdf41670843",
+    "torch-server/install_verified_wheels.py": "5d1a14549acff11f08ba19ff2226f9b480852e16fb48745ace3c2cc1fadadbc3",
+    "torch-server/wheel_target.py": "a381edb267f13316a582c3ee4d40450554004d1dc7c2788d4408ed101ebe94b1",
+    "torch-server/wheel_records.py": "f955958b637016b2760ff8a72e21d2e8b794f5e34d45a6eba54fa99c8238db50",
+    "torch-server/tooling/packaging.zip": "3453711fd71407b7d84253d5b498e7c0430fff187e3fb73dbd6f463b924014b2",
+    "torch-server/runtime/requirements.lock": "05c4ba8556998179cac8db5798177500e1154caca3d9164e00455240dab4a07e",
+    "torch-server/runtime/runtime.json": "9a158a4d82a859400df7dcccb54aa021c5456f420e0e608a9f060a802d2d9f9c",
+    "rust/Cargo.lock": "7ebce70162112913f675c270b1e6be748d7ef607280b6e84cfe667e38f1763ec",
+    "rust/crates/pumas-core/src/acquisition/s3.rs": "4e30e93fe73772cf03628f93dda26299645da6d4736d6b6b3c3dd54bc7a06bab",
+    "rust/crates/pumas-core/src/acquisition/s3/manifest.rs": "1fde4b9fc26428fb53fe054370e01eee7da9a6038ad2ea1a1147903d9e5368f5",
+    "rust/crates/pumas-core/src/model_library/importer.rs": "f11ff3d975871a8a1239c773964084dec394bccbb3c1f178091270bcf4c2e5ae"
+  },
+  "logs_sha256": {
+    "clippy.log": "7aed835892a4e8c2365e87ad8e411c25cfbed79f0916c370b4b852cd6845d12b",
+    "diff-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "feature-graphs.log": "173ed427a61ed780b4583f312ae27454b3b191dcaa5af80f51ff123e23a97b60",
+    "frozen-refs.log": "1e415953a2488d21bbe15f25a8fde6ef6ef9bd7f972b6fa2407acb306faf33e2",
+    "push-source.log": "d8f379e10ee7e7e57ad5020a39887cb5a386114f61025a5723678988fe30815c",
+    "python.log": "4a8ac3db747fce03aea1ff1f37dcc483d6d5d3a81a209a445d13b480dd0b3b5e",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "rust.log": "eed21409dd439528b747c12cb0c31f9fe622e880f41976e5250b9420408fe058",
+    "rustfmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "syntax.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "commands": {
+    "feature_graphs": "source /workspace/.pumas-tools/env.sh; flock /tmp/pumas-cargo-admission/cargo.lock python scripts/release/check-dependency-features.py --s3",
+    "python": "PYTHONPATH=/tmp/pumas-q2-test-packages:torch-server/tests python3 -m unittest -v test_wheel_catalog_owner test_wheel_target test_target_observation test_install_verified_wheels test_qualified_wheel_catalog",
+    "rust": "CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=/tmp/pumas-uv-offline-build/target flock /tmp/pumas-cargo-admission/cargo.lock cargo test --offline --locked --manifest-path rust/Cargo.toml -p pumas-app-manager --features test-support version_manager::installer::torch::torch_ -- --test-threads=1 --nocapture",
+    "clippy": "CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=/tmp/pumas-uv-offline-build/target flock /tmp/pumas-cargo-admission/cargo.lock cargo clippy --offline --locked --manifest-path rust/Cargo.toml -p pumas-app-manager --features test-support --tests -- -D warnings",
+    "ruff": "PYTHONPATH=/tmp/pumas-q2-test-packages python3 -m ruff check torch-server/wheel_catalog_owner.py torch-server/tests/test_wheel_catalog_owner.py",
+    "rustfmt": "rustfmt --edition 2021 --config skip_children=true --check rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner.rs rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs",
+    "syntax": "python3 -m py_compile torch-server/wheel_catalog_owner.py torch-server/tests/test_wheel_catalog_owner.py",
+    "diff": "git diff --cached --check -- . ':(exclude)**/*.log'",
+    "push": "git push -u origin feat/torch-catalog-owner-92e4389c"
+  },
+  "qualification": {
+    "python": 81,
+    "rust": 50,
+    "catalog_python": 20,
+    "catalog_rust": 11,
+    "prebuild_feature_graphs": 33,
+    "strict_clippy": true,
+    "scoped_checks": true,
+    "automatic_preview_adoption": false,
+    "real_provider_acceptance": false,
+    "all_children_servers_effects_joined": true
+  }
+}

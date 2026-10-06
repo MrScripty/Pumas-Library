@@ -1,5 +1,19 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 finite request-scoped catalog owner (2026-10-06):** Separate source
+`c82cf0199d973d604d0c9971f06398ee171586d7` starts from accepted final executable
+repair `92e4389c`, with accepted `e6b5b876` design retained separately.
+The dormant private owner binds original selection/roots/constraints, existing
+PyTorch build/PyPI observations and owned selected target to actual shared
+candidate acquisition/inspection and a private catalog snapshot receipt.
+Alternative ranges/extras/cycles reach a finite fixed point; missing coverage,
+unknown size, source/proof mutation, limits and abandonment refuse completion
+without solver/install/fallback. 81 Python tests, 50 Rust controls, 33 pre-build
+feature graphs and strict scoped checks pass. [Exact API, fixtures and limits](reports/torch-catalog-owner-2026-10-06.md).
+Automatic/preview adoption remains off. Provider/volume, public offline solver,
+full target/selection parity, lifecycle/cold admission and coordinated caller
+composition remain gated; P1/Q2/AQ acceptance is unchanged.
+
 **Q2 final selected-executable review repair (2026-10-06):** Frozen `2ce91b43`
 remains intact. The executable-only probe mutation reproduced bound publication
 and Adopted settlement against its unchanged validator. Separate source

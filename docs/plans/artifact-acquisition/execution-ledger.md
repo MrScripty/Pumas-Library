@@ -1568,3 +1568,11 @@ staging/VersionId fixtures, main, schemas and dependencies remain unchanged.
 Parent owns review/hosted qualification/PRs/merges. Next existing-plan feature is
 Q3 desktop/RPC explicit source workflow through the native operation;
 real-provider/installed/native acceptance remains separate. AQ-S3 stays not ready.
+
+
+2026-10-06 final prefix checkpoint: the post-prefix RPC suite exited 101 at normal
+binary linking with SIGBUS and zero free disk, before executing tests. Its full
+log and retired failed-link file hashes are retained. Final core units/Clippy,
+66 integrations and production RPC Clippy remain passed; RPC tests are blocked,
+not passed. Resume after restoring link headroom, using the exact report command.
+No service-limit rejection was observed; no PR mutation occurred.

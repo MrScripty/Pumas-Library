@@ -55,3 +55,10 @@ Evidence: `/workspace/scratch/s3-prefix-main95/`; intermediate failures are
 retained. See [qualification](s3-prefix-enumeration-2026-10-06.md) for scope,
 check logs and limitations. Next planned work: Q3 actual-provider acceptance,
 then Q4; do not silently close either gate.
+
+
+Final attempt: post-prefix RPC suite is blocked before execution by link SIGBUS
+with zero filesystem headroom. Failure evidence is `prefix-rpc-final-tests.log`;
+no RPC result is claimed. Restore build-cache link headroom and rerun the exact
+command in the qualification report. The service limit was not observed; this
+checkpoint records the concrete filesystem blocker.

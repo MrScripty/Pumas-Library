@@ -191,3 +191,20 @@ Use the reproduction environment above. Retain output at
 checkpoint its result is pending. A running process must be polled before
 starting any replacement; service interruption is not evidence of test success.
 Provider/platform gates and parent PR coordination remain open.
+
+
+### Final RPC attempt: qualification remains blocked
+
+The above exact RPC test command exited 101 while linking the normal RPC
+executable (`pumas_rpc-f5f33b788485001f`) with linker SIGBUS. A direct filesystem
+check confirmed zero free space. No RPC tests ran and the earlier 302 tests are
+still only the attribution prerequisite result. Full failure output is preserved
+in `prefix-rpc-final-tests.log`. Only 17 failed-link object files and its temporary
+output were retired; hashes/sizes are in `retired-final-rpc-link-cache.json`.
+No test was interrupted. No source/security/network/runtime policy was changed.
+
+This is a concrete link-headroom blocker, not a successful qualification or an
+observed service-limit rejection. Resume by providing sufficient recomputable
+build-cache headroom, then rerun the exact RPC test command above. Preserve the
+existing failure log under a new filename before the rerun. Actual service-limit
+exhaustion has not been observed. Draft PR publication remains parent-owned.

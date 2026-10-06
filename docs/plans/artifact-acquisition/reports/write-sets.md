@@ -860,3 +860,29 @@ unit exercises all owned roots/aliases. RPC README/shared contract, plan/ledger/
 write set and correction qualification report record this reviewed gap. Reader,
 manifest, watcher, importer.rs, existing publication protocol, dependencies,
 frontend/Electron/generated DTOs and all zero-length work are excluded.
+
+## AC10 public-HF importer measurement successor — 2026-10-06
+
+The coordinator explicitly admits the existing AC10 512 MiB measurement on separate
+`qualification/ac10-public-hf-72224551`, based on frozen
+`722245514b3bae42511aa5ea188570292ce276d4` (tree
+`14e8a1b36b580f2397264dd38b18329ec07bc75e`). AC01 d1e9106b is an
+ancestor of this base and recorded hosted candidate 0dd38c7 (Build 37141872406);
+the previous conditional source-edit hold is satisfied. The exact source/test
+write set remains the one Linux ignored test and its local helpers in `api/hf.rs`.
+Owning documentation is this report, plan, ledger, acceptance matrix and dependency
+gates, plus `reports/ac10-public-hf-measurement-2026-10-06.md` for bounded evidence.
+Independent specification and standards reviews precede implementation. No production
+owner, dependency, schema, S3 frozen write set, runtime or Q2 source changes are admitted.
+
+The earlier 8/128 MiB shared-layer probe on separate d56b2b91 remains distinct;
+this successor measures public HF admission, real importer and receipt settlement.
+Initial overlay headroom is 1.2 GiB, RAM available 16 GiB, with no active Rust
+build. Only previously authorized inactive reproducible Rust cache binaries may
+be removed with a path/hash manifest; source and evidence remain intact. The
+fixture root stays on the workspace filesystem, not the separate tmpfs. Set only
+repository-local user.name/user.email to the owner-selected MrScripty identity and
+verify effective author and committer before each commit; preserve existing history.
+All AQ-HTTP criteria remain pending. Q2 remains gated: an approved exact wheel
+closure, shared verified local handoff, local-only pip consumption under denied
+network, lease-through-child cleanup and bootstrap traffic accounting are absent.

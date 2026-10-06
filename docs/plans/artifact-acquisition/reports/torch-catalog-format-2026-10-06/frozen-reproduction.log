@@ -1,0 +1,110 @@
+test_simple_json_conformant_10_through_13_versions_lists (test_wheel_catalog_owner.CatalogTests.test_simple_json_conformant_10_through_13_versions_lists) ... 
+  test_simple_json_conformant_10_through_13_versions_lists (test_wheel_catalog_owner.CatalogTests.test_simple_json_conformant_10_through_13_versions_lists) (version='1.1') ... ERROR
+  test_simple_json_conformant_10_through_13_versions_lists (test_wheel_catalog_owner.CatalogTests.test_simple_json_conformant_10_through_13_versions_lists) (version='1.2') ... ERROR
+  test_simple_json_conformant_10_through_13_versions_lists (test_wheel_catalog_owner.CatalogTests.test_simple_json_conformant_10_through_13_versions_lists) (version='1.3') ... ERROR
+test_simple_json_11_through_13_cannot_omit_versions (test_wheel_catalog_owner.CatalogTests.test_simple_json_11_through_13_cannot_omit_versions) ... 
+  test_simple_json_11_through_13_cannot_omit_versions (test_wheel_catalog_owner.CatalogTests.test_simple_json_11_through_13_cannot_omit_versions) (version='1.1') ... FAIL
+  test_simple_json_11_through_13_cannot_omit_versions (test_wheel_catalog_owner.CatalogTests.test_simple_json_11_through_13_cannot_omit_versions) (version='1.2') ... FAIL
+  test_simple_json_11_through_13_cannot_omit_versions (test_wheel_catalog_owner.CatalogTests.test_simple_json_11_through_13_cannot_omit_versions) (version='1.3') ... FAIL
+test_actual_dist_info_wrong_name_version_or_nested_path_refuses (test_wheel_catalog_owner.CatalogTests.test_actual_dist_info_wrong_name_version_or_nested_path_refuses) ... 
+  test_actual_dist_info_wrong_name_version_or_nested_path_refuses (test_wheel_catalog_owner.CatalogTests.test_actual_dist_info_wrong_name_version_or_nested_path_refuses) (directory='wrong-1.0.dist-info') ... FAIL
+  test_actual_dist_info_wrong_name_version_or_nested_path_refuses (test_wheel_catalog_owner.CatalogTests.test_actual_dist_info_wrong_name_version_or_nested_path_refuses) (directory='torch-1.0.dist-info') ... FAIL
+  test_actual_dist_info_wrong_name_version_or_nested_path_refuses (test_wheel_catalog_owner.CatalogTests.test_actual_dist_info_wrong_name_version_or_nested_path_refuses) (directory='nested/torch-2.14.0+cpu.dist-info') ... FAIL
+
+======================================================================
+ERROR: test_simple_json_conformant_10_through_13_versions_lists (test_wheel_catalog_owner.CatalogTests.test_simple_json_conformant_10_through_13_versions_lists) (version='1.1')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/tests/test_wheel_catalog_owner.py", line 112, in test_simple_json_conformant_10_through_13_versions_lists
+    self.assertEqual(len(owner.prepare(request, self.observation)["candidates"]), 1)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/wheel_catalog_owner.py", line 176, in prepare
+    check(type(doc) is dict and doc.keys() == {"meta", "name", "files"}
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/wheel_catalog_owner.py", line 55, in check
+    raise Refused(reason)
+wheel_catalog_owner.Refused: Unsupported/incomplete Simple JSON response
+
+======================================================================
+ERROR: test_simple_json_conformant_10_through_13_versions_lists (test_wheel_catalog_owner.CatalogTests.test_simple_json_conformant_10_through_13_versions_lists) (version='1.2')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/tests/test_wheel_catalog_owner.py", line 112, in test_simple_json_conformant_10_through_13_versions_lists
+    self.assertEqual(len(owner.prepare(request, self.observation)["candidates"]), 1)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/wheel_catalog_owner.py", line 176, in prepare
+    check(type(doc) is dict and doc.keys() == {"meta", "name", "files"}
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/wheel_catalog_owner.py", line 55, in check
+    raise Refused(reason)
+wheel_catalog_owner.Refused: Unsupported/incomplete Simple JSON response
+
+======================================================================
+ERROR: test_simple_json_conformant_10_through_13_versions_lists (test_wheel_catalog_owner.CatalogTests.test_simple_json_conformant_10_through_13_versions_lists) (version='1.3')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/tests/test_wheel_catalog_owner.py", line 112, in test_simple_json_conformant_10_through_13_versions_lists
+    self.assertEqual(len(owner.prepare(request, self.observation)["candidates"]), 1)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/wheel_catalog_owner.py", line 176, in prepare
+    check(type(doc) is dict and doc.keys() == {"meta", "name", "files"}
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/wheel_catalog_owner.py", line 55, in check
+    raise Refused(reason)
+wheel_catalog_owner.Refused: Unsupported/incomplete Simple JSON response
+
+======================================================================
+FAIL: test_simple_json_11_through_13_cannot_omit_versions (test_wheel_catalog_owner.CatalogTests.test_simple_json_11_through_13_cannot_omit_versions) (version='1.1')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/tests/test_wheel_catalog_owner.py", line 116, in test_simple_json_11_through_13_cannot_omit_versions
+    with self.subTest(version=version), self.assertRaises(owner.Refused):
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Refused not raised
+
+======================================================================
+FAIL: test_simple_json_11_through_13_cannot_omit_versions (test_wheel_catalog_owner.CatalogTests.test_simple_json_11_through_13_cannot_omit_versions) (version='1.2')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/tests/test_wheel_catalog_owner.py", line 116, in test_simple_json_11_through_13_cannot_omit_versions
+    with self.subTest(version=version), self.assertRaises(owner.Refused):
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Refused not raised
+
+======================================================================
+FAIL: test_simple_json_11_through_13_cannot_omit_versions (test_wheel_catalog_owner.CatalogTests.test_simple_json_11_through_13_cannot_omit_versions) (version='1.3')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/tests/test_wheel_catalog_owner.py", line 116, in test_simple_json_11_through_13_cannot_omit_versions
+    with self.subTest(version=version), self.assertRaises(owner.Refused):
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Refused not raised
+
+======================================================================
+FAIL: test_actual_dist_info_wrong_name_version_or_nested_path_refuses (test_wheel_catalog_owner.CatalogTests.test_actual_dist_info_wrong_name_version_or_nested_path_refuses) (directory='wrong-1.0.dist-info')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/tests/test_wheel_catalog_owner.py", line 148, in test_actual_dist_info_wrong_name_version_or_nested_path_refuses
+    with self.assertRaises(owner.Refused):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Refused not raised
+
+======================================================================
+FAIL: test_actual_dist_info_wrong_name_version_or_nested_path_refuses (test_wheel_catalog_owner.CatalogTests.test_actual_dist_info_wrong_name_version_or_nested_path_refuses) (directory='torch-1.0.dist-info')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/tests/test_wheel_catalog_owner.py", line 148, in test_actual_dist_info_wrong_name_version_or_nested_path_refuses
+    with self.assertRaises(owner.Refused):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Refused not raised
+
+======================================================================
+FAIL: test_actual_dist_info_wrong_name_version_or_nested_path_refuses (test_wheel_catalog_owner.CatalogTests.test_actual_dist_info_wrong_name_version_or_nested_path_refuses) (directory='nested/torch-2.14.0+cpu.dist-info')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/pumas-q2-catalog-format-4c85/torch-server/tests/test_wheel_catalog_owner.py", line 148, in test_actual_dist_info_wrong_name_version_or_nested_path_refuses
+    with self.assertRaises(owner.Refused):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Refused not raised
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.749s
+
+FAILED (failures=6, errors=3)

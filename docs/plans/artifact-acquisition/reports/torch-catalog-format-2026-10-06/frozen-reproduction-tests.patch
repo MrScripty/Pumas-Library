@@ -1,0 +1,101 @@
+diff --git a/torch-server/tests/test_wheel_catalog_owner.py b/torch-server/tests/test_wheel_catalog_owner.py
+index 25faecc9..5d10825a 100644
+--- a/torch-server/tests/test_wheel_catalog_owner.py
++++ b/torch-server/tests/test_wheel_catalog_owner.py
+@@ -45,7 +45,8 @@ class CatalogTests(unittest.TestCase):
+     def request(self, artifacts, *, roots=None, constraints=(), release="2.14.0", build="cpu", direct=()):
+         rows = {}
+         for artifact in artifacts:
+-            rows.setdefault(artifact["name"], []).append({"filename": artifact["url"].rsplit("/", 1)[-1],
++            name = owner.packaging.utils.canonicalize_name(artifact["name"])
++            rows.setdefault(name, []).append({"filename": artifact["url"].rsplit("/", 1)[-1],
+                 "url": artifact["url"], "hashes": {"sha256": artifact["sha256"]}, "size": artifact["size"]})
+         observations = []
+         for name, files in rows.items():
+@@ -54,7 +55,9 @@ class CatalogTests(unittest.TestCase):
+                 observations.append({"repository": repo, "project": name, "url": base + name + "/",
+                     "status": 200, "observed_at": "2026-10-06T12:00:00Z", "body": json.dumps({
+                         "meta": {"api-version": "1.3"}, "name": name,
+-                        "files": files if repo == ("pytorch" if name == "torch" else "pypi") else []})})
++                        "files": files if repo == ("pytorch" if name == "torch" else "pypi") else [],
++                        "versions": list(dict.fromkeys(str(owner.packaging.utils.parse_wheel_filename(f["filename"])[1])
++                            for f in files)) if repo == ("pytorch" if name == "torch" else "pypi") else []})})
+         return {"schema": "pumas.wheel-catalog-request.v1", "selection": "synthetic-selection-1",
+                 "release": release, "build": build, "roots": roots or [f"torch=={release}+{build}"],
+                 "constraints": list(constraints), "direct_roots": list(direct),
+@@ -83,6 +86,75 @@ class CatalogTests(unittest.TestCase):
+         artifact["size"] = artifact["path"].stat().st_size
+         artifact["sha256"] = hashlib.sha256(artifact["path"].read_bytes()).hexdigest()
+ 
++    def rename_info(self, artifact, directory):
++        def rename(members):
++            old = next(n.rsplit("/", 1)[0] for n in members if n.endswith(".dist-info/METADATA"))
++            renamed = {n.replace(old + "/", directory + "/", 1): body for n, body in members.items()}
++            record = directory + "/RECORD"
++            renamed[record] = renamed[record].replace(old.encode(), directory.encode())
++            members.clear()
++            members.update(renamed)
++        self.mutate(artifact, rename)
++
++    def test_simple_json_conformant_10_through_13_versions_lists(self):
++        for version in ("1.0", "1.1", "1.2", "1.3"):
++            with self.subTest(version=version):
++                request = self.request([self.torch()])
++                for observation in request["observations"]:
++                    page = json.loads(observation["body"])
++                    page["meta"]["api-version"] = version
++                    if version == "1.0":
++                        page.pop("versions")
++                    else:
++                        # Legacy strings/no-file versions are permitted and not ordered.
++                        page["versions"] += ["legacy-snapshot", "0.1"]
++                    observation["body"] = json.dumps(page)
++                self.assertEqual(len(owner.prepare(request, self.observation)["candidates"]), 1)
++
++    def test_simple_json_11_through_13_cannot_omit_versions(self):
++        for version in ("1.1", "1.2", "1.3"):
++            with self.subTest(version=version), self.assertRaises(owner.Refused):
++                request = self.request([self.torch()])
++                for observation in request["observations"]:
++                    page = json.loads(observation["body"])
++                    page["meta"]["api-version"] = version
++                    page.pop("versions")
++                    observation["body"] = json.dumps(page)
++                owner.prepare(request, self.observation)
++
++    def test_simple_versions_collection_and_wheel_association_are_checked(self):
++        for versions in (None, "2.14.0+cpu", [1], ["2.14.0+cpu", "2.14.0+cpu"], [], ["2.14.0"]):
++            with self.subTest(versions=versions), self.assertRaises(owner.Refused):
++                request = self.request([self.torch()])
++                page = json.loads(request["observations"][0]["body"])
++                page["versions"] = versions
++                request["observations"][0]["body"] = json.dumps(page)
++                owner.prepare(request, self.observation)
++
++    def test_actual_dist_info_wrong_name_version_or_nested_path_refuses(self):
++        for directory in ("wrong-1.0.dist-info", "torch-1.0.dist-info", "nested/torch-2.14.0+cpu.dist-info"):
++            with self.subTest(directory=directory):
++                shutil.rmtree(self.wheels)
++                self.wheels.mkdir()
++                artifact = self.torch()
++                self.rename_info(artifact, directory)
++                request = self.request([artifact])
++                # Conformant 1.0 isolates the wheel gap on the frozen parser too.
++                for observation in request["observations"]:
++                    page = json.loads(observation["body"])
++                    page["meta"]["api-version"] = "1.0"
++                    page.pop("versions")
++                    observation["body"] = json.dumps(page)
++                with self.assertRaises(owner.Refused):
++                    self.inspect(request, [artifact])
++
++    def test_normalized_dist_info_identity_allows_legacy_name_and_equivalent_version(self):
++        artifacts = [self.torch(requires=["Some.Project==1.0"]), self.artifact("Some.Project")]
++        self.rename_info(artifacts[1], "Some.Project-1.0.0.dist-info")
++        _, result = self.inspect(self.request(artifacts), artifacts)
++        self.assertIn("some-project", result["reachable"])
++        self.assertFalse(result["empty_domains"])
++
+     def test_full_alternative_ranges_late_extras_markers_cycle_reach_fixed_point(self):
+         artifacts = [self.torch(requires=["branch>=1", "switch==1"]),
+             self.artifact("branch", version="1", requires=["dependency<2", 'gpu-dependency; extra == "gpu"'], extras=["gpu"]),

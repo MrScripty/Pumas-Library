@@ -1,0 +1,9 @@
+{
+  "frozen_head": "4c85b60d47a736c066a17e673754099f8f6e5870",
+  "owner_identical_to_frozen": true,
+  "owner_sha256": "6fdd06e02942fc5e1cac4f2f582950f585ea1caf6abda2d392619c8763481d8d",
+  "test_diff_sha256": "a47a32a465eb88d7f50286ebc44610310f7595c0c929e5628254a33bb3e534b2",
+  "log_sha256": "d7917235f9359c8ff098cd0c41c263b598a5bd8f8e037ef05b10537dc918d55e",
+  "expected_exit": 1,
+  "controls": "conformant versions required; missing mandatory versions; root .dist-info identity (wrong name/version/nested)"
+}

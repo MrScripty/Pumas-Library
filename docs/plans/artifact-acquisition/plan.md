@@ -1,5 +1,16 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 catalog format review successor (2026-10-06):** Frozen `4c85b60d`
+reproduces rejection of valid Simple 1.1+ version lists, acceptance of missing
+mandatory lists and wrong/nested `.dist-info` identities. Separate tested source
+`a30ad50bc11e4100ce19ef166e6711faa8424490` repairs both using public normalized
+identity rules and conformant fixtures. 89 Python tests, 51 shared Rust controls,
+33 pre-build feature graphs and strict scoped checks pass. [Reproduction and
+repair evidence](reports/torch-catalog-format-2026-10-06.md) records exact scope.
+Authority/custody, automatic/preview adoption and P1/Q2/AQ gates are unchanged;
+independent completion/budget review and provider/solver/caller qualification
+remain pending.
+
 **Q2 finite request-scoped catalog owner (2026-10-06):** Separate source
 `c82cf0199d973d604d0c9971f06398ee171586d7` starts from accepted final executable
 repair `92e4389c`, with accepted `e6b5b876` design retained separately.

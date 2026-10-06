@@ -1,5 +1,96 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 current-main composition (2026-10-06):** A separate patch candidate on
+current main5e114f6d carries reviewed finite6308 and its shared Q2 handoff history,
+with original evidence intact. Main and composed feature graphs pass33 each
+before builds; current Node/HTTP/Cargo/native-owner source stays unchanged.
+[Composition plan](reports/torch-current-main-composition-2026-10-06.md) inventories
+all source/API/conflict surfaces and remaining gates. Dynamic automatic/preview
+resolution remains exposed and unqualified for P1. Disabling it would change
+promised upstream/core behavior; parent disposition is pending, and no disabling
+change or mandatory preset policy is implemented. Direct users need the shared
+Torch capability. Native3a601625 remains unpublished and is not integrated.
+No PR/main merge or package/runtime/source-safety acceptance is claimed.
+
+**Q2 finite qualified recipe candidate (2026-10-06):** Tested source
+`498b79611ded25151e28531b8f961dac1462061c`, tree
+`97dbe68916150da6a1375abd026066293553f9a2`, on separate
+`feat/torch-qualified-wheel-catalog-d87f560f` implements the optional existing
+finite bundled recipe through public standalone packaging metadata APIs and
+shared payload acquisition/local installation. Original lock/direct roots remain
+exact; actual acquired identity/tags/Python/hash and complete marker/extras closure
+validate before local --no-deps. All dependency URLs, including inactive branches,
+refuse explicitly without fallback. Final229 Python/306 app-manager and strict
+default workspace all-targets Clippy, Ruff/fmt pass. See
+[bounded qualification](reports/torch-qualified-wheel-catalog-2026-10-06.md).
+Automatic and retained-preview resolution remain unqualified for source
+preparation; private hooks remain unactivated. Actual Torch/GPU/provider,
+enforced network denial, hosted/platform acceptance and independent review remain
+open. AQ-HTTP and AQ-PACKAGES are not advanced; no shared/native cleanup changes.
+Next existing Q2 work is review/composition and exact network-denied/provider
+acceptance, with generic public resolver admission a separate decision.
+
+**Q2 public-tooling research disposition (2026-10-06):** Parent retained §11 and
+forbids private-hook activation. Research recommends the finite existing recipe
+as acquired/preflighted exact local wheels, with public pip consumption; no
+production source or dependency change was admitted by that research entry. Five inert local controls
+show why `--no-index` alone is insufficient and validate a preflighted wheelhouse
+boundary. Dynamic automatic/retained-preview selection remains unqualified.
+See [supported alternatives and recommendation](reports/torch-public-resolution-alternatives-2026-10-06.md).
+
+**Q2 resolver boundary blocker (2026-10-06):** Independent review reproduced
+source-candidate preparation before report validation despite pip dry-run and
+binary-only flags. Automatic and retained-preview resolver modes remain exposed.
+Qualified-recipe work was paused during that investigation. A separately tested, unactivated private-pip
+admission proposal requires an explicit exception to the public-tooling contract;
+production source is unchanged. Nine inert placement controls pass without URL
+retrieval/build hooks. See [proposal and limits](reports/torch-resolver-source-boundary-proposal-2026-10-06.md).
+This corrects the scope of earlier automatic qualification; AQ-PACKAGES stays open.
+
+**Q2 automatic resolution source milestone (2026-10-06):** Separate branch
+`feat/torch-automatic-wheel-handoff-7a3264ac` normal-merges frozen pip repair99a55b78
+without rewriting its evidence. Tested source `5946c4738870bdcfc613430bb98fd873d9e6d6f3`
+(tree `295eb32167dc49ced598d1082f6f3bf086ce4679`) accepts original resolver-only
+version1 evidence before shared verified wheel acquisition/local installation.
+Acceptance ends fallback; original interpreter/provider identities, owned inputs,
+postprobe proof and receipts are preserved. Final216 Python and304 app-manager
+pass; strict default and focused headless integration/binary checks pass. Full
+headless all-targets retains11 matched baseline generated errors. Original
+admissioncancel failure and narrow correction are preserved in
+[qualification](reports/torch-automatic-wheel-handoff-qualification-2026-10-06.md).
+AQ-PACKAGES remains not ready; actual automatic-provider/Torch/platform/hosted and
+enforced-denial evidence remain separate. Next Q2 slice is remaining qualified
+bundled-recipe payload handoff/disposition and package acceptance. No native/S3/
+core interface/dependency/ORT-policy writes or external review contact.
+
+**Q2 local-pip correction (2026-10-06):** Independent review of frozen handoff
+`7a3264ac` found ambient global/site/PIP_CONFIG_FILE requirements injection despite
+`--isolated`. Separate repair disables config files and inherited pip options only
+in the child environment. Host settings, custody and proof/publication policies
+remain unchanged. See [repair qualification](reports/torch-wheel-pip-config-repair-2026-10-06.md). The earlier handoff
+evidence remains historical; parser controls do not qualify enforced network
+denial. AQ-PACKAGES remains not ready. Next existing-plan source feature remains
+automatic-resolution/final-payload separation, paused on its separate branch
+while this repair receives coordinator review.
+
+**Q2 retained-preview wheel handoff (2026-10-06):** Separately admitted while
+AQ-HTTP8756 remains frozen, branch `feat/torch-verified-wheel-handoff-8756f33b`
+retains base8756f33 and accepted main1c1c7875. Tested source
+`e246645bcf7d2f3bae2f68a0ba29215fafe335e9` (tree
+`24eceee6dc62b0c368f666c43989c34ba3b2a3bb`) acquires the accepted complete wheel
+set before exact local pip, preserves original provenance, validates installed
+members after probing, retains child/input custody through cleanup and receipt
+settlement, and refuses unresolved cold replay before cleanup. Thirteen shared
+controls, 301 app-manager and 210 pinned-tool Python tests pass; strict default
+checks pass. Full headless RPC test Clippy has an unchanged helper lint failure;
+headless production binary passes. See [qualification](reports/torch-verified-wheel-handoff-qualification-2026-10-06.md).
+This completes only the retained unqualified-preview source slice. Automatic
+selection and qualified recipes retain documented scope. AQ-HTTP is a release
+dependency; AQ-PACKAGES remains not ready, including enforced network denial,
+real Torch/provider/platform and hosted acceptance. Next Q2 source work separates
+automatic resolution from final payload installation. No native/S3/generator,
+dependency/runtime-pin or ONNX policy changes, external review contact or merge.
+
 **Positive HTTP elapsed-budget feature (2026-10-06):** Separate
 `feat/acquisition-http-budget-0c02dcfb` retains frozen AC10 evidence base
 `0c02dcfb81a0f7ab2a3858c2b5cee329816b3ce5` (tree `78c663ed397264284cb95662d49a3354380755d4`). Tested
@@ -405,7 +496,7 @@ Each row is one coherent semantic unit including producer and actual consumers. 
 | Milestone | Goal | Dependencies | Gate / evidence | State |
 | --- | --- | --- | --- | --- |
 | **Q1** | Shared HTTP lifecycle, neutral persistence/handoff, and real HF/native consumer cutover; existing UI outcomes preserved. | Source/retained-state preparation and active recovery-owner handoff. No runtime milestone. | `AQ-HTTP`: AC01–AC10, AC15, AC16, AC18; real HF model import and native archive extraction plus corresponding UI/contract/cancellation/reopen evidence. | In progress; gate not ready |
-| **Q2** | Exact wheel-file-set acquisition and local-only consumption in the existing Torch installer. | AQ-HTTP. | `AQ-PACKAGES`: AC11, AC12 and Q1 regression evidence affected by this composition; network-denied installation and actual package identity. | Planned |
+| **Q2** | Exact wheel-file-set acquisition and local-only consumption in the existing Torch installer. | AQ-HTTP. | `AQ-PACKAGES`: AC11, AC12 and Q1 regression evidence affected by this composition; network-denied installation and actual package identity. | In progress; bounded preview and automatic source complete, gate not ready |
 | **Q3** | S3-compatible acquisition using the same lifecycle, direct explicit source workflow, tested credentials/version semantics, and a real model import through the existing model-facing operations. | AQ-HTTP. Q2 is the default next serial integration; Q3 can be delegated after shared files stabilize. | `AQ-S3`: AC13, AC14 and source-neutrality regressions; native AWS S3, one non-AWS compatible service, local MinIO, and S3-to-model-library evidence. | Planned |
 | **Q4** | Complete affected public/installed/native qualification, migration documentation and removal of superseded authority. | Q1–Q3 implemented. | `AQ-COMPLETE`: all AC01–AC18 satisfied and all four milestones Accepted; packaged/independent-consumer/native-platform evidence in AC17. | Planned |
 

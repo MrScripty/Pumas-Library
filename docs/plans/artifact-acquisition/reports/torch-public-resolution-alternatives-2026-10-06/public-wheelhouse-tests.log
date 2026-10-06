@@ -1,0 +1,14 @@
+test_finite_validated_recipe_can_report_exact_inputs_without_dependency_resolution (__main__.PublicWheelhouseTests.test_finite_validated_recipe_can_report_exact_inputs_without_dependency_resolution) ... ok
+test_metadata_direct_sources_refuse_before_public_pip_invocation (__main__.PublicWheelhouseTests.test_metadata_direct_sources_refuse_before_public_pip_invocation) ... ok
+test_missing_named_closure_fails_without_report_or_source_build (__main__.PublicWheelhouseTests.test_missing_named_closure_fails_without_report_or_source_build) ... ok
+test_no_index_still_follows_harmless_direct_reference_outside_wheelhouse (__main__.PublicWheelhouseTests.test_no_index_still_follows_harmless_direct_reference_outside_wheelhouse) ... ok
+test_prevalidated_named_dependency_closure_resolves_with_public_pip (__main__.PublicWheelhouseTests.test_prevalidated_named_dependency_closure_resolves_with_public_pip) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.245s
+
+OK
+PUBLIC CONTROL: fixed exact local inputs produce a report with --no-deps
+PUBLIC CONTROL: missing local closure refuses; no external source is offered
+PUBLIC CONTROL: --no-index followed an inert direct local wheel outside --find-links
+PUBLIC CONTROL: prevalidated named closure resolves entirely from local wheelhouse

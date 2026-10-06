@@ -4,6 +4,7 @@ import importlib.util
 import base64
 import hashlib
 import json
+import os
 import pathlib
 import re
 import tempfile
@@ -411,6 +412,213 @@ class ResolverTests(unittest.TestCase):
                             target, [{"name": "sympy", "version": "1.14.0"}]
                         )
             record.write_text(good_record, encoding="utf-8")
+
+    def test_resolve_only_accepts_original_report_without_installing_packages(self):
+        fixture = {"version": "1", **report()}
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "resolution"
+            original_environment = dict(os.environ)
+
+            def fake_run(command, **kwargs):
+                self.assertIn("--dry-run", command)
+                self.assertNotIn("--target", command)
+                self.assertNotIn("--_pumas-pip-progress-worker", command)
+                self.assertIn("torch==2.10.0+cpu", command)
+                self.assertEqual(
+                    {
+                        key: value
+                        for key, value in kwargs["env"].items()
+                        if key.upper().startswith("PIP_")
+                    },
+                    {"PIP_CONFIG_FILE": os.devnull},
+                )
+                pathlib.Path(command[command.index("--report") + 1]).write_text(
+                    json.dumps(fixture), encoding="utf-8"
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--resolve-only",
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.dict(
+                    os.environ,
+                    {
+                        "PIP_CONFIG_FILE": "hostile-config",
+                        "Pip_Requirement": "hostile-requirements",
+                    },
+                ),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run) as run,
+                patch.object(
+                    resolver,
+                    "installed_file_manifest",
+                    side_effect=AssertionError("resolution must not inspect installed files"),
+                ),
+            ):
+                resolver.main()
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(dict(os.environ), original_environment)
+            self.assertEqual(json.loads((output / "pip-resolution.json").read_text()), fixture)
+            resolution = json.loads((output / "resolution.json").read_text())
+            self.assertEqual(resolution["interpreter"], resolver.sys.executable)
+            self.assertEqual(len(resolution["artifacts"]), len(fixture["install"]))
+            self.assertIn("https://", (output / "requirements.txt").read_text())
+            self.assertFalse((output / "installed-files.json").exists())
+            self.assertFalse((output / "staged-packages").exists())
+
+    def test_resolve_only_rejects_install_discovery_and_installed_outputs(self):
+        conflicts = (
+            ["--install"],
+            ["--target", "unused"],
+            ["--progress-file", "unused"],
+            ["--discover"],
+            ["--release-options"],
+            ["--interpreter", "unused"],
+            ["--selected-python", "python3.12"],
+        )
+        for extra in conflicts:
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as directory:
+                with (
+                    patch.object(
+                        resolver.sys,
+                        "argv",
+                        [
+                            "resolve_runtime.py",
+                            "--version",
+                            "2.10.0",
+                            "--build",
+                            "cpu",
+                            "--resolve-only",
+                            "--output",
+                            directory,
+                            *extra,
+                        ],
+                    ),
+                    patch.object(resolver.subprocess, "run") as run,
+                    redirect_stderr(StringIO()),
+                ):
+                    with self.assertRaises(SystemExit) as result:
+                        resolver.main()
+                self.assertEqual(result.exception.code, 2)
+                run.assert_not_called()
+        for member in (
+            "pip-resolution.json",
+            "resolution.json",
+            "requirements.txt",
+            "installed-files.json",
+        ):
+            with self.subTest(member=member), tempfile.TemporaryDirectory() as directory:
+                output = pathlib.Path(directory)
+                (output / member).write_text("retained original evidence")
+                with (
+                    patch.object(
+                        resolver.sys,
+                        "argv",
+                        [
+                            "resolve_runtime.py",
+                            "--version",
+                            "2.10.0",
+                            "--build",
+                            "cpu",
+                            "--resolve-only",
+                            "--output",
+                            directory,
+                        ],
+                    ),
+                    patch.object(resolver.subprocess, "run") as run,
+                    redirect_stderr(StringIO()),
+                ):
+                    with self.assertRaises(SystemExit) as result:
+                        resolver.main()
+                self.assertEqual(result.exception.code, 2)
+                run.assert_not_called()
+                self.assertEqual((output / member).read_text(), "retained original evidence")
+
+    def test_resolve_only_refuses_unknown_report_version_before_acceptance(self):
+        for version in (None, "2", 1):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                output = pathlib.Path(directory)
+                fixture = report()
+                if version is not None:
+                    fixture["version"] = version
+
+                def fake_run(command, **kwargs):
+                    pathlib.Path(command[command.index("--report") + 1]).write_text(
+                        json.dumps(fixture)
+                    )
+                    return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+                with (
+                    patch.object(
+                        resolver.sys,
+                        "argv",
+                        [
+                            "resolve_runtime.py",
+                            "--version",
+                            "2.10.0",
+                            "--build",
+                            "cpu",
+                            "--resolve-only",
+                            "--output",
+                            directory,
+                        ],
+                    ),
+                    patch.object(resolver.subprocess, "run", side_effect=fake_run) as run,
+                    redirect_stderr(StringIO()),
+                ):
+                    with self.assertRaises(SystemExit) as result:
+                        resolver.main()
+                self.assertEqual(result.exception.code, 3)
+                self.assertEqual(run.call_count, 1)
+                self.assertFalse((output / "requirements.txt").exists())
+                self.assertFalse((output / "resolution.json").exists())
+                self.assertFalse((output / "installed-files.json").exists())
+
+    def test_resolve_only_refuses_nonobject_report_before_acceptance(self):
+        for fixture in (None, [], "malformed report"):
+            with self.subTest(fixture=fixture), tempfile.TemporaryDirectory() as directory:
+                output = pathlib.Path(directory)
+
+                def fake_run(command, **kwargs):
+                    pathlib.Path(command[command.index("--report") + 1]).write_text(
+                        json.dumps(fixture)
+                    )
+                    return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+                with (
+                    patch.object(
+                        resolver.sys,
+                        "argv",
+                        [
+                            "resolve_runtime.py",
+                            "--version",
+                            "2.10.0",
+                            "--build",
+                            "cpu",
+                            "--resolve-only",
+                            "--output",
+                            directory,
+                        ],
+                    ),
+                    patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                    redirect_stderr(StringIO()),
+                ):
+                    with self.assertRaises(SystemExit) as result:
+                        resolver.main()
+                self.assertEqual(result.exception.code, 3)
+                self.assertFalse((output / "requirements.txt").exists())
+                self.assertFalse((output / "resolution.json").exists())
 
     def test_install_mode_stages_once_and_validates_report_before_writing_lock(self):
         fixture = report()

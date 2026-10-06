@@ -330,7 +330,46 @@ Shutdown closes new admission, signals appropriate work, drains tracked async an
 
 The package owner supplies a version-checked accepted resolution and trusted immutable artifact set. Acquisition obtains files; package tooling installs them into an owned empty stage from exact local inputs. Preserve original URLs/digests as provenance and validate the installed set afterward. Use only supported public tooling. A report is evidence about a resolution, not by itself a consumable lock format.
 
+The local package-tool child disables ambient pip configuration: `--isolated`
+alone still loads global/site settings. Use a copied child environment without
+inherited `PIP_*` options and `PIP_CONFIG_FILE=os.devnull` to disable all config
+files; never change host/user/global settings to establish local consumption.
+See [pip configuration](https://pip.pypa.io/en/stable/topics/configuration/).
+Option-parser controls establish configuration isolation, not network denial.
+
+The optional finite qualified Torch recipe uses its existing exact hash-pinned
+lock and selected direct roots rather than dynamic pip resolution. Supported
+standalone packaging APIs select target-compatible wheels from bounded approved
+index metadata. After shared acquisition, the package owner validates actual
+wheel METADATA/WHEEL identity, Python/tags and complete marker/extras closure
+before local `--no-deps` consumption. Unsupported dependency URLs, including
+inactive branches, refuse explicitly without source fallback. Preserve original
+lock/preview/catalog provenance; this capability introduces no mandatory runtime
+version policy and does not qualify automatic or retained-preview resolution.
+
 The decisive test denies network during the final installation leg and rejects hidden direct-URL retrieval, alternate same-name/version wheels, and missing closure members. Resolver metadata and managed-Python bootstrap traffic remain separately recorded; the claim is exact payload handoff, not interception of every package-tool request. Sources: [pip report](https://pip.pypa.io/en/stable/reference/installation-report/) and [pip install](https://pip.pypa.io/en/stable/cli/pip_install/).
+
+The bounded retained-preview and automatic-selection Torch implementation uses
+the existing shared HTTP consumer for every accepted wheel before final local
+pip execution. A separate local
+requirements/report pair uses exact file URLs and hashes with `--no-index`,
+`--no-deps`, `--only-binary=:all:` and `--require-hashes`; original resolution
+provenance is unchanged. The package owner checks marker/extras closure, wheel
+metadata/tags, local report identity and installed RECORD before probing, then
+rechecks selected installed members and unchanged proof/provenance beneath the
+owned runtime before publication. The proof covers selected installed members;
+the venv bootstrap baseline has separate ownership. Input custody survives child
+exit/cleanup and durable receipt settlement. Unresolved retained uses refuse cold
+replay; input reclamation is deliberately deferred. Automatic selection runs
+explicit resolver-only public pip dry-run/report with child-only configuration
+isolation. It accepts original version1 report/hash requirements/artifacts and
+actual staged-venv identity before acquisition; provider identity stays separate.
+Candidate fallback ends at acceptance, and final local/probe/publication failures
+propagate. Resolver metadata/candidate traffic (which may fetch wheel bytes),
+managed-Python bootstrap and qualified bundled recipes retain separate scoped
+standard-tool responsibility. Legacy helper install and exact-wheel preview modes
+keep their boundaries. Local fixtures
+do not establish enforced egress denial, real Torch or AQ-PACKAGES acceptance.
 
 ## 12. Compatibility and extension
 

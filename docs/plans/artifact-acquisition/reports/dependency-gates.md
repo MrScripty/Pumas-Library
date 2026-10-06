@@ -1,5 +1,51 @@
 # Acquisition prerequisites and runtime handoffs
 
+**Q2 current-main composition (2026-10-06):** A separate patch candidate on
+current main5e114f6d carries reviewed finite6308 and its shared Q2 handoff history,
+with original evidence intact. Main and composed feature graphs pass33 each
+before builds; current Node/HTTP/Cargo/native-owner source stays unchanged.
+[Composition plan](torch-current-main-composition-2026-10-06.md) inventories
+all source/API/conflict surfaces and remaining gates. Dynamic automatic/preview
+resolution remains exposed and unqualified for P1. Disabling it would change
+promised upstream/core behavior; parent disposition is pending, and no disabling
+change or mandatory preset policy is implemented. Direct users need the shared
+Torch capability. Native3a601625 remains unpublished and is not integrated.
+No PR/main merge or package/runtime/source-safety acceptance is claimed.
+
+**Q2 finite qualified recipe candidate (2026-10-06):** Tested source
+`498b79611ded25151e28531b8f961dac1462061c`, tree
+`97dbe68916150da6a1375abd026066293553f9a2`, on separate
+`feat/torch-qualified-wheel-catalog-d87f560f` implements the optional existing
+finite bundled recipe through public standalone packaging metadata APIs and
+shared payload acquisition/local installation. Original lock/direct roots remain
+exact; actual acquired identity/tags/Python/hash and complete marker/extras closure
+validate before local --no-deps. All dependency URLs, including inactive branches,
+refuse explicitly without fallback. Final229 Python/306 app-manager and strict
+default workspace all-targets Clippy, Ruff/fmt pass. See
+[bounded qualification](torch-qualified-wheel-catalog-2026-10-06.md).
+Automatic and retained-preview resolution remain unqualified for source
+preparation; private hooks remain unactivated. Actual Torch/GPU/provider,
+enforced network denial, hosted/platform acceptance and independent review remain
+open. AQ-HTTP and AQ-PACKAGES are not advanced; no shared/native cleanup changes.
+Next existing Q2 work is review/composition and exact network-denied/provider
+acceptance, with generic public resolver admission a separate decision.
+
+**2026-10-06 automatic Q2 source milestone:** Source5946c473 uses accepted
+resolver-only evidence and the common acquired-input installer/proof/publisher.
+[Qualification](torch-automatic-wheel-handoff-qualification-2026-10-06.md) records
+passed default/focused headless checks, unchanged11 generated headless errors,
+original admissioncancel failures and correction. AQ-PACKAGES remains not ready:
+fixtures are not actual automatic-provider/Torch or enforced-denial/platform/
+hosted acceptance; qualified bundled recipe remains scoped. Parent owns review/
+integration, and the separate native cancellation worker has no interface overlap.
+
+**2026-10-06 Q2 repair:** Independent review found ambient requirements
+injection in frozen `7a3264ac`. Child-only pip config isolation and hostile
+controls are recorded in [qualification](torch-wheel-pip-config-repair-2026-10-06.md).
+Custody/proof semantics remain unchanged. AQ-PACKAGES remains not ready; real
+network-denied/provider/platform/hosted evidence remains separate. Automatic
+resolution work is paused separately pending this repair's review.
+
 **Owner:** acquisition integration, with one serial cross-plan integrator. This is the single status record for acquisition-provided gates. The runtime plan references these rows and does not independently declare them ready.
 
 **Local S3 follow-up:** The staging-event and version-qualified identity fixes at verified remote `a606c80b0be41580c7af0583703d9f9af5f2cb44` have focused regression evidence. A test-only successor covers a valid large binding/bundle under the normal live watcher and public GetModel/cold output proof; [qualification](s3-staging-discovery-qualification.md) records 57 focused integration tests, strict Clippy, the failed notifier-replacement experiment and remaining limits. This supports parts of AC13/AC14, without closing AQ-S3 or authorizing live-provider credentials/configuration.
@@ -102,3 +148,23 @@ No public shape, S3/native frozen source, generator or Q2 writes. AQ-HTTP remain
 not ready; broader acceptance, current-head hosted checks, resource/platform/UI,
 public-client and deployment dispositions remain pending. Q2 exact local package
 handoff/denied-network installation remains the next gated implementation feature.
+
+## Q2 retained-preview source milestone — gate remains not ready
+
+The coordinator separately admitted source implementation on frozen HTTP8756,
+with AQ-HTTP governing release acceptance. Tested source
+`e246645bcf7d2f3bae2f68a0ba29215fafe335e9` (tree
+`24eceee6dc62b0c368f666c43989c34ba3b2a3bb`) supplies exact shared wheel acquisition,
+local-only consumption, post-probe installed-member/provenance proof and retained
+input/child/receipt custody for unqualified retained previews. The 13 shared
+controls, 301 app-manager tests and 210 pinned-tool Python tests pass. Strict
+default checks and headless production binary pass; full headless test Clippy has
+an unchanged helper failure. [Qualification](torch-verified-wheel-handoff-qualification-2026-10-06.md)
+records exact evidence and failures.
+
+AQ-HTTP and AQ-PACKAGES remain not ready. The denial fixture could not create its
+UID map, so no enforced-denial claim exists. Real Torch, provider/platform,
+installed/desktop and hosted evidence remain required. Automatic selection and
+qualified recipes retain scoped existing paths; bootstrap traffic is separately
+owned. Next Q2 source work separates automatic resolution from final payload
+installation. No runtime gate, merge or acceptance is advanced.

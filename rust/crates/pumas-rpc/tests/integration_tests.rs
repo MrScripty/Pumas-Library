@@ -54,6 +54,7 @@ fn create_indexable_test_model(root: &std::path::Path, model_id: &str, official_
     .unwrap();
 }
 
+#[cfg(feature = "inference-plugins")]
 fn create_valid_test_diffusers_bundle(root: &std::path::Path, model_id: &str, repo_id: &str) {
     let model_dir = root.join("shared-resources/models").join(model_id);
     std::fs::create_dir_all(model_dir.join("transformer")).unwrap();

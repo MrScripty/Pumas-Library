@@ -1,0 +1,81 @@
+test_metadata_direct_sources_refuse_before_public_pip_invocation (__main__.PublicWheelhouseTests.test_metadata_direct_sources_refuse_before_public_pip_invocation) ... 
+  test_metadata_direct_sources_refuse_before_public_pip_invocation (__main__.PublicWheelhouseTests.test_metadata_direct_sources_refuse_before_public_pip_invocation) (reference='hidden @ https://example.invalid/hidden-1.0-py3-none-any.whl; python_version < "0"') ... ERROR
+test_missing_named_closure_fails_without_report_or_source_build (__main__.PublicWheelhouseTests.test_missing_named_closure_fails_without_report_or_source_build) ... ok
+test_no_index_still_follows_harmless_direct_reference_outside_wheelhouse (__main__.PublicWheelhouseTests.test_no_index_still_follows_harmless_direct_reference_outside_wheelhouse) ... ok
+test_prevalidated_named_dependency_closure_resolves_with_public_pip (__main__.PublicWheelhouseTests.test_prevalidated_named_dependency_closure_resolves_with_public_pip) ... ok
+
+======================================================================
+ERROR: test_metadata_direct_sources_refuse_before_public_pip_invocation (__main__.PublicWheelhouseTests.test_metadata_direct_sources_refuse_before_public_pip_invocation) (reference='hidden @ https://example.invalid/hidden-1.0-py3-none-any.whl; python_version < "0"')
+----------------------------------------------------------------------
+  + Exception Group Traceback (most recent call last):
+  |   File "/workspace/scratch/q2-public-resolution/test_public_wheelhouse.py", line 111, in test_metadata_direct_sources_refuse_before_public_pip_invocation
+  |     preflight_then_resolve(root, root.parent / 'never-created-report.json')
+  |   File "/workspace/scratch/q2-public-resolution/test_public_wheelhouse.py", line 75, in preflight_then_resolve
+  |     preflight(sorted(directory.iterdir()))
+  |   File "/workspace/scratch/q2-public-resolution/test_public_wheelhouse.py", line 55, in preflight
+  |     metadata = Metadata.from_email(archive.read(members[0]), validate=True)
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/metadata.py", line 896, in from_email
+  |     with _ErrorCollector().on_exit("invalid or unparsed metadata") as collector:
+  |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py", line 144, in __exit__
+  |     next(self.gen)
+  |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/errors.py", line 72, in on_exit
+  |     self.finalize(msg)
+  |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/errors.py", line 62, in finalize
+  |     raise ExceptionGroup(msg, self.errors)
+  | ExceptionGroup: invalid or unparsed metadata (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/requirements.py", line 84, in __init__
+    |     parsed = _parse_requirement(requirement_string)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/_parser.py", line 107, in parse_requirement
+    |     return _parse_requirement(Tokenizer(source, rules=DEFAULT_RULES))
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/_parser.py", line 125, in _parse_requirement
+    |     url, specifier, marker = _parse_requirement_details(tokenizer)
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/_parser.py", line 158, in _parse_requirement_details
+    |     marker = _parse_requirement_marker(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/_parser.py", line 192, in _parse_requirement_marker
+    |     tokenizer.raise_syntax_error(
+    |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/_tokenizer.py", line 173, in raise_syntax_error
+    |     raise ParserSyntaxError(
+    | packaging._tokenizer.ParserSyntaxError: Expected semicolon (after URL and whitespace) or end
+    |     hidden @ https://example.invalid/hidden-1.0-py3-none-any.whl; python_version < "0"
+    |              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/metadata.py", line 746, in _process_requires_dist
+    |     reqs.append(requirements.Requirement(req))
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/requirements.py", line 86, in __init__
+    |     raise InvalidRequirement(str(e)) from e
+    | packaging.requirements.InvalidRequirement: Expected semicolon (after URL and whitespace) or end
+    |     hidden @ https://example.invalid/hidden-1.0-py3-none-any.whl; python_version < "0"
+    |              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/metadata.py", line 878, in from_raw
+    |     getattr(ins, key)
+    |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/metadata.py", line 605, in __get__
+    |     value = converter(value)
+    |             ^^^^^^^^^^^^^^^^
+    |   File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/packaging/metadata.py", line 748, in _process_requires_dist
+    |     raise self._invalid_metadata(
+    | packaging.metadata.InvalidMetadata: 'hidden @ https://example.invalid/hidden-1.0-py3-none-any.whl; python_version < "0"' is invalid for 'requires-dist'
+    +------------------------------------
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.942s
+
+FAILED (errors=1)
+PUBLIC CONTROL: missing local closure refuses; no external source is offered
+PUBLIC CONTROL: --no-index followed an inert direct local wheel outside --find-links
+PUBLIC CONTROL: prevalidated named closure resolves entirely from local wheelhouse

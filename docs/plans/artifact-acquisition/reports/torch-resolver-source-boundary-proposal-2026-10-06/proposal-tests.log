@@ -1,0 +1,14 @@
+test_approved_redirect_dispatches_without_real_network (__main__.AdmissionTests.test_approved_redirect_dispatches_without_real_network) ... ok
+test_approved_wheels_and_hash_fragment_reach_constructor (__main__.AdmissionTests.test_approved_wheels_and_hash_fragment_reach_constructor) ... ok
+test_cached_https_adapter_is_refused_before_cache_or_dispatch (__main__.AdmissionTests.test_cached_https_adapter_is_refused_before_cache_or_dispatch) ... ok
+test_candidate_refusals_precede_constructor (__main__.AdmissionTests.test_candidate_refusals_precede_constructor) ... ok
+test_original_pip_reaches_source_constructor_despite_public_flags (__main__.AdmissionTests.test_original_pip_reaches_source_constructor_despite_public_flags) ... ok
+test_real_requirement_boundary_refuses_inert_metadata_direct_sources (__main__.AdmissionTests.test_real_requirement_boundary_refuses_inert_metadata_direct_sources) ... ok
+test_redirect_refusals_precede_adapter_dispatch (__main__.AdmissionTests.test_redirect_refusals_precede_adapter_dispatch) ... ok
+test_refusal_message_excludes_rejected_url_and_credentials (__main__.AdmissionTests.test_refusal_message_excludes_rejected_url_and_credentials) ... ok
+test_unsupported_version_and_missing_seam_refuse_before_activation (__main__.AdmissionTests.test_unsupported_version_and_missing_seam_refuse_before_activation) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.040s
+
+OK

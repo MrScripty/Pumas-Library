@@ -1,0 +1,23 @@
+{
+  "base": "1abcf960ba9bf0e4504aef505d24f9b78a9e89ca",
+  "base_tree": "8816ef0e6124a60d3ed8acc38ceeacf5d98a41ee",
+  "production_activated": false,
+  "private_hooks_activated": false,
+  "python": "3.12.14",
+  "pip": "26.2.1",
+  "standalone_packaging": "26.3",
+  "tests": 5,
+  "command": "python3 test_public_wheelhouse.py",
+  "ruff": "0.15.2: All checks passed",
+  "network": "No external fixture URL passed to pip; public CLI controls only local inert wheels; not enforced-denial evidence",
+  "sources_prepared_or_hooks_executed": false,
+  "files": {
+    "test_public_wheelhouse.py": "ee5e913a0a9f219b88f8d1fcfcdece4d1ec63c93f1909b75c4f3fdbcacee1ed7",
+    "public-wheelhouse-tests.log": "6c31662b675a2efe15cf88954026cc8d6abfb5efb762d26ac663f12b3baafc0f",
+    "public-wheelhouse-tests-initial-fixture-error.log": "28887ebce98e0df3e57ea755c1047f19ac122adbda189b8f27920322b779e175",
+    "recipe-inventory.json": "e92acf9c4ec31cb846133ba99018a5038db6cc2303666658ff2103eb8b8c8c38"
+  },
+  "primary_documentation_retrieved": "2026-10-06",
+  "resolvelib_api_executed": false,
+  "uv_resolver_executed": false
+}

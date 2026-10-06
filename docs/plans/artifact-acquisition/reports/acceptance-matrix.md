@@ -1,5 +1,51 @@
 # Acquisition acceptance matrix
 
+**Q2 current-main composition (2026-10-06):** A separate patch candidate on
+current main5e114f6d carries reviewed finite6308 and its shared Q2 handoff history,
+with original evidence intact. Main and composed feature graphs pass33 each
+before builds; current Node/HTTP/Cargo/native-owner source stays unchanged.
+[Composition plan](torch-current-main-composition-2026-10-06.md) inventories
+all source/API/conflict surfaces and remaining gates. Dynamic automatic/preview
+resolution remains exposed and unqualified for P1. Disabling it would change
+promised upstream/core behavior; parent disposition is pending, and no disabling
+change or mandatory preset policy is implemented. Direct users need the shared
+Torch capability. Native3a601625 remains unpublished and is not integrated.
+No PR/main merge or package/runtime/source-safety acceptance is claimed.
+
+**Q2 finite qualified recipe candidate (2026-10-06):** Tested source
+`498b79611ded25151e28531b8f961dac1462061c`, tree
+`97dbe68916150da6a1375abd026066293553f9a2`, on separate
+`feat/torch-qualified-wheel-catalog-d87f560f` implements the optional existing
+finite bundled recipe through public standalone packaging metadata APIs and
+shared payload acquisition/local installation. Original lock/direct roots remain
+exact; actual acquired identity/tags/Python/hash and complete marker/extras closure
+validate before local --no-deps. All dependency URLs, including inactive branches,
+refuse explicitly without fallback. Final229 Python/306 app-manager and strict
+default workspace all-targets Clippy, Ruff/fmt pass. See
+[bounded qualification](torch-qualified-wheel-catalog-2026-10-06.md).
+Automatic and retained-preview resolution remain unqualified for source
+preparation; private hooks remain unactivated. Actual Torch/GPU/provider,
+enforced network denial, hosted/platform acceptance and independent review remain
+open. AQ-HTTP and AQ-PACKAGES are not advanced; no shared/native cleanup changes.
+Next existing Q2 work is review/composition and exact network-denied/provider
+acceptance, with generic public resolver admission a separate decision.
+
+**2026-10-06 automatic Q2 source:** Tested5946c473 separates resolver-only
+acceptance from shared verified payload/local installation, preserving original
+identities and custody with no postacceptance fallback. Final216 Python/304
+app-manager and strict default/focused headless checks pass. Full headless11
+baseline errors remain. [Qualification](torch-automatic-wheel-handoff-qualification-2026-10-06.md)
+keeps original failed evidence and bounded fixture scope. AC11/AC12/AQ-PACKAGES
+remain pending actual automatic-provider/Torch, enforced-denial/platform/hosted
+acceptance and remaining qualified-recipe disposition.
+
+**2026-10-06 Q2 local-pip correction:** Frozen handoff `7a3264ac` allowed
+ambient config to append requirements despite `--isolated`. The separate
+[repair qualification](torch-wheel-pip-config-repair-2026-10-06.md) records
+child-only config isolation and hostile-config controls. This corrects the
+earlier local-only source claim; parser tests do not establish network denial.
+AC11/AC12 and AQ-PACKAGES remain pending.
+
 **2026-10-05 bounded S3 update:** Explicit normal sibling composition cd9d8191
 and qualification successor 7358bd3d pass combined protocol and Linux production
 installed-backend checks, including ten independently signed TLS scenarios.
@@ -427,3 +473,23 @@ No public shape, S3/native frozen source, generator or Q2 writes. AQ-HTTP remain
 not ready; broader acceptance, current-head hosted checks, resource/platform/UI,
 public-client and deployment dispositions remain pending. Q2 exact local package
 handoff/denied-network installation remains the next gated implementation feature.
+
+## AC11/AC12 bounded retained-preview package evidence — 2026-10-06
+
+Source `e246645bcf7d2f3bae2f68a0ba29215fafe335e9` (tree
+`24eceee6dc62b0c368f666c43989c34ba3b2a3bb`) consumes an accepted complete wheel
+set through shared acquisition, then public local-only pip with exact hashes.
+Thirteen synthetic Linux shared-handoff controls include real helper/publisher
+and receipt settlement, bad bytes/missing closure, failed/lost-ack cold refusal,
+cancellation/abandonment, and post-probe member/proof/provenance/ancestor refusal.
+301 app-manager and 210 pinned-tool Python tests pass with strict default checks.
+Headless full-test Clippy has a pre-existing helper lint; production binary passes.
+See [qualification](torch-verified-wheel-handoff-qualification-2026-10-06.md).
+
+This supports only the retained unqualified-preview slice. The fixture does not
+run real Torch or the complete provider/probe pipeline, and the ordinary bwrap
+denial setup failed. AC11/AC12/AQ-PACKAGES remain pending on enforced-denial,
+actual package/interpreter/build, egress, hosted and platform evidence. Automatic
+resolution/install, qualified recipe and managed-Python bootstrap remain scoped
+retained mechanisms. Inputs remain retained; no reclaim or automatic cold replay
+is qualified. AQ-HTTP is still a release dependency.

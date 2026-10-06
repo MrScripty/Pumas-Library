@@ -1,0 +1,248 @@
+{
+  "branch": "feat/torch-automatic-wheel-handoff-7a3264ac",
+  "frozen_handoff": "7a3264ac8d04383bd01c8ab71b7287a48c66f2db",
+  "accepted_main": "7c229e92726e1af7447d37e3dc03fd4bd2ccfffa",
+  "frozen_repair": "99a55b78be42e3238c09b32576b0950ae5b21f21",
+  "base": "2b380b59fdc2e2896b4d3fbde53de27296076c64",
+  "base_tree": "eceaba08b9f38f7d59c52d2a7b90a61802fef7d6",
+  "source_head": "5946c4738870bdcfc613430bb98fd873d9e6d6f3",
+  "source_tree": "295eb32167dc49ced598d1082f6f3bf086ce4679",
+  "source_blobs": {
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": "f344f1e57667971e77b3d6b5728b292714bbbcb6",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_wheel_handoff_tests.rs": "297ab24d15e6bc0a5779e04186298f339a200069",
+    "torch-server/resolve_runtime.py": "871e3f71ab93a93305cf687db0d9acda554b8727",
+    "torch-server/tests/test_resolve_runtime.py": "e2662aade4d215a7622a6b96f104087379c9d60a",
+    "rust/crates/pumas-rpc/tests/integration_tests.rs": "0890775881c3b57e08ca605d6356633fcee40ccc"
+  },
+  "archive": {
+    "path": "logs.tar.gz",
+    "bytes": 21234,
+    "sha256": "9f4f296f4f5aed27734f0b65657be4d381f0754f220e5765dca4de852506893a",
+    "members": [
+      {
+        "name": "admission-isolated-after.log",
+        "bytes": 541,
+        "sha256": "bb75c20f0e5d39c894da7c209d5fb4aefa223c5d82450e62548f363110c5c493"
+      },
+      {
+        "name": "admission-isolated-before-correct-filter.log",
+        "bytes": 1225,
+        "sha256": "418486879607bb222bcc0d33a384aa118a2c2e8c8b12821e2daa0fed56b26f56"
+      },
+      {
+        "name": "admission-isolated-before.log",
+        "bytes": 418,
+        "sha256": "14b8ddd0d844aba66e2870df0df047a01bc77b2d715e9a31cff434f3967b9e2d"
+      },
+      {
+        "name": "admission.md",
+        "bytes": 2312,
+        "sha256": "c426a92730d90aca42b9b0ceb70acce72bb8e41dcf70ccd8e2b82e205abdbe2a"
+      },
+      {
+        "name": "baseline-worktree.log",
+        "bytes": 144,
+        "sha256": "69bdb3c1f87fa45f255e5d8753e9aeb02bc9c26198acb9b94c245dc3bb457567"
+      },
+      {
+        "name": "cache-restoration.json",
+        "bytes": 318,
+        "sha256": "9ff8ccd074c96d470604981b81fbf26c6e027efcdf73e7f2287ae1162eb8947c"
+      },
+      {
+        "name": "check-initial.log",
+        "bytes": 694,
+        "sha256": "5d6d7003b461596e9621b7c75a9fee1951e871309bc2ddd79576a26b83f9aeac"
+      },
+      {
+        "name": "clippy-app-final.log",
+        "bytes": 183,
+        "sha256": "28a66c7c4f9ea514b0e15da142f20e11a2a9f1a6170e9695d6a88092ffa76ee3"
+      },
+      {
+        "name": "clippy-initial.log",
+        "bytes": 183,
+        "sha256": "54ec3aeed019f27b4566ecad74340547be7dc13c5476ade7edc8b73eb4f86045"
+      },
+      {
+        "name": "clippy-rpc-default.log",
+        "bytes": 289,
+        "sha256": "d991bce9a7ec1d3699b30c623ba88cdb0db625e41affc8aec44bd2314d23b6a7"
+      },
+      {
+        "name": "clippy-rpc-headless-all-targets.log",
+        "bytes": 2869,
+        "sha256": "f92b591c39386641be1913197cd25e58251d637741d54f14b03a813af641c14d"
+      },
+      {
+        "name": "clippy-rpc-headless-bin.log",
+        "bytes": 60,
+        "sha256": "f694a9e074374d315f58b8a63ce849858b1b8708cf56b3d194218605bd2a9d6e"
+      },
+      {
+        "name": "clippy-rpc-headless-integration.log",
+        "bytes": 60,
+        "sha256": "59e339d2aa27cd2222fead9549dbc67b0a6e0d10e368fb0ddf49b9c9ba0ac0a3"
+      },
+      {
+        "name": "commands.txt",
+        "bytes": 2659,
+        "sha256": "8310c6c303462fc7bfc1054dd2aaa93448af2c6f2afdf514d4a2818861249e2b"
+      },
+      {
+        "name": "environment.json",
+        "bytes": 620,
+        "sha256": "1755140cb98603242ba8d164baf0595c7e315edd9ba07680bcc617969ff3a46f"
+      },
+      {
+        "name": "headless-baseline-clippy.log",
+        "bytes": 2956,
+        "sha256": "c1789e58ac6930e487b6e0b531dd47e9e28f14763cc8de7c5b9e4fd05e3e4c6c"
+      },
+      {
+        "name": "headless-baseline-comparison.json",
+        "bytes": 987,
+        "sha256": "64288df938f2e144763825d96d0e9a7d4a080025a423a8ddc65322997a68fda1"
+      },
+      {
+        "name": "headless-baseline-integration-clippy.log",
+        "bytes": 572,
+        "sha256": "fb22eb94cbea9d9951570657a238802bab3f683604094feba1f76e7801fe74d4"
+      },
+      {
+        "name": "own-cache-evictions.json",
+        "bytes": 705,
+        "sha256": "6b952b26f10b213c028af7a42d6bd6e17def8cf9568df42111f042f934d87fc5"
+      },
+      {
+        "name": "python-full-final.log",
+        "bytes": 2846,
+        "sha256": "50b8823c035a7e4c8431b3869ae8794c27b6275898f7f6947470c7507a7a5369"
+      },
+      {
+        "name": "python-full.log",
+        "bytes": 2845,
+        "sha256": "644576e1f817186a1f4d453e277ae6301d2de24049b62c5b1f54cea7701f60e7"
+      },
+      {
+        "name": "resolver-after.log",
+        "bytes": 161,
+        "sha256": "a548ece082b78eac9e9d87bf6f61793238c7aa8063200ebbfbb2a36eeaa41458"
+      },
+      {
+        "name": "resolver-before.log",
+        "bytes": 4006,
+        "sha256": "05cb93cb296af71c241d1a63604645ccdae2ded624f48d44e49106260ed4cacb"
+      },
+      {
+        "name": "review-acks.txt",
+        "bytes": 736,
+        "sha256": "cb3c55043ff9430910965459a405ed93993ee32992bc05711ac387c5f5ed8d54"
+      },
+      {
+        "name": "ruff-final.log",
+        "bytes": 19,
+        "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      {
+        "name": "ruff-format-applied.log",
+        "bytes": 20,
+        "sha256": "96a977f329ec3c59092d40e041a019b49dcf03ca04055e177aa0ccb8c27234df"
+      },
+      {
+        "name": "ruff-format-final.log",
+        "bytes": 26,
+        "sha256": "3bc53bf3e981a98a34a852e175bf9b77af841edea74fca595d9aedcbaf9a4938"
+      },
+      {
+        "name": "ruff-format-report-shape.log",
+        "bytes": 42,
+        "sha256": "10869b88a75066aa23546ef1f95fcd4678c3fb92a56ed46ef91688052b67976a"
+      },
+      {
+        "name": "ruff-initial.log",
+        "bytes": 19,
+        "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      {
+        "name": "rust-app-manager-full-final.log",
+        "bytes": 32569,
+        "sha256": "722af334e18479303390374e5ec6a19eed9369a92d91d228fffa94490f520d1e"
+      },
+      {
+        "name": "rust-app-manager-full.log",
+        "bytes": 33169,
+        "sha256": "8d1594324b5f7ebc0a66c8d0a43759437c1dc4301474ff6d3080e971d2a080c4"
+      },
+      {
+        "name": "rust-fmt.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "unimplemented-admission.patch",
+        "bytes": 2933,
+        "sha256": "4cc1a539234ae49d8026b915d1eebccc96cbde1ba953f8c4bfcffd04b4fbaa8f"
+      }
+    ]
+  },
+  "qualification": {
+    "resolver_before": {
+      "tests": 62,
+      "failures": 3,
+      "errors": 1
+    },
+    "resolver_after_initial": 62,
+    "python_before_final_shape_control": 215,
+    "python_final": 216,
+    "app_manager_initial": {
+      "passed": 303,
+      "failed": 1,
+      "ignored": 1
+    },
+    "admission_before_correct_filter": "1 failure",
+    "admission_before_wrong_exact_filter": "0 tests; not qualification",
+    "admission_after": "1 pass",
+    "app_manager_final": {
+      "passed": 304,
+      "failed": 0,
+      "ignored_unit": 1,
+      "ignored_doctest": 1
+    },
+    "shared_control_cases": 16,
+    "clippy_app_default_all_targets": "pass",
+    "clippy_rpc_default_all_targets": "pass",
+    "clippy_rpc_headless_all_targets": "11 exactly matching pre-existing generated contract errors",
+    "clippy_rpc_headless_integration": "pass",
+    "clippy_rpc_headless_bin": "pass",
+    "ruff_check": "pass",
+    "ruff_format": "pass",
+    "rust_format": "pass",
+    "independent_final_reviews": 2,
+    "enforced_network_denial": false,
+    "real_automatic_provider_or_torch_run": false
+  },
+  "public_api_changes": {
+    "rust_or_rpc_dtos": [],
+    "python_cli": [
+      "explicit --resolve-only mode additive; default exact-wheel preview and legacy --install mode retained"
+    ],
+    "automatic_provider_label": "final installation uses actual selected managed-Python identity label"
+  },
+  "limits": [
+    "candidate engine fixtures and strict accepted-packet validation; resolver pip transport mocked",
+    "existing shared13 real-helper/HTTP/publisher custody controls reused,3 new packet/candidate controls",
+    "no complete automatic managed-provider/Torch probe run",
+    "no whole-venv integrity or enforced denial/provider/platform/hosted gate claim",
+    "qualified recipe/provider bootstrap/metadata candidate traffic remains separately scoped",
+    "native cleanup/shared interfaces unchanged"
+  ],
+  "cache_restoration": {
+    "source": "/workspace/Pumas-Library-pr42-desktop-contract/node_modules",
+    "entries": 41202,
+    "before_digest": "7b37fb0447757adef9ab516e10d683403128f6c6843f836410e4518fb9be908f",
+    "after_digest": "7b37fb0447757adef9ab516e10d683403128f6c6843f836410e4518fb9be908f",
+    "all_modes_paths_content_links_match": true
+  },
+  "next_existing_plan_slice": "remaining Q2 qualified bundled-recipe payload handoff/disposition and package acceptance"
+}

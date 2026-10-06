@@ -1,0 +1,407 @@
+{
+  "path": "torch-server/runtime/requirements.lock",
+  "bytes": 84913,
+  "sha256": "05c4ba8556998179cac8db5798177500e1154caca3d9164e00455240dab4a07e",
+  "entries": 66,
+  "exact_named_pins": 63,
+  "direct_wheel_roots": 3,
+  "provider_wheel_bytes_or_metadata_examined": false,
+  "requirements": [
+    {
+      "name": "accelerate",
+      "requirement": "accelerate==1.12.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "annotated-doc",
+      "requirement": "annotated-doc==0.0.5",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "annotated-types",
+      "requirement": "annotated-types==0.8.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "anyio",
+      "requirement": "anyio==4.15.1",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "certifi",
+      "requirement": "certifi==2026.7.22",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "charset-normalizer",
+      "requirement": "charset-normalizer==3.5.1",
+      "allowed_sha256_count": 172,
+      "direct_url": false
+    },
+    {
+      "name": "click",
+      "requirement": "click==8.5.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "diffusers",
+      "requirement": "diffusers==0.37.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "einops",
+      "requirement": "einops==0.8.2",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "fastapi",
+      "requirement": "fastapi==0.128.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "filelock",
+      "requirement": "filelock==3.32.6",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "fsspec",
+      "requirement": "fsspec==2026.7.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "h11",
+      "requirement": "h11==0.16.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "hf-xet",
+      "requirement": "hf-xet==1.6.0",
+      "allowed_sha256_count": 17,
+      "direct_url": false
+    },
+    {
+      "name": "httpcore",
+      "requirement": "httpcore==1.0.9",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "httpx",
+      "requirement": "httpx==0.28.1",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "huggingface-hub",
+      "requirement": "huggingface-hub==0.36.2",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "idna",
+      "requirement": "idna==3.19",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "importlib-metadata",
+      "requirement": "importlib-metadata==9.0.1",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "jinja2",
+      "requirement": "jinja2==3.1.6",
+      "allowed_sha256_count": 1,
+      "direct_url": false
+    },
+    {
+      "name": "markupsafe",
+      "requirement": "markupsafe==3.0.3",
+      "allowed_sha256_count": 1,
+      "direct_url": false
+    },
+    {
+      "name": "mpmath",
+      "requirement": "mpmath==1.3.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "networkx",
+      "requirement": "networkx==3.6.1",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "numpy",
+      "requirement": "numpy==2.5.3",
+      "allowed_sha256_count": 66,
+      "direct_url": false
+    },
+    {
+      "name": "nunchaku",
+      "requirement": "nunchaku @ https://github.com/nunchux-ai/nunchaku/releases/download/v1.2.0/nunchaku-1.2.0%2Btorch2.9-cp312-cp312-linux_x86_64.whl#sha256=6196fbea888d6719fd7aff7ec58f1618ff37c35d4542f2c595aadd2a242e500f",
+      "allowed_sha256_count": 1,
+      "direct_url": true
+    },
+    {
+      "name": "nvidia-cublas",
+      "requirement": "nvidia-cublas==13.0.0.19",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-cuda-cupti",
+      "requirement": "nvidia-cuda-cupti==13.0.48",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-cuda-nvrtc",
+      "requirement": "nvidia-cuda-nvrtc==13.0.48",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-cuda-runtime",
+      "requirement": "nvidia-cuda-runtime==13.0.48",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-cudnn-cu13",
+      "requirement": "nvidia-cudnn-cu13==9.13.0.50",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-cufft",
+      "requirement": "nvidia-cufft==12.0.0.15",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-cufile",
+      "requirement": "nvidia-cufile==1.15.0.42",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-curand",
+      "requirement": "nvidia-curand==10.4.0.35",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-cusolver",
+      "requirement": "nvidia-cusolver==12.0.3.29",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-cusparse",
+      "requirement": "nvidia-cusparse==12.6.2.49",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-cusparselt-cu13",
+      "requirement": "nvidia-cusparselt-cu13==0.8.0",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-nccl-cu13",
+      "requirement": "nvidia-nccl-cu13==2.27.7",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-nvjitlink",
+      "requirement": "nvidia-nvjitlink==13.0.39",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-nvshmem-cu13",
+      "requirement": "nvidia-nvshmem-cu13==3.3.24",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "nvidia-nvtx",
+      "requirement": "nvidia-nvtx==13.0.39",
+      "allowed_sha256_count": 3,
+      "direct_url": false
+    },
+    {
+      "name": "packaging",
+      "requirement": "packaging==26.3",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "peft",
+      "requirement": "peft==0.18.1",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "pillow",
+      "requirement": "pillow==12.1.0",
+      "allowed_sha256_count": 91,
+      "direct_url": false
+    },
+    {
+      "name": "protobuf",
+      "requirement": "protobuf==6.33.4",
+      "allowed_sha256_count": 10,
+      "direct_url": false
+    },
+    {
+      "name": "psutil",
+      "requirement": "psutil==7.2.1",
+      "allowed_sha256_count": 21,
+      "direct_url": false
+    },
+    {
+      "name": "pydantic",
+      "requirement": "pydantic==2.13.5",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "pydantic-core",
+      "requirement": "pydantic-core==2.46.5",
+      "allowed_sha256_count": 120,
+      "direct_url": false
+    },
+    {
+      "name": "pyyaml",
+      "requirement": "pyyaml==6.0.3",
+      "allowed_sha256_count": 73,
+      "direct_url": false
+    },
+    {
+      "name": "regex",
+      "requirement": "regex==2026.9.10",
+      "allowed_sha256_count": 130,
+      "direct_url": false
+    },
+    {
+      "name": "requests",
+      "requirement": "requests==2.34.2",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "safetensors",
+      "requirement": "safetensors==0.7.0",
+      "allowed_sha256_count": 23,
+      "direct_url": false
+    },
+    {
+      "name": "sentencepiece",
+      "requirement": "sentencepiece==0.2.1",
+      "allowed_sha256_count": 65,
+      "direct_url": false
+    },
+    {
+      "name": "setuptools",
+      "requirement": "setuptools==84.0.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "starlette",
+      "requirement": "starlette==0.50.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "sympy",
+      "requirement": "sympy==1.14.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "tokenizers",
+      "requirement": "tokenizers==0.22.2",
+      "allowed_sha256_count": 24,
+      "direct_url": false
+    },
+    {
+      "name": "torch",
+      "requirement": "torch @ https://download-r2.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl",
+      "allowed_sha256_count": 1,
+      "direct_url": true
+    },
+    {
+      "name": "torchvision",
+      "requirement": "torchvision @ https://download-r2.pytorch.org/whl/cu130/torchvision-0.24.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl",
+      "allowed_sha256_count": 1,
+      "direct_url": true
+    },
+    {
+      "name": "tqdm",
+      "requirement": "tqdm==4.70.1",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "transformers",
+      "requirement": "transformers==4.57.6",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "triton",
+      "requirement": "triton==3.5.1",
+      "allowed_sha256_count": 14,
+      "direct_url": false
+    },
+    {
+      "name": "typing-extensions",
+      "requirement": "typing-extensions==4.16.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "typing-inspection",
+      "requirement": "typing-inspection==0.4.4",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "urllib3",
+      "requirement": "urllib3==2.7.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "uvicorn",
+      "requirement": "uvicorn==0.40.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    },
+    {
+      "name": "zipp",
+      "requirement": "zipp==4.1.0",
+      "allowed_sha256_count": 2,
+      "direct_url": false
+    }
+  ]
+}

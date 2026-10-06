@@ -931,3 +931,174 @@ independently reviewed. Owning plan/ledger/matrix/gates and
 [qualification](http-elapsed-budget-qualification-2026-10-06.md) record affected
 checks, historical failures, cache restoration and pending broader gate scope.
 Evidence-only successor preserves source, dependencies and frozen refs.
+
+## Q2 resolved-preview exact wheel handoff — admitted 2026-10-06
+
+The coordinator explicitly admits implementation while AQ-HTTP candidate8756f33
+is frozen in independent review; dependency gates govern publication/acceptance,
+not this separate source implementation. Branch
+`feat/torch-verified-wheel-handoff-8756f33b` retains base
+`8756f33b3ba114f5bdd84dbcf25b1aa58c287868`, tree
+`508caecefaf7825a357670c6a05357653bb0f4ef`, including accepted main1c1c7875.
+The smallest slice is retained unqualified resolved-preview installation: validate
+its existing complete resolution, acquire every pinned wheel via shared HTTP,
+consume only exact local inputs in an empty stage, validate dependency closure/
+installed RECORD/distribution identity, retain inputs through child cleanup and
+actual existing runtime publication. Automatic selection and the qualified
+bundled recipe remain explicitly scoped existing paths, not migrated by this slice.
+
+Production writes: `installer/torch.rs`, a package-owner helper
+`torch-server/install_verified_wheels.py`, and only adjacent Torch composition
+in `version_manager/mod.rs` and RPC `main.rs`. No core acquisition service,
+manifest, S3 reader, native importer/watcher/recovery or installer.rs production
+writes; no dependency/schema/generator/runtime-pin/ONNX build-policy changes.
+Tests: helper fixtures under torch-server/tests and co-located Torch owner tests.
+Owning plan, ledger, acceptance matrix, gates, contract/README and one Q2 report
+record exact checks and limits. Independent specification/standards reviewers
+have reviewed the design and will review final source. Inputs live in retained
+capability-backed sibling roots outside auto-deleted Torch stages. Local pip
+receives separate local-file hash requirements, never the remote provenance lock.
+One composite child cleanup lease retains both stage and acquired inputs.
+
+Acceptance: actual dependent fixture wheels; wrong/substituted bytes and missing
+files/closure refuse before publication; dependency direct URLs refuse; marker/
+extras closure validation; exact installed proof and receipt identity; held-child
+cancellation/drainage plus retained unresolved/cold refusal. A normal child-only
+bwrap network-denial probe failed UID-map setup on this host; preserve the failure
+and do not modify host/network/security settings. Network-denied/real Torch/
+platform/hosted evidence remains a release dependency. No production-ready or
+full AQ-PACKAGES claim. Repository-local MrScripty identity is preserved.
+
+### Q2 admitted source completion
+
+Tested source `e246645bcf7d2f3bae2f68a0ba29215fafe335e9` (tree
+`24eceee6dc62b0c368f666c43989c34ba3b2a3bb`) completes the bounded retained-preview
+source slice. Final production and fixture blobs are independently reviewed;
+source errors, cleanup/oracle/lint repairs and qualification limits are preserved
+in [report](torch-verified-wheel-handoff-qualification-2026-10-06.md).
+The owning plan/ledger/matrix/gates and one report/evidence folder now record
+301 app-manager, 210 pinned-tool Python and 13 shared controls, strict default
+checks, the unchanged headless test lint failure and passing production binary.
+Enforced-denial, actual Torch/provider/platform/hosted acceptance and whole Q2
+migration remain open. Evidence-only successor preserves all source blobs and
+frozen refs; own temporary PR42 dependency caches are restored with matching
+mode/path/content/link digests. No gate advancement, merge or external review.
+
+## Q2 child pip configuration repair — admitted 2026-10-06
+
+Parent independent review reproduced ambient `install.requirement` injection on
+frozen Q2 `7a3264ac8d04383bd01c8ab71b7287a48c66f2db`: `--isolated` still
+loads global/site/PIP_CONFIG_FILE settings. Separate branch
+`fix/torch-wheel-pip-config-7a3264ac` begins at normal merge
+`8eb1e00fd61400532b4c55b9dc167f0a9438fc0c`, tree
+`b6d37961c54d6e5fe0e894e5223c08f1213d804b`, preserving accepted main
+`7c229e92726e1af7447d37e3dc03fd4bd2ccfffa` and frozen handoff source.
+Admitted production write: `torch-server/install_verified_wheels.py` child-only
+pip environment isolation; tests: `torch-server/tests/test_install_verified_wheels.py`.
+Owning plan, contract/README, ledger/matrix/gates and qualification evidence may
+record the correction and exact checks. Preserve all custody, exact-set, installed
+proof and postprobe validation. No Rust/native/S3/dependency/pin changes.
+Host/user/global settings remain untouched; hostile URL tests parse options only,
+never retrieve remote requirements. Parser evidence is not network-denial proof.
+Automatic-resolution branch remains paused and separate.
+
+# Q2 automatic resolution/final-payload separation — admitted 2026-10-06
+
+Parent delegates a separate successor of frozen7a3264ac. Normal merge af6113c69a42e6582c55b460277219e980f68a8c incorporates accepted main7c229e92726e1af7447d37e3dc03fd4bd2ccfffa; source tree remains b6d37961c54d6e5fe0e894e5223c08f1213d804b. MrScripty metadata verified. Branch feat/torch-automatic-wheel-handoff-7a3264ac.
+
+Contract: automatic build/interpreter selection runs explicit resolver-only public pip dry-run/report. Its original version1 report/hash requirements/resolution and interpreter/provider identity yield an accepted exact closure before acquisition. Preserve candidate ordering and existing conclusive-only fallback. Final payload uses the existing shared verified handoff/local installer/proof/publisher without remote re-resolution. No package installation or RECORD output in resolve-only mode; metadata/candidate traffic and provider bootstrap remain scoped standard-tool responsibility. No new runtime pins, dependencies, core/S3/native/importer/watcher/installer.rs production changes, credential/network/security changes, provider resources or external review contact.
+
+Writes admitted before implementation: torch-server/resolve_runtime.py and co-located tests; rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs and co-located handoff tests; torch-server/README.md, docs/contracts/artifact-acquisition.md and owning acquisition plan/ledger/matrix/gates/write-set/report. First establish headless Clippy baseline on unchanged accepted main. If genuinely relevant, only rust/crates/pumas-rpc/tests/integration_tests.rs may receive the existing inference-plugins cfg on its unused helper; do not disable any lint or edit frozen source sets.
+
+Criteria: resolver installs nothing, approved report/trust/identity agrees before handoff, complete exact wheels verified before local pip, missing/changed closure cannot publish, no fallback after accepted handoff, original provenance retained, cancellation/abandonment and post-probe proof survive composition. Fixtures first; default/headless affected checks and read-only source/custody review. Enforced network denial, actual Torch/provider/platform/hosted acceptance remain open; no gate or merge claimed. Parent owns PR/review/CI/integration.
+
+Resumed after parent instruction: normal merge `2b380b59fdc2e2896b4d3fbde53de27296076c64`, tree `eceaba08b9f38f7d59c52d2a7b90a61802fef7d6`, incorporates frozen pip repair `99a55b78` without rewriting its evidence. Repair branch remains untouched. Genuine accepted-main headless warnings are preserved in repair qualification; this feature will gate the unused integration helper under its existing inference feature, without suppressing generated warnings.
+
+### Automatic source completion
+
+Tested/pushed source5946c4738870bdcfc613430bb98fd873d9e6d6f3, tree295eb32167dc49ced598d1082f6f3bf086ce4679, completes the admitted bounded automatic slice. Final reviewed blobs and exact checks/failed controls are bound in the separate automatic qualification report/evidence. Owning plan/ledger/matrix/gates record limits; no frozen repair report/source rewrite, gate advancement or native/shared cleanup edits. Evidence-only successor preserves source; original temporary dependency cache restored with matching paths/modes/content/links.
+
+## Q2 resolver pre-preparation boundary investigation — 2026-10-06
+
+Independent review of frozen automatic handoff found that public pip dry-run /
+binary-only flags do not prevent preparation of direct-URL source dependencies.
+Separate investigation branch `fix/torch-resolver-source-boundary-cf3afb3f` starts
+at `cf3afb3f45762b61e882cf0ad4e738a6f18086f1`, tree
+`6fbb0dfb95646e7009dc14f9610cdeab5c6c591a`. Frozen automatic, local-pip repair
+and qualified-recipe branches remain untouched. The qualified slice is paused.
+
+Admitted evidence writes: this report, the owning plan's current-blocker notice,
+and `torch-resolver-source-boundary-proposal-2026-10-06.md` with adjacent inert
+proposal/test evidence. No production source edit is admitted by this entry.
+Contract §11 requires supported public tooling. A private, exact-version-tested
+pip admission adapter therefore needs an explicit parent contract exception;
+that decision is pending. Safe candidate/request sentinels may demonstrate
+placement without any URL retrieval, source preparation, hooks or build installs.
+The investigation does not qualify the automatic or retained-preview boundary.
+Parent owns the exception, PR/review/CI/integration and any later implementation
+admission. Native cleanup remains with its separate owner.
+
+## Q2 supported-public-tooling alternatives — admitted research 2026-10-06
+
+Parent explicitly keeps contract §11 and disallows private-hook activation.
+Evidence-only branch `docs/torch-public-resolution-alternatives-1abcf960` starts
+at `1abcf960ba9bf0e4504aef505d24f9b78a9e89ca`, tree
+`8816ef0e6124a60d3ed8acc38ceeacf5d98a41ee`. Research may write this admission,
+a bounded owning-plan status note, and a separate public-tooling comparison report
+with inert local-wheel controls and source inventory. No production source,
+contract waiver, runtime/tooling dependency, provider/network/auth policy,
+recipe/pin, private prototype or native/shared cleanup change is admitted.
+
+Controls use public standalone packaging APIs and subprocess pip CLI on generated
+metadata-only local wheels; direct source/VCS fixture strings stop at preflight
+without invoking pip. No source archive, backend/hook execution, external package
+probe, real credential or installation. Research does not qualify either exposed
+resolver mode or authorize a new resolver/selection policy.
+
+## Q2 finite qualified-recipe handoff — admitted 2026-10-06
+
+Parent explicitly authorizes the existing finite qualified recipe through public
+packaging APIs and existing acquisition custody. Branch
+`feat/torch-qualified-wheel-catalog-d87f560f` starts at
+`d87f560f5e451083eaa2635bf84ba1980784cae8`, tree
+`9c6b4ec4a75054f4e01c5f9d3c8be5e0b2badb0e`. This is a bounded optional recipe
+capability, not generic runtime/model policy or automatic-selection repair.
+
+Production writes admitted before implementation: existing Torch owner
+`installer/torch.rs`, co-located handoff tests; a finite recipe catalog helper and
+its tests; local wheel installer and tests; extraction of its existing installed
+RECORD proof into one shared Python owner with compatibility aliases in
+`resolve_runtime.py`; embedded runtime materialization; owning docs/evidence.
+Public standalone packaging tooling must exist before target installation: ship
+an independently recorded licensed tooling snapshot from the already available
+standalone distribution, verifying each input against its distribution RECORD.
+This introduces no runtime recipe/pin or provider download and does not use
+pip's private vendored namespace. Record source provenance, exact tooling bytes
+and licence in the bounded evidence. All final payload still uses acquisition.
+
+Keep recipe/lock bytes and the three selected direct wheels exact. Catalog only
+its finite named pins from bounded approved index metadata; no dependency
+resolver/preparation or source/VCS fallback. Acquired-wheel public metadata
+preflight validates actual identity/tags/Python/hashes, every dependency URL and
+complete marker/extras closure before public local `--no-deps` install. Preserve
+original recipe/lock/catalog provenance, shared child drainage/use/receipt
+settlement and GPU/live-sidecar/post-probe policy. Native cleanup remains with
+its separate owner; reconcile its interface when an exact successor is supplied.
+No private pip hooks, general dynamic solver, security/auth change, release/gate
+claim, new mandatory version policy or external review contact.
+
+## Q2 current-main finite composition — admitted 2026-10-06
+
+Parent requests a bounded composition of reviewed6308 onto current main5e114f6d,
+with exact inventory, current feature graphs before builds and no PR/main merge.
+Branch integrate/torch-finite-recipe-5e114f6d preserves all frozen refs/evidence.
+Carry the exact inventoried Q2 source/contract/history paths only; no new feature
+or baseline cleanup. Actual integration compile regressions may receive narrow
+repairs after evidence; record every repair and recheck affected source. Owning
+composition plan/ledger/matrix/gates/evidence may record this finite candidate.
+Explicit temporary-disable compatibility policy remains parent-dispositioned; no
+disabling change is admitted without that decision. Keep dynamic source P1 and
+direct-acquisition capability migration explicit, preserve main Node/HTTP/Cargo
+source and original recipe, avoid native3a601625/shared cleanup writes, and add no
+uv dependency or private-hook activation. Current/composed graphs pass33 each
+before the first build. No package/runtime/release/security acceptance is claimed.

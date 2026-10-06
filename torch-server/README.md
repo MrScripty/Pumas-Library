@@ -78,8 +78,59 @@ Provider, network, or incomplete-scan failures remain inconclusive and do not
 silently select an older interpreter. The manager records the selected
 distribution source, full version, target, provider pin, executable
 fingerprint, exact wheel URLs, hashes, and package versions with the installed
-runtime. Installation uses official binary wheels only and never falls back to
-a source build.
+runtime. Final verified-payload installation uses validated local wheels.
+Automatic and unqualified retained-preview resolution can prepare direct-URL
+source dependencies before report validation; those modes remain exposed and
+unqualified. The optional finite qualified recipe avoids that resolver boundary.
+
+The retained, unqualified resolved-preview and automatic-selection paths acquire
+their accepted wheel sets through the application's shared acquisition owner
+before final installation.
+`VersionManager::new_with_acquisition` supports Torch; direct installer users can
+use `VersionInstaller::with_torch_acquisition`. Existing constructors keep their
+signatures, but these installation paths require the shared capability. The local
+helper installs only verified file URLs with hashes, no index, no dependency
+fetching, no source builds and an empty target. Its child-only environment removes
+inherited `PIP_*` options and sets `PIP_CONFIG_FILE=os.devnull`, since `--isolated`
+alone still loads global/site configuration. Host settings remain untouched. It validates dependency closure,
+selected interpreter tags, the local pip report and installed RECORD files;
+publication rechecks selected members and provenance after the runtime probe.
+Original resolution/report/requirements remain separate from local installation
+evidence. Unresolved uses refuse cold replay before startup cleanup, and sibling
+wheel inputs remain retained. Automatic selection uses explicit `--resolve-only`
+public pip dry-run/report and accepts version1 evidence before acquisition.
+Dry-run does not establish absence of source preparation or build-isolation side
+effects. Conclusive candidate fallback ends at acceptance. Original
+report/requirements/interpreter provenance remain unchanged; managed-provider
+identity is recorded separately. Resolver metadata/candidate traffic may fetch
+wheel bytes and remains separately scoped, along with managed-Python bootstrap
+and the qualified bundled recipe. Legacy `--install` remains available to the
+package helper; ordinary exact-wheel preview still requires `--torch-wheel`.
+This bounded implementation has synthetic Linux evidence; enforced network-denial,
+real Torch and supported-platform acceptance remain open under AQ-PACKAGES.
+
+The optional existing `v2.9.1` qualified bundled recipe now takes a separate finite
+catalog path. `qualified_wheel_catalog.py --lock --preview --output` reads only
+bounded Simple Repository metadata from the lock's two original indexes, selects
+compatible wheels matching its exact versions and allowed SHA-256 values, and
+preserves the three selected direct roots. It invokes no pip resolver. Unavailable,
+ambiguous or unsupported catalog evidence refuses without source or automatic
+fallback. The original lock and preview accompany the catalog into shared payload
+acquisition; `install_verified_wheels.py --recipe-lock --preview` checks them again
+before local pip. Actual acquired METADATA, WHEEL tags, Python requirements,
+hashes and complete marker/extras dependency closure must agree. All dependency
+URLs, including inactive branches, are explicitly unsupported. This optional path
+does not replace generic runtime or model selection.
+
+The helpers use the supported standalone `packaging` APIs embedded in
+`tooling/packaging.zip`; its source, file hashes and Apache-2.0/BSD-2-Clause licence
+are recorded in `tooling/packaging-source.json` and inside the archive. Installed
+RECORD proof has one shared owner in `wheel_records.py`; legacy resolver exports
+remain lazy compatibility aliases. Qualified installation retains the existing
+GPU/protocol validation, postprobe proof, child/input custody and receipt publisher.
+Automatic and retained-preview resolution remain unqualified for the separately
+documented source-preparation boundary. The new finite path has inert-wheel local
+controls, not real Torch/GPU, enforced network-denial or release acceptance.
 
 Native managed-Python provisioning, Torch CPU/Core installation, restart,
 and sidecar lifecycle passed on Linux x86_64, Windows x64, and macOS arm64

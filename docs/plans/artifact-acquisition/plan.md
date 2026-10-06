@@ -1,5 +1,13 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 catalog-authority design checkpoint (2026-10-06):** The separate
+[request-scoped design](reports/torch-catalog-authority-design-2026-10-06.md)
+defines existing caller source/target/version authority, bounded observed-universe
+completeness and coordinated automatic/preview adoption tests. Production and
+frozen candidates remain unchanged; no new mirror/version policy or resolver is
+activated. This is proposed design, not P1/AQ acceptance. The independently
+reported final selected-executable P2 receives a separate source successor.
+
 **Q2 qualified observation producer (2026-10-06):** Frozen `bb330f2d` remains
 intact. Source `84f1e62a` (61 Python controls, 30 Rust handoff tests, 33 feature
 graph checks and strict scoped checks passing) adds an existing qualified

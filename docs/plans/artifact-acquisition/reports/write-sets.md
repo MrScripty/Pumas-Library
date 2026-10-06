@@ -1250,3 +1250,15 @@ No installer.rs/native cleanup, dependency/lock/recipe, experimental resolver,
 credential, external reviewer, model/provider payload or real backend changes.
 Controlled tiny-wheel producer→finite catalog→shared consumer evidence cannot
 qualify full recipe/provider/native-platform execution or AQ/P1 gates.
+
+## Q2 catalog authority design — admitted 2026-10-06
+
+Parent freezes 2ce91b431afacdb4eb402af91f55b1258afe04fc, tree
+e1dc46a0e45926bf1d1906813c456d2fed7e259c. Separate
+design/torch-catalog-authority-2ce91b43 may change only this admission, an
+owning-plan status note and torch-catalog-authority-design-2026-10-06.md with
+adjacent source-inventory evidence. Inspect existing source/provider/acquisition
+contracts; define request authority, complete bounded enumeration, normal caller
+adoption and decisive tests. No production/contracts/recipe/dependency/resolver
+changes or new mirror/network grant. The independently reported final executable
+P2 will receive a separate successor after this checkpoint is saved.

@@ -1,0 +1,40 @@
+{
+  "base": "2ce91b431afacdb4eb402af91f55b1258afe04fc",
+  "base_tree": "e1dc46a0e45926bf1d1906813c456d2fed7e259c",
+  "branch": "design/torch-catalog-authority-2ce91b43",
+  "scope": "Documentation/source analysis only; production, contracts and accepted candidates unchanged. Proposed tests were not executed.",
+  "sources": {
+    "docs/contracts/artifact-acquisition.md": "4eb289329a429c3a8d70762a533d7a5e11ca0cfda472837f3ee4cbe33dbbbaa5",
+    "docs/contracts/wheel-target.md": "c9d6e8952de5bc7f97b0c1380379b9f33751e3d71a335bd38c8139c1cd27985f",
+    "rust/crates/pumas-core/src/config.rs": "e34883cae9eb112f4c8f7a6b0aa239b612a15c16183b140535b127c670ab98d9",
+    "rust/crates/pumas-core/src/acquisition/mod.rs": "11804c51212ad77dfeedbfda2e5c4a5b98e5875f1725f908ade74afbd6baee9c",
+    "rust/crates/pumas-core/src/acquisition/manifest.rs": "be07454900f848324440faab91a3e07b5d48fc11aa39b37158696580a4dcda88",
+    "rust/crates/pumas-core/src/acquisition/service.rs": "3e611252c15f6c87aa2f4f22519d1ed80b2dbe1f22855089b77cb8aeec839c4f",
+    "rust/crates/pumas-core/src/acquisition/http.rs": "71c6d899231b1028e22124546b2b05fc7379526a32cd5d2b1449092ddc6c6ae0",
+    "rust/crates/pumas-core/src/acquisition/workspace.rs": "1d6c8d5d66bd807bdef48bd4f4d98c5db7db197fca4a57577ee0fcb1bb742ed6",
+    "rust/crates/pumas-core/src/acquisition/task_custody.rs": "ee393db73f59be12a1912ec352ee85d0a289ce2281fe325625b85231aafccc01",
+    "rust/crates/pumas-app-manager/src/version_manager/mod.rs": "a8737e9605ee3f79ae0f68be9e306beb36c161a6efb305a2cc0c70462145d8fb",
+    "rust/crates/pumas-app-manager/src/version_manager/torch_preview.rs": "f77aeb4224573a4cc0ecbf01b392344ac6961007c1ec3587a5a9cc68a48938a7",
+    "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "52872188b38b9010c0af7cd6004cd84712a3ad08dfa3f5c92c9a24c1ab48c637",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": "37085d499a0b29354cbf8538b86c1f1c28deea70f3ed1e354bdb134dbb506c25",
+    "torch-server/resolve_runtime.py": "eda80c72173711a1c20168760750f8e2f0b246db8acf2375712fbeb0d1c1a6ee",
+    "torch-server/qualified_wheel_catalog.py": "c92fae33e8906b20e0caf89ba51261249fa65f1259d4204f90259bdf41670843",
+    "torch-server/wheel_target.py": "a381edb267f13316a582c3ee4d40450554004d1dc7c2788d4408ed101ebe94b1",
+    "torch-server/install_verified_wheels.py": "5d1a14549acff11f08ba19ff2226f9b480852e16fb48745ace3c2cc1fadadbc3",
+    "docs/plans/artifact-acquisition/reports/torch-offline-catalog-2026-10-06.md": "952464859cd0c1f541dce8ec0039bb7eb06b907255993a6a5f340f6786aba8a8",
+    "docs/plans/artifact-acquisition/reports/torch-direct-root-binding-2026-10-06.md": "052b74b617daa1d17e273ccd840866f09314644b3e60b5af3c7a4ca0a4fde27a",
+    "docs/plans/artifact-acquisition/reports/torch-public-uv-evaluation-2026-10-06.md": "4387527ede35ae281b34b9a53bbbbbf019f23c4be4d64f4512be52ee24a6d5c1"
+  },
+  "key_seams": {
+    "caller_selection": "TorchInstallSelection and preview_torch_runtime / resolve_selected_torch_attempt",
+    "current_source_policy": "resolve_runtime.trusted_wheel_url and installer.validate_direct_torch_report",
+    "shared_owner": "AcquisitionService, AcquisitionConsumer.acquire_http, AcquiredArtifactUse",
+    "generic_config": "NetworkConfig, InstallationConfig, AcquisitionCapacity",
+    "target": "capture_observation / accepted_qualified_torch_target",
+    "unknown_size_gap": "HTTP stream has selected-length enforcement, not caller arbitrary byte cap"
+  },
+  "primary_sources_checked": [
+    "https://packaging.python.org/en/latest/specifications/simple-repository-api/",
+    "https://docs.astral.sh/uv/reference/cli/#uv-pip-compile"
+  ]
+}

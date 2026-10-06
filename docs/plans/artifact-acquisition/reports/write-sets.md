@@ -2,6 +2,24 @@
 
 These are the admitted exact paths/closed path families. The actual source files selected for the current Q1 slice are listed in the execution ledger; remaining paths below are authorized Q1 boundaries, not claims that those implementations exist. Before a slice edits files, its integrator records the exact members and actual tests in its ledger. New authority/consumer boundaries trigger re-plan.
 
+## Q2 supplied-approval null repair — 2026-10-06
+
+Parent freezes `64d62cdc90fa2c3ec9424d99cde0865bd919e793`. The independent review
+identifies one CLI admission downgrade: a supplied JSON-null observation becomes
+`None`, allowing an otherwise absent-context resolution to enter legacy mode.
+On `fix/torch-null-approval-64d62cdc`, admit only
+`torch-server/install_verified_wheels.py`, its direct
+`torch-server/tests/test_target_observation.py` boundary controls,
+`docs/contracts/wheel-target.md`, this write-set, the owning plan and
+`reports/torch-null-approval-2026-10-06.md` with adjacent test/source evidence.
+The fix must distinguish an absent flag from supplied invalid data before staging
+or pip, preserving valid legacy and bound consumption. Verify exact frozen
+reproduction with tiny local wheels, missing/null/malformed controls, existing
+consumer/target/finite suites and the embedded/shared handoff as appropriate.
+Preserve frozen native/tag repairs, packet/custody implementation, schemas,
+resolver/catalog/recipe/dependency source, main and all frozen candidates. No
+production resolver or observation-producer adoption or catalog-authority change.
+
 ## Q2 target observation binding successor — 2026-10-06
 
 Parent freezes `638bb7c442be11af00f88017316fc4de04c15807`; this successor starts

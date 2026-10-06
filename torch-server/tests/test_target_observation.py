@@ -44,13 +44,37 @@ class ObservationTests(unittest.TestCase):
         return [*args, "--target-observation", str(self.approved)] if approval else args
 
     def refuse(self, *, approval=True):
-        args = self.command(approval=approval)
+        self.refuse_command(self.command(approval=approval))
+
+    def refuse_command(self, args):
         with patch.object(sys, "argv", ["consumer", *args[3:]]), patch.object(fixtures.consumer.subprocess, "run", side_effect=AssertionError("pip must not start")):
             with self.assertRaises(SystemExit) as refusal:
                 fixtures.consumer.main()
             self.assertEqual(refusal.exception.code, 3)
         self.assertFalse(self.packages.exists())
         self.assertFalse(self.output.exists())
+
+    def test_cli_supplied_invalid_observation_data_never_selects_legacy(self):
+        bound = copy.deepcopy(self.resolution)
+        values = ("null", "", "{", "{}", "[]", "false", "0", '"not an observation"', '{"schema":"future"}')
+        for context in ("legacy", "bound"):
+            self.resolution = {"artifacts": self.artifacts} if context == "legacy" else bound
+            for number, raw in enumerate(values):
+                with self.subTest(context=context, raw=raw):
+                    self.packages = self.root / f"packages-{context}-{number}"
+                    self.output = self.root / f"proof-{context}-{number}"
+                    args = self.command()
+                    self.approved.write_text(raw)
+                    self.refuse_command(args)
+
+    def test_cli_supplied_missing_observation_file_refuses_in_both_modes(self):
+        bound = copy.deepcopy(self.resolution)
+        for context in ("legacy", "bound"):
+            with self.subTest(context=context):
+                self.resolution = {"artifacts": self.artifacts} if context == "legacy" else bound
+                args = self.command()
+                self.approved.unlink()
+                self.refuse_command(args)
 
     def test_actual_selected_interpreter_observer_and_canonical_projection(self):
         completed = subprocess.run([sys.executable, "-I", str(fixtures.ROOT / "wheel_target.py"), "--observe"], capture_output=True, check=True)

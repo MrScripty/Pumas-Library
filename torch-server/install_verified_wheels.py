@@ -294,6 +294,8 @@ def main() -> None:
             if len(approved) > 64 * 1024:
                 raise ValueError("Approved target observation is oversized")
             observation = json.loads(approved)
+            if not isinstance(observation, dict):
+                raise ValueError("Supplied target observation must be an object")
         owner = target_owner()
         selected = owner.resolution_target(resolution, observation)
         if selected is not None:

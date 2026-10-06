@@ -117,6 +117,12 @@ and keep their existing resolver. They refuse unsolicited target-bearing packets
 The finite recipe remains in its existing absent-context mode. No experimental
 resolver or new production catalog is activated by this opt-in boundary.
 
+At the CLI boundary, absence means the `--target-observation` flag was omitted.
+If the flag is supplied, its file must decode to an observation object; JSON null,
+other scalar/list values, malformed JSON and missing files refuse before package
+or output staging and pip, including when both resolution binding fields are
+absent. Parsed null must never be converted into absent-approval authority.
+
 Resolver adapters must consume the same target and verify the public tool can
 represent it. The current offline experiment passes the full patch version and
 explicit Windows or qualified glibc floor. It rejects unsupported libc/deployment

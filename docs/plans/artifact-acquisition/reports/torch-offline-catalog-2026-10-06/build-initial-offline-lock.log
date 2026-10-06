@@ -1,0 +1,11 @@
+     Locking 333 packages to latest compatible versions
+error: failed to download `tokio-macros v2.7.2`
+
+Caused by:
+  attempting to make an HTTP request, but --offline was specified
+Traceback (most recent call last):
+  File "/tmp/pumas-uv-offline-eed/docs/plans/artifact-acquisition/reports/torch-offline-catalog-2026-10-06/build_harness.py", line 34, in <module>
+    subprocess.run(["cargo", "build", "--offline", "--locked", "--manifest-path", str(crate / "Cargo.toml")], check=True)
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['cargo', 'build', '--offline', '--locked', '--manifest-path', '/tmp/pumas-uv-offline-build/crate/Cargo.toml']' returned non-zero exit status 101.

@@ -1,5 +1,18 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 acquired offline-catalog experiment (2026-10-06):** Parent rejects live-index
+uv as P1 closure. Separate evidence-only8eb93f5a acquires an owner-declared finite
+wheel universe through shared custody and inspects actual candidate hashes,
+METADATA/WHEEL/tags/requirements before public offline/no-index/no-build uv.
+24 controls pass220 assertions; original remote provenance has an explicit local
+input projection, and incomplete catalogs, URL/VCS, substitutions, unclassified
+errors and selected-file ambiguity stop without fallback. See the
+[measured contract and migration limits](reports/torch-offline-catalog-2026-10-06.md).
+Production/source and frozen main/composition/finite refs remain unchanged.
+This does not qualify automatic P1 or add a production dependency/policy. Parent
+owns catalog/target/selection/consumer migration decisions; finite recipe needs
+no replacement, and all AQ gates remain open.
+
 **Q2 public uv experiment (2026-10-06):** Frozen composition a1da98 remains
 unchanged and has no merge-ready PR. Separate evidence-only uv0.12.23 evaluation
 uses official isolated tooling, inert local wheels/indexes and data-only source /

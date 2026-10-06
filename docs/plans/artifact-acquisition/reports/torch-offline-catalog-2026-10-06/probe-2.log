@@ -1,0 +1,28 @@
+{"case": "multi-extras-linux", "failed": ["selected"], "status": "solver_or_mapping_refused"}
+{"case": "multi-extras-windows", "failed": ["selected"], "status": "solver_or_mapping_refused"}
+{"case": "approved-redirect", "failed": ["selected"], "status": "solver_or_mapping_refused"}
+{"case": "denied-redirect", "failed": [], "status": "acquisition_or_inspection_refused"}
+{"case": "missing-candidate", "failed": [], "status": "preflight_refused"}
+{"case": "undeclared-completeness", "failed": [], "status": "preflight_refused"}
+{"case": "source-url", "failed": [], "status": "preflight_refused"}
+{"case": "vcs-url", "failed": [], "status": "preflight_refused"}
+{"case": "inactive-url", "failed": [], "status": "preflight_refused"}
+{"case": "unselected-candidate-url", "failed": [], "status": "preflight_refused"}
+{"case": "root-vcs", "failed": [], "status": "preflight_refused"}
+{"case": "root-option", "failed": [], "status": "preflight_refused"}
+{"case": "source-substitution", "failed": [], "status": "acquisition_or_inspection_refused"}
+{"case": "actual-metadata-mismatch", "failed": [], "status": "preflight_refused"}
+{"case": "actual-wheel-tags-mismatch", "failed": [], "status": "preflight_refused"}
+{"case": "python-and-tags", "failed": ["selected"], "status": "solver_or_mapping_refused"}
+{"case": "bounded-unsatisfiable", "failed": [], "status": "solver_or_mapping_refused"}
+{"case": "ambient-config-env-python", "failed": ["selected"], "status": "solver_or_mapping_refused"}
+Traceback (most recent call last):
+  File "/tmp/pumas-uv-offline-eed/docs/plans/artifact-acquisition/reports/torch-offline-catalog-2026-10-06/evaluate_offline.py", line 516, in <module>
+    main()
+  File "/tmp/pumas-uv-offline-eed/docs/plans/artifact-acquisition/reports/torch-offline-catalog-2026-10-06/evaluate_offline.py", line 512, in main
+    evaluate(args.harness.resolve(), args.uv.resolve(), args.output.resolve())
+  File "/tmp/pumas-uv-offline-eed/docs/plans/artifact-acquisition/reports/torch-offline-catalog-2026-10-06/evaluate_offline.py", line 500, in evaluate
+    require(all(not record["failed_assertions"] for record in records), "one or more measured assertions failed")
+  File "/tmp/pumas-uv-offline-eed/docs/plans/artifact-acquisition/reports/torch-offline-catalog-2026-10-06/evaluate_offline.py", line 49, in require
+    raise Refused(reason)
+Refused: one or more measured assertions failed

@@ -1,0 +1,306 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.22
+   Compiling quote v1.0.47
+   Compiling libc v0.2.180
+   Compiling syn v2.0.114
+   Compiling cfg-if v1.0.4
+   Compiling jobserver v0.1.34
+   Compiling shlex v1.3.0
+   Compiling find-msvc-tools v0.1.8
+   Compiling cc v1.2.53
+   Compiling once_cell v1.21.3
+   Compiling bitflags v2.10.0
+   Compiling pkg-config v0.3.32
+   Compiling synstructure v0.13.2
+   Compiling version_check v0.9.5
+   Compiling pin-project-lite v0.2.16
+   Compiling zerofrom-derive v0.1.6
+   Compiling smallvec v1.15.1
+   Compiling zerocopy v0.8.33
+   Compiling futures-core v0.3.31
+   Compiling zerofrom v0.1.6
+   Compiling yoke-derive v0.8.1
+   Compiling stable_deref_trait v1.2.1
+   Compiling vcpkg v0.2.15
+   Compiling memchr v2.7.6
+   Compiling yoke v0.8.1
+   Compiling futures-sink v0.3.31
+   Compiling log v0.4.29
+   Compiling bytes v1.11.1
+   Compiling zerovec-derive v0.11.2
+   Compiling crossbeam-utils v0.8.21
+   Compiling zerovec v0.11.5
+   Compiling mio v1.1.1
+   Compiling errno v0.3.14
+   Compiling displaydoc v0.2.5
+   Compiling itoa v1.0.17
+   Compiling slab v0.4.11
+   Compiling signal-hook-registry v1.4.8
+   Compiling futures-channel v0.3.31
+   Compiling socket2 v0.6.1
+   Compiling tokio-macros v2.6.0
+   Compiling pin-utils v0.1.0
+   Compiling tokio v1.49.0
+   Compiling openssl-sys v0.9.111
+   Compiling ahash v0.8.12
+   Compiling futures-macro v0.3.31
+   Compiling futures-task v0.3.31
+   Compiling futures-io v0.3.31
+   Compiling rustix v1.1.3
+   Compiling futures-util v0.3.31
+   Compiling http v1.4.0
+   Compiling tinystr v0.8.2
+   Compiling litemap v0.8.1
+   Compiling writeable v0.6.2
+   Compiling linux-raw-sys v0.11.0
+   Compiling icu_locale_core v2.1.1
+   Compiling zerotrie v0.2.3
+   Compiling potential_utf v0.1.4
+   Compiling typenum v1.19.0
+   Compiling serde_core v1.0.228
+   Compiling getrandom v0.3.4
+   Compiling scopeguard v1.2.0
+   Compiling parking_lot_core v0.9.12
+   Compiling icu_properties_data v2.1.2
+   Compiling icu_normalizer_data v2.1.1
+   Compiling cfg_aliases v0.2.1
+   Compiling lock_api v0.4.14
+   Compiling icu_collections v2.1.1
+   Compiling icu_provider v2.1.1
+   Compiling hashbrown v0.14.5
+   Compiling http-body v1.0.1
+   Compiling generic-array v0.14.7
+   Compiling tracing-core v0.1.36
+   Compiling tracing-attributes v0.1.31
+   Compiling openssl v0.10.75
+   Compiling percent-encoding v2.3.2
+   Compiling httparse v1.10.1
+   Compiling hashbrown v0.16.1
+   Compiling foreign-types-shared v0.1.1
+   Compiling equivalent v1.0.2
+   Compiling crossbeam-epoch v0.9.20
+   Compiling indexmap v2.13.0
+   Compiling foreign-types v0.3.2
+   Compiling tracing v0.1.44
+   Compiling tokio-util v0.7.18
+   Compiling ppv-lite86 v0.2.21
+   Compiling zstd-sys v2.0.16+zstd.1.5.7
+   Compiling openssl-macros v0.1.1
+   Compiling ipnet v2.11.0
+   Compiling fnv v1.0.7
+   Compiling tower-service v0.3.3
+   Compiling io-lifetimes v3.0.1
+   Compiling atomic-waker v1.1.2
+   Compiling serde v1.0.228
+   Compiling io-lifetimes v2.0.4
+   Compiling try-lock v0.2.5
+   Compiling native-tls v0.2.14
+   Compiling want v0.3.1
+   Compiling h2 v0.4.16
+   Compiling icu_normalizer v2.1.1
+   Compiling icu_properties v2.1.2
+   Compiling getrandom v0.2.17
+   Compiling serde_derive v1.0.228
+   Compiling autocfg v1.5.0
+   Compiling openssl-probe v0.1.6
+   Compiling io-extras v0.19.0
+   Compiling rayon-core v1.13.0
+   Compiling zmij v1.0.16
+   Compiling num-traits v0.2.19
+   Compiling rand_core v0.6.4
+   Compiling crossbeam-deque v0.8.6
+   Compiling hyper v1.8.1
+   Compiling idna_adapter v1.2.1
+   Compiling form_urlencoded v1.2.2
+   Compiling nix v0.30.1
+   Compiling libsqlite3-sys v0.30.1
+   Compiling sync_wrapper v1.0.2
+   Compiling crc32fast v1.5.0
+   Compiling cap-primitives v4.0.3
+   Compiling serde_json v1.0.149
+   Compiling tower-layer v0.3.3
+   Compiling zstd-safe v7.2.4
+   Compiling utf8_iter v1.0.4
+   Compiling portable-atomic v1.13.0
+   Compiling base64 v0.22.1
+   Compiling hyper-util v0.1.19
+   Compiling idna v1.1.0
+   Compiling tower v0.5.3
+   Compiling fs-set-times v0.20.3
+   Compiling rand_chacha v0.3.1
+   Compiling tokio-native-tls v0.3.1
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling rand_core v0.9.5
+   Compiling http-body-util v0.1.3
+   Compiling nix v0.29.0
+   Compiling rustix-linux-procfs v0.1.1
+   Compiling aho-corasick v1.1.4
+   Compiling raw-cpuid v11.6.0
+   Compiling blake3 v1.8.3
+   Compiling instant v0.1.13
+   Compiling filetime v0.2.27
+   Compiling inotify-sys v0.1.5
+   Compiling thiserror v2.0.18
+   Compiling either v1.15.0
+   Compiling maybe-owned v0.3.4
+   Compiling same-file v1.0.6
+   Compiling anyhow v1.0.103
+   Compiling regex-syntax v0.8.8
+   Compiling cap-std v4.0.3
+   Compiling ryu v1.0.22
+   Compiling bitflags v1.3.2
+   Compiling mini-moka v0.10.3
+   Compiling simd-adler32 v0.3.8
+   Compiling adler2 v2.0.1
+   Compiling zeroize v1.8.2
+   Compiling tinyvec_macros v0.1.1
+   Compiling ambient-authority v0.0.2
+   Compiling cpufeatures v0.2.17
+   Compiling iri-string v0.7.10
+   Compiling option-ext v0.2.0
+   Compiling dirs-sys v0.4.1
+   Compiling tower-http v0.6.8
+   Compiling tinyvec v1.13.2
+   Compiling rustls-pki-types v1.14.0
+   Compiling miniz_oxide v0.8.9
+   Compiling inotify v0.10.2
+   Compiling serde_urlencoded v0.7.1
+   Compiling regex-automata v0.4.13
+   Compiling walkdir v2.5.0
+   Compiling rayon v1.11.0
+   Compiling notify-types v1.0.1
+   Compiling quanta v0.12.6
+   Compiling hyper-tls v0.6.0
+   Compiling rand_chacha v0.9.0
+   Compiling digest v0.10.7
+   Compiling rand v0.8.6
+   Compiling url v2.5.8
+   Compiling parking_lot v0.12.5
+   Compiling dashmap v6.1.0
+   Compiling dashmap v5.5.3
+   Compiling hashlink v0.9.1
+   Compiling spinning_top v0.3.0
+   Compiling xattr v1.6.1
+   Compiling futures-executor v0.3.31
+   Compiling crossbeam-channel v0.5.15
+   Compiling encoding_rs v0.8.35
+   Compiling thiserror-impl v2.0.18
+   Compiling fastrand v2.3.0
+   Compiling no-std-compat v0.4.1
+   Compiling tagptr v0.2.0
+   Compiling nonzero_ext v0.3.0
+   Compiling futures-timer v3.0.3
+   Compiling triomphe v0.1.15
+   Compiling arrayvec v0.7.6
+   Compiling constant_time_eq v0.4.2
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling arrayref v0.3.9
+   Compiling iana-time-zone v0.1.64
+   Compiling mime v0.3.17
+   Compiling fallible-iterator v0.3.0
+   Compiling rusqlite v0.32.1
+   Compiling reqwest v0.12.28
+   Compiling chrono v0.4.43
+   Compiling governor v0.7.0
+   Compiling tempfile v3.24.0
+   Compiling futures v0.3.31
+   Compiling tar v0.4.45
+   Compiling flate2 v1.1.8
+   Compiling ctrlc v3.5.1
+   Compiling sha2 v0.10.9
+   Compiling zstd v0.13.3
+   Compiling rand v0.9.3
+   Compiling notify v7.0.0
+   Compiling sysinfo v0.32.1
+   Compiling regex v1.12.2
+   Compiling unicode-normalization v0.1.25
+   Compiling dirs v5.0.1
+   Compiling uuid v1.19.0
+   Compiling fs2 v0.4.3
+   Compiling async-trait v0.1.89
+   Compiling hex v0.4.3
+   Compiling semver v1.0.27
+   Compiling urlencoding v2.1.3
+   Compiling pumas-library v0.7.0 (/tmp/pumas-uv-offline-eed/rust/crates/pumas-core)
+   Compiling pumas-offline-catalog-experiment v0.0.0 (/tmp/pumas-uv-offline-build/crate)
+error[E0277]: the trait bound `uuid::Uuid: serde::Serialize` is not satisfied
+   --> src/main.rs:108:24
+    |
+108 |           Ok(payload) => json!({"status":"experiment_completed", "payload":payload,
+    |  ________________________^
+109 | |             "settled_records":store.acquisitions()?}),
+    | |                                                     ^
+    | |                                                     |
+    | |_____________________________________________________the trait `serde_core::ser::Serialize` is not implemented for `uuid::Uuid`
+    |                                                       required by a bound introduced by this call
+    |
+    = note: for local types consider adding `#[derive(serde::Serialize)]` to your `uuid::Uuid` type
+    = note: for types from other crates check whether the crate offers a `serde` feature flag
+    = help: the following other types implement trait `serde_core::ser::Serialize`:
+              &'a T
+              &'a mut T
+              ()
+              (T,)
+              (T0, T1)
+              (T0, T1, T2)
+              (T0, T1, T2, T3)
+              (T0, T1, T2, T3, T4)
+            and 524 others
+    = note: required for `BTreeMap<uuid::Uuid, AcquisitionRecord>` to implement `serde_core::ser::Serialize`
+    = note: 1 redundant requirement hidden
+    = note: required for `&BTreeMap<uuid::Uuid, AcquisitionRecord>` to implement `serde_core::ser::Serialize`
+note: required by a bound in `to_value`
+   --> /workspace/.pumas-tools/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/value/mod.rs:997:8
+    |
+995 | pub fn to_value<T>(value: T) -> Result<Value, Error>
+    |        -------- required by a bound in this function
+996 | where
+997 |     T: Serialize,
+    |        ^^^^^^^^^ required by this bound in `to_value`
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `uuid::Uuid: serde::Serialize` is not satisfied
+   --> src/main.rs:110:23
+    |
+110 |           Err(error) => json!({"status":"acquisition_or_inspection_refused", "error":error.to_string(),
+    |  _______________________^
+111 | |             "retained_records":store.acquisitions()?}),
+    | |                                                      ^
+    | |                                                      |
+    | |______________________________________________________the trait `serde_core::ser::Serialize` is not implemented for `uuid::Uuid`
+    |                                                        required by a bound introduced by this call
+    |
+    = note: for local types consider adding `#[derive(serde::Serialize)]` to your `uuid::Uuid` type
+    = note: for types from other crates check whether the crate offers a `serde` feature flag
+    = help: the following other types implement trait `serde_core::ser::Serialize`:
+              &'a T
+              &'a mut T
+              ()
+              (T,)
+              (T0, T1)
+              (T0, T1, T2)
+              (T0, T1, T2, T3)
+              (T0, T1, T2, T3, T4)
+            and 524 others
+    = note: required for `BTreeMap<uuid::Uuid, AcquisitionRecord>` to implement `serde_core::ser::Serialize`
+    = note: 1 redundant requirement hidden
+    = note: required for `&BTreeMap<uuid::Uuid, AcquisitionRecord>` to implement `serde_core::ser::Serialize`
+note: required by a bound in `to_value`
+   --> /workspace/.pumas-tools/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.149/src/value/mod.rs:997:8
+    |
+995 | pub fn to_value<T>(value: T) -> Result<Value, Error>
+    |        -------- required by a bound in this function
+996 | where
+997 |     T: Serialize,
+    |        ^^^^^^^^^ required by this bound in `to_value`
+    = note: this error originates in the macro `$crate::json_internal` which comes from the expansion of the macro `json` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `pumas-offline-catalog-experiment` (bin "pumas-offline-catalog-experiment") due to 2 previous errors
+Traceback (most recent call last):
+  File "/tmp/pumas-uv-offline-eed/docs/plans/artifact-acquisition/reports/torch-offline-catalog-2026-10-06/build_harness.py", line 33, in <module>
+    subprocess.run(["cargo", "build", "--offline", "--manifest-path", str(crate / "Cargo.toml")], check=True)
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['cargo', 'build', '--offline', '--manifest-path', '/tmp/pumas-uv-offline-build/crate/Cargo.toml']' returned non-zero exit status 101.

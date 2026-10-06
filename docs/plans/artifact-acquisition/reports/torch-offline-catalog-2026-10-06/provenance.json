@@ -1,0 +1,57 @@
+{
+  "base_commit": "eed27495137fbd9cf933fd8f3d827fd66ea591ca",
+  "base_tree": "3242e15d63bbe7b131d6b08934b4e41be7ddecdb",
+  "tested_source_commit": "8eb93f5a61d6047e5d4bdeeaad47f6714494b887",
+  "tested_source_tree": "97bf6d38146cf7c5d91f943be549985adb2adc67",
+  "uv": {
+    "version": "uv 0.12.23 (x86_64-unknown-linux-gnu)",
+    "binary_sha256": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f",
+    "prior_official_provenance": "../torch-public-uv-evaluation-2026-10-06/tool-provenance.json"
+  },
+  "packaging": {
+    "source": "torch-server/tooling/packaging.zip",
+    "sha256": "3453711fd71407b7d84253d5b498e7c0430fff187e3fb73dbd6f463b924014b2",
+    "version": "26.3",
+    "existing_provenance": "torch-server/tooling/packaging-source.json"
+  },
+  "python": {
+    "version": "Python 3.12.14",
+    "binary_sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7"
+  },
+  "strace": {
+    "version": "strace -- version 6.13",
+    "binary_sha256": "69f88291a4e47f258b8e32b089c919a247509f063ef3d6afe5389939051102b3"
+  },
+  "rust": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+  "harness": {
+    "binary_sha256": "bd6adca9a7a3f1206280a4779887becfef65280adcbe12f0780ec600cc25cbfa",
+    "source_sha256": "b68ade355f303043d3fcee2c0f037fbb2da148e1f35a13126e0b8316a03fdfd4",
+    "compiled_source_sha256": "b68ade355f303043d3fcee2c0f037fbb2da148e1f35a13126e0b8316a03fdfd4",
+    "manifest_sha256": "50dec6c25cd97cbec26401b9fb0fb3570479df67299afe0b6ad2fc4145b7c3de",
+    "lock_sha256": "705cc5e3bb941b21c7614179e7d5ac907aaa642173afc7a55ff7101a19a6be55",
+    "shared_core_default_features": false,
+    "external_target": "/tmp/pumas-uv-offline-build/target",
+    "cargo_build_jobs": 1,
+    "offline_locked_build": true,
+    "new_package_identities_vs_production_lock": [
+      [
+        "pumas-offline-catalog-experiment",
+        "0.0.0",
+        null
+      ]
+    ]
+  },
+  "raw_evidence": {
+    "sha256": "c59fdbe5fd4f378d0bed30b3a03ee00da74393cff2f54c69ea7ea0bbc8652018",
+    "bytes": 355370,
+    "members": 2063,
+    "authoritative_run": "qualified-final",
+    "earlier_runs": "exploratory failures/refinements retained; not acceptance"
+  },
+  "source_files": {
+    "evaluate_offline.py": "7700ac186adc19b271f696a00dd221675b6720fa0b0c7b34ba3def56963da34f",
+    "build_harness.py": "6f3e030a37e6d49628b4dc098a61120893223dd2e3cf1ba3da19e4ec0f21d8c2",
+    "acquire.rs": "b68ade355f303043d3fcee2c0f037fbb2da148e1f35a13126e0b8316a03fdfd4"
+  },
+  "production_changed_paths": []
+}

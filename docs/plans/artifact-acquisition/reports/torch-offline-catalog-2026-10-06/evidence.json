@@ -1,0 +1,4083 @@
+{
+  "cases": [
+    {
+      "case": "multi-extras-linux",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "selected": true,
+        "held_using": true,
+        "settled_adopted": true,
+        "observed_no_uv_ip_io": true,
+        "one_uv_invocation": true,
+        "exact_projection_provenance": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "exit": 0,
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "multi-extras-linux"
+            },
+            "files": [
+              {
+                "bytes": 829,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-2.0-py3-none-any.whl",
+                "sha256": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-3.0-py3-none-any.whl",
+                "sha256": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+              },
+              {
+                "bytes": 717,
+                "path": "helper-1.0-py3-none-any.whl",
+                "sha256": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+              },
+              {
+                "bytes": 736,
+                "path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                "sha256": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+              },
+              {
+                "bytes": 768,
+                "path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "sha256": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+              }
+            ],
+            "id": "d2eae845-52ed-4c59-ae63-ba752f9a5a4c",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+                  },
+                  "expected_size": 829,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-2.0-py3-none-any.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-3.0-py3-none-any.whl",
+                  "source_key": "candidate-3",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+                  },
+                  "expected_size": 717,
+                  "logical_path": "helper-1.0-py3-none-any.whl",
+                  "source_key": "candidate-4",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+                  },
+                  "expected_size": 736,
+                  "logical_path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                  "source_key": "candidate-5",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+                  },
+                  "expected_size": 768,
+                  "logical_path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-6",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "63f08077383137fbdf5e30c8d3d3466f8fe428b09d64d3877f11cb24d8751cc0"
+                },
+                "source_id": "offline-catalog.multi-extras-linux"
+              }
+            },
+            "phase": {
+              "lease": "f2772f27-9f11-4205-b1e4-7bb3e681fa48",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fcbf"
+            }
+          },
+          "lock_sha256": "944a83bcb299938c47a5c04f99b7a582cb329ee349b3f793cb3d2d8ccdd137cd",
+          "observation": {
+            "executions": [
+              "183712 execve(\"/tmp/pumas-uv-public-eval/tool-env/bin/uv\", [\"/tmp/pumas-uv-public-eval/tool-e\"..., \"--no-config\", \"--no-cache\", \"--offline\", \"--no-python-downloads\", \"--no-managed-python\", \"--color\", \"never\", \"pip\", \"compile\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-index\", \"--find-links\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-build\", \"--no-sources\", \"--keyring-provider\", \"disabled\", \"--python\", \"/opt/codex/runtimes/codex-primar\"..., \"--python-version\", \"3.12\", \"--python-platform\", \"x86_64-manylinux_2_17\", \"--format\", \"pylock.toml\", \"--generate-hashes\", \"--no-header\", \"--no-annotate\", \"-o\", \"/tmp/pumas-uv-offline-evidence/q\"...], 0x7ffd98d72ba8 /* 13 vars */) = 0",
+              "183715 execve(\"/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3\", [\"/opt/codex/runtimes/codex-primar\"..., \"-I\", \"-B\", \"-c\", \"import sys; sys.path = [__import\"...], 0x55884b5d9910 /* 14 vars */) = 0"
+            ],
+            "ip_operations": []
+          },
+          "projection_sha256": "1b6a68a5a9f129dd1c77d286fb724ecb44d38d4782c71a57944145f2fd8dfa09",
+          "selected": [
+            {
+              "bytes": 717,
+              "filename": "helper-1.0-py3-none-any.whl",
+              "id": "candidate-4",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/multi-extras-linux/acquisition/catalog/helper-1.0-py3-none-any.whl",
+              "name": "helper",
+              "sha256": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:37823/owner/helper-1.0-py3-none-any.whl",
+              "version": "1.0"
+            },
+            {
+              "bytes": 765,
+              "filename": "leaf-2.0-py3-none-any.whl",
+              "id": "candidate-2",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/multi-extras-linux/acquisition/catalog/leaf-2.0-py3-none-any.whl",
+              "name": "leaf",
+              "sha256": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:37823/owner/leaf-2.0-py3-none-any.whl",
+              "version": "2.0"
+            },
+            {
+              "bytes": 768,
+              "filename": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+              "id": "candidate-6",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/multi-extras-linux/acquisition/catalog/linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+              "name": "linuxleaf",
+              "sha256": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba",
+              "tags": [
+                "cp312-cp312-manylinux_2_17_x86_64"
+              ],
+              "url": "http://127.0.0.1:37823/owner/linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+              "version": "1.0"
+            },
+            {
+              "bytes": 829,
+              "filename": "root-1.0-py3-none-any.whl",
+              "id": "candidate-0",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/multi-extras-linux/acquisition/catalog/root-1.0-py3-none-any.whl",
+              "name": "root",
+              "sha256": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:37823/owner/root-1.0-py3-none-any.whl",
+              "version": "1.0"
+            }
+          ],
+          "status": "selected",
+          "uv_invoked": true
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "multi-extras-linux"
+            },
+            "files": [
+              {
+                "bytes": 829,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-2.0-py3-none-any.whl",
+                "sha256": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-3.0-py3-none-any.whl",
+                "sha256": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+              },
+              {
+                "bytes": 717,
+                "path": "helper-1.0-py3-none-any.whl",
+                "sha256": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+              },
+              {
+                "bytes": 736,
+                "path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                "sha256": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+              },
+              {
+                "bytes": 768,
+                "path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "sha256": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+              }
+            ],
+            "id": "d2eae845-52ed-4c59-ae63-ba752f9a5a4c",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+                  },
+                  "expected_size": 829,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-2.0-py3-none-any.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-3.0-py3-none-any.whl",
+                  "source_key": "candidate-3",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+                  },
+                  "expected_size": 717,
+                  "logical_path": "helper-1.0-py3-none-any.whl",
+                  "source_key": "candidate-4",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+                  },
+                  "expected_size": 736,
+                  "logical_path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                  "source_key": "candidate-5",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+                  },
+                  "expected_size": 768,
+                  "logical_path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-6",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "63f08077383137fbdf5e30c8d3d3466f8fe428b09d64d3877f11cb24d8751cc0"
+                },
+                "source_id": "offline-catalog.multi-extras-linux"
+              }
+            },
+            "phase": {
+              "lease": "f2772f27-9f11-4205-b1e4-7bb3e681fa48",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fcbf"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-2.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-3.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/helper-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/winleaf-1.0-cp312-cp312-win_amd64.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "multi-extras-windows",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "selected": true,
+        "held_using": true,
+        "settled_adopted": true,
+        "observed_no_uv_ip_io": true,
+        "one_uv_invocation": true,
+        "exact_projection_provenance": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "exit": 0,
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "multi-extras-windows"
+            },
+            "files": [
+              {
+                "bytes": 829,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-2.0-py3-none-any.whl",
+                "sha256": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-3.0-py3-none-any.whl",
+                "sha256": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+              },
+              {
+                "bytes": 717,
+                "path": "helper-1.0-py3-none-any.whl",
+                "sha256": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+              },
+              {
+                "bytes": 736,
+                "path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                "sha256": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+              },
+              {
+                "bytes": 768,
+                "path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "sha256": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+              }
+            ],
+            "id": "f269741e-859a-485f-8f4c-8c09ac5b3f18",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+                  },
+                  "expected_size": 829,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-2.0-py3-none-any.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-3.0-py3-none-any.whl",
+                  "source_key": "candidate-3",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+                  },
+                  "expected_size": 717,
+                  "logical_path": "helper-1.0-py3-none-any.whl",
+                  "source_key": "candidate-4",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+                  },
+                  "expected_size": 736,
+                  "logical_path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                  "source_key": "candidate-5",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+                  },
+                  "expected_size": 768,
+                  "logical_path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-6",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "7242a31c9562bc9a024522a05f97a0f590be888f0ea5319340b29e83bd255308"
+                },
+                "source_id": "offline-catalog.multi-extras-windows"
+              }
+            },
+            "phase": {
+              "lease": "6be82739-ffa4-49d2-b40c-a6a4dbd7dcba",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fd27"
+            }
+          },
+          "lock_sha256": "c9e01120641d6d456b338657220edf46066530f20fc84263377f7e9fe9f5fd65",
+          "observation": {
+            "executions": [
+              "183738 execve(\"/tmp/pumas-uv-public-eval/tool-env/bin/uv\", [\"/tmp/pumas-uv-public-eval/tool-e\"..., \"--no-config\", \"--no-cache\", \"--offline\", \"--no-python-downloads\", \"--no-managed-python\", \"--color\", \"never\", \"pip\", \"compile\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-index\", \"--find-links\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-build\", \"--no-sources\", \"--keyring-provider\", \"disabled\", \"--python\", \"/opt/codex/runtimes/codex-primar\"..., \"--python-version\", \"3.12\", \"--python-platform\", \"x86_64-pc-windows-msvc\", \"--format\", \"pylock.toml\", \"--generate-hashes\", \"--no-header\", \"--no-annotate\", \"-o\", \"/tmp/pumas-uv-offline-evidence/q\"...], 0x7ffd0d0e0b68 /* 13 vars */) = 0",
+              "183741 execve(\"/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3\", [\"/opt/codex/runtimes/codex-primar\"..., \"-I\", \"-B\", \"-c\", \"import sys; sys.path = [__import\"...], 0x55f2befb0910 /* 14 vars */) = 0"
+            ],
+            "ip_operations": []
+          },
+          "projection_sha256": "29da993992bc7f0fec5ec9017b0f28a8fba2f803b1caef010b62df3b07d04832",
+          "selected": [
+            {
+              "bytes": 717,
+              "filename": "helper-1.0-py3-none-any.whl",
+              "id": "candidate-4",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/multi-extras-windows/acquisition/catalog/helper-1.0-py3-none-any.whl",
+              "name": "helper",
+              "sha256": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:39791/owner/helper-1.0-py3-none-any.whl",
+              "version": "1.0"
+            },
+            {
+              "bytes": 765,
+              "filename": "leaf-2.0-py3-none-any.whl",
+              "id": "candidate-2",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/multi-extras-windows/acquisition/catalog/leaf-2.0-py3-none-any.whl",
+              "name": "leaf",
+              "sha256": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:39791/owner/leaf-2.0-py3-none-any.whl",
+              "version": "2.0"
+            },
+            {
+              "bytes": 829,
+              "filename": "root-1.0-py3-none-any.whl",
+              "id": "candidate-0",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/multi-extras-windows/acquisition/catalog/root-1.0-py3-none-any.whl",
+              "name": "root",
+              "sha256": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:39791/owner/root-1.0-py3-none-any.whl",
+              "version": "1.0"
+            },
+            {
+              "bytes": 736,
+              "filename": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+              "id": "candidate-5",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/multi-extras-windows/acquisition/catalog/winleaf-1.0-cp312-cp312-win_amd64.whl",
+              "name": "winleaf",
+              "sha256": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b",
+              "tags": [
+                "cp312-cp312-win_amd64"
+              ],
+              "url": "http://127.0.0.1:39791/owner/winleaf-1.0-cp312-cp312-win_amd64.whl",
+              "version": "1.0"
+            }
+          ],
+          "status": "selected",
+          "uv_invoked": true
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "multi-extras-windows"
+            },
+            "files": [
+              {
+                "bytes": 829,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-2.0-py3-none-any.whl",
+                "sha256": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-3.0-py3-none-any.whl",
+                "sha256": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+              },
+              {
+                "bytes": 717,
+                "path": "helper-1.0-py3-none-any.whl",
+                "sha256": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+              },
+              {
+                "bytes": 736,
+                "path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                "sha256": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+              },
+              {
+                "bytes": 768,
+                "path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "sha256": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+              }
+            ],
+            "id": "f269741e-859a-485f-8f4c-8c09ac5b3f18",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+                  },
+                  "expected_size": 829,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-2.0-py3-none-any.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-3.0-py3-none-any.whl",
+                  "source_key": "candidate-3",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+                  },
+                  "expected_size": 717,
+                  "logical_path": "helper-1.0-py3-none-any.whl",
+                  "source_key": "candidate-4",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+                  },
+                  "expected_size": 736,
+                  "logical_path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                  "source_key": "candidate-5",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+                  },
+                  "expected_size": 768,
+                  "logical_path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-6",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "7242a31c9562bc9a024522a05f97a0f590be888f0ea5319340b29e83bd255308"
+                },
+                "source_id": "offline-catalog.multi-extras-windows"
+              }
+            },
+            "phase": {
+              "lease": "6be82739-ffa4-49d2-b40c-a6a4dbd7dcba",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fd27"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-2.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-3.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/helper-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/winleaf-1.0-cp312-cp312-win_amd64.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "approved-redirect",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "selected": true,
+        "held_using": true,
+        "settled_adopted": true,
+        "observed_no_uv_ip_io": true,
+        "one_uv_invocation": true,
+        "exact_projection_provenance": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "exit": 0,
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "approved-redirect"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "28e6aaa5-fb5f-4bf2-8c81-0df4b22c340c",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "a2a3fc8cc0cb5975bdf0fc7dd1719746d66592846a0a992e2c00acf8bc018207"
+                },
+                "source_id": "offline-catalog.approved-redirect"
+              }
+            },
+            "phase": {
+              "lease": "9f0a11f0-260c-4508-b5a0-929793c442b0",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fd8f"
+            }
+          },
+          "lock_sha256": "fba02ca53cf0486596b6b1f837669cba28d6dc0c94e03a71c22f4b837ef2cdfc",
+          "observation": {
+            "executions": [
+              "183759 execve(\"/tmp/pumas-uv-public-eval/tool-env/bin/uv\", [\"/tmp/pumas-uv-public-eval/tool-e\"..., \"--no-config\", \"--no-cache\", \"--offline\", \"--no-python-downloads\", \"--no-managed-python\", \"--color\", \"never\", \"pip\", \"compile\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-index\", \"--find-links\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-build\", \"--no-sources\", \"--keyring-provider\", \"disabled\", \"--python\", \"/opt/codex/runtimes/codex-primar\"..., \"--python-version\", \"3.12\", \"--python-platform\", \"x86_64-manylinux_2_17\", \"--format\", \"pylock.toml\", \"--generate-hashes\", \"--no-header\", \"--no-annotate\", \"-o\", \"/tmp/pumas-uv-offline-evidence/q\"...], 0x7ffd48dab4a8 /* 13 vars */) = 0",
+              "183762 execve(\"/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3\", [\"/opt/codex/runtimes/codex-primar\"..., \"-I\", \"-B\", \"-c\", \"import sys; sys.path = [__import\"...], 0x559467730910 /* 14 vars */) = 0"
+            ],
+            "ip_operations": []
+          },
+          "projection_sha256": "22087eb3971e85cf9b94ccddc380ecd4ab124b22f2369e2264e408dbaa3ad9bc",
+          "selected": [
+            {
+              "bytes": 697,
+              "filename": "root-1.0-py3-none-any.whl",
+              "id": "candidate-0",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/approved-redirect/acquisition/catalog/root-1.0-py3-none-any.whl",
+              "name": "root",
+              "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:43447/owner/root-1.0-py3-none-any.whl",
+              "version": "1.0"
+            }
+          ],
+          "status": "selected",
+          "uv_invoked": true
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "approved-redirect"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "28e6aaa5-fb5f-4bf2-8c81-0df4b22c340c",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "a2a3fc8cc0cb5975bdf0fc7dd1719746d66592846a0a992e2c00acf8bc018207"
+                },
+                "source_id": "offline-catalog.approved-redirect"
+              }
+            },
+            "phase": {
+              "lease": "9f0a11f0-260c-4508-b5a0-929793c442b0",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fd8f"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/approved/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "denied-redirect",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "refused_before_inspection": true,
+        "no_install": true
+      },
+      "outcome": {
+        "error": "Download failed for artifact source: Acquisition retry budget exhausted after 1 attempts: Network error: HTTP artifact request failed",
+        "retained_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "denied-redirect"
+            },
+            "files": [],
+            "id": "c18d6e2c-53c9-458b-afd0-42ce499dc10f",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "cd40e25070e120b1ebfb48b6a84768bcc1254a84bda33af179a26bebd2c0730a"
+                },
+                "source_id": "offline-catalog.denied-redirect"
+              }
+            },
+            "phase": {
+              "state": "transferring"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fdd4"
+            }
+          }
+        ],
+        "status": "acquisition_or_inspection_refused"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "missing-candidate",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "specific_refusal_reason": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "missing-candidate"
+            },
+            "files": [
+              {
+                "bytes": 723,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "95c774d2ed648c8c48309fe7c58f449cc8bb389efb88e5cf58dafc9b257691b6"
+              }
+            ],
+            "id": "77a492d4-e8e7-454b-bfc6-0b8cd74fb832",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "95c774d2ed648c8c48309fe7c58f449cc8bb389efb88e5cf58dafc9b257691b6"
+                  },
+                  "expected_size": 723,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "7f063262d30bc745cfdfe71fc48a9d4ce0e53cd13ff3e62f1a013eb5e04d1c43"
+                },
+                "source_id": "offline-catalog.missing-candidate"
+              }
+            },
+            "phase": {
+              "lease": "273c5767-d57b-4828-9321-126511295153",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fdde"
+            }
+          },
+          "reason": "incomplete bounded catalog: missing>=1",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "missing-candidate"
+            },
+            "files": [
+              {
+                "bytes": 723,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "95c774d2ed648c8c48309fe7c58f449cc8bb389efb88e5cf58dafc9b257691b6"
+              }
+            ],
+            "id": "77a492d4-e8e7-454b-bfc6-0b8cd74fb832",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "95c774d2ed648c8c48309fe7c58f449cc8bb389efb88e5cf58dafc9b257691b6"
+                  },
+                  "expected_size": 723,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "7f063262d30bc745cfdfe71fc48a9d4ce0e53cd13ff3e62f1a013eb5e04d1c43"
+                },
+                "source_id": "offline-catalog.missing-candidate"
+              }
+            },
+            "phase": {
+              "lease": "273c5767-d57b-4828-9321-126511295153",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fdde"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "undeclared-completeness",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "undeclared-completeness"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "42c9d9d7-cca2-42bf-a334-6973c60b1add",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "035a932595200fe4d7cdd85d925bc51c6c86ec74dedfe66a5e909174a5b62d3f"
+                },
+                "source_id": "offline-catalog.undeclared-completeness"
+              }
+            },
+            "phase": {
+              "lease": "9b1d4934-5f86-4e0f-ac58-38c4ef6a4fc9",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fdf0"
+            }
+          },
+          "reason": "owner has not declared finite catalog complete",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "undeclared-completeness"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "42c9d9d7-cca2-42bf-a334-6973c60b1add",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "035a932595200fe4d7cdd85d925bc51c6c86ec74dedfe66a5e909174a5b62d3f"
+                },
+                "source_id": "offline-catalog.undeclared-completeness"
+              }
+            },
+            "phase": {
+              "lease": "9b1d4934-5f86-4e0f-ac58-38c4ef6a4fc9",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fdf0"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "source-url",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "specific_refusal_reason": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "source-url"
+            },
+            "files": [
+              {
+                "bytes": 762,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "46bdb0117a272fed4e147dd24ced3784badca74f85531d1715584a64b1f4e834"
+              }
+            ],
+            "id": "87a3663a-9bba-41cc-8baa-5bdbbf2f0d59",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "46bdb0117a272fed4e147dd24ced3784badca74f85531d1715584a64b1f4e834"
+                  },
+                  "expected_size": 762,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "6d3668424c79a7f3bccb0ae598e6c5344d3e0465160e6e77abf6475ea7dfd19f"
+                },
+                "source_id": "offline-catalog.source-url"
+              }
+            },
+            "phase": {
+              "lease": "553b225e-8d0e-475b-b793-9cfb87a42b59",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe02"
+            }
+          },
+          "reason": "dependency URL/VCS refused before uv, including inactive markers",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "source-url"
+            },
+            "files": [
+              {
+                "bytes": 762,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "46bdb0117a272fed4e147dd24ced3784badca74f85531d1715584a64b1f4e834"
+              }
+            ],
+            "id": "87a3663a-9bba-41cc-8baa-5bdbbf2f0d59",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "46bdb0117a272fed4e147dd24ced3784badca74f85531d1715584a64b1f4e834"
+                  },
+                  "expected_size": 762,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "6d3668424c79a7f3bccb0ae598e6c5344d3e0465160e6e77abf6475ea7dfd19f"
+                },
+                "source_id": "offline-catalog.source-url"
+              }
+            },
+            "phase": {
+              "lease": "553b225e-8d0e-475b-b793-9cfb87a42b59",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe02"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "vcs-url",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "specific_refusal_reason": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "vcs-url"
+            },
+            "files": [
+              {
+                "bytes": 761,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0e97ea14d900a0d2e825617b64002fc37939f83fc314ffa317201d547ff8b1f5"
+              }
+            ],
+            "id": "56330e05-0d00-42d5-8a97-fc7417c8b27b",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0e97ea14d900a0d2e825617b64002fc37939f83fc314ffa317201d547ff8b1f5"
+                  },
+                  "expected_size": 761,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "4dfbcb2dc93623b75f24f20e93e842e25cd6ad41c394814164a3d8eb4e69f43c"
+                },
+                "source_id": "offline-catalog.vcs-url"
+              }
+            },
+            "phase": {
+              "lease": "746785c7-8f7a-4310-a1ba-fe0da87f6142",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe14"
+            }
+          },
+          "reason": "dependency URL/VCS refused before uv, including inactive markers",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "vcs-url"
+            },
+            "files": [
+              {
+                "bytes": 761,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0e97ea14d900a0d2e825617b64002fc37939f83fc314ffa317201d547ff8b1f5"
+              }
+            ],
+            "id": "56330e05-0d00-42d5-8a97-fc7417c8b27b",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0e97ea14d900a0d2e825617b64002fc37939f83fc314ffa317201d547ff8b1f5"
+                  },
+                  "expected_size": 761,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "4dfbcb2dc93623b75f24f20e93e842e25cd6ad41c394814164a3d8eb4e69f43c"
+                },
+                "source_id": "offline-catalog.vcs-url"
+              }
+            },
+            "phase": {
+              "lease": "746785c7-8f7a-4310-a1ba-fe0da87f6142",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe14"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "inactive-url",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "specific_refusal_reason": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "inactive-url"
+            },
+            "files": [
+              {
+                "bytes": 787,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "f4c668aab73da42f38beaff0b36856566ebc3a9152458d525b3d7e483fe44965"
+              }
+            ],
+            "id": "48bc6327-17ec-4b22-ab63-5f3a093e114b",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "f4c668aab73da42f38beaff0b36856566ebc3a9152458d525b3d7e483fe44965"
+                  },
+                  "expected_size": 787,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "cc1bf07b53493bc8f67673f5c3bb77eea89123a7a0c77c6b4d143252f73b9be0"
+                },
+                "source_id": "offline-catalog.inactive-url"
+              }
+            },
+            "phase": {
+              "lease": "eada6183-aadc-45b1-99a6-3ca10e202fb3",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe26"
+            }
+          },
+          "reason": "dependency URL/VCS refused before uv, including inactive markers",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "inactive-url"
+            },
+            "files": [
+              {
+                "bytes": 787,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "f4c668aab73da42f38beaff0b36856566ebc3a9152458d525b3d7e483fe44965"
+              }
+            ],
+            "id": "48bc6327-17ec-4b22-ab63-5f3a093e114b",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "f4c668aab73da42f38beaff0b36856566ebc3a9152458d525b3d7e483fe44965"
+                  },
+                  "expected_size": 787,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "cc1bf07b53493bc8f67673f5c3bb77eea89123a7a0c77c6b4d143252f73b9be0"
+                },
+                "source_id": "offline-catalog.inactive-url"
+              }
+            },
+            "phase": {
+              "lease": "eada6183-aadc-45b1-99a6-3ca10e202fb3",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe26"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "unselected-candidate-url",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "specific_refusal_reason": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "unselected-candidate-url"
+            },
+            "files": [
+              {
+                "bytes": 722,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "b7f3a688eefbd27f13f174c2318b4e29c2545b626885f0d83ba0a34a2ef3e492"
+              },
+              {
+                "bytes": 697,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+              },
+              {
+                "bytes": 762,
+                "path": "leaf-9.0-py3-none-any.whl",
+                "sha256": "20ac26d9bfbb315a9c10729bfc30d39b44d7b9dd0b4455373e0a7b8c8db4d1e6"
+              }
+            ],
+            "id": "b3444270-0342-4cfd-8efd-f5eaa9d6c76d",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "b7f3a688eefbd27f13f174c2318b4e29c2545b626885f0d83ba0a34a2ef3e492"
+                  },
+                  "expected_size": 722,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "20ac26d9bfbb315a9c10729bfc30d39b44d7b9dd0b4455373e0a7b8c8db4d1e6"
+                  },
+                  "expected_size": 762,
+                  "logical_path": "leaf-9.0-py3-none-any.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "a5a0d981882c94dd6918677a36fb84acb0353bb8aa15b38354429b40beabf343"
+                },
+                "source_id": "offline-catalog.unselected-candidate-url"
+              }
+            },
+            "phase": {
+              "lease": "210b694e-45e7-452d-a7e3-cf488459363a",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe38"
+            }
+          },
+          "reason": "dependency URL/VCS refused before uv, including inactive markers",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "unselected-candidate-url"
+            },
+            "files": [
+              {
+                "bytes": 722,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "b7f3a688eefbd27f13f174c2318b4e29c2545b626885f0d83ba0a34a2ef3e492"
+              },
+              {
+                "bytes": 697,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+              },
+              {
+                "bytes": 762,
+                "path": "leaf-9.0-py3-none-any.whl",
+                "sha256": "20ac26d9bfbb315a9c10729bfc30d39b44d7b9dd0b4455373e0a7b8c8db4d1e6"
+              }
+            ],
+            "id": "b3444270-0342-4cfd-8efd-f5eaa9d6c76d",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "b7f3a688eefbd27f13f174c2318b4e29c2545b626885f0d83ba0a34a2ef3e492"
+                  },
+                  "expected_size": 722,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "20ac26d9bfbb315a9c10729bfc30d39b44d7b9dd0b4455373e0a7b8c8db4d1e6"
+                  },
+                  "expected_size": 762,
+                  "logical_path": "leaf-9.0-py3-none-any.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "a5a0d981882c94dd6918677a36fb84acb0353bb8aa15b38354429b40beabf343"
+                },
+                "source_id": "offline-catalog.unselected-candidate-url"
+              }
+            },
+            "phase": {
+              "lease": "210b694e-45e7-452d-a7e3-cf488459363a",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe38"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-9.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "root-vcs",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "specific_refusal_reason": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "root-vcs"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "12e7d744-6c26-459f-8d0b-7b961e2ae2c9",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "df1274dbc71dde32fcaca95a43088982f57b360939bd89f86569990c210c1722"
+                },
+                "source_id": "offline-catalog.root-vcs"
+              }
+            },
+            "phase": {
+              "lease": "d2fe39df-5c36-4139-80f6-f139d1f528cf",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe4c"
+            }
+          },
+          "reason": "root source is not exact owner wheel",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "root-vcs"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "12e7d744-6c26-459f-8d0b-7b961e2ae2c9",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "df1274dbc71dde32fcaca95a43088982f57b360939bd89f86569990c210c1722"
+                },
+                "source_id": "offline-catalog.root-vcs"
+              }
+            },
+            "phase": {
+              "lease": "d2fe39df-5c36-4139-80f6-f139d1f528cf",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe4c"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "root-option",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "root-option"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "44030753-892c-4c94-a302-fd9a6f741418",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "0c16ec49578d9785dbc06c7a172ea250aca67721bc76a093db1df5d104d41e62"
+                },
+                "source_id": "offline-catalog.root-option"
+              }
+            },
+            "phase": {
+              "lease": "b03f16da-1078-4442-9da0-7fb2a46547df",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe5e"
+            }
+          },
+          "reason": "requirement option injection",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "root-option"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "44030753-892c-4c94-a302-fd9a6f741418",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "0c16ec49578d9785dbc06c7a172ea250aca67721bc76a093db1df5d104d41e62"
+                },
+                "source_id": "offline-catalog.root-option"
+              }
+            },
+            "phase": {
+              "lease": "b03f16da-1078-4442-9da0-7fb2a46547df",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe5e"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "source-substitution",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "refused_before_inspection": true,
+        "no_install": true
+      },
+      "outcome": {
+        "error": "Hash mismatch: expected 0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b, got 28c3682b531e41dc8a1d6c21a17befc0ba188dcbb963b4c367c4aa0dce7571be",
+        "retained_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "source-substitution"
+            },
+            "files": [],
+            "id": "eb0ac3b2-2e38-41ce-bc24-bad10d6b0f9d",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "9e6eba722c9915afd919d171e2f10c3d486f4fc0e6ddabffb99b890eb49a1df9"
+                },
+                "source_id": "offline-catalog.source-substitution"
+              }
+            },
+            "phase": {
+              "state": "transferring"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe70"
+            }
+          }
+        ],
+        "status": "acquisition_or_inspection_refused"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "actual-metadata-mismatch",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "specific_refusal_reason": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "actual-metadata-mismatch"
+            },
+            "files": [
+              {
+                "bytes": 698,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "5c9c6f4337a0d28dfcba3f0a3e33131a2329a3d684d62386601ee5cb36cc837b"
+              }
+            ],
+            "id": "145b6fda-e254-4f94-8217-f3a2348d7c2b",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "5c9c6f4337a0d28dfcba3f0a3e33131a2329a3d684d62386601ee5cb36cc837b"
+                  },
+                  "expected_size": 698,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "27558f35cd486628c5b1b623f3745619430ea660785d8fb98f1c60fdc0da668d"
+                },
+                "source_id": "offline-catalog.actual-metadata-mismatch"
+              }
+            },
+            "phase": {
+              "lease": "44acf035-f37a-416f-ad2a-b632a2ecb0d4",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe7b"
+            }
+          },
+          "reason": "actual METADATA identity mismatch",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "actual-metadata-mismatch"
+            },
+            "files": [
+              {
+                "bytes": 698,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "5c9c6f4337a0d28dfcba3f0a3e33131a2329a3d684d62386601ee5cb36cc837b"
+              }
+            ],
+            "id": "145b6fda-e254-4f94-8217-f3a2348d7c2b",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "5c9c6f4337a0d28dfcba3f0a3e33131a2329a3d684d62386601ee5cb36cc837b"
+                  },
+                  "expected_size": 698,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "27558f35cd486628c5b1b623f3745619430ea660785d8fb98f1c60fdc0da668d"
+                },
+                "source_id": "offline-catalog.actual-metadata-mismatch"
+              }
+            },
+            "phase": {
+              "lease": "44acf035-f37a-416f-ad2a-b632a2ecb0d4",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe7b"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "actual-wheel-tags-mismatch",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "specific_refusal_reason": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "actual-wheel-tags-mismatch"
+            },
+            "files": [
+              {
+                "bytes": 706,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "2a73f99be17f4c007b7c6a00d0af98eeeabcc49ebfe62c0c55f64c3224334014"
+              }
+            ],
+            "id": "f0956b8f-94f0-4b45-b1f0-72743739cc3a",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "2a73f99be17f4c007b7c6a00d0af98eeeabcc49ebfe62c0c55f64c3224334014"
+                  },
+                  "expected_size": 706,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "4951c618c48a2c6ad7fab3a95d8cad7842db0f7b47cfa5c9a291043acd7b63ba"
+                },
+                "source_id": "offline-catalog.actual-wheel-tags-mismatch"
+              }
+            },
+            "phase": {
+              "lease": "56159f36-2d3c-4b27-bac1-08543d208679",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe8d"
+            }
+          },
+          "reason": "actual WHEEL tags disagree with filename",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "actual-wheel-tags-mismatch"
+            },
+            "files": [
+              {
+                "bytes": 706,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "2a73f99be17f4c007b7c6a00d0af98eeeabcc49ebfe62c0c55f64c3224334014"
+              }
+            ],
+            "id": "f0956b8f-94f0-4b45-b1f0-72743739cc3a",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "2a73f99be17f4c007b7c6a00d0af98eeeabcc49ebfe62c0c55f64c3224334014"
+                  },
+                  "expected_size": 706,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "4951c618c48a2c6ad7fab3a95d8cad7842db0f7b47cfa5c9a291043acd7b63ba"
+                },
+                "source_id": "offline-catalog.actual-wheel-tags-mismatch"
+              }
+            },
+            "phase": {
+              "lease": "56159f36-2d3c-4b27-bac1-08543d208679",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe8d"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "python-and-tags",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "selected": true,
+        "held_using": true,
+        "settled_adopted": true,
+        "observed_no_uv_ip_io": true,
+        "one_uv_invocation": true,
+        "exact_projection_provenance": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "exit": 0,
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "python-and-tags"
+            },
+            "files": [
+              {
+                "bytes": 719,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "3a4a21915ff356ba954a5adfd06e3a13e4b0c3392cf6b916c1cf9b5900def10f"
+              },
+              {
+                "bytes": 762,
+                "path": "choice-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "sha256": "86b438a81839fc28a0c1617dcf30dfdfc30a9f21d7b98363aa14654d22fb1811"
+              },
+              {
+                "bytes": 762,
+                "path": "choice-2.0-cp311-cp311-manylinux_2_17_x86_64.whl",
+                "sha256": "e0b9ce30a78c1225f94031c4fef685ff01998fcf45b96317c3eb16f5c8a6018f"
+              },
+              {
+                "bytes": 741,
+                "path": "choice-3.0-py3-none-any.whl",
+                "sha256": "46d16c8bc0b6b2eca0253c9a6fa8ccd9406b1f300a497acf77b4a757d4ed3dd8"
+              }
+            ],
+            "id": "69afa5ef-18f4-461c-8437-5a6a060c9553",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "3a4a21915ff356ba954a5adfd06e3a13e4b0c3392cf6b916c1cf9b5900def10f"
+                  },
+                  "expected_size": 719,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "86b438a81839fc28a0c1617dcf30dfdfc30a9f21d7b98363aa14654d22fb1811"
+                  },
+                  "expected_size": 762,
+                  "logical_path": "choice-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "e0b9ce30a78c1225f94031c4fef685ff01998fcf45b96317c3eb16f5c8a6018f"
+                  },
+                  "expected_size": 762,
+                  "logical_path": "choice-2.0-cp311-cp311-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "46d16c8bc0b6b2eca0253c9a6fa8ccd9406b1f300a497acf77b4a757d4ed3dd8"
+                  },
+                  "expected_size": 741,
+                  "logical_path": "choice-3.0-py3-none-any.whl",
+                  "source_key": "candidate-3",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "453aa76b21d5a259bdfe2c2db304666e71c957b8047de3e2b4d019fddcaa58f8"
+                },
+                "source_id": "offline-catalog.python-and-tags"
+              }
+            },
+            "phase": {
+              "lease": "2d575015-a4b3-4912-9028-d581fd0b46bb",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe9f"
+            }
+          },
+          "lock_sha256": "c832ebdd3a56c1045aa1cd02f3ec3928f3ff7c84f2701e400b35c1e2b8e0f3e4",
+          "observation": {
+            "executions": [
+              "183838 execve(\"/tmp/pumas-uv-public-eval/tool-env/bin/uv\", [\"/tmp/pumas-uv-public-eval/tool-e\"..., \"--no-config\", \"--no-cache\", \"--offline\", \"--no-python-downloads\", \"--no-managed-python\", \"--color\", \"never\", \"pip\", \"compile\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-index\", \"--find-links\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-build\", \"--no-sources\", \"--keyring-provider\", \"disabled\", \"--python\", \"/opt/codex/runtimes/codex-primar\"..., \"--python-version\", \"3.12\", \"--python-platform\", \"x86_64-manylinux_2_17\", \"--format\", \"pylock.toml\", \"--generate-hashes\", \"--no-header\", \"--no-annotate\", \"-o\", \"/tmp/pumas-uv-offline-evidence/q\"...], 0x7ffdd4c14448 /* 13 vars */) = 0",
+              "183841 execve(\"/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3\", [\"/opt/codex/runtimes/codex-primar\"..., \"-I\", \"-B\", \"-c\", \"import sys; sys.path = [__import\"...], 0x5597045a1910 /* 14 vars */) = 0"
+            ],
+            "ip_operations": []
+          },
+          "projection_sha256": "4f7792f639cd68cccaaa2520d077326af3444c31f50e7a10a78cbe1ad5603553",
+          "selected": [
+            {
+              "bytes": 762,
+              "filename": "choice-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+              "id": "candidate-1",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/python-and-tags/acquisition/catalog/choice-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+              "name": "choice",
+              "sha256": "86b438a81839fc28a0c1617dcf30dfdfc30a9f21d7b98363aa14654d22fb1811",
+              "tags": [
+                "cp312-cp312-manylinux_2_17_x86_64"
+              ],
+              "url": "http://127.0.0.1:34165/owner/choice-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+              "version": "1.0"
+            },
+            {
+              "bytes": 719,
+              "filename": "root-1.0-py3-none-any.whl",
+              "id": "candidate-0",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/python-and-tags/acquisition/catalog/root-1.0-py3-none-any.whl",
+              "name": "root",
+              "sha256": "3a4a21915ff356ba954a5adfd06e3a13e4b0c3392cf6b916c1cf9b5900def10f",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:34165/owner/root-1.0-py3-none-any.whl",
+              "version": "1.0"
+            }
+          ],
+          "status": "selected",
+          "uv_invoked": true
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "python-and-tags"
+            },
+            "files": [
+              {
+                "bytes": 719,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "3a4a21915ff356ba954a5adfd06e3a13e4b0c3392cf6b916c1cf9b5900def10f"
+              },
+              {
+                "bytes": 762,
+                "path": "choice-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "sha256": "86b438a81839fc28a0c1617dcf30dfdfc30a9f21d7b98363aa14654d22fb1811"
+              },
+              {
+                "bytes": 762,
+                "path": "choice-2.0-cp311-cp311-manylinux_2_17_x86_64.whl",
+                "sha256": "e0b9ce30a78c1225f94031c4fef685ff01998fcf45b96317c3eb16f5c8a6018f"
+              },
+              {
+                "bytes": 741,
+                "path": "choice-3.0-py3-none-any.whl",
+                "sha256": "46d16c8bc0b6b2eca0253c9a6fa8ccd9406b1f300a497acf77b4a757d4ed3dd8"
+              }
+            ],
+            "id": "69afa5ef-18f4-461c-8437-5a6a060c9553",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "3a4a21915ff356ba954a5adfd06e3a13e4b0c3392cf6b916c1cf9b5900def10f"
+                  },
+                  "expected_size": 719,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "86b438a81839fc28a0c1617dcf30dfdfc30a9f21d7b98363aa14654d22fb1811"
+                  },
+                  "expected_size": 762,
+                  "logical_path": "choice-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "e0b9ce30a78c1225f94031c4fef685ff01998fcf45b96317c3eb16f5c8a6018f"
+                  },
+                  "expected_size": 762,
+                  "logical_path": "choice-2.0-cp311-cp311-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "46d16c8bc0b6b2eca0253c9a6fa8ccd9406b1f300a497acf77b4a757d4ed3dd8"
+                  },
+                  "expected_size": 741,
+                  "logical_path": "choice-3.0-py3-none-any.whl",
+                  "source_key": "candidate-3",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "453aa76b21d5a259bdfe2c2db304666e71c957b8047de3e2b4d019fddcaa58f8"
+                },
+                "source_id": "offline-catalog.python-and-tags"
+              }
+            },
+            "phase": {
+              "lease": "2d575015-a4b3-4912-9028-d581fd0b46bb",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fe9f"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/choice-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/choice-2.0-cp311-cp311-manylinux_2_17_x86_64.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/choice-3.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "bounded-unsatisfiable",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "solver_no_fallback": true,
+        "specific_exit": true,
+        "observed_no_uv_ip_io": true,
+        "one_uv_invocation": true,
+        "exact_projection_provenance": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "exit": 1,
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "bounded-unsatisfiable"
+            },
+            "files": [
+              {
+                "bytes": 738,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "7ea07891a3b4e966d736a4c8252aa28b2b3e0a77e8a54797b08ad26075cc32ab"
+              },
+              {
+                "bytes": 722,
+                "path": "left-1.0-py3-none-any.whl",
+                "sha256": "204010f0cb9c19b18a58980325ea5407a78d7cb4022bf124f71f32999734ecce"
+              },
+              {
+                "bytes": 732,
+                "path": "right-1.0-py3-none-any.whl",
+                "sha256": "5b9323881bbb466bc5c577ee211ded630a2ff3b37d333ca0e8abc6766698188e"
+              },
+              {
+                "bytes": 697,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+              },
+              {
+                "bytes": 697,
+                "path": "leaf-2.0-py3-none-any.whl",
+                "sha256": "6d2f1ee6e49f5eef821b5f0e7a7723ee232d3d11c3470212fc7b43ce380069d3"
+              }
+            ],
+            "id": "96a0c36e-199b-4b95-bf93-f238b02479c7",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "7ea07891a3b4e966d736a4c8252aa28b2b3e0a77e8a54797b08ad26075cc32ab"
+                  },
+                  "expected_size": 738,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "204010f0cb9c19b18a58980325ea5407a78d7cb4022bf124f71f32999734ecce"
+                  },
+                  "expected_size": 722,
+                  "logical_path": "left-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "5b9323881bbb466bc5c577ee211ded630a2ff3b37d333ca0e8abc6766698188e"
+                  },
+                  "expected_size": 732,
+                  "logical_path": "right-1.0-py3-none-any.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-3",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "6d2f1ee6e49f5eef821b5f0e7a7723ee232d3d11c3470212fc7b43ce380069d3"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "leaf-2.0-py3-none-any.whl",
+                  "source_key": "candidate-4",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "171b1135a68540f0eed12fe660e5c9f3e3e1dd33aca209f0172bd118967a5396"
+                },
+                "source_id": "offline-catalog.bounded-unsatisfiable"
+              }
+            },
+            "phase": {
+              "lease": "aeb932f4-730e-4445-9900-e0f585e50254",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fefa"
+            }
+          },
+          "observation": {
+            "executions": [
+              "183858 execve(\"/tmp/pumas-uv-public-eval/tool-env/bin/uv\", [\"/tmp/pumas-uv-public-eval/tool-e\"..., \"--no-config\", \"--no-cache\", \"--offline\", \"--no-python-downloads\", \"--no-managed-python\", \"--color\", \"never\", \"pip\", \"compile\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-index\", \"--find-links\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-build\", \"--no-sources\", \"--keyring-provider\", \"disabled\", \"--python\", \"/opt/codex/runtimes/codex-primar\"..., \"--python-version\", \"3.12\", \"--python-platform\", \"x86_64-manylinux_2_17\", \"--format\", \"pylock.toml\", \"--generate-hashes\", \"--no-header\", \"--no-annotate\", \"-o\", \"/tmp/pumas-uv-offline-evidence/q\"...], 0x7ffce4855e48 /* 13 vars */) = 0",
+              "183861 execve(\"/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3\", [\"/opt/codex/runtimes/codex-primar\"..., \"-I\", \"-B\", \"-c\", \"import sys; sys.path = [__import\"...], 0x55ec69e50910 /* 14 vars */) = 0"
+            ],
+            "ip_operations": []
+          },
+          "reason": "resolver nonzero exit is fatal/inconclusive; no fallback",
+          "status": "solver_or_mapping_refused",
+          "uv_invoked": true
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "bounded-unsatisfiable"
+            },
+            "files": [
+              {
+                "bytes": 738,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "7ea07891a3b4e966d736a4c8252aa28b2b3e0a77e8a54797b08ad26075cc32ab"
+              },
+              {
+                "bytes": 722,
+                "path": "left-1.0-py3-none-any.whl",
+                "sha256": "204010f0cb9c19b18a58980325ea5407a78d7cb4022bf124f71f32999734ecce"
+              },
+              {
+                "bytes": 732,
+                "path": "right-1.0-py3-none-any.whl",
+                "sha256": "5b9323881bbb466bc5c577ee211ded630a2ff3b37d333ca0e8abc6766698188e"
+              },
+              {
+                "bytes": 697,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+              },
+              {
+                "bytes": 697,
+                "path": "leaf-2.0-py3-none-any.whl",
+                "sha256": "6d2f1ee6e49f5eef821b5f0e7a7723ee232d3d11c3470212fc7b43ce380069d3"
+              }
+            ],
+            "id": "96a0c36e-199b-4b95-bf93-f238b02479c7",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "7ea07891a3b4e966d736a4c8252aa28b2b3e0a77e8a54797b08ad26075cc32ab"
+                  },
+                  "expected_size": 738,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "204010f0cb9c19b18a58980325ea5407a78d7cb4022bf124f71f32999734ecce"
+                  },
+                  "expected_size": 722,
+                  "logical_path": "left-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "5b9323881bbb466bc5c577ee211ded630a2ff3b37d333ca0e8abc6766698188e"
+                  },
+                  "expected_size": 732,
+                  "logical_path": "right-1.0-py3-none-any.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-3",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "6d2f1ee6e49f5eef821b5f0e7a7723ee232d3d11c3470212fc7b43ce380069d3"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "leaf-2.0-py3-none-any.whl",
+                  "source_key": "candidate-4",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "171b1135a68540f0eed12fe660e5c9f3e3e1dd33aca209f0172bd118967a5396"
+                },
+                "source_id": "offline-catalog.bounded-unsatisfiable"
+              }
+            },
+            "phase": {
+              "lease": "aeb932f4-730e-4445-9900-e0f585e50254",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fefa"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/left-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/right-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-2.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "unclassified-operational-error",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "solver_no_fallback": true,
+        "specific_exit": true,
+        "observed_no_uv_ip_io": true,
+        "one_uv_invocation": true,
+        "exact_projection_provenance": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "exit": 2,
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "unclassified-operational-error"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "fa68ac9f-a216-455a-aff8-330780de1bfc",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "db65b505607604e966d294ad8b610f8258648d638148b603fde8ce0eb928ffd6"
+                },
+                "source_id": "offline-catalog.unclassified-operational-error"
+              }
+            },
+            "phase": {
+              "lease": "471fefab-0373-4fe1-9e24-f1310a9527af",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8ff5f"
+            }
+          },
+          "observation": {
+            "executions": [
+              "183878 execve(\"/tmp/pumas-uv-public-eval/tool-env/bin/uv\", [\"/tmp/pumas-uv-public-eval/tool-e\"..., \"--no-config\", \"--no-cache\", \"--offline\", \"--no-python-downloads\", \"--no-managed-python\", \"--color\", \"never\", \"pip\", \"compile\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-index\", \"--find-links\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-build\", \"--no-sources\", \"--keyring-provider\", \"disabled\", \"--python\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--python-version\", \"3.12\", \"--python-platform\", \"x86_64-manylinux_2_17\", \"--format\", \"pylock.toml\", \"--generate-hashes\", \"--no-header\", \"--no-annotate\", \"-o\", \"/tmp/pumas-uv-offline-evidence/q\"...], 0x7ffeac014a28 /* 13 vars */) = 0"
+            ],
+            "ip_operations": []
+          },
+          "reason": "resolver nonzero exit is fatal/inconclusive; no fallback",
+          "status": "solver_or_mapping_refused",
+          "uv_invoked": true
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "unclassified-operational-error"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "fa68ac9f-a216-455a-aff8-330780de1bfc",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "db65b505607604e966d294ad8b610f8258648d638148b603fde8ce0eb928ffd6"
+                },
+                "source_id": "offline-catalog.unclassified-operational-error"
+              }
+            },
+            "phase": {
+              "lease": "471fefab-0373-4fe1-9e24-f1310a9527af",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8ff5f"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "ambiguous-compatible-files",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "solver_no_fallback": true,
+        "specific_refusal_reason": true,
+        "specific_exit": true,
+        "observed_no_uv_ip_io": true,
+        "one_uv_invocation": true,
+        "exact_projection_provenance": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "exit": 0,
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "ambiguous-compatible-files"
+            },
+            "files": [
+              {
+                "bytes": 717,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "334a4009d74eaed61e44a8f0957580eb873984a98ee9bb299956e8365821918d"
+              },
+              {
+                "bytes": 697,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+              },
+              {
+                "bytes": 718,
+                "path": "leaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "sha256": "d25bd68321497094d73e4c488badd98b07828f7894627249459a408fdee2b08a"
+              }
+            ],
+            "id": "adb63121-544b-4c58-b98e-111a8993b497",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "334a4009d74eaed61e44a8f0957580eb873984a98ee9bb299956e8365821918d"
+                  },
+                  "expected_size": 717,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "d25bd68321497094d73e4c488badd98b07828f7894627249459a408fdee2b08a"
+                  },
+                  "expected_size": 718,
+                  "logical_path": "leaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "d3bbaaaedda867271c4f03c44941108b79755111f73542ccf369a2ebc7a99748"
+                },
+                "source_id": "offline-catalog.ambiguous-compatible-files"
+              }
+            },
+            "phase": {
+              "lease": "99e872a6-6624-4107-aecb-285d311a7654",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8ff8a"
+            }
+          },
+          "observation": {
+            "executions": [
+              "183891 execve(\"/tmp/pumas-uv-public-eval/tool-env/bin/uv\", [\"/tmp/pumas-uv-public-eval/tool-e\"..., \"--no-config\", \"--no-cache\", \"--offline\", \"--no-python-downloads\", \"--no-managed-python\", \"--color\", \"never\", \"pip\", \"compile\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-index\", \"--find-links\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-build\", \"--no-sources\", \"--keyring-provider\", \"disabled\", \"--python\", \"/opt/codex/runtimes/codex-primar\"..., \"--python-version\", \"3.12\", \"--python-platform\", \"x86_64-manylinux_2_17\", \"--format\", \"pylock.toml\", \"--generate-hashes\", \"--no-header\", \"--no-annotate\", \"-o\", \"/tmp/pumas-uv-offline-evidence/q\"...], 0x7fffc98990f8 /* 13 vars */) = 0",
+              "183894 execve(\"/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3\", [\"/opt/codex/runtimes/codex-primar\"..., \"-I\", \"-B\", \"-c\", \"import sys; sys.path = [__import\"...], 0x55dc76969910 /* 14 vars */) = 0"
+            ],
+            "ip_operations": []
+          },
+          "reason": "ambiguous/ineligible exact selected wheel",
+          "status": "solver_or_mapping_refused",
+          "uv_invoked": true
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "ambiguous-compatible-files"
+            },
+            "files": [
+              {
+                "bytes": 717,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "334a4009d74eaed61e44a8f0957580eb873984a98ee9bb299956e8365821918d"
+              },
+              {
+                "bytes": 697,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+              },
+              {
+                "bytes": 718,
+                "path": "leaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "sha256": "d25bd68321497094d73e4c488badd98b07828f7894627249459a408fdee2b08a"
+              }
+            ],
+            "id": "adb63121-544b-4c58-b98e-111a8993b497",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "334a4009d74eaed61e44a8f0957580eb873984a98ee9bb299956e8365821918d"
+                  },
+                  "expected_size": 717,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "dc1e089aa875e6c3551440ada64f91fc6e15e42f78388ca2367f1058c82401c8"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "d25bd68321497094d73e4c488badd98b07828f7894627249459a408fdee2b08a"
+                  },
+                  "expected_size": 718,
+                  "logical_path": "leaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "d3bbaaaedda867271c4f03c44941108b79755111f73542ccf369a2ebc7a99748"
+                },
+                "source_id": "offline-catalog.ambiguous-compatible-files"
+              }
+            },
+            "phase": {
+              "lease": "99e872a6-6624-4107-aecb-285d311a7654",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8ff8a"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "unapproved-initial-source",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "refused_before_inspection": true,
+        "no_install": true
+      },
+      "outcome": {
+        "status": "owner_source_refused"
+      },
+      "requests": [],
+      "failed_assertions": []
+    },
+    {
+      "case": "unexpected-local-member",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "specific_refusal_reason": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "unexpected-local-member"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "b848ad70-119d-4dd9-893b-88f9de422b6c",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "f2f50cc42abcdafb48e2af6d1f2458a0a1d61a029434bdead50b17fb23f38a4f"
+                },
+                "source_id": "offline-catalog.unexpected-local-member"
+              }
+            },
+            "phase": {
+              "lease": "13c749fd-f475-4485-9547-88ab99bf5580",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8ffe1"
+            }
+          },
+          "reason": "unexpected/incomplete local catalog namespace",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "unexpected-local-member"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "b848ad70-119d-4dd9-893b-88f9de422b6c",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "f2f50cc42abcdafb48e2af6d1f2458a0a1d61a029434bdead50b17fb23f38a4f"
+                },
+                "source_id": "offline-catalog.unexpected-local-member"
+              }
+            },
+            "phase": {
+              "lease": "13c749fd-f475-4485-9547-88ab99bf5580",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8ffe1"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "ambient-config-env-python",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "selected": true,
+        "held_using": true,
+        "settled_adopted": true,
+        "observed_no_uv_ip_io": true,
+        "one_uv_invocation": true,
+        "exact_projection_provenance": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "exit": 0,
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "ambient-config-env-python"
+            },
+            "files": [
+              {
+                "bytes": 829,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-2.0-py3-none-any.whl",
+                "sha256": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-3.0-py3-none-any.whl",
+                "sha256": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+              },
+              {
+                "bytes": 717,
+                "path": "helper-1.0-py3-none-any.whl",
+                "sha256": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+              },
+              {
+                "bytes": 736,
+                "path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                "sha256": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+              },
+              {
+                "bytes": 768,
+                "path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "sha256": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+              }
+            ],
+            "id": "719bb4c9-ac56-4d87-8609-baf41e731bdf",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+                  },
+                  "expected_size": 829,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-2.0-py3-none-any.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-3.0-py3-none-any.whl",
+                  "source_key": "candidate-3",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+                  },
+                  "expected_size": 717,
+                  "logical_path": "helper-1.0-py3-none-any.whl",
+                  "source_key": "candidate-4",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+                  },
+                  "expected_size": 736,
+                  "logical_path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                  "source_key": "candidate-5",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+                  },
+                  "expected_size": 768,
+                  "logical_path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-6",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "23fe6b6fd60d3e24c09dd358bc7de95e8b3a208ef21655b62308f711335f1d8e"
+                },
+                "source_id": "offline-catalog.ambient-config-env-python"
+              }
+            },
+            "phase": {
+              "lease": "17fd06a1-3670-448e-adac-f92d76dab771",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fff8"
+            }
+          },
+          "lock_sha256": "7ac499c93c884d6473c8c97dc9c10d2d0bbe3ce7917132b8ae07471321635087",
+          "observation": {
+            "executions": [
+              "183920 execve(\"/tmp/pumas-uv-public-eval/tool-env/bin/uv\", [\"/tmp/pumas-uv-public-eval/tool-e\"..., \"--no-config\", \"--no-cache\", \"--offline\", \"--no-python-downloads\", \"--no-managed-python\", \"--color\", \"never\", \"pip\", \"compile\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-index\", \"--find-links\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-build\", \"--no-sources\", \"--keyring-provider\", \"disabled\", \"--python\", \"/opt/codex/runtimes/codex-primar\"..., \"--python-version\", \"3.12\", \"--python-platform\", \"x86_64-manylinux_2_17\", \"--format\", \"pylock.toml\", \"--generate-hashes\", \"--no-header\", \"--no-annotate\", \"-o\", \"/tmp/pumas-uv-offline-evidence/q\"...], 0x7ffe9fc42e88 /* 13 vars */) = 0",
+              "183923 execve(\"/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3\", [\"/opt/codex/runtimes/codex-primar\"..., \"-I\", \"-B\", \"-c\", \"import sys; sys.path = [__import\"...], 0x55a7d213b910 /* 14 vars */) = 0"
+            ],
+            "ip_operations": []
+          },
+          "projection_sha256": "1b27bb2415fab52409946356201e61f0393926da2180df79eb54dad9020f1581",
+          "selected": [
+            {
+              "bytes": 717,
+              "filename": "helper-1.0-py3-none-any.whl",
+              "id": "candidate-4",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/ambient-config-env-python/acquisition/catalog/helper-1.0-py3-none-any.whl",
+              "name": "helper",
+              "sha256": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:42463/owner/helper-1.0-py3-none-any.whl",
+              "version": "1.0"
+            },
+            {
+              "bytes": 765,
+              "filename": "leaf-2.0-py3-none-any.whl",
+              "id": "candidate-2",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/ambient-config-env-python/acquisition/catalog/leaf-2.0-py3-none-any.whl",
+              "name": "leaf",
+              "sha256": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:42463/owner/leaf-2.0-py3-none-any.whl",
+              "version": "2.0"
+            },
+            {
+              "bytes": 768,
+              "filename": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+              "id": "candidate-6",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/ambient-config-env-python/acquisition/catalog/linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+              "name": "linuxleaf",
+              "sha256": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba",
+              "tags": [
+                "cp312-cp312-manylinux_2_17_x86_64"
+              ],
+              "url": "http://127.0.0.1:42463/owner/linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+              "version": "1.0"
+            },
+            {
+              "bytes": 829,
+              "filename": "root-1.0-py3-none-any.whl",
+              "id": "candidate-0",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/ambient-config-env-python/acquisition/catalog/root-1.0-py3-none-any.whl",
+              "name": "root",
+              "sha256": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:42463/owner/root-1.0-py3-none-any.whl",
+              "version": "1.0"
+            }
+          ],
+          "status": "selected",
+          "uv_invoked": true
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "ambient-config-env-python"
+            },
+            "files": [
+              {
+                "bytes": 829,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-1.0-py3-none-any.whl",
+                "sha256": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-2.0-py3-none-any.whl",
+                "sha256": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+              },
+              {
+                "bytes": 765,
+                "path": "leaf-3.0-py3-none-any.whl",
+                "sha256": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+              },
+              {
+                "bytes": 717,
+                "path": "helper-1.0-py3-none-any.whl",
+                "sha256": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+              },
+              {
+                "bytes": 736,
+                "path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                "sha256": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+              },
+              {
+                "bytes": 768,
+                "path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                "sha256": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+              }
+            ],
+            "id": "719bb4c9-ac56-4d87-8609-baf41e731bdf",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "47a7e609a6c5404a703a04659362c6af639b0a6f5bfa2a1a1a01dc2ebf6021f9"
+                  },
+                  "expected_size": 829,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "cf6345102cef2188e90ec0995ac9c65ef1d65700da7dfd2641791e650bd9cbf7"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-1.0-py3-none-any.whl",
+                  "source_key": "candidate-1",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "b3e038a11fed6e3a1b39e4c434e586b7f003c5ba77001e3459006b1f2a63ea0a"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-2.0-py3-none-any.whl",
+                  "source_key": "candidate-2",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "1a1d1045626cca9a897acc862e5db49ac5d54a78e052a053e7c7c9a243d58410"
+                  },
+                  "expected_size": 765,
+                  "logical_path": "leaf-3.0-py3-none-any.whl",
+                  "source_key": "candidate-3",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "fe213f063c03fc92c70c32ac1999bead519cd99eebc5f42884d250518a18c098"
+                  },
+                  "expected_size": 717,
+                  "logical_path": "helper-1.0-py3-none-any.whl",
+                  "source_key": "candidate-4",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "ffd00dfd12d93de657f8490cb5b661621b155c663691b4e985753baf9f674f1b"
+                  },
+                  "expected_size": 736,
+                  "logical_path": "winleaf-1.0-cp312-cp312-win_amd64.whl",
+                  "source_key": "candidate-5",
+                  "verification": "sha256"
+                },
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "667705d790880f518679afbf0ce37ecfe830c01f8854ae9e985545f92f7554ba"
+                  },
+                  "expected_size": 768,
+                  "logical_path": "linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+                  "source_key": "candidate-6",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "23fe6b6fd60d3e24c09dd358bc7de95e8b3a208ef21655b62308f711335f1d8e"
+                },
+                "source_id": "offline-catalog.ambient-config-env-python"
+              }
+            },
+            "phase": {
+              "lease": "17fd06a1-3670-448e-adac-f92d76dab771",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:8fff8"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-2.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/leaf-3.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/helper-1.0-py3-none-any.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/winleaf-1.0-cp312-cp312-win_amd64.whl",
+          "authorization": false
+        },
+        {
+          "method": "GET",
+          "path": "/owner/linuxleaf-1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "primed-cache-source-substitution",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "selected": true,
+        "held_using": true,
+        "settled_adopted": true,
+        "observed_no_uv_ip_io": true,
+        "one_uv_invocation": true,
+        "exact_projection_provenance": true,
+        "actual_public_uv_cache_prime": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "exit": 0,
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "primed-cache-source-substitution"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "486c3c21-fe83-4012-ac7d-9ecc671caec0",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "e772148345073094b8682ebbb1c945575621aec4b0938d9584e2c2e40478c707"
+                },
+                "source_id": "offline-catalog.primed-cache-source-substitution"
+              }
+            },
+            "phase": {
+              "lease": "1b34bd25-c012-4fd1-a088-2d5041e08234",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:90095"
+            }
+          },
+          "lock_sha256": "933e355be8f7f7ce57b6ae60c1a44581753a0bd0928866bc96126ab63925cdeb",
+          "observation": {
+            "executions": [
+              "183951 execve(\"/tmp/pumas-uv-public-eval/tool-env/bin/uv\", [\"/tmp/pumas-uv-public-eval/tool-e\"..., \"--no-config\", \"--no-cache\", \"--offline\", \"--no-python-downloads\", \"--no-managed-python\", \"--color\", \"never\", \"pip\", \"compile\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-index\", \"--find-links\", \"/tmp/pumas-uv-offline-evidence/q\"..., \"--no-build\", \"--no-sources\", \"--keyring-provider\", \"disabled\", \"--python\", \"/opt/codex/runtimes/codex-primar\"..., \"--python-version\", \"3.12\", \"--python-platform\", \"x86_64-manylinux_2_17\", \"--format\", \"pylock.toml\", \"--generate-hashes\", \"--no-header\", \"--no-annotate\", \"-o\", \"/tmp/pumas-uv-offline-evidence/q\"...], 0x7ffdfebaecf8 /* 13 vars */) = 0",
+              "183954 execve(\"/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3\", [\"/opt/codex/runtimes/codex-primar\"..., \"-I\", \"-B\", \"-c\", \"import sys; sys.path = [__import\"...], 0x561eb8b92910 /* 14 vars */) = 0"
+            ],
+            "ip_operations": []
+          },
+          "projection_sha256": "724813d9a64f6159570ececcbcbbf0cab23c2619debd33add7d19f6ea06bf8b3",
+          "selected": [
+            {
+              "bytes": 697,
+              "filename": "root-1.0-py3-none-any.whl",
+              "id": "candidate-0",
+              "local": "/tmp/pumas-uv-offline-evidence/qualified-final/primed-cache-source-substitution/acquisition/catalog/root-1.0-py3-none-any.whl",
+              "name": "root",
+              "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b",
+              "tags": [
+                "py3-none-any"
+              ],
+              "url": "http://127.0.0.1:45075/owner/root-1.0-py3-none-any.whl",
+              "version": "1.0"
+            }
+          ],
+          "status": "selected",
+          "uv_invoked": true
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "primed-cache-source-substitution"
+            },
+            "files": [
+              {
+                "bytes": 697,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+              }
+            ],
+            "id": "486c3c21-fe83-4012-ac7d-9ecc671caec0",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "0c760c43f600418f8ee3b86efe7c47f2bcc44410cf05bb662584dba7c61eab9b"
+                  },
+                  "expected_size": 697,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "e772148345073094b8682ebbb1c945575621aec4b0938d9584e2c2e40478c707"
+                },
+                "source_id": "offline-catalog.primed-cache-source-substitution"
+              }
+            },
+            "phase": {
+              "lease": "1b34bd25-c012-4fd1-a088-2d5041e08234",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:90095"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    },
+    {
+      "case": "primed-cache-missing-candidate",
+      "checks": {
+        "harness_success": true,
+        "only_admitted_requests": true,
+        "no_credential_headers": true,
+        "immutable_owner_provenance": true,
+        "exact_consumer_receipt": true,
+        "refused_before_uv": true,
+        "specific_refusal_reason": true,
+        "actual_public_uv_cache_prime": true,
+        "no_install": true
+      },
+      "outcome": {
+        "payload": {
+          "held_use_record": {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "primed-cache-missing-candidate"
+            },
+            "files": [
+              {
+                "bytes": 717,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "334a4009d74eaed61e44a8f0957580eb873984a98ee9bb299956e8365821918d"
+              }
+            ],
+            "id": "efd2cf35-6a2b-41f4-ac49-15b03e7817d9",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "334a4009d74eaed61e44a8f0957580eb873984a98ee9bb299956e8365821918d"
+                  },
+                  "expected_size": 717,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "889923c24d168c29d526901faf04cbfe80aaca6a26f36dd4eda54c1156834f84"
+                },
+                "source_id": "offline-catalog.primed-cache-missing-candidate"
+              }
+            },
+            "phase": {
+              "lease": "70d62f9e-97e8-494b-b395-2678224f8f58",
+              "state": "using"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:9010e"
+            }
+          },
+          "reason": "incomplete bounded catalog: leaf",
+          "status": "preflight_refused",
+          "uv_invoked": false
+        },
+        "settled_records": [
+          {
+            "demand": {
+              "consumer": "experiment.torch.offline-catalog",
+              "operation": "primed-cache-missing-candidate"
+            },
+            "files": [
+              {
+                "bytes": 717,
+                "path": "root-1.0-py3-none-any.whl",
+                "sha256": "334a4009d74eaed61e44a8f0957580eb873984a98ee9bb299956e8365821918d"
+              }
+            ],
+            "id": "efd2cf35-6a2b-41f4-ac49-15b03e7817d9",
+            "manifest": {
+              "files": [
+                {
+                  "expected_sha256": {
+                    "authority": "experiment.owner.sha256",
+                    "value": "334a4009d74eaed61e44a8f0957580eb873984a98ee9bb299956e8365821918d"
+                  },
+                  "expected_size": 717,
+                  "logical_path": "root-1.0-py3-none-any.whl",
+                  "source_key": "candidate-0",
+                  "verification": "sha256"
+                }
+              ],
+              "schema_version": 1,
+              "source": {
+                "provider": "experiment",
+                "revision": {
+                  "authority": "experiment.owner.catalog",
+                  "strength": "weak",
+                  "value": "889923c24d168c29d526901faf04cbfe80aaca6a26f36dd4eda54c1156834f84"
+                },
+                "source_id": "offline-catalog.primed-cache-missing-candidate"
+              }
+            },
+            "phase": {
+              "lease": "70d62f9e-97e8-494b-b395-2678224f8f58",
+              "state": "adopted"
+            },
+            "workspace": {
+              "relative_target": "catalog",
+              "root_identity": "21:9010e"
+            }
+          }
+        ],
+        "status": "experiment_completed"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/owner/root-1.0-py3-none-any.whl",
+          "authorization": false
+        }
+      ],
+      "failed_assertions": []
+    }
+  ],
+  "failed_assertions": 0
+}

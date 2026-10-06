@@ -1,0 +1,14 @@
+[package]
+name = "pumas-offline-catalog-experiment"
+version = "0.0.0"
+edition = "2021"
+[workspace]
+[dependencies]
+pumas-library = { path = "/tmp/pumas-uv-offline-eed/rust/crates/pumas-core", default-features = false }
+async-trait = "0.1"
+reqwest = "0.12.28"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros"] }
+[profile.dev]
+debug = 0
+incremental = false

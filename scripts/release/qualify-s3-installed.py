@@ -486,6 +486,21 @@ def verify_installed_inputs(installed, expected):
         check(digest(installed / name) == expected_hash, "installed input hash mismatch")
 
 
+def stage_verified_inputs(stage, binary, provenance):
+    hashes = provenance["attribution"]["sha256"]
+    expected = {
+        "pumas-rpc": provenance["binary_sha256"],
+        "LICENSE.txt": digest(ROOT / "LICENSE"),
+        "THIRD-PARTY-NOTICES.txt": hashes["THIRD-PARTY-NOTICES.txt"],
+        "ATTRIBUTION-README.md": hashes["README.md"],
+        "ATTRIBUTION-inventory.json": hashes["inventory.json"],
+    }
+    for original, name in package_inputs(binary):
+        shutil.copy2(original, stage / name)
+        check(digest(stage / name) == expected[name], "copied input differs from build evidence")
+    return expected
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
@@ -515,10 +530,7 @@ def main():
         stage, installed = workspace / "stage", workspace / "installed"
         stage.mkdir()
         installed.mkdir()
-        inputs = package_inputs(binary)
-        for original, name in inputs:
-            shutil.copy2(original, stage / name)
-        payload["packaged_files"] = {path.name: digest(path) for path in stage.iterdir()}
+        payload["packaged_files"] = stage_verified_inputs(stage, binary, provenance)
         (stage / "qualification.json").write_text(json.dumps(payload, indent=2) + "\n")
         with tarfile.open(archive_path, "w:gz") as archive:
             for path in sorted(stage.iterdir()):

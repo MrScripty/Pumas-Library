@@ -354,6 +354,29 @@ class InstalledInputsTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "input hash"):
             self.harness.verify_installed_inputs(self.root, expected)
 
+    def test_copy_is_bound_to_build_notice_hashes_not_new_stage_hashes(self):
+        with patch.object(self.harness, "ROOT", self.root):
+            inputs = self.harness.package_inputs(self.root / "binary")
+            for path, name in inputs:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"synthetic {name}")
+            provenance = {
+                "binary_sha256": subject.digest(inputs[0][0]),
+                "attribution": {
+                    "sha256": {path.name: subject.digest(path) for path, _ in inputs[2:]}
+                },
+            }
+            stage = self.root / "stage"
+            stage.mkdir()
+            expected = self.harness.stage_verified_inputs(stage, inputs[0][0], provenance)
+            self.assertEqual(
+                expected["THIRD-PARTY-NOTICES.txt"],
+                provenance["attribution"]["sha256"]["THIRD-PARTY-NOTICES.txt"],
+            )
+            inputs[2][0].write_text("replacement notices after build validation")
+            with self.assertRaisesRegex(AssertionError, "differs from build"):
+                self.harness.stage_verified_inputs(stage, inputs[0][0], provenance)
+
 
 if __name__ == "__main__":
     unittest.main()

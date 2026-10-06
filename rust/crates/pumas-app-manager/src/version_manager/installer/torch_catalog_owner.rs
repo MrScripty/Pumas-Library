@@ -82,7 +82,8 @@ struct CatalogPlan {
 }
 
 // A catalog snapshot receipt, not installation evidence or reusable Using access.
-// Retain owner grants through settlement; no method reopens acquired payloads.
+// Retain owner grants after settlement for private read-only selection. No API
+// reconstructs an AcquiredArtifactUse or stale Using lease from this receipt.
 struct CompleteCatalog {
     receipt: AcquisitionConsumerReceipt,
     evidence: serde_json::Value,
@@ -617,6 +618,9 @@ enum CatalogFailureOrSuccess {
     Incomplete,
     Refused,
 }
+
+#[path = "torch_offline_selection.rs"]
+mod offline_selection;
 
 #[cfg(all(test, target_os = "linux"))]
 #[path = "torch_catalog_owner_tests.rs"]

@@ -1189,6 +1189,10 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
             include_str!("../../../../../../torch-server/wheel_catalog_owner.py"),
         ),
         (
+            "offline_wheel_selection.py",
+            include_str!("../../../../../../torch-server/offline_wheel_selection.py"),
+        ),
+        (
             "probe_runtime.py",
             include_str!("../../../../../../torch-server/probe_runtime.py"),
         ),

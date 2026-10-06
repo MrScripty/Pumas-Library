@@ -356,6 +356,45 @@ inactive branches, refuse explicitly without source fallback. Preserve original
 lock/preview/catalog provenance; this capability introduces no mandatory runtime
 version policy and does not qualify automatic or retained-preview resolution.
 
+The dormant request-scoped offline selection slice consumes only the private live
+`CompleteCatalog`, retaining its accepted snapshot receipt, granted acquired
+files, original request, owned target observation and pending stage. A serialized
+catalog or solver lock cannot create that capability. Selection does not reopen a
+stale shared `Using` lease, issue installation evidence or activate existing
+production callers. Its private selected packet and refusals retain the live
+catalog; managed children and registered blocking effects retain that custody
+through drain even if the caller stops waiting.
+
+Only the explicitly supplied, hash-qualified public uv executable is invoked.
+The first qualification is the already provisioned official uv 0.12.23 Linux
+x86_64 artifact; other tooling/platforms and production provisioning remain gated.
+The child environment is cleared and receives owned home/config/cache/temp paths;
+public flags disable configuration, cache, indexes, network, managed Python and
+Python downloads, sources, builds and keyring retrieval. Exact acquired candidate
+directories are the sole find-links inputs. Original direct-root URLs project to
+exact local hash-bound wheels without losing their approved source identity.
+Yanked policy that local files cannot express refuses; no new ranking or source
+priority policy follows this qualification.
+
+The independent checker reinspects the actual catalog before and after solving,
+compares the original complete evidence, then maps every lock artifact to an exact
+acquired name/version/source URL/filename/hash/size/local identity. Unknown lock
+profiles, source archives/VCS/directories, remote locators, missing hashes and
+ambiguous compatible files refuse, including source escapes in inactive rows.
+Ordinary admitted same-version alternatives also refuse even if the solver emits
+only one file; an originally approved exact direct root is the existing qualified
+exception. Original roots and constraints plus actual METADATA markers/extras and
+the complete selected closure are independently checked, including missing extras,
+late extra activation, cycles and unrelated selected packages. Final acceptance
+fences all acquired hashes/sizes/namespaces, original producer bytes, selected
+interpreter and qualified solver bytes after every checker child. All solver
+nonzero/operational failures are fatal or inconclusive for this attempt and never
+candidate-fallback instructions. A separate 120-second owned selection deadline and bounded
+catalog/input/lock/packet limits apply; the catalog acquisition deadline is
+unchanged and is not reset by selection. No selected packet can add sources or
+renew approval. Installing/reacquiring selected payloads, consumer settlement,
+real-provider parity and coordinated caller migration remain separate gates.
+
 The decisive test denies network during the final installation leg and rejects hidden direct-URL retrieval, alternate same-name/version wheels, and missing closure members. Resolver metadata and managed-Python bootstrap traffic remain separately recorded; the claim is exact payload handoff, not interception of every package-tool request. Sources: [pip report](https://pip.pypa.io/en/stable/reference/installation-report/) and [pip install](https://pip.pypa.io/en/stable/cli/pip_install/).
 
 The bounded retained-preview and automatic-selection Torch implementation uses

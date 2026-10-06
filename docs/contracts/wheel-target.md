@@ -161,6 +161,21 @@ inspection-host strings, another interpreter or a source fallback. Unsupported
 projection does not mean the target itself is globally incompatible. Exact
 direct-root artifact bindings and original source provenance remain separate.
 
+The dormant CompleteCatalog offline selection adapter retains the exact approved
+observation, full Python patch version, target marker context and selected
+executable binding in its independently checked selected packet. Its initial
+public uv 0.12.23 qualification supports explicit Windows x86_64 projection and
+listed glibc floors 2.17, 2.28 and 2.31 through 2.40; invocation tooling itself is
+currently qualified only for Linux x86_64. Actual native glibc 2.41 in this executor
+has no exact explicit projection and refuses before solver invocation. Production
+must never lower that approval to 2.40 or substitute a generic Linux target.
+Positive controls explicitly declare a synthetic compatible 2.40 fixture target;
+they do not qualify the unmodified native producer or another platform. macOS,
+musl, unsupported floors, native-Linux exclusion and unprojectable marker variables
+remain explicit refusals. Automatic/preview adoption and target/selection parity
+remain gated. The final owned selection proof rechecks selected executable bytes
+after solver/checker effects, independently of any managed-provider label.
+
 Targets are owner declarations, not self-authenticating evidence. Future
 automatic/preview integration must bind the approved target/projection to request,
 resolution and consumer provenance, identify the actual selected interpreter,

@@ -1,5 +1,35 @@
 # Acquisition implementation write sets and coordination
 
+## Q2 qualified offline selection — admitted 2026-10-06
+
+Parent accepts catalog format head 3f573449b2fe96c3114fc2f5b952ce66da78da68,
+tree 68e746e52327c848804157c3ec8c259fd4512203. Start separate branch
+feat/torch-offline-selected-3f573449 at that exact checkpoint. Admit this record,
+owning plan, docs/contracts/{artifact-acquisition.md,wheel-target.md}, separate
+torch-offline-selected-2026-10-06 report/evidence,
+torch-server/{offline_wheel_selection.py,tests/test_offline_wheel_selection.py},
+and rust/crates/pumas-app-manager/src/version_manager/installer/
+{torch.rs,torch_catalog_owner.rs,torch_catalog_owner_tests.rs,
+torch_offline_selection.rs}. torch.rs only embeds the new trusted helper.
+The new private capability consumes the accepted live CompleteCatalog and retains
+its granted acquired files, request, selected target and pending stage. It does
+not deserialize/import completion or reopen a stale shared Using lease.
+Use explicitly qualified public uv tooling, offline/no-index/no-build/no-sources,
+no ambient configuration/cache/interpreter download. Independently inspect actual
+local bytes and validate exact selected identities, original direct roots,
+constraints, target markers/extras/closure; unsupported target projection,
+ambiguous files, incomplete coverage and any solver error refuse without fallback.
+No automatic/preview activation, installation, source/version policy changes,
+production tool provisioning/dependencies, frozen native/watch/import/S3 writes,
+Library retries/settings/credentials or real-provider downloads.
+Required controls: real public solver valid alternatives/extras/direct roots,
+actual Complete shared receipt-to-selection, target/executable/input/lock changes,
+missing coverage, operational/unsatisfiable results, source/cache/config traps,
+ambiguous same-version identities; existing Python/Rust handoff regressions,
+33 pre-build feature graphs before serialized offline/locked Cargo, strict checks.
+Provider/platform/tool-distribution/selection parity and consumer adoption remain
+gated; selected evidence is not installation proof or permission to add sources.
+
 ## Q2 catalog format review successor — admitted 2026-10-06
 
 Preserve frozen 4c85b60d47a736c066a17e673754099f8f6e5870, tree

@@ -17,6 +17,13 @@ enum Case {
     AbandonInspector,
     WrongDistInfo,
     Redirect,
+    Selected,
+    SelectedWrongSolver,
+    SelectedSolverError,
+    SelectedUnsupportedTarget,
+    SelectedChangedExecutable,
+    SelectedChangedWheel,
+    SelectedAbandonedChecker,
 }
 
 async fn fixture(case: Case) {
@@ -63,10 +70,27 @@ async fn fixture(case: Case) {
         .await
         .unwrap();
     let python = pumas_library::platform::paths::venv_python(&runtime);
-    let produced = installer
+    let mut produced = installer
         .observe_qualified_torch_target(&runtime, &python, &stage, &log, &progress_tx)
         .await
         .unwrap();
+    if matches!(
+        case,
+        Case::Selected
+            | Case::SelectedSolverError
+            | Case::SelectedChangedExecutable
+            | Case::SelectedChangedWheel
+            | Case::SelectedAbandonedChecker
+    ) {
+        // Explicit test-only target declaration: uv 0.12.23 cannot represent
+        // this executor's actual glibc 2.41. A synthetic 2.40 floor is validated
+        // as a subset of actual native tags; production never changes approval.
+        let mut observation: serde_json::Value =
+            serde_json::from_str(&produced.observation).unwrap();
+        observation["target"]["libc"] = serde_json::json!({"family":"glibc","version":"2.40"});
+        produced.observation = serde_json::to_string(&observation).unwrap();
+        std::fs::write(&produced.path, produced.observation.as_bytes()).unwrap();
+    }
     let approved_hash = target_observation_digest(
         &serde_json::from_str::<serde_json::Value>(&produced.observation).unwrap(),
     )
@@ -77,7 +101,7 @@ async fn fixture(case: Case) {
         .join("../../../torch-server/tests/test_install_verified_wheels.py");
     let code = r#"import importlib.util,json,pathlib,sys
 s=importlib.util.spec_from_file_location('fixture',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
-p=pathlib.Path(sys.argv[2]); rows=[m.make_wheel(p,'torch',version='2.14.0+cpu',requires=['branch>=1']),m.make_wheel(p,'branch',version='1',requires=['dependency<2']),m.make_wheel(p,'branch',version='2',requires=['dependency>=2']),m.make_wheel(p,'dependency',version='1'),m.make_wheel(p,'dependency',version='2')]
+p=pathlib.Path(sys.argv[2]); rows=[m.make_wheel(p,'torch',version='2.14.0+cpu',requires=(['branch>=1','dependency<1'] if sys.argv[3]=='solver-error' else ['branch>=1'])),m.make_wheel(p,'branch',version='1',requires=['dependency<2']),m.make_wheel(p,'branch',version='2',requires=['dependency>=2']),m.make_wheel(p,'dependency',version='1'),m.make_wheel(p,'dependency',version='2')]
 if sys.argv[3]=='wrong-info':
  import hashlib,zipfile
  a=rows[0]; path=p/a['url'].rsplit('/',1)[-1]
@@ -99,6 +123,8 @@ print(json.dumps(rows))
         .arg(&source)
         .arg(if case == Case::WrongDistInfo {
             "wrong-info"
+        } else if case == Case::SelectedSolverError {
+            "solver-error"
         } else {
             "valid"
         })
@@ -268,7 +294,17 @@ print(json.dumps(rows))
     };
     let mut completion = match result {
         Ok(complete) => {
-            assert_eq!(case, Case::Success);
+            assert!(matches!(
+                case,
+                Case::Success
+                    | Case::Selected
+                    | Case::SelectedWrongSolver
+                    | Case::SelectedSolverError
+                    | Case::SelectedUnsupportedTarget
+                    | Case::SelectedChangedExecutable
+                    | Case::SelectedChangedWheel
+                    | Case::SelectedAbandonedChecker
+            ));
             assert_eq!(complete.receipt.owner, CATALOG_OWNER);
             assert_eq!(complete.evidence["request_sha256"], request_hash);
             assert_eq!(
@@ -277,7 +313,11 @@ print(json.dumps(rows))
             );
             assert_eq!(
                 complete.evidence["reachable"]["dependency"],
-                serde_json::json!(["dependency<2", "dependency>=2"])
+                if case == Case::SelectedSolverError {
+                    serde_json::json!(["dependency<1", "dependency<2", "dependency>=2"])
+                } else {
+                    serde_json::json!(["dependency<2", "dependency>=2"])
+                }
             );
             assert_eq!(complete.receipt.verified_files.len(), 5);
             for file in complete.receipt.manifest.files() {
@@ -307,6 +347,130 @@ print(json.dumps(rows))
             None
         }
     };
+    if matches!(
+        case,
+        Case::Selected
+            | Case::SelectedWrongSolver
+            | Case::SelectedSolverError
+            | Case::SelectedUnsupportedTarget
+            | Case::SelectedChangedExecutable
+            | Case::SelectedChangedWheel
+            | Case::SelectedAbandonedChecker
+    ) {
+        use super::offline_selection::{
+            QualifiedOfflineSolver, SelectionContext, SelectionFailure,
+        };
+        let complete = completion.take().unwrap();
+        let granted_path = versions.join(relative);
+        if matches!(
+            case,
+            Case::SelectedChangedExecutable
+                | Case::SelectedChangedWheel
+                | Case::SelectedAbandonedChecker
+        ) {
+            let helper = runtime.join("offline_wheel_selection.py");
+            let mut script = std::fs::read_to_string(&helper).unwrap();
+            script.push_str(if case == Case::SelectedChangedExecutable {
+                "\nif '--check' in sys.argv:\n import os\n p=Path(sys.executable); q=p.with_name('selection-python-replacement'); q.write_bytes(b'changed executable after selected proof'); os.replace(q,p)\n"
+            } else if case == Case::SelectedChangedWheel {
+                "\nif '--check' in sys.argv:\n p=next(Path(sys.argv[sys.argv.index('--wheels')+1]).glob('*/dependency-1-*.whl')); p.write_bytes(p.read_bytes()+b'changed unselected acquired input')\n"
+            } else {
+                "\nif '--check' in sys.argv:\n import os,time\n Path(__file__).with_name('selected-checker-alive').write_text(str(os.getpid())); time.sleep(120)\n"
+            });
+            std::fs::write(helper, script).unwrap();
+        }
+        let solver = if case == Case::SelectedWrongSolver {
+            python.clone()
+        } else {
+            PathBuf::from(
+                std::env::var("PUMAS_QUALIFIED_UV")
+                    .expect("Supply already qualified local uv; no downloader"),
+            )
+        };
+        let context = SelectionContext {
+            installer: &installer,
+            consumer: &consumer,
+            runtime: &runtime,
+            python: &python,
+            solver: QualifiedOfflineSolver { path: solver },
+        };
+        if case == Case::SelectedAbandonedChecker {
+            let mut flow = Box::pin(complete.select(context));
+            tokio::time::timeout(Duration::from_secs(15), async {
+                loop {
+                    tokio::select! {
+                        _ = &mut flow => panic!("Checker completed before abandonment"),
+                        _ = tokio::time::sleep(Duration::from_millis(25)) => {
+                            if runtime.join("selected-checker-alive").exists() { break; }
+                        }
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            drop(retained_stage.take());
+            drop(flow);
+            assert!(
+                runtime.is_dir(),
+                "Managed selected checker must retain the pending runtime"
+            );
+            assert!(
+                granted_path.is_dir(),
+                "Managed selected checker must retain the catalog grant"
+            );
+            assert_eq!(std::fs::read_dir(&granted_path).unwrap().count(), 5);
+        } else {
+            match complete.select(context).await {
+                Ok(packet) => {
+                    assert_eq!(case, Case::Selected);
+                    assert_eq!(packet.evidence["schema"], "pumas.selected-wheel-packet.v1");
+                    assert_eq!(packet.evidence["request_sha256"], request_hash);
+                    assert_eq!(packet.evidence["target_observation_sha256"], approved_hash);
+                    let selected = packet.evidence["selected"].as_array().unwrap();
+                    assert_eq!(selected.len(), 3);
+                    assert!(selected
+                        .iter()
+                        .all(|c| c["url"].as_str().unwrap().starts_with("https://")));
+                    assert_eq!(packet.catalog.receipt.verified_files.len(), 5);
+                    assert_eq!(
+                        requests.load(Ordering::SeqCst),
+                        5,
+                        "Solver must not add source traffic"
+                    );
+                    println!("selected packet: {}", packet.evidence);
+                    packet.catalog._grant.validate().unwrap();
+                    packet.catalog._grant.clear_contents().unwrap();
+                }
+                Err(refusal) => {
+                    assert!(matches!(
+                        case,
+                        Case::SelectedWrongSolver
+                            | Case::SelectedSolverError
+                            | Case::SelectedUnsupportedTarget
+                            | Case::SelectedChangedExecutable
+                            | Case::SelectedChangedWheel
+                    ));
+                    assert_eq!(
+                        refusal.kind,
+                        if case == Case::SelectedSolverError {
+                            SelectionFailure::SolverFailed
+                        } else {
+                            SelectionFailure::Refused
+                        }
+                    );
+                    refusal._catalog._grant.validate().unwrap();
+                    assert_eq!(std::fs::read_dir(&granted_path).unwrap().count(), 5);
+                    assert!(
+                        case == Case::SelectedSolverError
+                            || case == Case::SelectedUnsupportedTarget
+                            || !runtime.join("offline-selection").exists()
+                            || runtime.join("offline-selection/selected.json").exists()
+                    );
+                    assert!(runtime.is_dir());
+                }
+            }
+        }
+    }
     installer.shutdown_torch_cleanup().await.unwrap();
     consumer.shutdown().await.unwrap();
     service.shutdown().await.unwrap();
@@ -325,10 +489,33 @@ print(json.dumps(rows))
     } else {
         let row = rows.values().next().unwrap();
         let receipt = service.consumer_receipt(row.id).unwrap();
-        assert_eq!(receipt.is_some(), case == Case::Success);
+        assert_eq!(
+            receipt.is_some(),
+            matches!(
+                case,
+                Case::Success
+                    | Case::Selected
+                    | Case::SelectedWrongSolver
+                    | Case::SelectedSolverError
+                    | Case::SelectedUnsupportedTarget
+                    | Case::SelectedChangedExecutable
+                    | Case::SelectedChangedWheel
+                    | Case::SelectedAbandonedChecker
+            )
+        );
         assert_eq!(
             matches!(row.phase, AcquisitionPhase::Adopted { .. }),
-            case == Case::Success
+            matches!(
+                case,
+                Case::Success
+                    | Case::Selected
+                    | Case::SelectedWrongSolver
+                    | Case::SelectedSolverError
+                    | Case::SelectedUnsupportedTarget
+                    | Case::SelectedChangedExecutable
+                    | Case::SelectedChangedWheel
+                    | Case::SelectedAbandonedChecker
+            )
         );
         assert_eq!(
             requests.load(Ordering::SeqCst),
@@ -369,7 +556,17 @@ print(json.dumps(rows))
     println!(
         "catalog control {case:?}: requests={} complete={} installed=false cleanup_drained=true",
         requests.load(Ordering::SeqCst),
-        case == Case::Success
+        matches!(
+            case,
+            Case::Success
+                | Case::Selected
+                | Case::SelectedWrongSolver
+                | Case::SelectedSolverError
+                | Case::SelectedUnsupportedTarget
+                | Case::SelectedChangedExecutable
+                | Case::SelectedChangedWheel
+                | Case::SelectedAbandonedChecker
+        )
     );
 }
 
@@ -424,4 +621,45 @@ async fn abandoned_inspector_retains_child_stage_and_using_until_drain() {
 #[tokio::test]
 async fn actual_wrong_dist_info_refuses_snapshot_and_cold_replay() {
     fixture(Case::WrongDistInfo).await;
+}
+
+#[tokio::test]
+#[ignore = "Requires explicitly provisioned qualified public uv; synthetic wheels only"]
+async fn complete_catalog_to_independently_checked_public_offline_selection() {
+    fixture(Case::Selected).await;
+}
+
+#[tokio::test]
+async fn complete_catalog_cannot_use_an_unqualified_solver_executable() {
+    fixture(Case::SelectedWrongSolver).await;
+}
+
+#[tokio::test]
+#[ignore = "Requires explicitly provisioned qualified public uv; copied fixture executable"]
+async fn selected_proof_cannot_hide_final_selected_executable_replacement() {
+    fixture(Case::SelectedChangedExecutable).await;
+}
+
+#[tokio::test]
+#[ignore = "Requires explicitly provisioned qualified public uv; managed child abandonment"]
+async fn abandoned_selected_checker_retains_catalog_grant_and_runtime_until_drain() {
+    fixture(Case::SelectedAbandonedChecker).await;
+}
+
+#[tokio::test]
+#[ignore = "Requires explicitly provisioned qualified public uv; bounded unsatisfiable catalog"]
+async fn complete_unsatisfiable_catalog_solver_error_never_accepts_or_falls_back() {
+    fixture(Case::SelectedSolverError).await;
+}
+
+#[tokio::test]
+#[ignore = "Requires explicitly provisioned qualified public uv; actual native target projection"]
+async fn actual_glibc_241_complete_catalog_refuses_without_target_downgrade() {
+    fixture(Case::SelectedUnsupportedTarget).await;
+}
+
+#[tokio::test]
+#[ignore = "Requires explicitly provisioned qualified public uv; final acquired-input fence"]
+async fn selected_checker_cannot_hide_unselected_acquired_wheel_replacement() {
+    fixture(Case::SelectedChangedWheel).await;
 }

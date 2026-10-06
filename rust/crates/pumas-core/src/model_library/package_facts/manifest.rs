@@ -86,7 +86,14 @@ impl PackageInspectionManifest {
     ) -> Result<String> {
         let model_dir = model_dir.to_path_buf();
         let descriptor_json = serde_json::to_string(descriptor)?;
-        let metadata_json = serde_json::to_string(metadata)?;
+        // Metadata contains unordered maps (including model_card's HashMap).
+        // Hash their recursively canonical object projection, retaining every
+        // value and array position. This deliberately invalidates fingerprints
+        // made from the old raw JSON; cached output must be re-observed through
+        // the existing owned producer, never relabelled or accepted as fresh.
+        let metadata_json = super::super::download_store::canonical_json_sha256(
+            &serde_json::to_value(metadata)?,
+        )?;
         let dependency_bindings_json = serde_json::to_string(dependency_bindings)?;
         let fingerprint_files = self
             .entries
@@ -814,3 +821,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "fingerprint_tests.rs"]
+mod fingerprint_tests;

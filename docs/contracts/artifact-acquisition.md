@@ -332,6 +332,20 @@ The package owner supplies a version-checked accepted resolution and trusted imm
 
 The decisive test denies network during the final installation leg and rejects hidden direct-URL retrieval, alternate same-name/version wheels, and missing closure members. Resolver metadata and managed-Python bootstrap traffic remain separately recorded; the claim is exact payload handoff, not interception of every package-tool request. Sources: [pip report](https://pip.pypa.io/en/stable/reference/installation-report/) and [pip install](https://pip.pypa.io/en/stable/cli/pip_install/).
 
+The bounded retained-preview Torch implementation uses the existing shared HTTP
+consumer for every accepted wheel before local pip execution. A separate local
+requirements/report pair uses exact file URLs and hashes with `--no-index`,
+`--no-deps`, `--only-binary=:all:` and `--require-hashes`; original resolution
+provenance is unchanged. The package owner checks marker/extras closure, wheel
+metadata/tags, local report identity and installed RECORD before probing, then
+rechecks selected installed members and unchanged proof/provenance beneath the
+owned runtime before publication. The proof covers selected installed members;
+the venv bootstrap baseline has separate ownership. Input custody survives child
+exit/cleanup and durable receipt settlement. Unresolved retained uses refuse cold
+replay; input reclamation is deliberately deferred. Automatic resolution/install
+and qualified bundled recipes remain scoped retained mechanisms. Local fixtures
+do not establish enforced egress denial, real Torch or AQ-PACKAGES acceptance.
+
 ## 12. Compatibility and extension
 
 Internal coordinated DTOs, public Rust/IPC APIs, persisted formats, optional source implementations and consumer install/model records have different evolution obligations. Update actual generated consumers with their producer. New source support within this contract does not change model-adapter registration or runtime installation identity. Unknown schema/protocol versions are explicitly rejected, not decoded into weaker defaults.

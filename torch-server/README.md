@@ -81,6 +81,22 @@ fingerprint, exact wheel URLs, hashes, and package versions with the installed
 runtime. Installation uses official binary wheels only and never falls back to
 a source build.
 
+The retained, unqualified resolved-preview path now acquires its accepted wheel
+set through the application's shared acquisition owner before running pip.
+`VersionManager::new_with_acquisition` supports Torch; direct installer users can
+use `VersionInstaller::with_torch_acquisition`. Existing constructors keep their
+signatures, but this preview path requires the shared capability. The local
+helper installs only verified file URLs with hashes, no index, no dependency
+fetching, no source builds and an empty target. It validates dependency closure,
+selected interpreter tags, the local pip report and installed RECORD files;
+publication rechecks selected members and provenance after the runtime probe.
+Original resolution/report/requirements remain separate from local installation
+evidence. Unresolved uses refuse cold replay before startup cleanup, and sibling
+wheel inputs remain retained. The automatic resolver/install path, managed-Python
+bootstrap and qualified bundled recipe retain their existing tool responsibility.
+This bounded implementation has synthetic Linux evidence; enforced network-denial,
+real Torch and supported-platform acceptance remain open under AQ-PACKAGES.
+
 Native managed-Python provisioning, Torch CPU/Core installation, restart,
 and sidecar lifecycle passed on Linux x86_64, Windows x64, and macOS arm64
 for source `21041697` in

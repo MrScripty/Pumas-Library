@@ -3,6 +3,11 @@
 use super::*;
 use crate::torch_client::{SUPPORTED_TORCH_PROTOCOL, TORCH_IMAGE_GENERATION_CAPABILITY};
 use fs2::FileExt;
+use pumas_library::acquisition::{
+    AcquiredArtifactUse, AcquisitionConsumerReceipt, ArtifactFile, ArtifactManifest,
+    ArtifactRevisionEvidence, ArtifactSourceIdentity, FileVerificationRequirement,
+    RevisionStrength, Sha256Evidence,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::process::Stdio;
@@ -1164,6 +1169,10 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
             include_str!("../../../../../../torch-server/resolve_runtime.py"),
         ),
         (
+            "install_verified_wheels.py",
+            include_str!("../../../../../../torch-server/install_verified_wheels.py"),
+        ),
+        (
             "probe_runtime.py",
             include_str!("../../../../../../torch-server/probe_runtime.py"),
         ),
@@ -1468,6 +1477,18 @@ fn trusted_macos_pypi_torch_wheel(
         })
 }
 
+fn qualified_nunchaku_wheel(artifact: &crate::version_manager::TorchArtifact) -> bool {
+    let expected = format!(
+        "{}#sha256={}",
+        artifact.url,
+        artifact.sha256.to_ascii_lowercase()
+    );
+    include_str!("../../../../../../torch-server/runtime/requirements.lock")
+        .lines()
+        .filter_map(|line| line.strip_prefix("nunchaku @ "))
+        .any(|line| line.split_whitespace().next() == Some(expected.as_str()))
+}
+
 fn validate_direct_torch_report(
     resolution: &DirectTorchResolution,
     report: &serde_json::Value,
@@ -1558,6 +1579,9 @@ fn validate_direct_torch_report(
                         url.host_str(),
                         Some("download.pytorch.org" | "download-r2.pytorch.org")
                     ) && url.path().starts_with("/whl/"))
+                    || (artifact.name == "nunchaku"
+                        && adapter == "nunchaku"
+                        && qualified_nunchaku_wheel(artifact))
             };
         if !trusted_source {
             return Err(failed("Torch report contains an untrusted wheel source"));
@@ -1635,6 +1659,9 @@ fn validate_direct_torch_report(
                 return Err(failed("Torch report omitted an image dependency"));
             }
         }
+    }
+    if adapter == "nunchaku" && !names.contains("nunchaku") {
+        return Err(failed("Torch report omitted the selected Nunchaku wheel"));
     }
     Ok(())
 }
@@ -1727,14 +1754,7 @@ fn validate_staged_files(target: &Path, manifest: &StagedFilesManifest) -> Resul
 }
 
 fn move_verified_packages(target: &Path, runtime: &Path, python_minor: &str) -> Result<()> {
-    #[cfg(windows)]
-    let packages = runtime.join("venv").join("Lib").join("site-packages");
-    #[cfg(not(windows))]
-    let packages = runtime
-        .join("venv")
-        .join("lib")
-        .join(format!("python{python_minor}"))
-        .join("site-packages");
+    let packages = torch_site_packages(runtime, python_minor);
     std::fs::create_dir_all(&packages).map_err(PumasError::from)?;
     let entries = std::fs::read_dir(target)
         .map_err(PumasError::from)?
@@ -1760,6 +1780,114 @@ fn move_verified_packages(target: &Path, runtime: &Path, python_minor: &str) -> 
     Ok(())
 }
 
+// Recheck only the selected, RECORD-proven installed members after executing the
+// probe. The venv bootstrap baseline has separate ownership and is not an exact
+// package inventory. Preserve the validated proof/provenance bytes as authority.
+fn validate_torch_owned_path(runtime: &Path, path: &Path) -> Result<()> {
+    let relative = path
+        .strip_prefix(runtime)
+        .map_err(|_| failed("Torch proof path escaped its runtime"))?;
+    let mut observed = runtime.to_path_buf();
+    let root = std::fs::symlink_metadata(&observed).map_err(PumasError::from)?;
+    if !root.is_dir() || root.file_type().is_symlink() {
+        return Err(failed("Torch runtime proof root is not a normal directory"));
+    }
+    for component in relative.components() {
+        if !matches!(component, std::path::Component::Normal(_)) {
+            return Err(failed("Torch proof path is not relative to its runtime"));
+        }
+        observed.push(component);
+        if std::fs::symlink_metadata(&observed)
+            .map_err(PumasError::from)?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(failed("Torch proof path contains a link"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_torch_final_proof(
+    runtime: &Path,
+    packages: &Path,
+    manifest_path: &Path,
+    validated_manifest: &[u8],
+    provenance: &[(PathBuf, Vec<u8>)],
+) -> Result<()> {
+    validate_torch_owned_path(runtime, packages)?;
+    validate_torch_owned_path(runtime, manifest_path)?;
+    if std::fs::symlink_metadata(manifest_path)
+        .map_err(PumasError::from)?
+        .file_type()
+        .is_symlink()
+        || std::fs::symlink_metadata(packages)
+            .map_err(PumasError::from)?
+            .file_type()
+            .is_symlink()
+        || std::fs::read(manifest_path).map_err(PumasError::from)? != validated_manifest
+    {
+        return Err(failed("Installed Torch proof changed during runtime probe"));
+    }
+    for (path, bytes) in provenance {
+        validate_torch_owned_path(runtime, path)?;
+        if std::fs::symlink_metadata(path)
+            .map_err(PumasError::from)?
+            .file_type()
+            .is_symlink()
+            || std::fs::read(path).map_err(PumasError::from)? != *bytes
+        {
+            return Err(failed(
+                "Torch resolution provenance changed during runtime probe",
+            ));
+        }
+    }
+    let manifest: StagedFilesManifest = serde_json::from_slice(validated_manifest)
+        .map_err(|_| failed("Invalid validated Torch file proof"))?;
+    for member in manifest.files {
+        let mut path = packages.to_path_buf();
+        for component in Path::new(&member.path).components() {
+            if !matches!(component, std::path::Component::Normal(_)) {
+                return Err(failed("Invalid validated Torch file path"));
+            }
+            path.push(component);
+            if std::fs::symlink_metadata(&path)
+                .map_err(PumasError::from)?
+                .file_type()
+                .is_symlink()
+            {
+                return Err(failed("Installed Torch member contains a link"));
+            }
+        }
+        let metadata = std::fs::symlink_metadata(&path).map_err(PumasError::from)?;
+        if !metadata.is_file()
+            || metadata.len() != member.size
+            || hash_regular_file(&path)? != member.sha256
+        {
+            return Err(failed(
+                "Installed Torch member changed during runtime probe",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn torch_site_packages(runtime: &Path, python_minor: &str) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let _ = python_minor;
+        runtime.join("venv").join("Lib").join("site-packages")
+    }
+    #[cfg(not(windows))]
+    {
+        runtime
+            .join("venv")
+            .join("lib")
+            .join(format!("python{python_minor}"))
+            .join("site-packages")
+    }
+}
+
 fn validate_and_move_direct_torch_packages(
     resolution: &DirectTorchResolution,
     report: &serde_json::Value,
@@ -1774,7 +1902,426 @@ fn validate_and_move_direct_torch_packages(
     move_verified_packages(target, runtime, selection.minor)
 }
 
+struct TorchChildLease {
+    stage: Arc<TorchPendingStage>,
+    _inputs: Option<Arc<AcquiredArtifactUse>>,
+}
+
+struct TorchWheelHost {
+    cancel: Arc<AtomicBool>,
+    shutdown: Arc<AtomicBool>,
+    progress: Arc<RwLock<InstallationProgressTracker>>,
+}
+
+#[async_trait::async_trait]
+impl pumas_library::acquisition::HttpAttemptHost for TorchWheelHost {
+    async fn pause_requested(&self) {
+        while !self.cancel_requested() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    fn pause_requested_now(&self) -> bool {
+        false
+    }
+    fn cancel_requested(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst) || self.shutdown.load(Ordering::SeqCst)
+    }
+    async fn record_progress(&mut self, bytes: u64) -> Result<()> {
+        self.progress
+            .write()
+            .await
+            .update_network_transfer(None, true, bytes, None, None, true);
+        Ok(())
+    }
+}
+#[async_trait::async_trait]
+impl pumas_library::acquisition::AcquisitionHost for TorchWheelHost {
+    async fn retry(
+        &mut self,
+        _attempt: u32,
+        _delay: Option<Duration>,
+        _error: Option<&str>,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+
+// Rust keeps source identity/verification; pip's standard wheel parser performs
+// package filename/tag validation before installation. Decode only one path
+// component here, never authorize a directory from a remote URL.
+fn torch_wheel_filename(source: &str) -> Result<String> {
+    let url = reqwest::Url::parse(source).map_err(|_| failed("Invalid wheel source"))?;
+    let encoded = url
+        .path()
+        .rsplit('/')
+        .next()
+        .ok_or_else(|| failed("Wheel filename absent"))?;
+    let mut bytes = Vec::with_capacity(encoded.len());
+    let mut input = encoded.as_bytes().iter().copied();
+    while let Some(byte) = input.next() {
+        if byte == b'%' {
+            let high = input.next().and_then(|b| (b as char).to_digit(16));
+            let low = input.next().and_then(|b| (b as char).to_digit(16));
+            bytes.push(match (high, low) {
+                (Some(high), Some(low)) => (high * 16 + low) as u8,
+                _ => return Err(failed("Invalid wheel filename encoding")),
+            });
+        } else {
+            bytes.push(byte);
+        }
+    }
+    let name = String::from_utf8(bytes).map_err(|_| failed("Invalid wheel filename"))?;
+    if !name.ends_with(".whl")
+        || name
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '/' | '\\'))
+    {
+        return Err(failed("Invalid wheel filename"));
+    }
+    Ok(name)
+}
+
+fn torch_wheel_manifest(
+    artifacts: &[crate::version_manager::TorchArtifact],
+) -> Result<ArtifactManifest> {
+    let identity = serde_json::to_vec(artifacts).map_err(|_| failed("Invalid wheel resolution"))?;
+    let revision = format!("{:x}", Sha256::digest(identity));
+    let source = ArtifactSourceIdentity::new(
+        "python-wheels",
+        "torch.accepted-resolution",
+        ArtifactRevisionEvidence::new(
+            "torch.resolution.sha256",
+            revision,
+            RevisionStrength::Immutable,
+        )
+        .map_err(|_| failed("Invalid accepted wheel revision"))?,
+    )
+    .map_err(|_| failed("Invalid accepted wheel source"))?;
+    let files = artifacts
+        .iter()
+        .map(|artifact| {
+            ArtifactFile::new(
+                torch_wheel_filename(&artifact.url)?,
+                artifact.url.clone(),
+                None,
+                Some(
+                    Sha256Evidence::new(
+                        "torch.accepted-resolution.sha256",
+                        artifact.sha256.clone(),
+                    )
+                    .map_err(|_| failed("Invalid accepted wheel SHA-256"))?,
+                ),
+                FileVerificationRequirement::Sha256,
+            )
+            .map_err(|_| failed("Invalid accepted wheel manifest"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ArtifactManifest::new(source, files).map_err(|_| failed("Invalid accepted wheel manifest"))
+}
+
+// The borrowed owner pipeline and shared acquisition worker run together.
+// Channel closure propagates refusal in either direction; no task is detached.
+// The worker retains the use until the existing runtime publisher acknowledges.
+async fn with_verified_torch_wheels<Prepare, PrepareFuture, Publish, PublishFuture>(
+    consumer: &AcquisitionConsumer,
+    request: AcquisitionHttpRequest,
+    client: reqwest::Client,
+    host: Box<dyn pumas_library::acquisition::AcquisitionHost>,
+    prepare: Prepare,
+    publish: Publish,
+) -> Result<()>
+where
+    Prepare: FnOnce(Arc<AcquiredArtifactUse>) -> PrepareFuture,
+    PrepareFuture: std::future::Future<Output = Result<(PathBuf, serde_json::Value)>>,
+    Publish: FnOnce(PathBuf, AcquisitionConsumerReceipt) -> PublishFuture,
+    PublishFuture: std::future::Future<Output = Result<()>>,
+{
+    let (inputs_tx, inputs_rx) = tokio::sync::oneshot::channel();
+    let (proof_tx, proof_rx) = tokio::sync::oneshot::channel();
+    let (receipt_tx, receipt_rx) = tokio::sync::oneshot::channel();
+    let (published_tx, published_rx) = tokio::sync::oneshot::channel();
+    let acquisition = consumer.acquire_http(
+        request,
+        client,
+        host,
+        move |inputs| async move {
+            let inputs = Arc::new(inputs);
+            inputs_tx
+                .send(inputs.clone())
+                .map_err(|_| failed("Torch wheel consumer closed"))?;
+            let proof = proof_rx
+                .await
+                .map_err(|_| failed("Torch wheel preparation refused"))?;
+            Ok((inputs, proof))
+        },
+        move |inputs, receipt| async move {
+            receipt_tx
+                .send(receipt)
+                .map_err(|_| failed("Torch publication owner closed"))?;
+            let published = published_rx
+                .await
+                .map_err(|_| failed("Torch publication was not acknowledged"))?;
+            if published {
+                // The successful output retains capability/use through the
+                // shared owner's durable receipt settlement, not just rename.
+                Ok(inputs)
+            } else {
+                Err(failed("Torch runtime publication refused"))
+            }
+        },
+    );
+    let pipeline = async move {
+        let Ok(inputs) = inputs_rx.await else {
+            return None;
+        };
+        let (runtime, proof) = match prepare(inputs).await {
+            Ok(prepared) => prepared,
+            Err(error) => return Some(Err(error)),
+        };
+        if proof_tx.send(proof).is_err() {
+            return None;
+        }
+        let Ok(receipt) = receipt_rx.await else {
+            return None;
+        };
+        let result = publish(runtime, receipt).await;
+        let _ = published_tx.send(result.is_ok());
+        Some(result)
+    };
+    let (acquisition, pipeline) = tokio::join!(acquisition, pipeline);
+    match pipeline {
+        Some(Err(error)) => Err(error),
+        _ => acquisition.map(drop),
+    }
+}
+
 impl VersionInstaller {
+    /// Configure the retained-preview wheel path with the shared acquisition
+    /// service. Incomplete historic wheel uses are retained and refused; this
+    /// slice never replays package execution or invents cold publication proof.
+    pub async fn with_torch_acquisition(
+        mut self,
+        acquisition: Arc<pumas_library::acquisition::AcquisitionService>,
+    ) -> Result<Self> {
+        if self.app_id != AppId::Torch {
+            return Err(failed("Torch wheel acquisition requires the Torch owner"));
+        }
+        self.acquisition_consumer = Some(Self::open_torch_acquisition(acquisition).await?);
+        Ok(self)
+    }
+
+    pub(crate) async fn open_torch_acquisition(
+        acquisition: Arc<pumas_library::acquisition::AcquisitionService>,
+    ) -> Result<Arc<AcquisitionConsumer>> {
+        let consumer = Arc::new(acquisition.open_consumer("runtime.torch.wheels")?);
+        let store = acquisition.store().clone();
+        let records = consumer
+            .run_blocking("inspect retained Torch wheel uses", move || {
+                store.acquisitions()
+            })
+            .await?;
+        let unsettled = records.values().any(|record| {
+            record.demand.consumer == consumer.owner()
+                && !matches!(
+                    record.phase,
+                    pumas_library::acquisition::AcquisitionPhase::Adopted { .. }
+                        | pumas_library::acquisition::AcquisitionPhase::Withdrawn
+                )
+        });
+        if unsettled {
+            consumer.shutdown().await?;
+            return Err(failed("Retained Torch wheel acquisition is unresolved; package replay and input cleanup are refused"));
+        }
+        Ok(consumer)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn install_verified_resolved_torch(
+        &self,
+        plan: &TorchInstallPlan,
+        tag: &str,
+        release: &GitHubRelease,
+        destination: &Path,
+        versions: &Path,
+        progress: &mpsc::Sender<ProgressUpdate>,
+        stage: &Arc<TorchPendingStage>,
+        log: &Path,
+    ) -> Result<()> {
+        let consumer = self.acquisition_consumer.as_ref().ok_or_else(|| {
+            failed("Resolved Torch installation requires the shared acquisition service")
+        })?;
+        let resolution: DirectTorchResolution = serde_json::from_str(&plan.resolution)
+            .map_err(|_| failed("Invalid retained Torch resolution"))?;
+        let report: serde_json::Value = serde_json::from_str(&plan.report)
+            .map_err(|_| failed("Invalid retained Torch report"))?;
+        if report["version"].as_str() != Some("1") {
+            return Err(failed("Unsupported retained pip resolution report version"));
+        }
+        let version = plan
+            .preview
+            .tag
+            .strip_prefix('v')
+            .ok_or_else(|| failed("Invalid Torch release"))?;
+        let minor = plan
+            .preview
+            .python
+            .strip_prefix("python")
+            .ok_or_else(|| failed("Invalid Torch interpreter selection"))?;
+        validate_direct_torch_report(
+            &resolution,
+            &report,
+            &plan.requirements,
+            &DirectTorchSelection {
+                version,
+                build: &plan.preview.build,
+                minor,
+                adapter: &plan.preview.adapter,
+                python: &plan.interpreter_path,
+            },
+        )?;
+        if serde_json::to_value(&resolution.artifacts).map_err(|_| failed("Invalid wheel set"))?
+            != serde_json::to_value(&plan.preview.artifacts)
+                .map_err(|_| failed("Invalid retained wheel set"))?
+        {
+            return Err(failed(
+                "Retained preview and resolution wheel sets disagree",
+            ));
+        }
+        let manifest = torch_wheel_manifest(&resolution.artifacts)?;
+        let runtime = self
+            .prepare_resolved_torch_runtime(plan, stage, log, progress)
+            .await?;
+        let provenance = vec![
+            (
+                runtime.join("resolution.json"),
+                plan.resolution.as_bytes().to_vec(),
+            ),
+            (
+                runtime.join("pip-resolution.json"),
+                plan.report.as_bytes().to_vec(),
+            ),
+            (
+                runtime.join("requirements.txt"),
+                plan.requirements.as_bytes().to_vec(),
+            ),
+            (
+                runtime.join("runtime.json"),
+                std::fs::read(runtime.join("runtime.json")).map_err(PumasError::from)?,
+            ),
+        ];
+        // A durable sibling is deliberate: failure cannot auto-delete Using
+        // inputs when the ordinary Torch TempDir is cleaned after child drainage.
+        let relative = format!(
+            ".torch-wheel-input-{}",
+            stage
+                .path()
+                .file_name()
+                .ok_or_else(|| failed("Torch attempt identity absent"))?
+                .to_string_lossy()
+        );
+        let wheels = versions.join(&relative);
+        let root = versions.to_path_buf();
+        let lease = stage.clone();
+        let capture = relative.clone();
+        let (grant, workspace) = consumer
+            .run_blocking("reserve Torch wheel inputs", move || {
+                std::fs::create_dir(root.join(&capture)).map_err(PumasError::from)?;
+                let grant =
+                    ReservedDirectory::capture(&root, Path::new(&capture), lease, || Ok(()))?;
+                let workspace = grant.acquisition_workspace()?;
+                Ok((grant, workspace))
+            })
+            .await?;
+        let request = AcquisitionHttpRequest {
+            demand: AcquisitionDemand {
+                consumer: consumer.owner().to_owned(),
+                operation: relative,
+            },
+            manifest,
+            workspace,
+            sources: resolution
+                .artifacts
+                .iter()
+                .map(|artifact| AcquisitionHttpSource {
+                    url: artifact.url.clone(),
+                    authorization: None,
+                })
+                .collect(),
+            retry: AcquisitionRetryPolicy {
+                attempts: Some(InstallationConfig::DOWNLOAD_RETRY_ATTEMPTS),
+                elapsed: Duration::from_secs(3600),
+                backoff: RetryConfig::new()
+                    .with_max_attempts(InstallationConfig::DOWNLOAD_RETRY_ATTEMPTS),
+            },
+        };
+        let client = reqwest::Client::builder()
+            .https_only(true)
+            .no_proxy()
+            .connect_timeout(InstallationConfig::URL_FETCH_TIMEOUT)
+            .user_agent("pumas-library")
+            .build()
+            .map_err(|_| failed("Could not construct wheel acquisition transport"))?;
+        let host = Box::new(TorchWheelHost {
+            cancel: self.cancel_flag.clone(),
+            shutdown: self.shutdown_flag.clone(),
+            progress: self.progress_tracker.clone(),
+        });
+        with_verified_torch_wheels(consumer, request, client, host,
+            |inputs| async move {
+                grant.validate()?;
+                for index in 0..inputs.record().manifest.files().len() { drop(inputs.open_file(index).await?); }
+                let packages = runtime.join("staged-packages");
+                let output = runtime.join("local-wheel-install");
+                let python = pumas_library::platform::paths::venv_python(&runtime);
+                let mut command = Command::new(&python);
+                command.arg("-I").arg(runtime.join("install_verified_wheels.py"))
+                    .arg("--resolution").arg(runtime.join("resolution.json"))
+                    .arg("--wheels").arg(&wheels).arg("--target").arg(&packages).arg("--output").arg(&output);
+                let status = self.run_runtime_command_status_with_custody(command, log, "Installing exact verified local wheels", progress,
+                    Some(TorchChildLease { stage: stage.clone(), _inputs: Some(inputs.clone()) }), None).await?;
+                if !status.success() { return Err(failed("Exact local wheel installation refused; see installation log")); }
+                let manifest_path = output.join("installed-files.json");
+                let validated_manifest = std::fs::read(&manifest_path).map_err(PumasError::from)?;
+                let installed: StagedFilesManifest = serde_json::from_slice(&validated_manifest)
+                    .map_err(|_| failed("Invalid installed wheel proof"))?;
+                let packages_for_check = packages.clone();
+                let runtime_for_move = runtime.clone();
+                let packages_after_move = torch_site_packages(&runtime, minor);
+                let minor = minor.to_owned();
+                let count = installed.files.len();
+                inputs.run_blocking("validate and move installed Torch packages", move || {
+                    validate_staged_files(&packages_for_check, &installed)?;
+                    move_verified_packages(&packages_for_check, &runtime_for_move, &minor)
+                }).await?;
+                let mut probe = Command::new(&python);
+                probe.arg("-B").arg(runtime.join("probe_runtime.py"));
+                let status = self.run_runtime_command_status_with_custody(probe, log, "Checking installed Torch identity and CPU operation", progress,
+                    Some(TorchChildLease { stage: stage.clone(), _inputs: Some(inputs.clone()) }), None).await?;
+                if !status.success() { return Err(failed("Installed Torch identity probe refused")); }
+                let runtime_for_check = runtime.clone();
+                let manifest_for_check = manifest_path.clone();
+                let manifest_for_receipt = validated_manifest.clone();
+                let recipe_digest = format!("{:x}", Sha256::digest(&provenance[3].1));
+                inputs.run_blocking("recheck Torch packages and provenance after probe", move || {
+                    validate_torch_final_proof(&runtime_for_check, &packages_after_move, &manifest_for_check, &validated_manifest, &provenance)
+                }).await?;
+                let proof = serde_json::json!({
+                    "format": "pumas-torch-wheel-install-1", "tag": tag,
+                    "output_directory": torch_directory_identity(&runtime).map_err(PumasError::from)?,
+                    "resolution_sha256": format!("{:x}", Sha256::digest(plan.resolution.as_bytes())),
+                    "interpreter_sha256": plan.interpreter_hash,
+                    "installed_manifest_sha256": format!("{:x}", Sha256::digest(&manifest_for_receipt)), "installed_files": count,
+                    "recipe_sha256": recipe_digest,
+                });
+                Ok((runtime, proof))
+            },
+            |runtime, receipt| async move {
+                std::fs::write(runtime.join("acquisition-wheel-receipt.json"), serde_json::to_vec_pretty(&receipt).map_err(|_| failed("Invalid wheel receipt"))?).map_err(PumasError::from)?;
+                self.publish_staged_torch_runtime(runtime, tag, release, destination, versions, progress, stage, Some(plan)).await
+            },
+        ).await
+    }
+
     async fn run_provider_with_cancel<F, T>(&self, operation: F) -> Result<T>
     where
         F: std::future::Future<Output = Result<T>>,
@@ -2054,7 +2601,7 @@ impl VersionInstaller {
         Ok(DirectTorchAttempt::Installed(runtime))
     }
 
-    async fn stage_resolved_torch_runtime(
+    async fn prepare_resolved_torch_runtime(
         &self,
         plan: &TorchInstallPlan,
         staging: &std::sync::Arc<TorchPendingStage>,
@@ -2112,52 +2659,6 @@ impl VersionInstaller {
             serde_json::to_vec_pretty(&recipe).map_err(|e| failed(e.to_string()))?,
         )
         .map_err(PumasError::from)?;
-        let python = pumas_library::platform::paths::venv_python(&runtime);
-        let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
-        let download_progress_path = runtime.join("download-progress.json");
-        let mut install = Command::new(&python);
-        install
-            .arg("-I")
-            .arg(runtime.join("resolve_runtime.py"))
-            .arg("--_pumas-pip-progress-worker")
-            .arg(&download_progress_path)
-            .args([
-                "--isolated",
-                "install",
-                "--no-deps",
-                "--require-hashes",
-                "--only-binary=:all:",
-                "--disable-pip-version-check",
-                "-r",
-            ])
-            .arg(runtime.join("requirements.txt"))
-            .arg("--cache-dir")
-            .arg(pip_cache);
-        let status = self
-            .run_runtime_command_status_with_download_progress(
-                install,
-                log_path,
-                "Installing resolved wheel artifacts",
-                progress_tx,
-                Some(staging.clone()),
-                Some(&download_progress_path),
-            )
-            .await?;
-        if !status.success() {
-            return Err(failed(
-                "Installing resolved wheel artifacts failed; see installation log",
-            ));
-        }
-        let mut probe = Command::new(&python);
-        probe.arg(runtime.join("probe_runtime.py"));
-        self.run_runtime_command(
-            probe,
-            log_path,
-            "Checking installed Torch identity and CPU operation",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
         Ok(runtime)
     }
 
@@ -2315,94 +2816,68 @@ impl VersionInstaller {
             None,
             Some(log_path.to_string_lossy().as_ref()),
         );
-        let result = self
-            .stage_torch_runtime(recipe, plan, selection, &staging, &log_path, &progress_tx)
-            .await;
-        #[cfg(test)]
-        if result.is_ok() && self.torch_stage_override.is_some() {
-            if let Some(pause) = &self.torch_stage_pause {
-                pause.reached.notify_one();
-                pause
-                    .resume
-                    .acquire()
-                    .await
-                    .map_err(|e| failed(format!("Staging pause failed: {e}")))?
-                    .forget();
-            }
-        }
-        let result = async {
-            match result {
-                Ok(runtime) => {
-                    self.check_cancelled()?;
-                    std::fs::write(runtime.join(".pumas-publishing"), TORCH_PUBLISHING_MARKER)
-                        .map_err(PumasError::from)?;
-                    if !self.torch_control.try_begin_publication() {
-                        return Err(failed(
-                            "Torch installation was cancelled before publication",
-                        ));
-                    }
-                    #[cfg(test)]
-                    if let Some(pause) = &self.torch_publication_pause {
-                        pause.reached.notify_one();
-                        pause
-                            .resume
-                            .acquire()
-                            .await
-                            .map_err(|e| failed(format!("Publication pause failed: {e}")))?
-                            .forget();
-                    }
-                    let pending = versions_dir.join(format!(".torch-pending-publish-{tag}"));
-                    write_pending_publish_marker(&pending, &runtime).map_err(PumasError::from)?;
-                    let publish_to = destination.clone();
-                    let published = spawn_blocking_with_stage(staging.clone(), move || {
-                        pumas_library::platform::filesystem::rename_directory_noreplace(
-                            &runtime,
-                            &publish_to,
+        let result =
+            if let Some(plan) = plan.filter(|plan| plan.preview.qualification != "qualified") {
+                #[cfg(test)]
+                let fixture_override = self.torch_stage_override.is_some();
+                #[cfg(not(test))]
+                let fixture_override = false;
+                if fixture_override {
+                    let runtime = self
+                        .stage_torch_runtime(
+                            recipe,
+                            Some(plan),
+                            selection,
+                            &staging,
+                            &log_path,
+                            &progress_tx,
                         )
-                    })
+                        .await?;
+                    self.publish_staged_torch_runtime(
+                        runtime,
+                        tag,
+                        release,
+                        &destination,
+                        &versions_dir,
+                        &progress_tx,
+                        &staging,
+                        Some(plan),
+                    )
                     .await
-                    .map_err(|error| failed(format!("Runtime publication task failed: {error}")))?;
-                    if let Err(error) = published {
-                        std::fs::remove_file(&pending).map_err(PumasError::from)?;
-                        return Err(PumasError::from(error));
-                    }
-                    let result = self
-                        .finalize_installation(
+                } else {
+                    self.install_verified_resolved_torch(
+                        plan,
+                        tag,
+                        release,
+                        &destination,
+                        &versions_dir,
+                        &progress_tx,
+                        &staging,
+                        &log_path,
+                    )
+                    .await
+                }
+            } else {
+                let staged = self
+                    .stage_torch_runtime(recipe, plan, selection, &staging, &log_path, &progress_tx)
+                    .await;
+                match staged {
+                    Ok(runtime) => {
+                        self.publish_staged_torch_runtime(
+                            runtime,
                             tag,
                             release,
                             &destination,
+                            &versions_dir,
                             &progress_tx,
-                            staging.clone(),
-                            plan
-                                .map(|plan| format!("Python {}", plan.managed_python.version)),
+                            &staging,
+                            plan,
                         )
-                        .await;
-                    if result.is_err() {
-                        // The durable ownership marker survives a Windows
-                        // file lock and is retried at startup and install.
-                        let rollback_destination = destination.clone();
-                        match spawn_blocking_with_stage(staging.clone(), move || {
-                            std::fs::remove_dir_all(rollback_destination)
-                        })
                         .await
-                        .map_err(|error| failed(format!("Torch rollback task failed: {error}")))?
-                        {
-                            Ok(()) => std::fs::remove_file(&pending).map_err(PumasError::from)?,
-                            Err(error) => warn!(%error, path = %destination.display(), "Unregistered Torch publication retained for cleanup"),
-                        }
                     }
-                    if result.is_ok() {
-                        match std::fs::remove_file(destination.join(".pumas-publishing")) {
-                            Ok(()) => std::fs::remove_file(&pending).map_err(PumasError::from)?,
-                            Err(error) => warn!(%error, "Installed Torch publication marker could not be removed"),
-                        }
-                    }
-                    result
+                    Err(error) => Err(error),
                 }
-                Err(error) => Err(error),
-            }
-        }
-        .await;
+            };
         let mut tracker = self.progress_tracker.write().await;
         if let Err(error) = &result {
             tracker.set_error(&error.to_string());
@@ -2421,6 +2896,97 @@ impl VersionInstaller {
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn publish_staged_torch_runtime(
+        &self,
+        runtime: PathBuf,
+        tag: &str,
+        release: &GitHubRelease,
+        destination: &Path,
+        versions_dir: &Path,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+        staging: &Arc<TorchPendingStage>,
+        plan: Option<&TorchInstallPlan>,
+    ) -> Result<()> {
+        #[cfg(test)]
+        if self.torch_stage_override.is_some() {
+            if let Some(pause) = &self.torch_stage_pause {
+                pause.reached.notify_one();
+                pause
+                    .resume
+                    .acquire()
+                    .await
+                    .map_err(|e| failed(format!("Staging pause failed: {e}")))?
+                    .forget();
+            }
+        }
+        self.check_cancelled()?;
+        std::fs::write(runtime.join(".pumas-publishing"), TORCH_PUBLISHING_MARKER)
+            .map_err(PumasError::from)?;
+        if !self.torch_control.try_begin_publication() {
+            return Err(failed(
+                "Torch installation was cancelled before publication",
+            ));
+        }
+        #[cfg(test)]
+        if let Some(pause) = &self.torch_publication_pause {
+            pause.reached.notify_one();
+            pause
+                .resume
+                .acquire()
+                .await
+                .map_err(|e| failed(format!("Publication pause failed: {e}")))?
+                .forget();
+        }
+        let pending = versions_dir.join(format!(".torch-pending-publish-{tag}"));
+        write_pending_publish_marker(&pending, &runtime).map_err(PumasError::from)?;
+        let publish_to = destination.to_path_buf();
+        let published = spawn_blocking_with_stage(staging.clone(), move || {
+            pumas_library::platform::filesystem::rename_directory_noreplace(&runtime, &publish_to)
+        })
+        .await
+        .map_err(|error| failed(format!("Runtime publication task failed: {error}")))?;
+        if let Err(error) = published {
+            std::fs::remove_file(&pending).map_err(PumasError::from)?;
+            return Err(PumasError::from(error));
+        }
+        let result = self
+            .finalize_installation(
+                tag,
+                release,
+                destination,
+                progress_tx,
+                staging.clone(),
+                plan.map(|plan| format!("Python {}", plan.managed_python.version)),
+            )
+            .await;
+        if result.is_err() {
+            // The durable ownership marker survives a Windows
+            // file lock and is retried at startup and install.
+            let rollback_destination = destination.to_path_buf();
+            match spawn_blocking_with_stage(staging.clone(), move || {
+                std::fs::remove_dir_all(rollback_destination)
+            })
+            .await
+            .map_err(|error| failed(format!("Torch rollback task failed: {error}")))?
+            {
+                Ok(()) => std::fs::remove_file(&pending).map_err(PumasError::from)?,
+                Err(error) => {
+                    warn!(%error, path = %destination.display(), "Unregistered Torch publication retained for cleanup")
+                }
+            }
+        }
+        if result.is_ok() {
+            match std::fs::remove_file(destination.join(".pumas-publishing")) {
+                Ok(()) => std::fs::remove_file(&pending).map_err(PumasError::from)?,
+                Err(error) => {
+                    warn!(%error, "Installed Torch publication marker could not be removed")
+                }
+            }
+        }
+        result
+    }
+
     async fn stage_torch_runtime(
         &self,
         recipe_spec: Option<&TorchRuntimeRecipe>,
@@ -2435,9 +3001,10 @@ impl VersionInstaller {
             return stage(staging.path());
         }
         if let Some(plan) = plan.filter(|p| p.preview.qualification != "qualified") {
-            return self
-                .stage_resolved_torch_runtime(plan, staging, log_path, progress_tx)
-                .await;
+            let _ = plan;
+            return Err(failed(
+                "Resolved Torch wheels require the verified acquisition handoff",
+            ));
         }
         if let Some(selection) = selection {
             return self
@@ -2639,16 +3206,39 @@ impl VersionInstaller {
 
     async fn run_runtime_command_status_with_download_progress(
         &self,
-        mut command: Command,
+        command: Command,
         log_path: &Path,
         stage: &str,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
         stage_lease: Option<std::sync::Arc<TorchPendingStage>>,
         download_progress_path: Option<&Path>,
     ) -> Result<std::process::ExitStatus> {
+        self.run_runtime_command_status_with_custody(
+            command,
+            log_path,
+            stage,
+            progress_tx,
+            stage_lease.map(|stage| TorchChildLease {
+                stage,
+                _inputs: None,
+            }),
+            download_progress_path,
+        )
+        .await
+    }
+
+    async fn run_runtime_command_status_with_custody(
+        &self,
+        mut command: Command,
+        log_path: &Path,
+        stage: &str,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+        stage_lease: Option<TorchChildLease>,
+        download_progress_path: Option<&Path>,
+    ) -> Result<std::process::ExitStatus> {
         self.check_cancelled()?;
         if let Some(stage_lease) = &stage_lease {
-            let scratch = stage_lease.scratch_path()?;
+            let scratch = stage_lease.stage.scratch_path()?;
             command
                 .env("TMPDIR", &scratch)
                 .env("TMP", &scratch)
@@ -2689,7 +3279,7 @@ impl VersionInstaller {
         )
         .map_err(|error| failed(format!("{stage}: {error}")))?;
         if let Some(stage_lease) = stage_lease {
-            child.attach_cleanup_lease(stage_lease);
+            child.attach_cleanup_lease(Arc::new(stage_lease));
         }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(3600);
         let mut last_download_progress: Option<TorchDownloadProgress> = None;
@@ -3162,3 +3752,7 @@ mod managed_python_provenance_tests {
         );
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "torch_wheel_handoff_tests.rs"]
+mod torch_wheel_handoff_tests;

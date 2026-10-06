@@ -931,3 +931,40 @@ independently reviewed. Owning plan/ledger/matrix/gates and
 [qualification](http-elapsed-budget-qualification-2026-10-06.md) record affected
 checks, historical failures, cache restoration and pending broader gate scope.
 Evidence-only successor preserves source, dependencies and frozen refs.
+
+## Q2 resolved-preview exact wheel handoff — admitted 2026-10-06
+
+The coordinator explicitly admits implementation while AQ-HTTP candidate8756f33
+is frozen in independent review; dependency gates govern publication/acceptance,
+not this separate source implementation. Branch
+`feat/torch-verified-wheel-handoff-8756f33b` retains base
+`8756f33b3ba114f5bdd84dbcf25b1aa58c287868`, tree
+`508caecefaf7825a357670c6a05357653bb0f4ef`, including accepted main1c1c7875.
+The smallest slice is retained unqualified resolved-preview installation: validate
+its existing complete resolution, acquire every pinned wheel via shared HTTP,
+consume only exact local inputs in an empty stage, validate dependency closure/
+installed RECORD/distribution identity, retain inputs through child cleanup and
+actual existing runtime publication. Automatic selection and the qualified
+bundled recipe remain explicitly scoped existing paths, not migrated by this slice.
+
+Production writes: `installer/torch.rs`, a package-owner helper
+`torch-server/install_verified_wheels.py`, and only adjacent Torch composition
+in `version_manager/mod.rs` and RPC `main.rs`. No core acquisition service,
+manifest, S3 reader, native importer/watcher/recovery or installer.rs production
+writes; no dependency/schema/generator/runtime-pin/ONNX build-policy changes.
+Tests: helper fixtures under torch-server/tests and co-located Torch owner tests.
+Owning plan, ledger, acceptance matrix, gates, contract/README and one Q2 report
+record exact checks and limits. Independent specification/standards reviewers
+have reviewed the design and will review final source. Inputs live in retained
+capability-backed sibling roots outside auto-deleted Torch stages. Local pip
+receives separate local-file hash requirements, never the remote provenance lock.
+One composite child cleanup lease retains both stage and acquired inputs.
+
+Acceptance: actual dependent fixture wheels; wrong/substituted bytes and missing
+files/closure refuse before publication; dependency direct URLs refuse; marker/
+extras closure validation; exact installed proof and receipt identity; held-child
+cancellation/drainage plus retained unresolved/cold refusal. A normal child-only
+bwrap network-denial probe failed UID-map setup on this host; preserve the failure
+and do not modify host/network/security settings. Network-denied/real Torch/
+platform/hosted evidence remains a release dependency. No production-ready or
+full AQ-PACKAGES claim. Repository-local MrScripty identity is preserved.

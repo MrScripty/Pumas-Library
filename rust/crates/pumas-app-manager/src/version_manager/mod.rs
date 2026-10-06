@@ -461,8 +461,10 @@ impl VersionManager {
         Ok(manager)
     }
 
-    /// Construct the llama.cpp manager with the application's existing shared
-    /// acquisition owner. A second service/store is never created here.
+    /// Construct a llama.cpp or Torch manager with the application's existing
+    /// shared acquisition owner. Torch refuses unresolved wheel uses before
+    /// startup cleanup; retained-preview installs require this capability.
+    /// A second service/store is never created here.
     pub async fn new_with_acquisition(
         launcher_root: impl Into<PathBuf>,
         app_id: AppId,
@@ -477,9 +479,26 @@ impl VersionManager {
         acquisition: Arc<AcquisitionService>,
         configured_client: Option<Arc<GitHubClient>>,
     ) -> Result<Self> {
+        if app_id == AppId::Torch {
+            // Refuse unresolved wheel custody before ordinary Torch startup
+            // can reclaim its retained stage or unregistered publication.
+            let consumer = VersionInstaller::open_torch_acquisition(acquisition).await?;
+            let initialized =
+                Self::new_with_github_client(launcher_root, app_id, configured_client).await;
+            return match initialized {
+                Ok(mut manager) => {
+                    manager.acquisition_consumer = Some(consumer);
+                    Ok(manager)
+                }
+                Err(error) => {
+                    consumer.shutdown().await?;
+                    Err(error)
+                }
+            };
+        }
         if app_id != AppId::LlamaCpp {
             return Err(PumasError::Config {
-                message: "Shared artifact acquisition is currently required for llama.cpp".into(),
+                message: "Shared artifact acquisition is supported for llama.cpp and Torch".into(),
             });
         }
         let mut manager =

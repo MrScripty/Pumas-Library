@@ -968,3 +968,18 @@ bwrap network-denial probe failed UID-map setup on this host; preserve the failu
 and do not modify host/network/security settings. Network-denied/real Torch/
 platform/hosted evidence remains a release dependency. No production-ready or
 full AQ-PACKAGES claim. Repository-local MrScripty identity is preserved.
+
+### Q2 admitted source completion
+
+Tested source `e246645bcf7d2f3bae2f68a0ba29215fafe335e9` (tree
+`24eceee6dc62b0c368f666c43989c34ba3b2a3bb`) completes the bounded retained-preview
+source slice. Final production and fixture blobs are independently reviewed;
+source errors, cleanup/oracle/lint repairs and qualification limits are preserved
+in [report](torch-verified-wheel-handoff-qualification-2026-10-06.md).
+The owning plan/ledger/matrix/gates and one report/evidence folder now record
+301 app-manager, 210 pinned-tool Python and 13 shared controls, strict default
+checks, the unchanged headless test lint failure and passing production binary.
+Enforced-denial, actual Torch/provider/platform/hosted acceptance and whole Q2
+migration remain open. Evidence-only successor preserves all source blobs and
+frozen refs; own temporary PR42 dependency caches are restored with matching
+mode/path/content/link digests. No gate advancement, merge or external review.

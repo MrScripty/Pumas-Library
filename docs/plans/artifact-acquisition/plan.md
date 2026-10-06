@@ -1,5 +1,23 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 retained-preview wheel handoff (2026-10-06):** Separately admitted while
+AQ-HTTP8756 remains frozen, branch `feat/torch-verified-wheel-handoff-8756f33b`
+retains base8756f33 and accepted main1c1c7875. Tested source
+`e246645bcf7d2f3bae2f68a0ba29215fafe335e9` (tree
+`24eceee6dc62b0c368f666c43989c34ba3b2a3bb`) acquires the accepted complete wheel
+set before exact local pip, preserves original provenance, validates installed
+members after probing, retains child/input custody through cleanup and receipt
+settlement, and refuses unresolved cold replay before cleanup. Thirteen shared
+controls, 301 app-manager and 210 pinned-tool Python tests pass; strict default
+checks pass. Full headless RPC test Clippy has an unchanged helper lint failure;
+headless production binary passes. See [qualification](reports/torch-verified-wheel-handoff-qualification-2026-10-06.md).
+This completes only the retained unqualified-preview source slice. Automatic
+selection and qualified recipes retain documented scope. AQ-HTTP is a release
+dependency; AQ-PACKAGES remains not ready, including enforced network denial,
+real Torch/provider/platform and hosted acceptance. Next Q2 source work separates
+automatic resolution from final payload installation. No native/S3/generator,
+dependency/runtime-pin or ONNX policy changes, external review contact or merge.
+
 **Positive HTTP elapsed-budget feature (2026-10-06):** Separate
 `feat/acquisition-http-budget-0c02dcfb` retains frozen AC10 evidence base
 `0c02dcfb81a0f7ab2a3858c2b5cee329816b3ce5` (tree `78c663ed397264284cb95662d49a3354380755d4`). Tested
@@ -405,7 +423,7 @@ Each row is one coherent semantic unit including producer and actual consumers. 
 | Milestone | Goal | Dependencies | Gate / evidence | State |
 | --- | --- | --- | --- | --- |
 | **Q1** | Shared HTTP lifecycle, neutral persistence/handoff, and real HF/native consumer cutover; existing UI outcomes preserved. | Source/retained-state preparation and active recovery-owner handoff. No runtime milestone. | `AQ-HTTP`: AC01–AC10, AC15, AC16, AC18; real HF model import and native archive extraction plus corresponding UI/contract/cancellation/reopen evidence. | In progress; gate not ready |
-| **Q2** | Exact wheel-file-set acquisition and local-only consumption in the existing Torch installer. | AQ-HTTP. | `AQ-PACKAGES`: AC11, AC12 and Q1 regression evidence affected by this composition; network-denied installation and actual package identity. | Planned |
+| **Q2** | Exact wheel-file-set acquisition and local-only consumption in the existing Torch installer. | AQ-HTTP. | `AQ-PACKAGES`: AC11, AC12 and Q1 regression evidence affected by this composition; network-denied installation and actual package identity. | In progress; bounded retained-preview source complete, gate not ready |
 | **Q3** | S3-compatible acquisition using the same lifecycle, direct explicit source workflow, tested credentials/version semantics, and a real model import through the existing model-facing operations. | AQ-HTTP. Q2 is the default next serial integration; Q3 can be delegated after shared files stabilize. | `AQ-S3`: AC13, AC14 and source-neutrality regressions; native AWS S3, one non-AWS compatible service, local MinIO, and S3-to-model-library evidence. | Planned |
 | **Q4** | Complete affected public/installed/native qualification, migration documentation and removal of superseded authority. | Q1–Q3 implemented. | `AQ-COMPLETE`: all AC01–AC18 satisfied and all four milestones Accepted; packaged/independent-consumer/native-platform evidence in AC17. | Planned |
 

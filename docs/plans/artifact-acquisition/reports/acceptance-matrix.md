@@ -427,3 +427,23 @@ No public shape, S3/native frozen source, generator or Q2 writes. AQ-HTTP remain
 not ready; broader acceptance, current-head hosted checks, resource/platform/UI,
 public-client and deployment dispositions remain pending. Q2 exact local package
 handoff/denied-network installation remains the next gated implementation feature.
+
+## AC11/AC12 bounded retained-preview package evidence — 2026-10-06
+
+Source `e246645bcf7d2f3bae2f68a0ba29215fafe335e9` (tree
+`24eceee6dc62b0c368f666c43989c34ba3b2a3bb`) consumes an accepted complete wheel
+set through shared acquisition, then public local-only pip with exact hashes.
+Thirteen synthetic Linux shared-handoff controls include real helper/publisher
+and receipt settlement, bad bytes/missing closure, failed/lost-ack cold refusal,
+cancellation/abandonment, and post-probe member/proof/provenance/ancestor refusal.
+301 app-manager and 210 pinned-tool Python tests pass with strict default checks.
+Headless full-test Clippy has a pre-existing helper lint; production binary passes.
+See [qualification](torch-verified-wheel-handoff-qualification-2026-10-06.md).
+
+This supports only the retained unqualified-preview slice. The fixture does not
+run real Torch or the complete provider/probe pipeline, and the ordinary bwrap
+denial setup failed. AC11/AC12/AQ-PACKAGES remain pending on enforced-denial,
+actual package/interpreter/build, egress, hosted and platform evidence. Automatic
+resolution/install, qualified recipe and managed-Python bootstrap remain scoped
+retained mechanisms. Inputs remain retained; no reclaim or automatic cold replay
+is qualified. AQ-HTTP is still a release dependency.

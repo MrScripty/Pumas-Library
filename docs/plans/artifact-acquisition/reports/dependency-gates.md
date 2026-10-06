@@ -102,3 +102,23 @@ No public shape, S3/native frozen source, generator or Q2 writes. AQ-HTTP remain
 not ready; broader acceptance, current-head hosted checks, resource/platform/UI,
 public-client and deployment dispositions remain pending. Q2 exact local package
 handoff/denied-network installation remains the next gated implementation feature.
+
+## Q2 retained-preview source milestone — gate remains not ready
+
+The coordinator separately admitted source implementation on frozen HTTP8756,
+with AQ-HTTP governing release acceptance. Tested source
+`e246645bcf7d2f3bae2f68a0ba29215fafe335e9` (tree
+`24eceee6dc62b0c368f666c43989c34ba3b2a3bb`) supplies exact shared wheel acquisition,
+local-only consumption, post-probe installed-member/provenance proof and retained
+input/child/receipt custody for unqualified retained previews. The 13 shared
+controls, 301 app-manager tests and 210 pinned-tool Python tests pass. Strict
+default checks and headless production binary pass; full headless test Clippy has
+an unchanged helper failure. [Qualification](torch-verified-wheel-handoff-qualification-2026-10-06.md)
+records exact evidence and failures.
+
+AQ-HTTP and AQ-PACKAGES remain not ready. The denial fixture could not create its
+UID map, so no enforced-denial claim exists. Real Torch, provider/platform,
+installed/desktop and hosted evidence remain required. Automatic selection and
+qualified recipes retain scoped existing paths; bootstrap traffic is separately
+owned. Next Q2 source work separates automatic resolution from final payload
+installation. No runtime gate, merge or acceptance is advanced.

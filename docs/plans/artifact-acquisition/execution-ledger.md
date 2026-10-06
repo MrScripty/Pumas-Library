@@ -1754,3 +1754,33 @@ are preserved. [Post-main evidence](reports/http-elapsed-budget-2026-10-06/post-
 binds exact commands/logs, identities, merge parents/tree and Rust subtree
 agreement. Parent separately monitors main's postmerge CI; no new hosted or full
 AQ-HTTP acceptance is claimed. Q2 remains the next gated implementation feature.
+
+## 2026-10-06 — Q2 retained-preview verified wheel handoff
+
+Separately admitted base `8756f33b3ba114f5bdd84dbcf25b1aa58c287868` (tree
+`508caecefaf7825a357670c6a05357653bb0f4ef`) preserves main1c1c7875 and frozen
+HTTP/AC10/PR42/S3 refs. Source `e246645bcf7d2f3bae2f68a0ba29215fafe335e9`, tree
+`24eceee6dc62b0c368f666c43989c34ba3b2a3bb`, migrates only the retained unqualified
+preview's final wheel payload/install leg. Shared exact-set verification precedes
+local-only public pip; original provenance is retained. Installed RECORD proof,
+post-probe member/provenance/ancestry rechecks and child-held input custody precede
+existing owner publication; successful use survives durable receipt settlement.
+Unresolved uses refuse cold replay before cleanup, with sibling inputs retained.
+Additive `with_torch_acquisition`; existing shared manager constructor now accepts
+Torch, and RPC binds it. No core/S3/native/generator/dependency/runtime-pin edits.
+
+301 app-manager tests (+1 existing ignored), 210 pinned-tool Python tests,
+13 new shared controls and strict app-manager/default-RPC/Ruff/scoped-format
+checks pass. Headless production binary Clippy passes; headless all-target Clippy
+fails on an unchanged integration helper. Initial home-registry/FastAPI-tooling,
+compile/lint/oracle errors are preserved. Two read-only reviews ACK final blobs.
+Own inactive build caches were hashed before removal, PR42 directories restored
+with matching digests. [Report](reports/torch-verified-wheel-handoff-qualification-2026-10-06.md)
+and validated archive bind exact commands/profiles/exits and source identity.
+
+AQ-HTTP remains a release dependency. AC11/AC12/AQ-PACKAGES remain pending on
+enforced network-denial, real Torch/provider/platform and hosted acceptance.
+Automatic resolution/install, qualified recipe and managed-Python bootstrap retain
+explicit scope. Next Q2 source work separates automatic resolution from final
+payload installation. Parent owns PR/review/CI/merge; no merge/production-ready
+claim or external reviewer contact.

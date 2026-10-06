@@ -18,3 +18,8 @@ The checker is unchanged. No dependencies, authentication, network policy, API
 or schemas were changed. Local execution and Git push work; shell gh reads were
 Forbidden, while authorized GitHub connector reads succeeded. Hosted repair
 qualification and PR42 advancement belong to the parent. AC10 remains separate.
+
+The exact final root-versus-Electron regression was rerun with only
+`absWorkingDir` removed (exit 1), then with source 75d7 restored byte-for-byte
+(exit 0). `exact-regression-red-green.json` binds commands, versions, source/test
+hashes, exact red/green log hashes and all six generated output hashes.

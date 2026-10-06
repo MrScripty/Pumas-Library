@@ -26,7 +26,8 @@
   "sanitization": "All published bytes checked for common credential-value patterns; no environment values, auth stores or full hosted job logs collected. Exact original repair-evidence.json and all its hashed files preserved.",
   "raw_log_container": {
     "path": "command-logs.tar.gz",
-    "sha256": "142c6f256e6c16216e9d4002eafcbdc9695fc770b35e2e456d7a3cad9c4695cd",
+    "sha256": "78b748596bc2a286a9c5849a49eb3ffd101d9ef97389e299a0d7aab31cded2ef",
     "format": "gzip tar; original log names and exact bytes; diagnostic whitespace preserved"
-  }
+  },
+  "exact_repair_regression": "exact-regression-red-green.json: Node24.19.0, esbuild0.25.12, AJV8.20.0; only absWorkingDir removed gives exit1; restored repair gives exit0; six output hashes retained"
 }

@@ -698,3 +698,179 @@ async fn verified_wheels_probe_proof_ancestor_escape_refuses_publication() {
 async fn verified_wheels_abandoned_waiter_holds_inputs_through_child_cleanup() {
     fixture(Case::AbandonedChild).await;
 }
+
+fn accepted_packet_fixture() -> PreparedTorchWheelInstall {
+    let artifacts: Vec<_> = [
+        "torch",
+        "fastapi",
+        "uvicorn",
+        "psutil",
+        "pillow",
+        "safetensors",
+    ]
+    .into_iter()
+    .map(|name| crate::version_manager::TorchArtifact {
+        name: name.into(),
+        version: if name == "torch" && !cfg!(target_os = "macos") {
+            "2.14.0+cpu"
+        } else if name == "torch" {
+            "2.14.0"
+        } else {
+            "1.0"
+        }
+        .into(),
+        url: if name == "torch" {
+            "https://download.pytorch.org/whl/cpu/torch/torch-fixture.whl".into()
+        } else {
+            format!("https://files.pythonhosted.org/packages/{name}-fixture.whl")
+        },
+        sha256: "a".repeat(64),
+    })
+    .collect();
+    let (platform, machine) = match std::env::consts::OS {
+        "windows" => ("Windows-fixture", "AMD64"),
+        "macos" => ("macOS-fixture", "arm64"),
+        _ => ("Linux-fixture", "x86_64"),
+    };
+    let resolution_json = serde_json::json!({
+        "release":"2.14.0", "torch":artifacts[0].version, "build":"cpu", "python":"3.12",
+        "interpreter":"/owned/stage/venv/python", "implementation":"cpython",
+        "platform":platform, "machine":machine, "adapter":"none", "artifacts":artifacts,
+    })
+    .to_string();
+    let report =
+        serde_json::json!({ "version":"1", "install": artifacts.iter().map(|a| serde_json::json!({
+        "metadata":{"name":a.name,"version":a.version},
+        "download_info":{"url":a.url,"archive_info":{"hashes":{"sha256":a.sha256}}}
+    })).collect::<Vec<_>>() })
+        .to_string();
+    let requirements = artifacts
+        .iter()
+        .map(|a| format!("{} @ {} --hash=sha256:{}\n", a.name, a.url, a.sha256))
+        .collect::<String>();
+    let resolution = accepted_torch_resolution(
+        &resolution_json,
+        &report,
+        &requirements,
+        &DirectTorchSelection {
+            version: "2.14.0",
+            build: "cpu",
+            minor: "3.12",
+            adapter: "none",
+            python: Path::new("/owned/stage/venv/python"),
+        },
+    )
+    .unwrap();
+    PreparedTorchWheelInstall {
+        runtime: PathBuf::from("/owned/stage"),
+        resolution,
+        resolution_json,
+        report,
+        requirements,
+        interpreter_hash: "b".repeat(64),
+        provider_label: Some("Python 3.12.14".into()),
+    }
+}
+
+#[test]
+fn accepted_packet_preserves_venv_identity_and_refuses_changed_evidence() {
+    let packet = accepted_packet_fixture();
+    let selection = DirectTorchSelection {
+        version: "2.14.0",
+        build: "cpu",
+        minor: "3.12",
+        adapter: "none",
+        python: Path::new("/owned/stage/venv/python"),
+    };
+    assert_eq!(packet.resolution.interpreter, "/owned/stage/venv/python");
+    assert_eq!(packet.interpreter_hash, "b".repeat(64));
+    assert_eq!(packet.provider_label.as_deref(), Some("Python 3.12.14"));
+    for version in [
+        serde_json::Value::Null,
+        serde_json::json!("2"),
+        serde_json::json!(1),
+    ] {
+        let mut report: serde_json::Value = serde_json::from_str(&packet.report).unwrap();
+        report["version"] = version;
+        assert!(accepted_torch_resolution(
+            &packet.resolution_json,
+            &report.to_string(),
+            &packet.requirements,
+            &selection
+        )
+        .is_err());
+    }
+    let mut resolution: serde_json::Value = serde_json::from_str(&packet.resolution_json).unwrap();
+    resolution["interpreter"] = serde_json::json!("/managed/provider/python");
+    assert!(accepted_torch_resolution(
+        &resolution.to_string(),
+        &packet.report,
+        &packet.requirements,
+        &selection
+    )
+    .is_err());
+    let mut report: serde_json::Value = serde_json::from_str(&packet.report).unwrap();
+    report["install"][0]["download_info"]["archive_info"]["hashes"]["sha256"] =
+        serde_json::json!("c".repeat(64));
+    assert!(accepted_torch_resolution(
+        &packet.resolution_json,
+        &report.to_string(),
+        &packet.requirements,
+        &selection
+    )
+    .is_err());
+    assert!(accepted_torch_resolution(
+        &packet.resolution_json,
+        &packet.report,
+        &packet.requirements.replace("sha256:a", "sha256:c"),
+        &selection
+    )
+    .is_err());
+}
+
+#[tokio::test]
+async fn automatic_candidate_loop_stops_at_first_accepted_packet() {
+    let calls = Arc::new(StdMutex::new(Vec::new()));
+    let capture = calls.clone();
+    let prepared = resolve_torch_candidates(
+        &["cpu".into(), "cu130".into()],
+        &["3.14".into(), "3.12".into()],
+        move |build, minor| {
+            capture.lock().unwrap().push((build, minor.clone()));
+            async move {
+                if minor == "3.14" {
+                    Ok(DirectTorchAttempt::Retry)
+                } else {
+                    Ok(DirectTorchAttempt::Resolved(Box::new(
+                        accepted_packet_fixture(),
+                    )))
+                }
+            }
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![("cpu".into(), "3.14".into()), ("cpu".into(), "3.12".into())]
+    );
+    assert_eq!(prepared.resolution.python, "3.12");
+    assert_eq!(prepared.resolution.interpreter, "/owned/stage/venv/python");
+}
+
+#[tokio::test]
+async fn automatic_candidate_loop_propagates_inconclusive_or_validation_errors() {
+    let calls = Arc::new(StdMutex::new(0));
+    let capture = calls.clone();
+    let result = resolve_torch_candidates(
+        &["cu130".into(), "cpu".into()],
+        &["3.14".into(), "3.12".into()],
+        move |_, _| {
+            *capture.lock().unwrap() += 1;
+            async { Err(failed("inconclusive resolution or refused evidence")) }
+        },
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(*calls.lock().unwrap(), 1);
+}

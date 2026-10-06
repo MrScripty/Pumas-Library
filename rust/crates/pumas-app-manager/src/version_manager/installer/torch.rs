@@ -1426,6 +1426,34 @@ struct DirectTorchResolution {
     artifacts: Vec<crate::version_manager::TorchArtifact>,
 }
 
+// Accepted package-owner evidence; final installation never re-enters selection.
+struct PreparedTorchWheelInstall {
+    runtime: PathBuf,
+    resolution: DirectTorchResolution,
+    resolution_json: String,
+    report: String,
+    requirements: String,
+    interpreter_hash: String,
+    provider_label: Option<String>,
+}
+
+fn accepted_torch_resolution(
+    resolution: &str,
+    report: &str,
+    requirements: &str,
+    selection: &DirectTorchSelection<'_>,
+) -> Result<DirectTorchResolution> {
+    let resolution: DirectTorchResolution = serde_json::from_str(resolution)
+        .map_err(|_| failed("Invalid accepted Torch resolution"))?;
+    let report: serde_json::Value =
+        serde_json::from_str(report).map_err(|_| failed("Invalid accepted Torch report"))?;
+    if report["version"].as_str() != Some("1") {
+        return Err(failed("Unsupported pip resolution report version"));
+    }
+    validate_direct_torch_report(&resolution, &report, requirements, selection)?;
+    Ok(resolution)
+}
+
 struct DirectTorchSelection<'a> {
     version: &'a str,
     build: &'a str,
@@ -1667,8 +1695,30 @@ fn validate_direct_torch_report(
 }
 
 enum DirectTorchAttempt {
-    Installed(PathBuf),
+    Resolved(Box<PreparedTorchWheelInstall>),
     Retry,
+}
+
+async fn resolve_torch_candidates<Attempt, AttemptFuture>(
+    builds: &[String],
+    minors: &[String],
+    mut attempt: Attempt,
+) -> Result<PreparedTorchWheelInstall>
+where
+    Attempt: FnMut(String, String) -> AttemptFuture,
+    AttemptFuture: std::future::Future<Output = Result<DirectTorchAttempt>>,
+{
+    for build in builds {
+        for minor in minors {
+            match attempt(build.clone(), minor.clone()).await? {
+                DirectTorchAttempt::Resolved(prepared) => return Ok(*prepared),
+                DirectTorchAttempt::Retry => {}
+            }
+        }
+    }
+    Err(failed(
+        "No managed Python candidate has compatible Torch wheels and dependencies",
+    ))
 }
 
 #[derive(Deserialize)]
@@ -1888,6 +1938,7 @@ fn torch_site_packages(runtime: &Path, python_minor: &str) -> PathBuf {
     }
 }
 
+#[cfg(test)]
 fn validate_and_move_direct_torch_packages(
     resolution: &DirectTorchResolution,
     report: &serde_json::Value,
@@ -2096,7 +2147,7 @@ where
 }
 
 impl VersionInstaller {
-    /// Configure the retained-preview wheel path with the shared acquisition
+    /// Configure retained-preview and automatic wheel paths with shared acquisition
     /// service. Incomplete historic wheel uses are retained and refused; this
     /// slice never replays package execution or invents cold publication proof.
     pub async fn with_torch_acquisition(
@@ -2147,15 +2198,10 @@ impl VersionInstaller {
         stage: &Arc<TorchPendingStage>,
         log: &Path,
     ) -> Result<()> {
-        let consumer = self.acquisition_consumer.as_ref().ok_or_else(|| {
-            failed("Resolved Torch installation requires the shared acquisition service")
-        })?;
-        let resolution: DirectTorchResolution = serde_json::from_str(&plan.resolution)
-            .map_err(|_| failed("Invalid retained Torch resolution"))?;
-        let report: serde_json::Value = serde_json::from_str(&plan.report)
-            .map_err(|_| failed("Invalid retained Torch report"))?;
-        if report["version"].as_str() != Some("1") {
-            return Err(failed("Unsupported retained pip resolution report version"));
+        if self.acquisition_consumer.is_none() {
+            return Err(failed(
+                "Resolved Torch installation requires the shared acquisition service",
+            ));
         }
         let version = plan
             .preview
@@ -2167,9 +2213,9 @@ impl VersionInstaller {
             .python
             .strip_prefix("python")
             .ok_or_else(|| failed("Invalid Torch interpreter selection"))?;
-        validate_direct_torch_report(
-            &resolution,
-            &report,
+        let resolution = accepted_torch_resolution(
+            &plan.resolution,
+            &plan.report,
             &plan.requirements,
             &DirectTorchSelection {
                 version,
@@ -2187,22 +2233,61 @@ impl VersionInstaller {
                 "Retained preview and resolution wheel sets disagree",
             ));
         }
-        let manifest = torch_wheel_manifest(&resolution.artifacts)?;
         let runtime = self
             .prepare_resolved_torch_runtime(plan, stage, log, progress)
             .await?;
+        let prepared = PreparedTorchWheelInstall {
+            runtime,
+            resolution,
+            resolution_json: plan.resolution.clone(),
+            report: plan.report.clone(),
+            requirements: plan.requirements.clone(),
+            interpreter_hash: plan.interpreter_hash.clone(),
+            provider_label: Some(format!("Python {}", plan.managed_python.version)),
+        };
+        self.install_verified_prepared_torch(
+            prepared,
+            tag,
+            release,
+            destination,
+            versions,
+            progress,
+            stage,
+            log,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn install_verified_prepared_torch(
+        &self,
+        prepared: PreparedTorchWheelInstall,
+        tag: &str,
+        release: &GitHubRelease,
+        destination: &Path,
+        versions: &Path,
+        progress: &mpsc::Sender<ProgressUpdate>,
+        stage: &Arc<TorchPendingStage>,
+        log: &Path,
+    ) -> Result<()> {
+        let consumer = self.acquisition_consumer.as_ref().ok_or_else(|| {
+            failed("Torch wheel installation requires the shared acquisition service")
+        })?;
+        let manifest = torch_wheel_manifest(&prepared.resolution.artifacts)?;
+        let minor = prepared.resolution.python.as_str();
+        let runtime = prepared.runtime.clone();
         let provenance = vec![
             (
                 runtime.join("resolution.json"),
-                plan.resolution.as_bytes().to_vec(),
+                prepared.resolution_json.as_bytes().to_vec(),
             ),
             (
                 runtime.join("pip-resolution.json"),
-                plan.report.as_bytes().to_vec(),
+                prepared.report.as_bytes().to_vec(),
             ),
             (
                 runtime.join("requirements.txt"),
-                plan.requirements.as_bytes().to_vec(),
+                prepared.requirements.as_bytes().to_vec(),
             ),
             (
                 runtime.join("runtime.json"),
@@ -2239,7 +2324,8 @@ impl VersionInstaller {
             },
             manifest,
             workspace,
-            sources: resolution
+            sources: prepared
+                .resolution
                 .artifacts
                 .iter()
                 .map(|artifact| AcquisitionHttpSource {
@@ -2308,8 +2394,8 @@ impl VersionInstaller {
                 let proof = serde_json::json!({
                     "format": "pumas-torch-wheel-install-1", "tag": tag,
                     "output_directory": torch_directory_identity(&runtime).map_err(PumasError::from)?,
-                    "resolution_sha256": format!("{:x}", Sha256::digest(plan.resolution.as_bytes())),
-                    "interpreter_sha256": plan.interpreter_hash,
+                    "resolution_sha256": format!("{:x}", Sha256::digest(prepared.resolution_json.as_bytes())),
+                    "interpreter_sha256": prepared.interpreter_hash,
                     "installed_manifest_sha256": format!("{:x}", Sha256::digest(&manifest_for_receipt)), "installed_files": count,
                     "recipe_sha256": recipe_digest,
                 });
@@ -2317,7 +2403,7 @@ impl VersionInstaller {
             },
             |runtime, receipt| async move {
                 std::fs::write(runtime.join("acquisition-wheel-receipt.json"), serde_json::to_vec_pretty(&receipt).map_err(|_| failed("Invalid wheel receipt"))?).map_err(PumasError::from)?;
-                self.publish_staged_torch_runtime(runtime, tag, release, destination, versions, progress, stage, Some(plan)).await
+                self.publish_staged_torch_runtime(runtime, tag, release, destination, versions, progress, stage, prepared.provider_label.clone()).await
             },
         ).await
     }
@@ -2349,13 +2435,13 @@ impl VersionInstaller {
         }
     }
 
-    async fn stage_selected_torch_runtime(
+    async fn resolve_selected_torch_runtime(
         &self,
         selection: &super::super::torch_preview::TorchInstallSelection,
         staging: &std::sync::Arc<TorchPendingStage>,
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
-    ) -> Result<PathBuf> {
+    ) -> Result<PreparedTorchWheelInstall> {
         if selection.adapter != "none" && selection.adapter != "flux2" {
             return Err(failed(
                 "This Torch dependency profile requires a resolved plan",
@@ -2398,44 +2484,37 @@ impl VersionInstaller {
                 "No managed CPython candidate is available for Torch",
             ));
         }
-        for build in builds {
-            for minor in &minors {
-                self.check_cancelled()?;
-                let attempt = self
-                    .stage_selected_torch_attempt(
-                        selection,
-                        &build,
-                        minor,
-                        &python_root,
-                        &TorchAttemptContext {
-                            staging,
-                            log_path,
-                            progress_tx,
-                        },
-                    )
-                    .await?;
-                match attempt {
-                    DirectTorchAttempt::Installed(runtime) => return Ok(runtime),
-                    DirectTorchAttempt::Retry => {
-                        let runtime = staging.path().join("runtime");
-                        spawn_blocking_with_stage(staging.clone(), move || {
-                            std::fs::remove_dir_all(runtime)
-                        })
-                        .await
-                        .map_err(|error| {
-                            failed(format!("Torch retry cleanup task failed: {error}"))
-                        })?
-                        .map_err(PumasError::from)?;
-                    }
-                }
+        let python_root = python_root.as_path();
+        resolve_torch_candidates(&builds, &minors, |build, minor| async move {
+            self.check_cancelled()?;
+            let attempt = self
+                .resolve_selected_torch_attempt(
+                    selection,
+                    &build,
+                    &minor,
+                    python_root,
+                    &TorchAttemptContext {
+                        staging,
+                        log_path,
+                        progress_tx,
+                    },
+                )
+                .await?;
+            if matches!(attempt, DirectTorchAttempt::Retry) {
+                let runtime = staging.path().join("runtime");
+                spawn_blocking_with_stage(staging.clone(), move || {
+                    std::fs::remove_dir_all(runtime)
+                })
+                .await
+                .map_err(|error| failed(format!("Torch retry cleanup task failed: {error}")))?
+                .map_err(PumasError::from)?;
             }
-        }
-        Err(failed(
-            "No managed Python candidate has compatible Torch wheels and dependencies",
-        ))
+            Ok(attempt)
+        })
+        .await
     }
 
-    async fn stage_selected_torch_attempt(
+    async fn resolve_selected_torch_attempt(
         &self,
         selection: &super::super::torch_preview::TorchInstallSelection,
         build: &str,
@@ -2488,34 +2567,25 @@ impl VersionInstaller {
             .strip_prefix('v')
             .ok_or_else(|| failed("Invalid Torch release tag"))?;
         let python = pumas_library::platform::paths::venv_python(&runtime);
-        let packages = runtime.join("staged-packages");
         let resolver_output = runtime.join("resolver-result");
-        let download_progress_path = resolver_output.join("download-progress.json");
         let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
         let mut install = Command::new(&python);
         install
             .arg("-I")
             .arg(runtime.join("resolve_runtime.py"))
-            .args(["--install", "--version", version, "--build", build])
+            .args(["--resolve-only", "--version", version, "--build", build])
             .args(["--adapter", &selection.adapter])
-            .arg("--progress-file")
-            .arg(&download_progress_path)
-            .arg("--target")
-            .arg(&packages)
             .arg("--output")
             .arg(&resolver_output)
             .arg("--cache-dir")
             .arg(pip_cache);
         let status = self
-            .run_runtime_command_status_with_download_progress(
+            .run_runtime_command_status(
                 install,
                 log_path,
-                &format!(
-                    "Resolving and installing official Torch {build} wheels for Python {minor}"
-                ),
+                &format!("Resolving official Torch {build} wheels for Python {minor}"),
                 progress_tx,
                 Some(staging.clone()),
-                Some(&download_progress_path),
             )
             .await?;
         if !status.success() {
@@ -2527,29 +2597,18 @@ impl VersionInstaller {
                 return Ok(DirectTorchAttempt::Retry);
             }
             return Err(failed(format!(
-                "Torch package installation failed ({status}); see installation log"
+                "Torch package resolution failed ({status}); see installation log"
             )));
         }
-        // No staged package code runs until the resolver has validated the
-        // installation report and published its lock and resolution manifest.
-        let resolution: DirectTorchResolution = serde_json::from_slice(
-            &std::fs::read(resolver_output.join("resolution.json")).map_err(PumasError::from)?,
-        )
-        .map_err(|error| failed(format!("Invalid Torch installation report: {error}")))?;
-        let report: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(resolver_output.join("pip-resolution.json"))
-                .map_err(PumasError::from)?,
-        )
-        .map_err(|error| failed(format!("Invalid Torch pip report: {error}")))?;
+        // Resolve-only output is accepted before any payload acquisition/install.
+        let resolution_json = std::fs::read_to_string(resolver_output.join("resolution.json"))
+            .map_err(PumasError::from)?;
+        let report = std::fs::read_to_string(resolver_output.join("pip-resolution.json"))
+            .map_err(PumasError::from)?;
         let requirements = std::fs::read_to_string(resolver_output.join("requirements.txt"))
             .map_err(PumasError::from)?;
-        let manifest: StagedFilesManifest = serde_json::from_slice(
-            &std::fs::read(resolver_output.join("installed-files.json"))
-                .map_err(PumasError::from)?,
-        )
-        .map_err(|error| failed(format!("Invalid Torch staged file manifest: {error}")))?;
-        validate_and_move_direct_torch_packages(
-            &resolution,
+        let resolution = accepted_torch_resolution(
+            &resolution_json,
             &report,
             &requirements,
             &DirectTorchSelection {
@@ -2559,18 +2618,22 @@ impl VersionInstaller {
                 adapter: &selection.adapter,
                 python: &python,
             },
-            &packages,
-            &runtime,
-            &manifest,
         )?;
-        for name in [
-            "requirements.txt",
-            "resolution.json",
-            "pip-resolution.json",
-            "installed-files.json",
+        if format!(
+            "{:x}",
+            Sha256::digest(std::fs::read(&managed_python.executable).map_err(PumasError::from)?)
+        ) != interpreter_hash
+        {
+            return Err(failed(
+                "Managed Python executable changed during resolution",
+            ));
+        }
+        for (name, bytes) in [
+            ("requirements.txt", requirements.as_bytes()),
+            ("resolution.json", resolution_json.as_bytes()),
+            ("pip-resolution.json", report.as_bytes()),
         ] {
-            std::fs::copy(resolver_output.join(name), runtime.join(name))
-                .map_err(PumasError::from)?;
+            std::fs::write(runtime.join(name), bytes).map_err(PumasError::from)?;
         }
         let recipe = serde_json::json!({
             "recipe_id": format!("upstream-install-{}-{}-{}-{}", selection.tag, build, minor, selection.adapter),
@@ -2588,17 +2651,17 @@ impl VersionInstaller {
             serde_json::to_vec_pretty(&recipe).map_err(|error| failed(error.to_string()))?,
         )
         .map_err(PumasError::from)?;
-        let mut probe = Command::new(&python);
-        probe.arg(runtime.join("probe_runtime.py"));
-        self.run_runtime_command(
-            probe,
-            log_path,
-            "Checking installed Torch identity and CPU operation",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
-        Ok(DirectTorchAttempt::Installed(runtime))
+        Ok(DirectTorchAttempt::Resolved(Box::new(
+            PreparedTorchWheelInstall {
+                runtime,
+                resolution,
+                resolution_json,
+                report,
+                requirements,
+                interpreter_hash,
+                provider_label: Some(format!("Python {}", managed_python.version)),
+            },
+        )))
     }
 
     async fn prepare_resolved_torch_runtime(
@@ -2816,23 +2879,77 @@ impl VersionInstaller {
             None,
             Some(log_path.to_string_lossy().as_ref()),
         );
-        let result =
-            if let Some(plan) = plan.filter(|plan| plan.preview.qualification != "qualified") {
-                #[cfg(test)]
-                let fixture_override = self.torch_stage_override.is_some();
-                #[cfg(not(test))]
-                let fixture_override = false;
-                if fixture_override {
-                    let runtime = self
-                        .stage_torch_runtime(
-                            recipe,
-                            Some(plan),
-                            selection,
-                            &staging,
-                            &log_path,
-                            &progress_tx,
-                        )
-                        .await?;
+        #[cfg(test)]
+        let fixture_override = self.torch_stage_override.is_some();
+        #[cfg(not(test))]
+        let fixture_override = false;
+        let result = if let Some(selection) = selection.filter(|_| !fixture_override) {
+            async {
+                self.check_cancelled()?;
+                if self.acquisition_consumer.is_none() {
+                    return Err(failed(
+                        "Automatic Torch installation requires the shared acquisition service",
+                    ));
+                }
+                let prepared = self
+                    .resolve_selected_torch_runtime(selection, &staging, &log_path, &progress_tx)
+                    .await?;
+                // Acceptance ends candidate fallback. Every later failure propagates.
+                self.install_verified_prepared_torch(
+                    prepared,
+                    tag,
+                    release,
+                    &destination,
+                    &versions_dir,
+                    &progress_tx,
+                    &staging,
+                    &log_path,
+                )
+                .await
+            }
+            .await
+        } else if let Some(plan) = plan.filter(|plan| plan.preview.qualification != "qualified") {
+            if fixture_override {
+                let runtime = self
+                    .stage_torch_runtime(
+                        recipe,
+                        Some(plan),
+                        selection,
+                        &staging,
+                        &log_path,
+                        &progress_tx,
+                    )
+                    .await?;
+                self.publish_staged_torch_runtime(
+                    runtime,
+                    tag,
+                    release,
+                    &destination,
+                    &versions_dir,
+                    &progress_tx,
+                    &staging,
+                    Some(format!("Python {}", plan.managed_python.version)),
+                )
+                .await
+            } else {
+                self.install_verified_resolved_torch(
+                    plan,
+                    tag,
+                    release,
+                    &destination,
+                    &versions_dir,
+                    &progress_tx,
+                    &staging,
+                    &log_path,
+                )
+                .await
+            }
+        } else {
+            let staged = self
+                .stage_torch_runtime(recipe, plan, selection, &staging, &log_path, &progress_tx)
+                .await;
+            match staged {
+                Ok(runtime) => {
                     self.publish_staged_torch_runtime(
                         runtime,
                         tag,
@@ -2841,43 +2958,13 @@ impl VersionInstaller {
                         &versions_dir,
                         &progress_tx,
                         &staging,
-                        Some(plan),
-                    )
-                    .await
-                } else {
-                    self.install_verified_resolved_torch(
-                        plan,
-                        tag,
-                        release,
-                        &destination,
-                        &versions_dir,
-                        &progress_tx,
-                        &staging,
-                        &log_path,
+                        plan.map(|plan| format!("Python {}", plan.managed_python.version)),
                     )
                     .await
                 }
-            } else {
-                let staged = self
-                    .stage_torch_runtime(recipe, plan, selection, &staging, &log_path, &progress_tx)
-                    .await;
-                match staged {
-                    Ok(runtime) => {
-                        self.publish_staged_torch_runtime(
-                            runtime,
-                            tag,
-                            release,
-                            &destination,
-                            &versions_dir,
-                            &progress_tx,
-                            &staging,
-                            plan,
-                        )
-                        .await
-                    }
-                    Err(error) => Err(error),
-                }
-            };
+                Err(error) => Err(error),
+            }
+        };
         let mut tracker = self.progress_tracker.write().await;
         if let Err(error) = &result {
             tracker.set_error(&error.to_string());
@@ -2906,7 +2993,7 @@ impl VersionInstaller {
         versions_dir: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
         staging: &Arc<TorchPendingStage>,
-        plan: Option<&TorchInstallPlan>,
+        provider_label: Option<String>,
     ) -> Result<()> {
         #[cfg(test)]
         if self.torch_stage_override.is_some() {
@@ -2957,7 +3044,7 @@ impl VersionInstaller {
                 destination,
                 progress_tx,
                 staging.clone(),
-                plan.map(|plan| format!("Python {}", plan.managed_python.version)),
+                provider_label,
             )
             .await;
         if result.is_err() {
@@ -3006,10 +3093,10 @@ impl VersionInstaller {
                 "Resolved Torch wheels require the verified acquisition handoff",
             ));
         }
-        if let Some(selection) = selection {
-            return self
-                .stage_selected_torch_runtime(selection, staging, log_path, progress_tx)
-                .await;
+        if selection.is_some() {
+            return Err(failed(
+                "Automatic Torch wheels require the verified acquisition handoff",
+            ));
         }
         let recipe_spec = recipe_spec.expect("checked above");
         let runtime = staging.path().join("runtime");

@@ -1148,7 +1148,9 @@ def main() -> None:
     parser.add_argument("--build")
     parser.add_argument("--adapter", choices=ADAPTERS, default="none")
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--install", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--install", action="store_true")
+    mode.add_argument("--resolve-only", action="store_true")
     parser.add_argument("--target", type=Path)
     parser.add_argument("--cache-dir", type=Path)
     parser.add_argument("--progress-file", type=Path)
@@ -1160,6 +1162,10 @@ def main() -> None:
     parser.add_argument("--torch-wheel")
     parser.add_argument("--torch-sha256")
     args = parser.parse_args()
+    if args.resolve_only and (
+        args.discover or args.release_options or args.selected_python or args.interpreter
+    ):
+        parser.error("--resolve-only does not accept discovery or interpreter selection flags")
     if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
         parser.error("Only stable upstream Torch versions are supported")
     if args.release_options:
@@ -1228,7 +1234,7 @@ def main() -> None:
         or args.progress_file.resolve().parent != args.output.resolve()
     ):
         parser.error("--progress-file must be download-progress.json inside --output")
-    if args.torch_wheel is None and not args.install:
+    if args.torch_wheel is None and not (args.install or args.resolve_only):
         parser.error("Resolution requires --torch-wheel from official discovery")
     try:
         target = native_target(
@@ -1251,6 +1257,19 @@ def main() -> None:
             raise ValueError("Selected Torch wheel SHA-256 is invalid")
     except ValueError as error:
         parser.exit(2, f"{error}\n")
+    if args.resolve_only and (
+        args.output.is_symlink()
+        or any(
+            (args.output / name).exists()
+            for name in (
+                "requirements.txt",
+                "resolution.json",
+                "pip-resolution.json",
+                "installed-files.json",
+            )
+        )
+    ):
+        parser.error("Resolve-only output must be owned and contain no previous evidence")
     args.output.mkdir(parents=True, exist_ok=True)
     if args.install:
         if any((args.output / name).exists() for name in ("requirements.txt", "resolution.json")):
@@ -1306,7 +1325,17 @@ def main() -> None:
             str(args.progress_file),
             *command[4:],
         ]
-    completed = subprocess.run(child_command, check=False, capture_output=True, text=True)
+    # Deterministic resolution must not accept extra ambient requirements/indexes.
+    # Preserve legacy modes; the new accepted-packet path disables config in its child.
+    pip_environment = None
+    if args.resolve_only:
+        pip_environment = {
+            key: value for key, value in os.environ.items() if not key.upper().startswith("PIP_")
+        }
+        pip_environment["PIP_CONFIG_FILE"] = os.devnull
+    completed = subprocess.run(
+        child_command, check=False, capture_output=True, text=True, env=pip_environment
+    )
     print(completed.stdout, end="", flush=True)
     print(completed.stderr, end="", file=sys.stderr, flush=True)
     if completed.returncode:
@@ -1316,6 +1345,8 @@ def main() -> None:
         parser.exit(code, f"{message}\n")
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
+        if args.resolve_only and (not isinstance(report, dict) or report.get("version") != "1"):
+            raise ValueError("Unsupported pip resolution report version")
         requirements, resolution = requirements_from_report(
             report, args.version, args.build, args.adapter
         )

@@ -81,11 +81,12 @@ fingerprint, exact wheel URLs, hashes, and package versions with the installed
 runtime. Installation uses official binary wheels only and never falls back to
 a source build.
 
-The retained, unqualified resolved-preview path now acquires its accepted wheel
-set through the application's shared acquisition owner before running pip.
+The retained, unqualified resolved-preview and automatic-selection paths acquire
+their accepted wheel sets through the application's shared acquisition owner
+before final installation.
 `VersionManager::new_with_acquisition` supports Torch; direct installer users can
 use `VersionInstaller::with_torch_acquisition`. Existing constructors keep their
-signatures, but this preview path requires the shared capability. The local
+signatures, but these installation paths require the shared capability. The local
 helper installs only verified file URLs with hashes, no index, no dependency
 fetching, no source builds and an empty target. Its child-only environment removes
 inherited `PIP_*` options and sets `PIP_CONFIG_FILE=os.devnull`, since `--isolated`
@@ -94,8 +95,14 @@ selected interpreter tags, the local pip report and installed RECORD files;
 publication rechecks selected members and provenance after the runtime probe.
 Original resolution/report/requirements remain separate from local installation
 evidence. Unresolved uses refuse cold replay before startup cleanup, and sibling
-wheel inputs remain retained. The automatic resolver/install path, managed-Python
-bootstrap and qualified bundled recipe retain their existing tool responsibility.
+wheel inputs remain retained. Automatic selection uses explicit `--resolve-only`
+public pip dry-run/report; it installs no packages and accepts version1 evidence
+before acquisition. Conclusive candidate fallback ends at acceptance. Original
+report/requirements/interpreter provenance remain unchanged; managed-provider
+identity is recorded separately. Resolver metadata/candidate traffic may fetch
+wheel bytes and remains separately scoped, along with managed-Python bootstrap
+and the qualified bundled recipe. Legacy `--install` remains available to the
+package helper; ordinary exact-wheel preview still requires `--torch-wheel`.
 This bounded implementation has synthetic Linux evidence; enforced network-denial,
 real Torch and supported-platform acceptance remain open under AQ-PACKAGES.
 

@@ -1001,3 +1001,15 @@ proof and postprobe validation. No Rust/native/S3/dependency/pin changes.
 Host/user/global settings remain untouched; hostile URL tests parse options only,
 never retrieve remote requirements. Parser evidence is not network-denial proof.
 Automatic-resolution branch remains paused and separate.
+
+# Q2 automatic resolution/final-payload separation — admitted 2026-10-06
+
+Parent delegates a separate successor of frozen7a3264ac. Normal merge af6113c69a42e6582c55b460277219e980f68a8c incorporates accepted main7c229e92726e1af7447d37e3dc03fd4bd2ccfffa; source tree remains b6d37961c54d6e5fe0e894e5223c08f1213d804b. MrScripty metadata verified. Branch feat/torch-automatic-wheel-handoff-7a3264ac.
+
+Contract: automatic build/interpreter selection runs explicit resolver-only public pip dry-run/report. Its original version1 report/hash requirements/resolution and interpreter/provider identity yield an accepted exact closure before acquisition. Preserve candidate ordering and existing conclusive-only fallback. Final payload uses the existing shared verified handoff/local installer/proof/publisher without remote re-resolution. No package installation or RECORD output in resolve-only mode; metadata/candidate traffic and provider bootstrap remain scoped standard-tool responsibility. No new runtime pins, dependencies, core/S3/native/importer/watcher/installer.rs production changes, credential/network/security changes, provider resources or external review contact.
+
+Writes admitted before implementation: torch-server/resolve_runtime.py and co-located tests; rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs and co-located handoff tests; torch-server/README.md, docs/contracts/artifact-acquisition.md and owning acquisition plan/ledger/matrix/gates/write-set/report. First establish headless Clippy baseline on unchanged accepted main. If genuinely relevant, only rust/crates/pumas-rpc/tests/integration_tests.rs may receive the existing inference-plugins cfg on its unused helper; do not disable any lint or edit frozen source sets.
+
+Criteria: resolver installs nothing, approved report/trust/identity agrees before handoff, complete exact wheels verified before local pip, missing/changed closure cannot publish, no fallback after accepted handoff, original provenance retained, cancellation/abandonment and post-probe proof survive composition. Fixtures first; default/headless affected checks and read-only source/custody review. Enforced network denial, actual Torch/provider/platform/hosted acceptance remain open; no gate or merge claimed. Parent owns PR/review/CI/integration.
+
+Resumed after parent instruction: normal merge `2b380b59fdc2e2896b4d3fbde53de27296076c64`, tree `eceaba08b9f38f7d59c52d2a7b90a61802fef7d6`, incorporates frozen pip repair `99a55b78` without rewriting its evidence. Repair branch remains untouched. Genuine accepted-main headless warnings are preserved in repair qualification; this feature will gate the unused integration helper under its existing inference feature, without suppressing generated warnings.

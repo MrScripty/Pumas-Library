@@ -1,0 +1,28 @@
+    Checking tokio v1.49.0
+    Checking serde v1.0.228
+    Checking serde_json v1.0.149
+    Checking serde_urlencoded v0.7.1
+    Checking chrono v0.4.43
+    Checking governor v0.7.0
+    Checking cargo-platform v0.1.9
+    Checking clap_builder v4.5.54
+    Checking tokio-util v0.7.18
+    Checking tokio-native-tls v0.3.1
+    Checking async-compat v0.2.5
+    Checking h2 v0.4.16
+    Checking tower v0.5.3
+    Checking tower-http v0.6.8
+    Checking uniffi_core v0.28.3
+    Checking cargo_metadata v0.15.4
+   Compiling pumas-uniffi v0.7.0 (/workspace/Pumas-Library/rust/crates/pumas-uniffi)
+    Checking hyper v1.8.1
+    Checking clap v4.5.54
+    Checking uniffi v0.28.3
+    Checking hyper-util v0.1.19
+    Checking hyper-tls v0.6.0
+    Checking axum v0.7.9
+    Checking reqwest v0.12.28
+    Checking pumas-library v0.7.0 (/workspace/Pumas-Library/rust/crates/pumas-core)
+    Checking pumas-rpc v0.7.0 (/workspace/Pumas-Library/rust/crates/pumas-rpc)
+    Checking pumas-app-manager v0.7.0 (/workspace/Pumas-Library/rust/crates/pumas-app-manager)
+    Finished `dev` profile [unoptimized] target(s) in 50.66s

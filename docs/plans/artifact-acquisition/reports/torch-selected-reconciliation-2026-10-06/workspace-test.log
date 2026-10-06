@@ -1,0 +1,428 @@
+    Finished `test` profile [unoptimized] target(s) in 0.63s
+     Running unittests src/lib.rs (/workspace/pumas-reconcile-target/debug/deps/pumas_app_manager-7dc7649cb76bfd44)
+
+running 355 tests
+test ollama_client::naming::tests::test_derive_ollama_name ... ok
+test process::factory::tests::test_binary_manager_version_path ... ok
+test process::factory::tests::in_process_plugins_do_not_create_process_managers ... ok
+test torch_client::tests::generation_transport_is_connect_bounded_without_total_timeout ... ok
+test torch_client::tests::handshake_compat_distinguishes_each_incompatibility ... ok
+test torch_client::tests::handshake_compat_requires_status_protocol_and_capability ... ok
+test torch_client::tests::handshake_parses_legacy_health_without_capabilities_as_incompatible ... ok
+test torch_client::tests::handshake_rejects_malformed_bodies_before_compat_classification ... ok
+test torch_client::tests::image_error_decoding_admits_only_known_codes ... ok
+test torch_client::tests::image_result_accepts_canonical_fields_and_additive_private_data ... ok
+test torch_client::tests::image_success_body_requires_every_typed_field ... ok
+test torch_client::tests::strict_base64_vectors_round_trip ... ok
+test torch_client::tests::supported_protocol_is_three ... ok
+test torch_client::tests::test_compute_device_roundtrip ... ok
+test torch_client::tests::test_compute_device_unknown_string ... ok
+test torch_client::tests::test_default_server_config ... ok
+test torch_client::tests::test_device_info_deserialization ... ok
+test torch_client::tests::test_model_slot_deserialization ... ok
+test torch_client::tests::test_slot_state_serialization ... ok
+test torch_client::tests::test_torch_server_config_allows_loopback_without_lan_access ... ok
+test torch_client::tests::test_torch_server_config_allows_non_loopback_with_lan_access ... ok
+test torch_client::tests::test_torch_server_config_rejects_non_loopback_without_lan_access ... ok
+test version_manager::constraints::tests::test_compare_versions ... ok
+test version_manager::constraints::tests::test_parse_requirement_line ... ok
+test version_manager::constraints::tests::test_safe_filename ... ok
+test version_manager::constraints::tests::test_version_matches_spec ... ok
+test version_manager::dependencies::tests::locked_direct_reference_is_a_package_name ... ok
+test version_manager::dependencies::tests::test_canonicalize_name ... ok
+test version_manager::dependencies::tests::test_check_dependencies_returns_version_not_found_for_missing_version ... ok
+test version_manager::dependencies::tests::test_get_python_version_returns_none_without_venv ... ok
+test version_manager::dependencies::tests::test_parse_requirements ... ok
+test version_manager::dependencies::tests::torch_dependency_repair_cannot_mutate_an_installed_runtime ... ok
+test version_manager::installer::tests::llama_cpp_asset_selection_accepts_explicit_vulkan_only_release ... ok
+test version_manager::installer::tests::llama_cpp_asset_selection_keeps_cpu_default_without_gpu ... ok
+test version_manager::installer::tests::llama_cpp_asset_selection_prefers_linux_vulkan_when_gpu_is_available ... ok
+test version_manager::installer::tests::llama_cpp_launch_binary_uses_wrapper_with_runtime_library_path ... ok
+test version_manager::installer::tests::native_attempt_reopen_preserves_identity_and_remove_reinstall_renews_it ... ok
+test api_proxy::tests::test_extract_path_simple ... ok
+test api_proxy::tests::test_interpolate_body ... ok
+test version_manager::installer::tests::native_cancellation_clears_before_releasing_acquisition_and_removes_shell_after ... ok
+test version_manager::installer::tests::native_cleanup_failure_reports_and_retains_its_path ... ok
+test version_manager::installer::tests::native_cleanup_preserves_replaced_root_or_workspace_contents ... ok
+test version_manager::installer::tests::native_creation_crash_orphan_is_not_adopted_by_a_later_attempt ... ok
+test version_manager::installer::tests::native_failed_clear_preserves_cancellation_and_cleanup_causes ... ok
+test version_manager::installer::tests::native_cleanup_pending_remains_successful_and_visible ... ok
+test version_manager::installer::tests::native_invalid_archive_cannot_touch_retained_output ... ok
+test version_manager::installer::tests::native_legacy_present_is_retained_and_absent_cleanup_is_harmless ... ok
+test version_manager::installer::tests::native_output_rejects_external_and_directory_links ... ok
+test version_manager::installer::tests::native_publication_failure_preserves_stage_and_existing_output ... ok
+test version_manager::installer::tests::native_publication_preserves_a_dangling_destination_link ... ok
+test version_manager::installer::tests::native_receipt_reconciles_staged_publication_and_rejects_changed_output ... ok
+test version_manager::installer::tests::native_removed_stage_with_failed_diagnostic_is_not_reported_retained ... ok
+test version_manager::installer::tests::native_uncertain_metadata_publication_retains_complete_output ... ok
+test version_manager::installer::tests::native_v2_reopen_rejects_replacement_and_missing_stage_without_mutation ... ok
+test version_manager::installer::tests::native_worker_retains_custody_after_waiter_is_cancelled ... ok
+test version_manager::installer::tests::native_cancelled_archive_settles_queued_writes_before_reclamation ... ok
+test version_manager::installer::tests::runtime_zip_extraction_preserves_stored_and_deflated_payloads ... ok
+test version_manager::installer::tests::test_finalize_ollama_binary_fails_when_binary_missing ... ok
+test version_manager::installer::tests::test_finalize_ollama_binary_moves_nested_binary_to_launch_path ... ok
+test version_manager::installer::tests::test_slugify_tag ... ok
+test version_manager::installer::tests::torch_cancel_and_publication_are_mutually_exclusive ... ok
+test version_manager::installer::tests::unconfigured_direct_llama_cpp_installer_rejects_before_native_mutation ... ok
+test version_manager::installer::torch::cross_process_recovery_tests::active_owner_keeps_stage_and_publication_until_its_lock_is_released ... ok
+test version_manager::installer::tests::public_direct_installer_configures_shared_llama_cpp_acquisition ... ok
+test version_manager::installer::torch::cross_process_recovery_tests::finalization_uses_retained_python_version_without_running_runtime_python ... ok
+test version_manager::installer::torch::cross_process_recovery_tests::mutation_lock_rejects_owner_past_bound ... ok
+test version_manager::installer::torch::cross_process_recovery_tests::mutation_lock_returns_non_contention_errors_without_waiting ... ok
+test version_manager::installer::torch::cross_process_recovery_tests::mutation_lock_waits_for_short_handoff ... ok
+test version_manager::installer::torch::cross_process_recovery_tests::only_fs2_contention_is_normalized_to_would_block ... ok
+test version_manager::installer::torch::cross_process_recovery_tests::pending_stage_carries_the_lock_through_its_cleanup_lease ... ok
+test version_manager::installer::torch::cross_process_recovery_tests::cancelled_staging_waiter_cannot_release_a_running_blocking_stage_task ... ok
+test version_manager::installer::torch::cross_process_recovery_tests::stage_scratch_rejects_a_link_outside_the_stage ... ok
+test version_manager::installer::torch::download_progress_tests::progress_file_rejects_secret_sources_and_bad_rates ... ok
+test version_manager::installer::torch::download_progress_tests::progress_source_accepts_any_safe_https_host_and_path ... ok
+test version_manager::installer::torch::managed_python_provenance_tests::automatic_build_candidates_reach_cpu_after_unsupported_cuda_wheels ... ok
+test version_manager::installer::torch::managed_python_provenance_tests::automatic_build_candidates_try_supported_cuda_channels_before_cpu ... ok
+test version_manager::installer::torch::managed_python_provenance_tests::automatic_cuda_channel_uses_existing_linux_driver_floors ... ok
+test version_manager::installer::torch::managed_python_provenance_tests::automatic_python_fallback_only_accepts_conclusive_wheel_failures ... ok
+test version_manager::installer::torch::managed_python_provenance_tests::direct_install_report_requires_trusted_hash_locked_wheels_before_probe ... ok
+test version_manager::installer::torch::managed_python_provenance_tests::installed_runtime_recipe_retains_managed_python_provider_identity ... ok
+test version_manager::installer::torch::managed_python_provenance_tests::macos_pypi_torch_wheels_require_matching_identity_and_platform ... ok
+test version_manager::installer::torch::managed_python_provenance_tests::validated_staged_packages_move_into_venv_only_without_collisions ... ok
+test version_manager::installer::torch::publication_identity_tests::durable_identity_reclaims_partial_publication_after_inner_marker_loss ... ok
+test version_manager::installer::torch::publication_identity_tests::pre_rename_marker_cannot_delete_raced_unrelated_destination ... ok
+test version_manager::installer::tests::native_progress_backpressure_ends_on_cancel_and_shutdown ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::abandoned_selected_checker_retains_catalog_grant_and_runtime_until_drain ... ignored, Requires explicitly provisioned qualified public uv; managed child abandonment
+test version_manager::installer::torch::torch_catalog_owner::tests::abandoned_selected_consumer_retains_live_packet_until_descendant_drain ... ignored, Managed actual local verifier and descendant cleanup custody
+test version_manager::installer::torch::torch_catalog_owner::tests::actual_glibc_241_complete_catalog_refuses_without_target_downgrade ... ignored, Requires explicitly provisioned qualified public uv; actual native target projection
+test version_manager::installer::torch::cross_process_recovery_tests::runtime_command_uses_stage_scratch_and_preserves_other_environment ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::cancelled_selected_consumer_refuses_proof_and_preserves_catalog_receipt ... ignored, Managed actual local verifier cancellation and descendant cleanup
+test torch_client::tests::image_result_rejects_invalid_required_data_and_dimension_mismatch ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::abandoned_inspector_retains_child_stage_and_using_until_drain ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::actual_wrong_dist_info_refuses_snapshot_and_cold_replay ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_held_wheel_after_inspection_refuses_complete ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_original_payload_never_publishes_snapshot ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_owned_target_refuses_before_any_payload ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_catalog_to_independently_checked_public_offline_selection ... ignored, Requires explicitly provisioned qualified public uv; synthetic wheels only
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_selected_packet_installs_exact_local_subset_with_real_report_and_record ... ignored, Explicit qualified uv, actual public pip, synthetic compatible 2.40 native target
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_unsatisfiable_catalog_solver_error_never_accepts_or_falls_back ... ignored, Requires explicitly provisioned qualified public uv; bounded unsatisfiable catalog
+test version_manager::installer::torch::torch_catalog_owner::tests::changed_selected_executable_after_inspection_refuses_complete ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_alternative_catalog_uses_shared_payloads_and_snapshot_receipt ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::complete_catalog_cannot_use_an_unqualified_solver_executable ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::failed_second_repository_never_acquires_or_completes ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_checker_cannot_hide_retained_projection_growth ... ignored, Requires explicitly provisioned qualified public uv; bounded projection growth
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_checker_cannot_hide_retained_projection_replacement ... ignored, Requires explicitly provisioned qualified public uv; exact projection replacement
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_checker_cannot_hide_unselected_acquired_wheel_replacement ... ignored, Requires explicitly provisioned qualified public uv; final acquired-input fence
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_consumer_final_mutations_refuse_without_receipt_rewrite ... ignored, Actual local install followed by verifier output/input mutations
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_proof_cannot_hide_final_selected_executable_replacement ... ignored, Requires explicitly provisioned qualified public uv; copied fixture executable
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_runtime_abandoned_publication_job_retains_custody_through_metadata ... ignored, Registered owned publisher completes while caller acknowledgment is abandoned
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_runtime_actual_probe_failure_never_publishes ... ignored, Actual selected local installation followed by CPU probe failure
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_runtime_cancelled_and_abandoned_probe_keep_custody_until_drain ... ignored, Managed actual runtime probe and descendant cleanup custody
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_runtime_owned_fixture_publishes_actual_probe_and_bound_record ... ignored, Actual local selected installation and genuine probe with synthetic Torch/protocol sources
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_runtime_post_probe_mutations_refuse_publication ... ignored, Actual completed probe followed by original input/output/provider mutations
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_runtime_publication_failure_and_movement_controls ... ignored, Owned publication failure, moved mutations, foreign directory and uncertain acknowledgment
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_runtime_reconciliation_abandoned_waiter_keeps_job_custody ... ignored, Registered reconciliation retains live custody after caller abandonment
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_runtime_reconciliation_committed_and_owned_rollback ... ignored, Actual local installation/probe and interrupted publication reconciliation
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_runtime_reconciliation_interrupted_cleanup_retains_custody ... ignored, Actual owned rollback interrupted after deletion, with original live progress retained
+test version_manager::installer::torch::torch_catalog_owner::tests::selected_runtime_reconciliation_missing_mutated_foreign_evidence_is_unresolved ... ignored, Actual local installation/probe and ambiguous evidence preservation
+test version_manager::installer::torch::torch_catalog_owner::tests::index_size_conflicting_with_body_refuses_complete ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::cancel_after_publication_begins_is_rejected ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::concurrent_direct_install_rejection_does_not_disrupt_active_torch_attempt ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::direct_installer_preserves_existing_upstream_directory ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::embedded_sidecar_and_lock_materialize_outside_the_checkout ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::manager_filters_upstream_releases_and_preserves_legacy_runtime_state ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::official_release_metadata_does_not_need_pumas_bundle_assets ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::unverified_release_installs_without_becoming_active_or_default ... ok
+test version_manager::installer::torch::torch_upstream_contract_tests::v291_resolves_only_to_its_immutable_independent_recipe ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::accepted_packet_preserves_venv_identity_and_refuses_changed_evidence ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::payload_redirect_cannot_extend_catalog_authority ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::automatic_candidate_loop_propagates_inconclusive_or_validation_errors ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::automatic_candidate_loop_stops_at_first_accepted_packet ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::embedded_qualified_runtime_contains_public_tooling_and_single_record_owner ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::missing_dependency_coverage_retains_using_and_refuses_cold_replay ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::accepted_target_packet_refuses_mismatch_missing_context_and_late_downgrade ... ok
+test version_manager::installer::torch::torch_catalog_owner::tests::unknown_size_refuses_before_any_payload ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_producer_refuses_before_consumption ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_producer_refuses_before_acquisition ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_producer_probe_refuses_publication_and_receipt ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_recipe_catalog_preserves_complete_pins_and_selected_direct_identity ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::target_observation_projection_matches_python_unicode_fixture ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_selected_consumer_probe_refuses_publication_and_receipt ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_changed_approval_retains_custody_without_receipt ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_mismatch_refuses_before_local_stage ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_missing_context_refuses_before_local_stage ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_unsupported_context_refuses_before_local_stage ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_abandoned_waiter_holds_inputs_through_child_cleanup ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_selected_consumer_refuses_without_changing_provider ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_cancel_child_retains_composite_custody_until_cleanup ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_changed_bytes_never_start_local_installation ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_failed_publication_retains_inputs_and_cold_output ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_install_then_publish_and_settle_exact_receipt ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_preserve_existing_qualified_nunchaku_source_and_digest ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_missing_dependency_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_owned_producer_finite_catalog_shared_consumer_receipt ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_target_wheels_valid_handoff_binds_receipt_and_settles ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_package_ancestor_escape_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_member_mutation_refuses_publication ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_proof_ancestor_escape_refuses_publication ... ok
+test version_manager::installer::torch_tests::cancellation_before_publication_cleans_attempt ... ok
+test version_manager::installer::torch_tests::cancelled_child_drain_waiter_retains_slot_for_retry ... ok
+test version_manager::installer::torch_tests::cancelled_cleanup_drain_waiter_can_retry_without_losing_task ... ok
+test version_manager::installer::torch_tests::cancelling_a_runtime_command_reaps_its_process_group ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_proof_mutation_refuses_publication ... ok
+test version_manager::installer::torch_tests::direct_install_rejects_legacy_custom_tag_without_changing_existing_runtime ... ok
+test version_manager::installer::torch_tests::direct_installer_shutdown_drains_scheduled_orphan_prune ... ok
+test version_manager::installer::torch_tests::existing_upstream_directory_is_never_replaced ... ok
+test version_manager::installer::torch_tests::interrupted_publication_is_quarantined_before_retry ... ok
+test version_manager::installer::torch_tests::orphan_gc_keeps_two_newest_owned_dirs_and_preserves_unmarked_lookalikes ... ok
+test version_manager::installer::torch_tests::partial_publication_cleanup_preserves_ambiguous_directory ... ok
+test version_manager::installer::torch_tests::pending_stage_quarantine_retries_after_obstruction_clears ... ok
+test version_manager::installer::torch_tests::publication_records_wheel_metadata_without_source_archive_size ... ok
+test version_manager::installer::torch_tests::child_admission_harvests_completed_supervisors_and_retains_panics ... ok
+test version_manager::installer::torch_tests::registered_publication_recovery_preserves_runtime ... ok
+test version_manager::installer::torch_tests::unregistered_publication_retry_removes_owned_directory ... ok
+test version_manager::installer::torch_tests::stage_failure_cleans_attempt_and_preserves_legacy_runtime ... ok
+test version_manager::launcher::tests::test_slugify_tag ... ok
+test version_manager::launcher::tests::test_is_version_running_no_pid_file ... ok
+test version_manager::launcher::tests::test_version_path ... ok
+test version_manager::managed_python::tests::all_shipped_targets_have_distinct_official_uv_pins ... ok
+test version_manager::managed_python::tests::catalog_keeps_native_windows_and_macos_records_with_none_libc ... ok
+test version_manager::managed_python::tests::catalog_rejects_malformed_and_sorts_native_stable_minors ... ok
+test version_manager::managed_python::tests::ensure_minor_rejects_below_runtime_floor_before_bootstrap ... ok
+test version_manager::managed_python::tests::managed_identity_retains_selected_release_and_exact_provider_pin ... ok
+test version_manager::managed_python::tests::observed_identity_rejects_wrong_minor_platform_or_prerelease ... ok
+test version_manager::managed_python::tests::private_provider_directory_rejects_symlink_escape ... ok
+test version_manager::managed_python::tests::private_transport_settings_preserve_proxy_and_tls_without_python_configuration ... ok
+test version_manager::managed_python::tests::selected_catalog_identity_owns_a_distinct_interpreter_depot ... ok
+test version_manager::managed_python::tests::stable_minor_rejects_prereleases_and_noncanonical_requests ... ok
+test version_manager::managed_python::tests::cancelled_provider_command_is_drained_by_manager_shutdown ... ok
+test version_manager::managed_python::tests::uv_bootstrap_and_cache_paths_are_scoped_to_exact_provider_pin ... ok
+test version_manager::ollama::tests::ollama_shutdown_does_not_replay_delivered_operation_errors ... ok
+test version_manager::ollama::tests::ollama_wrapper_shutdown_drains_cancelled_state_mutation_and_retains_outcome ... ok
+test version_manager::ollama::tests::ollama_wrapper_shutdown_rejects_queued_install_before_cancellation_reset ... ok
+test version_manager::managed_python::tests::timed_out_provider_command_drains_tree_and_closed_owner_rejects_spawn ... ok
+test version_manager::ollama::tests::receipt_review_buffered_ollama_error_survives_unpolled_waiter_drop ... ok
+test version_manager::ollama::tests::receipt_review_observed_ollama_error_is_not_reported_again ... ok
+test version_manager::ollama::tests::test_binary_name ... ok
+test version_manager::progress::tests::completed_transfer_and_installation_clear_active_rate ... ok
+test version_manager::progress::tests::network_activity_measures_downloads_without_exposing_unapproved_sources ... ok
+test version_manager::progress::tests::network_transfer_preserves_source_and_speed_without_advancing_stage ... ok
+test version_manager::progress::tests::stage_change_clears_previous_network_source_and_speed ... ok
+test version_manager::progress::tests::test_overall_progress_calculation ... ok
+test version_manager::progress::tests::test_package_weights ... ok
+test version_manager::progress::tests::test_progress_tracker_complete_package ... ok
+test version_manager::progress::tests::test_progress_tracker_download_progress ... ok
+test version_manager::progress::tests::test_progress_tracker_persistence ... ok
+test version_manager::progress::tests::test_progress_tracker_start ... ok
+test version_manager::progress::tests::test_progress_tracker_update_stage ... ok
+test version_manager::size_calculator::tests::test_cache_persistence ... ok
+test version_manager::size_calculator::tests::test_calculate_release_size_caching ... ok
+test version_manager::size_calculator::tests::test_calculate_release_size_no_requirements ... ok
+test version_manager::size_calculator::tests::test_calculate_release_size_with_requirements ... ok
+test version_manager::size_calculator::tests::test_calculator_creation ... ok
+test version_manager::size_calculator::tests::test_clear_cache ... ok
+test version_manager::size_calculator::tests::test_default_known_packages ... ok
+test version_manager::size_calculator::tests::test_format_size_bytes ... ok
+test version_manager::size_calculator::tests::test_format_size_gb ... ok
+test version_manager::size_calculator::tests::test_format_size_kb ... ok
+test version_manager::size_calculator::tests::test_format_size_mb ... ok
+test version_manager::size_calculator::tests::test_format_size_tb ... ok
+test version_manager::size_calculator::tests::test_get_cached_size_empty ... ok
+test version_manager::size_calculator::tests::test_get_size_breakdown ... ok
+test version_manager::size_calculator::tests::test_mixed_known_unknown_packages ... ok
+test version_manager::size_calculator::tests::test_package_name_normalization ... ok
+test version_manager::size_calculator::tests::test_parse_package_name_simple ... ok
+test version_manager::size_calculator::tests::test_parse_package_name_skipped ... ok
+test version_manager::size_calculator::tests::test_parse_package_name_with_extras ... ok
+test version_manager::size_calculator::tests::test_parse_package_name_with_semicolon ... ok
+test version_manager::size_calculator::tests::test_parse_package_name_with_version ... ok
+test version_manager::size_calculator::tests::test_unknown_package_default_size ... ok
+test version_manager::size_calculator::tests::test_update_known_package_size ... ok
+test version_manager::state::tests::legacy_sycl_migration_retries_after_renames_before_metadata_save ... ok
+test version_manager::state::tests::legacy_torch_source_install_is_unregistered_without_deleting_files ... ok
+test version_manager::state::tests::native_metadata_worker_holds_lease_after_waiter_is_cancelled ... ok
+test version_manager::state::tests::native_public_state_mutations_share_installation_admission ... ok
+test version_manager::state::tests::receipt_review_buffered_state_error_survives_unpolled_waiter_drop ... ok
+test version_manager::state::tests::receipt_review_observed_state_error_is_not_reported_again ... ok
+test version_manager::state::tests::state_mutation_shutdown_does_not_replay_delivered_errors ... ok
+test version_manager::ollama::tests::ollama_wrapper_shutdown_settles_removal_after_waiter_cancellation ... ok
+test version_manager::state::tests::test_add_installed_version ... ok
+test version_manager::state::tests::test_empty_state ... ok
+test version_manager::state::tests::test_llama_cpp_legacy_sycl_tag_migrates_to_precision_variant ... ok
+test version_manager::state::tests::test_llama_cpp_nested_server_binary_is_complete ... ok
+test version_manager::state::tests::test_remove_installed_version ... ok
+test version_manager::state::tests::test_set_active_version ... ok
+test version_manager::state::tests::test_set_active_version_not_installed ... ok
+test version_manager::state::tests::test_set_default_version ... ok
+test version_manager::state::tests::test_validate_installations ... ok
+test version_manager::state::tests::torch_initialization_loads_versions_when_cleanup_marker_is_unreadable ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_published_without_ack_refuses_cold_replay ... ok
+test version_manager::tests::active_torch_version_cannot_be_removed_and_state_persists ... ok
+test version_manager::state::tests::state_mutation_shutdown_drains_cancelled_waiters_and_retains_failures ... ok
+test version_manager::tests::empty_cached_torch_release_list_does_not_gate_installation ... ok
+test version_manager::tests::native_adopted_output_survives_legacy_or_mismatched_cleanup_custody ... FAILED
+test version_manager::tests::native_archive_publishes_complete_output_and_reopens_metadata ... FAILED
+test version_manager::tests::native_cancel_before_completion_receipt_prevents_publication ... FAILED
+test version_manager::tests::native_cancel_failed_clear_keeps_using_and_both_error_causes ... FAILED
+test version_manager::tests::managed_torch_profile_blocks_runtime_removal ... ok
+test version_manager::tests::native_completed_progress_clears_only_its_own_nonpending_completion ... ok
+test version_manager::tests::native_direct_recovery_cancellation_retains_effect_until_shared_shutdown ... FAILED
+test version_manager::tests::cancelling_install_resolution_drains_owned_resolver_process_group ... ok
+test version_manager::tests::native_cancelled_shutdown_waiter_does_not_interrupt_cancellation ... ok
+test version_manager::installer::torch::torch_wheel_handoff_tests::verified_wheels_probe_provenance_mutation_refuses_publication ... ok
+test version_manager::tests::native_manager_removal_shares_installation_admission ... ok
+test version_manager::tests::native_receipt_post_rename_sigkill_child ... ignored, spawned only by the parent SIGKILL recovery regression
+test version_manager::tests::native_receipt_post_rename_interruption_cold_reopen_refuses_changed_output_and_settles ... FAILED
+test version_manager::tests::native_receipt_publication_conflict_cold_reopen_reconciles_without_reacquiring ... FAILED
+test version_manager::tests::native_receiptless_using_cold_reopen_preserves_custody_without_replay ... FAILED
+test version_manager::tests::native_removal_shutdown_observes_cancelled_waiter_completion_and_failure ... ok
+test version_manager::tests::native_shutdown_cancels_stalled_transfer_and_retains_failed_outcome ... FAILED
+test version_manager::tests::native_full_progress_channel_releases_on_cancel_and_shutdown_signals ... ok
+test version_manager::tests::native_shutdown_drains_registered_tasks_and_retains_failure ... ok
+test version_manager::tests::ollama_shutdown_cancels_stalled_headers_and_body ... ok
+test version_manager::tests::onnx_runtime_is_rejected_by_version_manager ... ok
+test version_manager::tests::qualified_legacy_torch_activation_uses_trusted_recipe_identity ... ok
+test version_manager::tests::relative_launcher_root_is_captured_before_manager_paths ... ok
+test version_manager::tests::removal_finishes_before_defaulting_removed_torch_version ... ok
+test version_manager::tests::removal_wins_race_with_switch_and_does_not_leave_removed_version_selected ... ok
+test version_manager::tests::removing_inactive_default_torch_version_clears_default ... ok
+test version_manager::tests::restart_falls_back_from_invalid_active_torch_to_verified_default ... ok
+test version_manager::tests::running_torch_environment_cannot_be_removed ... ok
+test version_manager::tests::stale_torch_manager_selection_preserves_new_and_removed_installs ... ok
+test version_manager::tests::test_get_active_version_none ... ok
+test version_manager::tests::test_get_installed_versions_empty ... ok
+test version_manager::tests::test_get_version_status_reads_installed_metadata ... ok
+test version_manager::tests::test_manager_creation ... ok
+test version_manager::tests::test_path_helpers ... ok
+test version_manager::tests::torch_activation_rejects_unregistered_path_before_reading_it ... ok
+test version_manager::tests::torch_activation_requires_identity_manifest ... ok
+test version_manager::tests::torch_admission_returns_during_tracker_contention_then_enters_visible_cancellable_state ... ok
+test version_manager::tests::torch_busy_startup_prefers_last_selected_over_default ... ok
+test version_manager::tests::torch_choices_and_selection_token_are_local_fast_and_single_use ... ok
+test version_manager::tests::torch_direct_install_enters_stage_without_release_cache_or_network_lookup ... ok
+test version_manager::tests::torch_getters_refresh_selection_after_external_commit_and_remain_responsive_when_busy ... ok
+test version_manager::tests::native_independent_acquisition_installs_and_repeated_shutdown_preserves_receipt ... ok
+test version_manager::tests::torch_mutations_wait_for_short_cross_process_handoffs ... ok
+test version_manager::tests::torch_runtime_options_refresh_installs_and_removals_from_another_manager ... ok
+test version_manager::tests::native_verified_archive_without_server_retains_custody_and_cold_reopen_refuses ... ok
+test version_manager::tests::torch_shutdown_drains_cleanup_scheduled_by_active_install ... ok
+test version_manager::tests::torch_shutdown_rejects_install_paused_before_admission ... ok
+test version_manager::tests::torch_startup_defers_only_lock_contention ... ok
+test version_manager::tests::torch_startup_ignores_transitional_active_marker_while_owner_holds_lock ... ok
+test version_manager::tests::torch_startup_skips_stale_validation_when_install_owner_holds_lock ... ok
+test version_manager::tests::torch_status_uses_one_metadata_generation_while_versions_lock_is_busy ... ok
+test version_manager::torch_alternatives::tests::amd_driver_keeps_rocm_advanced_and_cpu_only_host_sees_cpu ... ok
+test version_manager::torch_alternatives::tests::amd_driver_status_requires_binding_to_display_device ... ok
+test version_manager::torch_alternatives::tests::catalog_candidates_sort_semantically_and_reject_unknown_minor ... ok
+test version_manager::torch_alternatives::tests::cuda_minor_compatibility_floors_are_numeric_and_unknown_families_stay_advanced ... ok
+test version_manager::torch_alternatives::tests::incomplete_scan_never_recommends_gpu ... ok
+test version_manager::torch_alternatives::tests::legacy_alternatives_filter_cpu_only_and_nvidia_intel_hosts ... ok
+test version_manager::torch_alternatives::tests::legacy_alternatives_removed_gpu_only_match_does_not_claim_match ... ok
+test version_manager::torch_alternatives::tests::legacy_alternatives_unknown_host_withholds_gpu_and_is_inconclusive ... ok
+test version_manager::torch_alternatives::tests::legacy_native_wheel_leads_require_exact_official_target_wheels ... ok
+test version_manager::torch_alternatives::tests::missing_gpu_driver_keeps_exact_advanced_wheels_but_recommends_cpu ... ok
+test version_manager::torch_alternatives::tests::native_choices_filter_channels_and_keep_cpu_default ... ok
+test version_manager::torch_alternatives::tests::native_wheel_urls_are_release_and_target_bounded ... ok
+test version_manager::torch_alternatives::tests::nvidia_and_intel_show_cuda_cpu_and_recommend_highest_exact_cuda ... ok
+test version_manager::torch_alternatives::tests::only_stable_three_part_versions_are_accepted ... ok
+test version_manager::torch_alternatives::tests::pci_reader_identifies_only_display_gpu_vendors ... ok
+test version_manager::torch_alternatives::tests::release_options_uses_one_managed_interpreter_and_all_catalog_candidates ... ok
+test version_manager::torch_alternatives::tests::release_options_wire_shape_and_official_wheel_validation ... ok
+test version_manager::torch_alternatives::tests::v214_cu132_requires_nvidia_580_floor_and_unknown_channel_is_not_default ... ok
+test version_manager::torch_alternatives::tests::wheel_only_contract_deserializes_without_claiming_dependency_resolution ... ok
+test version_manager::torch_alternatives::tests::windows_cuda_wheels_never_become_automatic_default_without_cpu ... ok
+test version_manager::torch_preview::platform_neutral_tests::auto_python_fallback_requires_a_definite_unsupported_attempt ... ok
+test version_manager::torch_preview::resolver_diagnostic_tests::classifies_only_known_resolution_reasons ... ok
+test version_manager::torch_preview::resolver_diagnostic_tests::missing_diagnostic_does_not_change_resolver_rejection ... ok
+test version_manager::torch_preview::resolver_diagnostic_tests::split_utf8_character_before_final_diagnostic_does_not_hide_category ... ok
+test version_manager::torch_preview::resolver_diagnostic_tests::stderr_reader_returns_only_bounded_final_bytes ... ok
+test version_manager::torch_preview::resolver_diagnostic_tests::unknown_invalid_utf8_and_truncated_stderr_use_fixed_fallback_codes ... ok
+test version_manager::torch_preview::tests::auto_skips_newer_python_without_exact_wheel_and_tries_newest_match_first ... ok
+test version_manager::torch_preview::tests::bundled_preset_is_one_choice_in_the_upstream_range ... ok
+test version_manager::torch_preview::tests::cancelled_resolver_waiter_keeps_workspace_until_owned_drain ... ok
+test version_manager::tests::torch_removal_preserves_version_while_independent_install_owner_holds_lock ... ok
+test version_manager::torch_preview::tests::pinned_bundled_preview_does_not_require_github_release_metadata ... ok
+test version_manager::torch_preview::tests::preview_accepts_canonical_future_channels_without_xpu_or_paths ... ok
+test version_manager::torch_preview::tests::healthy_long_resolver_does_not_block_another_preview_or_preflight ... ok
+test version_manager::torch_preview::tests::preview_resolver_cleans_child_after_leader_exits ... ok
+test version_manager::torch_preview::tests::probe_context_comparison_identifies_each_changed_identity ... ok
+test version_manager::torch_preview::tests::public_bundled_selection_requires_explicit_python312_without_release_cache ... ok
+test version_manager::torch_preview::tests::resolved_preview_serializes_under_preview_key ... ok
+test version_manager::torch_preview::tests::resolver_command_receives_the_exact_discovered_wheel_and_hash ... ok
+test version_manager::torch_preview::tests::resolver_exit_codes_serialize_distinct_safe_rejections ... ok
+test version_manager::torch_preview::tests::retained_managed_identity_hashes_canonical_path_without_launching_python ... ok
+test version_manager::torch_preview::tests::retained_previews_expire_and_remain_bounded ... ok
+test version_manager::torch_preview::tests::runtime_source_hashes_track_sidecar_files_without_virtualenv_or_links ... ok
+test version_manager::torch_workspace::tests::command_uses_workspace_tmp_and_keeps_other_environment ... ok
+test version_manager::torch_workspace::tests::escaping_pip_cache_symlink_is_rejected_without_touching_target ... ok
+test version_manager::torch_workspace::tests::escaping_preview_symlink_is_rejected_without_touching_target ... ok
+test version_manager::torch_workspace::tests::paths_with_spaces_work ... ok
+test version_manager::torch_workspace::tests::pip_cache_is_persistent_and_managed ... ok
+test version_manager::torch_workspace::tests::workspaces_are_unique_and_managed ... ok
+test version_manager::torch_preview::tests::preview_resolver_deadline_kills_process_group ... ok
+test version_manager::tests::torch_selection_and_validation_leave_metadata_untouched_while_owner_holds_lock ... ok
+test version_manager::tests::native_receipt_post_rename_sigkill_cold_reopen_recovers_without_source_replay ... FAILED
+
+failures:
+
+---- version_manager::tests::native_adopted_output_survives_legacy_or_mismatched_cleanup_custody stdout ----
+
+thread 'version_manager::tests::native_adopted_output_survives_legacy_or_mismatched_cleanup_custody' (26961) panicked at crates/pumas-app-manager/src/version_manager/mod.rs:2291:18:
+called `Result::unwrap()` on an `Err` value: Io { message: "Failed to create registry directory: /home/agent/.config/pumas", path: Some("/home/agent/.config/pumas"), source: Some(Os { code: 30, kind: ReadOnlyFilesystem, message: "Read-only file system" }) }
+
+---- version_manager::tests::native_archive_publishes_complete_output_and_reopens_metadata stdout ----
+
+thread 'version_manager::tests::native_archive_publishes_complete_output_and_reopens_metadata' (26963) panicked at crates/pumas-app-manager/src/version_manager/mod.rs:4569:14:
+called `Result::unwrap()` on an `Err` value: Io { message: "Failed to create registry directory: /home/agent/.config/pumas", path: Some("/home/agent/.config/pumas"), source: Some(Os { code: 30, kind: ReadOnlyFilesystem, message: "Read-only file system" }) }
+
+---- version_manager::tests::native_cancel_before_completion_receipt_prevents_publication stdout ----
+
+thread 'version_manager::tests::native_cancel_before_completion_receipt_prevents_publication' (26965) panicked at crates/pumas-app-manager/src/version_manager/mod.rs:2515:14:
+called `Result::unwrap()` on an `Err` value: Io { message: "Failed to create registry directory: /home/agent/.config/pumas", path: Some("/home/agent/.config/pumas"), source: Some(Os { code: 30, kind: ReadOnlyFilesystem, message: "Read-only file system" }) }
+
+---- version_manager::tests::native_cancel_failed_clear_keeps_using_and_both_error_causes stdout ----
+
+thread 'version_manager::tests::native_cancel_failed_clear_keeps_using_and_both_error_causes' (26967) panicked at crates/pumas-app-manager/src/version_manager/mod.rs:2420:14:
+called `Result::unwrap()` on an `Err` value: Io { message: "Failed to create registry directory: /home/agent/.config/pumas", path: Some("/home/agent/.config/pumas"), source: Some(Os { code: 30, kind: ReadOnlyFilesystem, message: "Read-only file system" }) }
+
+---- version_manager::tests::native_direct_recovery_cancellation_retains_effect_until_shared_shutdown stdout ----
+
+thread 'version_manager::tests::native_direct_recovery_cancellation_retains_effect_until_shared_shutdown' (26983) panicked at crates/pumas-app-manager/src/version_manager/mod.rs:4441:14:
+called `Result::unwrap()` on an `Err` value: Io { message: "Failed to create registry directory: /home/agent/.config/pumas", path: Some("/home/agent/.config/pumas"), source: Some(Os { code: 30, kind: ReadOnlyFilesystem, message: "Read-only file system" }) }
+
+---- version_manager::tests::native_receipt_post_rename_interruption_cold_reopen_refuses_changed_output_and_settles stdout ----
+
+thread 'version_manager::tests::native_receipt_post_rename_interruption_cold_reopen_refuses_changed_output_and_settles' (26993) panicked at crates/pumas-app-manager/src/version_manager/mod.rs:3541:14:
+called `Result::unwrap()` on an `Err` value: Io { message: "Failed to create registry directory: /home/agent/.config/pumas", path: Some("/home/agent/.config/pumas"), source: Some(Os { code: 30, kind: ReadOnlyFilesystem, message: "Read-only file system" }) }
+
+---- version_manager::tests::native_receipt_publication_conflict_cold_reopen_reconciles_without_reacquiring stdout ----
+
+thread 'version_manager::tests::native_receipt_publication_conflict_cold_reopen_reconciles_without_reacquiring' (26996) panicked at crates/pumas-app-manager/src/version_manager/mod.rs:4190:14:
+called `Result::unwrap()` on an `Err` value: Io { message: "Failed to create registry directory: /home/agent/.config/pumas", path: Some("/home/agent/.config/pumas"), source: Some(Os { code: 30, kind: ReadOnlyFilesystem, message: "Read-only file system" }) }
+
+---- version_manager::tests::native_receiptless_using_cold_reopen_preserves_custody_without_replay stdout ----
+
+thread 'version_manager::tests::native_receiptless_using_cold_reopen_preserves_custody_without_replay' (26999) panicked at crates/pumas-app-manager/src/version_manager/mod.rs:2719:14:
+called `Result::unwrap()` on an `Err` value: Io { message: "Failed to create registry directory: /home/agent/.config/pumas", path: Some("/home/agent/.config/pumas"), source: Some(Os { code: 30, kind: ReadOnlyFilesystem, message: "Read-only file system" }) }
+
+---- version_manager::tests::native_shutdown_cancels_stalled_transfer_and_retains_failed_outcome stdout ----
+
+thread 'version_manager::tests::native_shutdown_cancels_stalled_transfer_and_retains_failed_outcome' (27008) panicked at crates/pumas-app-manager/src/version_manager/mod.rs:5245:14:
+called `Result::unwrap()` on an `Err` value: Io { message: "Failed to create registry directory: /home/agent/.config/pumas", path: Some("/home/agent/.config/pumas"), source: Some(Os { code: 30, kind: ReadOnlyFilesystem, message: "Read-only file system" }) }
+
+---- version_manager::tests::native_receipt_post_rename_sigkill_cold_reopen_recovers_without_source_replay stdout ----
+
+thread 'version_manager::tests::native_receipt_post_rename_sigkill_cold_reopen_recovers_without_source_replay' (26995) panicked at crates/pumas-app-manager/src/version_manager/mod.rs:3925:14:
+child did not request the controlled archive: Elapsed(())
+
+
+failures:
+    version_manager::tests::native_adopted_output_survives_legacy_or_mismatched_cleanup_custody
+    version_manager::tests::native_archive_publishes_complete_output_and_reopens_metadata
+    version_manager::tests::native_cancel_before_completion_receipt_prevents_publication
+    version_manager::tests::native_cancel_failed_clear_keeps_using_and_both_error_causes
+    version_manager::tests::native_direct_recovery_cancellation_retains_effect_until_shared_shutdown
+    version_manager::tests::native_receipt_post_rename_interruption_cold_reopen_refuses_changed_output_and_settles
+    version_manager::tests::native_receipt_post_rename_sigkill_cold_reopen_recovers_without_source_replay
+    version_manager::tests::native_receipt_publication_conflict_cold_reopen_reconciles_without_reacquiring
+    version_manager::tests::native_receiptless_using_cold_reopen_preserves_custody_without_replay
+    version_manager::tests::native_shutdown_cancels_stalled_transfer_and_retains_failed_outcome
+
+test result: FAILED. 322 passed; 10 failed; 23 ignored; 0 measured; 0 filtered out; finished in 50.87s
+
+error: test failed, to rerun pass `-p pumas-app-manager --lib`

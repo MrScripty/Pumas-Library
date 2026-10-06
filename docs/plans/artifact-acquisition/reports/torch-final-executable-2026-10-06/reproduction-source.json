@@ -1,0 +1,7 @@
+{
+  "frozen_head": "2ce91b431afacdb4eb402af91f55b1258afe04fc",
+  "frozen_tree": "e1dc46a0e45926bf1d1906813c456d2fed7e259c",
+  "production_torch_rs_sha256": "37085d499a0b29354cbf8538b86c1f1c28deea70f3ed1e354bdb134dbb506c25",
+  "production_source_unchanged": true,
+  "regression_patch_sha256": "de95d5c78a8f63657874b774b2adf2ca21986ce970b1e8f93e329634ea6820a5"
+}

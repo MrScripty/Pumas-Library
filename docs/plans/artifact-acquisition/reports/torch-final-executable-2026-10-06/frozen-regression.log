@@ -1,0 +1,24 @@
+   Compiling pumas-library v0.7.0 (/tmp/pumas-q2-final-executable-2ce9/rust/crates/pumas-core)
+   Compiling pumas-app-manager v0.7.0 (/tmp/pumas-q2-final-executable-2ce9/rust/crates/pumas-app-manager)
+    Finished `test` profile [unoptimized] target(s) in 1m 39s
+     Running unittests src/lib.rs (/tmp/pumas-uv-offline-build/target/debug/deps/pumas_app_manager-a6c29384ac95defc)
+
+running 1 test
+test version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_selected_consumer_probe_refuses_publication_and_receipt ... FAILED
+
+failures:
+
+---- version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_selected_consumer_probe_refuses_publication_and_receipt stdout ----
+Executable-only probe control: result_success=true adopted=true receipt=true installed=true output=true cleanup_drained=true
+
+thread 'version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_selected_consumer_probe_refuses_publication_and_receipt' (195669) panicked at crates/pumas-app-manager/src/version_manager/installer/torch_wheel_handoff_tests.rs:904:9:
+assertion failed: result.is_err()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    version_manager::installer::torch::torch_wheel_handoff_tests::qualified_changed_selected_consumer_probe_refuses_publication_and_receipt
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 319 filtered out; finished in 6.61s
+
+error: test failed, to rerun pass `-p pumas-app-manager --lib`

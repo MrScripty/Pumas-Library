@@ -1,5 +1,16 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 final selected-executable review repair (2026-10-06):** Frozen `2ce91b43`
+remains intact. The executable-only probe mutation reproduced bound publication
+and Adopted settlement against its unchanged validator. Separate source
+`7ceac3a1` rechecks the retained selected-consumer hash after all validation/
+probe children in the final owned proof job; changed bytes refuse publication
+and receipt with retained custody. 31 Rust controls, 33 feature graphs and strict
+scoped checks pass. [Reproduction and repair](reports/torch-final-executable-2026-10-06.md)
+record exact source/evidence. The separate catalog-authority design is saved at
+`e6b5b876`; no resolver/source/version policy is adopted. Parent owns review/CI/
+merges; real provider/platform and P1/AQ acceptance remain open.
+
 **Q2 qualified observation producer (2026-10-06):** Frozen `bb330f2d` remains
 intact. Source `84f1e62a` (61 Python controls, 30 Rust handoff tests, 33 feature
 graph checks and strict scoped checks passing) adds an existing qualified

@@ -87,7 +87,9 @@ The private Rust selection boundary receives approved observation separately fro
 resolution/report bytes. It checks the fixed complete schema, exact target and
 observation digest, selected interpreter path/hash and the public report's whole
 runtime marker environment before accepting the packet. Standard compatibility
-semantics remain with the Python target owner. Approved bytes/digest live in the
+semantics remain with the Python target owner. The selected executable hash is
+separate from the existing managed-provider proof; venv redirectors do not replace
+or inherit the provider digest. Approved bytes/digest live in the
 accepted packet and cannot be decoded from its resolution JSON. Before acquisition
 the consumer rechecks retained packet bindings, then materializes the approved
 bytes with exclusive creation in its owned runtime. The existing provenance fence

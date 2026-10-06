@@ -231,7 +231,7 @@ async fn fixture(case: Case) {
             &serde_json::json!({"environment": observation["target"]["markers"]}),
             Some(&raw),
             Path::new(observation["interpreter"].as_str().unwrap()),
-            observation["interpreter_sha256"].as_str().unwrap(),
+            observation["interpreter_sha256"].as_str(),
         )
         .unwrap()
         .unwrap();
@@ -878,7 +878,7 @@ fn accepted_packet_fixture() -> PreparedTorchWheelInstall {
             minor: "3.12",
             adapter: "none",
             python: Path::new("/owned/stage/venv/python"),
-            interpreter_hash: &"b".repeat(64),
+            target_interpreter_hash: None,
             target_observation: None,
         },
     )
@@ -932,7 +932,7 @@ fn accepted_target_packet_refuses_mismatch_missing_context_and_late_downgrade() 
         minor: markers["python_version"].as_str().unwrap(),
         adapter: "none",
         python,
-        interpreter_hash: observation["interpreter_sha256"].as_str().unwrap(),
+        target_interpreter_hash: observation["interpreter_sha256"].as_str(),
         target_observation: Some(&approved),
     };
     let check = |resolution: &serde_json::Value,
@@ -988,18 +988,25 @@ fn accepted_target_packet_refuses_mismatch_missing_context_and_late_downgrade() 
         ..selection
     };
     assert!(check(&resolution, &report, &unapproved).is_err());
+    let missing_binary_context = DirectTorchSelection {
+        target_interpreter_hash: None,
+        ..selection
+    };
+    assert!(check(&resolution, &report, &missing_binary_context).is_err());
     let replaced_binary = DirectTorchSelection {
-        interpreter_hash: &"0".repeat(64),
+        target_interpreter_hash: Some(&"0".repeat(64)),
         ..selection
     };
     assert!(check(&resolution, &report, &replaced_binary).is_err());
     packet.resolution = accepted;
     packet.resolution_json = resolution.to_string();
     packet.report = report.to_string();
-    packet.interpreter_hash = observation["interpreter_sha256"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    // Managed-provider identity stays independent of selected venv/redirector bytes.
+    assert_eq!(packet.interpreter_hash, "b".repeat(64));
+    assert_ne!(
+        packet.interpreter_hash,
+        observation["interpreter_sha256"].as_str().unwrap()
+    );
     revalidate_prepared_torch_target(&packet).unwrap();
     resolution.as_object_mut().unwrap().remove("wheel_target");
     resolution
@@ -1031,7 +1038,7 @@ fn accepted_packet_preserves_venv_identity_and_refuses_changed_evidence() {
         minor: "3.12",
         adapter: "none",
         python: Path::new("/owned/stage/venv/python"),
-        interpreter_hash: &"b".repeat(64),
+        target_interpreter_hash: None,
         target_observation: None,
     };
     assert_eq!(packet.resolution.interpreter, "/owned/stage/venv/python");

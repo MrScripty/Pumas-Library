@@ -1450,6 +1450,7 @@ struct DirectTorchResolution {
 struct AcceptedTorchTarget {
     observation: String,
     sha256: String,
+    interpreter_sha256: String,
 }
 
 #[derive(Deserialize)]
@@ -1494,14 +1495,14 @@ fn accepted_torch_target(
     report: &serde_json::Value,
     observation: Option<&str>,
     python: &Path,
-    interpreter_hash: &str,
+    interpreter_hash: Option<&str>,
 ) -> Result<Option<AcceptedTorchTarget>> {
     let fields = ["wheel_target", "wheel_target_observation_sha256"];
     let present = fields
         .iter()
         .filter(|key| resolution.get(**key).is_some())
         .count();
-    if present == 0 && observation.is_none() {
+    if present == 0 && observation.is_none() && interpreter_hash.is_none() {
         return Ok(None); // Explicit legacy mode; explicit context never defaults.
     }
     let raw = observation
@@ -1567,13 +1568,16 @@ fn accepted_torch_target(
         || target["python"] != markers["python_full_version"]
         || target["abi"] != format!("cp{}", minor.replace('.', ""))
         || markers["implementation_name"] != "cpython"
+        || observed.interpreter.is_empty()
+        || observed.interpreter.len() > 4096
+        || observed.interpreter.chars().any(char::is_control)
         || Path::new(&observed.interpreter) != python
         || observed.interpreter_sha256.len() != 64
         || !observed
             .interpreter_sha256
             .bytes()
-            .all(|b| b.is_ascii_hexdigit())
-        || observed.interpreter_sha256 != interpreter_hash
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || Some(observed.interpreter_sha256.as_str()) != interpreter_hash
         || resolution["interpreter"] != observed.interpreter
         || resolution["python"] != minor
         || resolution["implementation"] != markers["implementation_name"]
@@ -1592,6 +1596,7 @@ fn accepted_torch_target(
     Ok(Some(AcceptedTorchTarget {
         observation: raw.to_owned(),
         sha256,
+        interpreter_sha256: observed.interpreter_sha256,
     }))
 }
 
@@ -1618,7 +1623,7 @@ fn revalidate_prepared_torch_target(prepared: &PreparedTorchWheelInstall) -> Res
         &report,
         accepted.map(|target| target.observation.as_str()),
         Path::new(&prepared.resolution.interpreter),
-        &prepared.interpreter_hash,
+        accepted.map(|target| target.interpreter_sha256.as_str()),
     )?;
     if observed.as_ref().map(|target| &target.sha256) != accepted.map(|target| &target.sha256) {
         return Err(failed("Accepted Torch target changed before acquisition"));
@@ -1771,7 +1776,7 @@ fn accepted_torch_resolution(
         &report,
         selection.target_observation,
         selection.python,
-        selection.interpreter_hash,
+        selection.target_interpreter_hash,
     )?;
     Ok(resolution)
 }
@@ -1782,7 +1787,7 @@ struct DirectTorchSelection<'a> {
     minor: &'a str,
     adapter: &'a str,
     python: &'a Path,
-    interpreter_hash: &'a str,
+    target_interpreter_hash: Option<&'a str>,
     target_observation: Option<&'a str>,
 }
 
@@ -2551,7 +2556,7 @@ impl VersionInstaller {
                 minor,
                 adapter: &plan.preview.adapter,
                 python: &plan.interpreter_path,
-                interpreter_hash: &plan.interpreter_hash,
+                target_interpreter_hash: None,
                 target_observation: None,
             },
         )?;
@@ -3123,7 +3128,7 @@ impl VersionInstaller {
                 minor,
                 adapter: &selection.adapter,
                 python: &python,
-                interpreter_hash: &interpreter_hash,
+                target_interpreter_hash: None,
                 target_observation: None,
             },
         )?;
@@ -4037,7 +4042,7 @@ mod managed_python_provenance_tests {
             minor: "3.12",
             adapter: "none",
             python,
-            interpreter_hash: &"b".repeat(64),
+            target_interpreter_hash: None,
             target_observation: None,
         };
         let check = |resolution: &DirectTorchResolution, report: &serde_json::Value, lock: &str| {

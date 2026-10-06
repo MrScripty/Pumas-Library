@@ -1117,3 +1117,27 @@ VCS command traps record attempts without fetching or executing package code.
 Measure source/build refusal, marker/extras/target/tag/direct-root closure, index
 priority, schemas and no-fallback semantics, compare with existing selection and
 return a supported proposal. No hostile external fetch or real GPU/runtime install.
+
+## Q2 acquired offline-catalog uv experiment — admitted 2026-10-06
+
+Parent rejects live-index uv as P1 closure and authorizes one evidence-only
+experiment on experiment/torch-offline-catalog-eed27495, base
+eed27495137fbd9cf933fd8f3d827fd66ea591ca, tree
+3242e15d63bbe7b131d6b08934b4e41be7ddecdb. Allowed writes are this admission,
+an owning-plan status link, and a separate report with adjacent experimental
+Rust acquisition harness, Python inspection/offline-CLI controls, reproducible
+tool/build provenance and raw measured evidence. No production source, manifest,
+lock, dependency, native cleanup, recipe or frozen ref change is admitted.
+
+An external experiment crate uses the existing public shared HTTP acquisition
+API, owner-approved exact anonymous loopback URLs/redirects, strong fixture
+digests and held use custody. Inspect all actual candidate bytes before public
+uv; reject all dependency URLs and non-wheel sources before invocation. Use an
+owned finite directory, explicit remote-to-local provenance projection,
+--offline --no-index --find-links, no builds, isolated config/cache/Python policy,
+and public PEP 751 output rather than fabricating a pip report. Incomplete
+bounded candidate catalog and unclassified solver failures are terminal or
+inconclusive; no fallback. Metadata-only inert fixtures and syscall observations
+measure candidate/extras/marker/platform selection and source/config/cache/
+redirect/substitution refusals. Completeness applies only to the declared finite
+request universe. Parent owns migration review; no production safety acceptance.

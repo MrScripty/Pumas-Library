@@ -73,7 +73,7 @@ jobs:
       - name: Test enabled S3 reader and shared acquisition
         run: cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3 --test s3_reader --test s3_acquisition -- --test-threads=1
       - name: Test enabled S3 signing and bounded prefix discovery
-        run: cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3 --lib acquisition::s3:: -- --test-threads=1
+        run: 'cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3 --lib acquisition::s3:: -- --test-threads=1'
       - name: Lint enabled S3 implementation
         run: cargo clippy --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3,test-support --all-targets -- -D warnings
       # Separate package invocations prevent workspace feature unification from

@@ -40943,8 +40943,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-proc-macro2 1.0.105 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/proc-macro2/1.0.105/download
+proc-macro2 1.0.107 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/proc-macro2/1.0.107/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License
@@ -41179,8 +41179,8 @@ Declared license: MIT
 
 ==============================================================================
 
-quote 1.0.43 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/quote/1.0.43/download
+quote 1.0.47 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/quote/1.0.47/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License

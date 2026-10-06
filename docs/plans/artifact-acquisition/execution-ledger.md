@@ -1,5 +1,29 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — bounded approved-main integration/readiness checkpoint
+
+Parent authorized history-preserving composition of approved main95, SDK9077,
+AC0810f39431 and accepted HF4eb273b3, with no prefix feature or PR merge.
+Shell access is confirmed after the disconnect. Normal merge chain 0e021b00,
+7c8aac72 and 9a1466f5 preserves every input/ref. The intermediate ledger helper
+failure/markers are corrected in 9a1466f5 without rewriting history. Main's
+runtime loader and dynamic ORT configuration, SDK reader, HF helper and AC08
+hooks are projected byte-for-byte from their approved/reviewed sources; frozen
+native repair source is preserved.
+
+Resolved default+s3 graphs for core/RPC on all three desktop targets contain no
+ONNX build-download/copy/TLS features and retain one SDK owner. Actual composed
+checks pass 52 package, 39 public HF, 13 S3 unit, 65 S3 integration, two runtime
+path-selection and 153 renderer cases, frontend types/lint, feature/ownership
+checks and six attribution tests. The unchanged canonical attribution generator
+refreshes and validates 365 default-release entries. Optional-S3 distribution
+terms remain separately scoped; no new release/platform/gate acceptance follows.
+See [exact ancestry, isolated review scopes and evidence](reports/main95-readiness-checkpoint-2026-10-06.md).
+No optional hardening, runtime provisioning or prefix feature is added. Parent
+owns PR/review/integration; work stops at this bounded checkpoint under the
+requested weekly usage ceiling.
+
+
 ## 2026-10-06 — admitted HF index target semantics correction
 
 Parent independent review found P2 malformed-map acceptance at preserved

@@ -10,8 +10,10 @@ Base: `7cf17383001d582056ac4299803c83d0f9ae68a7`, tree
 Branch: `feat/s3-prefix-main95`. Attribution prerequisite:
 `a39121b4cc7667f901959497f71368179341cfd1`, tree
 `35e24f3265b6064d16516493378e89f695609a4b`.
-Bind final source head/tree using `git rev-parse HEAD HEAD^{tree}` after the
-checkpoint commit; review the base-to-head comparison without rewriting inputs.
+Source checkpoint: `253cc3d17aeae04f4df996133e0f7f4745e03a71`, tree
+`1bf9e7614f8cfb9850f62399a0cd8f839db500d3`, committed and nonforce pushed.
+Review comparison: `7cf17383001d582056ac4299803c83d0f9ae68a7..253cc3d17aeae04f4df996133e0f7f4745e03a71`.
+Subsequent evidence-only commits do not change that source tree's Rust bytes.
 
 ## Proposed description
 
@@ -41,8 +43,8 @@ Focused prefix checks pass 28 S3 units and 66 S3 integrations, including signing
 session tokens, anonymous compatibility, pagination refusal, cancellation,
 TRACE redaction, prefix-to-import and exact cold receipts. Node attribution and
 release-contract tests pass 19; graph/ownership/format/attribution checks pass.
-A final test-module deduplication follows a strict Clippy diagnostic; its rerun
-results must be read from the qualification report before calling this complete.
+The final shared test-fixture cleanup passes strict core Clippy with
+`--all-targets -- -D warnings` and the 28-test focused unit rerun.
 Production RPC compilation and 302 RPC tests passed before prefix implementation;
 post-prefix RPC tests/Clippy remain pending. Hosted CI, actual provider acceptance,
 platform/runtime/inference and desktop/accessibility are separate pending gates.

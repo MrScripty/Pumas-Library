@@ -7,7 +7,9 @@ Successor `feat/s3-prefix-main95` retains integrated checkpoint
 `35e24f3265b6064d16516493378e89f695609a4b`. The prerequisite qualified default
 plus S3 RPC compilation and 302 tests, eight attribution regressions, eleven
 release contracts and 33 dependency graphs. The final source milestone and
-review comparison are bound in the successor review packet after qualification.
+review comparison are bound in the successor review packet. Source checkpoint
+`253cc3d17aeae04f4df996133e0f7f4745e03a71`, tree
+`1bf9e7614f8cfb9850f62399a0cd8f839db500d3`, is committed and pushed.
 
 ## Owner and authority
 
@@ -100,8 +102,9 @@ Completed checks before the final fixture-module cleanup:
 Strict core Clippy found a duplicate test fixture module. The fixture was moved
 to the shared S3 test parent, retaining its original visibility and bytes. An
 intermediate sibling import failed visibility checks; that compiler evidence is
-retained in `prefix-clippy-core-fixture-reuse.log`. Post-cleanup unit/Clippy
-qualification is recorded separately when complete. Post-prefix RPC tests,
+retained in `prefix-clippy-core-fixture-reuse.log`. Post-cleanup strict core Clippy passed with `--all-targets -- -D warnings`
+in `prefix-clippy-core-shared-fixture.log`; the final focused unit rerun passed 28 tests, with the two subprocess helpers
+exercised by their parent tests, in `prefix-unit-shared-fixture-recovered.log`. Post-prefix RPC tests,
 production RPC Clippy and hosted checks remain pending at this checkpoint.
 The 302 RPC tests above qualified the attribution prerequisite before prefix
 source changes; they are not a post-prefix result.
@@ -128,3 +131,42 @@ in `prefix-integration-key-serialization-intermediate.log`.
 The saved source checkpoint records successful checks and explicitly pending
 qualification; it does not claim all release gates have passed. No external reviewer was contacted and no
 PR mutation occurred; parent owns draft publication, review and integration.
+
+
+The first post-fixture unit link failed with SIGBUS after the remaining disk
+space reached zero (`prefix-unit-shared-fixture.log`). Only its 17 recomputable
+object files and one superseded 1.1 GB debug test executable were retired, with
+paths, sizes and SHA-256 evidence in `retired-final-fixture-link-cache.json` and
+`retired-superseded-debug-unit-cache.json`. Source, dependency maps, prior logs and
+frozen qualification archives remain intact. The recovery unit run passed 28 tests (two subprocess helper entries ignored
+and exercised by parent tests) in `prefix-unit-shared-fixture-recovered.log`.
+
+
+Two additional superseded test executables (the attribution-prerequisite RPC
+binary and earlier SDK unit binary) were retired for link headroom. Their hashes
+and sizes are retained in `retired-recovery-headroom-cache.json`. Prior passing
+logs and frozen packaged qualification evidence remain intact.
+
+## Reproduction and resume
+
+Use Rust 1.92 with the checked-in lockfile, one build job, disabled incremental
+compilation and debug level zero for dev/test. Keep `XDG_CONFIG_HOME` isolated
+for fixtures and permit enough recomputable cache space for the test linker.
+All qualification commands use `--locked --offline`; the selected production
+graph retains dynamic ORT loading without a build-time runtime download.
+
+```sh
+cargo fmt --all --manifest-path rust/Cargo.toml --check
+cargo clippy --locked --offline --manifest-path rust/Cargo.toml \
+  -p pumas-library --features s3,test-support --all-targets -- -D warnings
+cargo test --locked --offline --manifest-path rust/Cargo.toml \
+  -p pumas-library --features s3,test-support --lib acquisition::s3:: \
+  -- --test-threads=1 --nocapture
+cargo test --locked --offline --manifest-path rust/Cargo.toml \
+  -p pumas-library --features s3,test-support \
+  --test s3_reader --test s3_acquisition --test s3_model_workflow
+```
+
+Resume post-prefix production/default-plus-S3 RPC qualification before claiming
+completion. Provider/platform gates remain separate; no hidden credentials or
+runtime provisioning may be introduced to close them.

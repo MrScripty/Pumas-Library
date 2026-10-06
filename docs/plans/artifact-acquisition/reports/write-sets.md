@@ -921,3 +921,13 @@ behavior. Source expiry waits for registered effects to drain and does not impos
 a disk/verification/import/child-cleanup deadline or declare AQ-HTTP ready.
 Independent specification/standards design reviews precede implementation;
 parent retains PRs, hosted qualification, review coordination and integration.
+
+### HTTP elapsed-budget admitted completion — 2026-10-06
+
+Tested source `0950c4d5839608c8dd5f52afcb3fd2424a9a1656` (tree `55c7dea28bae397ee9d70995897c5ff0c8e2a672`) changes only the
+admitted shared service owner and co-located tests, plus core README, contract
+and admission notes. Final source blob `83478facd105a08f8a52e36e6ce9780d09e76d2a` is
+independently reviewed. Owning plan/ledger/matrix/gates and
+[qualification](http-elapsed-budget-qualification-2026-10-06.md) record affected
+checks, historical failures, cache restoration and pending broader gate scope.
+Evidence-only successor preserves source, dependencies and frozen refs.

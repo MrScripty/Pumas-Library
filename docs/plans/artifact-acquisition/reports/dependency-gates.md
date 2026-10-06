@@ -86,3 +86,19 @@ gated and has no new admitted source work: approved exact wheel closure,
 shared verified local wheel handoff, denied-network local-only child consumption,
 lease-through-exit/cleanup and installed-output proof are still required, with
 resolver/bootstrap traffic separately accounted. AQ-PACKAGES is not ready.
+
+## AQ-HTTP positive elapsed-budget prerequisite — local feature complete
+
+Source `0950c4d5839608c8dd5f52afcb3fd2424a9a1656` (tree `55c7dea28bae397ee9d70995897c5ff0c8e2a672`) enforces the existing
+positive per-file HTTP budget across headers/body/retries/backoff, preserving
+zero opt-out, attempt limits, exact identity/verification and receipt policy.
+Ten owned loopback controls plus 153 acquisition-filter and 192 HF download
+cases in each default/no-default mode, one public HF status/import control in
+each, and strict Clippy in three feature modes pass. This supports bounded
+AC02/AC06/AC10/AC15 behavior only. Already registered writes drain before return;
+no hard filesystem/verification/import/child-cleanup return deadline is claimed.
+See [http-elapsed-budget-qualification-2026-10-06](http-elapsed-budget-qualification-2026-10-06.md) for exact logs and independent source reviews.
+No public shape, S3/native frozen source, generator or Q2 writes. AQ-HTTP remains
+not ready; broader acceptance, current-head hosted checks, resource/platform/UI,
+public-client and deployment dispositions remain pending. Q2 exact local package
+handoff/denied-network installation remains the next gated implementation feature.

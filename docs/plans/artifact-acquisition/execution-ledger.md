@@ -1707,3 +1707,33 @@ integration. AC10 and AQ-HTTP remain pending. Next existing-plan feature is Q2
 exact wheel closure/local-only Torch consumption, gated by AQ-HTTP; required
 verified-local handoff, denied-network child consumption and lease/output proof
 remain absent. No Q2 implementation or provider/platform acceptance is claimed.
+
+## 2026-10-06 — positive HTTP elapsed-budget feature
+
+Branch `feat/acquisition-http-budget-0c02dcfb` retains base
+`0c02dcfb81a0f7ab2a3858c2b5cee329816b3ce5` (tree `78c663ed397264284cb95662d49a3354380755d4`).
+Tested source `0950c4d5839608c8dd5f52afcb3fd2424a9a1656`, tree `55c7dea28bae397ee9d70995897c5ff0c8e2a672`;
+owner blob `83478facd105a08f8a52e36e6ce9780d09e76d2a`. The already present
+exact file-set/verification/lease/receipt pipeline now honors its positive
+per-file HTTP source-wait budget through headers, body, retries and capped
+backoff, without resetting on retry. Overflow refuses before worker/store
+admission. Explicit zero and all S3/native production paths remain unchanged;
+registered writes retain capability/custody until drainage. No new public shape,
+schema, dependency, verification or receipt identity policy.
+
+Final-source acquisition-filter tests pass **153/153 in default and 153/153 in no-default** (including all ten new controls). HF download tests pass **192/192 in each configuration**; mixed-size public HF status/import/receipt controls pass **1/1 in each**. Strict all-target core Clippy with warnings denied passes in default, no-default and default-plus-S3. Scoped rustfmt and `git diff --check` pass. These are affected-slice checks, not full workspace or hosted qualification.
+
+Initial test-only old-owner run failed six controls and passed three (exit101);
+its pre-refinement patch/blob/raw log are retained. Intermediate TempDir move
+compile failure (exit101), repaired nine-control pass and pre-clock-refinement
+153-pass run are separately identified. Independent specification and standards
+reviews ACK final blob. Exact argv, profiles, wrapper, logs, hashes, failures,
+clock/fixture limits, ONNX manifest policy and resource/cache restoration are in
+[qualification](reports/http-elapsed-budget-qualification-2026-10-06.md) and its
+[evidence JSON](reports/http-elapsed-budget-2026-10-06/evidence.json).
+Repository-local MrScripty identity is verified before/after both commits.
+Parent owns PR/review/hosted integration. Linux synthetic/core evidence supports
+bounded AC02/AC06/AC10/AC15 aspects; those broader criteria and AQ-HTTP remain
+pending. Q2 accepted exact wheel closure/local-only Torch consumption is the next
+existing-plan feature, gated by AQ-HTTP. Separate PR42 generator evidence and
+frozen AC10 evidence refs are preserved.

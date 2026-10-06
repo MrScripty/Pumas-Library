@@ -60,7 +60,14 @@ class EmbeddedRuntimeImportTests(unittest.TestCase):
         source = INSTALLER.read_text()
         # Read the actual embedded-file table, rather than maintaining a second
         # hand-picked runtime file list that could omit a transitive import.
-        table = source.split("for (name, contents) in [", 1)[1].split("    ] {", 1)[0]
+        self.assertIn("for (name, contents) in embedded_torch_runtime_files() {", source)
+        function = re.search(
+            r"(?ms)^fn embedded_torch_runtime_files\(\)[^\n]*\{\n(.*?)^\}", source
+        )
+        self.assertIsNotNone(function, "Missing installed runtime embedding function")
+        table_match = re.search(r"(?ms)^\s*vec!\[\n(.*?)^\s*\]\s*$", function.group(1))
+        self.assertIsNotNone(table_match, "Unrecognized installed runtime embedding table")
+        table = table_match.group(1)
         included = re.findall(
             r'\(\s*"([^"\n]+)"\s*,\s*include_str!\("([^"\n]+)"\)\s*,?\s*\)', table
         )

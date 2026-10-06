@@ -11,6 +11,8 @@ controls and affected-slice checks pass; independent reviews ACK the final blob.
 Zero-budget compatibility, registered-effect drainage, S3/native frozen source,
 public API shapes and explicit runtime ONNX policy remain unchanged. See
 [qualification](reports/http-elapsed-budget-qualification-2026-10-06.md).
+Normal merge `6385a493` incorporates accepted main `1c1c7875`; the
+Rust subtree is unchanged and all ten controls pass again in both modes.
 AQ-HTTP remains pending. Next implementation feature is Q2 exact wheel closure /
 verified local handoff / network-denied local-only Torch consumption, gated by
 AQ-HTTP acceptance; no Q2 source change is admitted here.

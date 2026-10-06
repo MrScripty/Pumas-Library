@@ -1737,3 +1737,20 @@ bounded AC02/AC06/AC10/AC15 aspects; those broader criteria and AQ-HTTP remain
 pending. Q2 accepted exact wheel closure/local-only Torch consumption is the next
 existing-plan feature, gated by AQ-HTTP. Separate PR42 generator evidence and
 frozen AC10 evidence refs are preserved.
+
+## Accepted current-main composition — 2026-10-06
+
+After parent accepted PR42, normal merge `6385a4931ca2ebd21f7c8af83b087d5f2cf6b9a1` (tree
+`a2d461188d622cf123fb4d7464602fc913fc831a`) incorporates current main
+`1c1c7875ff8fc43b3ad1957fb2a94d44c850716c` (tree
+`8c27d77e7d31ed13f85db77a8c155f15a7fbe693`) with parents
+`9470f4882216097f86114ec53e086d9f15b24e00` and `1c1c7875ff8fc43b3ad1957fb2a94d44c850716c`.
+The merge adds only the accepted generator repair and its evidence. The entire
+Rust subtree `0bd482ac031078865f944efeec6dad4d7d825530` matches tested HTTP source `0950c4d5`;
+the owner blob and all S3/native sources remain byte-identical. All ten deadline
+controls pass again in default and no-default (10/10 each) on this merge. The
+original failed controls, qualified checks, raw archive and AC10/PR42 evidence
+are preserved. [Post-main evidence](reports/http-elapsed-budget-2026-10-06/post-main-evidence.json)
+binds exact commands/logs, identities, merge parents/tree and Rust subtree
+agreement. Parent separately monitors main's postmerge CI; no new hosted or full
+AQ-HTTP acceptance is claimed. Q2 remains the next gated implementation feature.

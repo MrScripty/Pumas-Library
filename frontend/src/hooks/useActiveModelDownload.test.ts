@@ -1,4 +1,5 @@
-import { act, renderHook } from '@testing-library/react';
+import { createElement } from 'react';
+import { act, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
@@ -22,6 +23,7 @@ vi.mock('../api/adapter', () => ({
 import type { ModelDownloadUpdateNotification } from '../types/api';
 import type { DownloadProgressOutcome } from '../generated/desktop-contract';
 import { useActiveModelDownload } from './useActiveModelDownload';
+import { Header } from '../components/Header';
 
 function progressOutcome(overrides: Partial<DownloadProgressOutcome>): DownloadProgressOutcome {
   return {
@@ -63,6 +65,52 @@ describe('useActiveModelDownload', () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it.each(['completed', 'empty'] as const)('keeps a pushed %s snapshot when the older startup list resolves late', async (terminal) => {
+    let resolveList!: (value: { success: true; downloads: DownloadProgressOutcome[] }) => void;
+    listModelDownloadsMock.mockReturnValueOnce(new Promise(resolve => { resolveList = resolve; }));
+    const { result, unmount } = renderHook(() => useActiveModelDownload());
+    act(() => downloadUpdateCallback?.({
+      cursor: 'download:2', snapshot: { cursor: 'download:2', revision: 2,
+        downloads: terminal === 'empty' ? [] : [progressOutcome({ status: 'completed', progress: 1 })],
+      }, stale_cursor: false, snapshot_required: false,
+    }));
+    await act(async () => resolveList({ success: true, downloads: [
+      progressOutcome({ status: 'downloading', progress: 0.42 }),
+    ] }));
+    expect(result.current.activeDownload).toBeNull();
+    expect(result.current.activeDownloadCount).toBe(0);
+    expect(listModelDownloadsMock).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(unsubscribeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the rendered header active at byte completion and idle only after terminal status, even with a late startup list', async () => {
+    let resolveList!: (value: { success: true; downloads: DownloadProgressOutcome[] }) => void;
+    listModelDownloadsMock.mockReturnValueOnce(new Promise(resolve => { resolveList = resolve; }));
+    function DownloadHeader() {
+      const { activeDownload, activeDownloadCount } = useActiveModelDownload();
+      return createElement(Header, {
+        launcherUpdateAvailable: false, onMinimize: vi.fn(), onClose: vi.fn(),
+        networkAvailable: true, modelLibraryLoaded: true,
+        activeModelDownload: activeDownload, activeModelDownloadCount: activeDownloadCount,
+      });
+    }
+    const { unmount } = render(createElement(DownloadHeader));
+    const push = (status: 'downloading' | 'completed') => downloadUpdateCallback?.({
+      cursor: 'download:2', snapshot: { cursor: 'download:2', revision: 2,
+        downloads: [progressOutcome({ status, progress: 1, downloadedBytes: 1000, totalBytes: 1000 })],
+      }, stale_cursor: false, snapshot_required: false,
+    });
+    act(() => push('downloading'));
+    expect(screen.getByRole('status')).toHaveTextContent('Downloading 1 model');
+    act(() => push('completed'));
+    expect(screen.getByRole('status')).toHaveTextContent('Network online · model library ready');
+    await act(async () => resolveList({ success: true, downloads: [progressOutcome({ status: 'downloading', progress: 0.42 })] }));
+    expect(screen.getByRole('status')).toHaveTextContent('Network online · model library ready');
+    unmount();
+    expect(unsubscribeMock).toHaveBeenCalledTimes(1);
   });
 
   it('selects the highest-priority active download and exposes the active count', async () => {

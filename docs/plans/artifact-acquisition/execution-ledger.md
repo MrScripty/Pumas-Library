@@ -1,5 +1,65 @@
 # Acquisition execution ledger
 
+## 2026-10-05 — admitted AC08 startup snapshot ordering
+
+Coordinator continuation starts isolated branch
+`fix/desktop-download-startup-aca0ef2a` at preserved HF completeness head
+`aca0ef2a5dcffecfb98c2ba42fc87886b2210ebe`, tree
+`1bd889433130b08d8b5ed7b66ed519fde8010d47`. Exact writes are
+`frontend/src/hooks/useActiveModelDownload{.ts,.test.ts}`,
+`frontend/src/hooks/useModelDownloads{.ts,.test.ts}`, and this ledger.
+A delayed unversioned startup list currently overwrites a newer canonical pushed
+snapshot, resurrecting completed activity or clearing retained error state.
+The subscription's full snapshot takes presentation authority once observed;
+the outstanding startup result is still observed but classified as superseded.
+Initial queries without a push retain current command/association reconciliation.
+No domain completion, receipt, exact selection, recovery or backend/DTO policy
+changes. Deterministic hook/renderer projections and lifecycle controls qualify
+this bounded ordering repair. Browser/desktop execution remains unavailable;
+the prior ownership/access denial is respected without an alternate launch.
+Preserved HF/SDK/native/ORT work is untouched. Parent owns PR integration and
+has separately authorized an isolated production SDK reader replacement only
+after this bounded milestone completes.
+
+The repair is complete locally: a mounted hook accepts the startup list until
+its first canonical full subscription snapshot. That push supersedes the
+unversioned outstanding query; the query still resolves/rejects under its
+existing owner and is classified without stale state application. Supersession
+is scoped to each mounted effect and reset on remount. Cleanup ends callback
+application and unregisters the subscription. No polling, cursor arithmetic,
+new UI state store, DTO, backend status or receipt semantics were added.
+
+The unchanged source failed five new cases: both completed/empty terminal pushes
+were resurrected in the header and download rows, and a retained package error
+was cleared. After the fix, both hook files passed 115/115. A further actual
+Header component test in jsdom proves 100% received bytes still display active
+downloading until backend terminal status, and that a delayed startup list does
+not restore activity afterward. Paused/error controls retain the exact download
+ID for resume; existing association, optimistic command rollback, rekeying,
+partial/duplicate activity and unsubscribe tests pass. Six affected renderer
+files pass 153/153: the two hooks, completion refresh, Header, local download
+actions and remote download menu. Frontend `check:types`, zero-warning `lint`,
+and diff checks pass on the final source.
+
+Commands used the existing pnpm 10.33.0/Vitest 4.1.11 scripts with cached workspace
+dependencies whose manifests/lock match this branch. Node was 24.19.0; the
+repository pin is 24.15.0, so this is local supporting evidence rather than
+exact pinned-toolchain qualification. Cache links are ignored workspace-only
+setup; no dependency, lockfile, permission or account setting changed. An
+intermediate renderer fixture property typo and missing cached Electron type
+link were corrected before final checks. Logs are under
+`/workspace/scratch/ac08-startup-snapshot/`: `red.log`, `focused.log`,
+`renderer-qualified.log`, `types.log`, `lint.log` and intermediate setup logs.
+
+This is deterministic React/jsdom renderer/state evidence. No actual browser or
+Electron desktop was launched; no browser geometry, focus, keyboard/assistive
+technology, native pointer behavior, real-source transfer or desktop/backend
+composition is claimed. Prior browser ownership/access denial remains binding.
+AC08/AQ-HTTP and all dependent gates remain pending. Parent owns integration.
+The separately requested HF weight-map target correction is next on its own
+successor; the authorized production SDK reader replacement follows, with
+prefix enumeration and live-provider/platform qualification remaining separate.
+
 ## 2026-10-05 — admitted Q1 shard/Diffusers package completeness
 
 Coordinator continuation of Q1/AC01 starts branch

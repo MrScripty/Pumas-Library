@@ -3,18 +3,17 @@ use super::*;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
-#[path = "../../../tests/s3_reader/fixture.rs"]
-mod fixture;
+use super::fixture;
 use fixture::{head, range_response, Fixture};
 
-const ACCESS: &str = "PUMAS-SYNTHETIC-ACCESS";
-const SECRET: &str = "pumas-synthetic-secret/+=";
-const TOKEN: &str = "pumas-synthetic-session/+=";
+pub(super) const ACCESS: &str = "PUMAS-SYNTHETIC-ACCESS";
+pub(super) const SECRET: &str = "pumas-synthetic-secret/+=";
+pub(super) const TOKEN: &str = "pumas-synthetic-session/+=";
 const KEY: &str = "models/a b%?.bin";
 const VERSION: &str = "v+1/=";
 
 #[derive(Clone)]
-struct MemoryLog(Arc<std::sync::Mutex<Vec<u8>>>);
+pub(super) struct MemoryLog(pub(super) Arc<std::sync::Mutex<Vec<u8>>>);
 impl std::io::Write for MemoryLog {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         self.0.lock().unwrap().extend_from_slice(bytes);
@@ -109,7 +108,7 @@ async fn global_trace_child() {
     }
 }
 
-fn config(endpoint: String, addressing: S3Addressing) -> S3ReaderConfig {
+pub(super) fn config(endpoint: String, addressing: S3Addressing) -> S3ReaderConfig {
     S3ReaderConfig {
         endpoint,
         region: "fixture-region".into(),
@@ -122,7 +121,7 @@ fn config(endpoint: String, addressing: S3Addressing) -> S3ReaderConfig {
 fn credentials(token: Option<&str>) -> S3Credentials {
     S3Credentials::new(ACCESS.into(), SECRET.into(), token.map(str::to_owned)).unwrap()
 }
-fn reader(endpoint: String, addressing: S3Addressing, token: Option<&str>) -> S3Reader {
+pub(super) fn reader(endpoint: String, addressing: S3Addressing, token: Option<&str>) -> S3Reader {
     S3Reader::build(
         config(endpoint, addressing),
         Authentication::LoopbackFixture(credentials(token)),
@@ -159,11 +158,12 @@ fn hmac(key: &[u8], data: &[u8]) -> Vec<u8> {
     Sha256::digest(outer).to_vec()
 }
 
-fn valid_signature(request: &str, secret: &str) -> bool {
+pub(super) fn valid_signature(request: &str, secret: &str) -> bool {
     let mut lines = request.split("\r\n");
     let mut first = lines.next().unwrap().split_whitespace();
     let method = first.next().unwrap();
-    let (path, query) = first.next().unwrap().split_once('?').unwrap();
+    let target = first.next().unwrap();
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let headers: BTreeMap<_, _> = lines
         .filter_map(|line| line.split_once(':'))
         .map(|(key, value)| (key.to_ascii_lowercase(), value.trim().to_owned()))
@@ -508,6 +508,7 @@ async fn ambient_credentials_and_proxies_are_ignored_in_isolated_process() {
         return;
     }
     check_identity().await;
+    super::prefix_tests::ambient_prefix_probe().await;
 }
 
 struct Host;

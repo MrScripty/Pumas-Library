@@ -100,7 +100,23 @@ impl HttpConnector for ScopedTransport {
                 return Err(transport_error("unsupported request body"));
             }
             let (parts, _) = request.into_parts();
-            let range_request = parts.method == http::Method::GET;
+            let listing_budget = parts
+                .extensions
+                .get::<super::list_xml::ListingBodyBudget>()
+                .map(|budget| budget.0);
+            let range_request = parts.method == http::Method::GET
+                && parts.headers.contains_key(http::header::RANGE);
+            if parts.method == http::Method::GET
+                && !range_request
+                && (listing_budget.is_none()
+                    || !url
+                        .query_pairs()
+                        .any(|(name, value)| name == "list-type" && value == "2"))
+            {
+                return Err(transport_error(
+                    "GET requires explicit range or guarded listing authority",
+                ));
+            }
             let response = transport
                 .client
                 .request(parts.method, url)
@@ -109,6 +125,9 @@ impl HttpConnector for ScopedTransport {
                 .await
                 .map_err(|_| transport_error("scoped HTTP request failed"))?;
             let status = response.status();
+            if listing_budget.is_some() && status.is_success() && status != http::StatusCode::OK {
+                return Err(transport_error("listing response must be OK"));
+            }
             // A successful whole-object GET cannot satisfy an explicit range.
             if range_request && status.is_success() && status != http::StatusCode::PARTIAL_CONTENT {
                 return Err(transport_error("range response must be partial"));
@@ -116,7 +135,9 @@ impl HttpConnector for ScopedTransport {
             let headers = response.headers().clone();
             // SDK error XML is untrusted diagnostic input, never artifact data.
             // Bound it without interpreting or logging provider messages.
-            let limit = if status.is_success() {
+            let limit = if let Some(limit) = listing_budget {
+                Some(limit)
+            } else if status.is_success() {
                 None
             } else {
                 Some(1024 * 1024usize)

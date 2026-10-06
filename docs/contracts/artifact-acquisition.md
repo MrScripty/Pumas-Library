@@ -213,6 +213,39 @@ Explicit multi-file S3 selections identify each object by the pair of its exact 
 
 Use one range per S3 GetObject call and bounded parallel calls only when the supported reader and identity contract permit them. Pagination failures or capacity limits produce incomplete/unavailable manifests, not silently shortened file sets. Recheck the exact version/evidence when refreshing credentials or location. Capability differences of compatible endpoints produce explicit unsupported results.
 
+The optional `S3Reader::enumerate_prefix` is an additive, in-memory discovery
+operation for an explicitly authorized raw prefix on a general-purpose versioned
+bucket. `S3PrefixLimits` supplies positive page, object, per-page XML byte and
+total XML byte bounds; page size is 1–1000, each XML response is at most 1 MiB,
+and the reviewed XML guard additionally limits parsing to 4096 nodes and refuses
+DTDs. The reader's existing caller-supplied operation timeout covers the complete
+pagination and subsequent HEAD pinning, rather than restarting a service-wide
+deadline per page. Requests remain sequential, with SDK retries disabled and no
+delimiter, encoding conversion, Requester Pays or source/credential discovery.
+
+Each listing uses the same SDK/closed transport/diagnostic scope as reads. The
+transport permits only an annotated ListObjectsV2 GET with HTTP 200, bounding the
+stream before SDK buffering. The promoted reviewed XML guard requires exact
+agreement with SDK-decoded completion, tokens, selection/count fields and every
+key/size/ETag. Missing, duplicate, ambiguous or contradictory completion evidence,
+changed scope echoes, grouped/encoded results, cyclic tokens, duplicate or
+non-lexicographic keys and out-of-prefix or unsupported keys fail closed. Raw
+prefixes are not turned into directory prefixes. Tokens are ephemeral and never
+part of a manifest, receipt, debug representation or log.
+
+Only a complete final page can proceed to sequential conditional HEAD observations.
+Each HEAD must match the listed size/ETag and supply an immutable, non-null
+VersionId under the existing validation policy. Missing/racing objects or failed
+pages return no listing; exhausted capacity is typed `S3PrefixError::Incomplete`.
+Other failures wrap the unchanged reader error contract. `S3PrefixListing`
+contains ordered immutable observations, no credentials or read capability;
+its Debug shows counts, and each object's Debug is redacted. A successful listing
+is still not an atomic multi-object snapshot or a ready artifact set. Callers
+choose exact logical paths and supply authoritative SHA-256 evidence, then use
+the existing explicit manifest/acquisition/import path. Its VersionId range pins,
+namespace validation, verification, receipts, retry policy and persistence formats
+remain unchanged. There is no new prefix RPC/desktop or automatic import path.
+
 [AWS GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html) and [Object metadata](https://docs.aws.amazon.com/AmazonS3/latest/API/API_Object.html) provide source semantics. A maintained SDK supplies signing and request mechanics. Pumas owns selected identity, allowed access, acquisition attempts, destination custody and verification.
 
 A new source implementation can register behind the internal source-reader interface without changing model-adapter IDs or installation-state variants. This plan does not enable untrusted executable source plugins or assume all providers obey identical APIs.

@@ -94,6 +94,15 @@ and optional session token. Credential inputs clear on submit or close and are
 never saved or refreshed. See the [RPC contract](rust/crates/pumas-rpc/README.md#explicit-s3-model-import)
 for per-file pins, aggregate staging progress, cancellation and retained-work limits.
 
+The optional Rust reader also exposes `S3Reader::enumerate_prefix` with explicit
+`S3PrefixLimits`. It returns complete, ordered immutable object observations only
+after bounded pagination and conditional HEAD pinning. Missing/racing objects,
+ambiguous completion or exhausted limits return errors. These observations are
+not an atomic package snapshot: callers still choose logical paths, provide
+SHA-256 evidence and use the existing explicit manifest/import API. Discovery
+does not download or import content. See the [acquisition contract](docs/contracts/artifact-acquisition.md#6-s3-and-other-source-readers).
+S3-enabled distributions require the [S3 release notices](docs/release-attribution/0.7.0-s3/README.md).
+
 The optional Node launcher exposes the same backend-only selection:
 
 ```bash

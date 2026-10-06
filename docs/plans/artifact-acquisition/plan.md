@@ -1,5 +1,16 @@
 # Plan: source-neutral artifact acquisition
 
+**Q3 bounded prefix source checkpoint (2026-10-06):** Separate
+`feat/s3-prefix-main95` preserves integrated 7cf17383 and tested attribution
+prerequisite a39121b4. Explicit bounded SDK pagination with reviewed XML agreement
+and immutable conditional HEAD pins is implemented. Focused units/integrations
+pass; post-prefix RPC qualification and provider/platform gates remain pending.
+See [qualification](reports/s3-prefix-enumeration-2026-10-06.md) and
+[parent review packet](reports/s3-prefix-review-packet-2026-10-06.md).
+Parent retains PR/review/integration ownership. Next existing-plan work is
+Q3 actual-provider acceptance, then Q4 qualification.
+
+
 **Q3 sibling composition and bounded Q4 evidence (2026-10-05):** The coordinator
 authorized normal composition of frozen e6acb0ba and 7dc6acef, in that ordered
 parent sequence. Merge cd9d8191 preserves accepted PR40 and every frozen ref.

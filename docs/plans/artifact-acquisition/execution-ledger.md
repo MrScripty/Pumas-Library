@@ -1,5 +1,25 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — bounded prefix source checkpoint
+
+Separate `feat/s3-prefix-main95` implements bounded complete ListObjectsV2
+pagination using the sole existing SDK owner, the reviewed XML/SDK agreement
+guard, and conditional immutable HEAD observations. New public API consists of
+`S3Reader::enumerate_prefix`, `S3PrefixLimits`, `S3PrefixError`, `S3PrefixListing`
+and `S3PrefixObject`; existing config/constructors/error enum stay compatible.
+The existing explicit manifest/import owner still requires caller digests.
+
+Focused qualification passes 28 S3 units and 66 integration cases, including
+prefix-to-import and cold receipts. Attribution/release tests pass 19 cases;
+33 dependency graphs, ownership, formatting and both attribution profiles pass.
+Core Clippy caught duplicate test-fixture loading; a shared test-parent module
+fix is saved with its failure evidence and post-fix checks reported separately.
+Post-prefix RPC qualification and provider/platform gates remain pending.
+Protected manifest/native/ONNX source remains byte-identical to integrated 7cf.
+See [checkpoint qualification](reports/s3-prefix-enumeration-2026-10-06.md)
+and [parent review packet](reports/s3-prefix-review-packet-2026-10-06.md).
+Parent owns draft PR publication, review and integration; no PR was mutated.
+
 ## 2026-10-06 — S3 release profile and bounded-prefix successor admitted
 
 The owner resumes from integrated `7cf17383001d582056ac4299803c83d0f9ae68a7`

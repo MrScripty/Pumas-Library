@@ -3,7 +3,7 @@
 use pumas_library::{
     acquisition::{
         AcquisitionPhase, AcquisitionRetryPolicy, AcquisitionWorkspace, S3Addressing,
-        S3Credentials, S3ManifestEntry, S3ReaderConfig, Sha256Evidence,
+        S3Credentials, S3ManifestEntry, S3PrefixLimits, S3Reader, S3ReaderConfig, Sha256Evidence,
     },
     models::{ImportState, ModelImportSpec},
     network::RetryConfig,
@@ -247,6 +247,144 @@ async fn public_single_and_bundle_workflows_publish_ready_and_settle_exact_recei
         assert_published(&cold, &id, aux).await;
         close(&cold).await;
     }
+}
+
+#[tokio::test]
+async fn bounded_prefix_pins_feed_existing_bundle_import_and_cold_exact_receipts() {
+    let root = tempfile::TempDir::new().unwrap();
+    let stage = tempfile::TempDir::new().unwrap();
+    let api = setup_api(root.path()).await;
+    let bytes = gguf();
+    let page = |key: &str, size: usize, truncated: bool, continuation: &str| {
+        let body = format!("<ListBucketResult><Name>fixture-bucket</Name><Prefix>models/</Prefix><MaxKeys>1</MaxKeys><KeyCount>1</KeyCount><IsTruncated>{truncated}</IsTruncated>{continuation}<Contents><Key>{key}</Key><ETag>\"selected\"</ETag><Size>{size}</Size></Contents></ListBucketResult>");
+        format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/xml\r\nConnection: close\r\n\r\n{body}", body.len()).into_bytes()
+    };
+    let versioned = |payload: &[u8], head: bool, version: &str| {
+        String::from_utf8(wire(payload, head))
+            .unwrap()
+            .replacen(
+                &format!("x-amz-version-id: {VERSION}\r\n"),
+                &format!("x-amz-version-id: {version}\r\n"),
+                1,
+            )
+            .into_bytes()
+    };
+    let responses = vec![
+        page(
+            "models/config/tokenizer_config.json",
+            2,
+            true,
+            "<NextContinuationToken>workflow+next/=</NextContinuationToken>",
+        ),
+        page(
+            "models/weights.gguf",
+            bytes.len(),
+            false,
+            "<ContinuationToken>workflow+next/=</ContinuationToken>",
+        ),
+        versioned(b"{}", true, "config-v1"),
+        versioned(&bytes, true, "weights-v2"),
+        versioned(b"{}", true, "config-v1"),
+        versioned(&bytes, true, "weights-v2"),
+        versioned(b"{}", false, "config-v1"),
+        versioned(&bytes, false, "weights-v2"),
+    ];
+    let (fixture, _) = Fixture::serve(responses, false).await;
+    let reader = S3Reader::new(S3ReaderConfig {
+        endpoint: fixture.endpoint.clone(),
+        region: "fixture-region".into(),
+        bucket: "fixture-bucket".into(),
+        addressing: S3Addressing::Path,
+        allow_http: true,
+        operation_timeout: Duration::from_secs(5),
+    })
+    .unwrap();
+    let listing = reader
+        .enumerate_prefix(
+            "models/",
+            S3PrefixLimits {
+                page_size: 1,
+                max_pages: 2,
+                max_objects: 2,
+                max_page_bytes: 4096,
+                max_total_bytes: 8192,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(listing.pages(), 2);
+    assert!(api.acquisition().store().acquisitions().unwrap().is_empty());
+    assert_eq!(std::fs::read_dir(stage.path()).unwrap().count(), 0);
+    let entries = listing
+        .objects()
+        .iter()
+        .map(|object| {
+            let (path, payload) = match object.key() {
+                "models/config/tokenizer_config.json" => {
+                    ("config/tokenizer_config.json", b"{}".as_slice())
+                }
+                "models/weights.gguf" => ("weights.gguf", bytes.as_slice()),
+                _ => panic!("fixture returned an unapproved logical member"),
+            };
+            object.manifest_entry(path.into(), entry(path, payload).expected_sha256)
+        })
+        .collect();
+    drop(reader);
+    let mut request = request(&fixture.endpoint, stage.path(), true);
+    request.entries = entries;
+    let result = api
+        .import_s3_model(request, S3ModelImportControl::new())
+        .await
+        .unwrap();
+    let id = result.model_id.unwrap();
+    assert_published(&api, &id, true).await;
+    let records = api.acquisition().store().acquisitions().unwrap();
+    let manifest = records.values().next().unwrap().manifest.clone();
+    let saved = serde_json::to_string(records.values().next().unwrap()).unwrap();
+    assert!(!saved.contains("workflow+next/="));
+    assert!(!saved.contains("workflow%2Bnext%2F%3D"));
+    assert_eq!(
+        manifest
+            .files()
+            .iter()
+            .map(|file| file.source_key().to_owned())
+            .collect::<Vec<_>>(),
+        vec![
+            serde_json::to_string(&("models/config/tokenizer_config.json", "config-v1")).unwrap(),
+            serde_json::to_string(&("models/weights.gguf", "weights-v2")).unwrap(),
+        ]
+    );
+    let requests = fixture.finish().await;
+    assert_eq!(requests.len(), 8);
+    assert!(requests
+        .iter()
+        .all(|request| !request.contains("authorization:")));
+    assert!(requests[1].contains("continuation-token=workflow%2Bnext%2F%3D"));
+    assert!(requests[2..4]
+        .iter()
+        .all(|request| request.starts_with("HEAD ")
+            && request.contains("if-match: \"selected\"")
+            && !request.contains("versionId=")));
+    assert!(requests[4].contains("versionId=config-v1"));
+    assert!(requests[5].contains("versionId=weights-v2"));
+    assert!(requests[6].contains("versionId=config-v1"));
+    assert!(requests[7].contains("versionId=weights-v2"));
+    close(&api).await;
+    drop(api);
+    let cold = setup_api(root.path()).await;
+    assert_published(&cold, &id, true).await;
+    assert_eq!(
+        cold.acquisition()
+            .store()
+            .acquisitions()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .manifest,
+        manifest
+    );
+    close(&cold).await;
 }
 #[tokio::test]
 async fn invalid_inputs_and_plaintext_credentials_fail_before_network_or_admission() {

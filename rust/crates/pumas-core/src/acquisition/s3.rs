@@ -14,12 +14,20 @@ use super::{
     FileVerificationRequirement, ManifestValidationError, RevisionStrength, Sha256Evidence,
 };
 
+mod list_xml;
 mod manifest;
+mod prefix;
 mod sdk;
 pub use manifest::{S3ManifestEntry, S3ManifestSelection};
+pub use prefix::{S3PrefixError, S3PrefixLimits, S3PrefixListing, S3PrefixObject};
 
 #[cfg(test)]
 mod auth_tests;
+#[cfg(test)]
+#[path = "../../tests/s3_reader/fixture.rs"]
+mod fixture;
+#[cfg(test)]
+mod prefix_tests;
 
 /// Endpoint interpretation. Virtual-hosted endpoints already include the bucket.
 #[derive(Clone, Copy, Debug)]
@@ -30,8 +38,8 @@ pub enum S3Addressing {
 
 /// Explicit caller-authorized source configuration, never read from model metadata.
 ///
-/// General-purpose/versioned buckets only. Environment discovery, prefix listing,
-/// and remote writes are absent. Authentication is supplied separately in memory.
+/// General-purpose/versioned buckets only. Environment discovery and remote
+/// writes are absent. Authentication is supplied separately in memory.
 pub struct S3ReaderConfig {
     /// Absolute HTTP(S) origin, without credentials, query, fragment, or path.
     pub endpoint: String,

@@ -23,5 +23,10 @@
     "scoped-lint.log"
   ],
   "identity_verified_before_source_commit": true,
-  "sanitization": "All published bytes checked for common credential-value patterns; no environment values, auth stores or full hosted job logs collected. Exact original repair-evidence.json and all its hashed files preserved."
+  "sanitization": "All published bytes checked for common credential-value patterns; no environment values, auth stores or full hosted job logs collected. Exact original repair-evidence.json and all its hashed files preserved.",
+  "raw_log_container": {
+    "path": "command-logs.tar.gz",
+    "sha256": "142c6f256e6c16216e9d4002eafcbdc9695fc770b35e2e456d7a3cad9c4695cd",
+    "format": "gzip tar; original log names and exact bytes; diagnostic whitespace preserved"
+  }
 }

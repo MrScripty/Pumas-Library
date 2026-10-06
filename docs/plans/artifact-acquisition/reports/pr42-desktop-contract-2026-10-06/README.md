@@ -5,7 +5,9 @@ Exact tested source is `75d7e426acdb4f2ed25c6063653ae517a56528aa`, tree
 `722245514b3bae42511aa5ea188570292ce276d4`. This successor adds evidence only;
 source 75d7 remains unchanged. `repair-evidence.json` preserves the original
 command/result/source/hash record; `commands.json` identifies observed exits
-and retained setup failures. All named hashed files are included unchanged.
+and retained setup failures. All named hashed files are included unchanged. Raw diagnostic logs are in
+`command-logs.tar.gz` under their original names; JSON/text files are alongside
+the archive. Original log whitespace is preserved, not normalized.
 
 The hosted and local stale-check failure and working-directory regression are
 retained. Final generation, strict byte parity from root and Electron working

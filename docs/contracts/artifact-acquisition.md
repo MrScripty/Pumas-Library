@@ -330,6 +330,13 @@ Shutdown closes new admission, signals appropriate work, drains tracked async an
 
 The package owner supplies a version-checked accepted resolution and trusted immutable artifact set. Acquisition obtains files; package tooling installs them into an owned empty stage from exact local inputs. Preserve original URLs/digests as provenance and validate the installed set afterward. Use only supported public tooling. A report is evidence about a resolution, not by itself a consumable lock format.
 
+The local package-tool child disables ambient pip configuration: `--isolated`
+alone still loads global/site settings. Use a copied child environment without
+inherited `PIP_*` options and `PIP_CONFIG_FILE=os.devnull` to disable all config
+files; never change host/user/global settings to establish local consumption.
+See [pip configuration](https://pip.pypa.io/en/stable/topics/configuration/).
+Option-parser controls establish configuration isolation, not network denial.
+
 The decisive test denies network during the final installation leg and rejects hidden direct-URL retrieval, alternate same-name/version wheels, and missing closure members. Resolver metadata and managed-Python bootstrap traffic remain separately recorded; the claim is exact payload handoff, not interception of every package-tool request. Sources: [pip report](https://pip.pypa.io/en/stable/reference/installation-report/) and [pip install](https://pip.pypa.io/en/stable/cli/pip_install/).
 
 The bounded retained-preview Torch implementation uses the existing shared HTTP

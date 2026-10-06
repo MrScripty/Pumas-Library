@@ -9,6 +9,7 @@ from email.parser import Parser
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -134,6 +135,12 @@ def install(artifacts: list[dict], wheels: Path, target: Path, output: Path) -> 
     requirements = output / "local-requirements.txt"
     requirements.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     report = output / "local-pip-report.json"
+    # --isolated excludes user settings, but still loads global/site config.
+    # Disable every config file in this child only; discard inherited pip options.
+    pip_environment = {
+        key: value for key, value in os.environ.items() if not key.upper().startswith("PIP_")
+    }
+    pip_environment["PIP_CONFIG_FILE"] = os.devnull
     completed = subprocess.run(
         [
             sys.executable,
@@ -158,6 +165,7 @@ def install(artifacts: list[dict], wheels: Path, target: Path, output: Path) -> 
             str(requirements),
         ],
         check=False,
+        env=pip_environment,
     )
     if completed.returncode:
         raise ValueError("Exact local wheel installation failed")

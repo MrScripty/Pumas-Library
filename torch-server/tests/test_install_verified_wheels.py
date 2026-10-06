@@ -5,7 +5,10 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -86,6 +89,121 @@ class LocalWheelTests(unittest.TestCase):
         self.assertTrue(
             all(item["download_info"]["url"].startswith("file:") for item in report["install"])
         )
+
+    def test_ambient_pip_configuration_cannot_add_requirements(self):
+        # Parse only: these URLs are never handed to pip's install execution.
+        parser = """
+import json, sys
+from unittest.mock import patch
+from pip._internal.commands import create_command
+from pip._internal.configuration import kinds
+files = {kinds.GLOBAL: [], kinds.USER: [], kinds.SITE: []}
+if sys.argv[1] != "env":
+    files[sys.argv[1]] = [sys.argv[2]]
+with patch("pip._internal.configuration.get_configuration_files", return_value=files):
+    options, arguments = create_command("install", isolated=True).parse_args(sys.argv[3:])
+print(json.dumps({"requirements": options.requirements, "arguments": arguments,
+                 "no_index": options.no_index, "no_deps": options.ignore_dependencies,
+                 "require_hashes": options.require_hashes,
+                 "find_links": options.find_links, "constraints": options.constraints}))
+"""
+        run = subprocess.run
+        artifacts = [make_wheel(self.wheels, "root-wheel")]
+        config = self.root / "hostile-pip.conf"
+        config.write_text(
+            "[install]\nrequirement = https://example.invalid/injected-requirements.txt\n"
+            "constraint = https://example.invalid/injected-constraints.txt\n"
+            "find-links = https://example.invalid/injected-wheels/\n"
+        )
+        original_config = config.read_bytes()
+        for kind in ("global", "site", "env"):
+            with self.subTest(kind=kind):
+                ambient = {
+                    "PIP_CONFIG_FILE": str(config) if kind == "env" else "",
+                    "PIP_REQUIREMENT": "https://example.invalid/environment-requirements.txt",
+                    "PIP_CONSTRAINT": "https://example.invalid/environment-constraints.txt",
+                    "PIP_FIND_LINKS": "https://example.invalid/environment-wheels/",
+                }
+                with patch.dict(os.environ, ambient):
+                    original_environment = dict(os.environ)
+
+                    def parsed_install(command, **kwargs):
+                        parse_command = [
+                            sys.executable,
+                            "-I",
+                            "-c",
+                            parser,
+                            kind,
+                            str(config),
+                            *command[6:],
+                        ]
+                        old = run(
+                            parse_command,
+                            env=original_environment,
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                        old_options = json.loads(old.stdout)
+                        # Negative control: --isolated alone retains the config injection.
+                        self.assertEqual(
+                            old_options["requirements"],
+                            [
+                                "https://example.invalid/injected-requirements.txt",
+                                str(self.output / "local-requirements.txt"),
+                            ],
+                        )
+                        result = run(
+                            parse_command,
+                            env=kwargs.get("env"),
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                        options = json.loads(result.stdout)
+                        self.assertEqual(
+                            options["requirements"], [str(self.output / "local-requirements.txt")]
+                        )
+                        self.assertEqual(options["arguments"], [])
+                        self.assertEqual(options["find_links"], [])
+                        self.assertEqual(options["constraints"], [])
+                        self.assertTrue(options["no_index"])
+                        self.assertTrue(options["no_deps"])
+                        self.assertTrue(options["require_hashes"])
+                        self.assertEqual(
+                            {
+                                key: value
+                                for key, value in kwargs["env"].items()
+                                if key.upper().startswith("PIP_")
+                            },
+                            {"PIP_CONFIG_FILE": os.devnull},
+                        )
+                        raise RuntimeError("parser-only stop")
+
+                    with patch.object(consumer.subprocess, "run", side_effect=parsed_install):
+                        with self.assertRaisesRegex(RuntimeError, "parser-only stop"):
+                            consumer.install(artifacts, self.wheels, self.target, self.output)
+                    self.assertEqual(dict(os.environ), original_environment)
+                    self.assertEqual(config.read_bytes(), original_config)
+
+    def test_actual_install_ignores_owned_local_hostile_requirements(self):
+        artifacts = [make_wheel(self.wheels, "root-wheel")]
+        hostile = self.root / "unselected-requirements.txt"
+        # Local missing input fails safely if consumed, without remote retrieval.
+        hostile.write_text("-r " + str(self.root / "missing-local-requirements.txt") + "\n")
+        config = self.root / "hostile-pip.conf"
+        config.write_text("[install]\nrequirement = " + str(hostile) + "\n")
+        before = config.read_bytes(), hostile.read_bytes()
+        with patch.dict(
+            os.environ, {"PIP_CONFIG_FILE": str(config), "PIP_REQUIREMENT": str(hostile)}
+        ):
+            original_environment = dict(os.environ)
+            manifest = consumer.install(artifacts, self.wheels, self.target, self.output)
+            self.assertEqual(dict(os.environ), original_environment)
+        self.assertEqual((config.read_bytes(), hostile.read_bytes()), before)
+        self.assertTrue(manifest["files"])
+        report = json.loads((self.output / "local-pip-report.json").read_text())
+        self.assertEqual([item["metadata"]["name"] for item in report["install"]], ["root-wheel"])
 
     def test_missing_required_closure_refuses_before_pip(self):
         self.refuse([make_wheel(self.wheels, "root-wheel", requires=["missing-wheel==1.0"])])

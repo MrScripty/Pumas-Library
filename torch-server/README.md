@@ -87,7 +87,9 @@ set through the application's shared acquisition owner before running pip.
 use `VersionInstaller::with_torch_acquisition`. Existing constructors keep their
 signatures, but this preview path requires the shared capability. The local
 helper installs only verified file URLs with hashes, no index, no dependency
-fetching, no source builds and an empty target. It validates dependency closure,
+fetching, no source builds and an empty target. Its child-only environment removes
+inherited `PIP_*` options and sets `PIP_CONFIG_FILE=os.devnull`, since `--isolated`
+alone still loads global/site configuration. Host settings remain untouched. It validates dependency closure,
 selected interpreter tags, the local pip report and installed RECORD files;
 publication rechecks selected members and provenance after the runtime probe.
 Original resolution/report/requirements remain separate from local installation

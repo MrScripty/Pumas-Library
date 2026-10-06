@@ -15,6 +15,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
 
+// Deliberately dormant until catalog adapter/selection/caller review is admitted.
+#[allow(
+    dead_code,
+    reason = "Q2 catalog owner is not adopted by automatic/preview callers"
+)]
+#[path = "torch_catalog_owner.rs"]
+mod torch_catalog_owner;
+
 const MAX_TORCH_ORPHAN_QUARANTINES: usize = 2;
 const MAX_TORCH_DOWNLOAD_SOURCE_BYTES: usize = 2048;
 const TORCH_DOWNLOAD_SPEED_STALE_AFTER: Duration = Duration::from_secs(2);
@@ -1175,6 +1183,10 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
         (
             "wheel_target.py",
             include_str!("../../../../../../torch-server/wheel_target.py"),
+        ),
+        (
+            "wheel_catalog_owner.py",
+            include_str!("../../../../../../torch-server/wheel_catalog_owner.py"),
         ),
         (
             "probe_runtime.py",

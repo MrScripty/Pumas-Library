@@ -1,5 +1,44 @@
 # Acquisition implementation write sets and coordination
 
+## Q2 catalog owner, finite observation slice — admitted 2026-10-06
+
+Parent accepts the e6b5b876 design and final executable repair 92e4389c.
+Start feat/torch-catalog-owner-92e4389c from exact
+92e4389c6720d8490785d646e2bc98833af95bb4, tree
+22073b89cd8f92d3ca774fc58ea17a94a379cfd0. Admit only this record,
+the owning plan, a separate torch-catalog-owner-2026-10-06 report/evidence,
+torch-server/{wheel_catalog_owner.py,tests/test_wheel_catalog_owner.py}, and
+rust/crates/pumas-app-manager/src/version_manager/installer/
+{torch.rs,torch_catalog_owner.rs,torch_catalog_owner_tests.rs}.
+The torch.rs change only embeds/declares the dormant owner and its tests.
+No installer.rs/native/importer/watcher/S3/manifest, dependencies, recipe,
+resolve_runtime.py, automatic or preview adoption changes.
+
+The first API supports caller-owned finite immutable complete Simple JSON
+project observations for existing selected-build PyTorch and PyPI sources,
+explicit original roots/constraints/direct identities and an owned selected
+target. Shared acquisition alone obtains compatible candidate bodies; the
+existing managed child and blocking custody inspect actual bytes. A private
+non-deserializable Complete result describes a catalog snapshot, never an
+installation or a reusable stale Using capability. No solver is invoked.
+Missing project/repository coverage, malformed observations, unknown size,
+source violation, dependency URLs (even inactive), overflow or deadline end
+the request with typed Incomplete/refusal, with no fallback.
+
+Engineering limits for this bounded admission: 32 projects, 64 observations,
+1 MiB each/8 MiB aggregate metadata, 4096 index rows, 128 admitted wheels,
+4096 dependency edges, 128 ZIP members/wheel, 8 MiB expanded/wheel,
+1 MiB METADATA/64 KiB WHEEL, 8 MiB aggregate actual METADATA,
+64 MiB aggregate expanded ZIP and expected/successful wheel bytes,
+10 MiB serialized request/2 MiB plan or evidence, 120 seconds total.
+One payload attempt, no redirects, no ambient proxy.
+These refusal bounds qualify inert fixtures only, not real provider volume.
+Live provider metadata collection, unknown-length transfers, offline solver,
+target projection/selection parity, catalog reuse/cold startup and coordinated
+caller adoption remain separate gates. Verify source/target/identity controls,
+actual shared receipt custody, the existing handoff regressions, 33 feature
+graphs before serialized offline locked Cargo and strict scoped checks.
+
 These are the admitted exact paths/closed path families. The actual source files selected for the current Q1 slice are listed in the execution ledger; remaining paths below are authorized Q1 boundaries, not claims that those implementations exist. Before a slice edits files, its integrator records the exact members and actual tests in its ledger. New authority/consumer boundaries trigger re-plan.
 
 ## Q2 supplied-approval null repair — 2026-10-06

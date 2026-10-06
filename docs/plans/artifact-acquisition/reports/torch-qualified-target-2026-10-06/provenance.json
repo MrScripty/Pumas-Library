@@ -1,0 +1,68 @@
+{
+  "branch": "feat/torch-qualified-target-bb330f2d",
+  "base": "bb330f2d5aed22d15f996c33fe326ce0fe6a5a1c",
+  "base_tree": "2087a39ae0784e2b7dd90c52b24396b9d029d129",
+  "tested_source": "84f1e62a7c705dbbb2cd97a8e36e913d8ca3d9d3",
+  "tested_source_tree": "049f6e815a2549aea811d383121dc9f5ab9f4b62",
+  "changed_files_sha256": {
+    "docs/contracts/wheel-target.md": "c9d6e8952de5bc7f97b0c1380379b9f33751e3d71a335bd38c8139c1cd27985f",
+    "docs/plans/artifact-acquisition/reports/write-sets.md": "2d46773ef0dc0cb5202364029f09ae5c580759ccdd484ff8075a1ea73b09d63e",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": "37085d499a0b29354cbf8538b86c1f1c28deea70f3ed1e354bdb134dbb506c25",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_wheel_handoff_tests.rs": "fa9bfcd81cda2b2d42ca05d3bf077454be8306468984561ea89a59655510f5fc",
+    "torch-server/qualified_wheel_catalog.py": "c92fae33e8906b20e0caf89ba51261249fa65f1259d4204f90259bdf41670843",
+    "torch-server/tests/test_qualified_wheel_catalog.py": "fabb4bb09c28711a1a17dada7e10820104b6afb43e691b58fdc80333ba4cff9a",
+    "torch-server/tests/test_target_observation.py": "418ea628942cc9bf5fc3b4a0ee7ea570f3c8b6b35fd7b93890117ff7c9c28339",
+    "torch-server/wheel_target.py": "a381edb267f13316a582c3ee4d40450554004d1dc7c2788d4408ed101ebe94b1"
+  },
+  "retained_files_sha256": {
+    "rust/crates/pumas-app-manager/src/version_manager/installer.rs": "4c2ed18d55f8465100e7f29481ee6d9c7f038e397a119d853aa4f5c62e56324a",
+    "torch-server/install_verified_wheels.py": "5d1a14549acff11f08ba19ff2226f9b480852e16fb48745ace3c2cc1fadadbc3",
+    "torch-server/resolve_runtime.py": "eda80c72173711a1c20168760750f8e2f0b246db8acf2375712fbeb0d1c1a6ee",
+    "torch-server/wheel_records.py": "f955958b637016b2760ff8a72e21d2e8b794f5e34d45a6eba54fa99c8238db50",
+    "torch-server/runtime/requirements.lock": "05c4ba8556998179cac8db5798177500e1154caca3d9164e00455240dab4a07e",
+    "torch-server/runtime/runtime.json": "9a158a4d82a859400df7dcccb54aa021c5456f420e0e608a9f060a802d2d9f9c",
+    "torch-server/tooling/packaging.zip": "3453711fd71407b7d84253d5b498e7c0430fff187e3fb73dbd6f463b924014b2",
+    "rust/Cargo.lock": "7ebce70162112913f675c270b1e6be748d7ef607280b6e84cfe667e38f1763ec",
+    "rust/crates/pumas-core/src/acquisition/s3.rs": "4e30e93fe73772cf03628f93dda26299645da6d4736d6b6b3c3dd54bc7a06bab",
+    "rust/crates/pumas-core/src/acquisition/s3/manifest.rs": "1fde4b9fc26428fb53fe054370e01eee7da9a6038ad2ea1a1147903d9e5368f5",
+    "rust/crates/pumas-core/src/model_library/importer.rs": "f11ff3d975871a8a1239c773964084dec394bccbb3c1f178091270bcf4c2e5ae"
+  },
+  "logs_sha256": {
+    "python-final.log": "4d4f426c5a6b5b4c05e064d9a31649d6273366ee4d5f6024ca1c0ecea5ff3a91",
+    "handoff.log": "463ee1cc7cb20feb926196f01d4037542d1c1191fad0bc43b242d2b7ba20058d",
+    "feature-graphs.log": "173ed427a61ed780b4583f312ae27454b3b191dcaa5af80f51ff123e23a97b60",
+    "clippy.log": "524c42de79e604a81fea3d26aa1ba2c316c10a9294a192c78e68aab505e8134c",
+    "ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "rustfmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "syntax.log": "96e428636c4a42f0aa1674b9f887f80f2d4285b8a440c291991e8f785e3b7edc",
+    "diff-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "frozen-refs.log": "64225e62dd22d39a8f65619f20b125ea991e8d21c4d1f1d22abb5afa96dc6442",
+    "environment.json": "9b5027fe4f37ad640a897896a2a1b6f18c7e2a26253e141d33e2c4b05dd2e98d",
+    "push-source.log": "aa7a3622a4e4bfa103083e206015520a572a1add2926d4953ab40bcd415ca1a6",
+    "handoff-initial-compile.log": "39ecb084f65e2517b5eda9896e52ee73c7d2e3d1a504ce98d49c2948488e59d1",
+    "handoff-fixture-inline-lock.log": "c38eaec13419e10b45e9486a8fd09bf02bbea0a37bd20486c123511387c291ec",
+    "ruff-priority-fixture.log": "105fc7786e132b6ae5e3df84f57d0d7dc1f7e9a8c0e9af7b7874fe88702e90e2"
+  },
+  "results": {
+    "python": 61,
+    "rust_handoff": 30,
+    "feature_graphs": 33,
+    "clippy": "pass -D warnings",
+    "ruff": "pass",
+    "rustfmt": "pass",
+    "syntax": 4,
+    "diff_check": "pass"
+  },
+  "commands": {
+    "feature_graphs": "source /workspace/.pumas-tools/env.sh; flock /tmp/pumas-cargo-admission/cargo.lock python scripts/release/check-dependency-features.py --s3",
+    "python": "PYTHONPATH=/tmp/pumas-q2-test-packages:torch-server/tests python3 -m unittest test_wheel_target test_target_observation test_install_verified_wheels test_qualified_wheel_catalog -v",
+    "cargo_prefix": "source /workspace/.pumas-tools/env.sh; CARGO_BUILD_JOBS=1 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=/tmp/pumas-uv-offline-build/target flock /tmp/pumas-cargo-admission/cargo.lock",
+    "handoff": "cargo test --offline --locked --manifest-path rust/Cargo.toml -p pumas-app-manager --features test-support torch_wheel_handoff_tests -- --test-threads=1",
+    "clippy": "cargo clippy --offline --locked --manifest-path rust/Cargo.toml -p pumas-app-manager --features test-support --tests -- -D warnings",
+    "ruff": "PYTHONPATH=/tmp/pumas-q2-test-packages python3 -m ruff check torch-server/wheel_target.py torch-server/qualified_wheel_catalog.py torch-server/tests/test_target_observation.py torch-server/tests/test_qualified_wheel_catalog.py",
+    "rustfmt": "rustfmt --edition 2021 --check rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs rust/crates/pumas-app-manager/src/version_manager/installer/torch_wheel_handoff_tests.rs",
+    "syntax": "ast.parse of the four changed Python source files",
+    "push": "git push --set-upstream origin feat/torch-qualified-target-bb330f2d"
+  },
+  "limits": "Controlled metadata and tiny-wheel publication qualify producer/context/handoff boundaries, not full 66-package recipe/provider/native execution, enforced OS network denial, catalog completeness, resolver adoption or AQ/P1 acceptance."
+}

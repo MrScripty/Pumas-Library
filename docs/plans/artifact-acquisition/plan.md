@@ -1,5 +1,23 @@
 # Plan: source-neutral artifact acquisition
 
+**Q2 qualified observation producer (2026-10-06):** Frozen `bb330f2d` remains
+intact. Source `84f1e62a` (61 Python controls, 30 Rust handoff tests, 33 feature
+graph checks and strict scoped checks passing) adds an existing qualified
+finite-recipe caller that owns and retains the actual
+selected venv's observation under existing stage/child custody. Its bounded
+catalog validates that context before metadata access and binds both target
+fields; the accepted handoff fences original produced bytes and selected
+executable identity before acquisition/local consumption and provenance after
+probe. Provider identity and original finite recipe/preview/source authority
+remain separate and unchanged. Controlled tiny-wheel producer→catalog→shared
+consumer evidence and exact source are in
+[qualification](reports/torch-qualified-target-2026-10-06.md).
+Automatic/retained unqualified preview resolution and frozen candidates remain
+unchanged. No upstream catalog-completeness, real provider/backend/platform or
+P1/AQ acceptance is claimed. Next Q2 work remains the approved upstream catalog
+universe and its complete bounded enumeration/byte/time policy, plus separately
+admitted automatic/preview adoption and real-provider/installed qualification.
+
 **Q2 supplied-null approval repair (2026-10-06):** Frozen `64d62cdc` remains intact.
 Source `c35a2801` confirms and closes the CLI downgrade where supplied JSON null
 and absent resolution binding fields selected legacy consumption. Supplied

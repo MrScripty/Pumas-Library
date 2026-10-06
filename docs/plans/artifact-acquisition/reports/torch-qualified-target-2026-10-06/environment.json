@@ -1,0 +1,19 @@
+{
+  "execution": "same selected executor; no saved seed",
+  "platform": "Linux x86_64",
+  "python": "3.12.14",
+  "rust": "1.92.0",
+  "cargo": "1.92.0",
+  "ruff": "0.15.2",
+  "build": {
+    "offline": true,
+    "locked": true,
+    "jobs": 1,
+    "incremental": false,
+    "debug": 0,
+    "cargo_admission": "/tmp/pumas-cargo-admission/cargo.lock",
+    "target": "/tmp/pumas-uv-offline-build/target"
+  },
+  "fixtures": "inert tiny wheels; owned venv; controlled allowed-source metadata; anonymous loopback shared payload; no provider/model/backend execution",
+  "repository_instructions": "No applicable filesystem AGENTS.md or .agents/skills found; .agents and .codex are empty in selected executor"
+}

@@ -1,6 +1,6 @@
 # Parent draft PR packet: bounded S3 prefix enumeration
 
-Status: saved source checkpoint; final qualification pending. Parent must
+Status: locally qualified source checkpoint; hosted/provider/platform gates open. Parent must
 coordinate before any PR mutation. No external reviewer has been contacted.
 
 Suggested title: Add bounded explicit S3 prefix enumeration
@@ -47,7 +47,8 @@ The final shared test-fixture cleanup passes strict core Clippy with
 `--all-targets -- -D warnings` and the 28-test focused unit rerun.
 Production RPC compilation and 302 RPC tests passed before prefix implementation;
 post-prefix production RPC Clippy passes with the inherited dead-code
-allowance; post-prefix RPC tests remain pending. Hosted CI, actual provider acceptance,
+allowance; post-prefix exact default-plus-S3 RPC suite now passes 324 tests with
+12 existing ignores (302 unit, 20 integration, 2 intent integration). Hosted CI, actual provider acceptance,
 platform/runtime/inference and desktop/accessibility are separate pending gates.
 No provider account credentials have been used or provisioned.
 
@@ -62,3 +63,13 @@ with zero filesystem headroom. Failure evidence is `prefix-rpc-final-tests.log`;
 no RPC result is claimed. Restore build-cache link headroom and rerun the exact
 command in the qualification report. The service limit was not observed; this
 checkpoint records the concrete filesystem blocker.
+
+
+Recovery is complete: owner-authorized retirement of four inactive reproducible
+integration-test executables freed 2.23 GB. The unchanged exact RPC command
+passed with 324 tests and 12 existing ignores in `prefix-rpc-recovery-tests.log`.
+The original failure log and cache-removal hashes are preserved. No source,
+assertion or production dependency changed. The earlier blocker entry is
+historical. The source comparison remains 7cf17383..253cc3d1; later commits only
+add qualification evidence. Parent can publish the draft after coordinating its
+base/head; hosted review/CI, MinIO/AWS/non-AWS and Q4 remain separate open gates.

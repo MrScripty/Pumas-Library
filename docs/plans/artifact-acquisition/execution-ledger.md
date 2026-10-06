@@ -1,5 +1,25 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — prefix RPC recovery and local qualification complete
+
+The owner explicitly authorized reproducible Rust cache deletion. With no active
+build jobs, four inactive integration ELF files were retired (2.23 GB), retaining
+source, dependency maps, evidence and all failure logs. Exact paths/hashes are
+in `retired-rpc-recovery-inactive-tests.json`; disk headroom rose to 2.3 GB.
+The unchanged locked/offline default-plus-S3 RPC command passes 302 units,
+20 integrations and two intent integrations; 12 existing ignores are unchanged.
+Result: `prefix-rpc-recovery-tests.log`. Strict core/production RPC Clippy and
+all prior prefix/release checks remain passed; no source or dependency changed.
+Source checkpoint remains 253cc3d1 on separate `feat/s3-prefix-main95`.
+The earlier linker/disk blocker is resolved and retained as failure evidence.
+
+Next existing-plan Q3/AQ-S3 gates require authorized AWS/non-AWS fixtures and
+an approved versioned HTTPS MinIO installation; none are supplied. Docker has
+no image and MinIO is absent. Q4 still requires supported desktop/browser and
+platform/runtime/model/shipping artifacts. Chromium helper ownership remains
+unsupported; no bypass/reconfiguration or runtime download occurred. Parent
+owns PRs, reviews, hosted acceptance and integration; no PR was mutated.
+
 ## 2026-10-06 — bounded prefix source checkpoint
 
 Separate `feat/s3-prefix-main95` implements bounded complete ListObjectsV2

@@ -208,3 +208,58 @@ observed service-limit rejection. Resume by providing sufficient recomputable
 build-cache headroom, then rerun the exact RPC test command above. Preserve the
 existing failure log under a new filename before the rerun. Actual service-limit
 exhaustion has not been observed. Draft PR publication remains parent-owned.
+
+
+## Recovery completed: actual default-plus-S3 RPC qualification
+
+The owner explicitly authorized deletion of reproducible Rust build artifacts.
+An actual process check found no active Cargo/rustc/Clippy/linker job. Disk
+inspection attributed 29 GB to debug dependencies, 2.2 GB to examples and
+762 MB to incremental caches. Cleanup removed exactly four inactive integration
+ELF executables (2,228,060,536 bytes), retaining their dependency maps and all
+source, logs, evidence, uncommitted content and current qualification outputs.
+`retired-rpc-recovery-inactive-tests.json` records exact paths, sizes and hashes.
+Available space rose from 196 MB to 2.3 GB and remained about 2.1 GB after the run.
+
+The original `prefix-rpc-final-tests.log` is unchanged. The exact unchanged
+command above completed with exit zero in `prefix-rpc-recovery-tests.log`:
+
+| RPC target | Passed | Existing ignored | Evidence scope |
+| --- | ---: | ---: | --- |
+| Unit binary | 302 | 0 | Actual default-plus-S3 RPC suite |
+| Integration binary | 20 | 10 | Producer/process/transport/retained-state fixtures |
+| Intent integration binary | 2 | 2 | Shared owner/restart; live HF/CDN cases remain ignored |
+
+Total: 324 passed, 12 existing ignored; no assertions were weakened or tests
+changed. Settings remained one job, dev/test debug level zero and incremental
+off, with the same shared target and isolated XDG configuration used before
+recovery. Cargo remained locked/offline. Production dependencies and ONNX
+configuration are unchanged; no runtime was downloaded or provisioned.
+Final strict core Clippy, production RPC Clippy with the inherited dead-code
+allowance, 28 S3 units, 66 S3 integrations, 19 Node release tests, 33 dependency
+graphs, ownership, formatting and both notice profiles remain qualified.
+No source change followed source checkpoint 253cc3d1. Local RPC qualification
+is now complete; the earlier failure and pending-state paragraphs are historical
+evidence, not current blockers. Parent still owns PR publication/review/merges.
+
+## Next existing-plan gates and concrete inputs
+
+Q3/AQ-S3 still requires native AWS, a named independent S3-compatible provider
+and local MinIO acceptance. Current harmless checks find no MinIO executable
+and no Docker image. The earlier official MinIO installation denial remains
+preserved; it was not retried through an alternate route. An approved versioned
+MinIO installation with HTTPS and an owned synthetic versioned fixture would
+permit that local gate without real account credentials. AWS/non-AWS endpoints,
+versioned fixture identities/digests and separately authorized scoped access
+are not supplied; this task must not obtain/provision real credentials.
+
+Q4 remains installed/native/UI/platform and inference qualification, not this
+local suite. The current Chromium helper is `nobody:nogroup`, mode 4755; its
+supported owner requirement remains unmet. No sandbox flag, ownership/security
+change or network bypass was used. A supported desktop/browser environment,
+exact shipping candidate packages, supported Windows/macOS hosts and separately
+supplied runtime/model/deployment facts are still needed. The prior Linux
+installed fixture archive does not certify this new source head or inference.
+Next useful work needs those external fixtures/artifacts or parent-coordinated
+hosted acceptance; these gates cannot be honestly closed with synthetic reader
+fixtures. No additional feature or acceptance claim was invented.

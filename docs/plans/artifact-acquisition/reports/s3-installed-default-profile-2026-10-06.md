@@ -1,76 +1,132 @@
-# Installed default-plus-S3 qualification successor
+# Installed default-plus-S3 qualification — frozen local milestone
 
-Separate `feat/s3-installed-prefix-main95` starts from reviewed repair checkpoint
-`0901f6591249ccf955c10f29666e6380e898d201`, tree
-`422a71f51ab8403ac2f24ff1fc90b25d2a3b71e1`, preserving prefix capacity repair
-ce8a71a1, Python formatting 6f260de6 and all integrated 7cf17383 ancestors.
-The old installed archive and provider/platform evidence remain untouched.
+The actual Linux x86_64 production backend passes all ten owned installed HTTPS
+scenarios and the default-profile health smoke. This supports bounded AC17/Q4
+backend evidence. AQ-S3, AQ-COMPLETE and full Q4 remain not ready.
 
-## Bounded Q4 admission
+## Exact source and artifact identity
 
-The existing installed harness incorrectly attributed any supplied binary to
-checkout HEAD, hardcoded a headless profile and packaged default plus historical
-reader notices. This successor admits only the existing installed harness,
-one build-provenance helper and its focused tests, the existing Linux release
-contract test hook, and owning qualification/plan/ledger documentation. No Rust,
-dependency, runtime acquisition, native owner or public S3 API change is admitted.
+- Branch: `feat/s3-installed-prefix-main95`, committed and nonforce pushed.
+- Base: `0901f6591249ccf955c10f29666e6380e898d201`, tree
+  `422a71f51ab8403ac2f24ff1fc90b25d2a3b71e1`.
+- Initial production source: `4f5a2a7415193873e81e3737e1a41cfe3b5c18f3`, tree
+  `12bf1bd1bb465dde4604a91f8dd3d8dd85ba0634`; build duration 19m25s.
+- Final qualification source: `b0a66ba36773c2e4f73e5d1d982759d2f827eea0`, tree
+  `5250f10681e62e6f66c478f946b4e149ba10bebd`.
+- Binary SHA-256:
+  `69df92ec6ece85cfc257e841cfd33f76d624e57a634fa7a319e8bd7a7e00ef57`.
+- Final installed archive SHA-256:
+  `fdc13ae46eb6993368200dfeec30dbc65a5a9e32dc7cb2f9957c77ff99fd31bb`.
 
-The helper owns the fixed locked/offline release default-plus-S3 Cargo command.
-It requires clean committed source before/after, native Linux x86_64, unchanged
-checked-in release settings and no active Cargo config or Rust/profile override.
-Actual compiler-artifact events must report the exact RPC/core production
-features, release optimization and no test-support. Target is established from
-the actual Rust host/allowed build target, never an opaque fingerprint hash.
-The existing feature checker retains the dynamic ONNX/no-build-download and
-single-SDK graph contract. Builder diagnostics are streamed to external evidence
-files even if the session ends; provenance is emitted only on successful checks.
+Final source changes only the fixture oracle and its control/documentation after
+the initial production build. The builder reran its fixed command against that
+clean source (0.25s cached build), observed the same production artifacts and
+emitted a new source-bound record. Subsequent qualification documentation changes
+no Rust, harness or builder bytes. Complete build records, installed result and
+external evidence hashes are committed in
+[machine-readable evidence](s3-installed-default-profile-evidence-2026-10-06.json).
 
-The installed harness requires that unsigned local provenance and an explicit
-expected source head. It rechecks source/tree, binary SHA, production profile,
-actual feature observations and complete authoritative S3 notice bindings before
-launch. It packages the unchanged binary, project license, full 415-entry S3
-notices, attribution README/inventory and qualification metadata. Exact member
-sets and hashes are rechecked after extraction. This is local build evidence,
-not a signed attestation or proof that arbitrary caller-authored JSON is genuine.
-No model fixture, credential or runtime state is packaged.
+## Admitted scope and public behavior
 
-Fifteen synthetic controls passed at 4f5a2a74, including wrong source/binary/profile/features,
-changed/dirty source, active config/flags, failed build diagnostic retention,
-stale/omitted/default notices and missing/replaced/extra installed members.
-Pinned Ruff0.15.2 full CI Python scope lint/format checks now pass (56 files), including
-the existing installed harness whose earlier baseline formatting failure is
-resolved by formatting this functionally changed file. Full workflow YAML parses;
-the new Python controls are in the existing Linux release-contract gate. Hosted
-CI and production build/installed scenarios are pending at this source milestone.
+The historical installed harness attributed arbitrary supplied binaries to
+checkout HEAD, hardcoded a headless profile and selected default plus old reader
+notices. The admitted successor changes only the existing harness, one provenance
+helper and focused controls, the existing Linux release-contract test hook, and
+owning qualification/plan/ledger documentation. Rust, dependencies, native owners,
+ONNX behavior, S3 public APIs and acquisition policies are unchanged.
 
-## Planned execution and limits
+The new `scripts/release/s3_build_provenance.py --output <external-record>` owns
+the fixed locked/offline release command with defaults and explicit `s3`. It
+requires clean committed source before/after, native Linux x86_64, unchanged
+release settings and no active Cargo config or Rust/profile override. Actual
+Cargo compiler-artifact events must report RPC features
+`default,inference-plugins,s3`, core features
+`gpu-monitor,hf-client,onnx-runtime,process-manager,s3`, release optimization and
+no `test-support`. Target comes from the actual Rust host/build target, never an
+opaque fingerprint hash. Existing 33-graph checks retain dynamic ONNX and
+single-SDK contracts. No ONNX runtime is obtained.
 
-Build with `scripts/release/s3_build_provenance.py --output <external-record>`
-after committing the source milestone. Then run the existing ten owned HTTPS
-synthetic credential scenarios with `qualify-s3-installed.py --binary <reported>
---provenance <record> --source-head <exact-built-head> --output <fresh-directory>`.
-Production release LTO/codegen/strip settings remain unchanged. No ONNX runtime
-is obtained or inference executed. AWS/non-AWS/MinIO, installed desktop/browser,
-Windows/macOS and live runtime/model/client/deployment gates remain open.
-Parent owns PR publication, review and integration; none is performed here.
+The installed harness now requires `--provenance <record>` and
+`--source-head <exact-built-head>` in addition to `--binary` and `--output`.
+Before execution it rechecks source/tree, binary SHA, production profile, actual
+feature observations and authoritative full S3 notice bindings. The allowlist
+contains the unchanged binary, project license, full 415-entry S3 notice text,
+attribution README/inventory and qualification JSON. Copied bytes must match the
+build bindings; exact member sets and hashes are rechecked after extraction.
+No model fixture, credentials or runtime state enter the archive. Records are
+unsigned local evidence, without a claim of caller-authored JSON authenticity.
 
-## Installed oracle correction before qualification
+## Actual execution and fixture repair
 
-The first actual release build passed at 4f5a2a7415193873e81e3737e1a41cfe3b5c18f3
-(tree 12bf1bd1bb465dde4604a91f8dd3d8dd85ba0634), binary SHA-256
-69df92ec6ece85cfc257e841cfd33f76d624e57a634fa7a319e8bd7a7e00ef57.
-The installed harness then refused the first authenticated success case: its
-historical HMAC oracle hashed query parameters in wire order. The maintained SDK
-and existing Rust fixture independently canonicalize encoded query pairs in
-sorted order as SigV4 requires. An external diagnostic using sorted pairs passes
-all ten unchanged scenarios; this is diagnostic evidence, not final qualification.
+The first actual run passed anonymous single/bundle cases, then the old fixture
+HMAC oracle refused authenticated signing. It hashed query pairs in wire order.
+SigV4 and the existing independently checked Rust fixture sort encoded pairs;
+the current SDK can emit them in a different order. The narrow correction sorts
+the fixture's already encoded pairs without relaxing method/path/query, signed
+header, token, pin or wrong-secret checks. A fixed synthetic HMAC vector fails
+on the old reversed-order URI and passes repaired; wrong secret, token and
+VersionId still fail. An external diagnostic first passed all ten scenarios;
+final qualification reran the committed correction with fresh provenance.
+Original failure/archive, red control and diagnostics remain retained.
 
-A fixed synthetic HMAC vector reproduces the old failure for reversed query
-order and passes after the narrow fixture correction. Wrong secret, token and
-VersionId remain refused. All 16 provenance/oracle controls and the existing
-full CI Ruff scope (torch-server plus scripts/release, 56 files) pass. The earlier
-failed archive, red control and diagnostic logs are retained externally. An extra
-whole-repository lint invocation encountered an unchanged unused sys import in
-scripts/acceptance/flux2_v214_rpc_acceptance.py; that file is outside the CI scope
-and this write set. No source/dependency/runtime policy changed. Final installed
-qualification requires a fresh clean-head builder record after this correction.
+Final installed results at b0a66ba3:
+
+| Scenario | Result |
+| --- | --- |
+| Anonymous single object and bundle | Both passed |
+| Explicit access/secret without and with session token | Both passed |
+| Wrong digest, missing object and unknown length | All retained failure custody; no publication |
+| Truncated body | Passed existing bounded range resumption and failure behavior |
+| Cancellation during held body | Passed source closure, retained custody and drained exit |
+| Empty primary | Passed refusal and expected drain failure; no publication |
+
+All signatures are independently recomputed by the fixture, including a negative
+wrong-secret oracle. Synthetic ambient credentials remain unselected. Successful
+receipts retain exact demand, key/VersionId pins, verified digests and empty
+auxiliary identity. Cold owners find indexed models without transfer replay or
+receipt replacement. Invalid reserved paths perform no source I/O. The harness
+scans RPC output, bounded backend diagnostics and all disposable-root files for
+synthetic credentials. Every owned child/listener drains. A separate integrity
+check also scans all retained evidence and uncompressed archive members.
+
+Default-profile `/health` smoke passes with `inference_disabled=false`. This
+confirms backend startup/routes/drain; no inference executes and no runtime or
+real model asset is obtained.
+
+## Checks and preserved evidence
+
+All 16 provenance/oracle controls pass. Pinned Ruff0.15.2 lint and format pass for
+the entire existing CI Python scope (`torch-server scripts/release`, 56 files).
+Workflow YAML parses and the controls are wired into its existing Linux contract
+gate. S3 attribution validates 415 entries; the builder runs the existing 33
+default/headless/S3 feature graphs. `git diff --check` passes and the Q4 comparison
+has no Rust changes. An extra whole-repository lint invocation found an unchanged
+unused `sys` import in `scripts/acceptance/flux2_v214_rpc_acceptance.py`, outside
+the CI scope and admitted write set; its failure log is preserved.
+
+External evidence root: `/workspace/scratch/s3-installed-default-profile/`.
+Primary files: `production-build-query-fixed.json`, its `.cargo.jsonl` and
+`.cargo.stderr.log`, `installed-final.log`, `installed-final/installed-result.json`,
+`installed-final/pumas-s3-qualification-linux.tar.gz`,
+`default-profile-smoke.log`, `query-oracle-red.log`, `query-oracle-green.log`
+and `query-oracle-ruff-ci-{lint,format}.log`. Initial build/failure and diagnostic
+artifacts remain alongside final evidence. The checked-in JSON records hashes.
+
+## Remaining gates and next existing-plan slice
+
+Actual AWS/non-AWS/MinIO acceptance, supported desktop/browser, Windows/macOS,
+native/runtime/model workflows, independent clients and old-writer deployment
+facts remain unqualified. Provider fixtures/authorization and supported hosts
+are not supplied. No real account credential is obtained, sent or provisioned;
+no network/security bypass or paid service is used. Parent owns PR publication,
+external review, hosted CI and integration; none is performed here.
+
+The next feasible existing AC05/AC17 slice is one installed Linux S3 process-loss
+boundary before `FilesReady`: hold a synthetic authenticated HTTPS transfer after
+one byte, observe exact durable selection and partial custody, SIGKILL/reap the
+owned backend, then reopen without source replay or model/receipt publication.
+Cold task observations are ephemeral; the oracle must inspect canonical custody,
+not infer completion from a lost task status or saved counter. Read-only design
+is `/workspace/scratch/s3-installed-process-loss-design/DESIGN.md`; execution and
+a separate admitted write set remain future work. This would not establish
+power-loss durability, actual-provider acceptance or full Q4.

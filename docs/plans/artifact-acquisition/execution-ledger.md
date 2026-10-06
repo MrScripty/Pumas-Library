@@ -1,5 +1,25 @@
 # Acquisition execution ledger
 
+## 2026-10-06 — installed production default-plus-S3 milestone frozen
+
+The actual unchanged release settings build completed in 19m25s at 4f5a2a74.
+The first installed run exposed the old fixture HMAC oracle's wire-order query
+assumption. A fixed-vector red control and narrow SigV4 query-sort repair at
+b0a66ba36773c2e4f73e5d1d982759d2f827eea0 (tree
+5250f10681e62e6f66c478f946b4e149ba10bebd) pass all 16 controls. A fresh clean-head
+builder record observes the same actual default-plus-S3 production binary,
+SHA-256 69df92ec6ece85cfc257e841cfd33f76d624e57a634fa7a319e8bd7a7e00ef57.
+All ten unchanged HTTPS installed scenarios and default-profile health smoke
+pass. Full CI Ruff scope passes, complete 415-entry S3 notices are bound through
+extraction, and failures/diagnostics are retained. No Rust, native, dependency or
+ONNX source changed; no runtime or real credentials were obtained. This is one
+Linux backend fixture scope, not provider/platform/inference/full Q4 acceptance.
+See [frozen report](reports/s3-installed-default-profile-2026-10-06.md) and
+[hashed evidence](reports/s3-installed-default-profile-evidence-2026-10-06.json).
+Parent owns review/publication/integration. Next feasible existing-plan work is
+installed pre-FilesReady process loss and cold-custody qualification; read-only
+design exists, execution is future work.
+
 ## 2026-10-06 — independent installed default-plus-S3 Q4 successor admitted
 
 Separate `feat/s3-installed-prefix-main95` preserves prefix repair 0901f659.

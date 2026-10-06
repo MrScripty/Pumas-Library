@@ -2,11 +2,15 @@
 
 **Q4 installed default-plus-S3 successor (2026-10-06):** Independently admitted
 `feat/s3-installed-prefix-main95` binds build provenance and complete S3 notices
-to the existing installed HTTPS fixture harness. Fourteen negative/positive
-controls, full Ruff and YAML parse pass; actual release/installed execution is
-pending. See [scope and qualification](reports/s3-installed-default-profile-2026-10-06.md).
+to the existing installed HTTPS fixture harness. Actual production release,
+all ten installed scenarios and default-profile health smoke pass at b0a66ba3.
+All 16 provenance/oracle controls, full CI Ruff scope and YAML parse pass.
+The original query-order fixture failure and its red/green repair are retained.
+See [frozen qualification](reports/s3-installed-default-profile-2026-10-06.md).
 The current prefix branch and all frozen evidence remain separate. Provider,
 UI/platform/inference and hosted acceptance gates remain open.
+The next feasible existing AC05/AC17 slice is installed S3 pre-FilesReady process
+loss and exact cold-custody qualification; it remains separate future work.
 
 
 **Q3 prefix byte-capacity review repair (2026-10-06):** The maintained SDK now

@@ -1,0 +1,134 @@
+{
+  "prior_evidence_commit": "d5317a2e218b79b102b1a55db5b9053724be7e43",
+  "prior_evidence_tree": "138111c43300d6a68170c06efe6d7d81708d97f9",
+  "approved_reconciliation_commit": "9310c1d6a0dbbef6e602a2a9c464643e21f2d341",
+  "approved_reconciliation_tree": "93c3ac702f5f17694f0062b94df2216430a7bfda",
+  "uv_version": "uv 0.12.23 (x86_64-unknown-linux-gnu)",
+  "uv_sha256": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f",
+  "interpreter": "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+  "interpreter_sha256": "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7",
+  "python_version": "3.12.14",
+  "native_libc": {
+    "family": "glibc",
+    "version": "2.41"
+  },
+  "wheel_bindings": [
+    {
+      "filename": "native_child-1.0-py3-none-any.whl",
+      "size": 896,
+      "sha256": "4582881fb26560be4400aafd13265aef96727a59dfc667aa795738f5c8df1e5d",
+      "prior_relative_path": "wheels/native_child-1.0-py3-none-any.whl"
+    },
+    {
+      "filename": "native_floor40-1.0-cp312-cp312-manylinux_2_40_x86_64.whl",
+      "size": 938,
+      "sha256": "a8ccbdec4aaa9880ef6f69ad7849db8ab1ddd72f7106d65781f9938a5ce4eca8",
+      "prior_relative_path": "wheels/native_floor40-1.0-cp312-cp312-manylinux_2_40_x86_64.whl"
+    },
+    {
+      "filename": "native_floor41-1.0-cp312-cp312-manylinux_2_41_x86_64.whl",
+      "size": 1058,
+      "sha256": "31e21a69306b7be8eed5476dfce2cfdc7685b2781563d844fbf4c867c4dab1fa",
+      "prior_relative_path": "wheels/native_floor41-1.0-cp312-cp312-manylinux_2_41_x86_64.whl"
+    },
+    {
+      "filename": "native_floor42-1.0-cp312-cp312-manylinux_2_42_x86_64.whl",
+      "size": 939,
+      "sha256": "128089535efd43273daae72263e6c60846c4436432417a890e63375da2a00772",
+      "prior_relative_path": "wheels/native_floor42-1.0-cp312-cp312-manylinux_2_42_x86_64.whl"
+    },
+    {
+      "filename": "native_linux-1.0-cp312-cp312-linux_x86_64.whl",
+      "size": 909,
+      "sha256": "21ba538fbe3bf23324c418e579a9d7586e2468523759fb4a12bc4e18b2502522",
+      "prior_relative_path": "wheels/native_linux-1.0-cp312-cp312-linux_x86_64.whl"
+    },
+    {
+      "filename": "native_patch-1.0-py3-none-any.whl",
+      "size": 898,
+      "sha256": "78d5835dd650146939efed4037b3af7834d44cede731c18dfcb59def952fe2cc",
+      "prior_relative_path": "wheels/native_patch-1.0-py3-none-any.whl"
+    },
+    {
+      "filename": "native_wrongabi-1.0-cp313-cp313-manylinux_2_41_x86_64.whl",
+      "size": 948,
+      "sha256": "c7b918b1290a9a6fdbd97e92b5f71991bc1e705b0ffa7e0e29dc9fe59223ac0d",
+      "prior_relative_path": "wheels/native_wrongabi-1.0-cp313-cp313-manylinux_2_41_x86_64.whl"
+    }
+  ],
+  "cases": [
+    {
+      "case": "direct-native-higher-floor-refusal",
+      "prior_case_identifier": "native-floor42-refusal",
+      "prior_mode": "Interpreter platform with --python-version3.12.14; reconstructed cross-target tags.",
+      "mode": "Exact interpreter, neither target override; direct interpreter.tags() and native markers.",
+      "exit_code": 1,
+      "packages": [],
+      "selected_wheels": [],
+      "ip_socket_calls_observed": 0,
+      "observation_before_after_matches_original": true,
+      "argv_sha256": "187a674b4af9a47140471acac8a17d1d028136b69d35af6af229132991a48d05",
+      "roots_sha256": "c102b19ad43cd879734b75f0fca3234491e05875334e8385708b049de060bdb6",
+      "prior_invocation_sha256": "fcd659d5ad98fcc6dfb7f99d3e7546701755516666f9806dcea98c1305fc6719"
+    },
+    {
+      "case": "direct-native-python-abi-refusal",
+      "prior_case_identifier": "native-wrongabi-refusal",
+      "prior_mode": "Interpreter platform with --python-version3.12.14; reconstructed cross-target tags.",
+      "mode": "Exact interpreter, neither target override; direct interpreter.tags() and native markers.",
+      "exit_code": 1,
+      "packages": [],
+      "selected_wheels": [],
+      "ip_socket_calls_observed": 0,
+      "observation_before_after_matches_original": true,
+      "argv_sha256": "187a674b4af9a47140471acac8a17d1d028136b69d35af6af229132991a48d05",
+      "roots_sha256": "26a75ba72312b97e6b28e3e792566565666df0812bf2b0566498e1170a50c4af",
+      "prior_invocation_sha256": "d8c1a482c09a2d7cba67701a2f3b6e0a739d0195d7d67755e77756930bdd4012"
+    },
+    {
+      "case": "direct-native-lower-floor",
+      "prior_case_identifier": "native-floor40",
+      "prior_mode": "Interpreter platform with --python-version3.12.14; reconstructed cross-target tags.",
+      "mode": "Exact interpreter, neither target override; direct interpreter.tags() and native markers.",
+      "exit_code": 0,
+      "packages": [
+        "native-floor40"
+      ],
+      "selected_wheels": [
+        {
+          "name": "native-floor40",
+          "filename": "native_floor40-1.0-cp312-cp312-manylinux_2_40_x86_64.whl",
+          "sha256": "a8ccbdec4aaa9880ef6f69ad7849db8ab1ddd72f7106d65781f9938a5ce4eca8"
+        }
+      ],
+      "ip_socket_calls_observed": 0,
+      "observation_before_after_matches_original": true,
+      "argv_sha256": "187a674b4af9a47140471acac8a17d1d028136b69d35af6af229132991a48d05",
+      "roots_sha256": "0c22474881e38af476dca8eef721add467eac8ac44d0fb2475d7020796050f46",
+      "prior_invocation_sha256": "3b547ca22b9238afc16499da95dd56baa32c9846bb79c4bdb9f126e021e5da98"
+    },
+    {
+      "case": "direct-native-linux-tag",
+      "prior_case_identifier": "native-linux-tag",
+      "prior_mode": "Interpreter platform with --python-version3.12.14; reconstructed cross-target tags.",
+      "mode": "Exact interpreter, neither target override; direct interpreter.tags() and native markers.",
+      "exit_code": 0,
+      "packages": [
+        "native-linux"
+      ],
+      "selected_wheels": [
+        {
+          "name": "native-linux",
+          "filename": "native_linux-1.0-cp312-cp312-linux_x86_64.whl",
+          "sha256": "21ba538fbe3bf23324c418e579a9d7586e2468523759fb4a12bc4e18b2502522"
+        }
+      ],
+      "ip_socket_calls_observed": 0,
+      "observation_before_after_matches_original": true,
+      "argv_sha256": "187a674b4af9a47140471acac8a17d1d028136b69d35af6af229132991a48d05",
+      "roots_sha256": "a01c5367c2cdff9fef3c7d3c6edbe58d381d5347237d6f81b67d8e9a9614ea31",
+      "prior_invocation_sha256": "3b9fbf73a83a04d69a0151e5f679dfa781796f736a1b6825802129d6fe19181f"
+    }
+  ],
+  "scope": "Four public compile diagnostics only. Original evidence retained unchanged; existing no-overrides closure/missing-interpreter controls not repeated. No installation, runtime implementation, catalog capability, adoption, real-provider/native-binary acceptance or enforced network denial."
+}

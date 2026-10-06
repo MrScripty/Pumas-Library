@@ -1,0 +1,8 @@
+lock-version = "1.0"
+created-by = "uv"
+requires-python = ">=3.12.14"
+
+[[packages]]
+name = "native-floor40"
+version = "1.0"
+wheels = [{ url = "file:///workspace/pumas-native-tags-four-controls/run/wheels/native_floor40-1.0-cp312-cp312-manylinux_2_40_x86_64.whl", hashes = { sha256 = "a8ccbdec4aaa9880ef6f69ad7849db8ab1ddd72f7106d65781f9938a5ce4eca8" } }]

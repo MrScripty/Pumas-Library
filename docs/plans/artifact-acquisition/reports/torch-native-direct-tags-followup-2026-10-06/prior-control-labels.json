@@ -1,0 +1,47 @@
+{
+  "prior_commit": "d5317a2e218b79b102b1a55db5b9053724be7e43",
+  "prior_tree": "138111c43300d6a68170c06efe6d7d81708d97f9",
+  "original_evidence_modified": false,
+  "labels": [
+    {
+      "original_identifier": "native-floor42-refusal",
+      "corrected_display_label": "Interpreter platform with full patch override: higher-floor refusal",
+      "original_semantics": "--python-version3.12.14 supplied; resolution_tags(None,Some(version)) reconstructs tags with is_cross=true.",
+      "successor_identifier": "direct-native-higher-floor-refusal",
+      "successor_semantics": "Neither override; resolution_tags(None,None) uses interpreter.tags() directly; native markers.",
+      "original_exit_code": 1,
+      "successor_exit_code": 1,
+      "original_invocation_sha256": "fcd659d5ad98fcc6dfb7f99d3e7546701755516666f9806dcea98c1305fc6719"
+    },
+    {
+      "original_identifier": "native-wrongabi-refusal",
+      "corrected_display_label": "Interpreter platform with full patch override: Python/ABI refusal",
+      "original_semantics": "--python-version3.12.14 supplied; resolution_tags(None,Some(version)) reconstructs tags with is_cross=true.",
+      "successor_identifier": "direct-native-python-abi-refusal",
+      "successor_semantics": "Neither override; resolution_tags(None,None) uses interpreter.tags() directly; native markers.",
+      "original_exit_code": 1,
+      "successor_exit_code": 1,
+      "original_invocation_sha256": "d8c1a482c09a2d7cba67701a2f3b6e0a739d0195d7d67755e77756930bdd4012"
+    },
+    {
+      "original_identifier": "native-floor40",
+      "corrected_display_label": "Interpreter platform with full patch override: lower-floor acceptance",
+      "original_semantics": "--python-version3.12.14 supplied; resolution_tags(None,Some(version)) reconstructs tags with is_cross=true.",
+      "successor_identifier": "direct-native-lower-floor",
+      "successor_semantics": "Neither override; resolution_tags(None,None) uses interpreter.tags() directly; native markers.",
+      "original_exit_code": 0,
+      "successor_exit_code": 0,
+      "original_invocation_sha256": "3b547ca22b9238afc16499da95dd56baa32c9846bb79c4bdb9f126e021e5da98"
+    },
+    {
+      "original_identifier": "native-linux-tag",
+      "corrected_display_label": "Interpreter platform with full patch override: Linux-tag acceptance",
+      "original_semantics": "--python-version3.12.14 supplied; resolution_tags(None,Some(version)) reconstructs tags with is_cross=true.",
+      "successor_identifier": "direct-native-linux-tag",
+      "successor_semantics": "Neither override; resolution_tags(None,None) uses interpreter.tags() directly; native markers.",
+      "original_exit_code": 0,
+      "successor_exit_code": 0,
+      "original_invocation_sha256": "3b9fbf73a83a04d69a0151e5f679dfa781796f736a1b6825802129d6fe19181f"
+    }
+  ]
+}

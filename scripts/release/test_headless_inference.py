@@ -141,6 +141,98 @@ class ArchiveTests(unittest.TestCase):
                 self.assertFalse(output.exists())
                 self.assertFalse(output.with_name(output.name + ".partial").exists())
 
+    def test_metadata_snapshot_survives_input_mutation_during_staging(self):
+        inputs, build, runtime, contract, schema, output = fixture(self.root)
+        original_build, original_runtime, original_contract = copy.deepcopy(
+            (build, runtime, contract)
+        )
+        canary = "DUMMY_METADATA_CANARY_NOT_A_CREDENTIAL"
+        copy_payload = shutil.copyfile
+        written = []
+        write_bytes = Path.write_bytes
+
+        def mutate_inputs(source, destination):
+            # Model another caller retaining the input dictionaries while a
+            # potentially large native payload is staged after admission.
+            build["unexpected_secret"] = canary
+            build["source"]["unexpected_secret"] = canary
+            build["features"].append(canary)
+            build["command"].append(canary)
+            runtime["unexpected_secret"] = canary
+            runtime["files"]["libonnxruntime.so"]["unexpected_secret"] = canary
+            contract["unexpected_secret"] = canary
+            contract["expected"]["modalities"].append(canary)
+            contract["requests"][0]["bindings"]["version"] = "/" + canary
+            return copy_payload(source, destination)
+
+        def capture_write(path, data):
+            written.append(data)
+            return write_bytes(path, data)
+
+        with mock.patch.object(package.shutil, "copyfile", side_effect=mutate_inputs):
+            with mock.patch.object(Path, "write_bytes", capture_write):
+                manifest, digest = package.assemble(
+                    inputs, build, runtime, contract, schema, output
+                )
+        self.assertTrue(written)
+        self.assertTrue(all(canary.encode() not in data for data in written))
+        observed = package.extract_verified(output, digest, self.root / "consumer")
+        self.assertEqual(observed, manifest)
+        self.assertEqual(observed["build"], original_build)
+        self.assertEqual(observed["runtime"], original_runtime)
+        self.assertEqual(observed["compatibility"], original_contract)
+
+    def test_public_metadata_projection_preserves_values_without_container_aliases(self):
+        _, build, runtime, contract, _, _ = fixture(self.root)
+        supplied = (build, runtime, contract)
+        admitted = package.admitted_metadata(
+            build, runtime, contract, package.TARGETS["linux-x86_64"]
+        )
+        self.assertEqual(admitted, supplied)
+
+        def container_ids(value):
+            if isinstance(value, dict):
+                return {id(value)} | set().union(*(container_ids(item) for item in value.values()))
+            if isinstance(value, (list, tuple)):
+                return {id(value)} | set().union(*(container_ids(item) for item in value))
+            return set()
+
+        self.assertFalse(container_ids(supplied) & container_ids(admitted))
+
+    def test_cli_pinned_metadata_roundtrip_from_other_working_directory(self):
+        inputs, build, runtime, contract, schema, output = fixture(self.root)
+        records = {"build-record": build, "runtime-record": runtime, "contract": contract}
+        command = [sys.executable, str(Path(package.__file__).resolve()), "assemble"]
+        for name, data in records.items():
+            path = self.root / (name + ".json")
+            path.write_bytes(package.canonical(data))
+            command.extend(["--" + name, str(path), "--" + name + "-sha256", package.sha256(path)])
+        input_map = self.root / "inputs.json"
+        input_map.write_bytes(package.canonical({name: str(path) for name, path in inputs.items()}))
+        schema_path = self.root / "schema.json"
+        schema_path.write_bytes(schema)
+        command.extend(
+            ["--inputs", str(input_map), "--schema", str(schema_path), "--output", str(output)]
+        )
+        invalid = list(command)
+        invalid[invalid.index("--build-record-sha256") + 1] = "0" * 64
+        refused = subprocess.run(invalid, cwd=self.root, capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("trusted metadata hash mismatch", refused.stderr)
+        self.assertFalse(output.exists())
+        assembled = subprocess.run(
+            command, cwd=self.root, capture_output=True, text=True, timeout=10
+        )
+        self.assertEqual(assembled.returncode, 0, assembled.stderr)
+        report = json.loads(assembled.stdout)
+        self.assertEqual(report["qualification"], "unverified_candidate")
+        observed = package.extract_verified(
+            output, report["archive_sha256"], self.root / "consumer"
+        )
+        self.assertEqual(observed["build"], build)
+        self.assertEqual(observed["runtime"], runtime)
+        self.assertEqual(observed["compatibility"], contract)
+
     def test_manifest_and_payload_item_extra_canary_fields_refused(self):
         inputs, build, runtime, contract, schema, output = fixture(self.root)
         manifest, _ = package.assemble(inputs, build, runtime, contract, schema, output)
@@ -331,8 +423,8 @@ class ArchiveTests(unittest.TestCase):
         path = self.root / "record.json"
         path.write_text('{"schema_version":1}')
         with self.assertRaisesRegex(ValueError, "trusted metadata hash mismatch"):
-            package.trusted_json(path, "0" * 64)
-        self.assertEqual(package.trusted_json(path, package.sha256(path)), {"schema_version": 1})
+            package.read_pinned_json(path, "0" * 64)
+        self.assertEqual(package.read_pinned_json(path, package.sha256(path)), {"schema_version": 1})
         inputs, build, runtime, contract, schema, output = fixture(self.root)
         package.assemble(inputs, build, runtime, contract, schema, output)
         with self.assertRaisesRegex(ValueError, "archive SHA256 mismatch"):
@@ -411,7 +503,7 @@ class ArchiveTests(unittest.TestCase):
             return data
 
         with mock.patch.object(package, "metadata_bytes", side_effect=replace_after_read):
-            self.assertEqual(package.trusted_json(path, digest), {"identity": "trusted"})
+            self.assertEqual(package.read_pinned_json(path, digest), {"identity": "trusted"})
         if os.name == "nt":
             # Windows denies replacing an open archive. POSIX permits this race.
             return

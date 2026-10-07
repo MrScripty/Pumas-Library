@@ -94,6 +94,19 @@ GET paths and JSON pointers, exact digests, typed sizes, and a bounded single-li
 `rustc -V` version. Additional compiler details stay in separate reviewed evidence.
 Features are exactly `s3` and `inference-plugins`; modality identifiers remain the
 owner-supplied bounded tokens. No values are silently redacted or reinterpreted.
+The assembler creates a detached projection of only those public fields and
+revalidates it before staging payloads. Nested lists/maps cannot retain aliases
+to caller-owned metadata, and the actual admitted command is selected from the
+closed local argv forms. Later mutations of the input records cannot add data to
+staged metadata or change the returned manifest.
+
+`read_pinned_json` checks byte identity against a caller-supplied SHA256; its name
+does not imply confidential content or authenticated provenance. The pinned
+records, including build IDs, modality identifiers and handshake paths/pointers,
+are intended for public distribution and require caller review before their pins
+are supplied. Format bounds and projections do not identify secrets deliberately
+placed inside otherwise valid public fields. Schema, license and notice files
+remain explicit reviewed payload inputs.
 
 Build command metadata accepts only explicit offline, locked, native-targeted
 `cargo build` release argv for `pumas-rpc`: the repository `--manifest-path

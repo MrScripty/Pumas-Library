@@ -261,7 +261,8 @@ def flat_name(name):
     return name
 
 
-def trusted_json(path, expected_sha256):
+def read_pinned_json(path, expected_sha256):
+    """Read public metadata pinned by byte digest, not confidential or authenticated data."""
     path = Path(path)
     require(not path.is_symlink() and path.is_file(), "metadata must be a regular file")
     require(HEX64.fullmatch(expected_sha256 or ""), "trusted metadata hash is required")
@@ -413,6 +414,77 @@ def check_manifest(manifest):
     return target
 
 
+def admitted_metadata(build, runtime, contract, target):
+    """Detach the declared public fields before staging; never export input objects.
+
+    Validation rejects undeclared fields rather than silently dropping them. A
+    pinned digest establishes byte identity, not whether an identifier is public:
+    the caller must review the public build/compatibility/runtime records before
+    supplying their pins. Preserve admitted identity and actual command spelling.
+    """
+    expected = validate_contract(contract)
+    validate_build_record(build, target, expected)
+    validate_runtime_record(runtime, target)
+    public_build = {
+        "version": build["version"],
+        "target": target["rust_target"],
+        "host": target["rust_target"],
+        "profile": "release",
+        "features": list(build["features"]),
+        "source": {"head": build["source"]["head"], "tree": build["source"]["tree"]},
+        "build_id": build["build_id"],
+        "inference_enabled": True,
+        "binary_sha256": build["binary_sha256"],
+        "command": next(
+            argv
+            for argv in production_build_commands(target["rust_target"])
+            if argv == build["command"]
+        ),
+        "rustc": build["rustc"],
+    }
+    public_runtime = {
+        "target": target["rust_target"],
+        "version": PLAN["runtime_version"],
+        "loader_entry": target["runtime_entry"],
+        "source_archive_sha256": runtime["source_archive_sha256"],
+        "files": {
+            name: {"sha256": item["sha256"], "bytes": item["bytes"]}
+            for name, item in runtime["files"].items()
+        },
+    }
+    public_contract = {
+        "schema_version": 1,
+        "expected": {
+            "version": expected["version"],
+            "source_commit": expected["source_commit"],
+            "source_tree": expected["source_tree"],
+            "build_id": expected["build_id"],
+            "protocol_version": expected["protocol_version"],
+            "schema_sha256": expected["schema_sha256"],
+            "inference_enabled": True,
+            "features": list(expected["features"]),
+            "modalities": list(expected["modalities"]),
+        },
+        "requests": [
+            {
+                "path": request["path"],
+                "bindings": {
+                    name: request["bindings"][name]
+                    for name in IDENTITY_KEYS
+                    if name in request["bindings"]
+                },
+            }
+            for request in contract["requests"]
+        ],
+    }
+    # Validate the detached snapshot too; caller-owned containers are no longer
+    # consulted while copying payloads or serializing either metadata member.
+    expected = validate_contract(public_contract)
+    validate_build_record(public_build, target, expected)
+    validate_runtime_record(public_runtime, target)
+    return public_build, public_runtime, public_contract
+
+
 def assemble(inputs, build_record, runtime_record, contract, schema, output):
     """Records must already have been checked against caller-trusted digests."""
     output = Path(output)
@@ -426,14 +498,15 @@ def assemble(inputs, build_record, runtime_record, contract, schema, output):
         "generated archives must stay outside the source checkout",
     )
     decode(schema)
-    expected = validate_contract(contract)
     exact_fields(build_record, BUILD_KEYS, "build record")
     target = next(
         (item for item in TARGETS.values() if item["rust_target"] == build_record["target"]), None
     )
     require(target is not None, "unsupported build target")
-    validate_build_record(build_record, target, expected)
-    validate_runtime_record(runtime_record, target)
+    build_record, runtime_record, contract = admitted_metadata(
+        build_record, runtime_record, contract, target
+    )
+    expected = contract["expected"]
     manifest = {
         "schema_version": 1,
         "variant": "headless-inference",
@@ -803,11 +876,11 @@ def main():
     verify.add_argument("--contract-sha256", required=True)
     verify.add_argument("--start", action="store_true")
     args = parser.parse_args()
-    contract = trusted_json(args.contract, args.contract_sha256)
+    contract = read_pinned_json(args.contract, args.contract_sha256)
     validate_contract(contract)
     if args.command == "assemble":
-        build_record = trusted_json(args.build_record, args.build_record_sha256)
-        runtime = trusted_json(args.runtime_record, args.runtime_record_sha256)
+        build_record = read_pinned_json(args.build_record, args.build_record_sha256)
+        runtime = read_pinned_json(args.runtime_record, args.runtime_record_sha256)
         inputs = decode(metadata_bytes(args.inputs))
         manifest, digest = assemble(
             inputs, build_record, runtime, contract, metadata_bytes(args.schema), args.output

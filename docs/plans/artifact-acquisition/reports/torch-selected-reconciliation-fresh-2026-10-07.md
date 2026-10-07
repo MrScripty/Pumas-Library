@@ -102,6 +102,9 @@ are retained in [run-gates.py](torch-selected-reconciliation-fresh-2026-10-07/ru
 - [Authorized source publication](torch-selected-reconciliation-fresh-2026-10-07/source-publication.json) succeeded
   for the frozen source checkpoint; no PR or CodeRabbit request was created.
 
+Raw pip RECORD CRLF bytes and captured log whitespace are retained unchanged;
+artifact whitespace diagnostics do not describe source formatting failures.
+
 The fixture drives actual catalog acquisition, exact pinned public-uv selection,
 genuine pip installation/report/RECORD verification, and a real selected-profile
 probe before injecting interruptions. Controls cover lost acknowledgment, repeated

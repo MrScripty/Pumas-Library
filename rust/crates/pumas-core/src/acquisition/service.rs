@@ -2838,9 +2838,11 @@ mod tests {
         }
     }
 
+    type TransferCleanup = Box<dyn FnOnce() -> Result<()> + Send>;
+
     struct CleaningHost {
         controls: ControlledHost,
-        cleanup: Mutex<Option<Box<dyn FnOnce() -> Result<()> + Send>>>,
+        cleanup: Mutex<Option<TransferCleanup>>,
     }
 
     #[async_trait::async_trait]

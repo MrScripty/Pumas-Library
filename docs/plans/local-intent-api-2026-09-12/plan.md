@@ -467,6 +467,15 @@ acknowledged declaration disappears, no duplicate artifact writer is admitted,
 and no false available state is returned. Document supported filesystem/platform
 evidence limits rather than generalizing a Linux-only result.
 
+Current retained-owner qualification separates those gates: process-exit
+fixtures prove acknowledged SQLite persistence through read-only observations
+and prove that the same registry refuses another primary. Public owner reopen
+and ABA behavior use successful composed shutdown. Neither a surviving durable
+declaration nor reaping the root process supplies a crash-recovery receipt;
+automatic primary restart remains blocked pending qualified physical-store
+lifetime ownership. The current boundary is recorded in
+`reports/m3b-local-desired-state.md`.
+
 **Re-plan if:** A second library owner, destructive migration, independent task
 scheduler, or remote identity becomes necessary.
 

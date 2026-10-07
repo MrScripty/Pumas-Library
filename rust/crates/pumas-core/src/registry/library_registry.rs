@@ -253,6 +253,13 @@ impl LibraryRegistry {
                 connection_token TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS http_services (
+                library_path TEXT PRIMARY KEY,
+                owner_started_at TEXT NOT NULL,
+                owner_token TEXT NOT NULL,
+                service_generation TEXT NOT NULL,
+                description_json TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS registry_config (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -648,6 +655,125 @@ impl LibraryRegistry {
         Ok(instance)
     }
 
+    /// Match the exact retained ready row, without PID or endpoint liveness claims.
+    pub(crate) fn matches_ready_instance(&self, owner: &InstanceEntry) -> Result<bool> {
+        let conn = self.lock_conn()?;
+        Ok(
+            Self::read_instance_entry(&conn, &owner.library_path.to_string_lossy())?
+                .is_some_and(|current| same_ready_generation(&current, owner)),
+        )
+    }
+
+    pub(crate) fn publish_http_service(
+        &self,
+        owner: &InstanceEntry,
+        description: &crate::discovery::HttpServiceDescription,
+    ) -> Result<()> {
+        let mut conn = self.lock_conn()?;
+        let transaction =
+            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let path = owner.library_path.to_string_lossy();
+        let current = Self::read_instance_entry(&transaction, &path)?
+            .ok_or_else(|| PumasError::Other("HTTP publisher owner unavailable".into()))?;
+        if !same_ready_generation(&current, owner)
+            || description.instance.library_root != owner.library_path
+            || description.instance.generation != owner.started_at
+        {
+            return Err(PumasError::Other(
+                "HTTP publisher owner generation changed".into(),
+            ));
+        }
+        let library_id: String = transaction.query_row(
+            "SELECT id FROM libraries WHERE path = ?1",
+            params![path],
+            |row| row.get(0),
+        )?;
+        if description.instance.registry_library_id != library_id {
+            return Err(PumasError::Other(
+                "HTTP publisher library context changed".into(),
+            ));
+        }
+        let rows = transaction.execute(
+            "INSERT INTO http_services(library_path,owner_started_at,owner_token,service_generation,description_json)
+             VALUES(?1,?2,?3,?4,?5)
+             ON CONFLICT(library_path) DO UPDATE SET owner_started_at=excluded.owner_started_at,
+               owner_token=excluded.owner_token,service_generation=excluded.service_generation,
+               description_json=excluded.description_json
+             WHERE http_services.owner_started_at != excluded.owner_started_at
+                OR http_services.owner_token != excluded.owner_token",
+            params![path, owner.started_at, owner.connection_token, description.service_generation,
+                serde_json::to_string(description)?],
+        )?;
+        if rows == 0 {
+            return Err(PumasError::Other(
+                "this owner already has an HTTP advertisement".into(),
+            ));
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn revoke_http_service(
+        &self,
+        owner: &InstanceEntry,
+        service_generation: &str,
+    ) -> Result<bool> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "DELETE FROM http_services WHERE library_path=?1 AND owner_started_at=?2
+            AND owner_token=?3 AND service_generation=?4",
+            params![
+                owner.library_path.to_string_lossy(),
+                owner.started_at,
+                owner.connection_token,
+                service_generation
+            ],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// Observe valid-generation advertisements. A missing additive table in a
+    /// legacy registry is supported; invalid/unreadable schema remains an error.
+    pub fn list_http_services(&self) -> Result<Vec<crate::discovery::HttpServiceDescription>> {
+        let conn = self.lock_conn()?;
+        let table_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='http_services')", [], |row| row.get(0))?;
+        if !table_exists {
+            return Ok(Vec::new());
+        }
+        let mut stmt = conn.prepare("SELECT h.description_json, l.id, i.started_at, i.library_path, h.service_generation
+            FROM http_services h JOIN instances i ON h.library_path=i.library_path
+            JOIN libraries l ON l.path=i.library_path
+            WHERE i.status='ready' AND h.owner_started_at=i.started_at AND h.owner_token=i.connection_token
+            ORDER BY i.started_at DESC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        let mut descriptions = Vec::new();
+        for row in rows {
+            let (json, library_id, generation, root, service_generation) = row?;
+            let description: crate::discovery::HttpServiceDescription =
+                serde_json::from_str(&json)?;
+            if description.instance.registry_library_id != library_id
+                || description.instance.generation != generation
+                || description.instance.library_root.as_path() != Path::new(&root)
+                || description.service_generation != service_generation
+            {
+                return Err(PumasError::Other(
+                    "HTTP advertisement context is invalid".into(),
+                ));
+            }
+            descriptions.push(description);
+        }
+        Ok(descriptions)
+    }
+
     /// Release exactly the observed ready generation; stale owners cannot remove a successor.
     pub(crate) fn release_ready_instance(&self, instance: &InstanceEntry) -> Result<bool> {
         let Some(token) = &instance.connection_token else {
@@ -763,6 +889,15 @@ impl LibraryRegistry {
     pub fn cleanup_stale(&self) -> Result<usize> {
         Ok(0)
     }
+}
+
+fn same_ready_generation(current: &InstanceEntry, owner: &InstanceEntry) -> bool {
+    current.status == InstanceStatus::Ready
+        && owner.status == InstanceStatus::Ready
+        && current.library_path == owner.library_path
+        && current.started_at == owner.started_at
+        && owner.connection_token.is_some()
+        && current.connection_token == owner.connection_token
 }
 
 #[cfg(test)]

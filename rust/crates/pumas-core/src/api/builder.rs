@@ -583,6 +583,7 @@ impl PumasApiBuilder {
             registry: Some(registry),
             instance_claim: tokio::sync::Mutex::new(Some(claim)),
             ready_instance: std::sync::OnceLock::new(),
+            external_service_tasks: RuntimeTasks::default(),
             instance_shutdown: std::sync::OnceLock::new(),
         });
         let intent_primary = Arc::downgrade(&primary_state);

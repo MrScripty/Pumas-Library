@@ -9,6 +9,7 @@ pub(crate) type InstanceShutdownReceipt =
     Shared<BoxFuture<'static, std::result::Result<(), Arc<String>>>>;
 
 pub(crate) fn begin(primary: &Arc<PrimaryState>) -> InstanceShutdownReceipt {
+    primary.external_service_tasks.close();
     primary
         .instance_shutdown
         .get_or_init(|| {
@@ -56,17 +57,19 @@ async fn settle(primary: Arc<PrimaryState>) -> Result<()> {
         }
     };
     // Every owner is observed even when another drain fails.
-    let (finite, ipc, setup, conversions, runtimes) = tokio::join!(
+    let (finite, ipc, setup, conversions, runtimes, services) = tokio::join!(
         finite,
         ipc,
         primary.conversion_manager.shutdown_setup(),
         primary.conversion_manager.shutdown(),
         super::state_runtime_profiles::stop_all_managed_runtime_profiles(&primary),
+        primary.external_service_tasks.shutdown_owned(),
     );
     let acquisition = primary.acquisition.shutdown().await;
     let mut failures = Vec::new();
     for (name, result) in [
         ("finite work", finite),
+        ("external services", services),
         ("IPC", ipc),
         ("conversion setup", setup),
         ("conversions", conversions),

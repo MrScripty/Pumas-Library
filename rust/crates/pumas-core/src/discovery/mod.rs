@@ -15,20 +15,22 @@ use crate::{PumasApi, PumasError, PumasLocalClient, PumasReadOnlyLibrary, Result
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod http;
+pub use http::*;
+
 pub const DISCOVERY_SCHEMA_VERSION: u32 = 1;
 pub const LOCAL_IPC_PROTOCOL: &str = "pumas.local-ipc";
 pub const LOCAL_IPC_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProtocolAdvertisement {
-    pub name: String,
-    pub versions: Vec<u32>,
-}
+// Preserve the first-slice import path while sharing the single protocol type.
+pub use crate::build_info::ProtocolAdvertisement;
 
 /// A live, authenticated description. No token or raw runtime route is public.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstanceDescription {
     pub discovery_schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_info: Option<Box<crate::PumasBuildInfo>>,
     pub registry_library_id: String,
     pub library_root: PathBuf,
     /// Registry start generation, meaningful only within this root/registry context.
@@ -44,6 +46,7 @@ impl InstanceDescription {
     pub(crate) fn local(library: &LibraryEntry, instance: &InstanceEntry) -> Self {
         Self {
             discovery_schema_version: DISCOVERY_SCHEMA_VERSION,
+            build_info: Some(Box::new(crate::PumasBuildInfo::library())),
             registry_library_id: library.id.clone(),
             library_root: instance.library_path.clone(),
             generation: instance.started_at.clone(),
@@ -137,6 +140,8 @@ pub struct LocalDiscoverySnapshot {
     pub discovery_schema_version: u32,
     pub registered_libraries: Vec<LibraryEntry>,
     pub tracked_instances: Vec<TrackedInstance>,
+    #[serde(default)]
+    pub advertised_http_services: Vec<HttpServiceDescription>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,6 +192,7 @@ impl LocalDiscovery {
         Ok(LocalDiscoverySnapshot {
             discovery_schema_version: DISCOVERY_SCHEMA_VERSION,
             registered_libraries: self.registry.list()?,
+            advertised_http_services: self.registry.list_http_services()?,
             tracked_instances: self
                 .registry
                 .list_instances()?

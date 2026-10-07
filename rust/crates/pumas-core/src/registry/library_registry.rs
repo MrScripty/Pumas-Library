@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// A registered library entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +167,18 @@ impl LibraryRegistry {
         Self::configure_connection(&conn)?;
         Self::ensure_schema(&conn)?;
 
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
+    /// Observe an existing registry without creating it, migrating schema, or cleaning rows.
+    pub fn open_read_only_at(db_path: &Path) -> Result<Self> {
+        let conn =
+            Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        conn.busy_timeout(Duration::from_millis(u64::from(
+            RegistryConfig::BUSY_TIMEOUT_MS,
+        )))?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -525,7 +537,10 @@ impl LibraryRegistry {
     // Instance tracking
     // ========================================
 
-    /// Claim primary ownership for a library path.
+    /// Claim an unoccupied library path. Existing rows are unresolved authority,
+    /// even if their PID or endpoint is invisible in this observer's namespace.
+    /// Crash recovery requires independently qualified lifetime custody; this
+    /// registry is a rendezvous cache, not a physical-store lease.
     pub fn try_claim_instance(&self, path: &Path, pid: u32) -> Result<InstanceClaimResult> {
         let canonical = Self::canonicalize_library_path(path)?;
         let path_str = canonical.to_string_lossy().to_string();
@@ -538,9 +553,7 @@ impl LibraryRegistry {
             conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
         if let Some(existing) = Self::read_instance_entry(&transaction, &path_str)? {
-            if crate::platform::is_process_alive(existing.pid) {
-                return Ok(InstanceClaimResult::Occupied(existing));
-            }
+            return Ok(InstanceClaimResult::Occupied(existing));
         }
 
         let claim_token = uuid::Uuid::new_v4().to_string();
@@ -598,13 +611,26 @@ impl LibraryRegistry {
 
     /// Mark a previously claimed instance row as ready for client attachment.
     pub fn mark_instance_ready(&self, path: &Path, claim_token: &str, port: u16) -> Result<()> {
-        let conn = self.lock_conn()?;
+        self.promote_instance_ready(path, claim_token, port)
+            .map(|_| ())
+    }
+
+    /// Retain the promoted generation atomically with the claim transition.
+    pub(crate) fn promote_instance_ready(
+        &self,
+        path: &Path,
+        claim_token: &str,
+        port: u16,
+    ) -> Result<InstanceEntry> {
+        let mut conn = self.lock_conn()?;
+        let transaction =
+            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let canonical = Self::canonicalize_library_path(path)?;
         let path_str = canonical.to_string_lossy().to_string();
         let endpoint = loopback_tcp_endpoint(port);
         let connection_token = uuid::Uuid::new_v4().to_string();
 
-        let rows = conn.execute(
+        let rows = transaction.execute(
             "UPDATE instances
              SET port = ?1,
                  status = ?2,
@@ -632,7 +658,28 @@ impl LibraryRegistry {
             });
         }
 
-        Ok(())
+        let instance = Self::read_instance_entry(&transaction, &path_str)?
+            .ok_or_else(|| PumasError::Other("promoted instance disappeared".into()))?;
+        transaction.commit()?;
+        Ok(instance)
+    }
+
+    /// Release exactly the observed ready generation; stale owners cannot remove a successor.
+    pub(crate) fn release_ready_instance(&self, instance: &InstanceEntry) -> Result<bool> {
+        let Some(token) = &instance.connection_token else {
+            return Ok(false);
+        };
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "DELETE FROM instances WHERE library_path = ?1 AND started_at = ?2
+             AND connection_token = ?3 AND status = 'ready'",
+            params![
+                instance.library_path.to_string_lossy(),
+                instance.started_at,
+                token
+            ],
+        )?;
+        Ok(rows > 0)
     }
 
     /// Register a running instance for a library path.
@@ -727,61 +774,10 @@ impl LibraryRegistry {
         Ok(instances)
     }
 
-    /// Remove stale instance entries (dead PIDs or nonexistent library paths).
+    /// Compatibility no-op. A namespace-local PID or missing pathname cannot
+    /// establish cessation. Explicit administrative reconciliation is required.
     pub fn cleanup_stale(&self) -> Result<usize> {
-        let conn = self.lock_conn()?;
-
-        let mut stmt = conn.prepare("SELECT library_path, pid FROM instances")?;
-
-        let entries: Vec<(String, u32)> = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(stmt);
-
-        let mut removed = 0;
-        for (path_str, pid) in &entries {
-            let path = Path::new(path_str);
-            let pid_alive = crate::platform::is_process_alive(*pid);
-            let path_exists = path.exists();
-
-            if !pid_alive || !path_exists {
-                conn.execute(
-                    "DELETE FROM instances WHERE library_path = ?1",
-                    params![path_str],
-                )?;
-                removed += 1;
-
-                if !pid_alive {
-                    debug!("Cleaned up stale instance: PID {} (dead)", pid);
-                } else {
-                    debug!("Cleaned up stale instance: path {} (missing)", path_str);
-                }
-            }
-        }
-
-        // Also clean up library entries with nonexistent paths
-        let mut lib_stmt = conn.prepare("SELECT path FROM libraries")?;
-        let lib_paths: Vec<String> = lib_stmt
-            .query_map([], |row| row.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(lib_stmt);
-
-        for path_str in &lib_paths {
-            let path = Path::new(path_str);
-            if !path.exists() {
-                conn.execute(
-                    "DELETE FROM instances WHERE library_path = ?1",
-                    params![path_str],
-                )?;
-                conn.execute("DELETE FROM libraries WHERE path = ?1", params![path_str])?;
-                removed += 1;
-                warn!("Removed library with nonexistent path: {}", path_str);
-            }
-        }
-
-        Ok(removed)
+        Ok(0)
     }
 }
 
@@ -1257,27 +1253,19 @@ mod tests {
     }
 
     #[test]
-    fn test_try_claim_instance_replaces_dead_instance() {
+    fn test_try_claim_instance_preserves_namespace_unknown_owner() {
         let (registry, temp_dir) = create_test_registry();
         let lib_dir = create_library_dir(temp_dir.path(), "my-library");
-
         registry.register(&lib_dir, "My Library").unwrap();
         registry
             .register_instance(&lib_dir, 999_999_999, 12345)
             .unwrap();
-
-        let claim = registry.try_claim_instance(&lib_dir, 123456).unwrap();
-        let InstanceClaimResult::Claimed(claim) = claim else {
-            panic!("expected dead instance claim to be replaced");
-        };
-
-        let instance = registry.get_instance(&lib_dir).unwrap().unwrap();
-        assert_eq!(claim.pid, 123456);
-        assert_eq!(instance.pid, 123456);
-        assert_eq!(instance.port, 0);
-        assert_eq!(instance.endpoint, "127.0.0.1:0");
-        assert!(instance.connection_token.is_none());
-        assert_eq!(instance.status, InstanceStatus::Claiming);
+        let before = registry.get_instance(&lib_dir).unwrap().unwrap();
+        let result = registry.try_claim_instance(&lib_dir, 123456).unwrap();
+        assert!(matches!(result, InstanceClaimResult::Occupied(_)));
+        let after = registry.get_instance(&lib_dir).unwrap().unwrap();
+        assert_eq!(after.connection_token, before.connection_token);
+        assert_eq!(after.pid, before.pid);
     }
 
     #[test]
@@ -1375,7 +1363,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cleanup_stale_removes_dead_pid() {
+    fn test_cleanup_stale_preserves_unknown_pid() {
         let (registry, temp_dir) = create_test_registry();
         let lib_dir = create_library_dir(temp_dir.path(), "my-library");
 
@@ -1386,10 +1374,8 @@ mod tests {
             .unwrap();
 
         let removed = registry.cleanup_stale().unwrap();
-        assert!(removed >= 1);
-
-        let instance = registry.get_instance(&lib_dir).unwrap();
-        assert!(instance.is_none());
+        assert_eq!(removed, 0);
+        assert!(registry.get_instance(&lib_dir).unwrap().is_some());
     }
 
     #[test]

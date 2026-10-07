@@ -35,6 +35,7 @@ pub mod cache;
 pub mod cancel;
 pub mod config;
 pub mod conversion;
+pub mod discovery;
 pub mod error;
 pub mod index;
 pub mod intent;
@@ -226,10 +227,11 @@ impl PumasApi {
         Self::builder(launcher_root).build().await
     }
 
-    /// Discover and connect to an existing pumas-core instance, or return an error
-    /// if no libraries are registered.
+    /// Open the default registered library as an owning instance, or return an
+    /// error if no libraries are registered or an owner row already exists.
     ///
-    /// Open the default registered library as an owning instance.
+    /// Prefer `discovery::LocalDiscovery` for read-only observation and
+    /// `discovery::attach_or_start` for explicit compatibility-checked bootstrap.
     ///
     /// Host applications that need to attach to an already-running owner should
     /// call `PumasLocalClient::discover_ready_instances` and then
@@ -239,9 +241,6 @@ impl PumasApi {
             tracing::warn!("Failed to open registry for discovery: {}", e);
             PumasError::NoLibrariesRegistered
         })?;
-
-        // Clean up stale entries first
-        let _ = registry.cleanup_stale();
 
         let library = registry
             .get_default()?
@@ -274,9 +273,16 @@ impl PumasApi {
 
             let mut claim = state.instance_claim.lock().await;
             if let Some(claim) = claim.take() {
-                reg.mark_instance_ready(&claim.library_path, &claim.claim_token, port)?;
+                let instance =
+                    reg.promote_instance_ready(&claim.library_path, &claim.claim_token, port)?;
+                state
+                    .ready_instance
+                    .set(instance)
+                    .map_err(|_| PumasError::Other("instance generation already set".into()))?;
             } else {
-                reg.register_instance(&self.launcher_root, std::process::id(), port)?;
+                return Err(PumasError::Other(
+                    "IPC startup requires its own claim generation".into(),
+                ));
             }
         }
 
@@ -327,7 +333,9 @@ impl Drop for PumasApi {
         let ApiInner::Primary(ref state) = self.inner;
         // Best-effort: unregister instance from the global registry
         if let Some(ref reg) = state.registry {
-            let _ = reg.unregister_instance(&self.launcher_root);
+            if let Some(instance) = state.ready_instance.get() {
+                let _ = reg.release_ready_instance(instance);
+            }
         }
         // Server handle is dropped automatically via IpcServerHandle::drop
     }

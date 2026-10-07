@@ -39,6 +39,8 @@ pub struct PumasApiBuilder {
     auto_create_dirs: bool,
     enable_hf_client: bool,
     enable_process_manager: bool,
+    enable_connectivity_probe: bool,
+    registry: Option<registry::LibraryRegistry>,
     #[cfg(feature = "test-support")]
     hf_loopback_fixture: Option<model_library::test_support::HfLoopbackFixture>,
 }
@@ -217,9 +219,24 @@ impl PumasApiBuilder {
             auto_create_dirs: false,
             enable_hf_client: true,
             enable_process_manager: cfg!(feature = "process-manager"),
+            registry: None,
+            enable_connectivity_probe: true,
             #[cfg(feature = "test-support")]
             hf_loopback_fixture: None,
         }
+    }
+
+    /// Use an explicit rendezvous registry (e.g. a host application's isolated registry).
+    /// This does not grant physical-store exclusion across different registries.
+    pub fn with_registry(mut self, registry: registry::LibraryRegistry) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    /// Control the optional startup upstream connectivity probe.
+    pub fn with_connectivity_probe(mut self, enable: bool) -> Self {
+        self.enable_connectivity_probe = enable;
+        self
     }
 
     /// Auto-create required directories if they don't exist.
@@ -333,13 +350,15 @@ impl PumasApiBuilder {
             }
         }
 
-        let registry = registry::LibraryRegistry::open()?;
+        let registry = match self.registry.take() {
+            Some(registry) => registry,
+            None => registry::LibraryRegistry::open()?,
+        };
         let library_name = self
             .launcher_root
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("pumas-library");
-        let _ = registry.register(&self.launcher_root, library_name)?;
         let claim = match registry.try_claim_instance(&self.launcher_root, std::process::id())? {
             registry::InstanceClaimResult::Claimed(claim) => claim,
             registry::InstanceClaimResult::Occupied(instance) => {
@@ -353,6 +372,7 @@ impl PumasApiBuilder {
             }
         };
         let mut claim_guard = InstanceClaimGuard::new(registry.clone(), claim.clone());
+        let _ = registry.register(&self.launcher_root, library_name)?;
 
         let state = Arc::new(RwLock::new(ApiState {
             background_fetch_completed: false,
@@ -368,10 +388,12 @@ impl PumasApiBuilder {
             );
 
         // Check initial connectivity (non-blocking, will update state)
-        let nm_clone = network_manager.clone();
-        runtime_tasks.spawn(async move {
-            nm_clone.check_connectivity().await;
-        });
+        if self.enable_connectivity_probe {
+            let nm_clone = network_manager.clone();
+            runtime_tasks.spawn(async move {
+                nm_clone.check_connectivity().await;
+            });
+        }
 
         // Initialize process manager (if enabled)
         let process_manager = if self.enable_process_manager {
@@ -585,6 +607,7 @@ impl PumasApiBuilder {
             server_handle: tokio::sync::Mutex::new(None),
             registry: Some(registry),
             instance_claim: tokio::sync::Mutex::new(Some(claim)),
+            ready_instance: std::sync::OnceLock::new(),
         });
         let intent_primary = Arc::downgrade(&primary_state);
         primary_state

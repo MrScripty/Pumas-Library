@@ -593,22 +593,6 @@ impl LibraryRegistry {
         }))
     }
 
-    /// Release only this unpromoted startup claim. Stale startup cleanup must
-    /// never remove a successor or a claim already promoted to a ready instance.
-    pub(crate) fn release_instance_claim(&self, claim: &PrimaryInstanceClaim) -> Result<bool> {
-        let conn = self.lock_conn()?;
-        let rows = conn.execute(
-            "DELETE FROM instances WHERE library_path = ?1 AND pid = ?2
-             AND claim_token = ?3 AND status = 'claiming'",
-            params![
-                claim.library_path.to_string_lossy(),
-                claim.pid,
-                claim.claim_token
-            ],
-        )?;
-        Ok(rows > 0)
-    }
-
     /// Mark a previously claimed instance row as ready for client attachment.
     pub fn mark_instance_ready(&self, path: &Path, claim_token: &str, port: u16) -> Result<()> {
         self.promote_instance_ready(path, claim_token, port)

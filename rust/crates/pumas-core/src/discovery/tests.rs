@@ -188,7 +188,7 @@ async fn bootstrap_starts_then_attaches_without_stopping_borrowed_owner() {
         .unwrap();
     drop(again);
     if let LocalAccess::Owned { api, .. } = &owned {
-        api.shutdown_intent().await.unwrap();
+        api.shutdown_instance().await.unwrap();
     }
     drop(owned);
     assert!(registry.get_instance(&root).unwrap().is_none());
@@ -279,7 +279,7 @@ async fn stale_owner_cannot_authenticate_as_or_remove_successor() {
     let successor_client = PumasLocalClient::connect(successor.clone()).await.unwrap();
     assert!(successor_client.describe_instance().await.is_err());
     if let LocalAccess::Owned { api, .. } = &owned {
-        api.shutdown_intent().await.unwrap();
+        api.shutdown_instance().await.unwrap();
     }
     drop(owned);
     assert_eq!(
@@ -311,7 +311,7 @@ async fn concurrent_bootstrap_has_exactly_one_owner() {
     assert!(registry.get_instance(&root).unwrap().is_some());
     for result in &results {
         if let Ok(LocalAccess::Owned { api, .. }) = result {
-            api.shutdown_intent().await.unwrap();
+            api.shutdown_instance().await.unwrap();
         }
     }
     drop(results);
@@ -387,4 +387,181 @@ fn handshake_command_accepts_only_a_bounded_token() {
     ] {
         assert!(LocalIpcCommand::decode(operation, Some(params)).is_err());
     }
+}
+
+#[tokio::test]
+async fn ordinary_owned_drop_observes_listener_and_connection_cessation_before_release() {
+    let (_temp, registry, root) = fixture();
+    let owned = attach_or_start(
+        registry.clone(),
+        &root,
+        &CompatibilityRequirements::default(),
+    )
+    .await
+    .unwrap();
+    let instance = registry.get_instance(&root).unwrap().unwrap();
+    let client = PumasLocalClient::connect(instance.clone()).await.unwrap();
+    client.describe_instance().await.unwrap();
+    let primary = match &owned {
+        LocalAccess::Owned { api, .. } => api.primary().clone(),
+        _ => unreachable!(),
+    };
+    drop(owned); // No explicit shutdown_intent or shutdown_instance.
+    crate::api::instance_shutdown::begin(&primary)
+        .await
+        .unwrap();
+    assert!(registry.get_instance(&root).unwrap().is_none());
+    assert!(tokio::net::TcpStream::connect(&instance.endpoint)
+        .await
+        .is_err());
+    assert!(client.describe_instance().await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ordinary_drop_retains_owner_until_real_finite_index_mutation_and_ipc_settle() {
+    let (_temp, registry, root) = fixture();
+    let owned = attach_or_start(
+        registry.clone(),
+        &root,
+        &CompatibilityRequirements::default(),
+    )
+    .await
+    .unwrap();
+    let primary = match &owned {
+        LocalAccess::Owned { api, .. } => api.primary().clone(),
+        _ => unreachable!(),
+    };
+    let instance = registry.get_instance(&root).unwrap().unwrap();
+    let library = primary.model_library.clone();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let work = primary
+        .runtime_tasks
+        .start_owned("gated-index-mutation", move |context| async move {
+            context
+                .run_blocking("index-commit", move || {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    library.index().upsert(&ModelRecord {
+                        id: "settled".into(),
+                        path: "settled".into(),
+                        cleaned_name: "settled".into(),
+                        official_name: "Settled".into(),
+                        model_type: "llm".into(),
+                        tags: vec![],
+                        hashes: HashMap::new(),
+                        metadata: serde_json::json!({}),
+                        updated_at: "2026-10-07".into(),
+                    })
+                })
+                .await??;
+            Ok(())
+        })
+        .unwrap();
+    started_rx.await.unwrap();
+    drop(owned);
+    let receipt = crate::api::instance_shutdown::begin(&primary);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(25), receipt.clone())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        registry
+            .get_instance(&root)
+            .unwrap()
+            .unwrap()
+            .connection_token,
+        instance.connection_token
+    );
+    let contender = attach_or_start(
+        registry.clone(),
+        &root,
+        &CompatibilityRequirements::default(),
+    )
+    .await;
+    assert!(!matches!(&contender, Ok(LocalAccess::Owned { .. })));
+    drop(contender);
+    assert!(primary
+        .model_library
+        .index()
+        .get("settled")
+        .unwrap()
+        .is_none());
+    release_tx.send(()).unwrap();
+    work.await.unwrap().unwrap();
+    receipt.await.unwrap();
+    assert!(primary
+        .model_library
+        .index()
+        .get("settled")
+        .unwrap()
+        .is_some());
+    assert!(registry.get_instance(&root).unwrap().is_none());
+    assert!(tokio::net::TcpStream::connect(&instance.endpoint)
+        .await
+        .is_err());
+    let successor = attach_or_start(
+        registry.clone(),
+        &root,
+        &CompatibilityRequirements::default(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(&successor, LocalAccess::Owned { .. }));
+    successor.shutdown_owned().await.unwrap();
+}
+
+#[tokio::test]
+async fn borrowed_shutdown_owned_is_a_noop_and_failed_owned_drain_retains_authority() {
+    let (_temp, registry, root) = fixture();
+    let owned = attach_or_start(
+        registry.clone(),
+        &root,
+        &CompatibilityRequirements::default(),
+    )
+    .await
+    .unwrap();
+    let borrowed = attach_or_start(
+        registry.clone(),
+        &root,
+        &CompatibilityRequirements::default(),
+    )
+    .await
+    .unwrap();
+    borrowed.shutdown_owned().await.unwrap();
+    let LocalAccess::Borrowed { client, .. } = &borrowed else {
+        unreachable!()
+    };
+    client.describe_instance().await.unwrap();
+    let LocalAccess::Owned { api, .. } = &owned else {
+        unreachable!()
+    };
+    api.primary()
+        .runtime_tasks
+        .run_owned("fixture-failure", |_| async {
+            Err::<(), _>(PumasError::Other("fixture effect failed".into()))
+        })
+        .await
+        .unwrap_err();
+    let row = registry.get_instance(&root).unwrap().unwrap();
+    assert!(owned.shutdown_owned().await.is_err());
+    assert!(tokio::net::TcpStream::connect(&row.endpoint).await.is_err());
+    assert_eq!(
+        registry
+            .get_instance(&root)
+            .unwrap()
+            .unwrap()
+            .connection_token,
+        row.connection_token
+    );
+    drop(owned);
+    assert!(registry.get_instance(&root).unwrap().is_some());
+    assert!(attach_or_start(
+        registry.clone(),
+        &root,
+        &CompatibilityRequirements::default()
+    )
+    .await
+    .is_err());
 }

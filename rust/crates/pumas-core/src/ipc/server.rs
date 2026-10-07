@@ -16,9 +16,11 @@ use crate::config::RegistryConfig;
 use crate::model_library::ModelLibraryUpdateSubscriber;
 use crate::models::ModelLibraryUpdateNotification;
 use crate::{PumasError, Result};
+use futures::FutureExt;
 #[cfg(test)]
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::panic::AssertUnwindSafe;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
@@ -53,6 +55,7 @@ pub struct IpcServerHandle {
     conn_shutdown_tx: watch::Sender<bool>,
     task_handle: Option<tokio::task::JoinHandle<()>>,
     connection_tasks: ConnectionTasks,
+    connection_failed: Arc<AtomicBool>,
 }
 
 impl IpcServerHandle {
@@ -73,6 +76,40 @@ impl IpcServerHandle {
         }
         // Signal all connection handlers to close
         let _ = self.conn_shutdown_tx.send(true);
+    }
+
+    /// Observe listener and every accepted dispatch before owner release.
+    /// The owning shutdown coordinator must retain this future through completion.
+    pub(crate) async fn shutdown_and_wait(mut self) -> Result<()> {
+        self.shutdown();
+        let mut failures = Vec::new();
+        if let Some(task) = self.task_handle.take() {
+            if let Err(error) = task.await {
+                failures.push(error.to_string());
+            }
+        }
+        let tasks: Vec<_> = self
+            .connection_tasks
+            .lock()
+            .map_err(|_| PumasError::Other("IPC task owner poisoned".into()))?
+            .drain(..)
+            .collect();
+        for task in tasks {
+            if let Err(error) = task.await {
+                failures.push(error.to_string());
+            }
+        }
+        if self.connection_failed.load(Ordering::Acquire) {
+            failures.push("an accepted IPC dispatch panicked".into());
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(PumasError::Other(format!(
+                "IPC cessation unconfirmed: {}",
+                failures.join("; ")
+            )))
+        }
     }
 
     #[cfg(test)]
@@ -109,6 +146,22 @@ fn abort_connection_tasks(tasks: &ConnectionTasks) {
 
     for handle in handles {
         handle.abort();
+    }
+}
+
+// Response delivery owns no remaining domain effect. Stop blocked transports
+// without cancelling the dispatch whose result was already observed.
+async fn deliver_or_stop<W: AsyncWriteExt + Unpin>(
+    writer: &mut W,
+    bytes: &[u8],
+    shutdown: &mut watch::Receiver<bool>,
+) -> Result<bool> {
+    if *shutdown.borrow() {
+        return Ok(false);
+    }
+    tokio::select! {
+        result = write_frame(writer, bytes) => { result?; Ok(true) },
+        _ = shutdown.changed() => Ok(false),
     }
 }
 
@@ -153,6 +206,7 @@ impl IpcServer {
         let (conn_shutdown_tx, conn_shutdown_rx) = watch::channel(false);
         let active_connections = Arc::new(AtomicUsize::new(0));
         let connection_tasks = Arc::new(Mutex::new(Vec::new()));
+        let connection_failed = Arc::new(AtomicBool::new(false));
 
         let task_handle = tokio::spawn(Self::accept_loop(
             listener,
@@ -161,6 +215,7 @@ impl IpcServer {
             conn_shutdown_rx,
             active_connections,
             connection_tasks.clone(),
+            connection_failed.clone(),
         ));
 
         Ok(IpcServerHandle {
@@ -171,6 +226,7 @@ impl IpcServer {
             conn_shutdown_tx,
             task_handle: Some(task_handle),
             connection_tasks,
+            connection_failed,
         })
     }
 
@@ -181,6 +237,7 @@ impl IpcServer {
         conn_shutdown_rx: watch::Receiver<bool>,
         active_connections: Arc<AtomicUsize>,
         connection_tasks: ConnectionTasks,
+        connection_failed: Arc<AtomicBool>,
     ) {
         loop {
             tokio::select! {
@@ -205,11 +262,14 @@ impl IpcServer {
                             let dispatch = dispatch.clone();
                             let connection_guard = ActiveConnectionGuard::new(active_connections.clone());
                             let mut conn_shutdown = conn_shutdown_rx.clone();
+                            let failed = connection_failed.clone();
 
                             let handle = tokio::spawn(async move {
                                 debug!("IPC connection from {}", peer_addr);
-                                if let Err(e) = Self::handle_connection(stream, &*dispatch, &mut conn_shutdown).await {
-                                    debug!("IPC connection {} ended: {}", peer_addr, e);
+                                match AssertUnwindSafe(Self::handle_connection(stream, &*dispatch, &mut conn_shutdown)).catch_unwind().await {
+                                    Ok(Ok(())) => {},
+                                    Ok(Err(error)) => debug!("IPC connection {} ended: {}", peer_addr, error),
+                                    Err(_) => { failed.store(true, Ordering::Release); },
                                 }
                                 drop(connection_guard);
                             });
@@ -232,6 +292,9 @@ impl IpcServer {
         let (mut reader, mut writer) = stream.split();
 
         loop {
+            if *shutdown_rx.borrow() {
+                return Ok(());
+            }
             // Wait for either a frame or a shutdown signal
             let frame = tokio::select! {
                 result = read_frame(&mut reader) => {
@@ -249,7 +312,9 @@ impl IpcServer {
                 Ok(request) => request,
                 Err(response) => {
                     let response_bytes = serde_json::to_vec(&response)?;
-                    write_frame(&mut writer, &response_bytes).await?;
+                    if !deliver_or_stop(&mut writer, &response_bytes, shutdown_rx).await? {
+                        return Ok(());
+                    }
                     continue;
                 }
             };
@@ -280,7 +345,9 @@ impl IpcServer {
                     Err(error) => {
                         let response = IpcResponse::error(request.id, error);
                         let response_bytes = serde_json::to_vec(&response)?;
-                        write_frame(&mut writer, &response_bytes).await?;
+                        if !deliver_or_stop(&mut writer, &response_bytes, shutdown_rx).await? {
+                            return Ok(());
+                        }
                         continue;
                     }
                 }
@@ -288,8 +355,13 @@ impl IpcServer {
 
             let response = Self::process_request(request, dispatch).await;
 
+            if *shutdown_rx.borrow() {
+                return Ok(());
+            }
             let response_bytes = serde_json::to_vec(&response)?;
-            write_frame(&mut writer, &response_bytes).await?;
+            if !deliver_or_stop(&mut writer, &response_bytes, shutdown_rx).await? {
+                return Ok(());
+            }
         }
     }
 
@@ -355,13 +427,17 @@ impl IpcServer {
             Ok(None) => {
                 let response = IpcResponse::error(id, IpcError::method_not_found());
                 let response_bytes = serde_json::to_vec(&response)?;
-                write_frame(writer, &response_bytes).await?;
+                if !deliver_or_stop(writer, &response_bytes, shutdown_rx).await? {
+                    return Ok(());
+                }
                 return Ok(());
             }
             Err(error) => {
                 let response = IpcResponse::error(id, IpcError::from_pumas(&error));
                 let response_bytes = serde_json::to_vec(&response)?;
-                write_frame(writer, &response_bytes).await?;
+                if !deliver_or_stop(writer, &response_bytes, shutdown_rx).await? {
+                    return Ok(());
+                }
                 return Ok(());
             }
         };
@@ -369,13 +445,18 @@ impl IpcServer {
         let handshake = subscriber.handshake().clone();
         let response = IpcResponse::success(id.clone(), serde_json::to_value(&handshake)?);
         let response_bytes = serde_json::to_vec(&response)?;
-        write_frame(writer, &response_bytes).await?;
+        if !deliver_or_stop(writer, &response_bytes, shutdown_rx).await? {
+            return Ok(());
+        }
 
         if !handshake.live_stream_ready {
             return Ok(());
         }
 
         loop {
+            if *shutdown_rx.borrow() {
+                return Ok(());
+            }
             let update_result = tokio::select! {
                 result = subscriber.next_event() => result,
                 _ = shutdown_rx.changed() => return Ok(()),
@@ -385,7 +466,9 @@ impl IpcServer {
                 Err(error) => {
                     let response = IpcResponse::error(id, IpcError::from_pumas(&error));
                     let response_bytes = serde_json::to_vec(&response)?;
-                    write_frame(writer, &response_bytes).await?;
+                    if !deliver_or_stop(writer, &response_bytes, shutdown_rx).await? {
+                        return Ok(());
+                    }
                     return Ok(());
                 }
             };
@@ -397,7 +480,9 @@ impl IpcServer {
             };
             let response = IpcResponse::success(id.clone(), serde_json::to_value(notification)?);
             let response_bytes = serde_json::to_vec(&response)?;
-            write_frame(writer, &response_bytes).await?;
+            if !deliver_or_stop(writer, &response_bytes, shutdown_rx).await? {
+                return Ok(());
+            }
         }
     }
 }
@@ -710,5 +795,72 @@ mod tests {
 
         let read_result = timeout(Duration::from_secs(1), read_frame(&mut stream)).await;
         assert!(read_result.is_ok(), "connection should close after drop");
+    }
+}
+
+#[cfg(test)]
+mod shutdown_receipt_tests {
+    use super::*;
+    use crate::ipc::protocol::LocalIpcOperation;
+    use crate::ipc::IpcClient;
+    use std::sync::atomic::AtomicBool;
+
+    struct GatedDispatch {
+        started: Mutex<Option<oneshot::Sender<()>>>,
+        release: tokio::sync::Notify,
+        settled: AtomicBool,
+    }
+    #[async_trait::async_trait]
+    impl IpcDispatch for GatedDispatch {
+        async fn dispatch(&self, _: &str, _: serde_json::Value) -> Result<serde_json::Value> {
+            self.started
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap()
+                .send(())
+                .unwrap();
+            self.release.notified().await;
+            self.settled.store(true, Ordering::Release);
+            Ok(serde_json::to_value(
+                crate::models::ModelLibrarySelectorSnapshot::empty("fixture"),
+            )?)
+        }
+    }
+
+    #[tokio::test]
+    async fn ipc_cessation_waits_for_admitted_dispatch_and_closes_its_connection() {
+        let (started_tx, started_rx) = oneshot::channel();
+        let dispatch = Arc::new(GatedDispatch {
+            started: Mutex::new(Some(started_tx)),
+            release: tokio::sync::Notify::new(),
+            settled: AtomicBool::new(false),
+        });
+        let server = IpcServer::start(dispatch.clone()).await.unwrap();
+        let address = server.addr();
+        let client = IpcClient::connect(address, std::process::id())
+            .await
+            .unwrap();
+        let request = tokio::spawn(async move {
+            client
+                .call(
+                    LocalIpcOperation::ModelLibrarySelectorSnapshot,
+                    serde_json::json!({"request": {}, "connection_token": "fixture"}),
+                )
+                .await
+        });
+        started_rx.await.unwrap();
+        let mut shutdown = tokio::spawn(server.shutdown_and_wait());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), &mut shutdown)
+                .await
+                .is_err()
+        );
+        assert!(!dispatch.settled.load(Ordering::Acquire));
+        dispatch.release.notify_one();
+        shutdown.await.unwrap().unwrap();
+        assert!(dispatch.settled.load(Ordering::Acquire));
+        assert!(request.await.unwrap().is_err());
+        assert!(TcpStream::connect(address).await.is_err());
     }
 }

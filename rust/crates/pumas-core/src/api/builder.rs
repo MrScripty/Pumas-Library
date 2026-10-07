@@ -45,33 +45,9 @@ pub struct PumasApiBuilder {
     hf_loopback_fixture: Option<model_library::test_support::HfLoopbackFixture>,
 }
 
-struct InstanceClaimGuard {
-    registry: registry::LibraryRegistry,
-    claim: registry::PrimaryInstanceClaim,
-    active: bool,
-}
-
-impl InstanceClaimGuard {
-    fn new(registry: registry::LibraryRegistry, claim: registry::PrimaryInstanceClaim) -> Self {
-        Self {
-            registry,
-            claim,
-            active: true,
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.active = false;
-    }
-}
-
-impl Drop for InstanceClaimGuard {
-    fn drop(&mut self) {
-        if self.active {
-            let _ = self.registry.release_instance_claim(&self.claim);
-        }
-    }
-}
+// A failed/cancelled startup retains its claiming row. Constructor blocking
+// work is not a cessation receipt; only a promoted owner's ordered coordinator
+// may release a ready generation after it has observed all owned work.
 
 async fn load_known_download_dirs(
     persistence: Option<Arc<model_library::DownloadPersistence>>,
@@ -371,7 +347,6 @@ impl PumasApiBuilder {
                 });
             }
         };
-        let mut claim_guard = InstanceClaimGuard::new(registry.clone(), claim.clone());
         let _ = registry.register(&self.launcher_root, library_name)?;
 
         let state = Arc::new(RwLock::new(ApiState {
@@ -608,6 +583,7 @@ impl PumasApiBuilder {
             registry: Some(registry),
             instance_claim: tokio::sync::Mutex::new(Some(claim)),
             ready_instance: std::sync::OnceLock::new(),
+            instance_shutdown: std::sync::OnceLock::new(),
         });
         let intent_primary = Arc::downgrade(&primary_state);
         primary_state
@@ -631,53 +607,43 @@ impl PumasApiBuilder {
             known_download_dirs,
             runtime_tasks,
         );
-        claim_guard.disarm();
 
         Ok(api)
     }
 }
 
 #[cfg(test)]
-mod claim_guard_tests {
+mod startup_claim_tests {
     use super::*;
 
-    #[test]
-    fn startup_guard_cannot_delete_a_successor_or_promoted_instance() {
-        let root = tempfile::tempdir().unwrap();
+    #[tokio::test]
+    async fn failed_construction_retains_claim_instead_of_asserting_initializer_cessation() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("shared-resources"), b"blocked fixture").unwrap();
         let registry =
-            registry::LibraryRegistry::open_at(&root.path().join("registry.db")).unwrap();
-        let library = root.path().join("library");
-        std::fs::create_dir(&library).unwrap();
-        registry.register(&library, "Library").unwrap();
-        let claim = || match registry
-            .try_claim_instance(&library, std::process::id())
-            .unwrap()
-        {
-            registry::InstanceClaimResult::Claimed(claim) => claim,
-            registry::InstanceClaimResult::Occupied(_) => {
-                panic!("test requires an empty claim slot")
-            }
-        };
-        let first = claim();
-        let stale = InstanceClaimGuard::new(registry.clone(), first);
-        registry.unregister_instance(&library).unwrap();
-        let replacement = claim();
-        drop(stale);
-        registry
-            .mark_instance_ready(&library, &replacement.claim_token, 12345)
-            .unwrap();
-        // Promoting a claim transfers its ownership: even its own old startup
-        // guard cannot unregister the ready endpoint.
-        drop(InstanceClaimGuard::new(registry.clone(), replacement));
+            registry::LibraryRegistry::open_at(&temp.path().join("registry.db")).unwrap();
+        let result = PumasApi::builder(&root)
+            .with_registry(registry.clone())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .with_connectivity_probe(false)
+            .build()
+            .await;
+        assert!(result.is_err());
+        let claim = registry.get_instance(&root).unwrap().unwrap();
+        assert_eq!(claim.status, registry::InstanceStatus::Claiming);
+        assert!(matches!(
+            registry
+                .try_claim_instance(&root, std::process::id())
+                .unwrap(),
+            registry::InstanceClaimResult::Occupied(_)
+        ));
         assert_eq!(
-            registry.get_instance(&library).unwrap().unwrap().port,
-            12345
+            std::fs::read(root.join("shared-resources")).unwrap(),
+            b"blocked fixture"
         );
-
-        registry.unregister_instance(&library).unwrap();
-        let abandoned = InstanceClaimGuard::new(registry.clone(), claim());
-        drop(abandoned);
-        assert!(registry.get_instance(&library).unwrap().is_none());
     }
 }
 

@@ -247,6 +247,8 @@ pub(crate) struct PrimaryState {
     pub(crate) registry: Option<registry::LibraryRegistry>,
     /// Immutable ready generation retained by this owner for authentication and release.
     pub(crate) ready_instance: std::sync::OnceLock<registry::InstanceEntry>,
+    pub(crate) instance_shutdown:
+        std::sync::OnceLock<super::instance_shutdown::InstanceShutdownReceipt>,
     /// Pending startup claim that will be promoted to a ready instance row once IPC starts.
     pub(crate) instance_claim: tokio::sync::Mutex<Option<registry::PrimaryInstanceClaim>>,
 }
@@ -1629,6 +1631,7 @@ impl PrimaryState {
             registry: Some(registry::LibraryRegistry::open_at(&root.join("registry.db")).unwrap()),
             instance_claim: Mutex::new(None),
             ready_instance: std::sync::OnceLock::new(),
+            instance_shutdown: std::sync::OnceLock::new(),
         })
     }
 }

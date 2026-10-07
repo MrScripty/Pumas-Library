@@ -95,6 +95,10 @@ impl RuntimeTasks {
         }
     }
 
+    pub(crate) fn runtime_handle(&self) -> Handle {
+        self.handle.clone()
+    }
+
     /// Register best-effort background work.
     pub(crate) fn spawn<F>(&self, task: F)
     where

@@ -331,13 +331,10 @@ impl Drop for PumasApi {
         self.runtime_tasks.shutdown();
         let _ = self.model_watcher.take();
         let ApiInner::Primary(ref state) = self.inner;
-        // Best-effort: unregister instance from the global registry
-        if let Some(ref reg) = state.registry {
-            if let Some(instance) = state.ready_instance.get() {
-                let _ = reg.release_ready_instance(instance);
-            }
-        }
-        // Server handle is dropped automatically via IpcServerHandle::drop
+        // Drop cannot establish cessation synchronously. The independently
+        // retained coordinator releases this row only after observed settlement;
+        // runtime loss or failed cleanup leaves it unresolved.
+        let _receipt = api::instance_shutdown::begin(state);
     }
 }
 

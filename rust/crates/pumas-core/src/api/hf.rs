@@ -4359,6 +4359,7 @@ pub(super) mod tests {
             registry: None,
             instance_claim: Mutex::new(None),
             ready_instance: std::sync::OnceLock::new(),
+            instance_shutdown: std::sync::OnceLock::new(),
         };
         // Exercise the production API without a global registry, IPC listener,
         // filesystem watcher, or background connectivity probe.

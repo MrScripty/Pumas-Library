@@ -43,7 +43,7 @@ do not silently select a similarly named model or flatten equal model IDs across
 
 The owner retains its immutable ready row. Authentication compares that retained
 credential/generation to the current row; an old service cannot authenticate a
-successor's token. Startup cleanup is claim-token fenced; ready-row release is
+successor's token. Failed/cancelled startup retains its claim; ready-row release is
 root/start-generation/token fenced. Promotion captures its ready row within the same
 SQLite write transaction. `mark_instance_ready` retains its existing public signature.
 
@@ -60,6 +60,31 @@ shared hosts/filesystems, namespace-isolated deployments, or store/lock replacem
 The custody audit remains open. Numeric PIDs and failed loopback probes never supply
 cessation evidence. The registry UUID is explicitly a cache-entry identity, not an
 invented durable physical-library identity.
+
+### Ordered local owner shutdown follow-up
+
+Independent review identified that generation-fenced deletion alone did not prove
+predecessor cessation: ordinary `PumasApi` drop released the row while admitted
+finite effects could still run, and the stored IPC handle/accept-task state formed
+a lifetime cycle. The follow-up adds `shutdown_instance()` and
+`LocalAccess::shutdown_owned()`, with a shared independently owned coordinator.
+Borrowed shutdown is a no-op. Ordinary owned drop closes background admission and
+starts the same coordinator; the registry row remains until finite work, IPC,
+conversion owners, managed runtime profiles and acquisition have settled. Any
+failed drain or lost executor retains unresolved ownership.
+
+The coordinator takes the IPC handle out of primary state, closes admission,
+observes accepted dispatches, and stops blocked response delivery only after its
+domain operation has settled. Accepted-dispatch panics remain archived even when
+completed handles are reaped. Failed or cancelled waiters cannot delete a row. Failed/cancelled
+construction also retains its startup claim: an initializer running on a blocking pool cannot be
+assumed to have stopped just because its caller disappeared.
+Deterministic tests gate a real index mutation, test blocked successor admission,
+check the actual former listener and connection, and retain stale-generation and
+borrowed-service tests. Explicit shutdown is required to observe completion before
+exiting a host runtime; drop alone is not a synchronous cessation receipt. This
+repairs the same-registry local lifecycle only. Physical-store, shared-filesystem,
+namespace and historical-owner custody qualification remain open.
 
 ## Slice 2: one shared build/protocol descriptor and HTTP advertisement
 

@@ -313,6 +313,15 @@ impl LocalAccess {
         }
     }
 
+    /// Observe cessation only for a service owned by this access handle.
+    /// A borrowed access closes no owner admission or transport.
+    pub async fn shutdown_owned(&self) -> Result<()> {
+        match self {
+            Self::Owned { api, .. } => api.shutdown_instance().await,
+            Self::Borrowed { .. } => Ok(()),
+        }
+    }
+
     /// Query only local artifacts through the existing model intent identity contract.
     pub async fn query_local_models(
         &self,

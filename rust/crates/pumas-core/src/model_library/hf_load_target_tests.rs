@@ -163,9 +163,11 @@ async fn assert_read_only_alias_snapshot(
     );
     assert_eq!(
         target.local_load_path,
-        library
-            .library_display_root
-            .join(MODEL_ID)
+        MODEL_ID
+            .split('/')
+            .fold(library.library_display_root.clone(), |root, part| {
+                root.join(part)
+            })
             .display()
             .to_string()
     );

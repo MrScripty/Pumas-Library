@@ -87,6 +87,27 @@ Cargo artifacts/features, actual compiler/runner, and immutable source. This
 structural adapter is not a replacement for `s3_build_provenance.py` or independent
 production-build evidence.
 
+Metadata admission rejects unknown fields in every generated manifest, build,
+source, runtime, compatibility, handshake-request and file-item object before
+serializing metadata. It accepts bounded ASCII identity tokens, fixed local
+GET paths and JSON pointers, exact digests, typed sizes, and a bounded single-line
+`rustc -V` version. Additional compiler details stay in separate reviewed evidence.
+Features are exactly `s3` and `inference-plugins`; modality identifiers remain the
+owner-supplied bounded tokens. No values are silently redacted or reinterpreted.
+
+Build command metadata accepts only explicit offline, locked, native-targeted
+`cargo build` release argv for `pumas-rpc`: the repository `--manifest-path
+rust/Cargo.toml` form or Rust-workspace form, with `--no-default-features` and
+the two required features. It also accepts the reviewed repository invocation
+with `--bin pumas-rpc`, flags ordered as `--target TARGET --release`, and
+`--message-format=json-render-diagnostics`. Both feature order spellings are
+admitted; arbitrary extra flags, environment assignments, shell command strings,
+and command arguments carrying unrelated data are rejected. Preserve the actual
+admitted invocation rather than relabeling it. Synthetic canary tests show extra
+metadata and appended arguments cannot reach `build-record.json` or
+`manifest.json`; these are disclosure-admission controls, not a credential
+scanner or proof that supplied metadata is authentic.
+
 The runtime record requires native target, version `1.24.2`, loader entry,
 trusted source archive SHA256 and explicit native-library closure `{name:
 {sha256, bytes}}`. The exact loader basename is `libonnxruntime.so`,

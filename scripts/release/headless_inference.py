@@ -42,11 +42,162 @@ IDENTITY_KEYS = {
 }
 MAX_MANIFEST = 1024 * 1024
 MAX_PACKAGE = 4 * 1024 * 1024 * 1024
+BUILD_KEYS = {
+    "version",
+    "target",
+    "host",
+    "profile",
+    "features",
+    "source",
+    "build_id",
+    "inference_enabled",
+    "binary_sha256",
+    "command",
+    "rustc",
+}
+RUNTIME_KEYS = {"target", "version", "loader_entry", "source_archive_sha256", "files"}
+MANIFEST_KEYS = {
+    "schema_version",
+    "variant",
+    "qualification",
+    "version",
+    "target",
+    "build",
+    "runtime",
+    "compatibility",
+    "files",
+}
+IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}\Z")
+RUSTC_VERSION = re.compile(
+    r"rustc [0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)? "
+    r"\([a-f0-9]{7,40} [0-9]{4}-[0-9]{2}-[0-9]{2}\)\Z"
+)
 
 
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+def exact_fields(value, fields, label):
+    require(type(value) is dict and set(value) == fields, f"unexpected or missing {label} fields")
+
+
+def matches(value, pattern, limit):
+    return isinstance(value, str) and len(value) <= limit and pattern.fullmatch(value) is not None
+
+
+def production_build_commands(target):
+    """Closed argv forms; neither environment assignments nor arbitrary flags are metadata."""
+    commands = []
+    for manifest in (["--manifest-path", "rust/Cargo.toml"], []):
+        for features in ("s3,inference-plugins", "inference-plugins,s3"):
+            commands.append(
+                [
+                    "cargo",
+                    "build",
+                    "--locked",
+                    "--offline",
+                    *manifest,
+                    "-p",
+                    "pumas-rpc",
+                    "--release",
+                    "--no-default-features",
+                    "--features",
+                    features,
+                    "--target",
+                    target,
+                ]
+            )
+    for features in ("s3,inference-plugins", "inference-plugins,s3"):
+        commands.append(
+            [
+                "cargo",
+                "build",
+                "--locked",
+                "--offline",
+                "--manifest-path",
+                "rust/Cargo.toml",
+                "-p",
+                "pumas-rpc",
+                "--bin",
+                "pumas-rpc",
+                "--no-default-features",
+                "--features",
+                features,
+                "--target",
+                target,
+                "--release",
+                "--message-format=json-render-diagnostics",
+            ]
+        )
+    return commands
+
+
+def validate_file_item(item):
+    exact_fields(item, {"sha256", "bytes"}, "file item")
+    require(
+        matches(item["sha256"], HEX64, 64)
+        and type(item["bytes"]) is int
+        and 0 < item["bytes"] <= MAX_PACKAGE,
+        "invalid member hash/size",
+    )
+
+
+def validate_build_record(build, target, expected):
+    exact_fields(build, BUILD_KEYS, "build record")
+    exact_fields(build["source"], {"head", "tree"}, "build source")
+    require(
+        build["target"] == target["rust_target"]
+        and build["host"] == target["rust_target"]
+        and build["profile"] == "release",
+        "native production target/profile required",
+    )
+    require(
+        build["features"] == expected["features"]
+        and build["source"] == {"head": expected["source_commit"], "tree": expected["source_tree"]}
+        and build["build_id"] == expected["build_id"],
+        "build/cohort identity mismatch",
+    )
+    require(
+        build["version"] == expected["version"] and build["inference_enabled"] is True,
+        "compiled version/features mismatch",
+    )
+    require(matches(build["binary_sha256"], HEX64, 64), "binary build hash required")
+    require(
+        type(build["command"]) is list
+        and build["command"] in production_build_commands(target["rust_target"]),
+        "reviewed offline locked production command required",
+    )
+    require(matches(build["rustc"], RUSTC_VERSION, 160), "bounded rustc version required")
+
+
+def validate_runtime_record(runtime, target):
+    exact_fields(runtime, RUNTIME_KEYS, "runtime record")
+    require(
+        runtime["target"] == target["rust_target"]
+        and runtime["version"] == PLAN["runtime_version"]
+        and runtime["loader_entry"] == target["runtime_entry"],
+        "exact runtime target/version/entry required",
+    )
+    require(
+        matches(runtime["source_archive_sha256"], HEX64, 64), "runtime source archive hash required"
+    )
+    files = runtime["files"]
+    require(
+        type(files) is dict and 0 < len(files) <= 123 and target["runtime_entry"] in files,
+        "runtime closure missing exact loader basename",
+    )
+    for name, item in files.items():
+        flat_name(name)
+        require(
+            re.fullmatch(r"[A-Za-z0-9_.-]+(?:\.dll|\.dylib|\.so(?:\.[0-9]+)*)", name),
+            "runtime closure must contain native libraries only",
+        )
+        validate_file_item(item)
+    require(
+        sum(item["bytes"] for item in files.values()) <= MAX_PACKAGE, "runtime exceeds bounded size"
+    )
 
 
 def sha256(path):
@@ -120,46 +271,49 @@ def trusted_json(path, expected_sha256):
 
 
 def validate_contract(contract):
+    exact_fields(contract, {"schema_version", "expected", "requests"}, "compatibility contract")
     require(
         type(contract.get("schema_version")) is int and contract["schema_version"] == 1,
         "unsupported compatibility contract",
     )
     expected = contract.get("expected", {})
-    require(set(expected) == IDENTITY_KEYS, "complete compatibility identity required")
-    require(VERSION.fullmatch(expected["version"]), "v0.8 candidate version required")
+    exact_fields(expected, IDENTITY_KEYS, "compatibility identity")
+    require(matches(expected["version"], VERSION, 96), "v0.8 candidate version required")
     require(
-        HEX40.fullmatch(expected["source_commit"]) and HEX40.fullmatch(expected["source_tree"]),
+        matches(expected["source_commit"], HEX40, 40)
+        and matches(expected["source_tree"], HEX40, 40),
         "immutable source identity required",
     )
+    require(matches(expected["build_id"], IDENTIFIER, 128), "bounded build identity required")
     require(
-        isinstance(expected["build_id"], str) and expected["build_id"], "build identity required"
-    )
-    require(
-        type(expected["protocol_version"]) is int and expected["protocol_version"] > 0,
+        type(expected["protocol_version"]) is int and 0 < expected["protocol_version"] <= 2**31 - 1,
         "protocol version required",
     )
-    require(HEX64.fullmatch(expected["schema_sha256"]), "schema digest required")
+    require(matches(expected["schema_sha256"], HEX64, 64), "schema digest required")
     require(expected["inference_enabled"] is True, "inference-disabled distribution refused")
     for name in ("features", "modalities"):
         value = expected[name]
         require(
             isinstance(value, list)
-            and value
-            and all(isinstance(item, str) and item for item in value),
+            and 0 < len(value) <= 32
+            and all(matches(item, IDENTIFIER, 128) for item in value),
             f"{name} required",
         )
         require(len(value) == len(set(value)), f"duplicate {name}")
     require(
-        set(PLAN["rpc_features_required"]) <= set(expected["features"]),
+        set(PLAN["rpc_features_required"]) == set(expected["features"]),
         "S3 and inference features required",
     )
     bindings = []
     requests = contract.get("requests", [])
     require(isinstance(requests, list) and 0 < len(requests) <= 8, "handshake requests required")
     for request in requests:
+        exact_fields(request, {"path", "bindings"}, "handshake request")
         path = request.get("path", "")
         require(
-            re.fullmatch(r"/[A-Za-z0-9_./-]+", path)
+            isinstance(path, str)
+            and len(path) <= 256
+            and re.fullmatch(r"/[A-Za-z0-9_./-]+", path)
             and not path.startswith("//")
             and "/.." not in path,
             "handshake must use a fixed local GET path",
@@ -170,7 +324,10 @@ def validate_contract(contract):
         )
         for name, pointer in request["bindings"].items():
             require(
-                name in IDENTITY_KEYS and isinstance(pointer, str) and pointer.startswith("/"),
+                name in IDENTITY_KEYS
+                and isinstance(pointer, str)
+                and len(pointer) <= 256
+                and re.fullmatch(r"/[A-Za-z0-9_.~/-]*", pointer),
                 "invalid JSON pointer binding",
             )
             require(not re.search(r"~(?![01])", pointer), "invalid JSON pointer escape")
@@ -183,6 +340,7 @@ def validate_contract(contract):
 
 
 def check_manifest(manifest):
+    exact_fields(manifest, MANIFEST_KEYS, "manifest")
     require(
         type(manifest.get("schema_version")) is int
         and manifest["schema_version"] == 1
@@ -198,41 +356,9 @@ def check_manifest(manifest):
     expected = validate_contract(manifest["compatibility"])
     require(manifest["version"] == expected["version"], "package version mismatch")
     build = manifest["build"]
-    require(
-        build.get("target") == target["rust_target"]
-        and build.get("host") == target["rust_target"]
-        and build.get("profile") == "release",
-        "native production target/profile required",
-    )
-    require(
-        build.get("features") == expected["features"]
-        and build.get("source")
-        == {"head": expected["source_commit"], "tree": expected["source_tree"]}
-        and build.get("build_id") == expected["build_id"],
-        "build/cohort identity mismatch",
-    )
-    require(
-        build.get("version") == expected["version"] and build.get("inference_enabled") is True,
-        "compiled version/features mismatch",
-    )
-    require(
-        isinstance(build.get("command"), list)
-        and build["command"]
-        and isinstance(build.get("rustc"), str)
-        and build["rustc"],
-        "build toolchain evidence required",
-    )
+    validate_build_record(build, target, expected)
     runtime = manifest["runtime"]
-    require(
-        runtime.get("target") == target["rust_target"]
-        and runtime.get("version") == PLAN["runtime_version"]
-        and runtime.get("loader_entry") == target["runtime_entry"],
-        "exact runtime target/version/entry required",
-    )
-    require(
-        HEX64.fullmatch(runtime.get("source_archive_sha256", "")),
-        "runtime source archive hash required",
-    )
+    validate_runtime_record(runtime, target)
     files = manifest["files"]
     require(
         isinstance(files, dict) and 6 <= len(files) <= 128, "bounded complete inventory required"
@@ -241,12 +367,7 @@ def check_manifest(manifest):
     for name, item in files.items():
         flat_name(name)
         require(name not in {"manifest.json", "SHA256SUMS"}, "reserved inventory member")
-        require(
-            HEX64.fullmatch(item.get("sha256", ""))
-            and type(item.get("bytes")) is int
-            and item["bytes"] > 0,
-            "invalid member hash/size",
-        )
+        validate_file_item(item)
     require(
         sum(item["bytes"] for item in files.values()) <= MAX_PACKAGE, "package exceeds bounded size"
     )
@@ -270,19 +391,6 @@ def check_manifest(manifest):
         "schema/cohort mismatch",
     )
     runtime_files = runtime.get("files", {})
-    require(
-        isinstance(runtime_files, dict)
-        and runtime_files
-        and target["runtime_entry"] in runtime_files,
-        "runtime closure missing exact loader basename",
-    )
-    require(
-        all(
-            re.fullmatch(r"[A-Za-z0-9_.-]+(?:\.dll|\.dylib|\.so(?:\.[0-9]+)*)", name)
-            for name in runtime_files
-        ),
-        "runtime closure must contain native libraries only",
-    )
     require(
         all(
             name in files and canonical(files[name]) == canonical(item)
@@ -319,10 +427,13 @@ def assemble(inputs, build_record, runtime_record, contract, schema, output):
     )
     decode(schema)
     expected = validate_contract(contract)
+    exact_fields(build_record, BUILD_KEYS, "build record")
     target = next(
         (item for item in TARGETS.values() if item["rust_target"] == build_record["target"]), None
     )
     require(target is not None, "unsupported build target")
+    validate_build_record(build_record, target, expected)
+    validate_runtime_record(runtime_record, target)
     manifest = {
         "schema_version": 1,
         "variant": "headless-inference",

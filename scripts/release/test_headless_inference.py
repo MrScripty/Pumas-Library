@@ -57,8 +57,24 @@ def fixture(root, target="linux-x86_64"):
         "version": expected["version"],
         "inference_enabled": True,
         "binary_sha256": package.sha256(binary),
-        "command": ["controlled-fixture"],
-        "rustc": "controlled-fixture-not-a-real-Rust-build",
+        # Declarative admission fixtures, never evidence that Cargo ran.
+        "command": [
+            "cargo",
+            "build",
+            "--locked",
+            "--offline",
+            "--manifest-path",
+            "rust/Cargo.toml",
+            "-p",
+            "pumas-rpc",
+            "--release",
+            "--no-default-features",
+            "--features",
+            "s3,inference-plugins",
+            "--target",
+            definition["rust_target"],
+        ],
+        "rustc": "rustc 0.0.0 (0000000 2000-01-01)",
     }
     runtime = {
         "target": definition["rust_target"],
@@ -87,6 +103,161 @@ class ArchiveTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.addCleanup(self.temporary.cleanup)
+
+    def test_canary_extra_metadata_rejected_before_serialization(self):
+        canary = "DUMMY_METADATA_CANARY_NOT_A_CREDENTIAL"
+        cases = {
+            "build": lambda build, runtime, contract: build.update(unexpected_secret=canary),
+            "source": lambda build, runtime, contract: build["source"].update(
+                unexpected_secret=canary
+            ),
+            "runtime": lambda build, runtime, contract: runtime.update(unexpected_secret=canary),
+            "runtime_item": lambda build, runtime, contract: runtime["files"][
+                "libonnxruntime.so"
+            ].update(unexpected_secret=canary),
+            "contract": lambda build, runtime, contract: contract.update(unexpected_secret=canary),
+            "expected": lambda build, runtime, contract: contract["expected"].update(
+                unexpected_secret=canary
+            ),
+            "request": lambda build, runtime, contract: contract["requests"][0].update(
+                unexpected_secret=canary
+            ),
+            "binding": lambda build, runtime, contract: contract["requests"][0]["bindings"].update(
+                unexpected_secret="/" + canary
+            ),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name=name):
+                root = self.root / name
+                root.mkdir()
+                inputs, build, runtime, contract, schema, output = fixture(root)
+                mutate(build, runtime, contract)
+                with mock.patch.object(package, "canonical", wraps=package.canonical) as serialize:
+                    with self.assertRaises(ValueError):
+                        package.assemble(inputs, build, runtime, contract, schema, output)
+                    self.assertFalse(
+                        any(canary in json.dumps(call.args[0]) for call in serialize.call_args_list)
+                    )
+                self.assertFalse(output.exists())
+                self.assertFalse(output.with_name(output.name + ".partial").exists())
+
+    def test_manifest_and_payload_item_extra_canary_fields_refused(self):
+        inputs, build, runtime, contract, schema, output = fixture(self.root)
+        manifest, _ = package.assemble(inputs, build, runtime, contract, schema, output)
+        for location in ("manifest", "payload_item"):
+            with self.subTest(location=location):
+                candidate = copy.deepcopy(manifest)
+                item = candidate if location == "manifest" else candidate["files"]["pumas-rpc"]
+                item["unexpected_secret"] = "DUMMY_METADATA_CANARY_NOT_A_CREDENTIAL"
+                with self.assertRaisesRegex(ValueError, "unexpected or missing"):
+                    package.check_manifest(candidate)
+
+    def test_only_reviewed_offline_locked_production_argv_admitted(self):
+        for target in package.TARGETS:
+            for index, argv in enumerate(
+                package.production_build_commands(package.TARGETS[target]["rust_target"])
+            ):
+                with self.subTest(target=target, command=index):
+                    root = self.root / f"{target}-{index}"
+                    root.mkdir()
+                    inputs, build, runtime, contract, schema, output = fixture(root, target)
+                    build["command"] = argv
+                    manifest, digest = package.assemble(
+                        inputs, build, runtime, contract, schema, output
+                    )
+                    observed = package.extract_verified(output, digest, root / "consumer")
+                    self.assertEqual(observed["build"]["command"], argv)
+                    self.assertEqual(manifest["qualification"], "unverified_candidate")
+        for name in (
+            "extra_secret",
+            "missing_offline",
+            "missing_locked",
+            "test_build",
+            "wrong_target",
+            "shell_command",
+        ):
+            with self.subTest(rejected=name):
+                root = self.root / name
+                root.mkdir()
+                inputs, build, runtime, contract, schema, output = fixture(root)
+                if name == "extra_secret":
+                    build["command"].append("--dummy-secret=DUMMY_METADATA_CANARY_NOT_A_CREDENTIAL")
+                elif name in ("missing_offline", "missing_locked"):
+                    build["command"].remove("--" + name.removeprefix("missing_"))
+                elif name == "test_build":
+                    build["command"][1] = "test"
+                elif name == "wrong_target":
+                    build["command"][-1] = "aarch64-apple-darwin"
+                else:
+                    build["command"] = " ".join(build["command"])
+                with self.assertRaisesRegex(
+                    ValueError, "reviewed offline locked production command"
+                ):
+                    package.assemble(inputs, build, runtime, contract, schema, output)
+                self.assertFalse(output.exists())
+
+    def test_actual_cargo_json_build_command_preserved_verbatim(self):
+        inputs, build, runtime, contract, schema, output = fixture(self.root)
+        actual = [
+            "cargo",
+            "build",
+            "--locked",
+            "--offline",
+            "--manifest-path",
+            "rust/Cargo.toml",
+            "-p",
+            "pumas-rpc",
+            "--bin",
+            "pumas-rpc",
+            "--no-default-features",
+            "--features",
+            "s3,inference-plugins",
+            "--target",
+            "x86_64-unknown-linux-gnu",
+            "--release",
+            "--message-format=json-render-diagnostics",
+        ]
+        build["command"] = actual
+        _, digest = package.assemble(inputs, build, runtime, contract, schema, output)
+        observed = package.extract_verified(output, digest, self.root / "consumer")
+        self.assertEqual(observed["build"]["command"], actual)
+
+    def test_exported_metadata_strings_and_types_are_bounded(self):
+        cases = {
+            "build_id": lambda build, runtime, contract: contract["expected"].update(
+                build_id="x" * 129
+            ),
+            "toolchain_canary": lambda build, runtime, contract: build.update(
+                rustc=build["rustc"] + " DUMMY_METADATA_CANARY_NOT_A_CREDENTIAL"
+            ),
+            "pointer": lambda build, runtime, contract: contract["requests"][0]["bindings"].update(
+                version="/" + "x" * 256
+            ),
+            "path": lambda build, runtime, contract: contract["requests"][0].update(
+                path="/" + "x" * 256
+            ),
+            "modality": lambda build, runtime, contract: contract["expected"].update(
+                modalities=["x" * 129]
+            ),
+            "protocol": lambda build, runtime, contract: contract["expected"].update(
+                protocol_version=2**31
+            ),
+            "runtime_item_type": lambda build, runtime, contract: runtime["files"][
+                "libonnxruntime.so"
+            ].update(bytes=True),
+            "extra_feature": lambda build, runtime, contract: contract["expected"][
+                "features"
+            ].append("unreviewed_feature"),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name=name):
+                root = self.root / name
+                root.mkdir()
+                inputs, build, runtime, contract, schema, output = fixture(root)
+                mutate(build, runtime, contract)
+                with self.assertRaises(ValueError):
+                    package.assemble(inputs, build, runtime, contract, schema, output)
+                self.assertFalse(output.exists())
 
     def test_roundtrip_both_archive_formats_and_no_ambient_payload(self):
         for target in package.TARGETS:

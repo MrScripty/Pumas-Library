@@ -122,8 +122,9 @@ HTTP inference capabilities/model readiness must come from the modality lane.
 `LocalDiscovery::borrow_http_service` authenticates compatible core IPC first, then
 fetches the advertised description with no proxy/redirect, a bounded body and timeout.
 It requires the full advertised descriptor and authenticated instance to match, and
-checks the implemented HTTP protocol/schema. The borrowed result has no shutdown
-operation. Absence, incompatibility and unreachable listeners remain errors, with no
+checks the implemented HTTP protocol/schema. Initial attachment, HTTP observation and
+final core reauthentication share one bounded bootstrap deadline. The borrowed result
+has no shutdown operation. Absence, incompatibility and unreachable listeners remain errors, with no
 startup/reclamation fallback. Existing explicit `attach_or_start` provides local core
 bootstrap; choosing/extracting/launching a distributed HTTP binary is packaging work.
 
@@ -134,6 +135,8 @@ avoids a cycle with RPC's existing core finite-work drain. Successful external c
 then permits ordered core shutdown/release. A failed/abandoned receipt retains unresolved
 core authority. Dropping a registration is revocation plus failed custody, never evidence
 that its external service stopped. Call `complete_shutdown` only after owned effects settle.
+Completion is terminal even for a never-published registration; publishing another service
+requires a fresh registration and its own unsettled custody receipt.
 The same-registry support boundary and physical-store/namespace limitations remain.
 
 ## Slice 3: durable identity and qualified lifetime custody

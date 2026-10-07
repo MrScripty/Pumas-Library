@@ -81,6 +81,9 @@ impl HttpServiceRegistration {
         &self.description
     }
     pub fn publish(&mut self) -> Result<()> {
+        if self.settlement.is_none() {
+            return Err(invalid("HTTP cessation already reported"));
+        }
         if self.published {
             return Err(invalid("HTTP generation already published"));
         }
@@ -102,6 +105,7 @@ impl HttpServiceRegistration {
     }
     /// Report only after the listener, accepted requests and all HTTP-owned
     /// effects have settled. A failed/abandoned receipt retains core authority.
+    /// Completion is terminal; another service requires a fresh registration.
     pub fn complete_shutdown(&mut self, outcome: Result<()>) -> Result<()> {
         if self.published {
             return Err(invalid("revoke HTTP admission before reporting cessation"));
@@ -231,6 +235,10 @@ impl LocalDiscovery {
         root: &Path,
         requirements: &CompatibilityRequirements,
     ) -> Result<BorrowedHttpService> {
+        // All observations share one budget, including the final authentication.
+        // Expiration cancels only this borrowed observation, never the owner.
+        let deadline =
+            tokio::time::Instant::now() + crate::config::RegistryConfig::PRIMARY_READY_TIMEOUT;
         let library = self
             .registry
             .get_by_path(root)?
@@ -239,7 +247,10 @@ impl LocalDiscovery {
             .registry
             .get_instance(&library.path)?
             .ok_or_else(|| invalid("no tracked library owner"))?;
-        let (core, core_description, _) = super::attach(instance, &library, requirements).await?;
+        let (core, core_description, _) =
+            tokio::time::timeout_at(deadline, super::attach(instance, &library, requirements))
+                .await
+                .map_err(|_| invalid("local HTTP bootstrap deadline elapsed"))??;
         let advertised = self
             .registry
             .list_http_services()?
@@ -249,7 +260,9 @@ impl LocalDiscovery {
                     && service.instance.generation == core_description.generation
             })
             .ok_or_else(|| invalid("selected owner has no HTTP advertisement"))?;
-        let observed = fetch_description(&advertised.endpoint).await?;
+        let observed = tokio::time::timeout_at(deadline, fetch_description(&advertised.endpoint))
+            .await
+            .map_err(|_| invalid("local HTTP bootstrap deadline elapsed"))??;
         if !observed.build_info.supports_schema(
             "pumas.http-advertisement",
             HTTP_ADVERTISEMENT_SCHEMA_VERSION,
@@ -270,7 +283,10 @@ impl LocalDiscovery {
         requirements.negotiate(&observed.instance)?;
         // Reauthenticate after HTTP observation so an owner change during the
         // request remains unresolved. Observations still have no lifetime lease.
-        if core.describe_instance().await? != core_description {
+        let reauthenticated = tokio::time::timeout_at(deadline, core.describe_instance())
+            .await
+            .map_err(|_| invalid("local HTTP bootstrap deadline elapsed"))??;
+        if reauthenticated != core_description {
             return Err(invalid("core identity changed during HTTP observation"));
         }
         Ok(BorrowedHttpService {

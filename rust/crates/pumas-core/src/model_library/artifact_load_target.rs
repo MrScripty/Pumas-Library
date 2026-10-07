@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::index::{
     classify_package_facts_cache_record, ModelIndex, ModelPackageFactsCacheRecord,
-    ModelPackageFactsCacheRowState, ModelPackageFactsCacheScope,
+    ModelPackageFactsCacheRowState, ModelPackageFactsCacheScope, ModelRecord,
 };
 use crate::models::{
     ModelArtifactState, ModelEntryPathState, PackageArtifactKind, PumasArtifactLoadPathKind,
@@ -13,6 +13,12 @@ use crate::models::{
     ResolvedModelPackageFactsSummary,
 };
 use crate::Result;
+
+struct LoadTargetEvidence<'a> {
+    cache: &'a ModelPackageFactsCacheRecord,
+    model: &'a ModelRecord,
+    library_root: &'a Path,
+}
 
 pub(crate) fn unconfirmed_import_response() -> ResolveModelArtifactLoadTargetResponse {
     non_ready_response(
@@ -28,6 +34,7 @@ pub(crate) fn resolve_artifact_load_target_from_index(
     index: &ModelIndex,
     library_root: &Path,
     request: ResolveModelArtifactLoadTargetRequest,
+    expected_source_fingerprint: Option<&str>,
 ) -> Result<ResolveModelArtifactLoadTargetResponse> {
     if request.model_ref.model_id.trim().is_empty()
         || !request.model_ref.migration_diagnostics.is_empty()
@@ -41,7 +48,7 @@ pub(crate) fn resolve_artifact_load_target_from_index(
         ));
     }
 
-    let record = index.get(&request.model_ref.model_id)?;
+    let mut record = index.get(&request.model_ref.model_id)?;
     if record.is_none() {
         return Ok(non_ready_response(
             ModelArtifactState::Missing,
@@ -60,6 +67,12 @@ pub(crate) fn resolve_artifact_load_target_from_index(
         )
     }) {
         return Ok(unconfirmed_import_response());
+    }
+
+    if let Some(model) = record.as_mut() {
+        if let Some(metadata) = index.get_effective_metadata_json(&model.id)? {
+            model.metadata = serde_json::from_str(&metadata)?;
+        }
     }
 
     let selected_artifact_path =
@@ -106,11 +119,24 @@ pub(crate) fn resolve_artifact_load_target_from_index(
         Some(&selected_artifact_id),
         ModelPackageFactsCacheScope::Summary,
     )?;
-    let (summary_state, summary) = classify_package_facts_cache_record::<
-        ResolvedModelPackageFactsSummary,
-    >(Some(&selected_artifact_id), None, summary_record.as_ref());
+    let (summary_state, summary) =
+        classify_package_facts_cache_record::<ResolvedModelPackageFactsSummary>(
+            Some(&selected_artifact_id),
+            expected_source_fingerprint,
+            summary_record.as_ref(),
+        );
     if let Some(summary) = summary {
-        return Ok(response_from_summary(&request, summary));
+        return Ok(response_from_summary(
+            &request,
+            summary,
+            LoadTargetEvidence {
+                cache: summary_record
+                    .as_ref()
+                    .expect("decoded summary has a cache row"),
+                model: record.as_ref().expect("indexed model was checked"),
+                library_root,
+            },
+        ));
     }
     if summary_state != ModelPackageFactsCacheRowState::Missing {
         return Ok(response_from_cache_state(summary_state));
@@ -123,15 +149,48 @@ pub(crate) fn resolve_artifact_load_target_from_index(
     )?;
     let (detail_state, facts) = classify_package_facts_cache_record::<ResolvedModelPackageFacts>(
         Some(&selected_artifact_id),
-        None,
+        expected_source_fingerprint,
         detail_record.as_ref(),
     );
     if let Some(facts) = facts {
+        if facts.artifact.artifact_kind == PackageArtifactKind::HfCompatibleDirectory {
+            let model = record.as_ref().expect("indexed model was checked");
+            let expected_repo = model
+                .metadata
+                .get("repo_id")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| {
+                    model
+                        .metadata
+                        .get("huggingface_evidence")
+                        .and_then(|evidence| evidence.get("repo_id"))
+                        .and_then(serde_json::Value::as_str)
+                });
+            let expected_revision = model
+                .metadata
+                .get("upstream_revision")
+                .and_then(serde_json::Value::as_str);
+            if facts.transformers.as_ref().is_none_or(|source| {
+                source.source_repo_id.as_deref() != expected_repo
+                    || source.source_revision.as_deref() != expected_revision
+            }) {
+                return Ok(response_from_cache_state(
+                    ModelPackageFactsCacheRowState::StaleFingerprint,
+                ));
+            }
+        }
         return Ok(response_from_artifact(
             &request,
             facts.model_ref,
             facts.artifact,
             Some(facts.package_facts_contract_version),
+            LoadTargetEvidence {
+                cache: detail_record
+                    .as_ref()
+                    .expect("decoded detail has a cache row"),
+                model: record.as_ref().expect("indexed model was checked"),
+                library_root,
+            },
         ));
     }
 
@@ -251,6 +310,7 @@ pub(crate) fn library_unavailable_response() -> ResolveModelArtifactLoadTargetRe
 fn response_from_summary(
     request: &ResolveModelArtifactLoadTargetRequest,
     summary: ResolvedModelPackageFactsSummary,
+    evidence: LoadTargetEvidence<'_>,
 ) -> ResolveModelArtifactLoadTargetResponse {
     response_from_artifact(
         request,
@@ -267,6 +327,7 @@ fn response_from_summary(
             logical_size: None,
         },
         Some(summary.package_facts_contract_version),
+        evidence,
     )
 }
 
@@ -275,7 +336,65 @@ fn response_from_artifact(
     resolved_model_ref: crate::models::PumasModelRef,
     artifact: ResolvedArtifactFacts,
     package_facts_contract_version: Option<u32>,
+    evidence: LoadTargetEvidence<'_>,
 ) -> ResolveModelArtifactLoadTargetResponse {
+    if resolved_model_ref.model_ref_contract_version
+        != crate::models::PUMAS_MODEL_REF_CONTRACT_VERSION
+        || !resolved_model_ref.migration_diagnostics.is_empty()
+        || resolved_model_ref.model_id != request.model_ref.model_id
+        || evidence.cache.model_id != request.model_ref.model_id
+        || normalized_selected_artifact_id(resolved_model_ref.selected_artifact_id.as_deref())
+            != Some(evidence.cache.selected_artifact_id.as_str())
+        || request
+            .model_ref
+            .revision
+            .as_ref()
+            .is_some_and(|revision| Some(revision) != resolved_model_ref.revision.as_ref())
+        || evidence
+            .model
+            .metadata
+            .get("selected_artifact_id")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|id| Some(id) != resolved_model_ref.selected_artifact_id.as_deref())
+    {
+        return non_ready_response(
+            ModelArtifactState::Stale,
+            ModelEntryPathState::Stale,
+            PumasArtifactLoadTargetDiagnosticCode::SelectedArtifactMismatch,
+            Some("model_ref"),
+            "cached package facts do not preserve the selected model, artifact, or revision",
+        );
+    }
+
+    if artifact.artifact_kind == PackageArtifactKind::HfCompatibleDirectory {
+        let expected_revision = evidence
+            .model
+            .metadata
+            .get("upstream_revision")
+            .and_then(serde_json::Value::as_str);
+        let managed_root = evidence.library_root.join(&evidence.model.id);
+        let expected_storage = match evidence.model.metadata.get("storage_kind") {
+            None | Some(serde_json::Value::Null) => Some(crate::models::StorageKind::LibraryOwned),
+            Some(value) => serde_json::from_value::<crate::models::StorageKind>(value.clone()).ok(),
+        };
+        if !super::package_facts::manifest::is_package_observation_fingerprint(
+            &evidence.cache.source_fingerprint,
+        ) || expected_revision != resolved_model_ref.revision.as_deref()
+            || expected_storage != Some(artifact.storage_kind)
+            || resolved_model_ref.selected_artifact_path.as_deref()
+                != Some(artifact.entry_path.as_str())
+            || (artifact.storage_kind == crate::models::StorageKind::LibraryOwned
+                && Path::new(&artifact.entry_path) != managed_root)
+        {
+            return non_ready_response(
+                ModelArtifactState::Stale,
+                ModelEntryPathState::Stale,
+                PumasArtifactLoadTargetDiagnosticCode::StalePackageFacts,
+                Some("model_ref"),
+                "HF package facts require a current directory, revision, and versioned observation",
+            );
+        }
+    }
     if selected_artifact_path_mismatch(request, &resolved_model_ref) {
         return non_ready_response(
             ModelArtifactState::Stale,
@@ -350,7 +469,8 @@ fn response_from_artifact(
             library_root_id: None,
             storage_kind: artifact.storage_kind,
             validation_state: artifact.validation_state,
-            content_fingerprint: None,
+            content_fingerprint: normalized_non_empty(Some(&evidence.cache.source_fingerprint))
+                .map(ToOwned::to_owned),
             package_facts_contract_version,
         }),
         diagnostics: Vec::new(),

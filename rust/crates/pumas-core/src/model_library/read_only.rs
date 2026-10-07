@@ -61,7 +61,7 @@ impl PumasReadOnlyLibrary {
             return Ok(mode_not_allowed_response());
         }
 
-        resolve_artifact_load_target_from_index(&self.index, &self.library_root, request)
+        resolve_artifact_load_target_from_index(&self.index, &self.library_root, request, None)
     }
 }
 

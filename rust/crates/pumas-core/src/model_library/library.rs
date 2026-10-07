@@ -3096,7 +3096,7 @@ impl ModelLibrary {
             });
         }
         let storage_kind = metadata.storage_kind.unwrap_or(StorageKind::LibraryOwned);
-        let validation_state = metadata.validation_state.unwrap_or(
+        let mut validation_state = metadata.validation_state.unwrap_or(
             if is_diffusers_bundle(&metadata) || storage_kind == StorageKind::ExternalReference {
                 AssetValidationState::Invalid
             } else {
@@ -3116,7 +3116,25 @@ impl ModelLibrary {
             });
         }
 
-        let entry_path = if is_diffusers_bundle(&metadata) {
+        let manifest =
+            super::package_facts::manifest::PackageInspectionManifest::build(&model_dir, &metadata)
+                .await?;
+        let artifact_kind =
+            package_artifact_kind(&model_dir, &metadata, manifest.selected_files()).await?;
+        if artifact_kind == PackageArtifactKind::HfCompatibleDirectory
+            && manifest
+                .entries()
+                .iter()
+                .any(|entry| entry.status() == crate::models::PackageFactStatus::Missing)
+            && validation_state == AssetValidationState::Valid
+        {
+            validation_state = AssetValidationState::Degraded;
+        }
+        let entry_path = if artifact_kind == PackageArtifactKind::HfCompatibleDirectory
+            && storage_kind == StorageKind::LibraryOwned
+        {
+            model_dir.display().to_string()
+        } else if is_diffusers_bundle(&metadata) {
             match storage_kind {
                 StorageKind::LibraryOwned => model_dir.display().to_string(),
                 StorageKind::ExternalReference => {
@@ -3268,7 +3286,6 @@ impl ModelLibrary {
         let Some(facts) = facts else {
             return Ok(false);
         };
-        let expected_ref = context.model_ref();
         let current_revision = context.metadata().upstream_revision.as_deref();
         let revision_coheres = |revision: Option<&str>| {
             revision.is_none_or(|revision| Some(revision) == current_revision)
@@ -3282,17 +3299,7 @@ impl ModelLibrary {
         {
             return Ok(false);
         }
-        Ok(
-            facts.model_ref.model_ref_contract_version == expected_ref.model_ref_contract_version
-                && facts.model_ref.model_id == expected_ref.model_id
-                && facts.model_ref.selected_artifact_id == expected_ref.selected_artifact_id
-                && facts.model_ref.selected_artifact_path == expected_ref.selected_artifact_path
-                && facts.artifact.entry_path == context.descriptor().entry_path
-                && facts.artifact.storage_kind == context.descriptor().storage_kind
-                && facts.artifact.validation_state == context.descriptor().validation_state
-                && facts.artifact.selected_files == context.selected_files()
-                && facts.inspection_manifest.as_ref() == Some(&context.inspection_manifest()),
-        )
+        Ok(context.facts_are_coherent(&facts))
     }
 
     /// Read the final model outputs through the held destination and canonical
@@ -3423,6 +3430,15 @@ impl ModelLibrary {
         &self,
         model_id: &str,
     ) -> Result<ResolvedModelPackageFacts> {
+        self.resolve_model_package_facts_with_observation(model_id)
+            .await
+            .map(|(facts, _)| facts)
+    }
+
+    async fn resolve_model_package_facts_with_observation(
+        &self,
+        model_id: &str,
+    ) -> Result<(ResolvedModelPackageFacts, String)> {
         if let Some(guard) = &self.import_guard {
             guard.require_package_facts()?;
         }
@@ -3462,7 +3478,7 @@ impl ModelLibrary {
                     && cached.source_fingerprint == source_fingerprint
                 {
                     match serde_json::from_str::<ResolvedModelPackageFacts>(&cached.facts_json) {
-                        Ok(facts) => {
+                        Ok(facts) if context.facts_are_coherent(&facts) => {
                             self.validate_import_effect_async(context.model_dir())
                                 .await?;
                             self.upsert_model_package_facts_summary_cache(
@@ -3470,7 +3486,13 @@ impl ModelLibrary {
                                 &source_fingerprint,
                                 &facts,
                             )?;
-                            return Ok(facts);
+                            return Ok((facts, source_fingerprint));
+                        }
+                        Ok(_) => {
+                            tracing::debug!(
+                                model_id,
+                                "Reobserving incoherent cached package facts"
+                            );
                         }
                         Err(err) => {
                             tracing::warn!(
@@ -3638,14 +3660,14 @@ impl ModelLibrary {
                     cache_scope: ModelPackageFactsCacheScope::Detail,
                     package_facts_contract_version: i64::from(PACKAGE_FACTS_CONTRACT_VERSION),
                     producer_revision: context.metadata().updated_date.clone(),
-                    source_fingerprint,
+                    source_fingerprint: source_fingerprint.clone(),
                     facts_json: serde_json::to_string(&facts)?,
                     cached_at: now.clone(),
                     updated_at: now,
                 })?;
         }
 
-        Ok(facts)
+        Ok((facts, source_fingerprint))
     }
 
     fn upsert_model_package_facts_summary_cache(
@@ -3716,8 +3738,10 @@ impl ModelLibrary {
             if cached.package_facts_contract_version == i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
                 && cached.source_fingerprint == source_fingerprint
             {
-                if let Ok(summary) =
+                if let Some(summary) =
                     serde_json::from_str::<ResolvedModelPackageFactsSummary>(&cached.facts_json)
+                        .ok()
+                        .filter(|summary| context.summary_is_coherent(summary))
                 {
                     return Ok(ModelPackageFactsSummaryResult {
                         model_id: model_id.to_string(),
@@ -3736,8 +3760,10 @@ impl ModelLibrary {
             if cached.package_facts_contract_version == i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
                 && cached.source_fingerprint == source_fingerprint
             {
-                if let Ok(facts) =
+                if let Some(facts) =
                     serde_json::from_str::<ResolvedModelPackageFacts>(&cached.facts_json)
+                        .ok()
+                        .filter(|facts| context.facts_are_coherent(facts))
                 {
                     self.upsert_model_package_facts_summary_cache(
                         &context,
@@ -3847,13 +3873,13 @@ impl ModelLibrary {
 
     /// Resolve a selected artifact into an approved runtime load target.
     ///
-    /// The first implementation reads indexed/cache state through the shared
-    /// resolver core. It does not regenerate package facts or call broader
-    /// model-level execution descriptor APIs.
+    /// Owner-fresh resolution reobserves managed packages through the existing
+    /// facts producer. Indexed resolution only projects the stored observation.
     pub async fn resolve_model_artifact_load_target(
         &self,
         request: ResolveModelArtifactLoadTargetRequest,
     ) -> Result<ResolveModelArtifactLoadTargetResponse> {
+        let mut observed_fingerprint = None;
         if request.resolution_mode == PumasArtifactLoadTargetResolutionMode::OwnerFresh {
             if let Some(record) = self.index.get(&request.model_ref.model_id)? {
                 if record
@@ -3885,12 +3911,31 @@ impl ModelLibrary {
                     self.index
                         .delete_model_package_facts_cache(&request.model_ref.model_id)?;
                 }
+                if current_record.as_ref().is_some_and(|record| {
+                    record.metadata.get("storage_kind").and_then(Value::as_str)
+                        != Some("external_reference")
+                }) {
+                    // This is the existing owner producer, including publication
+                    // gates, observation comparison, and contextual cache validation.
+                    observed_fingerprint = match self
+                        .resolve_model_package_facts_with_observation(&request.model_ref.model_id)
+                        .await
+                    {
+                        Ok((_, fingerprint)) => Some(fingerprint),
+                        Err(_) => return Ok(library_unavailable_response()),
+                    };
+                }
             }
         }
         let index = self.index.clone();
         let root = self.library_root.clone();
         tokio::task::spawn_blocking(move || {
-            resolve_artifact_load_target_from_index(&index, &root, request)
+            resolve_artifact_load_target_from_index(
+                &index,
+                &root,
+                request,
+                observed_fingerprint.as_deref(),
+            )
         })
         .await
         .map_err(|error| {
@@ -7848,6 +7893,10 @@ pub struct LibraryStats {
 
 #[cfg(test)]
 mod tests {
+    mod hf_load_target_tests {
+        include!("hf_load_target_tests.rs");
+    }
+
     use super::*;
     use crate::intent::{AcquisitionPolicy, ModelRequirement, ModelSelector};
     use crate::models::{

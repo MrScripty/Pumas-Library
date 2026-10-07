@@ -385,11 +385,30 @@ GGUF quantization constraints require header evidence; filename-derived guesses
 remain insufficient, and canonical header labels such as `MOSTLY_Q4_K_M` match
 `Q4_K_M` without changing the recorded evidence.
 
-Some existing local Hugging Face directory packages expose a primary-file entry
-path with a directory load-target kind. The intent interface reports
-`Incomplete` for that inconsistency rather than returning a handle with the
-wrong path kind. Correcting that existing package/load-target contract is
-separate work.
+Managed Hugging Face directory packages use their canonical package directory
+in execution descriptors, package facts, and artifact load targets. Persisted
+upstream revisions survive the facts and target projections, including literal
+legacy `main` revisions without claiming immutable provenance.
+
+`resolve_model_artifact_load_target` in `OwnerFresh` mode reobserves managed
+packages through the existing package-facts producer. Missing selected or
+expected members prevent a ready HF target. `ReadOnlyIndexed` returns indexed
+snapshot evidence without inspecting package files or repairing cache rows.
+Legacy HF observations require owner reinspection; indexed resolution refuses
+their stale tokens, file-shaped paths, and dropped revisions.
+
+Target `content_fingerprint` projects the cache's exact
+`pumas-package-observation-v1:sha256:<digest>` token. The protocol version is part
+of the observation hash domain. It covers canonical metadata, descriptor,
+dependencies, manifest paths, file sizes and mtimes. This is a resident-cache
+invalidation observation, not a whole-package content digest: equal-length
+byte changes that restore mtime may leave it unchanged. Primary-file hashes and
+managed acquisition verification remain separate evidence.
+
+The synthetic producer tests and the pinned Pantograph guard interoperability
+runner at `tests/pantograph_guard_interop/run.py` exercise this handoff without
+loading model tensors. Real Cohere processor-file completeness requires a
+separate pinned member-manifest audit, and runtime compatibility is not claimed.
 
 See the native [local intent example](examples/intent_model.rs) and [managed
 acquisition example](examples/intent_acquire.rs) for the public call shapes.

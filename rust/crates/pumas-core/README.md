@@ -397,6 +397,13 @@ snapshot evidence without inspecting package files or repairing cache rows.
 Legacy HF observations require owner reinspection; indexed resolution refuses
 their stale tokens, file-shaped paths, and dropped revisions.
 
+Owner and read-only views capture the existing canonical library root and its
+platform display spelling at startup/open. Indexed HF path checks then compare
+against that stored display root without probing package directories. Relative
+and symlink root aliases select the same index; Windows verbatim drive and UNC
+prefixes follow the existing display contract. Portable relative model IDs are
+required before joining paths. Physical canonical roots remain the custody basis.
+
 Target `content_fingerprint` projects the cache's exact
 `pumas-package-observation-v1:sha256:<digest>` token. The protocol version is part
 of the observation hash domain. It covers canonical metadata, descriptor,

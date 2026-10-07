@@ -10,6 +10,11 @@ const TOKEN_PREFIX: &str = "pumas-package-observation-v1:sha256:";
 
 async fn synthetic_cohere_library() -> (TempDir, ModelLibrary, PathBuf) {
     let (temp, library) = setup_library().await;
+    let model_dir = seed_synthetic_cohere(&library).await;
+    (temp, library, model_dir)
+}
+
+async fn seed_synthetic_cohere(library: &ModelLibrary) -> PathBuf {
     let model_dir = library.build_model_path("audio", "cohere", "synthetic-asr");
     std::fs::create_dir_all(&model_dir).unwrap();
     write_min_safetensors(&model_dir.join("model.safetensors"));
@@ -60,7 +65,7 @@ async fn synthetic_cohere_library() -> (TempDir, ModelLibrary, PathBuf) {
     };
     library.save_metadata(&model_dir, &metadata).await.unwrap();
     library.index_model_dir(&model_dir).await.unwrap();
-    (temp, library, model_dir)
+    model_dir
 }
 
 fn hf_request(
@@ -115,14 +120,153 @@ fn remove_summary(library: &ModelLibrary) {
     ).unwrap();
 }
 
+async fn assert_read_only_alias_snapshot(
+    library: &ModelLibrary,
+    model_dir: &Path,
+    alias_root: &Path,
+    scope: ModelPackageFactsCacheScope,
+) {
+    let owner_target =
+        ready_target(library, PumasArtifactLoadTargetResolutionMode::OwnerFresh).await;
+    if scope == ModelPackageFactsCacheScope::Detail {
+        remove_summary(library);
+    }
+    let before_summary = library
+        .index
+        .list_model_package_facts_cache(MODEL_ID, ModelPackageFactsCacheScope::Summary)
+        .unwrap();
+    let before_detail = library
+        .index
+        .list_model_package_facts_cache(MODEL_ID, ModelPackageFactsCacheScope::Detail)
+        .unwrap();
+    let before_model = serde_json::to_value(library.index.get(MODEL_ID).unwrap()).unwrap();
+    let before_effective = library.index.get_effective_metadata_json(MODEL_ID).unwrap();
+    let before_cursor = library.index.current_model_library_update_cursor().unwrap();
+    // Keep models.db and the canonical library root, but remove the entire
+    // observed package. Indexed resolution must not canonicalize or scan it.
+    std::fs::remove_dir_all(model_dir).unwrap();
+    let read_only = crate::model_library::PumasReadOnlyLibrary::open(alias_root).unwrap();
+    assert_eq!(read_only.library_root(), library.library_root());
+    let response = read_only
+        .resolve_model_artifact_load_target(hf_request(
+            PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+        ))
+        .unwrap();
+    assert!(
+        response.is_ready(),
+        "{scope:?} root alias lost the indexed target: {response:?}"
+    );
+    let target = response.target.unwrap();
+    assert_eq!(
+        target, owner_target,
+        "root alias changed canonical path, reference or observation token"
+    );
+    assert_eq!(
+        target.local_load_path,
+        library
+            .library_display_root
+            .join(MODEL_ID)
+            .display()
+            .to_string()
+    );
+    assert_eq!(
+        target.model_ref.selected_artifact_path.as_deref(),
+        Some(target.local_load_path.as_str())
+    );
+    assert_eq!(
+        library
+            .index
+            .list_model_package_facts_cache(MODEL_ID, ModelPackageFactsCacheScope::Summary)
+            .unwrap(),
+        before_summary
+    );
+    assert_eq!(
+        library
+            .index
+            .list_model_package_facts_cache(MODEL_ID, ModelPackageFactsCacheScope::Detail)
+            .unwrap(),
+        before_detail
+    );
+    assert_eq!(
+        serde_json::to_value(library.index.get(MODEL_ID).unwrap()).unwrap(),
+        before_model
+    );
+    assert_eq!(
+        library.index.get_effective_metadata_json(MODEL_ID).unwrap(),
+        before_effective
+    );
+    assert_eq!(
+        library.index.current_model_library_update_cursor().unwrap(),
+        before_cursor
+    );
+}
+
+#[tokio::test]
+async fn hf_read_only_relative_root_preserves_summary_and_detail_snapshot() {
+    let cwd = std::env::current_dir().unwrap();
+    for scope in [
+        ModelPackageFactsCacheScope::Summary,
+        ModelPackageFactsCacheScope::Detail,
+    ] {
+        let (temp, library) = setup_library_relative_to_cwd().await;
+        let model_dir = seed_synthetic_cohere(&library).await;
+        let relative_root = temp.path().strip_prefix(&cwd).unwrap();
+        assert!(!relative_root.is_absolute());
+        assert_read_only_alias_snapshot(&library, &model_dir, relative_root, scope).await;
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn hf_read_only_symlink_root_preserves_summary_and_detail_snapshot() {
+    for scope in [
+        ModelPackageFactsCacheScope::Summary,
+        ModelPackageFactsCacheScope::Detail,
+    ] {
+        let temp = TempDir::new().unwrap();
+        let library = ModelLibrary::new(temp.path().join("library"))
+            .await
+            .unwrap();
+        let model_dir = seed_synthetic_cohere(&library).await;
+        let alias_root = temp.path().join("library-alias");
+        std::os::unix::fs::symlink(library.library_root(), &alias_root).unwrap();
+        assert_read_only_alias_snapshot(&library, &model_dir, &alias_root, scope).await;
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn hf_windows_native_owner_target_round_trips_canonical_display_path() {
+    let (_temp, library, model_dir) = synthetic_cohere_library().await;
+    let canonical_package = model_dir.canonicalize().unwrap();
+    let displayed_package = crate::platform::platform_display_path(&canonical_package);
+    assert_ne!(
+        Path::new(&displayed_package),
+        canonical_package.as_path(),
+        "fixture must exercise verbatim canonical path versus display path"
+    );
+    let target = ready_target(&library, PumasArtifactLoadTargetResolutionMode::OwnerFresh).await;
+    assert_eq!(target.local_load_path, displayed_package);
+    assert_eq!(
+        target.model_ref.selected_artifact_path.as_deref(),
+        Some(displayed_package.as_str())
+    );
+    assert_eq!(target.load_path_kind, PumasArtifactLoadPathKind::Directory);
+    assert_eq!(
+        target.content_fingerprint.as_deref(),
+        Some(
+            cached(&library, ModelPackageFactsCacheScope::Detail)
+                .source_fingerprint
+                .as_str()
+        )
+    );
+}
+
 #[tokio::test]
 async fn hf_owner_target_projects_canonical_package_identity_revision_and_observation() {
     let (_temp, library, model_dir) = synthetic_cohere_library().await;
     let target = ready_target(&library, PumasArtifactLoadTargetResolutionMode::OwnerFresh).await;
-    let root = std::fs::canonicalize(&model_dir)
-        .unwrap()
-        .display()
-        .to_string();
+    let root = crate::platform::platform_display_path(&std::fs::canonicalize(&model_dir).unwrap());
     assert_eq!(target.local_load_path, root);
     assert_eq!(target.load_path_kind, PumasArtifactLoadPathKind::Directory);
     assert_eq!(target.storage_kind, StorageKind::LibraryOwned);
@@ -207,6 +351,7 @@ async fn hf_expected_owner_observation_is_enforced_for_summary_and_detail() {
             resolve_artifact_load_target_from_index(
                 &library.index,
                 library.library_root(),
+                &library.library_display_root,
                 hf_request(PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed),
                 expected,
             )
@@ -378,12 +523,21 @@ async fn hf_currentness_refuses_dropped_revision_with_matching_observation() {
     let (_temp, library, _model_dir) = synthetic_cohere_library().await;
     ready_target(&library, PumasArtifactLoadTargetResolutionMode::OwnerFresh).await;
     let mut row = cached(&library, ModelPackageFactsCacheScope::Detail);
-    assert!(library.cached_model_package_facts_are_current(&row, None, None).await.unwrap());
+    assert!(library
+        .cached_model_package_facts_are_current(&row, None, None)
+        .await
+        .unwrap());
     let mut facts: ResolvedModelPackageFacts = serde_json::from_str(&row.facts_json).unwrap();
     facts.model_ref.revision = None;
     row.facts_json = serde_json::to_string(&facts).unwrap();
-    assert!(!library.cached_model_package_facts_are_current(&row, None, None).await.unwrap());
-    library.index.upsert_model_package_facts_cache(&row).unwrap();
+    assert!(!library
+        .cached_model_package_facts_are_current(&row, None, None)
+        .await
+        .unwrap());
+    library
+        .index
+        .upsert_model_package_facts_cache(&row)
+        .unwrap();
     let target = ready_target(&library, PumasArtifactLoadTargetResolutionMode::OwnerFresh).await;
     assert_eq!(target.model_ref.revision.as_deref(), Some(REVISION));
 }

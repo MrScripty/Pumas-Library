@@ -2,7 +2,7 @@ use super::selected_audio_execution::SelectedAudioLoad;
 use super::*;
 use base64::Engine as _;
 use pumas_library::index::{ModelPackageFactsCacheScope, ModelRecord};
-use pumas_library::model_library::ModelLibrary;
+use pumas_library::model_library::{ModelLibrary, PumasReadOnlyLibrary};
 use pumas_library::models as wire;
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -48,7 +48,10 @@ struct Fixture {
 }
 
 async fn fixture() -> Fixture {
-    let directory = tempfile::tempdir().unwrap();
+    fixture_in_directory(tempfile::tempdir().unwrap()).await
+}
+
+async fn fixture_in_directory(directory: tempfile::TempDir) -> Fixture {
     let library = ModelLibrary::new(directory.path().join("models"))
         .await
         .unwrap();
@@ -409,6 +412,121 @@ async fn actual_producer_detail_indexed_target_passes_actual_guard_without_cache
         wire::PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
     )
     .await;
+}
+
+async fn actual_read_only_alias_targets_pass_guard(
+    fixture: &Fixture,
+    root_alias: &std::path::Path,
+    alias_name: &str,
+) {
+    let reader = PumasReadOnlyLibrary::open(root_alias).unwrap();
+    let artifact_id = fixture
+        .target
+        .model_ref
+        .selected_artifact_id
+        .as_deref()
+        .unwrap();
+    // Retain unchanged rows from the real producer to exercise both genuine
+    // read-only accepted cache scopes through the aliased root.
+    let rows = [
+        ModelPackageFactsCacheScope::Summary,
+        ModelPackageFactsCacheScope::Detail,
+    ]
+    .map(|scope| {
+        fixture
+            .library
+            .index()
+            .get_model_package_facts_cache(MODEL_ID, Some(artifact_id), scope)
+            .unwrap()
+            .unwrap()
+    });
+    for row in rows {
+        fixture
+            .library
+            .index()
+            .delete_model_package_facts_cache(MODEL_ID)
+            .unwrap();
+        fixture
+            .library
+            .index()
+            .upsert_model_package_facts_cache(&row)
+            .unwrap();
+        let before = cache_snapshot(fixture, artifact_id);
+        let response = reader
+            .resolve_model_artifact_load_target(wire::ResolveModelArtifactLoadTargetRequest {
+                model_ref: project(&fixture.request.model_ref.as_ref().unwrap()),
+                expected_artifact_kind: None,
+                caller_observed_entry_path: None,
+                caller_observed_package_facts_contract_version: None,
+                resolution_mode: wire::PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+                consumer: wire::PumasArtifactConsumer {
+                    consumer_name: "pantograph-read-only-root-alias-interop".into(),
+                    task_kind: Some("audio_transcription".into()),
+                    runtime_family: Some("pytorch.cpu".into()),
+                },
+            })
+            .unwrap();
+        assert!(
+            response.is_ready(),
+            "read-only alias={alias_name}, scope={:?}: {response:?}",
+            row.cache_scope
+        );
+        assert!(reader.library_root().is_absolute());
+        assert_eq!(reader.library_root(), fixture.library.library_root());
+        assert_eq!(before, cache_snapshot(fixture, artifact_id));
+        let encoded = serde_json::to_vec(&response).unwrap();
+        let decoded: wire::ResolveModelArtifactLoadTargetResponse =
+            serde_json::from_slice(&encoded).unwrap();
+        let mut target: PumasArtifactLoadTarget = project(&decoded.target.unwrap());
+        target.model_ref.selected_artifact_path = fixture
+            .decision
+            .selected_model_ref
+            .as_ref()
+            .unwrap()
+            .selected_artifact_path
+            .clone();
+        assert_eq!(
+            target, fixture.target,
+            "alias must preserve owner-produced target identity"
+        );
+        SelectedAudioLoad::validate(&fixture.request, &target, &fixture.decision)
+            .await
+            .unwrap();
+        println!(
+            "actual read-only library: root_alias={alias_name}, accepted_scope={:?}, canonical_root=true, indexed_cache_unchanged=true",
+            row.cache_scope
+        );
+    }
+}
+
+#[tokio::test]
+async fn actual_read_only_relative_root_summary_and_detail_targets_pass_actual_guard() {
+    let working_directory = std::env::current_dir().unwrap();
+    let directory = tempfile::Builder::new()
+        .prefix(".pumas-read-only-relative-root-")
+        .tempdir_in(&working_directory)
+        .unwrap();
+    let fixture = fixture_in_directory(directory).await;
+    let physical_working_directory = working_directory.canonicalize().unwrap();
+    let relative_root = fixture
+        .library
+        .library_root()
+        .strip_prefix(&physical_working_directory)
+        .unwrap();
+    assert!(!relative_root.is_absolute());
+    actual_read_only_alias_targets_pass_guard(&fixture, relative_root, "relative").await;
+    assert_eq!(std::env::current_dir().unwrap(), working_directory);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn actual_read_only_symlink_root_summary_and_detail_targets_pass_actual_guard() {
+    let working_directory = std::env::current_dir().unwrap();
+    let fixture = fixture().await;
+    let alias = fixture._directory.path().join("models-symlink-alias");
+    std::os::unix::fs::symlink(fixture.library.library_root(), &alias).unwrap();
+    actual_read_only_alias_targets_pass_guard(&fixture, &alias, "symlink").await;
+    assert_eq!(std::env::current_dir().unwrap(), working_directory);
 }
 
 #[tokio::test]

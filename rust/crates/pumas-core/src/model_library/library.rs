@@ -202,6 +202,8 @@ pub(crate) struct CustomRuntimeProjection {
 pub struct ModelLibrary {
     /// Root directory of the library
     library_root: PathBuf,
+    /// Display spelling of the canonical root, captured before snapshot reads.
+    library_display_root: PathBuf,
     /// SQLite model index with FTS5
     index: ModelIndex,
     /// Link registry for tracking symlinks
@@ -233,27 +235,31 @@ impl ModelLibrary {
     pub async fn new(library_root: impl Into<PathBuf>) -> Result<Self> {
         let library_root = library_root.into();
 
-        let (library_root, index, link_registry) = tokio::task::spawn_blocking(move || {
-            std::fs::create_dir_all(&library_root)?;
-            let library_root = library_root.canonicalize()?;
-            let db_path = library_root.join(DB_FILENAME);
-            let registry_path = library_root.join("link_registry.json");
-            let index = ModelIndex::new(&db_path)?;
-            let link_registry = LinkRegistry::new(registry_path);
-            Ok::<_, PumasError>((library_root, index, link_registry))
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join model library startup initialization task: {}",
-                err
-            ))
-        })??;
+        let (library_root, library_display_root, index, link_registry) =
+            tokio::task::spawn_blocking(move || {
+                std::fs::create_dir_all(&library_root)?;
+                let library_root = library_root.canonicalize()?;
+                let library_display_root =
+                    PathBuf::from(crate::platform::platform_display_path(&library_root));
+                let db_path = library_root.join(DB_FILENAME);
+                let registry_path = library_root.join("link_registry.json");
+                let index = ModelIndex::new(&db_path)?;
+                let link_registry = LinkRegistry::new(registry_path);
+                Ok::<_, PumasError>((library_root, library_display_root, index, link_registry))
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join model library startup initialization task: {}",
+                    err
+                ))
+            })??;
 
         link_registry.load().await?;
 
         let library = Self {
             library_root,
+            library_display_root,
             index,
             link_registry: Arc::new(RwLock::new(link_registry)),
             write_lock: Arc::new(Mutex::new(())),
@@ -2920,6 +2926,7 @@ impl ModelLibrary {
             })?;
         let resolved = resolve_local_model_type_with_persisted_hints_async(
             self.index().clone(),
+            self.library_root.clone(),
             model_dir.clone(),
             metadata.clone(),
             type_info.clone(),
@@ -3879,6 +3886,11 @@ impl ModelLibrary {
         &self,
         request: ResolveModelArtifactLoadTargetRequest,
     ) -> Result<ResolveModelArtifactLoadTargetResponse> {
+        if !super::artifact_load_target::model_id_is_library_relative(&request.model_ref.model_id)
+            || !request.model_ref.migration_diagnostics.is_empty()
+        {
+            return Ok(super::artifact_load_target::invalid_model_reference_response());
+        }
         let mut observed_fingerprint = None;
         if request.resolution_mode == PumasArtifactLoadTargetResolutionMode::OwnerFresh {
             if let Some(record) = self.index.get(&request.model_ref.model_id)? {
@@ -3929,10 +3941,12 @@ impl ModelLibrary {
         }
         let index = self.index.clone();
         let root = self.library_root.clone();
+        let display_root = self.library_display_root.clone();
         tokio::task::spawn_blocking(move || {
             resolve_artifact_load_target_from_index(
                 &index,
                 &root,
+                &display_root,
                 request,
                 observed_fingerprint.as_deref(),
             )
@@ -4237,6 +4251,7 @@ impl ModelLibrary {
         })?;
         let resolved = resolve_local_model_type_with_persisted_hints_async(
             self.index().clone(),
+            self.library_root.clone(),
             model_dir.clone(),
             metadata.clone(),
             file_type_info.clone(),
@@ -4963,6 +4978,7 @@ async fn save_overrides_projection_async(
 
 async fn resolve_local_model_type_with_persisted_hints_async(
     index: ModelIndex,
+    library_root: PathBuf,
     model_dir: PathBuf,
     metadata: ModelMetadata,
     file_type_info: Option<ModelTypeInfo>,
@@ -4970,6 +4986,7 @@ async fn resolve_local_model_type_with_persisted_hints_async(
     tokio::task::spawn_blocking(move || {
         resolve_local_model_type_with_persisted_hints(
             &index,
+            &library_root,
             &model_dir,
             &metadata,
             file_type_info.as_ref(),
@@ -7079,6 +7096,7 @@ fn find_primary_model_file_in_selection(
 
 fn resolve_local_model_type_with_persisted_hints(
     index: &ModelIndex,
+    library_root: &Path,
     model_dir: &Path,
     metadata: &ModelMetadata,
     file_type_info: Option<&ModelTypeInfo>,
@@ -7093,9 +7111,14 @@ fn resolve_local_model_type_with_persisted_hints(
         spec_model_type.as_deref(),
         huggingface_evidence.as_ref(),
     )?;
-    let resolved = apply_unresolved_model_type_fallbacks(resolved, model_dir, file_type_info);
+    let resolved =
+        apply_unresolved_model_type_fallbacks(resolved, model_dir, library_root, file_type_info);
 
-    Ok(apply_name_token_disambiguation(resolved, model_dir))
+    Ok(apply_name_token_disambiguation(
+        resolved,
+        model_dir,
+        library_root,
+    ))
 }
 
 fn classification_hints_from_persisted_sources(
@@ -7225,8 +7248,9 @@ fn load_download_marker_hints(model_dir: &Path) -> Option<DownloadMarkerHints> {
 fn apply_name_token_disambiguation(
     mut resolved: ModelTypeResolution,
     model_dir: &Path,
+    library_root: &Path,
 ) -> ModelTypeResolution {
-    let Some(token_type) = detect_model_type_from_name_tokens(model_dir) else {
+    let Some(token_type) = detect_model_type_from_name_tokens(model_dir, library_root) else {
         return resolved;
     };
 
@@ -7259,6 +7283,7 @@ fn apply_name_token_disambiguation(
 fn apply_unresolved_model_type_fallbacks(
     mut resolved: ModelTypeResolution,
     model_dir: &Path,
+    library_root: &Path,
     file_type_info: Option<&ModelTypeInfo>,
 ) -> ModelTypeResolution {
     if resolved.model_type != ModelType::Unknown || resolved.source != "unresolved" {
@@ -7277,7 +7302,7 @@ fn apply_unresolved_model_type_fallbacks(
     }
 
     let Some(file_type_info) = file_type_info else {
-        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir) {
+        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir, library_root) {
             apply_fallback_resolution(
                 &mut resolved,
                 token_type,
@@ -7289,7 +7314,7 @@ fn apply_unresolved_model_type_fallbacks(
         return resolved;
     };
     if file_type_info.model_type == ModelType::Unknown {
-        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir) {
+        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir, library_root) {
             apply_fallback_resolution(
                 &mut resolved,
                 token_type,
@@ -7408,8 +7433,23 @@ fn detect_model_type_from_directory_layout(model_dir: &Path) -> Option<ModelType
     None
 }
 
-fn detect_model_type_from_name_tokens(model_dir: &Path) -> Option<ModelType> {
-    let mut token_pool = model_dir.display().to_string().to_lowercase();
+fn detect_model_type_from_name_tokens(model_dir: &Path, library_root: &Path) -> Option<ModelType> {
+    // Host/library ancestors are not model evidence (and temporary directory
+    // names can contain classification tokens). Preserve only library-relative
+    // type/family/name hints plus immediate members; external paths use basename.
+    let mut token_pool = model_dir
+        .strip_prefix(library_root)
+        .ok()
+        .filter(|relative| {
+            !relative.as_os_str().is_empty()
+                && relative
+                    .components()
+                    .all(|part| matches!(part, Component::Normal(_)))
+        })
+        .map(Path::as_os_str)
+        .or_else(|| model_dir.file_name())
+        .map(|name| name.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
     if let Ok(entries) = std::fs::read_dir(model_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let name = entry.file_name().to_string_lossy().to_lowercase();
@@ -10837,6 +10877,33 @@ mod tests {
             updated.model_type_resolution_source,
             Some("model-type-name-tokens".to_string())
         );
+    }
+
+    #[test]
+    fn test_name_token_fallback_ignores_host_directory_categories() {
+        let temp = TempDir::new().unwrap();
+        for ancestor in ["vlm", "audio", "diffusion", "vision", "embedding"] {
+            let library_root = temp.path().join(ancestor);
+            let model_dir = library_root.join("unknown/qwen3/qwen3-reranker-4b");
+            std::fs::create_dir_all(&model_dir).unwrap();
+            std::fs::write(model_dir.join("qwen3-reranker-4b.pt"), b"synthetic").unwrap();
+            assert_eq!(
+                detect_model_type_from_name_tokens(&model_dir, &library_root),
+                Some(ModelType::Reranker),
+                "host ancestor {ancestor} must not change model classification"
+            );
+        }
+        for (relative, expected) in [
+            ("audio/vendor/generic-model", ModelType::Audio),
+            ("vlm/qwen/generic-model", ModelType::Vlm),
+            ("reranker/vendor/generic-model", ModelType::Reranker),
+        ] {
+            assert_eq!(
+                detect_model_type_from_name_tokens(&temp.path().join(relative), temp.path()),
+                Some(expected),
+                "legitimate library-relative category must survive"
+            );
+        }
     }
 
     #[tokio::test]

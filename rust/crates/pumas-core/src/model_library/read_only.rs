@@ -21,15 +21,21 @@ const DB_FILENAME: &str = "models.db";
 /// and receipts; cached Ready facts cannot replace that physical evidence.
 pub struct PumasReadOnlyLibrary {
     library_root: PathBuf,
+    library_display_root: PathBuf,
     index: ModelIndex,
 }
 
 impl PumasReadOnlyLibrary {
     pub fn open(library_root: impl Into<PathBuf>) -> Result<Self> {
-        let library_root = library_root.into();
+        // Observe only the existing root once. Snapshot resolution does not
+        // canonicalize or inspect individual package directories.
+        let library_root = library_root.into().canonicalize()?;
+        let library_display_root =
+            PathBuf::from(crate::platform::platform_display_path(&library_root));
         let index = ModelIndex::open_read_only(library_root.join(DB_FILENAME))?;
         Ok(Self {
             library_root,
+            library_display_root,
             index,
         })
     }
@@ -61,7 +67,13 @@ impl PumasReadOnlyLibrary {
             return Ok(mode_not_allowed_response());
         }
 
-        resolve_artifact_load_target_from_index(&self.index, &self.library_root, request, None)
+        resolve_artifact_load_target_from_index(
+            &self.index,
+            &self.library_root,
+            &self.library_display_root,
+            request,
+            None,
+        )
     }
 }
 

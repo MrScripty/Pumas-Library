@@ -17,7 +17,36 @@ use crate::Result;
 struct LoadTargetEvidence<'a> {
     cache: &'a ModelPackageFactsCacheRecord,
     model: &'a ModelRecord,
-    library_root: &'a Path,
+    library_display_root: &'a Path,
+}
+
+/// Model IDs are portable, relative slash-separated library paths. Validate
+/// before joining so a drive, root, or traversal cannot replace root identity.
+pub(crate) fn model_id_is_library_relative(value: &str) -> bool {
+    !value.is_empty()
+        && value == value.trim()
+        && !value.contains(['\\', ':', '\0'])
+        && value.split('/').all(|part| {
+            !part.is_empty()
+                && part == part.trim()
+                && !part.ends_with('.')
+                && part != "."
+                && part != ".."
+        })
+}
+
+pub(crate) fn invalid_model_reference_response() -> ResolveModelArtifactLoadTargetResponse {
+    non_ready_response(
+        ModelArtifactState::Missing,
+        ModelEntryPathState::Missing,
+        PumasArtifactLoadTargetDiagnosticCode::MissingModel,
+        Some("model_ref"),
+        "model_ref does not identify a resolved library-relative Pumas model",
+    )
+}
+
+fn managed_hf_entry_path_matches(display_root: &Path, model_id: &str, entry_path: &str) -> bool {
+    model_id_is_library_relative(model_id) && Path::new(entry_path) == display_root.join(model_id)
 }
 
 pub(crate) fn unconfirmed_import_response() -> ResolveModelArtifactLoadTargetResponse {
@@ -33,19 +62,14 @@ pub(crate) fn unconfirmed_import_response() -> ResolveModelArtifactLoadTargetRes
 pub(crate) fn resolve_artifact_load_target_from_index(
     index: &ModelIndex,
     library_root: &Path,
+    library_display_root: &Path,
     request: ResolveModelArtifactLoadTargetRequest,
     expected_source_fingerprint: Option<&str>,
 ) -> Result<ResolveModelArtifactLoadTargetResponse> {
-    if request.model_ref.model_id.trim().is_empty()
+    if !model_id_is_library_relative(&request.model_ref.model_id)
         || !request.model_ref.migration_diagnostics.is_empty()
     {
-        return Ok(non_ready_response(
-            ModelArtifactState::Missing,
-            ModelEntryPathState::Missing,
-            PumasArtifactLoadTargetDiagnosticCode::MissingModel,
-            Some("model_ref"),
-            "model_ref does not identify a resolved Pumas model",
-        ));
+        return Ok(invalid_model_reference_response());
     }
 
     let mut record = index.get(&request.model_ref.model_id)?;
@@ -134,7 +158,7 @@ pub(crate) fn resolve_artifact_load_target_from_index(
                     .as_ref()
                     .expect("decoded summary has a cache row"),
                 model: record.as_ref().expect("indexed model was checked"),
-                library_root,
+                library_display_root,
             },
         ));
     }
@@ -189,7 +213,7 @@ pub(crate) fn resolve_artifact_load_target_from_index(
                     .as_ref()
                     .expect("decoded detail has a cache row"),
                 model: record.as_ref().expect("indexed model was checked"),
-                library_root,
+                library_display_root,
             },
         ));
     }
@@ -372,7 +396,8 @@ fn response_from_artifact(
             .metadata
             .get("upstream_revision")
             .and_then(serde_json::Value::as_str);
-        let managed_root = evidence.library_root.join(&evidence.model.id);
+        // Both sides use the producer's canonical display contract. The root
+        // was observed at open; this comparison never probes package paths.
         let expected_storage = match evidence.model.metadata.get("storage_kind") {
             None | Some(serde_json::Value::Null) => Some(crate::models::StorageKind::LibraryOwned),
             Some(value) => serde_json::from_value::<crate::models::StorageKind>(value.clone()).ok(),
@@ -384,7 +409,11 @@ fn response_from_artifact(
             || resolved_model_ref.selected_artifact_path.as_deref()
                 != Some(artifact.entry_path.as_str())
             || (artifact.storage_kind == crate::models::StorageKind::LibraryOwned
-                && Path::new(&artifact.entry_path) != managed_root)
+                && !managed_hf_entry_path_matches(
+                    evidence.library_display_root,
+                    &evidence.model.id,
+                    &artifact.entry_path,
+                ))
         {
             return non_ready_response(
                 ModelArtifactState::Stale,
@@ -638,5 +667,74 @@ fn load_path_kind(artifact_kind: PackageArtifactKind) -> PumasArtifactLoadPathKi
         | PackageArtifactKind::Adapter
         | PackageArtifactKind::Shard
         | PackageArtifactKind::Unknown => PumasArtifactLoadPathKind::File,
+    }
+}
+
+#[cfg(test)]
+mod path_identity_tests {
+    use super::*;
+
+    #[test]
+    fn managed_hf_identity_refuses_portable_root_and_traversal_aliases() {
+        let root = Path::new("library");
+        assert!(managed_hf_entry_path_matches(
+            root,
+            "audio/cohere/asr",
+            "library/audio/cohere/asr"
+        ));
+        for id in [
+            "",
+            "/outside",
+            "../outside",
+            "audio/../outside",
+            "audio/./asr",
+            "audio//asr",
+            "audio/asr/",
+            "C:/outside",
+            r"C:\outside",
+            r"audio\asr",
+            " audio/asr",
+            "audio/asr\0",
+            "audio/.. /outside",
+            "audio/. /asr",
+            "audio/asr./other",
+            "audio/asr /other",
+        ] {
+            assert!(!model_id_is_library_relative(id), "accepted {id:?}");
+            assert!(!managed_hf_entry_path_matches(root, id, "outside"));
+        }
+        assert!(!managed_hf_entry_path_matches(
+            root,
+            "audio/cohere/asr",
+            "outside/audio/cohere/asr"
+        ));
+        assert!(!managed_hf_entry_path_matches(
+            root,
+            "audio/cohere/asr",
+            "library/audio/cohere/asr/model.safetensors"
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn managed_hf_display_identity_matches_drive_and_unc_roots_without_io() {
+        for (root, entry) in [
+            (r"C:\library", r"C:\library\audio\cohere\asr"),
+            (
+                r"\\server\share\library",
+                r"\\server\share\library\audio\cohere\asr",
+            ),
+        ] {
+            assert!(managed_hf_entry_path_matches(
+                Path::new(root),
+                "audio/cohere/asr",
+                entry
+            ));
+            assert!(!managed_hf_entry_path_matches(
+                Path::new(root),
+                "audio/cohere/other",
+                entry
+            ));
+        }
     }
 }

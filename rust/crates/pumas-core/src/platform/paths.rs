@@ -313,6 +313,20 @@ pub fn set_test_registry_db_path(path: Option<PathBuf>) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn display_identity_strips_drive_and_unc_verbatim_prefixes_without_io() {
+        for (physical, display) in [
+            (r"\\?\C:\library", r"C:\library"),
+            (r"\\?\UNC\server\share\library", r"\\server\share\library"),
+        ] {
+            assert_eq!(
+                super::strip_windows_verbatim_prefix(std::path::Path::new(physical)),
+                std::path::PathBuf::from(display)
+            );
+        }
+    }
+
     #[test]
     fn absolute_launcher_root_captures_relative_and_preserves_absolute_paths() {
         let relative = std::path::Path::new("pumas-absent-root-fixture").join("nested");

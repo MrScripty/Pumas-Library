@@ -28,6 +28,8 @@ def git(checkout, *args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pantograph", type=Path, required=True, help="Existing pinned public checkout")
+    parser.add_argument("--pumas-core", type=Path, help="Alternate existing Pumas core source for a regression comparison")
+    parser.add_argument("--test-filter", help="Run only test names containing this string")
     parser.add_argument("--work-dir", type=Path, help="Retain a generated harness for inspecting build evidence")
     parser.add_argument("--resolve-source-dependencies", action="store_true", help="Allow Cargo to resolve/fetch public Rust source dependencies; never model runtimes")
     args = parser.parse_args()
@@ -39,7 +41,7 @@ def main():
     if git(pantograph, "status", "--porcelain", "--untracked-files=no"):
         parser.error("Pantograph tracked source/dependencies must be unchanged")
     source = Path(__file__).resolve().parent
-    core = source.parent.parent
+    core = args.pumas_core.resolve(strict=True) if args.pumas_core else source.parent.parent
     temp = None
     if args.work_dir:
         work = args.work_dir.resolve()
@@ -84,9 +86,12 @@ def main():
     command = ["cargo", "test", "--manifest-path", str(work / "Cargo.toml"), "--lib"]
     if not args.resolve_source_dependencies:
         command += ["--offline", "--locked"]
+    if args.test_filter:
+        command += [args.test_filter]
     command += ["--", "--show-output"]
     print(f"Consumer commit: {PANTOGRAPH_COMMIT}; guard blob: {GUARD_BLOB}", flush=True)
     print(f"Harness: {work}; runtime backends: disabled; ORT_SKIP_DOWNLOAD=1", flush=True)
+    print(f"Producer core source: {core}", flush=True)
     result = subprocess.run(command, env=env)
     if temp:
         temp.cleanup()

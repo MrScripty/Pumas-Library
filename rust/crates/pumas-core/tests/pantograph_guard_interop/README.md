@@ -48,3 +48,16 @@ Only negative guard tests manually mutate producer targets. Positive and matrix
 tests obtain their path, identity, revision, fingerprint, and descriptor from
 actual Pumas resolver DTOs; the existing host privacy projection removes selected
 path data from the scheduler identity without changing the executable target.
+
+Separate root-alias tests open the actual `PumasReadOnlyLibrary` through a relative
+root and, on Unix, a symlink root. Both accept unmodified production Summary and
+Detail cache rows, serialize real read-only resolver responses into the actual
+guard, compare the entire projected target against the owner-produced identity,
+and verify that cache rows remain unchanged. The relative fixture is created
+inside the existing working directory; neither test changes the process working
+directory or requires network access or a Windows share.
+
+For a regression comparison against another existing producer checkout,
+`--pumas-core /path/to/Pumas-Library/rust/crates/pumas-core` selects that source
+without editing it, and `--test-filter actual_read_only_` restricts execution to
+the two root-alias cases. The runner prints the producer manifest path explicitly.

@@ -1,5 +1,8 @@
 import type { OpenDialogOptions } from 'electron';
 import {
+  decodeS3TransferRetryParams,
+  decodeS3DiscoveryParams,
+  decodeS3AuthenticatedDiscoveryParams,
   decodeS3ImportParams,
   decodeS3AuthenticatedImportParams,
   decodeS3BundleImportParams,
@@ -59,6 +62,24 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
   }
 
   const method = rawMethod as RpcMethodName;
+  if (method === 'inspect_persisted_s3_imports') {
+    const decoded = decodeRuntimeLaunchParams(rawParams ?? {});
+    if (decoded.status !== 'valid') throw new Error('Invalid S3 inspection parameters');
+    return { method, params: decoded.value };
+  }
+  if (method === 'get_s3_transfer_retry' || method === 'retry_s3_model_transfer') {
+    const decoded = method === 'get_s3_transfer_retry'
+      ? decodeS3ImportStatusParams(rawParams) : decodeS3TransferRetryParams(rawParams);
+    if (decoded.status !== 'valid') throw new Error('Invalid S3 retry parameters');
+    return { method, params: decoded.value };
+  }
+  if (method.endsWith('_s3_prefix_discovery')) {
+    const decoded = method === 'start_s3_prefix_discovery' ? decodeS3DiscoveryParams(rawParams)
+      : method === 'start_authenticated_s3_prefix_discovery' ? decodeS3AuthenticatedDiscoveryParams(rawParams)
+      : method === 'get_s3_prefix_discovery' ? decodeS3ImportStatusParams(rawParams) : decodeS3ImportCancelParams(rawParams);
+    if (decoded.status !== 'valid') throw new Error('Invalid S3 discovery parameters');
+    return {method, params: decoded.value};
+  }
   if (method === 'start_s3_model_bundle_import' || method === 'start_authenticated_s3_model_bundle_import' || method === 'get_s3_model_bundle_import') {
     const decoded = method === 'start_s3_model_bundle_import' ? decodeS3BundleImportParams(rawParams)
       : method === 'start_authenticated_s3_model_bundle_import' ? decodeS3AuthenticatedBundleImportParams(rawParams)

@@ -19,7 +19,14 @@ mod resource_responses;
 mod runtime_profiles;
 mod runtime_tasks;
 #[cfg(feature = "s3")]
+mod s3_inspection;
+#[cfg(feature = "s3")]
 mod s3_models;
+#[cfg(feature = "s3")]
+pub use s3_inspection::{
+    S3PersistedImport, S3PersistedImports, S3PersistedPhase, S3RecordedModelBinding,
+    S3RecordedPublicationState,
+};
 mod serving;
 #[cfg(feature = "s3")]
 pub use s3_models::{

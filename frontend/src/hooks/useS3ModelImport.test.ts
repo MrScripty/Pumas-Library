@@ -1,9 +1,10 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { S3BundleImportParams, S3AuthenticatedBundleImportParams, S3BundleImportObservation, S3ImportOutcome, S3ImportParams, S3ImportCancelOutcome, S3AuthenticatedImportParams } from '../generated/desktop-contract';
+import type { S3TransferRetryParams, S3BundleImportParams, S3AuthenticatedBundleImportParams, S3BundleImportObservation, S3ImportOutcome, S3ImportParams, S3ImportCancelOutcome, S3AuthenticatedImportParams } from '../generated/desktop-contract';
 import { useS3ModelImport, type S3ImportDraft } from './useS3ModelImport';
 
-const { startBundle, startAuthenticatedBundle, getBundle, start, startAuthenticated, get, cancel } = vi.hoisted(() => ({
+const { startBundle, startAuthenticatedBundle, getBundle, start, startAuthenticated, get, cancel, retryTransfer } = vi.hoisted(() => ({
+  retryTransfer: vi.fn<(request: S3TransferRetryParams) => Promise<S3ImportOutcome>>(),
   startBundle: vi.fn<(request: S3BundleImportParams) => Promise<S3ImportOutcome>>(),
   startAuthenticatedBundle: vi.fn<(request: S3AuthenticatedBundleImportParams) => Promise<S3ImportOutcome>>(),
   getBundle: vi.fn<(id?: string) => Promise<S3BundleImportObservation>>(),
@@ -14,6 +15,7 @@ const { startBundle, startAuthenticatedBundle, getBundle, start, startAuthentica
 }));
 vi.mock('../api/import', () => ({ importAPI: {
   startS3ModelBundleImport:startBundle, startAuthenticatedS3ModelBundleImport:startAuthenticatedBundle, getS3ModelBundleImport:getBundle,
+  retryS3ModelTransfer: retryTransfer,
   startS3ModelImport: start, getS3ModelImport: get, cancelS3ModelImport: cancel,
   startAuthenticatedS3ModelImport: startAuthenticated,
 } }));
@@ -35,6 +37,23 @@ function deferred<T>() {
 async function settle() { await act(async () => { await Promise.resolve(); }); }
 
 describe('explicit S3 import observation', () => {
+  it('coalesces explicit retry clicks and observes a lost reply under the same identity without replay', async () => {
+    const cancelled:S3ImportOutcome={status:'finished',operation_id:id,result:{status:'cancelled',retained_work:true}};
+    get.mockResolvedValue(cancelled);
+    const {result}=renderHook(()=>useS3ModelImport());await settle();
+    const pending=deferred<S3ImportOutcome>();retryTransfer.mockReturnValueOnce(pending.promise);
+    let first:Promise<void>|undefined;
+    await act(async()=>{first=result.current.retry();await result.current.retry();});
+    expect(retryTransfer).toHaveBeenCalledTimes(1);expect(retryTransfer).toHaveBeenCalledWith({operation_id:id,credentials:null});
+    get.mockResolvedValue(running);await act(async()=>{pending.resolve(running);await first;});
+    expect(result.current.snapshot).toEqual(running);expect(get).toHaveBeenLastCalledWith(id);
+    get.mockResolvedValue(cancelled);await act(async()=>{result.current.observeAgain();});await settle();
+    retryTransfer.mockRejectedValueOnce(new Error('uncertain reply'));
+    await act(async()=>{await result.current.retry();});await settle();
+    expect(retryTransfer).toHaveBeenCalledTimes(2);expect(get).toHaveBeenLastCalledWith(id);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});expect(retryTransfer).toHaveBeenCalledTimes(2);expect(start).not.toHaveBeenCalled();
+  });
+
   it('admits credentials only through the distinct path and observes a lost acknowledgement without replay or secret state', async () => {
     const credentials = { access_key_id: 'synthetic-renderer-key', secret_access_key: 'synthetic-renderer-secret', session_token: 'synthetic-renderer-token' };
     startAuthenticated.mockRejectedValueOnce(new Error(JSON.stringify(credentials)));

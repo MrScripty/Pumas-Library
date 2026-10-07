@@ -66,8 +66,10 @@ fn compatibility_uses_protocol_and_schemas_instead_of_release_equality() {
     let mut description = InstanceDescription::local(&library, &instance);
     description.pumas_version = "999.0.0".into();
     description.protocols[0].versions = vec![1, 2, 3];
-    let mut requirements = CompatibilityRequirements::default();
-    requirements.protocol_versions = vec![1, 2];
+    let mut requirements = CompatibilityRequirements {
+        protocol_versions: vec![1, 2],
+        ..CompatibilityRequirements::default()
+    };
     assert_eq!(requirements.negotiate(&description).unwrap(), 2);
     requirements.protocol_versions = vec![4];
     assert!(requirements.negotiate(&description).is_err());

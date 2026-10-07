@@ -16,11 +16,11 @@ This remains a private CPU/no-adapter slice. Synthetic compatible2.40 arithmetic
 protocol fixtures cannot qualify actual native2.41, real Torch/provider/platform
 parity, GPU/model execution, enforced network denial or complete cold recovery.
 Q2/AQ/P1 classifications remain unchanged; new automatic/preview caller adoption
-stays OFF. The separate successor on `feat/torch-selected-reconcile-04fde63b` implements
+stays OFF. The separate successor on `feat/torch-selected-reconcile-fresh-04fde63b` implements
 private retained-owner reconciliation to committed, owned rollback or unresolved
 states and conservative pending-stage preservation. Qualification and exact
 source are recorded separately in
-[the reconciliation report](reports/torch-selected-reconciliation-2026-10-06.md).
+[the reconciliation report](reports/torch-selected-reconciliation-fresh-2026-10-07.md).
 It does not reconstruct cold catalog authority, replay installation, enable caller
 adoption or claim power-loss metadata durability. Remaining work is independent
 review/qualification, exact target/tool/source/provider parity and any separately

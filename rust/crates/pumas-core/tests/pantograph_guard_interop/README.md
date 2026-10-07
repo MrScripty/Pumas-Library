@@ -22,9 +22,29 @@ ORT_SKIP_DOWNLOAD=1 python3 rust/crates/pumas-core/tests/pantograph_guard_intero
   --pantograph /path/to/Pantograph
 ```
 
-The default execution is `cargo test --offline --locked --lib`. The separate
+The default execution is `cargo test --offline --locked --lib -- --show-output`,
+which records the observed scope/mode matrix for passing tests. The separate
 `--resolve-source-dependencies` option permits public Rust source dependency
 resolution for initial setup; it keeps all inference backends and Pumas's ONNX
 runtime disabled. A retained `--work-dir` exposes the generated manifest, lock,
 and module-path adapter for review. This harness tests admission and package
 observation, not the consumer's private resident cache or real Cohere inference.
+
+The scope/mode matrix retains one unmodified, production-generated cache row at
+entry and sends the serialized real resolver response to the unchanged guard.
+Summary rows are obtained through the production summary API. For indexed tests,
+the competing cache scope is absent and all cache-row fields are unchanged after
+resolution. OwnerFresh legitimately regenerates/repairs Summary before the shared
+summary-first resolver; a detail-only input therefore accepts Summary after repair.
+
+| Cache evidence at entry | Resolution mode | Accepted cache scope | Cache behavior |
+| --- | --- | --- | --- |
+| Summary only | OwnerFresh | Summary | Production observation also generates Detail |
+| Detail only | OwnerFresh | Summary | Production observation repairs Summary |
+| Summary only | ReadOnlyIndexed | Summary | No row mutation; Detail remains absent |
+| Detail only | ReadOnlyIndexed | Detail | No row mutation; Summary remains absent |
+
+Only negative guard tests manually mutate producer targets. Positive and matrix
+tests obtain their path, identity, revision, fingerprint, and descriptor from
+actual Pumas resolver DTOs; the existing host privacy projection removes selected
+path data from the scheduler identity without changing the executable target.

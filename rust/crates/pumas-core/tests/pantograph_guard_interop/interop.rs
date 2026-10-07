@@ -1,7 +1,7 @@
 use super::selected_audio_execution::SelectedAudioLoad;
 use super::*;
 use base64::Engine as _;
-use pumas_library::index::ModelRecord;
+use pumas_library::index::{ModelPackageFactsCacheScope, ModelRecord};
 use pumas_library::model_library::ModelLibrary;
 use pumas_library::models as wire;
 use serde::de::DeserializeOwned;
@@ -222,6 +222,193 @@ async fn actual_pumas_managed_cohere_wire_passes_actual_pantograph_guard() {
     SelectedAudioLoad::validate(&fixture.request, &fixture.target, &fixture.decision)
         .await
         .unwrap();
+}
+
+fn cache_snapshot(fixture: &Fixture, artifact_id: &str) -> serde_json::Value {
+    let row = |scope| {
+        fixture
+            .library
+            .index()
+            .get_model_package_facts_cache(MODEL_ID, Some(artifact_id), scope)
+            .unwrap()
+    };
+    json!({
+        "summary": row(ModelPackageFactsCacheScope::Summary),
+        "detail": row(ModelPackageFactsCacheScope::Detail),
+    })
+}
+
+async fn actual_guard_cache_scope_and_resolution_mode(
+    input_scope: ModelPackageFactsCacheScope,
+    mode: wire::PumasArtifactLoadTargetResolutionMode,
+) {
+    let fixture = fixture().await;
+    let artifact_id = fixture
+        .target
+        .model_ref
+        .selected_artifact_id
+        .as_deref()
+        .unwrap();
+    // Get Summary through its production API as well as the full package facts
+    // already produced for the execution request. No cache facts are invented.
+    let summary = fixture
+        .library
+        .resolve_model_package_facts_summary(MODEL_ID)
+        .await
+        .unwrap()
+        .summary
+        .unwrap();
+    let summary_row = fixture
+        .library
+        .index()
+        .get_model_package_facts_cache(
+            MODEL_ID,
+            Some(artifact_id),
+            ModelPackageFactsCacheScope::Summary,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&summary_row.facts_json).unwrap(),
+        serde_json::to_value(summary).unwrap(),
+        "Summary row must come from the production summary API"
+    );
+    let row = fixture
+        .library
+        .index()
+        .get_model_package_facts_cache(MODEL_ID, Some(artifact_id), input_scope)
+        .unwrap()
+        .unwrap();
+    // Retain one unmodified production row to make cache evidence scope
+    // unambiguous. These operations only affect this synthetic fixture database.
+    fixture
+        .library
+        .index()
+        .delete_model_package_facts_cache(MODEL_ID)
+        .unwrap();
+    fixture
+        .library
+        .index()
+        .upsert_model_package_facts_cache(&row)
+        .unwrap();
+    let before = cache_snapshot(&fixture, artifact_id);
+    match input_scope {
+        ModelPackageFactsCacheScope::Summary => assert!(before["detail"].is_null()),
+        ModelPackageFactsCacheScope::Detail => assert!(before["summary"].is_null()),
+    }
+    let indexed = matches!(
+        mode,
+        wire::PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed
+    );
+    let mode_name = format!("{mode:?}");
+    let response = fixture
+        .library
+        .resolve_model_artifact_load_target(wire::ResolveModelArtifactLoadTargetRequest {
+            model_ref: project(&fixture.request.model_ref.as_ref().unwrap()),
+            expected_artifact_kind: None,
+            caller_observed_entry_path: None,
+            caller_observed_package_facts_contract_version: None,
+            resolution_mode: mode,
+            consumer: wire::PumasArtifactConsumer {
+                consumer_name: "pantograph-guard-interop-matrix".into(),
+                task_kind: Some("audio_transcription".into()),
+                runtime_family: Some("pytorch.cpu".into()),
+            },
+        })
+        .await
+        .unwrap();
+    assert!(
+        response.is_ready(),
+        "{input_scope:?}/{mode_name}: {response:?}"
+    );
+    let after = cache_snapshot(&fixture, artifact_id);
+    let accepted_scope = if indexed {
+        assert_eq!(
+            before, after,
+            "ReadOnlyIndexed must not mutate any cache row"
+        );
+        input_scope
+    } else {
+        // OwnerFresh invokes the production detail observation, which repairs
+        // the Summary row before the summary-first shared resolver runs.
+        assert!(!after["summary"].is_null());
+        assert!(!after["detail"].is_null());
+        ModelPackageFactsCacheScope::Summary
+    };
+    let accepted_key = match accepted_scope {
+        ModelPackageFactsCacheScope::Summary => "summary",
+        ModelPackageFactsCacheScope::Detail => "detail",
+    };
+    // Round-trip the whole actual resolver response DTO. The guard target comes
+    // exclusively from this serialized production response, never a literal.
+    let response_bytes = serde_json::to_vec(&response).unwrap();
+    let decoded: wire::ResolveModelArtifactLoadTargetResponse =
+        serde_json::from_slice(&response_bytes).unwrap();
+    let produced_target = decoded.target.unwrap();
+    assert_eq!(
+        produced_target.content_fingerprint.as_deref(),
+        after[accepted_key]["source_fingerprint"].as_str()
+    );
+    assert_eq!(
+        produced_target.model_ref.revision.as_deref(),
+        Some(REVISION)
+    );
+    assert_eq!(
+        produced_target.local_load_path,
+        fixture.package_path.to_string_lossy()
+    );
+    let mut target: PumasArtifactLoadTarget = project(&produced_target);
+    // This is the existing host's scheduler privacy projection only. Physical
+    // target path, revision, artifact, fingerprint, and descriptor remain intact.
+    target.model_ref.selected_artifact_path = fixture
+        .decision
+        .selected_model_ref
+        .as_ref()
+        .unwrap()
+        .selected_artifact_path
+        .clone();
+    SelectedAudioLoad::validate(&fixture.request, &target, &fixture.decision)
+        .await
+        .unwrap();
+    println!(
+        "actual producer matrix: input_scope={input_scope:?}, mode={mode_name}, accepted_scope={accepted_scope:?}, indexed_cache_unchanged={indexed}"
+    );
+}
+
+#[tokio::test]
+async fn actual_producer_summary_owner_fresh_target_passes_actual_guard() {
+    actual_guard_cache_scope_and_resolution_mode(
+        ModelPackageFactsCacheScope::Summary,
+        wire::PumasArtifactLoadTargetResolutionMode::OwnerFresh,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn actual_producer_detail_owner_fresh_repairs_summary_and_passes_actual_guard() {
+    actual_guard_cache_scope_and_resolution_mode(
+        ModelPackageFactsCacheScope::Detail,
+        wire::PumasArtifactLoadTargetResolutionMode::OwnerFresh,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn actual_producer_summary_indexed_target_passes_actual_guard_without_cache_mutation() {
+    actual_guard_cache_scope_and_resolution_mode(
+        ModelPackageFactsCacheScope::Summary,
+        wire::PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn actual_producer_detail_indexed_target_passes_actual_guard_without_cache_mutation() {
+    actual_guard_cache_scope_and_resolution_mode(
+        ModelPackageFactsCacheScope::Detail,
+        wire::PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+    )
+    .await;
 }
 
 #[tokio::test]

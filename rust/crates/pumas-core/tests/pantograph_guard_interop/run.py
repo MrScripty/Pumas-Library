@@ -84,6 +84,7 @@ def main():
     command = ["cargo", "test", "--manifest-path", str(work / "Cargo.toml"), "--lib"]
     if not args.resolve_source_dependencies:
         command += ["--offline", "--locked"]
+    command += ["--", "--show-output"]
     print(f"Consumer commit: {PANTOGRAPH_COMMIT}; guard blob: {GUARD_BLOB}", flush=True)
     print(f"Harness: {work}; runtime backends: disabled; ORT_SKIP_DOWNLOAD=1", flush=True)
     result = subprocess.run(command, env=env)

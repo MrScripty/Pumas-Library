@@ -1,0 +1,5 @@
+    Checking pumas-library v0.7.0 (/workspace/pumas-selected-reconcile-saved/rust/crates/pumas-core)
+   Compiling pumas-uniffi v0.7.0 (/workspace/pumas-selected-reconcile-saved/rust/crates/pumas-uniffi)
+    Checking pumas-app-manager v0.7.0 (/workspace/pumas-selected-reconcile-saved/rust/crates/pumas-app-manager)
+    Checking pumas-rpc v0.7.0 (/workspace/pumas-selected-reconcile-saved/rust/crates/pumas-rpc)
+    Finished `dev` profile [unoptimized] target(s) in 1m 50s

@@ -1,0 +1,34 @@
+    Finished `test` profile [unoptimized] target(s) in 0.45s
+   Doc-tests pumas_app_manager
+
+running 1 test
+test crates/pumas-app-manager/src/version_manager/mod.rs - version_manager (line 24) ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests pumas_library
+
+running 14 tests
+test crates/pumas-core/src/api/builder.rs - api::builder::PumasApiBuilder (line 28) ... ignored
+test crates/pumas-core/src/error.rs - error::IoResultExt (line 365) ... ignored
+test crates/pumas-core/src/error.rs - error::io_err (line 406) ... ignored
+test crates/pumas-core/src/lib.rs - (line 10) ... ignored
+test crates/pumas-core/src/lib.rs - PumasApi::builder (line 207) ... ignored
+test crates/pumas-core/src/model_library/naming.rs - model_library::naming::extract_base_name (line 124) ... ignored
+test crates/pumas-core/src/model_library/naming.rs - model_library::naming::normalize_filename (line 98) ... ignored
+test crates/pumas-core/src/cancel.rs - cancel::CancellationToken (line 17) ... ok
+test crates/pumas-core/src/models/api_response.rs - models::api_response::ApiResponse (line 15) ... ignored
+test crates/pumas-core/src/model_library/sharding.rs - model_library::sharding::validate_shard_completeness (line 188) ... ok
+test crates/pumas-core/src/model_library/sharding.rs - model_library::sharding::detect_sharded_sets (line 76) ... ok
+test crates/pumas-core/src/model_library/naming.rs - model_library::naming::normalize_name (line 41) ... ok
+test crates/pumas-core/src/process/mod.rs - process (line 7) - compile ... ok
+test crates/pumas-core/src/system/mod.rs - system (line 11) - compile ... ok
+
+test result: ok. 6 passed; 0 failed; 8 ignored; 0 measured; 0 filtered out; finished in 2.48s
+
+   Doc-tests pumas_uniffi
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

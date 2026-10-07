@@ -1,0 +1,52 @@
+[
+  {
+    "gate": "python-affected",
+    "command": [
+      "python3",
+      "-m",
+      "unittest",
+      "-v",
+      "test_probe_runtime",
+      "test_consume_selected_wheels",
+      "test_offline_wheel_selection",
+      "test_wheel_catalog_owner",
+      "test_wheel_target",
+      "test_target_observation",
+      "test_install_verified_wheels",
+      "test_qualified_wheel_catalog"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 58.562,
+    "source": "26d2ee9f7dc78bce13723ef3cf4c9e712f24616e",
+    "tree": "e0da034768d80e8b63939f8a6229f9c11218ca66"
+  },
+  {
+    "gate": "python-full",
+    "command": [
+      "python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "torch-server/tests",
+      "-v"
+    ],
+    "exit_code": 1,
+    "elapsed_seconds": 76.975,
+    "source": "26d2ee9f7dc78bce13723ef3cf4c9e712f24616e",
+    "tree": "e0da034768d80e8b63939f8a6229f9c11218ca66"
+  },
+  {
+    "gate": "ruff",
+    "command": [
+      "/workspace/pumas-reconcile-tools/bin/ruff",
+      "check",
+      "--no-cache",
+      "torch-server"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 0.073,
+    "source": "26d2ee9f7dc78bce13723ef3cf4c9e712f24616e",
+    "tree": "e0da034768d80e8b63939f8a6229f9c11218ca66"
+  }
+]

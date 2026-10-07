@@ -1,0 +1,3 @@
+branch @ file:///tmp/.tmpkjezz7/torch-versions/.torch-catalog-fixture/4473807abd3d7df763b085808f517b9b6ba96abf595cafbf9c88a11de54bbd03/branch-2-py3-none-any.whl --hash=sha256:6e8f5022fcf76039f7fdf063161dd02cf78e5d6980efc1c994ef5a5dcde3689a
+dependency @ file:///tmp/.tmpkjezz7/torch-versions/.torch-catalog-fixture/d2da00f1399299ce1178da7b62a8817aefb658d9985cce698b42952e05a8ebf8/dependency-2-py3-none-any.whl --hash=sha256:7f77867e5d78e465e6511a80226b1bca20944161b1964381f30b64e096b7839d
+torch @ file:///tmp/.tmpkjezz7/torch-versions/.torch-catalog-fixture/b4c4491ba603c5a17a75613cf76d2675a43085432b6920e2829ee1d557a69c9c/torch-2.14.0%2Bcpu-py3-none-any.whl --hash=sha256:153d3d756b8c6e9e4ca0ac8eb547a8427f1431455e2b0b185952bdffcce90d4a

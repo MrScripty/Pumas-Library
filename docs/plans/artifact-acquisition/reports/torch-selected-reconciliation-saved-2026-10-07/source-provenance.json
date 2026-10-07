@@ -1,0 +1,68 @@
+{
+  "base": "04fde63b151fa019b73fcf71aca636b46a35c548",
+  "base_tree": "910a9abef17f94af4a4f88ee14312ea0e84299dc",
+  "base_fetch_verified": true,
+  "tested_source": "26d2ee9f7dc78bce13723ef3cf4c9e712f24616e",
+  "tested_tree": "e0da034768d80e8b63939f8a6229f9c11218ca66",
+  "prior_tested_source": "568a5f1fca76b2253088d97f71b1d950e5beacc9",
+  "prior_tested_tree": "5e5d26a3540d468a7a737ff5d54ccbebe0d78260",
+  "reused_repository_commits": [
+    "4afec387",
+    "0f1a2a05"
+  ],
+  "prior_reconciliation_source_tree": "02441072384c59a234cf0a1506df7e4357d8db02",
+  "main_preserved": "5e114f6d8e4559e0a4d67e56000b423120a0fde0",
+  "branch": "feat/torch-selected-reconcile-saved-04fde63b",
+  "source_sha256": {
+    "docs/contracts/artifact-acquisition.md": "0298d8eb08b264d8b5dbf4741ea759806440ffc1e3b7fe8463b703ab67561403",
+    "docs/plans/artifact-acquisition/plan.md": "213d1532d7048836a129e09906542fccbddef24a7a516414c7c81b7ef3fa63ce",
+    "docs/plans/artifact-acquisition/reports/write-sets.md": "e6b14983d55a660300e7fe58b1de63c0e2b7436183e7607ff9d6f349daa8c94d",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": "2dc2e719feabc3cd23f8b937b3eedd96daf407ce262cfe2b0fb90ce5a81680dd",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs": "7dccdbc925932cbc4fa846b614d63aba38e373be92e837312cb72e5ef6ad82b5",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_selected_runtime.rs": "ed630f846ae5f25e3922af6c6a5f3e3fcc0aaab9f1452243f1b6674aa1c922e9"
+  },
+  "prior_evidence_verified_count": 55,
+  "qualified_uv_sha256": "abdc39eab8b4ad341dca91f3823a23a343fae94bdb22ebdd9e91694415206f2f",
+  "public_rust_api_expansion": false,
+  "automatic_preview_adoption": false,
+  "independent_review": "parent-owned, pending for this candidate",
+  "prior_source_and_evidence_verified_count": 62,
+  "baseline_reproduction": {
+    "commit": "04fde63b151fa019b73fcf71aca636b46a35c548",
+    "tree": "910a9abef17f94af4a4f88ee14312ea0e84299dc",
+    "command": [
+      "python3",
+      "-m",
+      "unittest",
+      "-v",
+      "test_embedded_runtime_imports"
+    ],
+    "cwd": "/workspace/pumas-selected-reconcile-saved-baseline",
+    "exit_code": 1,
+    "log": "python-base-embedding.log",
+    "expected_inherited_errors": 2
+  },
+  "protected_files_equal_base": [
+    "rust/crates/pumas-core",
+    "rust/crates/pumas-rpc",
+    "rust/Cargo.toml",
+    "rust/Cargo.lock",
+    "torch-server"
+  ],
+  "observed_lifecycle_controls": 46,
+  "observed_reconciliation_controls": 18,
+  "gate_summary": {
+    "rust_all_gates_pass": true,
+    "affected_rust_tests": 74,
+    "lifecycle_controls": 46,
+    "reconciliation_controls": 18,
+    "affected_python_tests": 126,
+    "full_python_passed": 314,
+    "full_python_inherited_errors": 2,
+    "full_workspace_pass": true,
+    "full_feature_graphs": 33,
+    "new_installed_members": 21,
+    "new_selected_wheels": 3,
+    "source_unchanged": true
+  }
+}

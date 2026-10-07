@@ -1,0 +1,55 @@
+    Checking tokio v1.49.0
+    Checking zerocopy v0.8.33
+    Checking serde v1.0.228
+    Checking hashbrown v0.16.1
+    Checking indexmap v2.13.0
+    Checking ahash v0.8.12
+    Checking hashbrown v0.14.5
+    Checking serde_json v1.0.149
+    Checking tokio-util v0.7.18
+    Checking typenum v1.19.0
+    Checking h2 v0.4.16
+    Checking ppv-lite86 v0.2.21
+    Checking generic-array v0.14.7
+    Checking tower v0.5.3
+    Checking serde_urlencoded v0.7.1
+    Checking rand_chacha v0.3.1
+    Checking tokio-native-tls v0.3.1
+    Checking block-buffer v0.10.4
+    Checking crypto-common v0.1.7
+    Checking either v1.15.0
+    Checking rayon v1.11.0
+    Checking hyper v1.8.1
+    Checking hyper-util v0.1.19
+    Checking tower-http v0.6.8
+    Checking hyper-tls v0.6.0
+    Checking rand_chacha v0.9.0
+    Checking digest v0.10.7
+    Checking rand v0.8.6
+    Checking num-traits v0.2.19
+    Checking dashmap v5.5.3
+    Checking dashmap v6.1.0
+    Checking hashlink v0.9.1
+    Checking governor v0.7.0
+    Checking rusqlite v0.32.1
+    Checking mini-moka v0.10.3
+    Checking chrono v0.4.43
+    Checking reqwest v0.12.28
+    Checking sha2 v0.10.9
+    Checking rand v0.9.3
+    Checking nix v0.29.0
+    Checking sysinfo v0.32.1
+    Checking async-compat v0.2.5
+    Checking cargo-platform v0.1.9
+    Checking clap_builder v4.5.54
+    Checking cargo_metadata v0.15.4
+    Checking pumas-library v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-core)
+    Checking uniffi_core v0.28.3
+   Compiling pumas-uniffi v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-uniffi)
+    Checking axum v0.7.9
+    Checking zip v2.4.2
+    Checking clap v4.5.54
+    Checking uniffi v0.28.3
+    Checking pumas-app-manager v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-app-manager)
+    Checking pumas-rpc v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-rpc)
+    Finished `dev` profile [unoptimized] target(s) in 49.79s

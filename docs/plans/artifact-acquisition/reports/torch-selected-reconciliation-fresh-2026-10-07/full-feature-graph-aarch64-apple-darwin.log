@@ -1,0 +1,1215 @@
+pumas-app-manager v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-app-manager)|default,test-support
+async-trait v0.1.89 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro
+unicode-ident v1.0.22|
+quote v1.0.47|default,proc-macro
+proc-macro2 v1.0.107|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+unicode-ident v1.0.22|
+bytes v1.11.1|default,std
+chrono v0.4.43|alloc,clock,default,iana-time-zone,js-sys,now,oldtime,serde,std,wasm-bindgen,wasmbind,winapi,windows-link
+iana-time-zone v0.1.64|fallback
+core-foundation-sys v0.8.7|default,link
+num-traits v0.2.19|i128,std
+autocfg v1.5.0|
+serde v1.0.228|alloc,default,derive,serde_derive,std
+serde_core v1.0.228|alloc,default,result,std
+serde_derive v1.0.228 (proc-macro)|default
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+flate2 v1.1.8|any_impl,default,miniz_oxide,rust_backend
+crc32fast v1.5.0|default,std
+cfg-if v1.0.4|
+miniz_oxide v0.8.9|simd,simd-adler32,with-alloc
+adler2 v2.0.1|
+simd-adler32 v0.3.8|
+fs2 v0.4.3|
+libc v0.2.180|default,extra_traits,std
+futures v0.3.31|alloc,async-await,default,executor,futures-executor,std
+futures-channel v0.3.31|alloc,default,futures-sink,sink,std
+futures-core v0.3.31|alloc,default,std
+futures-sink v0.3.31|alloc,default,std
+futures-core v0.3.31|alloc,default,std
+futures-executor v0.3.31|std
+futures-core v0.3.31|alloc,default,std
+futures-task v0.3.31|alloc,std
+futures-util v0.3.31|alloc,async-await,async-await-macro,channel,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std
+futures-channel v0.3.31|alloc,default,futures-sink,sink,std (*)
+futures-core v0.3.31|alloc,default,std
+futures-io v0.3.31|default,std
+futures-macro v0.3.31 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+futures-sink v0.3.31|alloc,default,std
+futures-task v0.3.31|alloc,std
+memchr v2.7.6|alloc,default,std
+pin-project-lite v0.2.16|
+pin-utils v0.1.0|
+slab v0.4.11|default,std
+futures-io v0.3.31|default,std
+futures-sink v0.3.31|alloc,default,std
+futures-task v0.3.31|alloc,std
+futures-util v0.3.31|alloc,async-await,async-await-macro,channel,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std (*)
+getrandom v0.3.4|std
+cfg-if v1.0.4|
+libc v0.2.180|default,extra_traits,std
+nix v0.29.0|default,fs,process,signal
+bitflags v2.10.0|std
+cfg-if v1.0.4|
+libc v0.2.180|default,extra_traits,std
+cfg_aliases v0.2.1|
+pumas-library v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-core)|contract-schema,default,full,gpu-monitor,hf-client,onnx-runtime,process-manager,s3,test-support,uniffi
+anyhow v1.0.103|default,std
+async-trait v0.1.89 (proc-macro)| (*)
+aws-credential-types v1.2.14|
+aws-smithy-async v1.2.14|rt-tokio
+futures-util v0.3.31|alloc,async-await,async-await-macro,channel,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std (*)
+pin-project-lite v0.2.16|
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros
+bytes v1.11.1|default,std
+libc v0.2.180|default,extra_traits,std
+mio v1.1.1|net,os-ext,os-poll
+libc v0.2.180|default,extra_traits,std
+pin-project-lite v0.2.16|
+signal-hook-registry v1.4.8|
+errno v0.3.14|default,std
+libc v0.2.180|default,extra_traits,std
+libc v0.2.180|default,extra_traits,std
+socket2 v0.6.1|all
+libc v0.2.180|default,extra_traits,std
+tokio-macros v2.6.0 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+aws-smithy-runtime-api v1.12.3|client,default,http-02x,http-1x,http-auth
+aws-smithy-async v1.2.14|rt-tokio (*)
+aws-smithy-runtime-api-macros v1.0.0 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio
+base64-simd v0.8.0|alloc,default,detect,std
+outref v0.5.2|
+vsimd v0.8.0|alloc,detect,std
+bytes v1.11.1|default,std
+bytes-utils v0.1.4|default,std
+bytes v1.11.1|default,std
+either v1.15.0|default,std,use_std
+futures-core v0.3.31|alloc,default,std
+http v0.2.12|
+bytes v1.11.1|default,std
+fnv v1.0.7|default,std
+itoa v1.0.17|
+http v1.4.0|default,std
+bytes v1.11.1|default,std
+itoa v1.0.17|
+http-body v0.4.6|
+bytes v1.11.1|default,std
+http v0.2.12| (*)
+pin-project-lite v0.2.16|
+http-body v1.0.1|
+bytes v1.11.1|default,std
+http v1.4.0|default,std (*)
+http-body-util v0.1.3|default
+bytes v1.11.1|default,std
+futures-core v0.3.31|alloc,default,std
+http v1.4.0|default,std (*)
+http-body v1.0.1| (*)
+pin-project-lite v0.2.16|
+itoa v1.0.17|
+num-integer v0.1.46|default,std
+num-traits v0.2.19|i128,std (*)
+pin-project-lite v0.2.16|
+pin-utils v0.1.0|
+ryu v1.0.22|
+time v0.3.55|alloc,default,parsing,std
+deranged v0.5.8|default
+num-conv v0.2.2|
+powerfmt v0.2.1|
+time-core v0.1.9|
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tokio-util v0.7.18|codec,default,io
+bytes v1.11.1|default,std
+futures-core v0.3.31|alloc,default,std
+futures-sink v0.3.31|alloc,default,std
+pin-project-lite v0.2.16|
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+bytes v1.11.1|default,std
+http v0.2.12| (*)
+http v1.4.0|default,std (*)
+pin-project-lite v0.2.16|
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tracing v0.1.44|attributes,default,std,tracing-attributes
+pin-project-lite v0.2.16|
+tracing-attributes v0.1.31 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+tracing-core v0.1.36|default,once_cell,std
+once_cell v1.21.3|alloc,default,race,std
+zeroize v1.8.2|alloc,default
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+zeroize v1.8.2|alloc,default
+aws-sdk-s3 v1.137.0|http-1x,rt-tokio
+arc-swap v1.9.2|
+rustversion v1.0.22 (proc-macro)|
+aws-credential-types v1.2.14| (*)
+aws-runtime v1.7.5|event-stream,http-02x,http-1x
+aws-credential-types v1.2.14| (*)
+aws-sigv4 v1.4.5|default,http0-compat,http1,sign-eventstream,sign-http
+aws-credential-types v1.2.14| (*)
+aws-smithy-eventstream v0.60.21|
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+bytes v1.11.1|default,std
+crc32fast v1.5.0|default,std (*)
+aws-smithy-http v0.63.6|aws-smithy-eventstream,event-stream
+aws-smithy-eventstream v0.60.21| (*)
+aws-smithy-runtime-api v1.12.3|client,default,http-02x,http-1x,http-auth (*)
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+bytes v1.11.1|default,std
+bytes-utils v0.1.4|default,std (*)
+futures-core v0.3.31|alloc,default,std
+futures-util v0.3.31|alloc,async-await,async-await-macro,channel,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std (*)
+http v1.4.0|default,std (*)
+http-body v1.0.1| (*)
+http-body-util v0.1.3|default (*)
+percent-encoding v2.3.2|alloc,default,std
+pin-project-lite v0.2.16|
+pin-utils v0.1.0|
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+aws-smithy-runtime-api v1.12.3|client,default,http-02x,http-1x,http-auth (*)
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+bytes v1.11.1|default,std
+form_urlencoded v1.2.2|alloc,default,std
+percent-encoding v2.3.2|alloc,default,std
+hex v0.4.3|alloc,default,std
+hmac v0.13.0|
+digest v0.11.3|alloc,block-api,default,mac,oid
+block-buffer v0.12.1|
+hybrid-array v0.4.10|
+typenum v1.19.0|const-generics
+const-oid v0.10.2|
+crypto-common v0.2.2|
+hybrid-array v0.4.10| (*)
+ctutils v0.4.2|
+cmov v0.5.4|
+http v0.2.12| (*)
+http v1.4.0|default,std (*)
+percent-encoding v2.3.2|alloc,default,std
+sha2 v0.11.0|alloc,default,oid
+cfg-if v1.0.4|
+cpufeatures v0.3.1|
+libc v0.2.180|default,extra_traits,std
+digest v0.11.3|alloc,block-api,default,mac,oid (*)
+time v0.3.55|alloc,default,parsing,std (*)
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+aws-smithy-async v1.2.14|rt-tokio (*)
+aws-smithy-eventstream v0.60.21| (*)
+aws-smithy-http v0.63.6|aws-smithy-eventstream,event-stream (*)
+aws-smithy-runtime v1.11.3|client
+aws-smithy-async v1.2.14|rt-tokio (*)
+aws-smithy-http v0.63.6|aws-smithy-eventstream,event-stream (*)
+aws-smithy-observability v0.2.6|
+aws-smithy-runtime-api v1.12.3|client,default,http-02x,http-1x,http-auth (*)
+aws-smithy-runtime-api v1.12.3|client,default,http-02x,http-1x,http-auth (*)
+aws-smithy-schema v0.1.0|
+aws-smithy-runtime-api v1.12.3|client,default,http-02x,http-1x,http-auth (*)
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+http v1.4.0|default,std (*)
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+bytes v1.11.1|default,std
+fastrand v2.3.0|alloc,default,std
+http v0.2.12| (*)
+http v1.4.0|default,std (*)
+http-body v0.4.6| (*)
+http-body v1.0.1| (*)
+http-body-util v0.1.3|default (*)
+pin-project-lite v0.2.16|
+pin-utils v0.1.0|
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+aws-smithy-runtime-api v1.12.3|client,default,http-02x,http-1x,http-auth (*)
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+aws-types v1.3.16|
+aws-credential-types v1.2.14| (*)
+aws-smithy-async v1.2.14|rt-tokio (*)
+aws-smithy-runtime-api v1.12.3|client,default,http-02x,http-1x,http-auth (*)
+aws-smithy-schema v0.1.0| (*)
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+rustc_version v0.4.1|
+semver v1.0.27|default,serde,std
+serde_core v1.0.228|default,result,std
+bytes v1.11.1|default,std
+bytes-utils v0.1.4|default,std (*)
+fastrand v2.3.0|alloc,default,std
+http v0.2.12| (*)
+http v1.4.0|default,std (*)
+http-body v0.4.6| (*)
+http-body v1.0.1| (*)
+percent-encoding v2.3.2|alloc,default,std
+pin-project-lite v0.2.16|
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+uuid v1.19.0|default,rng,std,v4
+getrandom v0.3.4|std (*)
+aws-sigv4 v1.4.5|default,http0-compat,http1,sign-eventstream,sign-http (*)
+aws-smithy-async v1.2.14|rt-tokio (*)
+aws-smithy-checksums v0.64.8|
+aws-smithy-http v0.63.6|aws-smithy-eventstream,event-stream (*)
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+bytes v1.11.1|default,std
+crc-fast v1.10.0|alloc,default,digest,ffi,panic-handler,std
+digest v0.10.7|alloc,block-buffer,core-api,default,std
+block-buffer v0.10.4|
+generic-array v0.14.7|more_lengths
+typenum v1.19.0|const-generics
+version_check v0.9.5|
+crypto-common v0.1.7|std
+generic-array v0.14.7|more_lengths (*)
+typenum v1.19.0|const-generics
+spin v0.10.1|mutex,once,rwlock,spin_mutex
+hex v0.4.3|alloc,default,std
+http v1.4.0|default,std (*)
+http-body v1.0.1| (*)
+http-body-util v0.1.3|default (*)
+md-5 v0.11.0|alloc,default,oid
+cfg-if v1.0.4|
+digest v0.11.3|alloc,block-api,default,mac,oid (*)
+pin-project-lite v0.2.16|
+sha1 v0.11.0|alloc,default,oid
+cfg-if v1.0.4|
+cpufeatures v0.3.1| (*)
+digest v0.11.3|alloc,block-api,default,mac,oid (*)
+sha2 v0.11.0|alloc,default,oid (*)
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+aws-smithy-eventstream v0.60.21| (*)
+aws-smithy-http v0.63.6|aws-smithy-eventstream,event-stream (*)
+aws-smithy-json v0.62.7|
+aws-smithy-runtime-api v1.12.3|client,default,http-02x,http-1x,http-auth (*)
+aws-smithy-schema v0.1.0| (*)
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+aws-smithy-observability v0.2.6| (*)
+aws-smithy-runtime v1.11.3|client (*)
+aws-smithy-runtime-api v1.12.3|client,default,http-02x,http-1x,http-auth (*)
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+aws-smithy-xml v0.60.15|
+xmlparser v0.13.6|default,std
+aws-types v1.3.16| (*)
+bytes v1.11.1|default,std
+fastrand v2.3.0|alloc,default,std
+hex v0.4.3|alloc,default,std
+hmac v0.13.0| (*)
+http v0.2.12| (*)
+http v1.4.0|default,std (*)
+http-body v1.0.1| (*)
+lru v0.16.4|default,hashbrown
+hashbrown v0.16.1|allocator-api2,default,default-hasher,equivalent,inline-more,raw-entry
+allocator-api2 v0.2.21|alloc
+equivalent v1.0.2|
+foldhash v0.2.0|
+percent-encoding v2.3.2|alloc,default,std
+regex-lite v0.1.9|default,std,string
+sha2 v0.11.0|alloc,default,oid (*)
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+url v2.5.8|default,std
+form_urlencoded v1.2.2|alloc,default,std (*)
+idna v1.1.0|alloc,compiled_data,std
+idna_adapter v1.2.1|compiled_data
+icu_normalizer v2.1.1|compiled_data
+icu_collections v2.1.1|
+displaydoc v0.2.5 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+potential_utf v0.1.4|zerovec
+zerovec v0.11.5|derive,yoke
+yoke v0.8.1|derive,zerofrom
+stable_deref_trait v1.2.1|
+yoke-derive v0.8.1 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+synstructure v0.13.2|default,proc-macro
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+zerofrom v0.1.6|derive
+zerofrom-derive v0.1.6 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+synstructure v0.13.2|default,proc-macro (*)
+zerofrom v0.1.6|derive (*)
+zerovec-derive v0.11.2 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+yoke v0.8.1|derive,zerofrom (*)
+zerofrom v0.1.6|derive (*)
+zerovec v0.11.5|derive,yoke (*)
+icu_normalizer_data v2.1.1|
+icu_provider v2.1.1|baked
+displaydoc v0.2.5 (proc-macro)| (*)
+icu_locale_core v2.1.1|zerovec
+displaydoc v0.2.5 (proc-macro)| (*)
+litemap v0.8.1|
+tinystr v0.8.2|zerovec
+displaydoc v0.2.5 (proc-macro)| (*)
+zerovec v0.11.5|derive,yoke (*)
+writeable v0.6.2|
+zerovec v0.11.5|derive,yoke (*)
+writeable v0.6.2|
+yoke v0.8.1|derive,zerofrom (*)
+zerofrom v0.1.6|derive (*)
+zerotrie v0.2.3|yoke,zerofrom
+displaydoc v0.2.5 (proc-macro)| (*)
+yoke v0.8.1|derive,zerofrom (*)
+zerofrom v0.1.6|derive (*)
+zerovec v0.11.5|derive,yoke (*)
+smallvec v1.15.1|const_generics,const_new
+zerovec v0.11.5|derive,yoke (*)
+icu_properties v2.1.2|compiled_data
+icu_collections v2.1.1| (*)
+icu_locale_core v2.1.1|zerovec (*)
+icu_properties_data v2.1.2|
+icu_provider v2.1.1|baked (*)
+zerotrie v0.2.3|yoke,zerofrom (*)
+zerovec v0.11.5|derive,yoke (*)
+smallvec v1.15.1|const_generics,const_new
+utf8_iter v1.0.4|
+percent-encoding v2.3.2|alloc,default,std
+aws-smithy-runtime-api v1.12.3|client,default,http-02x,http-1x,http-auth (*)
+aws-smithy-types v1.5.0|byte-stream-poll-next,http-body-0-4-x,http-body-1-x,rt-tokio (*)
+blake3 v1.8.3|default,std
+arrayref v0.3.9|
+arrayvec v0.7.6|
+cfg-if v1.0.4|
+constant_time_eq v0.4.2|std
+cc v1.2.53|parallel
+find-msvc-tools v0.1.8|
+jobserver v0.1.34|
+libc v0.2.180|default,std
+libc v0.2.180|default,std
+shlex v1.3.0|default,std
+bytes v1.11.1|default,std
+cap-primitives v4.0.3|
+ambient-authority v0.0.2|
+fs-set-times v0.20.3|
+io-lifetimes v2.0.4|
+rustix v1.1.3|alloc,default,fs,process,std,termios,time
+bitflags v2.10.0|std
+errno v0.3.14|default,std (*)
+libc v0.2.180|default,extra_traits,std
+io-extras v0.19.0|default
+io-lifetimes v3.0.1|default
+io-lifetimes v3.0.1|default
+ipnet v2.11.0|default,std
+maybe-owned v0.3.4|
+rustix v1.1.3|alloc,default,fs,process,std,termios,time (*)
+cap-std v4.0.3|
+cap-primitives v4.0.3| (*)
+io-extras v0.19.0|default (*)
+io-lifetimes v3.0.1|default
+rustix v1.1.3|alloc,default,fs,process,std,termios,time (*)
+chrono v0.4.43|alloc,clock,default,iana-time-zone,js-sys,now,oldtime,serde,std,wasm-bindgen,wasmbind,winapi,windows-link (*)
+ctrlc v3.5.1|
+dispatch2 v0.3.0|alloc,block2,default,libc,objc2,std
+bitflags v2.10.0|std
+block2 v0.6.2|alloc
+objc2 v0.6.3|alloc,std
+objc2-encode v4.1.0|alloc,std
+libc v0.2.180|default,extra_traits,std
+objc2 v0.6.3|alloc,std (*)
+nix v0.30.1|process,signal
+bitflags v2.10.0|std
+cfg-if v1.0.4|
+libc v0.2.180|default,extra_traits,std
+cfg_aliases v0.2.1|
+dirs v5.0.1|
+dirs-sys v0.4.1|
+libc v0.2.180|default,extra_traits,std
+option-ext v0.2.0|
+flate2 v1.1.8|any_impl,default,miniz_oxide,rust_backend (*)
+fs2 v0.4.3| (*)
+futures v0.3.31|alloc,async-await,default,executor,futures-executor,std (*)
+governor v0.7.0|dashmap,default,jitter,quanta,rand,std
+cfg-if v1.0.4|
+dashmap v6.1.0|
+cfg-if v1.0.4|
+crossbeam-utils v0.8.21|default,std
+hashbrown v0.14.5|ahash,inline-more,raw
+ahash v0.8.12|default,getrandom,runtime-rng,serde,std
+cfg-if v1.0.4|
+getrandom v0.3.4|std (*)
+once_cell v1.21.3|alloc,default,race,std
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+zerocopy v0.8.33|derive,simd,zerocopy-derive
+zerocopy-derive v0.8.33 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+version_check v0.9.5|
+lock_api v0.4.14|atomic_usize,default
+scopeguard v1.2.0|
+once_cell v1.21.3|alloc,default,race,std
+parking_lot_core v0.9.12|
+cfg-if v1.0.4|
+libc v0.2.180|default,extra_traits,std
+smallvec v1.15.1|const_generics,const_new
+futures-sink v0.3.31|alloc,default,std
+futures-timer v3.0.3|
+futures-util v0.3.31|alloc,async-await,async-await-macro,channel,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std (*)
+no-std-compat v0.4.1|alloc,std
+nonzero_ext v0.3.0|std
+parking_lot v0.12.5|default
+lock_api v0.4.14|atomic_usize,default (*)
+parking_lot_core v0.9.12| (*)
+portable-atomic v1.13.0|default,fallback,require-cas
+quanta v0.12.6|default,flaky_tests
+crossbeam-utils v0.8.21|default,std
+libc v0.2.180|default,extra_traits,std
+once_cell v1.21.3|alloc,default,race,std
+rand v0.8.6|alloc,default,getrandom,libc,rand_chacha,std,std_rng
+libc v0.2.180|default,extra_traits,std
+rand_chacha v0.3.1|std
+ppv-lite86 v0.2.21|simd,std
+zerocopy v0.8.33|derive,simd,zerocopy-derive (*)
+rand_core v0.6.4|alloc,getrandom,std
+getrandom v0.2.17|std
+cfg-if v1.0.4|
+libc v0.2.180|default,extra_traits,std
+rand_core v0.6.4|alloc,getrandom,std (*)
+smallvec v1.15.1|const_generics,const_new
+spinning_top v0.3.0|
+lock_api v0.4.14|atomic_usize,default (*)
+half v2.7.1|alloc,default,std
+cfg-if v1.0.4|
+zerocopy v0.8.33|derive,simd,zerocopy-derive (*)
+hex v0.4.3|alloc,default,std
+http v1.4.0|default,std (*)
+http-body v1.0.1| (*)
+http-body-util v0.1.3|default (*)
+libc v0.2.180|default,extra_traits,std
+libloading v0.9.0|default,std
+cfg-if v1.0.4|
+mini-moka v0.10.3|dashmap,default,sync
+crossbeam-channel v0.5.15|default,std
+crossbeam-utils v0.8.21|default,std
+crossbeam-utils v0.8.21|default,std
+dashmap v5.5.3|
+cfg-if v1.0.4|
+hashbrown v0.14.5|ahash,inline-more,raw (*)
+lock_api v0.4.14|atomic_usize,default (*)
+once_cell v1.21.3|alloc,default,race,std
+parking_lot_core v0.9.12| (*)
+smallvec v1.15.1|const_generics,const_new
+tagptr v0.2.0|
+triomphe v0.1.15|
+nix v0.29.0|default,fs,process,signal (*)
+notify v7.0.0|default,fsevent-sys,macos_fsevent
+bitflags v2.10.0|std
+filetime v0.2.27|
+cfg-if v1.0.4|
+libc v0.2.180|default,extra_traits,std
+fsevent-sys v4.1.0|
+libc v0.2.180|default,extra_traits,std
+libc v0.2.180|default,extra_traits,std
+log v0.4.29|std
+notify-types v1.0.1|
+instant v0.1.13|
+cfg-if v1.0.4|
+walkdir v2.5.0|
+same-file v1.0.6|
+ort v2.0.0-rc.12|api-17,api-18,api-19,api-20,api-21,api-22,api-23,api-24,half,load-dynamic,ndarray,preload-dylibs,std,tracing
+half v2.7.1|alloc,default,std (*)
+libloading v0.9.0|default,std (*)
+ndarray v0.17.2|std
+matrixmultiply v0.3.10|cgemm,std
+rawpointer v0.2.1|
+autocfg v1.5.0|
+num-complex v0.4.6|
+num-traits v0.2.19|i128,std (*)
+num-integer v0.1.46|default,std (*)
+num-traits v0.2.19|i128,std (*)
+rawpointer v0.2.1|
+ort-sys v2.0.0-rc.12|api-17,api-18,api-19,api-20,api-21,api-22,api-23,api-24,disable-linking,std
+smallvec v1.15.1|const_generics,const_new
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+rand v0.9.3|alloc,default,os_rng,small_rng,std,std_rng,thread_rng
+rand_chacha v0.9.0|std
+ppv-lite86 v0.2.21|simd,std (*)
+rand_core v0.9.5|os_rng,std
+getrandom v0.3.4|std (*)
+rand_core v0.9.5|os_rng,std (*)
+regex v1.12.2|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+aho-corasick v1.1.4|perf-literal,std
+memchr v2.7.6|alloc,default,std
+memchr v2.7.6|alloc,default,std
+regex-automata v0.4.13|alloc,dfa-build,dfa-onepass,dfa-search,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary
+aho-corasick v1.1.4|perf-literal,std (*)
+memchr v2.7.6|alloc,default,std
+regex-syntax v0.8.8|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-syntax v0.8.8|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+reqwest v0.12.28|__tls,charset,default,default-tls,h2,http2,json,stream,system-proxy
+base64 v0.22.1|alloc,default,std
+bytes v1.11.1|default,std
+encoding_rs v0.8.35|alloc,default
+cfg-if v1.0.4|
+futures-core v0.3.31|alloc,default,std
+futures-util v0.3.31|alloc,async-await,async-await-macro,channel,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std (*)
+h2 v0.4.16|
+atomic-waker v1.1.2|
+bytes v1.11.1|default,std
+fnv v1.0.7|default,std
+futures-core v0.3.31|alloc,default,std
+futures-sink v0.3.31|alloc,default,std
+http v1.4.0|default,std (*)
+indexmap v2.13.0|default,std
+equivalent v1.0.2|
+hashbrown v0.16.1|allocator-api2,default,default-hasher,equivalent,inline-more,raw-entry (*)
+slab v0.4.11|default,std
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tokio-util v0.7.18|codec,default,io (*)
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+http v1.4.0|default,std (*)
+http-body v1.0.1| (*)
+http-body-util v0.1.3|default (*)
+hyper v1.8.1|client,default,http1,http2,server
+atomic-waker v1.1.2|
+bytes v1.11.1|default,std
+futures-channel v0.3.31|alloc,default,futures-sink,sink,std (*)
+futures-core v0.3.31|alloc,default,std
+h2 v0.4.16| (*)
+http v1.4.0|default,std (*)
+http-body v1.0.1| (*)
+httparse v1.10.1|default,std
+httpdate v1.0.3|
+itoa v1.0.17|
+pin-project-lite v0.2.16|
+pin-utils v0.1.0|
+smallvec v1.15.1|const_generics,const_new
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+want v0.3.1|
+try-lock v0.2.5|
+hyper-tls v0.6.0|
+bytes v1.11.1|default,std
+http-body-util v0.1.3|default (*)
+hyper v1.8.1|client,default,http1,http2,server (*)
+hyper-util v0.1.19|client,client-legacy,client-proxy,client-proxy-system,default,http1,http2,server,service,tokio
+base64 v0.22.1|alloc,default,std
+bytes v1.11.1|default,std
+futures-channel v0.3.31|alloc,default,futures-sink,sink,std (*)
+futures-core v0.3.31|alloc,default,std
+futures-util v0.3.31|alloc,async-await,async-await-macro,channel,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std (*)
+http v1.4.0|default,std (*)
+http-body v1.0.1| (*)
+hyper v1.8.1|client,default,http1,http2,server (*)
+ipnet v2.11.0|default,std
+libc v0.2.180|default,extra_traits,std
+percent-encoding v2.3.2|alloc,default,std
+pin-project-lite v0.2.16|
+socket2 v0.6.1|all (*)
+system-configuration v0.6.1|
+bitflags v2.10.0|std
+core-foundation v0.9.4|default,link
+core-foundation-sys v0.8.7|default,link
+libc v0.2.180|default,extra_traits,std
+system-configuration-sys v0.6.0|
+core-foundation-sys v0.8.7|default,link
+libc v0.2.180|default,extra_traits,std
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tower-service v0.3.3|
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+native-tls v0.2.14|
+libc v0.2.180|default,extra_traits,std
+security-framework v2.11.1|OSX_10_10,OSX_10_11,OSX_10_12,OSX_10_9,default
+bitflags v2.10.0|std
+core-foundation v0.9.4|default,link (*)
+core-foundation-sys v0.8.7|default,link
+libc v0.2.180|default,extra_traits,std
+security-framework-sys v2.15.0|OSX_10_10,OSX_10_11,OSX_10_12,OSX_10_9,default
+core-foundation-sys v0.8.7|default,link
+libc v0.2.180|default,extra_traits,std
+security-framework-sys v2.15.0|OSX_10_10,OSX_10_11,OSX_10_12,OSX_10_9,default (*)
+tempfile v3.24.0|default,getrandom
+fastrand v2.3.0|alloc,default,std
+getrandom v0.3.4|std (*)
+once_cell v1.21.3|alloc,default,race,std
+rustix v1.1.3|alloc,default,fs,process,std,termios,time (*)
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tokio-native-tls v0.3.1|
+native-tls v0.2.14| (*)
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tower-service v0.3.3|
+hyper-util v0.1.19|client,client-legacy,client-proxy,client-proxy-system,default,http1,http2,server,service,tokio (*)
+log v0.4.29|std
+mime v0.3.17|
+native-tls v0.2.14| (*)
+percent-encoding v2.3.2|alloc,default,std
+pin-project-lite v0.2.16|
+rustls-pki-types v1.14.0|alloc,default,std
+zeroize v1.8.2|alloc,default
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+serde_json v1.0.149|alloc,default,raw_value,std,unbounded_depth
+itoa v1.0.17|
+memchr v2.7.6|alloc,default,std
+serde_core v1.0.228|alloc,default,result,std
+zmij v1.0.16|
+serde_urlencoded v0.7.1|
+form_urlencoded v1.2.2|alloc,default,std (*)
+itoa v1.0.17|
+ryu v1.0.22|
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+sync_wrapper v1.0.2|futures,futures-core
+futures-core v0.3.31|alloc,default,std
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tokio-native-tls v0.3.1| (*)
+tokio-util v0.7.18|codec,default,io (*)
+tower v0.5.3|futures-core,futures-util,limit,make,pin-project-lite,retry,sync_wrapper,timeout,tokio,tokio-util,tracing,util
+futures-core v0.3.31|alloc,default,std
+futures-util v0.3.31|alloc,async-await,async-await-macro,channel,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std (*)
+pin-project-lite v0.2.16|
+sync_wrapper v1.0.2|futures,futures-core (*)
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tokio-util v0.7.18|codec,default,io (*)
+tower-layer v0.3.3|
+tower-service v0.3.3|
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+tower-http v0.6.8|cors,default,follow-redirect,futures-util,iri-string,tower,trace,tracing
+bitflags v2.10.0|std
+bytes v1.11.1|default,std
+futures-util v0.3.31|alloc,async-await,async-await-macro,channel,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std (*)
+http v1.4.0|default,std (*)
+http-body v1.0.1| (*)
+iri-string v0.7.10|alloc,default,std
+pin-project-lite v0.2.16|
+tower v0.5.3|futures-core,futures-util,limit,make,pin-project-lite,retry,sync_wrapper,timeout,tokio,tokio-util,tracing,util (*)
+tower-layer v0.3.3|
+tower-service v0.3.3|
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+tower-service v0.3.3|
+url v2.5.8|default,std (*)
+roxmltree v0.21.1|default,positions,std
+memchr v2.7.6|alloc,default,std
+rusqlite v0.32.1|bundled,modern_sqlite
+bitflags v2.10.0|std
+fallible-iterator v0.3.0|alloc,default
+fallible-streaming-iterator v0.1.9|
+hashlink v0.9.1|
+hashbrown v0.14.5|ahash,inline-more,raw (*)
+libsqlite3-sys v0.30.1|bundled,bundled_bindings,cc,default,min_sqlite_version_3_14_0,pkg-config,vcpkg
+cc v1.2.53|parallel (*)
+pkg-config v0.3.32|
+vcpkg v0.2.15|
+smallvec v1.15.1|const_generics,const_new
+rustix v1.1.3|alloc,default,fs,process,std,termios,time (*)
+schemars v1.2.0|default,derive,schemars_derive,std
+dyn-clone v1.0.20|
+ref-cast v1.0.25|
+ref-cast-impl v1.0.25 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+schemars_derive v1.2.0 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+serde_derive_internals v0.29.1|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+serde_json v1.0.149|alloc,default,raw_value,std,unbounded_depth (*)
+semver v1.0.27|default,serde,std
+serde_core v1.0.228|alloc,default,result,std
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+serde_json v1.0.149|alloc,default,raw_value,std,unbounded_depth (*)
+sha2 v0.10.9|default,std
+cfg-if v1.0.4|
+cpufeatures v0.2.17|
+libc v0.2.180|default,extra_traits,std
+digest v0.10.7|alloc,block-buffer,core-api,default,std (*)
+sysinfo v0.32.1|disk,multithread,system
+core-foundation-sys v0.8.7|default,link
+libc v0.2.180|default,extra_traits,std
+memchr v2.7.6|alloc,default,std
+rayon v1.11.0|
+either v1.15.0|default,std,use_std
+rayon-core v1.13.0|
+crossbeam-deque v0.8.6|default,std
+crossbeam-epoch v0.9.20|alloc,std
+crossbeam-utils v0.8.21|default,std
+crossbeam-utils v0.8.21|default,std
+crossbeam-utils v0.8.21|default,std
+tar v0.4.45|default,xattr
+filetime v0.2.27| (*)
+libc v0.2.180|default,extra_traits,std
+xattr v1.6.1|default,unsupported
+rustix v1.1.3|alloc,default,fs,process,std,termios,time (*)
+tempfile v3.24.0|default,getrandom (*)
+thiserror v2.0.18|default,std
+thiserror-impl v2.0.18 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+tokenizers v0.23.1|onig
+ahash v0.8.12|default,getrandom,runtime-rng,serde,std (*)
+compact_str v0.9.0|default,serde,std
+castaway v0.2.4|alloc
+rustversion v1.0.22 (proc-macro)|
+cfg-if v1.0.4|
+itoa v1.0.17|
+rustversion v1.0.22 (proc-macro)|
+ryu v1.0.22|
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+static_assertions v1.1.0|
+daachorse v1.0.1|alloc,default
+dary_heap v0.3.9|serde
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+derive_builder v0.20.2|default,std
+derive_builder_macro v0.20.2 (proc-macro)|lib_has_std
+derive_builder_core v0.20.2|lib_has_std
+darling v0.20.11|default,suggestions
+darling_core v0.20.11|strsim,suggestions
+fnv v1.0.7|default,std
+ident_case v1.0.1|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+strsim v0.11.1|
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+darling_macro v0.20.11 (proc-macro)|
+darling_core v0.20.11|strsim,suggestions (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+esaxx-rs v0.1.10|
+getrandom v0.3.4|std (*)
+itertools v0.14.0|default,use_alloc,use_std
+either v1.15.0|default,std,use_std
+log v0.4.29|std
+macro_rules_attribute v0.2.2|default
+macro_rules_attribute-proc_macro v0.2.2 (proc-macro)|
+paste v1.0.15 (proc-macro)|
+monostate v0.1.18|
+monostate-impl v0.1.18 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+serde_core v1.0.228|alloc,default,result,std
+onig v6.5.3|
+bitflags v2.10.0|std
+once_cell v1.21.3|alloc,default,race,std
+onig_sys v69.9.3|
+cc v1.2.53|parallel (*)
+pkg-config v0.3.32|
+paste v1.0.15 (proc-macro)|
+rand v0.9.3|alloc,default,os_rng,small_rng,std,std_rng,thread_rng (*)
+rayon v1.11.0| (*)
+rayon-cond v0.4.0|
+either v1.15.0|default,std,use_std
+itertools v0.14.0|default,use_alloc,use_std (*)
+rayon v1.11.0| (*)
+regex v1.12.2|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-syntax v0.8.8|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+serde_json v1.0.149|alloc,default,raw_value,std,unbounded_depth (*)
+spm_precompiled v0.1.4|
+base64 v0.13.1|default,std
+nom v7.1.3|alloc,default,std
+memchr v2.7.6|alloc,default,std
+minimal-lexical v0.2.1|std
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+unicode-segmentation v1.13.2|
+thiserror v2.0.18|default,std (*)
+unicode-normalization-alignments v0.1.12|
+smallvec v1.15.1|const_generics,const_new
+unicode-segmentation v1.13.2|
+unicode_categories v0.1.1|
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+unicode-normalization v0.1.25|default,std
+tinyvec v1.13.2|alloc,default,tinyvec_macros
+tinyvec_macros v0.1.1|
+uniffi v0.28.3|bindgen,bindgen-tests,cargo-metadata,cli,default,tokio
+anyhow v1.0.103|default,std
+camino v1.2.2|serde1
+serde_core v1.0.228|alloc,default,result,std
+cargo_metadata v0.15.4|default
+camino v1.2.2|serde1 (*)
+cargo-platform v0.1.9|
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+semver v1.0.27|default,serde,std (*)
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+serde_json v1.0.149|alloc,default,raw_value,std,unbounded_depth (*)
+thiserror v1.0.69|
+thiserror-impl v1.0.69 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+clap v4.5.54|cargo,color,default,derive,error-context,help,std,suggestions,usage
+clap_builder v4.5.54|cargo,color,error-context,help,std,suggestions,usage
+anstream v0.6.21|auto,default,wincon
+anstyle v1.0.13|default,std
+anstyle-parse v0.2.7|default,utf8
+utf8parse v0.2.2|default
+anstyle-query v1.1.5|
+colorchoice v1.0.4|
+is_terminal_polyfill v1.70.2|default
+utf8parse v0.2.2|default
+anstyle v1.0.13|default,std
+clap_lex v0.7.7|
+strsim v0.11.1|
+clap_derive v4.5.49 (proc-macro)|default
+heck v0.5.0|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+uniffi_bindgen v0.28.3|bindgen-tests,cargo-metadata,default
+anyhow v1.0.103|default,std
+askama v0.12.1|config
+askama_derive v0.12.5 (proc-macro)|basic-toml,config,serde
+askama_parser v0.2.1|
+nom v7.1.3|alloc,default,std
+memchr v2.7.6|alloc,std
+minimal-lexical v0.2.1|std
+basic-toml v0.1.10|
+serde v1.0.228|default,derive,serde_derive,std
+serde_core v1.0.228|default,result,std
+serde_derive v1.0.228 (proc-macro)|default (*)
+mime v0.3.17|
+mime_guess v2.0.5|default,rev-mappings
+mime v0.3.17|
+unicase v2.9.0|
+unicase v2.9.0|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+serde v1.0.228|default,derive,serde_derive,std (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+askama_escape v0.10.3|
+camino v1.2.2|serde1 (*)
+cargo_metadata v0.15.4|default (*)
+fs-err v2.11.0|
+autocfg v1.5.0|
+glob v0.3.3|
+goblin v0.8.2|alloc,archive,default,elf32,elf64,endian_fd,log,mach32,mach64,pe32,pe64,std
+log v0.4.29|std
+plain v0.2.3|
+scroll v0.12.0|derive,std
+scroll_derive v0.12.1 (proc-macro)|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+heck v0.5.0|
+once_cell v1.21.3|alloc,default,race,std
+paste v1.0.15 (proc-macro)|
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+textwrap v0.16.2|smawk
+smawk v0.3.2|
+toml v0.5.11|default
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+uniffi_meta v0.28.3|
+anyhow v1.0.103|default,std
+bytes v1.11.1|default,std
+siphasher v0.3.11|default,std
+uniffi_checksum_derive v0.28.3 (proc-macro)|default
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+uniffi_testing v0.28.3|
+anyhow v1.0.103|default,std
+camino v1.2.2|serde1 (*)
+cargo_metadata v0.15.4|default (*)
+fs-err v2.11.0| (*)
+once_cell v1.21.3|alloc,default,race,std
+uniffi_udl v0.28.3|
+anyhow v1.0.103|default,std
+textwrap v0.16.2|smawk (*)
+uniffi_meta v0.28.3| (*)
+uniffi_testing v0.28.3| (*)
+weedle2 v5.0.0|
+nom v7.1.3|alloc,default,std (*)
+uniffi_core v0.28.3|default,tokio
+anyhow v1.0.103|default,std
+async-compat v0.2.5|
+futures-core v0.3.31|alloc,default,std
+futures-io v0.3.31|default,std
+once_cell v1.21.3|alloc,default,race,std
+pin-project-lite v0.2.16|
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+bytes v1.11.1|default,std
+log v0.4.29|std
+once_cell v1.21.3|alloc,default,race,std
+paste v1.0.15 (proc-macro)|
+static_assertions v1.1.0|
+uniffi_macros v0.28.3 (proc-macro)|default
+bincode v1.3.3|
+serde v1.0.228|default,derive,serde_derive,std (*)
+camino v1.2.2|serde1
+serde_core v1.0.228|default,result,std
+fs-err v2.11.0|
+autocfg v1.5.0|
+once_cell v1.21.3|alloc,default,race,std
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+serde v1.0.228|default,derive,serde_derive,std (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+toml v0.5.11|default
+serde v1.0.228|default,derive,serde_derive,std (*)
+uniffi_meta v0.28.3|
+anyhow v1.0.103|default,std
+bytes v1.11.1|default,std
+siphasher v0.3.11|default,std
+uniffi_checksum_derive v0.28.3 (proc-macro)|default (*)
+url v2.5.8|default,std (*)
+urlencoding v2.1.3|
+uuid v1.19.0|default,rng,std,v4 (*)
+walkdir v2.5.0| (*)
+zstd v0.13.3|arrays,default,legacy,zdict_builder
+zstd-safe v7.2.4|arrays,legacy,std,zdict_builder
+zstd-sys v2.0.16+zstd.1.5.7|legacy,std,zdict_builder
+cc v1.2.53|parallel (*)
+pkg-config v0.3.32|
+native-tls v0.2.14| (*)
+nix v0.29.0|default,fs,process,signal (*)
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tracing-subscriber v0.3.22|alloc,ansi,default,env-filter,fmt,matchers,nu-ansi-term,once_cell,registry,sharded-slab,smallvec,std,thread_local,tracing,tracing-log
+matchers v0.2.0|
+regex-automata v0.4.13|alloc,dfa-build,dfa-onepass,dfa-search,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+nu-ansi-term v0.50.3|default,std
+once_cell v1.21.3|alloc,default,race,std
+regex-automata v0.4.13|alloc,dfa-build,dfa-onepass,dfa-search,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+sharded-slab v0.1.7|
+lazy_static v1.5.0|
+smallvec v1.15.1|const_generics,const_new
+thread_local v1.1.9|
+cfg-if v1.0.4|
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+tracing-core v0.1.36|default,once_cell,std (*)
+tracing-log v0.2.0|log-tracer,std
+log v0.4.29|std
+once_cell v1.21.3|alloc,default,race,std
+tracing-core v0.1.36|default,once_cell,std (*)
+regex v1.12.2|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+reqwest v0.12.28|__tls,charset,default,default-tls,h2,http2,json,stream,system-proxy (*)
+semver v1.0.27|default,serde,std (*)
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+serde_json v1.0.149|alloc,default,raw_value,std,unbounded_depth (*)
+sha2 v0.10.9|default,std (*)
+tar v0.4.45|default,xattr (*)
+tempfile v3.24.0|default,getrandom (*)
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+walkdir v2.5.0| (*)
+zip v2.4.2|_deflate-any,bzip2,deflate-flate2,deflate64,flate2,lzma,lzma-rs,xz,zstd
+bzip2 v0.5.2|default
+bzip2-sys v0.1.13+1.0.8|
+cc v1.2.53|parallel (*)
+pkg-config v0.3.32|
+crc32fast v1.5.0|default,std (*)
+deflate64 v0.1.10|
+displaydoc v0.2.5 (proc-macro)| (*)
+flate2 v1.1.8|any_impl,default,miniz_oxide,rust_backend (*)
+indexmap v2.13.0|default,std (*)
+lzma-rs v0.3.0|stream
+byteorder v1.5.0|default,std
+crc v3.4.0|
+crc-catalog v2.4.0|
+memchr v2.7.6|alloc,default,std
+thiserror v2.0.18|default,std (*)
+xz2 v0.1.7|
+lzma-sys v0.1.20|
+libc v0.2.180|default,extra_traits,std
+cc v1.2.53|parallel (*)
+pkg-config v0.3.32|
+zstd v0.13.3|arrays,default,legacy,zdict_builder (*)
+zstd v0.13.3|arrays,default,legacy,zdict_builder (*)
+pumas-library v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-core)|contract-schema,default,full,gpu-monitor,hf-client,onnx-runtime,process-manager,s3,test-support,uniffi (*)
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+
+pumas-library v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-core)|contract-schema,default,full,gpu-monitor,hf-client,onnx-runtime,process-manager,s3,test-support,uniffi (*)
+
+pumas-rpc v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-rpc)|default,export-contract,inference-plugins,s3,test-support
+anyhow v1.0.103|default,std
+axum v0.7.9|http1,json,matched-path,original-uri,query,tokio,tracing
+async-trait v0.1.89 (proc-macro)| (*)
+axum-core v0.4.5|tracing
+async-trait v0.1.89 (proc-macro)| (*)
+bytes v1.11.1|default,std
+futures-util v0.3.31|alloc,async-await,async-await-macro,channel,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std (*)
+http v1.4.0|default,std (*)
+http-body v1.0.1| (*)
+http-body-util v0.1.3|default (*)
+mime v0.3.17|
+pin-project-lite v0.2.16|
+rustversion v1.0.22 (proc-macro)|
+sync_wrapper v1.0.2|futures,futures-core (*)
+tower-layer v0.3.3|
+tower-service v0.3.3|
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+bytes v1.11.1|default,std
+futures-util v0.3.31|alloc,async-await,async-await-macro,channel,futures-channel,futures-io,futures-macro,futures-sink,io,memchr,sink,slab,std (*)
+http v1.4.0|default,std (*)
+http-body v1.0.1| (*)
+http-body-util v0.1.3|default (*)
+hyper v1.8.1|client,default,http1,http2,server (*)
+hyper-util v0.1.19|client,client-legacy,client-proxy,client-proxy-system,default,http1,http2,server,service,tokio (*)
+itoa v1.0.17|
+matchit v0.7.3|default
+memchr v2.7.6|alloc,default,std
+mime v0.3.17|
+percent-encoding v2.3.2|alloc,default,std
+pin-project-lite v0.2.16|
+rustversion v1.0.22 (proc-macro)|
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+serde_json v1.0.149|alloc,default,raw_value,std,unbounded_depth (*)
+serde_path_to_error v0.1.20|
+itoa v1.0.17|
+serde_core v1.0.228|alloc,default,result,std
+serde_urlencoded v0.7.1| (*)
+sync_wrapper v1.0.2|futures,futures-core (*)
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tower v0.5.3|futures-core,futures-util,limit,make,pin-project-lite,retry,sync_wrapper,timeout,tokio,tokio-util,tracing,util (*)
+tower-layer v0.3.3|
+tower-service v0.3.3|
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+cap-std v4.0.3| (*)
+clap v4.5.54|cargo,color,default,derive,error-context,help,std,suggestions,usage (*)
+dirs v5.0.1| (*)
+futures v0.3.31|alloc,async-await,default,executor,futures-executor,std (*)
+hyper v1.8.1|client,default,http1,http2,server (*)
+hyper-util v0.1.19|client,client-legacy,client-proxy,client-proxy-system,default,http1,http2,server,service,tokio (*)
+pumas-app-manager v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-app-manager)|default,test-support (*)
+pumas-library v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-core)|contract-schema,default,full,gpu-monitor,hf-client,onnx-runtime,process-manager,s3,test-support,uniffi (*)
+reqwest v0.12.28|__tls,charset,default,default-tls,h2,http2,json,stream,system-proxy (*)
+same-file v1.0.6|
+schemars v1.2.0|default,derive,schemars_derive,std (*)
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+serde_json v1.0.149|alloc,default,raw_value,std,unbounded_depth (*)
+tempfile v3.24.0|default,getrandom (*)
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+tower v0.5.3|futures-core,futures-util,limit,make,pin-project-lite,retry,sync_wrapper,timeout,tokio,tokio-util,tracing,util (*)
+tower-http v0.6.8|cors,default,follow-redirect,futures-util,iri-string,tower,trace,tracing (*)
+tracing v0.1.44|attributes,default,std,tracing-attributes (*)
+tracing-subscriber v0.3.22|alloc,ansi,default,env-filter,fmt,matchers,nu-ansi-term,once_cell,registry,sharded-slab,smallvec,std,thread_local,tracing,tracing-log (*)
+url v2.5.8|default,std (*)
+native-tls v0.2.14| (*)
+pumas-library v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-core)|contract-schema,default,full,gpu-monitor,hf-client,onnx-runtime,process-manager,s3,test-support,uniffi (*)
+tempfile v3.24.0|default,getrandom (*)
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+
+pumas-uniffi v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-uniffi)|bindings,cli,default
+pumas-library v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-core)|contract-schema,default,full,gpu-monitor,hf-client,onnx-runtime,process-manager,s3,test-support,uniffi (*)
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+serde_json v1.0.149|alloc,default,raw_value,std,unbounded_depth (*)
+thiserror v2.0.18|default,std (*)
+tokio v1.49.0|bytes,default,fs,io-util,libc,macros,mio,net,process,rt,rt-multi-thread,signal,signal-hook-registry,socket2,sync,test-util,time,tokio-macros (*)
+uniffi v0.28.3|bindgen,bindgen-tests,cargo-metadata,cli,default,tokio (*)
+uniffi v0.28.3|bindgen,build,cargo-metadata,cli,default
+anyhow v1.0.103|default,std
+camino v1.2.2|serde1 (*)
+cargo_metadata v0.15.4|default
+camino v1.2.2|serde1 (*)
+cargo-platform v0.1.9|
+serde v1.0.228|default,derive,serde_derive,std (*)
+semver v1.0.27|default,serde,std (*)
+serde v1.0.228|default,derive,serde_derive,std (*)
+serde_json v1.0.149|default,std,unbounded_depth
+itoa v1.0.17|
+memchr v2.7.6|alloc,std
+serde_core v1.0.228|default,result,std
+zmij v1.0.16|
+thiserror v1.0.69|
+thiserror-impl v1.0.69 (proc-macro)| (*)
+clap v4.5.54|cargo,color,default,derive,error-context,help,std,suggestions,usage
+clap_builder v4.5.54|cargo,color,error-context,help,std,suggestions,usage
+anstream v0.6.21|auto,default,wincon
+anstyle v1.0.13|default,std
+anstyle-parse v0.2.7|default,utf8
+utf8parse v0.2.2|default
+anstyle-query v1.1.5|
+colorchoice v1.0.4|
+is_terminal_polyfill v1.70.2|default
+utf8parse v0.2.2|default
+anstyle v1.0.13|default,std
+clap_lex v0.7.7|
+strsim v0.11.1|
+clap_derive v4.5.49 (proc-macro)|default (*)
+uniffi_bindgen v0.28.3|cargo-metadata,default
+anyhow v1.0.103|default,std
+askama v0.12.1|config
+askama_derive v0.12.5 (proc-macro)|basic-toml,config,serde (*)
+askama_escape v0.10.3|
+camino v1.2.2|serde1 (*)
+cargo_metadata v0.15.4|default (*)
+fs-err v2.11.0| (*)
+glob v0.3.3|
+goblin v0.8.2|alloc,archive,default,elf32,elf64,endian_fd,log,mach32,mach64,pe32,pe64,std
+log v0.4.29|
+plain v0.2.3|
+scroll v0.12.0|derive,std
+scroll_derive v0.12.1 (proc-macro)| (*)
+heck v0.5.0|
+once_cell v1.21.3|alloc,default,race,std
+paste v1.0.15 (proc-macro)|
+serde v1.0.228|default,derive,serde_derive,std (*)
+textwrap v0.16.2|smawk
+smawk v0.3.2|
+toml v0.5.11|default (*)
+uniffi_meta v0.28.3| (*)
+uniffi_udl v0.28.3|
+anyhow v1.0.103|default,std
+textwrap v0.16.2|smawk (*)
+uniffi_meta v0.28.3| (*)
+uniffi_testing v0.28.3|
+anyhow v1.0.103|default,std
+camino v1.2.2|serde1 (*)
+cargo_metadata v0.15.4|default (*)
+fs-err v2.11.0| (*)
+once_cell v1.21.3|alloc,default,race,std
+weedle2 v5.0.0|
+nom v7.1.3|alloc,default,std (*)
+uniffi_build v0.28.3|default
+anyhow v1.0.103|default,std
+camino v1.2.2|serde1 (*)
+uniffi_bindgen v0.28.3|cargo-metadata,default (*)
+uniffi_core v0.28.3|default
+anyhow v1.0.103|default,std
+bytes v1.11.1|default,std
+log v0.4.29|
+once_cell v1.21.3|alloc,default,race,std
+paste v1.0.15 (proc-macro)|
+static_assertions v1.1.0|
+uniffi_macros v0.28.3 (proc-macro)|default (*)
+uniffi v0.28.3|bindgen,bindgen-tests,cargo-metadata,cli,default,tokio (*)
+
+pumas_rustler v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-rustler)|
+pumas-library v0.7.0 (/workspace/pumas-selected-reconcile-fresh/rust/crates/pumas-core)|contract-schema,default,full,gpu-monitor,hf-client,onnx-runtime,process-manager,s3,test-support,uniffi (*)
+rustler v0.34.0|default,nif_version_2_14,nif_version_2_15
+inventory v0.3.21|
+rustler_codegen v0.34.0 (proc-macro)|
+heck v0.5.0|
+inventory v0.3.21|
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn v2.0.114|clone-impls,default,derive,extra-traits,fold,full,parsing,printing,proc-macro,visit,visit-mut (*)
+rustler_sys v2.4.3|default,nif_version_2_14,nif_version_2_15
+unreachable v1.0.0|
+void v1.0.2|
+regex v1.12.2|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+aho-corasick v1.1.4|perf-literal,std
+memchr v2.7.6|alloc,std
+memchr v2.7.6|alloc,std
+regex-automata v0.4.13|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary
+aho-corasick v1.1.4|perf-literal,std (*)
+memchr v2.7.6|alloc,std
+regex-syntax v0.8.8|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-syntax v0.8.8|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+serde v1.0.228|alloc,default,derive,serde_derive,std (*)
+serde_json v1.0.149|alloc,default,raw_value,std,unbounded_depth (*)
+thiserror v2.0.18|default,std (*)

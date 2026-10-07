@@ -1,0 +1,51 @@
+[
+  {
+    "label": "selected_base",
+    "path": "/workspace/pumas-selected-reconcile-saved-baseline",
+    "head": "04fde63b151fa019b73fcf71aca636b46a35c548",
+    "tree": "910a9abef17f94af4a4f88ee14312ea0e84299dc",
+    "task_writes_to_worktree": false
+  },
+  {
+    "label": "prior_saved_reconciliation",
+    "path": "/workspace/pumas-selected-reconcile-saved",
+    "head": "b53ff71e3020d7c099add7a14f44974a20e30dfa",
+    "tree": "bb4a405afe907ba5f5b7c4fb94bdba918a46f680",
+    "task_writes_to_worktree": false
+  },
+  {
+    "label": "s3_retry",
+    "path": "/workspace/pumas-s3-explicit-retry",
+    "head": "cecb0e5708f74f3da8fe3edf83b369ce9765994a",
+    "tree": "7c847257061bdc4621d8e995fcae3859e86d651a",
+    "task_writes_to_worktree": false
+  },
+  {
+    "label": "s3_inspector",
+    "path": "/workspace/pumas-s3-retained-inspection",
+    "head": "5219e71afb6efc1ed32f48f759f50d2f37644170",
+    "tree": "f89341fff8259ef91f75346d39742cf027ac1c73",
+    "task_writes_to_worktree": false
+  },
+  {
+    "label": "s3_copy",
+    "path": "/workspace/pumas-s3-discovery-copy",
+    "head": "6a9853902f49d5b412c35a2f16034859f7a1adb9",
+    "tree": "374c8b5ab11adec359eb777e3d9ce549cd75aaef",
+    "task_writes_to_worktree": false
+  },
+  {
+    "label": "s3_discovery",
+    "path": "/workspace/pumas-s3-prefix-discovery",
+    "head": "af38f6aeffd1d04e705f644d70f57cf77083d577",
+    "tree": "a52756cf4f8d3498fc8ea5afccc0994ed9885b61",
+    "task_writes_to_worktree": false
+  },
+  {
+    "label": "s3_browser",
+    "path": "/workspace/pumas-s3-prefix-browser-qa",
+    "head": "c5a8b57b8744c504dab2cf5b9c73b6122357742d",
+    "tree": "73a7a7d3274e5e632042c6cc6752386779ec03f2",
+    "task_writes_to_worktree": false
+  }
+]

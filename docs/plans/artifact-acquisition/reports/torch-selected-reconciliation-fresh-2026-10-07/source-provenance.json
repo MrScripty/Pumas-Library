@@ -1,0 +1,22 @@
+{
+  "base": "04fde63b151fa019b73fcf71aca636b46a35c548",
+  "base_tree": "910a9abef17f94af4a4f88ee14312ea0e84299dc",
+  "tested_lifecycle": "568a5f1fca76b2253088d97f71b1d950e5beacc9",
+  "tested_lifecycle_tree": "5e5d26a3540d468a7a737ff5d54ccbebe0d78260",
+  "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+  "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196",
+  "last_verified_main": "5e114f6d8e4559e0a4d67e56000b423120a0fde0",
+  "branch": "feat/torch-selected-reconcile-fresh-04fde63b",
+  "reused_scoped_commits": [
+    "f1a8a818f21e59fcdc5dffc307cec816540a1d2d",
+    "e7c700b5dbfe24603b1c0b106039caf460074e78"
+  ],
+  "changed_paths": {
+    "docs/contracts/artifact-acquisition.md": "0298d8eb08b264d8b5dbf4741ea759806440ffc1e3b7fe8463b703ab67561403",
+    "docs/plans/artifact-acquisition/plan.md": "ee6748e2378cca5506e99551a65e315ca916aa2af56b69cd29c02442e71a837a",
+    "docs/plans/artifact-acquisition/reports/write-sets.md": "6b66c0aeb28b838cf07f3cd03ee36698a4dfbc5b30867b7872a0c85b977edc72",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs": "2dc2e719feabc3cd23f8b937b3eedd96daf407ce262cfe2b0fb90ce5a81680dd",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs": "7dccdbc925932cbc4fa846b614d63aba38e373be92e837312cb72e5ef6ad82b5",
+    "rust/crates/pumas-app-manager/src/version_manager/installer/torch_selected_runtime.rs": "ed630f846ae5f25e3922af6c6a5f3e3fcc0aaab9f1452243f1b6674aa1c922e9"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "command": [
+    "git",
+    "push",
+    "origin",
+    "HEAD:refs/heads/feat/torch-selected-reconcile-fresh-04fde63b"
+  ],
+  "exit_code": 0,
+  "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+  "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196",
+  "qualification_complete": false,
+  "stdout": "",
+  "stderr": "remote: \nremote: Create a pull request for 'feat/torch-selected-reconcile-fresh-04fde63b' on GitHub by visiting:        \nremote:      https://github.com/MrScripty/Pumas-Library/pull/new/feat/torch-selected-reconcile-fresh-04fde63b        \nremote: \nremote: GitHub found 38 vulnerabilities on MrScripty/Pumas-Library's default branch (25 high, 12 moderate, 1 low). To find out more, visit:        \nremote:      https://github.com/MrScripty/Pumas-Library/security/dependabot        \nremote: \nTo https://github.com/MrScripty/Pumas-Library.git\n * [new branch]        HEAD -> feat/torch-selected-reconcile-fresh-04fde63b\n"
+}

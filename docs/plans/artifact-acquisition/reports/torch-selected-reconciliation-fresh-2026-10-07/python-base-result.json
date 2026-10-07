@@ -1,0 +1,19 @@
+{
+  "command": [
+    "python3",
+    "-m",
+    "unittest",
+    "-v",
+    "test_embedded_runtime_imports"
+  ],
+  "cwd": "/workspace/pumas-selected-reconcile-saved-baseline",
+  "PYTHONDONTWRITEBYTECODE": "1",
+  "PYTHONPATH": "/workspace/pumas-reconcile-python-full:/workspace/pumas-reconcile-tools:/workspace/pumas-selected-reconcile-saved-baseline/torch-server/tests",
+  "exit_code": 1,
+  "base": "04fde63b151fa019b73fcf71aca636b46a35c548",
+  "base_tree": "910a9abef17f94af4a4f88ee14312ea0e84299dc",
+  "tests_run": 2,
+  "errors": 2,
+  "exception": "IndexError: list index out of range",
+  "scope": "inherited embedded source table parser; no test or runtime changes made"
+}

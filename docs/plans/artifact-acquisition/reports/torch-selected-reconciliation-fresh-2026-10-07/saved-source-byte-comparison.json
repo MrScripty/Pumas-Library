@@ -1,0 +1,20 @@
+[
+  {
+    "path": "rust/crates/pumas-app-manager/src/version_manager/installer/torch.rs",
+    "candidate_sha256": "2dc2e719feabc3cd23f8b937b3eedd96daf407ce262cfe2b0fb90ce5a81680dd",
+    "saved_source_sha256": "2dc2e719feabc3cd23f8b937b3eedd96daf407ce262cfe2b0fb90ce5a81680dd",
+    "byte_identical": true
+  },
+  {
+    "path": "rust/crates/pumas-app-manager/src/version_manager/installer/torch_catalog_owner_tests.rs",
+    "candidate_sha256": "7dccdbc925932cbc4fa846b614d63aba38e373be92e837312cb72e5ef6ad82b5",
+    "saved_source_sha256": "7dccdbc925932cbc4fa846b614d63aba38e373be92e837312cb72e5ef6ad82b5",
+    "byte_identical": true
+  },
+  {
+    "path": "rust/crates/pumas-app-manager/src/version_manager/installer/torch_selected_runtime.rs",
+    "candidate_sha256": "ed630f846ae5f25e3922af6c6a5f3e3fcc0aaab9f1452243f1b6674aa1c922e9",
+    "saved_source_sha256": "ed630f846ae5f25e3922af6c6a5f3e3fcc0aaab9f1452243f1b6674aa1c922e9",
+    "byte_identical": true
+  }
+]

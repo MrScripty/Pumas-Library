@@ -1,0 +1,4 @@
+Metadata-Version: 2.1
+Name: branch
+Version: 2
+Requires-Dist: dependency>=2

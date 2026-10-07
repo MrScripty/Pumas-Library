@@ -1,0 +1,32 @@
+{
+  "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+  "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196",
+  "kind": "implementer source review; independent parent review remains pending",
+  "changed_rust_files": 3,
+  "public_rust_api_expansion": false,
+  "automatic_preview_adoption": false,
+  "catalog_receipt_changes": false,
+  "saved_authority_reconstruction": false,
+  "installation_or_probe_replay": false,
+  "checks": [
+    "Reconciliation consumes the retained live refusal/publication capability and validates original consumer ownership.",
+    "Original stage retains versions lock, catalog grant, installed packet and validation capability.",
+    "All fences, metadata readback, acknowledgment and rollback run inside one registered blocking job.",
+    "Unknown evidence and started metadata write without committed readback return Unresolved without deleting output.",
+    "Successful owned deletion is recorded in the live intent before directory synchronization and marker cleanup.",
+    "Unresolved last-owner drop preserves the selected stage; legacy cleanup skips publication/selected-stage markers and lookup uncertainty.",
+    "Metadata reads reload installed state; legacy atomic writer has no parent-directory synchronization.",
+    "No production caller invokes private reconciliation or staged adoption in this slice."
+  ],
+  "repository_guidance": [
+    "CONTRIBUTING.md",
+    "docs/ARCHITECTURE.md",
+    "docs/DEVELOPMENT.md",
+    "docs/contracts/artifact-acquisition.md",
+    "docs/plans/artifact-acquisition/plan.md",
+    "docs/plans/torch-cross-platform-runtime-management/plan.md",
+    "docs/plans/artifact-acquisition/reports/write-sets.md"
+  ],
+  "local_agents_skills_available": false,
+  "external_coding_standards_available": false
+}

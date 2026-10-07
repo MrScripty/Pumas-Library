@@ -1,0 +1,205 @@
+[
+  {
+    "gate": "graphs",
+    "command": [
+      "python3",
+      "scripts/release/check-dependency-features.py",
+      "--s3"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 14.887,
+    "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+    "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196"
+  },
+  {
+    "gate": "lifecycle",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "--manifest-path",
+      "rust/Cargo.toml",
+      "-p",
+      "pumas-app-manager",
+      "--features",
+      "test-support",
+      "selected_runtime_",
+      "--",
+      "--include-ignored",
+      "--test-threads=1",
+      "--nocapture"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 1508.965,
+    "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+    "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196"
+  },
+  {
+    "gate": "rust-affected",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "--manifest-path",
+      "rust/Cargo.toml",
+      "-p",
+      "pumas-app-manager",
+      "--features",
+      "test-support",
+      "version_manager::installer::torch::torch_",
+      "--",
+      "--include-ignored",
+      "--test-threads=1",
+      "--skip",
+      "selected_runtime_",
+      "--nocapture"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 746.732,
+    "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+    "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196"
+  },
+  {
+    "gate": "workspace-test",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "--manifest-path",
+      "rust/Cargo.toml",
+      "--workspace",
+      "--exclude",
+      "pumas_rustler",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 883.369,
+    "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+    "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196"
+  },
+  {
+    "gate": "workspace-check",
+    "command": [
+      "cargo",
+      "check",
+      "--offline",
+      "--locked",
+      "--manifest-path",
+      "rust/Cargo.toml",
+      "--workspace",
+      "--exclude",
+      "pumas_rustler",
+      "--all-targets",
+      "--all-features"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 193.627,
+    "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+    "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196"
+  },
+  {
+    "gate": "workspace-clippy",
+    "command": [
+      "cargo",
+      "clippy",
+      "--offline",
+      "--locked",
+      "--manifest-path",
+      "rust/Cargo.toml",
+      "--workspace",
+      "--exclude",
+      "pumas_rustler",
+      "--all-targets",
+      "--all-features",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 120.258,
+    "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+    "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196"
+  },
+  {
+    "gate": "no-default",
+    "command": [
+      "cargo",
+      "check",
+      "--offline",
+      "--locked",
+      "--manifest-path",
+      "rust/Cargo.toml",
+      "--workspace",
+      "--exclude",
+      "pumas_rustler",
+      "--no-default-features"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 49.939,
+    "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+    "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196"
+  },
+  {
+    "gate": "doc",
+    "command": [
+      "cargo",
+      "test",
+      "--offline",
+      "--locked",
+      "--manifest-path",
+      "rust/Cargo.toml",
+      "--workspace",
+      "--exclude",
+      "pumas_rustler",
+      "--doc"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 8.469,
+    "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+    "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196"
+  },
+  {
+    "gate": "rustfmt",
+    "command": [
+      "cargo",
+      "fmt",
+      "--manifest-path",
+      "rust/Cargo.toml",
+      "--all",
+      "--",
+      "--check"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 4.19,
+    "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+    "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196"
+  },
+  {
+    "gate": "evidence-verification",
+    "command": [
+      "python3",
+      "docs/plans/artifact-acquisition/reports/torch-selected-lifecycle-2026-10-06/verify_evidence.py",
+      "/workspace/pumas-selected-reconcile-fresh-qualification/publication",
+      "/workspace/pumas-selected-reconcile-fresh"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 0.127,
+    "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+    "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196"
+  },
+  {
+    "gate": "prior-evidence",
+    "command": [
+      "python3",
+      "docs/plans/artifact-acquisition/reports/torch-selected-lifecycle-2026-10-06/verify_evidence.py"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 0.092,
+    "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+    "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196"
+  }
+]

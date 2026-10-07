@@ -1,0 +1,18 @@
+lock-version = "1.0"
+created-by = "uv"
+requires-python = ">=3.12.14"
+
+[[packages]]
+name = "branch"
+version = "2"
+wheels = [{ url = "file:///tmp/.tmpf12VST/torch-versions/.torch-catalog-fixture/9b258e249e81d8706418bbeadea0c22cefbab0d2f391a44fa91cce4ee02eb27b/branch-2-py3-none-any.whl", hashes = { sha256 = "e2a597904c424e9ea306434f9f9c1d52ef86f7c0f478b5d5853e1dd7dbac1c8e" } }]
+
+[[packages]]
+name = "dependency"
+version = "2"
+wheels = [{ url = "file:///tmp/.tmpf12VST/torch-versions/.torch-catalog-fixture/b65022748a0823d83a07d15729a624871a71634fe2593adc1e36d8e8fd5ac09d/dependency-2-py3-none-any.whl", hashes = { sha256 = "9694b51336c13672a2c43ee47647f2f30e723cd2a07c355f245bc50360d7ab0b" } }]
+
+[[packages]]
+name = "torch"
+version = "2.14.0+cpu"
+wheels = [{ url = "file:///tmp/.tmpf12VST/torch-versions/.torch-catalog-fixture/30b52d66c22d26212ebb5114e18bb268581da62aeb96d17bb6679cae7106be78/torch-2.14.0+cpu-py3-none-any.whl", hashes = { sha256 = "990560b2685836ab0054b4ffe9e0a81aa7b61af5855e86b39fab7e82cc42e8d1" } }]

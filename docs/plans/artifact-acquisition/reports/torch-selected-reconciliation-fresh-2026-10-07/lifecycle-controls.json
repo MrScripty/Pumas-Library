@@ -1,0 +1,129 @@
+{
+  "source": "e1ca6959ef37ce2e8b0c96b75fc9e2ce3c0bf402",
+  "tree": "3a06d10ad7b5350c73ca4cbfa9db1335ac960196",
+  "tests_passed": 10,
+  "tests_failed": 0,
+  "tests_ignored": 0,
+  "full_flow_controls": [
+    "AbandonPublication",
+    "FailedProbe",
+    "Cancel",
+    "Abandon",
+    "Success",
+    "Mutation(\"member\")",
+    "Mutation(\"record\")",
+    "Mutation(\"provider\")",
+    "Mutation(\"executable\")",
+    "Mutation(\"producer\")",
+    "Mutation(\"target\")",
+    "Mutation(\"catalog\")",
+    "Mutation(\"lock\")",
+    "Mutation(\"projection\")",
+    "Mutation(\"packet\")",
+    "Mutation(\"manifest\")",
+    "Mutation(\"report\")",
+    "Mutation(\"runtime\")",
+    "Mutation(\"profile\")",
+    "Mutation(\"probe\")",
+    "Mutation(\"source\")",
+    "Mutation(\"added-source\")",
+    "Publication(BeforeRename)",
+    "Publication(AfterRename)",
+    "Publication(MovedMember)",
+    "Publication(MovedRecord)",
+    "Publication(ForeignDirectory)",
+    "Publication(AfterMetadata)",
+    "Reconcile(\"abandon-reconciliation\")",
+    "Reconcile(\"committed\")",
+    "Reconcile(\"missing-marker\")",
+    "Reconcile(\"before-rename\")",
+    "Reconcile(\"after-rename\")",
+    "Reconcile(\"cleanup-interruption\")",
+    "Reconcile(\"mutated-marker\")",
+    "Reconcile(\"missing-record\")",
+    "Reconcile(\"mutated-record\")",
+    "Reconcile(\"mutated-member\")",
+    "Reconcile(\"missing-directory\")",
+    "Reconcile(\"foreign-directory\")",
+    "Reconcile(\"foreign-metadata\")",
+    "Reconcile(\"rollback-missing-record\")",
+    "Reconcile(\"rollback-mutated-marker\")",
+    "Reconcile(\"rollback-missing-directory\")",
+    "Reconcile(\"rollback-missing-marker\")",
+    "Reconcile(\"missing-metadata\")"
+  ],
+  "reconciliation_controls": [
+    {
+      "case": "abandon-reconciliation",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "committed",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "missing-marker",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "before-rename",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "after-rename",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "cleanup-interruption",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "mutated-marker",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "missing-record",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "mutated-record",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "mutated-member",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "missing-directory",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "foreign-directory",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "foreign-metadata",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "rollback-missing-record",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "rollback-mutated-marker",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "rollback-missing-directory",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "rollback-missing-marker",
+      "original_marker_bytes": 239
+    },
+    {
+      "case": "missing-metadata",
+      "original_marker_bytes": 239
+    }
+  ]
+}

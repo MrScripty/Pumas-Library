@@ -23,7 +23,7 @@ source are recorded separately in
 [the reconciliation report](reports/torch-selected-reconciliation-fresh-2026-10-07.md).
 It does not reconstruct cold catalog authority, replay installation, enable caller
 adoption or claim power-loss metadata durability. Remaining work is independent
-review/qualification, exact target/tool/source/provider parity and any separately
+review/hosted qualification, exact target/tool/source/provider parity and any separately
 admitted cold protocol before coordinated caller adoption. Main, frozen native/S3/manifest files and paused
 Library transfers remain unchanged; parent owns review/CI/PRs/integration.
 

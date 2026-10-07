@@ -424,7 +424,9 @@ class ArchiveTests(unittest.TestCase):
         path.write_text('{"schema_version":1}')
         with self.assertRaisesRegex(ValueError, "trusted metadata hash mismatch"):
             package.read_pinned_json(path, "0" * 64)
-        self.assertEqual(package.read_pinned_json(path, package.sha256(path)), {"schema_version": 1})
+        self.assertEqual(
+            package.read_pinned_json(path, package.sha256(path)), {"schema_version": 1}
+        )
         inputs, build, runtime, contract, schema, output = fixture(self.root)
         package.assemble(inputs, build, runtime, contract, schema, output)
         with self.assertRaisesRegex(ValueError, "archive SHA256 mismatch"):

@@ -728,9 +728,17 @@ impl IpcRequest {
 #[serde(deny_unknown_fields)]
 pub(crate) struct IpcResponse {
     pub jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present_response_field",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub result: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present_response_field",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub error: Option<IpcError>,
     pub id: Option<serde_json::Value>,
 }
@@ -756,7 +764,7 @@ impl IpcResponse {
         }
     }
 
-    pub(crate) fn into_result(self, expected_id: u64) -> Result<Value> {
+    pub(crate) fn validate_envelope(&self, expected_id: u64) -> Result<()> {
         let expected_id = Some(Value::Number(expected_id.into()));
         if self.jsonrpc != "2.0" || self.id != expected_id {
             return Err(PumasError::InvalidParams {
@@ -764,6 +772,16 @@ impl IpcResponse {
             });
         }
 
+        if self.result.is_some() == self.error.is_some() {
+            return Err(PumasError::InvalidParams {
+                message: "Invalid local IPC response outcome".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn into_result(self, expected_id: u64) -> Result<Value> {
+        self.validate_envelope(expected_id)?;
         match (self.result, self.error) {
             (Some(result), None) => Ok(result),
             (None, Some(error)) if error.code == -32602 => Err(PumasError::InvalidParams {
@@ -775,6 +793,16 @@ impl IpcResponse {
             }),
         }
     }
+}
+
+// Preserve presence: a null success is a result, while an explicit null error
+// is malformed. Otherwise Option's null-to-None decoding can hide two outcomes.
+fn present_response_field<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 /// JSON-RPC 2.0 error object.

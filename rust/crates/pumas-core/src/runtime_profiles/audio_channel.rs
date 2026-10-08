@@ -189,7 +189,7 @@ impl Shared {
             let _ = entry.reply.send(Err(error));
             return Ok(false);
         }
-        cancellation.admitted.store(true, Ordering::Release);
+        cancellation.admitted.store(true, Ordering::SeqCst);
         pending.insert(id, entry);
         Ok(true)
     }
@@ -218,6 +218,11 @@ impl Drop for WorkerExit {
     }
 }
 
+// Caller loss and writer admission use a two-flag handshake without a shared
+// lock: either the caller observes admission or the writer observes the loss.
+// All four requested/admitted accesses must share the SeqCst order; separate
+// Release/Acquire pairs permit both sides to read false (store buffering).
+// `sent` independently deduplicates the two successful observers.
 #[derive(Default)]
 struct ExchangeCancellation {
     wire_id: AtomicU64,
@@ -318,7 +323,7 @@ impl PrivateAudioChannel {
     }
 
     fn cancel_original(self: &Arc<Self>, cancellation: &ExchangeCancellation) {
-        if !cancellation.admitted.load(Ordering::Acquire)
+        if !cancellation.admitted.load(Ordering::SeqCst)
             || cancellation.sent.swap(true, Ordering::AcqRel)
             || self.shared.closed.load(Ordering::Acquire)
         {
@@ -358,7 +363,7 @@ struct CallerLoss {
 impl Drop for CallerLoss {
     fn drop(&mut self) {
         if self.armed && self.operation == "load" {
-            self.cancellation.requested.store(true, Ordering::Release);
+            self.cancellation.requested.store(true, Ordering::SeqCst);
             self.channel.cancel_original(&self.cancellation);
         }
     }
@@ -503,7 +508,7 @@ async fn write_requests<W: AsyncWrite + Unpin>(
             return;
         }
         let _ = written.send(());
-        if job.operation == "load" && job.cancellation.requested.load(Ordering::Acquire) {
+        if job.operation == "load" && job.cancellation.requested.load(Ordering::SeqCst) {
             if let Some(channel) = channel.upgrade() {
                 channel.cancel_original(&job.cancellation);
             }

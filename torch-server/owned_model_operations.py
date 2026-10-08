@@ -157,14 +157,17 @@ class OwnedModelOperations:
             raise OwnedOperationError("capability_unavailable") from None
         if status.state != "ready" or status.cleanup != "retained":
             raise OwnedOperationError("capability_unavailable")
+        if adapter is None:
+            from loaders.cohere_asr_loader import transcribe_detailed
+
+            adapter = transcribe_detailed
         # The manager retains one inference owner for its entire runtime. Clean
         # unload/reload changes the bound slot, never that native worker owner.
+        # Implicit reuse must retain the same detailed-result adapter contract.
         self._native = manager._speech_owner
         if self._native is None:
-            self._native = SpeechOperationOwner(
-                manager, **({"adapter": adapter} if adapter is not None else {})
-            )
-        elif adapter is not None and self._native._adapter is not adapter:
+            self._native = SpeechOperationOwner(manager, adapter=adapter)
+        elif self._native._adapter is not adapter:
             raise OwnedOperationError("capability_unavailable")
 
     def start(self, body, *, admission=None):

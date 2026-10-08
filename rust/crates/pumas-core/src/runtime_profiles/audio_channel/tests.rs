@@ -275,6 +275,157 @@ async fn lost_load_caller_sends_exact_original_cancel_and_drains_out_of_order_re
     assert_eq!(stops.count.load(Ordering::Acquire), 0);
 }
 
+struct AdmissionPause {
+    custody: Custody,
+    entered: Option<oneshot::Sender<()>>,
+    released: std::sync::mpsc::Receiver<()>,
+}
+
+impl ExchangeCustody for AdmissionPause {
+    fn admit(&mut self) -> Result<()> {
+        self.custody.admit()?;
+        self.entered.take().unwrap().send(()).unwrap();
+        self.released.recv().unwrap();
+        Ok(())
+    }
+
+    fn complete(self: Box<Self>, reply: NativeReply) -> Result<Output> {
+        Box::new(self.custody).complete(reply)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn caller_loss_during_claim_is_observed_by_writer_after_admission() {
+    let (channel, mut peer, stops) = channel();
+    let effects = Arc::new(Effects::default());
+    let (entered, claiming) = oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let retained = effects.clone();
+    let original = call(
+        &channel,
+        "load",
+        Box::new(move || {
+            Ok(Box::new(AdmissionPause {
+                custody: Custody {
+                    effects: retained,
+                    admitted: false,
+                    settled: false,
+                },
+                entered: Some(entered),
+                released,
+            }))
+        }),
+    );
+    claiming.await.unwrap();
+    // The pending lock is held by admission, but caller loss takes no such
+    // lock. Its first observation must be followed by the writer's handshake.
+    original.abort();
+    assert!(original.await.unwrap_err().is_cancelled());
+    release.send(()).unwrap();
+    let frame = read_request(&mut peer).await;
+    let cancellation =
+        tokio::time::timeout(std::time::Duration::from_secs(5), read_request(&mut peer))
+            .await
+            .expect("writer must observe loss that preceded its admission publication");
+    assert_eq!(cancellation["operation"], "cancel_exchange");
+    assert_eq!(
+        cancellation["payload"]["target_exchange_id"],
+        frame["exchange_id"]
+    );
+    reply(&mut peer, &cancellation, serde_json::json!({"target_exchange_id":frame["exchange_id"],"cancellation_requested":true})).await;
+    assert_eq!(effects.settled.load(Ordering::Acquire), 0);
+    reply(
+        &mut peer,
+        &frame,
+        serde_json::json!({"native_settled":true}),
+    )
+    .await;
+    next_clean(&channel, &mut peer).await;
+    assert_eq!(effects.settled.load(Ordering::Acquire), 1);
+    assert_eq!(effects.uncertain.load(Ordering::Acquire), 0);
+    assert_eq!(stops.count.load(Ordering::Acquire), 0);
+}
+
+struct FlushPause<W> {
+    writer: W,
+    entered: Option<oneshot::Sender<()>>,
+    released: Option<oneshot::Receiver<()>>,
+}
+
+impl<W: AsyncWrite + Unpin> AsyncWrite for FlushPause<W> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bytes: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.writer).poll_write(cx, bytes)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        if let Some(entered) = self.entered.take() {
+            entered.send(()).unwrap();
+        }
+        if let Some(released) = &mut self.released {
+            if std::future::Future::poll(Pin::new(released), cx).is_pending() {
+                return Poll::Pending;
+            }
+            self.released = None;
+        }
+        Pin::new(&mut self.writer).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.writer).poll_shutdown(cx)
+    }
+}
+
+#[tokio::test]
+async fn both_loss_observers_send_one_cancel_and_retain_original_settlement() {
+    let (client, mut peer) = tokio::io::duplex(128 * 1024);
+    let (reader, writer) = tokio::io::split(client);
+    let (entered, flushing) = oneshot::channel();
+    let (release, released) = oneshot::channel();
+    let stops = Arc::new(Stops::default());
+    let channel = PrivateAudioChannel::from_streams(
+        FlushPause {
+            writer,
+            entered: Some(entered),
+            released: Some(released),
+        },
+        reader,
+        stops.callback(),
+    );
+    let effects = Arc::new(Effects::default());
+    let original = call(&channel, "load", prepare(&effects));
+    flushing.await.unwrap();
+    let frame = read_request(&mut peer).await;
+    // Caller sees admitted and schedules cancellation. Releasing flush makes
+    // the writer observe requested too; sent must deduplicate the two paths.
+    original.abort();
+    assert!(original.await.unwrap_err().is_cancelled());
+    release.send(()).unwrap();
+    let cancellation = read_request(&mut peer).await;
+    assert_eq!(cancellation["operation"], "cancel_exchange");
+    assert_eq!(
+        cancellation["payload"]["target_exchange_id"],
+        frame["exchange_id"]
+    );
+    reply(&mut peer, &cancellation, serde_json::json!({"target_exchange_id":frame["exchange_id"],"cancellation_requested":true})).await;
+    assert_eq!(effects.settled.load(Ordering::Acquire), 0);
+    reply(
+        &mut peer,
+        &frame,
+        serde_json::json!({"native_settled":true}),
+    )
+    .await;
+    // Any duplicate cancel would be the next frame and fail this exact-ID
+    // request/reply check rather than silently leaving a pending control.
+    next_clean(&channel, &mut peer).await;
+    assert_eq!(effects.settled.load(Ordering::Acquire), 1);
+    assert_eq!(effects.uncertain.load(Ordering::Acquire), 0);
+    assert_eq!(stops.count.load(Ordering::Acquire), 0);
+}
+
 #[tokio::test]
 async fn overlapping_wait_and_cancel_replies_are_correlated_independently() {
     let (channel, mut peer, stops) = channel();

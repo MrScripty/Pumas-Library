@@ -5,6 +5,7 @@
 
 mod catalog_projection;
 mod contract;
+mod discovery;
 mod handlers;
 mod http_admission;
 mod http_transport;
@@ -41,6 +42,9 @@ const VERSION_MANAGED_APPS: &[AppId] = &[AppId::Ollama, AppId::Torch, AppId::Lla
 #[command(name = "pumas-rpc")]
 #[command(about = "JSON-RPC server for Pumas Library")]
 struct Args {
+    /// Print build/protocol/schema identity without starting a runtime or server.
+    #[arg(long)]
+    build_info: bool,
     /// Export the current desktop wire contract without starting a server.
     #[cfg(feature = "export-contract")]
     #[arg(long)]
@@ -72,6 +76,10 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.build_info {
+        serde_json::to_writer_pretty(std::io::stdout(), &discovery::build_info())?;
+        return Ok(());
+    }
     #[cfg(feature = "export-contract")]
     if args.export_desktop_fixtures {
         serde_json::to_writer_pretty(std::io::stdout(), &contract::desktop_contract_fixtures()?)?;

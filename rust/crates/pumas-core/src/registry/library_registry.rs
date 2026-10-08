@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// A registered library entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,6 +172,18 @@ impl LibraryRegistry {
         })
     }
 
+    /// Observe an existing registry without creating it, migrating schema, or cleaning rows.
+    pub fn open_read_only_at(db_path: &Path) -> Result<Self> {
+        let conn =
+            Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        conn.busy_timeout(Duration::from_millis(u64::from(
+            RegistryConfig::BUSY_TIMEOUT_MS,
+        )))?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
     fn configure_connection(conn: &Connection) -> Result<()> {
         Self::configure_wal(
             conn,
@@ -241,6 +253,13 @@ impl LibraryRegistry {
                 connection_token TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS http_services (
+                library_path TEXT PRIMARY KEY,
+                owner_started_at TEXT NOT NULL,
+                owner_token TEXT NOT NULL,
+                service_generation TEXT NOT NULL,
+                description_json TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS registry_config (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -525,7 +544,10 @@ impl LibraryRegistry {
     // Instance tracking
     // ========================================
 
-    /// Claim primary ownership for a library path.
+    /// Claim an unoccupied library path. Existing rows are unresolved authority,
+    /// even if their PID or endpoint is invisible in this observer's namespace.
+    /// Crash recovery requires independently qualified lifetime custody; this
+    /// registry is a rendezvous cache, not a physical-store lease.
     pub fn try_claim_instance(&self, path: &Path, pid: u32) -> Result<InstanceClaimResult> {
         let canonical = Self::canonicalize_library_path(path)?;
         let path_str = canonical.to_string_lossy().to_string();
@@ -538,9 +560,7 @@ impl LibraryRegistry {
             conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
         if let Some(existing) = Self::read_instance_entry(&transaction, &path_str)? {
-            if crate::platform::is_process_alive(existing.pid) {
-                return Ok(InstanceClaimResult::Occupied(existing));
-            }
+            return Ok(InstanceClaimResult::Occupied(existing));
         }
 
         let claim_token = uuid::Uuid::new_v4().to_string();
@@ -580,31 +600,28 @@ impl LibraryRegistry {
         }))
     }
 
-    /// Release only this unpromoted startup claim. Stale startup cleanup must
-    /// never remove a successor or a claim already promoted to a ready instance.
-    pub(crate) fn release_instance_claim(&self, claim: &PrimaryInstanceClaim) -> Result<bool> {
-        let conn = self.lock_conn()?;
-        let rows = conn.execute(
-            "DELETE FROM instances WHERE library_path = ?1 AND pid = ?2
-             AND claim_token = ?3 AND status = 'claiming'",
-            params![
-                claim.library_path.to_string_lossy(),
-                claim.pid,
-                claim.claim_token
-            ],
-        )?;
-        Ok(rows > 0)
-    }
-
     /// Mark a previously claimed instance row as ready for client attachment.
     pub fn mark_instance_ready(&self, path: &Path, claim_token: &str, port: u16) -> Result<()> {
-        let conn = self.lock_conn()?;
+        self.promote_instance_ready(path, claim_token, port)
+            .map(|_| ())
+    }
+
+    /// Retain the promoted generation atomically with the claim transition.
+    pub(crate) fn promote_instance_ready(
+        &self,
+        path: &Path,
+        claim_token: &str,
+        port: u16,
+    ) -> Result<InstanceEntry> {
+        let mut conn = self.lock_conn()?;
+        let transaction =
+            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let canonical = Self::canonicalize_library_path(path)?;
         let path_str = canonical.to_string_lossy().to_string();
         let endpoint = loopback_tcp_endpoint(port);
         let connection_token = uuid::Uuid::new_v4().to_string();
 
-        let rows = conn.execute(
+        let rows = transaction.execute(
             "UPDATE instances
              SET port = ?1,
                  status = ?2,
@@ -632,7 +649,147 @@ impl LibraryRegistry {
             });
         }
 
+        let instance = Self::read_instance_entry(&transaction, &path_str)?
+            .ok_or_else(|| PumasError::Other("promoted instance disappeared".into()))?;
+        transaction.commit()?;
+        Ok(instance)
+    }
+
+    /// Match the exact retained ready row, without PID or endpoint liveness claims.
+    pub(crate) fn matches_ready_instance(&self, owner: &InstanceEntry) -> Result<bool> {
+        let conn = self.lock_conn()?;
+        Ok(
+            Self::read_instance_entry(&conn, &owner.library_path.to_string_lossy())?
+                .is_some_and(|current| same_ready_generation(&current, owner)),
+        )
+    }
+
+    pub(crate) fn publish_http_service(
+        &self,
+        owner: &InstanceEntry,
+        description: &crate::discovery::HttpServiceDescription,
+    ) -> Result<()> {
+        let mut conn = self.lock_conn()?;
+        let transaction =
+            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let path = owner.library_path.to_string_lossy();
+        let current = Self::read_instance_entry(&transaction, &path)?
+            .ok_or_else(|| PumasError::Other("HTTP publisher owner unavailable".into()))?;
+        if !same_ready_generation(&current, owner)
+            || description.instance.library_root != owner.library_path
+            || description.instance.generation != owner.started_at
+        {
+            return Err(PumasError::Other(
+                "HTTP publisher owner generation changed".into(),
+            ));
+        }
+        let library_id: String = transaction.query_row(
+            "SELECT id FROM libraries WHERE path = ?1",
+            params![path],
+            |row| row.get(0),
+        )?;
+        if description.instance.registry_library_id != library_id {
+            return Err(PumasError::Other(
+                "HTTP publisher library context changed".into(),
+            ));
+        }
+        let rows = transaction.execute(
+            "INSERT INTO http_services(library_path,owner_started_at,owner_token,service_generation,description_json)
+             VALUES(?1,?2,?3,?4,?5)
+             ON CONFLICT(library_path) DO UPDATE SET owner_started_at=excluded.owner_started_at,
+               owner_token=excluded.owner_token,service_generation=excluded.service_generation,
+               description_json=excluded.description_json
+             WHERE http_services.owner_started_at != excluded.owner_started_at
+                OR http_services.owner_token != excluded.owner_token",
+            params![path, owner.started_at, owner.connection_token, description.service_generation,
+                serde_json::to_string(description)?],
+        )?;
+        if rows == 0 {
+            return Err(PumasError::Other(
+                "this owner already has an HTTP advertisement".into(),
+            ));
+        }
+        transaction.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn revoke_http_service(
+        &self,
+        owner: &InstanceEntry,
+        service_generation: &str,
+    ) -> Result<bool> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "DELETE FROM http_services WHERE library_path=?1 AND owner_started_at=?2
+            AND owner_token=?3 AND service_generation=?4",
+            params![
+                owner.library_path.to_string_lossy(),
+                owner.started_at,
+                owner.connection_token,
+                service_generation
+            ],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// Observe valid-generation advertisements. A missing additive table in a
+    /// legacy registry is supported; invalid/unreadable schema remains an error.
+    pub fn list_http_services(&self) -> Result<Vec<crate::discovery::HttpServiceDescription>> {
+        let conn = self.lock_conn()?;
+        let table_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='http_services')", [], |row| row.get(0))?;
+        if !table_exists {
+            return Ok(Vec::new());
+        }
+        let mut stmt = conn.prepare("SELECT h.description_json, l.id, i.started_at, i.library_path, h.service_generation
+            FROM http_services h JOIN instances i ON h.library_path=i.library_path
+            JOIN libraries l ON l.path=i.library_path
+            WHERE i.status='ready' AND h.owner_started_at=i.started_at AND h.owner_token=i.connection_token
+            ORDER BY i.started_at DESC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        let mut descriptions = Vec::new();
+        for row in rows {
+            let (json, library_id, generation, root, service_generation) = row?;
+            let description: crate::discovery::HttpServiceDescription =
+                serde_json::from_str(&json)?;
+            if description.instance.registry_library_id != library_id
+                || description.instance.generation != generation
+                || description.instance.library_root.as_path() != Path::new(&root)
+                || description.service_generation != service_generation
+            {
+                return Err(PumasError::Other(
+                    "HTTP advertisement context is invalid".into(),
+                ));
+            }
+            descriptions.push(description);
+        }
+        Ok(descriptions)
+    }
+
+    /// Release exactly the observed ready generation; stale owners cannot remove a successor.
+    pub(crate) fn release_ready_instance(&self, instance: &InstanceEntry) -> Result<bool> {
+        let Some(token) = &instance.connection_token else {
+            return Ok(false);
+        };
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "DELETE FROM instances WHERE library_path = ?1 AND started_at = ?2
+             AND connection_token = ?3 AND status = 'ready'",
+            params![
+                instance.library_path.to_string_lossy(),
+                instance.started_at,
+                token
+            ],
+        )?;
+        Ok(rows > 0)
     }
 
     /// Register a running instance for a library path.
@@ -727,62 +884,20 @@ impl LibraryRegistry {
         Ok(instances)
     }
 
-    /// Remove stale instance entries (dead PIDs or nonexistent library paths).
+    /// Compatibility no-op. A namespace-local PID or missing pathname cannot
+    /// establish cessation. Explicit administrative reconciliation is required.
     pub fn cleanup_stale(&self) -> Result<usize> {
-        let conn = self.lock_conn()?;
-
-        let mut stmt = conn.prepare("SELECT library_path, pid FROM instances")?;
-
-        let entries: Vec<(String, u32)> = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(stmt);
-
-        let mut removed = 0;
-        for (path_str, pid) in &entries {
-            let path = Path::new(path_str);
-            let pid_alive = crate::platform::is_process_alive(*pid);
-            let path_exists = path.exists();
-
-            if !pid_alive || !path_exists {
-                conn.execute(
-                    "DELETE FROM instances WHERE library_path = ?1",
-                    params![path_str],
-                )?;
-                removed += 1;
-
-                if !pid_alive {
-                    debug!("Cleaned up stale instance: PID {} (dead)", pid);
-                } else {
-                    debug!("Cleaned up stale instance: path {} (missing)", path_str);
-                }
-            }
-        }
-
-        // Also clean up library entries with nonexistent paths
-        let mut lib_stmt = conn.prepare("SELECT path FROM libraries")?;
-        let lib_paths: Vec<String> = lib_stmt
-            .query_map([], |row| row.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(lib_stmt);
-
-        for path_str in &lib_paths {
-            let path = Path::new(path_str);
-            if !path.exists() {
-                conn.execute(
-                    "DELETE FROM instances WHERE library_path = ?1",
-                    params![path_str],
-                )?;
-                conn.execute("DELETE FROM libraries WHERE path = ?1", params![path_str])?;
-                removed += 1;
-                warn!("Removed library with nonexistent path: {}", path_str);
-            }
-        }
-
-        Ok(removed)
+        Ok(0)
     }
+}
+
+fn same_ready_generation(current: &InstanceEntry, owner: &InstanceEntry) -> bool {
+    current.status == InstanceStatus::Ready
+        && owner.status == InstanceStatus::Ready
+        && current.library_path == owner.library_path
+        && current.started_at == owner.started_at
+        && owner.connection_token.is_some()
+        && current.connection_token == owner.connection_token
 }
 
 #[cfg(test)]
@@ -1257,27 +1372,19 @@ mod tests {
     }
 
     #[test]
-    fn test_try_claim_instance_replaces_dead_instance() {
+    fn test_try_claim_instance_preserves_namespace_unknown_owner() {
         let (registry, temp_dir) = create_test_registry();
         let lib_dir = create_library_dir(temp_dir.path(), "my-library");
-
         registry.register(&lib_dir, "My Library").unwrap();
         registry
             .register_instance(&lib_dir, 999_999_999, 12345)
             .unwrap();
-
-        let claim = registry.try_claim_instance(&lib_dir, 123456).unwrap();
-        let InstanceClaimResult::Claimed(claim) = claim else {
-            panic!("expected dead instance claim to be replaced");
-        };
-
-        let instance = registry.get_instance(&lib_dir).unwrap().unwrap();
-        assert_eq!(claim.pid, 123456);
-        assert_eq!(instance.pid, 123456);
-        assert_eq!(instance.port, 0);
-        assert_eq!(instance.endpoint, "127.0.0.1:0");
-        assert!(instance.connection_token.is_none());
-        assert_eq!(instance.status, InstanceStatus::Claiming);
+        let before = registry.get_instance(&lib_dir).unwrap().unwrap();
+        let result = registry.try_claim_instance(&lib_dir, 123456).unwrap();
+        assert!(matches!(result, InstanceClaimResult::Occupied(_)));
+        let after = registry.get_instance(&lib_dir).unwrap().unwrap();
+        assert_eq!(after.connection_token, before.connection_token);
+        assert_eq!(after.pid, before.pid);
     }
 
     #[test]
@@ -1375,7 +1482,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cleanup_stale_removes_dead_pid() {
+    fn test_cleanup_stale_preserves_unknown_pid() {
         let (registry, temp_dir) = create_test_registry();
         let lib_dir = create_library_dir(temp_dir.path(), "my-library");
 
@@ -1386,10 +1493,8 @@ mod tests {
             .unwrap();
 
         let removed = registry.cleanup_stale().unwrap();
-        assert!(removed >= 1);
-
-        let instance = registry.get_instance(&lib_dir).unwrap();
-        assert!(instance.is_none());
+        assert_eq!(removed, 0);
+        assert!(registry.get_instance(&lib_dir).unwrap().is_some());
     }
 
     #[test]

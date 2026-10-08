@@ -361,6 +361,15 @@ local admission, drains admitted local effects, then drains downloads, even if
 the requesting waiter is dropped. `shutdown_downloads()` retains its narrower
 meaning. Neither operation stops inference runtimes.
 
+An orderly owner restart must first await successful `shutdown_instance()`;
+subsystem shutdown and synchronous `Drop` are not owner-release receipts.
+Failed construction, failed composed shutdown, and abrupt process exit retain
+the registry generation and block another primary. Acknowledged declarations,
+releases, and replacement generations can survive process loss and be inspected
+read-only without authorizing owner takeover. Automatic primary crash recovery
+awaits a qualified physical-store lifetime mechanism. Persistence after process
+loss and generation/ABA protection across orderly restart are separate claims.
+
 The index contains the versioned declaration authority for
 ensure/release. Its additive migration is transactional and writer connections
 use SQLite FULL synchronization. Declaration and deletion-claim rows survive

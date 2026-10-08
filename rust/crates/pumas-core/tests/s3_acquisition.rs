@@ -283,9 +283,7 @@ async fn api(root: &Path) -> PumasApi {
         .unwrap()
 }
 async fn close(api: &PumasApi) {
-    api.shutdown_intent().await.unwrap();
-    api.shutdown_downloads().await.unwrap();
-    api.shutdown_acquisition().await.unwrap();
+    api.shutdown_instance().await.unwrap();
 }
 
 #[tokio::test]

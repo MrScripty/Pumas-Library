@@ -33,6 +33,28 @@ async fn acquisition_integration_startup_refuses_legacy_store_without_rewriting_
             "schema {version} must refuse acquisition startup"
         );
         assert_eq!(std::fs::read(&store_path).unwrap(), before);
+        let registry = registry::LibraryRegistry::open().unwrap();
+        let retained_claim = registry.get_instance(root.path()).unwrap().unwrap();
+        assert_eq!(retained_claim.status, registry::InstanceStatus::Claiming);
+        let retained_claim = serde_json::to_value(retained_claim).unwrap();
+        let retry = PumasApi::builder(root.path())
+            .auto_create_dirs(true)
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await;
+        assert!(matches!(
+            retry,
+            Err(PumasError::InvalidParams { message })
+                if message == format!(
+                    "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
+                    root.path().display(), std::process::id()
+                )
+        ));
+        assert_eq!(
+            serde_json::to_value(registry.get_instance(root.path()).unwrap().unwrap()).unwrap(),
+            retained_claim
+        );
         let store = DownloadPersistence::new(&data_dir);
         if version != 6 {
             assert!(store
@@ -40,7 +62,14 @@ async fn acquisition_integration_startup_refuses_legacy_store_without_rewriting_
                 .unwrap()
                 .downloads
                 .is_empty());
-            let api = PumasApi::builder(root.path())
+            // A failed builder retains its claim. Check the independent
+            // HF-disabled compatibility path on its own authored store.
+            let independent = TempDir::new().unwrap();
+            let independent_data = independent.path().join("launcher-data");
+            std::fs::create_dir_all(&independent_data).unwrap();
+            let independent_store = independent_data.join("downloads.json");
+            std::fs::write(&independent_store, &before).unwrap();
+            let api = PumasApi::builder(independent.path())
                 .auto_create_dirs(true)
                 .with_hf_client(false)
                 .with_process_manager(false)
@@ -48,9 +77,9 @@ async fn acquisition_integration_startup_refuses_legacy_store_without_rewriting_
                 .await
                 .unwrap();
             assert!(api.list_models().await.unwrap().is_empty());
-            api.shutdown_downloads().await.unwrap();
-            api.shutdown_acquisition().await.unwrap();
+            api.shutdown_instance().await.unwrap();
             drop(api);
+            assert_eq!(std::fs::read(independent_store).unwrap(), before);
         }
         assert!(
             matches!(store.acquisition_store().require_acquisition_schema(),
@@ -61,7 +90,7 @@ async fn acquisition_integration_startup_refuses_legacy_store_without_rewriting_
 }
 
 pub(super) async fn assert_startup_retained_evidence(
-    api: &PumasApi,
+    library: &Arc<ModelLibrary>,
     copied_pending: &Path,
     metadata: &[u8],
     shards: &Path,
@@ -83,7 +112,7 @@ pub(super) async fn assert_startup_retained_evidence(
     );
     assert!(!shards.join(".pumas_download").exists());
     assert!(!shards.join("weights-00002-of-00002.gguf").exists());
-    let report = ModelImporter::new(api.model_library().clone())
+    let report = ModelImporter::new(library.clone())
         .discover_shard_recovery_async()
         .await;
     assert!(report.enumeration_complete);
@@ -99,7 +128,7 @@ pub(super) async fn assert_startup_retained_evidence(
                 .iter()
                 .any(|set| set.status
                     == crate::model_library::ShardSetDiscoveryStatus::MissingOrdinals)));
-    for record in api.model_library().index().list_all().unwrap() {
+    for record in library.index().list_all().unwrap() {
         assert_ne!(
             record.id, "vision/idea-research/grounding-dino-base",
             "startup must not publish the failed HF import"

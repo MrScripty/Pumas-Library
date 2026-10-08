@@ -32,7 +32,10 @@ React renderer
 ## Library Ownership
 
 A launcher root has one owning `PumasApi`/`PumasLibraryInstance`. Construction
-claims the root and returns an error when another live process owns it.
+claims the root and refuses an existing owner row, including unresolved
+ownership after failed startup/shutdown or process loss. Orderly replacement
+requires successful composed `shutdown_instance()`; PID liveness and subsystem
+drains do not authorize reclaim.
 `PumasLocalClient` explicitly connects to an existing ready owner.
 `PumasReadOnlyLibrary` reads indexed state without taking lifecycle ownership.
 

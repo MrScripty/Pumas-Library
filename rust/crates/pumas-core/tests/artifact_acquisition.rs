@@ -139,8 +139,7 @@ async fn ordinary_builder_leaves_legacy_state_read_only_until_explicit_offline_m
         matches!(api.acquisition().store().require_acquisition_schema(),
         Err(PumasError::Validation { field, .. }) if field == "acquisition.migration_required")
     );
-    api.shutdown_intent().await.unwrap();
-    api.shutdown_acquisition().await.unwrap();
+    api.shutdown_instance().await.unwrap();
     drop(api);
     // This fixture has no old readers/writers. Migration is a separate operator action.
     DownloadPersistence::migrate_legacy_offline(&data).unwrap();

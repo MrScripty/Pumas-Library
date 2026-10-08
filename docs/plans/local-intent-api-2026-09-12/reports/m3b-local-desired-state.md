@@ -2,6 +2,19 @@
 
 Status: accepted within the local Linux evidence and explicit compatibility limits below.
 
+**Current owner-lifecycle qualification (2026-10-07):** The earlier public
+crash/reopen sequence is superseded by retained primary custody. Successful
+`shutdown_instance()` permits orderly restart; failed construction/shutdown and
+abrupt exit do not. The current public crash fixture separately exercises real
+process exit after ensure, release, and replacement/ABA acknowledgements on
+independent roots. Read-only SQLite observations compare every stored declaration
+column before and after exit; refused same-registry primary construction must
+preserve both the declaration evidence and exact owner generation. It creates no
+replacement service on a crashed root. Public generation/ABA behavior after
+reopening is qualified through an explicitly orderly restart instead. These
+checks do not establish automatic primary recovery, even if a component-level
+store or registry-free acquisition fixture can reconstruct its own state.
+
 ## Native contract
 
 The existing primary instance composes one `IntentService` over its library,
@@ -83,7 +96,7 @@ remain deferred. Existing local transport projections remain M4.
 
 ## Verification
 
-Final relevant verification passed **877 tests**: model-library suites 682,
+Historical relevant verification passed **877 tests**: model-library suites 682,
 intent 11, runtime task ownership 11, reconciliation 28, index 74, HF API 26,
 public native intent 9, public desired state 5, public local crash 1, and relevant
 operational API 30. Six ignored subprocess helpers are invoked by their parent

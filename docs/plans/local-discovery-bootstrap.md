@@ -88,19 +88,56 @@ namespace and historical-owner custody qualification remain open.
 
 ## Slice 2: one shared build/protocol descriptor and HTTP advertisement
 
-Proposal for parent assignment: one additive core `PumasBuildInfo` with release version
-and supported protocol name/version pairs. Discovery can own this type if assigned;
-packaging adds build/artifact identity through the same type, not a parallel schema.
-The modality lane owns inference request/result/capability types. Discovery should
-reference those types only after their contract lands.
+`build_info::PumasBuildInfo` is the single additive shared build descriptor.
+It carries schema version 1, component/package version, optional build/source/target
+provenance, actual namespaced compiled features, and supported protocol/schema
+identities. Optional provenance comes from `PUMAS_BUILD_ID`,
+`PUMAS_SOURCE_REVISION`, and `PUMAS_BUILD_TARGET` at compile time; absent data stays
+absent. Compiled features do not assert runtime inference capability or model readiness.
+The first-slice `ProtocolAdvertisement` import remains available, and
+`InstanceDescription.build_info` is optional for old peers.
 
-Publish a loopback-only typed HTTP advertisement only after the listener is bound
-and ready, scoped to library and owner generation. Revoke it by that exact generation
-on ordered owner shutdown. A read-only HTTP description must distinguish protocol
-support, inference capability and model readiness using the modality lane's schema.
-Do not expose core IPC as an HTTP endpoint or infer an HTTP port from a core IPC row.
-Add a bootstrap client/extraction harness integration with packaging: attach before
-launching, preserve selected library/model context, never stop a borrowed process.
+`pumas-rpc --build-info` prints this typed producer identity without constructing a
+runtime, opening a library or starting a listener. The RPC producer includes actual
+RPC and linked core features. Release strings do not substitute for negotiation.
+The modality lane owns inference request/result/capability types, and packaging owns
+assets/manifests; neither needs to create a competing build schema.
+
+A prepared `HttpServiceRegistration` is invisible until the listener/router owner
+explicitly publishes it. RPC binds the actual loopback listener and polls its accept
+loop before publication. The additive registry table fences publication by retained
+core generation/token/library context and revocation by that identity plus the HTTP
+service generation. A live service cannot be replaced by another publisher within
+its owner generation. Old publishers/revokers cannot overwrite/delete successor data.
+Read-only registry observation tolerates an absent legacy HTTP table without migration.
+
+`GET /.well-known/pumas` reports HTTP advertisement schema 1, a service generation,
+a numeric-loopback base URL, the authenticated core instance identity and the HTTP
+producer build descriptor. The router retains its bind generation; an old listener
+cannot describe a successor. The existing Host/Origin admission and shutdown gate
+apply. Responses use `Cache-Control: no-store`. Core IPC is never presented as HTTP.
+The `pumas.local-http` protocol version 1 identifies this local rendezvous contract;
+HTTP inference capabilities/model readiness must come from the modality lane.
+
+`LocalDiscovery::borrow_http_service` authenticates compatible core IPC first, then
+fetches the advertised description with no proxy/redirect, a bounded body and timeout.
+It requires the full advertised descriptor and authenticated instance to match, and
+checks the implemented HTTP protocol/schema. Initial attachment, HTTP observation and
+final core reauthentication share one bounded bootstrap deadline. The borrowed result
+has no shutdown operation. Absence, incompatibility and unreachable listeners remain errors, with no
+startup/reclamation fallback. Existing explicit `attach_or_start` provides local core
+bootstrap; choosing/extracting/launching a distributed HTTP binary is packaging work.
+
+HTTP shutdown revokes advertisement admission first. A separate core-owned finite
+custody receipt remains until the HTTP supervisor observes accepted HTTP requests,
+catalog/source workers, installations and other external owners. This separate receipt
+avoids a cycle with RPC's existing core finite-work drain. Successful external cessation
+then permits ordered core shutdown/release. A failed/abandoned receipt retains unresolved
+core authority. Dropping a registration is revocation plus failed custody, never evidence
+that its external service stopped. Call `complete_shutdown` only after owned effects settle.
+Completion is terminal even for a never-published registration; publishing another service
+requires a fresh registration and its own unsettled custody receipt.
+The same-registry support boundary and physical-store/namespace limitations remain.
 
 ## Slice 3: durable identity and qualified lifetime custody
 

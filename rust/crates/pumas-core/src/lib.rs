@@ -31,6 +31,7 @@
 uniffi::setup_scaffolding!();
 
 pub mod acquisition;
+pub mod build_info;
 pub mod cache;
 pub mod cancel;
 pub mod config;
@@ -57,6 +58,8 @@ pub mod serving;
 pub mod system;
 
 mod api;
+
+pub use build_info::PumasBuildInfo;
 
 // Re-export commonly used types
 pub use cache::{CacheBackend, CacheConfig, CacheEntry, CacheMeta, CacheStats, SqliteCache};

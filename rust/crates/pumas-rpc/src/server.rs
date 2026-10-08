@@ -32,6 +32,7 @@ use pumas_library::{
 };
 #[cfg(feature = "inference-plugins")]
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -297,6 +298,13 @@ pub async fn start_server(
     .map_err(|err| anyhow::anyhow!("failed to build ONNX session manager: {err}"))?;
     #[cfg(feature = "inference-plugins")]
     let provider_registry = ProviderRegistry::builtin();
+    // Prepared registration is invisible; its custody receipt keeps the core
+    // generation until this supervisor observes all HTTP-owned effects.
+    let mut advertisement = api.prepare_http_service(
+        pumas_library::discovery::LoopbackHttpEndpoint::parse(format!("http://{actual_addr}"))?,
+        crate::discovery::build_info(),
+    )?;
+    let route_identity = crate::discovery::HttpRouteIdentity::from(advertisement.description());
     let (catalog_projection, catalog_worker) = CatalogProjection::start(MAX_IN_FLIGHT_RPC_REQUESTS);
     let shutdown_request = ShutdownRequest::default();
     let shutdown_signal = shutdown_request.signal.clone();
@@ -342,6 +350,11 @@ pub async fn start_server(
     // Build the router
     let app = Router::new()
         .route("/health", get(handle_health))
+        .route(
+            pumas_library::discovery::HTTP_DISCOVERY_PATH,
+            get(crate::discovery::handle_description),
+        )
+        .layer(axum::Extension(route_identity))
         .route(
             "/events/model-library-updates",
             get(handle_model_library_update_events),
@@ -399,6 +412,7 @@ pub async fn start_server(
     let downloads_drained = Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(test)]
     let downloads_drain_observed = downloads_drained.clone();
+    let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
         let mut serving = Box::pin(crate::http_transport::serve(
             listener,
@@ -406,11 +420,30 @@ pub async fn start_server(
             shutdown_request.clone(),
             http_policy,
         ));
-        let early_result = tokio::select! {
-            result = &mut serving => Some(result),
-            _ = shutdown_request.clone().requested() => None,
+        // Poll the actual accept loop before publication. No detached readiness
+        // guess or externally supplied port is used.
+        let first_poll =
+            futures::future::poll_fn(|cx| std::task::Poll::Ready(serving.as_mut().poll(cx))).await;
+        let startup = match &first_poll {
+            std::task::Poll::Ready(_) => Err("HTTP listener exited before readiness".to_owned()),
+            std::task::Poll::Pending if shutdown_request.is_requested() => {
+                Err("HTTP startup cancelled".to_owned())
+            }
+            std::task::Poll::Pending => advertisement.publish().map_err(|error| error.to_string()),
+        };
+        if startup.is_err() {
+            shutdown_request.request();
+        }
+        let _ = startup_tx.send(startup);
+        let early_result = match first_poll {
+            std::task::Poll::Ready(result) => Some(result),
+            std::task::Poll::Pending => tokio::select! {
+                result = &mut serving => Some(result),
+                _ = shutdown_request.clone().requested() => None,
+            },
         };
         shutdown_request.request();
+        let advertisement_revoke = advertisement.revoke();
         #[cfg(feature = "s3")]
         state.s3_imports.close();
         // Retain accepted connections until their responses settle. Core owners
@@ -513,12 +546,43 @@ pub async fn start_server(
                 Err(anyhow::anyhow!("{owners}; Installation cleanup: {error}"))
             }
         };
-        match (owners, runtimes) {
-            (Ok(()), Ok(())) => Ok(()),
-            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
-            (Err(owners), Err(runtimes)) => {
-                Err(anyhow::anyhow!("{owners}; managed runtimes: {runtimes}"))
+        let external = match (owners, runtimes, advertisement_revoke) {
+            (Ok(()), Ok(()), Ok(_)) => Ok(()),
+            (owners, runtimes, advertisement) => {
+                let failures = [
+                    owners.err().map(|e| e.to_string()),
+                    runtimes.err().map(|e| e.to_string()),
+                    advertisement.err().map(|e| e.to_string()),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+                Err(anyhow::anyhow!(failures.join("; ")))
             }
+        };
+        let cessation = external
+            .as_ref()
+            .map(|_| ())
+            .map_err(|error| pumas_library::PumasError::Other(error.to_string()));
+        let report = advertisement.complete_shutdown(cessation);
+        // Revocation failure can leave the settlement sender inside this
+        // registration. Close that abandoned receipt before awaiting its core
+        // observer; it must fail and retain authority instead of waiting on us.
+        drop(advertisement);
+        // Only now may the core observe external settlement and release its row.
+        let core = state.api.shutdown_instance().await;
+        let failures = [
+            external.err().map(|e| e.to_string()),
+            report.err().map(|e| e.to_string()),
+            core.err().map(|e| e.to_string()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(failures.join("; ")))
         }
     });
 
@@ -531,7 +595,17 @@ pub async fn start_server(
         handle.downloads_drained = Some(downloads_drained);
         handle
     };
-    Ok(handle)
+    match startup_rx.await {
+        Ok(Ok(())) => Ok(handle),
+        startup => {
+            let reason = match startup {
+                Ok(Err(reason)) => reason,
+                _ => "HTTP readiness supervisor unavailable".into(),
+            };
+            let drain = handle.shutdown().await;
+            Err(anyhow::anyhow!("{reason}; shutdown: {drain:?}"))
+        }
+    }
 }
 
 async fn reject_during_shutdown(
@@ -2488,3 +2562,346 @@ mod acquisition_integration;
 
 #[cfg(test)]
 mod rpc_http_resume;
+
+#[cfg(test)]
+mod http_discovery_tests {
+    use super::*;
+    use pumas_library::{
+        discovery::{
+            CompatibilityRequirements, HttpServiceDescription, LocalDiscovery, HTTP_DISCOVERY_PATH,
+        },
+        registry::LibraryRegistry,
+    };
+
+    async fn api_fixture() -> (
+        tempfile::TempDir,
+        LibraryRegistry,
+        std::path::PathBuf,
+        PumasApi,
+    ) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let registry = LibraryRegistry::open_at(&temp.path().join("registry.db")).unwrap();
+        let root = temp.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let api = PumasApi::builder(&root)
+            .with_registry(registry.clone())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .with_connectivity_probe(false)
+            .build()
+            .await
+            .unwrap();
+        api.start_ipc_server().await.unwrap();
+        (temp, registry, root, api)
+    }
+    async fn start(
+        api: PumasApi,
+        root: &std::path::Path,
+        port: u16,
+    ) -> anyhow::Result<ServerHandle> {
+        #[cfg(not(feature = "inference-plugins"))]
+        let _ = root;
+        start_server(
+            api,
+            #[cfg(feature = "inference-plugins")]
+            HashMap::new(),
+            #[cfg(feature = "inference-plugins")]
+            SizeCalculator::new_with_cache(root.join("launcher-data/cache")).await,
+            #[cfg(feature = "inference-plugins")]
+            PluginLoader::new_async(root.join("launcher-data/plugins")).await?,
+            LoopbackHost::parse("127.0.0.1")?,
+            port,
+            crate::http_transport::HttpShutdownPolicy::default(),
+        )
+        .await
+    }
+    #[tokio::test]
+    async fn real_http_advertisement_borrowing_and_ordered_shutdown() {
+        let (temp, registry, root, api) = api_fixture().await;
+        let server = start(api, &root, 0).await.unwrap();
+        let observer = LocalDiscovery::open_at(&temp.path().join("registry.db")).unwrap();
+        let description = registry.list_http_services().unwrap().remove(0);
+        assert_eq!(
+            description.endpoint.as_str(),
+            format!("http://{}", server.addr())
+        );
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let response = client
+            .get(format!(
+                "{}{HTTP_DISCOVERY_PATH}",
+                description.endpoint.as_str()
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(response.headers().get("cache-control").unwrap(), "no-store");
+        assert_eq!(
+            response.json::<HttpServiceDescription>().await.unwrap(),
+            description
+        );
+        let borrowed = observer
+            .borrow_http_service(&root, &CompatibilityRequirements::default())
+            .await
+            .unwrap();
+        assert_eq!(borrowed.description(), &description);
+        drop(borrowed);
+        assert!(client
+            .get(format!("{}/health", description.endpoint.as_str()))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_success());
+        assert_eq!(registry.list_http_services().unwrap()[0], description);
+        server.shutdown().await.unwrap();
+        assert!(registry.list_http_services().unwrap().is_empty());
+        assert!(registry.get_instance(&root).unwrap().is_none());
+        assert!(tokio::net::TcpStream::connect(server.addr()).await.is_err());
+    }
+    #[tokio::test]
+    async fn corrupt_foreign_http_row_preserves_real_descriptor_and_borrowing() {
+        let (temp, registry, root, api) = api_fixture().await;
+        let other_root = temp.path().join("other");
+        std::fs::create_dir(&other_root).unwrap();
+        let other = PumasApi::builder(&other_root)
+            .with_registry(registry.clone())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .with_connectivity_probe(false)
+            .build()
+            .await
+            .unwrap();
+        other.start_ipc_server().await.unwrap();
+        let healthy_server = start(api, &root, 0).await.unwrap();
+        let corrupt_server = start(other, &other_root, 0).await.unwrap();
+        let descriptions = registry.list_http_services().unwrap();
+        let healthy = descriptions
+            .iter()
+            .find(|d| d.instance.library_root == root)
+            .unwrap();
+        let corrupt = descriptions
+            .iter()
+            .find(|d| d.instance.library_root == other_root)
+            .unwrap();
+        let before = registry.get_instance(&other_root).unwrap().unwrap();
+        let connection = rusqlite::Connection::open(temp.path().join("registry.db")).unwrap();
+        let observer = LocalDiscovery::open_at(&temp.path().join("registry.db")).unwrap();
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        for bad_json in ["{".to_owned(), {
+            let mut value = serde_json::to_value(corrupt).unwrap();
+            value["instance"]["registry_library_id"] = serde_json::json!("wrong-library");
+            value.to_string()
+        }] {
+            connection
+                .execute(
+                    "UPDATE http_services SET description_json=?1 WHERE library_path=?2",
+                    rusqlite::params![bad_json, other_root.to_string_lossy()],
+                )
+                .unwrap();
+            let response = client
+                .get(format!(
+                    "{}{HTTP_DISCOVERY_PATH}",
+                    healthy.endpoint.as_str()
+                ))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), reqwest::StatusCode::OK);
+            assert_eq!(response.headers().get("cache-control").unwrap(), "no-store");
+            assert_eq!(
+                response.json::<HttpServiceDescription>().await.unwrap(),
+                *healthy
+            );
+            let borrowed = observer
+                .borrow_http_service(&root, &CompatibilityRequirements::default())
+                .await
+                .unwrap();
+            assert_eq!(borrowed.description(), healthy);
+            drop(borrowed);
+            let refused = client
+                .get(format!(
+                    "{}{HTTP_DISCOVERY_PATH}",
+                    corrupt.endpoint.as_str()
+                ))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(refused.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+            assert!(observer
+                .borrow_http_service(&other_root, &CompatibilityRequirements::default())
+                .await
+                .is_err());
+            assert!(observer.snapshot().is_err());
+            let retained = registry.get_instance(&other_root).unwrap().unwrap();
+            assert_eq!(retained.connection_token, before.connection_token);
+            assert_eq!(retained.started_at, before.started_at);
+            let retained_json: String = connection
+                .query_row(
+                    "SELECT description_json FROM http_services WHERE library_path=?1",
+                    [other_root.to_string_lossy()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(retained_json, bad_json);
+        }
+        healthy_server.shutdown().await.unwrap();
+        corrupt_server.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn ordinary_server_drop_revokes_admission_but_retains_core_until_catalog_settles() {
+        let (_temp, registry, root, api) = api_fixture().await;
+        let server = start(api, &root, 0).await.unwrap();
+        let (entered, release) = server
+            .catalog_projection
+            .as_ref()
+            .unwrap()
+            .hold_for_test()
+            .unwrap();
+        entered.await.unwrap();
+        let receipt = server.completion.clone();
+        let addr = server.addr();
+        drop(server);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), receipt.clone())
+                .await
+                .is_err()
+        );
+        assert!(registry.list_http_services().unwrap().is_empty());
+        assert!(registry.get_instance(&root).unwrap().is_some());
+        assert!(matches!(
+            registry
+                .try_claim_instance(&root, std::process::id())
+                .unwrap(),
+            pumas_library::registry::InstanceClaimResult::Occupied(_)
+        ));
+        release.send(()).unwrap();
+        receipt.await.unwrap();
+        assert!(registry.get_instance(&root).unwrap().is_none());
+        assert!(tokio::net::TcpStream::connect(addr).await.is_err());
+    }
+    #[tokio::test]
+    async fn failed_http_owned_drain_revokes_advertisement_but_retains_core_authority() {
+        let (_temp, registry, root, api) = api_fixture().await;
+        let server = start(api, &root, 0).await.unwrap();
+        let (entered, release) = server
+            .catalog_projection
+            .as_ref()
+            .unwrap()
+            .hold_for_test()
+            .unwrap();
+        entered.await.unwrap();
+        // Deterministically panic the actual blocking catalog owner.
+        drop(release);
+        assert!(server.shutdown().await.is_err());
+        assert!(registry.list_http_services().unwrap().is_empty());
+        assert!(registry.get_instance(&root).unwrap().is_some());
+        assert!(tokio::net::TcpStream::connect(server.addr()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn failed_advertisement_revoke_settles_shutdown_and_retains_core_authority() {
+        let (temp, registry, root, api) = api_fixture().await;
+        let server = start(api, &root, 0).await.unwrap();
+        let owner = registry.get_instance(&root).unwrap().unwrap();
+        let description = registry.list_http_services().unwrap().remove(0);
+        // Fail the real SQLite deletion, leaving publication and its settlement
+        // sender retained. This exercises complete_shutdown's early error path.
+        let connection = rusqlite::Connection::open(temp.path().join("registry.db")).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_http_revoke BEFORE DELETE ON http_services
+                 BEGIN SELECT RAISE(ABORT, 'controlled HTTP revoke failure'); END;",
+            )
+            .unwrap();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(3), server.shutdown())
+            .await
+            .expect("failed HTTP revocation must settle instead of retaining its sender forever");
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("controlled HTTP revoke failure"), "{error}");
+        let retained = registry.get_instance(&root).unwrap().unwrap();
+        assert_eq!(retained.started_at, owner.started_at);
+        assert_eq!(retained.connection_token, owner.connection_token);
+        assert_eq!(registry.list_http_services().unwrap()[0], description);
+        assert!(tokio::net::TcpStream::connect(server.addr()).await.is_err());
+        assert!(matches!(
+            registry
+                .try_claim_instance(&root, std::process::id())
+                .unwrap(),
+            pumas_library::registry::InstanceClaimResult::Occupied(_)
+        ));
+        // Clearing the injected storage fault cannot turn an abandoned receipt
+        // into cessation evidence, even through a repeated shared waiter.
+        connection
+            .execute_batch("DROP TRIGGER reject_http_revoke")
+            .unwrap();
+        assert!(server.shutdown().await.is_err());
+        assert!(registry.get_instance(&root).unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn bind_failure_publishes_nothing_and_old_router_cannot_describe_successor() {
+        let (_temp, registry, root, api) = api_fixture().await;
+        let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        assert!(start(api, &root, occupied.local_addr().unwrap().port())
+            .await
+            .is_err());
+        assert!(registry.list_http_services().unwrap().is_empty());
+        // Wait for ordinary API drop's ordered coordinator, without PID inference.
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while registry.get_instance(&root).unwrap().is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let api = PumasApi::builder(&root)
+            .with_registry(registry.clone())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .with_connectivity_probe(false)
+            .build()
+            .await
+            .unwrap();
+        api.start_ipc_server().await.unwrap();
+        let server = start(api, &root, 0).await.unwrap();
+        let old_description = registry.list_http_services().unwrap().remove(0);
+        registry.unregister_instance(&root).unwrap();
+        let successor = PumasApi::builder(&root)
+            .with_registry(registry.clone())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .with_connectivity_probe(false)
+            .build()
+            .await
+            .unwrap();
+        successor.start_ipc_server().await.unwrap();
+        let mut service = successor
+            .prepare_http_service(
+                old_description.endpoint.clone(),
+                crate::discovery::build_info(),
+            )
+            .unwrap();
+        service.publish().unwrap();
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(format!(
+                "{}{HTTP_DISCOVERY_PATH}",
+                old_description.endpoint.as_str()
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        server.shutdown().await.unwrap();
+        assert_eq!(
+            registry.list_http_services().unwrap()[0],
+            *service.description()
+        );
+        service.revoke().unwrap();
+        service.complete_shutdown(Ok(())).unwrap();
+        successor.shutdown_instance().await.unwrap();
+    }
+}

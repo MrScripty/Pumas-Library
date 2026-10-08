@@ -1,6 +1,6 @@
 # Draft v0.8 inference headless distribution
 
-The integrated review cohort is PR59 source
+The stable integrated review base is PR59 source
 `c1208926afea88c382dd25036735f900c074e9a0`, tree
 `e2b9826426df4079e62f0d76ee07c5e6aa3fc640`. It includes the public discovery,
 physical-store, S3, modality and packaging candidates. This distribution slice
@@ -10,6 +10,18 @@ Actual inference-enabled archives and consumer acceptance remain unqualified.
 The package version is still 0.7.0, so the strict v0.8 candidate gate currently
 refuses production before Cargo. An authorized integrated version change is a
 separate prerequisite; this slice neither bumps nor relabels the version.
+
+The separately reviewed successors are preserved as bounded commits:
+
+| Slice | Source commit | Qualified scope |
+| --- | --- | --- |
+| HF external-directory refusal | `8e11fb8c91335f6223ea9d0fa02387ea615ba639` | Synthetic package/cache regressions; no invented external root or content digest |
+| Modality-first facade | `7f2d5478dbe3df9378e66f9f0d51dbfaed94cf27` | Controlled selected-model HTTP/owned-adapter contracts and legacy compatibility |
+| Local inference candidate producer | `9feae31e86dab92ca4d3991ca8ef2cc348d727e2` | Controlled build/archive contracts; current 0.7 source refused before Cargo |
+
+The final integration evidence records its own exact head/tree and included
+commits. These successors do not change PR59's source or establish native model,
+consumer-production-pin, archive or release acceptance.
 
 ## Audited targets and acceptance boundary
 
@@ -101,10 +113,21 @@ model cache, downloader or owner reclamation rule.
 The five-consumer cohort is **Lanternwake, Tuldok, Pantograph, Eidetic and
 Chrema**. Lanternwake requires Audio→Text; Tuldok requires Image→Text captioning.
 Archive and HTTP identity checks alone do not implement or qualify those
-operations. Named-capability requests are not proof of a modality-first facade;
-the selected model, typed input, desired output and semantic disambiguation must
-be checked against declared provider capabilities. Image input/vision transport
-and installed audio ownership remain implementation/qualification gates.
+operations. The reviewed facade now accepts a selected model, typed input and
+desired output without a named capability, using the existing
+`POST /v1/model-operations` route. It matches declared available adapters and
+requires `semantic_task` when multiple operations fit the same modalities;
+option shape cannot select a task. Legacy named-capability requests keep their
+strict parsing and existing admission/cancellation paths. See the
+[RPC request contract](../../rust/crates/pumas-rpc/README.md).
+
+Text→Text, Text→Embeddings and Text→Image use existing adapters when declared
+available. Audio→Text resolves only to the existing qualified owned endpoint;
+the current installed runtime remains unavailable. Typed Image→Text, mixed
+image/audio message parts and PCM audio output are recognized but explicitly
+refused because no qualified executable adapter is declared. Image decoding,
+vision transport and installed audio admission remain separate implementation
+and qualification gates. This is not arbitrary modality-pair execution.
 
 Pantograph and Eidetic need one immutable Rust source/schema cohort. Reviewed
 Pantograph source `9fae65abe41ad91434b984f95f95dee94438dda2` still pins production
@@ -324,7 +347,7 @@ Before changing release inventory/workflow or publishing, complete:
    inference-enabled archives into an explicitly authorized release workflow only
    after the source/version/native acceptance gates; current tag jobs remain no-inference.
 6. Obtain the parent/owner's release decision. This slice changes no tag, release,
-   existing artifact plan, modality-owned gateway file, PR46 or main merge.
+   existing artifact plan, root-owned candidate PRs or main merge.
 
 Assembly binds explicit inputs but is not reproducible-build proof: archive
 timestamps/compression metadata are not normalized. Version manifests remain

@@ -18,8 +18,11 @@ are `config.json`, `model.safetensors`, `preprocessor_config.json`,
 `tokenizer.json`, and `tokenizer_config.json`. Supported optional members are
 `added_tokens.json`, `generation_config.json`, `processor_config.json`, and
 `special_tokens_map.json`; a present optional member must be explicitly selected.
-Unknown selections, missing required members, custom-code declarations, and
-unsupported variants are refused.
+Unknown selections, missing required members, unsupported custom-code bindings
+and unsupported variants are refused. Exact known original Cohere `auto_map`
+bindings and tokenizer aliases may remain as inert metadata: the loader uses
+explicit installed native classes and never executes repository Python. See
+[the native qualification contract](cohere-native-qualification.md).
 
 Preparation retains the existing root execution grant before opening selected
 files. It copies actual bytes through held source descriptors into a private

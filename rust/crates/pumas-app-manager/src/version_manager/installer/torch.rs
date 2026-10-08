@@ -1689,6 +1689,9 @@ fn validate_direct_torch_report(
             }
         }
     }
+    if adapter == "cohere-asr" {
+        super::super::cohere_asr_profile::validate(version, &resolution.artifacts)?;
+    }
     Ok(())
 }
 
@@ -1862,10 +1865,15 @@ impl VersionInstaller {
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<PathBuf> {
-        if selection.adapter != "none" && selection.adapter != "flux2" {
+        if !["none", "flux2", "cohere-asr"].contains(&selection.adapter.as_str()) {
             return Err(failed(
                 "This Torch dependency profile requires a resolved plan",
             ));
+        }
+        if selection.adapter == "cohere-asr" {
+            super::super::cohere_asr_profile::validate_selection(
+                selection.tag.trim_start_matches('v'),
+            )?;
         }
         let builds: Vec<String> = if selection.build == "auto" {
             automatic_torch_builds()
@@ -2081,7 +2089,7 @@ impl VersionInstaller {
         let recipe = serde_json::json!({
             "recipe_id": format!("upstream-install-{}-{}-{}-{}", selection.tag, build, minor, selection.adapter),
             "protocol": SUPPORTED_TORCH_PROTOCOL,
-            "capabilities": [TORCH_IMAGE_GENERATION_CAPABILITY],
+            "capabilities": if selection.adapter == "cohere-asr" { Vec::<&str>::new() } else { vec![TORCH_IMAGE_GENERATION_CAPABILITY] },
             "qualification": "not verified by Pumas",
             "build": build,
             "python": format!("python{minor}"),
@@ -2114,6 +2122,14 @@ impl VersionInstaller {
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<PathBuf> {
+        // The legacy retained-plan installer does not produce the staged RECORD
+        // manifest required by the ASR byte owner. Public Ready selections use
+        // the direct installer, which validates and publishes that manifest.
+        if plan.preview.adapter == "cohere-asr" {
+            return Err(failed(
+                "cohere-asr requires the public direct installation selection",
+            ));
+        }
         let runtime = staging.path().join("runtime");
         let runtime_for_write = runtime.clone();
         spawn_blocking_with_stage(staging.clone(), move || {
@@ -2152,7 +2168,7 @@ impl VersionInstaller {
         let recipe = serde_json::json!({
             "recipe_id": format!("upstream-preview-{}-{}-{}-{}", plan.preview.tag, plan.preview.build, plan.preview.python, plan.preview.adapter),
             "protocol": SUPPORTED_TORCH_PROTOCOL,
-            "capabilities": [TORCH_IMAGE_GENERATION_CAPABILITY],
+            "capabilities": if plan.preview.adapter == "cohere-asr" { Vec::<&str>::new() } else { vec![TORCH_IMAGE_GENERATION_CAPABILITY] },
             "qualification": "not verified by Pumas",
             "build": plan.preview.build,
             "python": plan.preview.python,
@@ -3085,6 +3101,187 @@ mod managed_python_provenance_tests {
         std::fs::remove_file(target.join("unreported.pth")).unwrap();
         publish(&requirements).unwrap();
         assert!(installed.exists());
+        assert!(!target.exists());
+    }
+
+    #[tokio::test]
+    async fn cohere_asr_legacy_plan_refuses_before_staging_or_provisioning() {
+        let root = tempfile::tempdir().unwrap();
+        let metadata = Arc::new(MetadataManager::new(root.path()));
+        metadata.ensure_directories().unwrap();
+        let tracker = Arc::new(RwLock::new(InstallationProgressTracker::new(
+            root.path().join("launcher-data/cache"),
+        )));
+        let installer = VersionInstaller::new(
+            root.path().to_owned(),
+            AppId::Torch,
+            metadata,
+            tracker,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let versions = installer.versions_dir();
+        std::fs::create_dir_all(&versions).unwrap();
+        let stage = Arc::new(
+            TorchPendingStage::new(
+                &versions,
+                "v2.10.0",
+                TorchVersionsLock::try_acquire(&versions).unwrap(),
+            )
+            .unwrap(),
+        );
+        let nonexistent = root.path().join("must-not-open-or-run-python");
+        let plan=super::TorchInstallPlan {
+            preview:crate::version_manager::TorchPreview { preview_id:"legacy".into(),tag:"v2.10.0".into(),build:"cpu".into(),python:"python3.12".into(),adapter:"cohere-asr".into(),artifacts:Vec::new(),qualification:"unverified".into(),expires_in_seconds:1800 },
+            requirements:String::new(),resolution:String::new(),report:String::new(),interpreter_path:nonexistent.clone(),interpreter_hash:String::new(),
+            managed_python:crate::version_manager::managed_python::ManagedPythonIdentity { python:"python3.12".into(),version:"3.12.0".into(),catalog_key:"inert".into(),source_url:"https://github.com/astral-sh/python-build-standalone/releases/download/inert/python.tar.zst".into(),target_triple:"x86_64-unknown-linux-gnu".into(),uv_version:"0.12.19".into(),uv_archive_sha256:"a".repeat(64),executable:nonexistent.clone() },
+        };
+        let log = root.path().join("must-not-create.log");
+        let (tx, mut rx) = mpsc::channel(8);
+        let before = std::fs::read_dir(stage.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        let error = installer
+            .stage_resolved_torch_runtime(&plan, &stage, &log, &tx)
+            .await
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("public direct installation selection"));
+        let after = std::fs::read_dir(stage.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(before, after);
+        assert!(!stage.path().join("runtime").exists());
+        assert!(!log.exists());
+        assert!(!nonexistent.exists());
+        assert!(!root.path().join("launcher-data/managed-python").exists());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cohere_asr_direct_report_refuses_bad_profile_before_staged_publication() {
+        let names = [
+            "torch",
+            "fastapi",
+            "uvicorn",
+            "psutil",
+            "pillow",
+            "safetensors",
+            "transformers",
+            "accelerate",
+            "huggingface-hub",
+            "tokenizers",
+            "librosa",
+            "soxr",
+            "soundfile",
+            "sentencepiece",
+            "protobuf",
+            "numpy",
+            "scipy",
+            "numba",
+            "llvmlite",
+        ];
+        let mut resolution = DirectTorchResolution {
+            release: "2.14.0".into(),
+            torch: "2.14.0+cpu".into(),
+            build: "cpu".into(),
+            python: "3.12".into(),
+            interpreter: "/fixture/python".into(),
+            implementation: "cpython".into(),
+            platform: "Linux-fixture".into(),
+            machine: "x86_64".into(),
+            adapter: "cohere-asr".into(),
+            artifacts: names
+                .iter()
+                .map(|name| crate::version_manager::TorchArtifact {
+                    name: (*name).into(),
+                    version: match *name {
+                        "torch" => "2.14.0+cpu",
+                        "transformers" => "5.4.0",
+                        "accelerate" => "1.12.0",
+                        "huggingface-hub" => "1.5.0",
+                        "tokenizers" => "0.22.2",
+                        _ => "1.0.0",
+                    }
+                    .into(),
+                    url: if *name == "torch" {
+                        "https://download.pytorch.org/whl/cpu/torch/torch-fixture.whl".into()
+                    } else {
+                        format!("https://files.pythonhosted.org/packages/{name}-fixture.whl")
+                    },
+                    sha256: "a".repeat(64),
+                })
+                .collect(),
+        };
+        let selection = DirectTorchSelection {
+            version: "2.14.0",
+            build: "cpu",
+            minor: "3.12",
+            adapter: "cohere-asr",
+            python: Path::new("/fixture/python"),
+        };
+        let records = |resolution: &DirectTorchResolution| {
+            let report = serde_json::json!({"install":resolution.artifacts.iter().map(|a| serde_json::json!({"metadata":{"name":a.name,"version":a.version},"download_info":{"url":a.url,"archive_info":{"hashes":{"sha256":a.sha256}}}})).collect::<Vec<_>>()});
+            let lock = resolution
+                .artifacts
+                .iter()
+                .map(|a| format!("{} @ {} --hash=sha256:{}", a.name, a.url, a.sha256))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (report, lock)
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = directory.path().join("runtime");
+        let target = runtime.join("staged-packages");
+        std::fs::create_dir_all(&target).unwrap();
+        let bytes = b"controlled inert wheel member";
+        std::fs::write(target.join("selected.py"), bytes).unwrap();
+        let manifest = StagedFilesManifest {
+            files: vec![StagedFile {
+                path: "selected.py".into(),
+                sha256: format!("{:x}", Sha256::digest(bytes)),
+                size: bytes.len() as u64,
+            }],
+        };
+        let index = resolution
+            .artifacts
+            .iter()
+            .position(|a| a.name == "transformers")
+            .unwrap();
+        for wrong in ["4.57.6", "5.4.1"] {
+            resolution.artifacts[index].version = wrong.into();
+            let (report, lock) = records(&resolution);
+            assert!(validate_and_move_direct_torch_packages(
+                &resolution,
+                &report,
+                &lock,
+                &selection,
+                &target,
+                &runtime,
+                &manifest
+            )
+            .is_err());
+            assert!(target.join("selected.py").exists());
+            assert!(!runtime.join("venv").exists());
+        }
+        resolution.artifacts[index].version = "5.4.0".into();
+        let (report, lock) = records(&resolution);
+        validate_and_move_direct_torch_packages(
+            &resolution,
+            &report,
+            &lock,
+            &selection,
+            &target,
+            &runtime,
+            &manifest,
+        )
+        .unwrap();
+        assert!(runtime
+            .join("venv/lib/python3.12/site-packages/selected.py")
+            .exists());
         assert!(!target.exists());
     }
 

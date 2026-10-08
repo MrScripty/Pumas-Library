@@ -42,6 +42,7 @@
 //! }
 //! ```
 
+mod cohere_asr_profile;
 mod constraints;
 mod dependencies;
 mod installer;

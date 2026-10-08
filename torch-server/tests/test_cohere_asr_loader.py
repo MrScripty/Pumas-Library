@@ -1,6 +1,7 @@
 """Synthetic boundary evidence; does not qualify installed Cohere weights."""
 
 import contextlib
+import hashlib
 import json
 from pathlib import Path
 import struct
@@ -61,6 +62,8 @@ class LoaderTests(unittest.TestCase):
             )
         )
         (self.root / "model.safetensors").write_bytes(b"fixture-only")
+        for name in ("tokenizer.json", "tokenizer_config.json", "preprocessor_config.json"):
+            (self.root / name).write_text("{}")
 
     def test_native_local_loader_forbids_remote_code_and_downloads(self):
         processor, model_class = Mock(), Mock()
@@ -142,15 +145,119 @@ class LoaderTests(unittest.TestCase):
                         with self.subTest(file=name, key=key, nested=nested):
                             with self.assertRaisesRegex(ValueError, "redirects"):
                                 load_cohere_asr(self.root, "cpu")
-                file.unlink()
+                file.write_text("{}")
             native.assert_not_called()
 
-    def test_official_remote_code_descriptor_remains_explicitly_unsupported(self):
+    def test_original_metadata_uses_only_explicit_installed_classes_without_mutation(self):
+        maps = {
+            "AutoConfig": "configuration_cohere_asr.CohereAsrConfig",
+            "AutoFeatureExtractor": "processing_cohere_asr.CohereAsrFeatureExtractor",
+            "AutoModel": "modeling_cohere_asr.CohereAsrModel",
+            "AutoModelForSpeechSeq2Seq": "modeling_cohere_asr.CohereAsrForConditionalGeneration",
+            "AutoProcessor": "processing_cohere_asr.CohereAsrProcessor",
+            "AutoTokenizer": "tokenization_cohere_asr.CohereAsrTokenizer",
+        }
+        config = json.loads((self.root / "config.json").read_text())
+        config["auto_map"] = maps
+        bodies = {
+            "config.json": config,
+            "tokenizer_config.json": {
+                "tokenizer_class": "CohereAsrTokenizer",
+                "auto_map": {"AutoTokenizer": maps["AutoTokenizer"]},
+                "bos_token": "<|startoftranscript|>",
+                "eos_token": "<|endoftext|>",
+            },
+            "preprocessor_config.json": {
+                "feature_extractor_type": "CohereAsrFeatureExtractor",
+                "auto_map": {"AutoFeatureExtractor": maps["AutoFeatureExtractor"]},
+            },
+            "processor_config.json": {
+                "processor_class": "CohereAsrProcessor",
+                "auto_map": {"AutoProcessor": maps["AutoProcessor"]},
+            },
+        }
+        for name, body in bodies.items():
+            (self.root / name).write_text(json.dumps(body))
+        before = {name: (self.root / name).read_bytes() for name in bodies}
+        digests = {name: hashlib.sha256(body).hexdigest() for name, body in before.items()}
+        # Repository code and tokenizer.model are not needed by this seam.
+        (self.root / "processing_cohere_asr.py").write_text("raise AssertionError('remote code')")
+        (self.root / "tokenizer.model").write_bytes(b"unselected-not-tokenizer-json")
+        features, tokenizer, processor, model_class = Mock(), Mock(), Mock(), Mock()
+        native = types.ModuleType("transformers")
+        native.CohereAsrFeatureExtractor = features
+        native.TokenizersBackend = tokenizer
+        native.CohereAsrProcessor = processor
+        native.CohereAsrForConditionalGeneration = model_class
+        native.StoppingCriteria = object
+        native.StoppingCriteriaList = list
+        # AutoProcessor/AutoTokenizer and dynamic import factories are absent.
+        with patch.dict(sys.modules, {"transformers": native}):
+            model, result_processor, kind = load_cohere_asr(self.root, "cpu")
+        self.assertEqual(kind, COHERE_ASR)
+        for fixed_class in (features, tokenizer):
+            fixed_class.from_pretrained.assert_called_once_with(
+                str(self.root), local_files_only=True, trust_remote_code=False
+            )
+        processor.assert_called_once_with(
+            feature_extractor=features.from_pretrained.return_value,
+            tokenizer=tokenizer.from_pretrained.return_value,
+        )
+        self.assertIs(result_processor, processor.return_value)
+        self.assertIs(model, model_class.from_pretrained.return_value)
+        self.assertEqual(before, {name: (self.root / name).read_bytes() for name in bodies})
+        self.assertEqual(
+            digests,
+            {name: hashlib.sha256((self.root / name).read_bytes()).hexdigest() for name in bodies},
+        )
+
+    def test_known_map_subsets_are_role_bounded_and_unknown_maps_refuse_before_load(self):
+        file = self.root / "tokenizer_config.json"
+        good = {"AutoTokenizer": "tokenization_cohere_asr.CohereAsrTokenizer"}
+        for bad in (
+            {},
+            {"AutoTokenizer": "other.CohereAsrTokenizer"},
+            {"AutoTokenizer": "repo--tokenization_cohere_asr.CohereAsrTokenizer"},
+            {"AutoTokenizer": [None, good["AutoTokenizer"]]},
+            {
+                "AutoTokenizer": good["AutoTokenizer"],
+                "AutoConfig": "configuration_cohere_asr.CohereAsrConfig",
+            },
+            {"UnknownFactory": good["AutoTokenizer"]},
+        ):
+            file.write_text(json.dumps({"auto_map": bad}))
+            with self.subTest(map=bad), patch("loaders.cohere_asr_loader._native_api") as native:
+                with self.assertRaisesRegex(ValueError, "redirects"):
+                    load_cohere_asr(self.root, "cpu")
+                native.assert_not_called()
+        file.write_text(json.dumps({"nested": [{"auto_map": good}]}))
+        with self.assertRaisesRegex(ValueError, "redirects"):
+            validate_installed_package(self.root)
+        for alias in (
+            "repo--CohereAsrTokenizer",
+            "CohereASRTokenizer",
+            ["CohereAsrTokenizer"],
+            None,
+        ):
+            file.write_text(json.dumps({"auto_map": good, "tokenizer_class": alias}))
+            with self.subTest(alias=alias), self.assertRaisesRegex(ValueError, "class"):
+                validate_installed_package(self.root)
+        file.write_text(json.dumps({"auto_map": good}))
+        self.assertEqual(validate_installed_package(self.root), self.root)
         config = json.loads((self.root / "config.json").read_text())
         config["auto_map"] = {"AutoConfig": "configuration_cohere_asr.CohereAsrConfig"}
         (self.root / "config.json").write_text(json.dumps(config))
+        self.assertEqual(validate_installed_package(self.root), self.root)
+
+    def test_missing_or_linked_tokenizer_json_refuses_before_conversion_fallback(self):
+        file = self.root / "tokenizer.json"
+        file.unlink()
+        (self.root / "tokenizer.model").write_bytes(b"unselected")
         with patch("loaders.cohere_asr_loader._native_api") as native:
-            with self.assertRaisesRegex(ValueError, "redirects"):
+            with self.assertRaises(ValueError):
+                load_cohere_asr(self.root, "cpu")
+            file.symlink_to(self.root / "config.json")
+            with self.assertRaises(ValueError):
                 load_cohere_asr(self.root, "cpu")
             native.assert_not_called()
 

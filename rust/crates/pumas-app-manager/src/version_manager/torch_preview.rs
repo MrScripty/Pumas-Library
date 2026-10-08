@@ -61,7 +61,7 @@ pub(super) const BUILDS: &[&str] = &[
     "rocm7.2",
     "rocm7.14",
 ];
-const ADAPTERS: &[&str] = &["none", "flux2"];
+const ADAPTERS: &[&str] = &["none", "flux2", "cohere-asr"];
 pub(super) const PREVIEW_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_RETAINED_TORCH_PREVIEWS: usize = 32;
 const MAX_RETAINED_TORCH_SELECTIONS: usize = 32;
@@ -703,6 +703,42 @@ mod tests {
             .path()
             .join("launcher-data/cache/github-releases-pytorch-pytorch.json")
             .exists());
+    }
+
+    #[tokio::test]
+    async fn cohere_asr_public_selection_is_exact_unverified_and_one_use() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        assert!(manager
+            .preview_torch_runtime("v2.3.1", "cpu", "python3.12", "cohere-asr")
+            .await
+            .is_err());
+        assert!(manager.torch_install_selections.lock().await.is_empty());
+        for (tag, build) in [("v2.10.0", "cpu"), ("v2.14.0", "cu134")] {
+            let TorchPreviewOutcome::Ready { preview } = manager
+                .preview_torch_runtime(tag, build, "python3.12", "cohere-asr")
+                .await
+                .unwrap()
+            else {
+                panic!("selection refused")
+            };
+            assert_eq!(preview.qualification, "unverified");
+            assert!(preview.artifacts.is_empty());
+            let selected = manager
+                .consume_torch_install_selection(&preview.preview_id, tag)
+                .await
+                .unwrap();
+            assert_eq!(selected.tag, tag);
+            assert_eq!(selected.build, build);
+            assert_eq!(selected.adapter, "cohere-asr");
+            assert!(manager
+                .consume_torch_install_selection(&preview.preview_id, tag)
+                .await
+                .is_err());
+        }
+        assert!(!root.path().join("launcher-data/managed-python").exists());
     }
 
     #[test]
@@ -1659,6 +1695,14 @@ impl VersionManager {
         {
             return Err(failed("Invalid Torch installation selection"));
         }
+        if adapter == "cohere-asr" {
+            super::cohere_asr_profile::validate_selection(tag.trim_start_matches('v'))?;
+            if !cfg!(target_os = "linux") {
+                return Err(failed(
+                    "ASR dependency profile is unavailable on this platform",
+                ));
+            }
+        }
         if adapter == "bundled" && !is_bundled_preset(tag, build, python, adapter) {
             return Err(failed(
                 "Bundled adapters require the v2.9.1 CUDA 13.0/Python 3.12 preset",
@@ -1804,8 +1848,11 @@ impl VersionManager {
         }
         if !cfg!(target_os = "linux") && adapter != "none" {
             return Err(failed(
-                "Image dependency profiles are unavailable on this platform",
+                "Selected dependency profiles are unavailable on this platform",
             ));
+        }
+        if adapter == "cohere-asr" {
+            super::cohere_asr_profile::validate_selection(tag.trim_start_matches('v'))?;
         }
         let python_root = self.launcher_root.join("launcher-data/managed-python");
         let mut install_build = build.to_owned();
@@ -2005,7 +2052,7 @@ impl VersionManager {
         }
         if !cfg!(target_os = "linux") && adapter != "none" {
             return Err(failed(
-                "Image dependency profiles are unavailable on this platform",
+                "Selected dependency profiles are unavailable on this platform",
             ));
         }
         if adapter != "bundled" && selected_wheel.is_none() {
@@ -2179,6 +2226,9 @@ impl VersionManager {
             return Err(failed(
                 "Resolver manifest does not match requested Torch selection",
             ));
+        }
+        if adapter == "cohere-asr" {
+            super::cohere_asr_profile::validate(version, &parsed.artifacts)?;
         }
         if let Some(selected_wheel) = selected_wheel {
             let resolved_torch = parsed

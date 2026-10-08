@@ -19,7 +19,6 @@ COHERE_ASR = "cohere-asr"
 MAX_DESCRIPTOR_BYTES = 65536
 _REDIRECT_KEYS = frozenset(
     {
-        "auto_map",
         "custom_pipelines",
         "audio_tokenizer",
         "audio_tokenizer_name_or_path",
@@ -34,8 +33,47 @@ _NATIVE_CLASSES = {
     "processor_class": {"CohereAsrProcessor"},
     "feature_extractor_class": {"CohereAsrFeatureExtractor"},
     "feature_extractor_type": {"CohereAsrFeatureExtractor"},
-    "tokenizer_class": {"TokenizersBackend", "PreTrainedTokenizerFast"},
+    "tokenizer_class": {"TokenizersBackend", "PreTrainedTokenizerFast", "CohereAsrTokenizer"},
 }
+
+# Original public metadata aliases are inert: only installed classes below run.
+_ORIGINAL_AUTO_MAP = {
+    "AutoConfig": "configuration_cohere_asr.CohereAsrConfig",
+    "AutoFeatureExtractor": "processing_cohere_asr.CohereAsrFeatureExtractor",
+    "AutoModel": "modeling_cohere_asr.CohereAsrModel",
+    "AutoModelForSpeechSeq2Seq": "modeling_cohere_asr.CohereAsrForConditionalGeneration",
+    "AutoProcessor": "processing_cohere_asr.CohereAsrProcessor",
+    "AutoTokenizer": "tokenization_cohere_asr.CohereAsrTokenizer",
+}
+_MAP_ROLES = {
+    "config.json": frozenset(_ORIGINAL_AUTO_MAP),
+    "preprocessor_config.json": {"AutoFeatureExtractor"},
+    "processor_config.json": {"AutoProcessor"},
+    "tokenizer_config.json": {"AutoTokenizer"},
+}
+
+
+class _NativeProcessor:
+    @staticmethod
+    def from_pretrained(root, *, local_files_only, trust_remote_code):
+        try:
+            from transformers import (
+                CohereAsrFeatureExtractor,
+                CohereAsrProcessor,
+                TokenizersBackend,
+            )
+        except ImportError as error:
+            raise SpeechRuntimeUnsupported(
+                "Installed native Cohere processor classes are required"
+            ) from error
+        # No Auto factory observes aliases/auto_map; descriptors stay unchanged.
+        feature_extractor = CohereAsrFeatureExtractor.from_pretrained(
+            root, local_files_only=local_files_only, trust_remote_code=trust_remote_code
+        )
+        tokenizer = TokenizersBackend.from_pretrained(
+            root, local_files_only=local_files_only, trust_remote_code=trust_remote_code
+        )
+        return CohereAsrProcessor(feature_extractor=feature_extractor, tokenizer=tokenizer)
 
 
 class SpeechRuntimeUnsupported(RuntimeError):
@@ -68,7 +106,6 @@ def _native_api():
     # Lazy imports preserve text/image workloads on the existing 4.x runtime.
     try:
         from transformers import (
-            AutoProcessor,
             CohereAsrForConditionalGeneration,
             StoppingCriteria,
             StoppingCriteriaList,
@@ -77,7 +114,12 @@ def _native_api():
         raise SpeechRuntimeUnsupported(
             "A qualified native Cohere ASR runtime (Transformers >=5.4) is required"
         ) from error
-    return AutoProcessor, CohereAsrForConditionalGeneration, StoppingCriteria, StoppingCriteriaList
+    return (
+        _NativeProcessor,
+        CohereAsrForConditionalGeneration,
+        StoppingCriteria,
+        StoppingCriteriaList,
+    )
 
 
 def validate_installed_package(model_path: Path) -> Path:
@@ -91,8 +133,14 @@ def validate_installed_package(model_path: Path) -> Path:
         raise ValueError("Cohere ASR requires an installed package directory")
     config_path = root / "config.json"
     weights = root / "model.safetensors"
-    for file in (config_path, weights):
-        if not file.is_file() or not file.resolve().is_relative_to(root):
+    for file in (
+        config_path,
+        weights,
+        root / "tokenizer.json",
+        root / "preprocessor_config.json",
+        root / "tokenizer_config.json",
+    ):
+        if file.is_symlink() or not file.is_file() or not file.resolve().is_relative_to(root):
             raise ValueError("Cohere ASR requires local config and safetensors weights")
     config = _descriptor(config_path)
     if (
@@ -129,6 +177,20 @@ def _descriptor(file):
         if type(item) is dict:
             if _REDIRECT_KEYS.intersection(item):
                 raise ValueError("Native ASR descriptor redirects are unsupported")
+            if "auto_map" in item:
+                mapping = item["auto_map"]
+                if (
+                    item is not value
+                    or type(mapping) is not dict
+                    or not mapping
+                    or any(
+                        key not in _MAP_ROLES.get(file.name, ())
+                        or type(alias) is not str
+                        or alias != _ORIGINAL_AUTO_MAP.get(key)
+                        for key, alias in mapping.items()
+                    )
+                ):
+                    raise ValueError("Native ASR descriptor redirects are unsupported")
             # TokenizersBackend also accepts serialized constructor overrides.
             if any(type(item.get(key)) is str for key in ("vocab", "merges")):
                 raise ValueError("Native ASR descriptor redirects are unsupported")

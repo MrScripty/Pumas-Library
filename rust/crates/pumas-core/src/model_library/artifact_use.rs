@@ -414,18 +414,115 @@ fn validate_native_descriptors(directory: &Dir) -> Result<()> {
             ));
         }
         let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-        let object = value
-            .as_object()
-            .ok_or_else(|| refusal("native loader descriptor is not an object"))?;
-        if object.contains_key("auto_map") || object.contains_key("custom_pipelines") {
-            return Err(refusal("custom loader code is not supported"));
+        if !value.is_object() {
+            return Err(refusal("native loader descriptor is not an object"));
         }
+        validate_native_descriptor_fields(name, &value)?;
         if name == "config.json"
             && (value["model_type"] != "cohere_asr"
                 || value["architectures"]
                     != serde_json::json!(["CohereAsrForConditionalGeneration"]))
         {
             return Err(refusal("selected package is not native Cohere ASR"));
+        }
+    }
+    Ok(())
+}
+
+// These original aliases are metadata, never executable class selectors. The
+// installed Python adapter constructs fixed native classes without Auto factories.
+const ORIGINAL_AUTO_MAP: &[(&str, &str)] = &[
+    ("AutoConfig", "configuration_cohere_asr.CohereAsrConfig"),
+    (
+        "AutoFeatureExtractor",
+        "processing_cohere_asr.CohereAsrFeatureExtractor",
+    ),
+    ("AutoModel", "modeling_cohere_asr.CohereAsrModel"),
+    (
+        "AutoModelForSpeechSeq2Seq",
+        "modeling_cohere_asr.CohereAsrForConditionalGeneration",
+    ),
+    ("AutoProcessor", "processing_cohere_asr.CohereAsrProcessor"),
+    (
+        "AutoTokenizer",
+        "tokenization_cohere_asr.CohereAsrTokenizer",
+    ),
+];
+
+fn validate_native_descriptor_fields(name: &str, value: &serde_json::Value) -> Result<()> {
+    let mut pending = vec![(value, true)];
+    while let Some((item, top_level)) = pending.pop() {
+        match item {
+            serde_json::Value::Object(object) => {
+                for (key, selected) in object {
+                    if key == "auto_map" {
+                        let map = selected
+                            .as_object()
+                            .filter(|map| top_level && !map.is_empty())
+                            .ok_or_else(|| {
+                                refusal("native descriptor redirects are unsupported")
+                            })?;
+                        for (selector, alias) in map {
+                            let role_matches = match name {
+                                "config.json" => true,
+                                "preprocessor_config.json" => selector == "AutoFeatureExtractor",
+                                "processor_config.json" => selector == "AutoProcessor",
+                                "tokenizer_config.json" => selector == "AutoTokenizer",
+                                _ => false,
+                            };
+                            if !role_matches
+                                || !ORIGINAL_AUTO_MAP.iter().any(|(known, original)| {
+                                    selector == known && alias.as_str() == Some(*original)
+                                })
+                            {
+                                return Err(refusal("native descriptor redirects are unsupported"));
+                            }
+                        }
+                    } else if matches!(
+                        key.as_str(),
+                        "custom_pipelines"
+                            | "audio_tokenizer"
+                            | "audio_tokenizer_name_or_path"
+                            | "tokenizer_file"
+                            | "vocab_file"
+                            | "merges_file"
+                            | "spm_file"
+                            | "fast_tokenizer_files"
+                    ) || (matches!(key.as_str(), "vocab" | "merges")
+                        && selected.is_string())
+                    {
+                        return Err(refusal("native descriptor redirects are unsupported"));
+                    } else {
+                        let allowed: Option<&[&str]> = match key.as_str() {
+                            "processor_class" => Some(&["CohereAsrProcessor"]),
+                            "feature_extractor_class" | "feature_extractor_type" => {
+                                Some(&["CohereAsrFeatureExtractor"])
+                            }
+                            "tokenizer_class" => Some(&[
+                                "TokenizersBackend",
+                                "PreTrainedTokenizerFast",
+                                "CohereAsrTokenizer",
+                            ]),
+                            _ => None,
+                        };
+                        if let Some(allowed) = allowed {
+                            if !selected
+                                .as_str()
+                                .is_some_and(|class| allowed.contains(&class))
+                            {
+                                return Err(refusal("native descriptor class is unsupported"));
+                            }
+                        } else if key.ends_with("_class") || key.ends_with("_processor_type") {
+                            return Err(refusal("native descriptor class is unsupported"));
+                        }
+                    }
+                    pending.push((selected, false));
+                }
+            }
+            serde_json::Value::Array(array) => {
+                pending.extend(array.iter().map(|value| (value, false)));
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -683,6 +780,7 @@ mod tests {
             "nested/model.safetensors",
             "model.safetensors.index.json",
             "pytorch_model.bin",
+            "tokenizer.model",
             "model.safetensors",
         ] {
             let mut fixture = Fixture::new().await;
@@ -738,6 +836,129 @@ mod tests {
             assert!(fixture.prepare().is_err());
             fixture.assert_root_available();
         }
+    }
+
+    #[tokio::test]
+    async fn original_aliases_are_inert_and_selected_descriptor_bytes_are_preserved() {
+        let mut fixture = Fixture::new().await;
+        let original_maps = serde_json::json!({
+            "AutoConfig": "configuration_cohere_asr.CohereAsrConfig",
+            "AutoFeatureExtractor": "processing_cohere_asr.CohereAsrFeatureExtractor",
+            "AutoModel": "modeling_cohere_asr.CohereAsrModel",
+            "AutoModelForSpeechSeq2Seq": "modeling_cohere_asr.CohereAsrForConditionalGeneration",
+            "AutoProcessor": "processing_cohere_asr.CohereAsrProcessor",
+            "AutoTokenizer": "tokenization_cohere_asr.CohereAsrTokenizer",
+        });
+        let descriptors = [
+            (
+                "config.json",
+                serde_json::json!({
+                    "model_type": "cohere_asr",
+                    "architectures": ["CohereAsrForConditionalGeneration"],
+                    "auto_map": original_maps,
+                }),
+            ),
+            (
+                "tokenizer_config.json",
+                serde_json::json!({
+                    "tokenizer_class": "CohereAsrTokenizer",
+                    "auto_map": {"AutoTokenizer": "tokenization_cohere_asr.CohereAsrTokenizer"},
+                }),
+            ),
+            (
+                "preprocessor_config.json",
+                serde_json::json!({
+                    "feature_extractor_type": "CohereAsrFeatureExtractor",
+                    "auto_map": {"AutoFeatureExtractor": "processing_cohere_asr.CohereAsrFeatureExtractor"},
+                }),
+            ),
+            (
+                "processor_config.json",
+                serde_json::json!({
+                    "processor_class": "CohereAsrProcessor",
+                    "auto_map": {"AutoProcessor": "processing_cohere_asr.CohereAsrProcessor"},
+                }),
+            ),
+        ];
+        fixture
+            .metadata
+            .selected_artifact_files
+            .as_mut()
+            .unwrap()
+            .push("processor_config.json".into());
+        fixture.publish_metadata();
+        for (name, body) in &descriptors {
+            std::fs::write(
+                fixture.package.join(name),
+                serde_json::to_vec(body).unwrap(),
+            )
+            .unwrap();
+        }
+        // Original repository code and the SentencePiece asset remain outside
+        // the fixed tokenizer.json native profile, even if present at source.
+        std::fs::write(fixture.package.join("tokenizer.model"), b"unselected").unwrap();
+        std::fs::write(
+            fixture.package.join("processing_cohere_asr.py"),
+            b"unselected code",
+        )
+        .unwrap();
+        let prepared = fixture.prepare().unwrap();
+        assert_eq!(prepared.manifest().count(), REQUIRED_MEMBERS.len() + 1);
+        for (name, _) in &descriptors {
+            let original = std::fs::read(fixture.package.join(name)).unwrap();
+            let copied = std::fs::read(prepared.read_source.path().join(name)).unwrap();
+            assert_eq!(original, copied, "descriptor must not be stripped: {name}");
+            let manifest = prepared
+                .manifest()
+                .find(|entry| entry.relative_path == *name)
+                .unwrap();
+            assert_eq!(manifest.sha256, hex::encode(Sha256::digest(&original)));
+        }
+        assert!(!prepared.read_source.path().join("tokenizer.model").exists());
+        assert!(!prepared
+            .read_source
+            .path()
+            .join("processing_cohere_asr.py")
+            .exists());
+        drop(prepared);
+        fixture.assert_root_available();
+    }
+
+    #[tokio::test]
+    async fn known_maps_are_role_bounded_and_redirects_and_unknown_aliases_refuse() {
+        let bad = [
+            serde_json::json!({"auto_map": {}}),
+            serde_json::json!({"auto_map": {"AutoTokenizer": "evil.Loader"}}),
+            serde_json::json!({"auto_map": {"AutoTokenizer": "repo--tokenization_cohere_asr.CohereAsrTokenizer"}}),
+            serde_json::json!({"auto_map": {"AutoTokenizer": [null,"tokenization_cohere_asr.CohereAsrTokenizer"]}}),
+            serde_json::json!({"auto_map": {"AutoConfig": "configuration_cohere_asr.CohereAsrConfig"}}),
+            serde_json::json!({"auto_map": {"AutoTokenizer": "tokenization_cohere_asr.CohereAsrTokenizer", "UnknownFactory": "evil.Loader"}}),
+            serde_json::json!({"nested": [{"auto_map": {"AutoTokenizer": "tokenization_cohere_asr.CohereAsrTokenizer"}}]}),
+            serde_json::json!({"tokenizer_class": "CohereASRTokenizer"}),
+            serde_json::json!({"tokenizer_class": "repo--CohereAsrTokenizer"}),
+            serde_json::json!({"image_processor_class": "Unqualified"}),
+            serde_json::json!({"nested": [{"tokenizer_file": "outside.json"}]}),
+            serde_json::json!({"vocab": "outside.model"}),
+            serde_json::json!({"fast_tokenizer_files": []}),
+            serde_json::json!({"audio_tokenizer": {}}),
+        ];
+        for descriptor in bad {
+            let fixture = Fixture::new().await;
+            std::fs::write(
+                fixture.package.join("tokenizer_config.json"),
+                serde_json::to_vec(&descriptor).unwrap(),
+            )
+            .unwrap();
+            assert!(
+                fixture.prepare().is_err(),
+                "unsupported descriptor: {descriptor}"
+            );
+            fixture.assert_root_available();
+        }
+        let fixture = Fixture::new().await;
+        std::fs::write(fixture.package.join("config.json"), br#"{"model_type":"cohere_asr","architectures":["CohereAsrForConditionalGeneration"],"auto_map":{"AutoConfig":"configuration_cohere_asr.CohereAsrConfig"}}"#).unwrap();
+        drop(fixture.prepare().unwrap());
+        fixture.assert_root_available();
     }
 
     #[tokio::test]

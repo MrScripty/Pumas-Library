@@ -1,0 +1,84 @@
+{
+  "kind": "reviewable_acquisition_plan_not_artifact_authority",
+  "repository": "CohereLabs/cohere-transcribe-03-2026",
+  "revision": "d552dadc2922ba6f6c1f994f8db904d52dcaf942",
+  "public_metadata_observed_date": "2026-10-08",
+  "acquisition_authorized": true,
+  "authenticated_access_available": false,
+  "asset_bytes_accessed": false,
+  "production_audio_admitted": false,
+  "selected_members": [
+    {
+      "path": "config.json",
+      "official_size_bytes": null,
+      "official_content_identity": null,
+      "acquired_sha256": null
+    },
+    {
+      "path": "model.safetensors",
+      "official_size_bytes": null,
+      "official_content_identity": null,
+      "acquired_sha256": null
+    },
+    {
+      "path": "preprocessor_config.json",
+      "official_size_bytes": null,
+      "official_content_identity": null,
+      "acquired_sha256": null
+    },
+    {
+      "path": "tokenizer.json",
+      "official_size_bytes": null,
+      "official_content_identity": null,
+      "acquired_sha256": null
+    },
+    {
+      "path": "tokenizer_config.json",
+      "official_size_bytes": null,
+      "official_content_identity": null,
+      "acquired_sha256": null
+    },
+    {
+      "path": "generation_config.json",
+      "official_size_bytes": null,
+      "official_content_identity": null,
+      "acquired_sha256": null
+    },
+    {
+      "path": "processor_config.json",
+      "official_size_bytes": null,
+      "official_content_identity": null,
+      "acquired_sha256": null
+    },
+    {
+      "path": "special_tokens_map.json",
+      "official_size_bytes": null,
+      "official_content_identity": null,
+      "acquired_sha256": null
+    }
+  ],
+  "unselected": [
+    "tokenizer.model",
+    "repository Python files",
+    "demo audio",
+    "documentation",
+    "image assets"
+  ],
+  "not_listed_optional_member": "added_tokens.json",
+  "verification": "Resolve exact revision using existing HF owner; retain per-member metadata; compare LFS SHA-256 where supplied and actual streamed sizes/hashes; bind final manifest to repository, full revision and exact member set. Null values are pending evidence and cannot authorize execution.",
+  "runtime_profile": {
+    "adapter": "cohere-asr",
+    "transformers": "5.4.0",
+    "torch": "exact user-selected version/build, >=2.4.0; compatibility floor, not universal model qualification",
+    "python": "exact selected managed interpreter",
+    "initial_model_test_cohort": "Linux x86_64, managed CPython 3.12, Torch 2.10.0+cpu, Transformers 5.4.0; proposed, not installed or qualified",
+    "full_dependency_closure": "existing platform-specific pip report, wheel hashes and staged installed-file manifest required"
+  },
+  "prerequisites": [
+    "Supported authenticated owning HF connection or already authorized indexed local package; no credentials in chat, no automatic access-term acceptance.",
+    "Recheck storage for selected model bytes, acquisition staging, installed runtime and retained copied model bytes; public aggregate storage is not an exact member budget.",
+    "Qualify interpreter/native dependent read closure before production load admission; imports and ELF static inspection are insufficient.",
+    "Observe actual pinned model load, finite bounded transcription, cancellation/caller-loss drain, exact native disposal and clean next operation before production admission."
+  ],
+  "source": "https://huggingface.co/api/models/CohereLabs/cohere-transcribe-03-2026"
+}

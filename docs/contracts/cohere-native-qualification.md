@@ -1,7 +1,8 @@
 # Cohere native audio qualification requirements
 
-This records the next acceptance requirements after the frozen private candidate
-`9da3f906aaebe2bfc8e790abaf1e600903b9531b`. Production audio remains
+This records the next acceptance requirements after the frozen private candidates
+`9da3f906aaebe2bfc8e790abaf1e600903b9531b` and
+`0f778688ee12a274e42fe8391b08c51208f49cf0`. Production audio remains
 unavailable. Public metadata and controlled fixtures do not establish a real
 model load, transcription quality, or a complete native runtime closure.
 
@@ -23,11 +24,12 @@ advertised license is Apache-2.0. The exact access form must be reviewed by the
 user in their own account; this audit neither accepted terms nor inspected
 credentials. Public visibility does not grant gated file access.
 
-The smallest external prerequisite is either an already authorized, Pumas-indexed
-local package for the pinned revision, or user-completed access consent followed
-by explicit authorization to acquire that revision through the existing owning
-HF connection. No credential should be placed in a chat, fixture, or handoff.
-Access approval alone does not clear the engineering requirements below.
+The user has authorized acquisition of the pinned revision and reports having
+accepted access. Authenticated access is not currently available to this task;
+no account status was independently verified. The remaining external prerequisite
+is a supported authenticated owning HF connection or an already authorized,
+Pumas-indexed local package. No credential should be placed in a chat, fixture,
+or handoff. Acquisition approval does not clear the engineering requirements below.
 
 ## Artifact verification
 
@@ -54,24 +56,38 @@ index owners, not a new download or installation path:
 
 The current supported required members are `config.json`, `model.safetensors`,
 `preprocessor_config.json`, `tokenizer.json`, and `tokenizer_config.json`.
-Optional selected members are `added_tokens.json`, `generation_config.json`,
-`processor_config.json`, and `special_tokens_map.json`.
+At the selected public revision, also select `generation_config.json`,
+`processor_config.json`, and `special_tokens_map.json`: eight members in total.
+The generic optional `added_tokens.json` member is not listed at this revision
+and must not be invented. The exact plan, including intentionally unknown
+per-file digests and sizes, is [cohere-asr-acquisition-plan.json](cohere-asr-acquisition-plan.json).
 
-Public metadata lists `auto_map` entries and `tokenizer.model`. Both Rust
-preparation and Python preflight currently reject custom-code declarations.
-The native installed-class route must be proved against these original
-descriptors before deciding whether harmless declarations can be accepted;
-`trust_remote_code=True` is not an acceptable shortcut. Determine whether the
-pinned native tokenizer consumes `tokenizer.model`; do not widen the member set
-or declare it unnecessary without that proof. Repository Python files are not
-selected executable runtime code.
+Rust preparation and Python preflight accept only known original top-level
+`auto_map` bindings, limited to each descriptor's role, and the original
+`CohereAsrTokenizer` alias as inert metadata. Unknown, nested, repository-qualified
+or list bindings, custom classes and secondary path redirects remain refused.
+No descriptor is rewritten. Explicit installed `CohereAsrFeatureExtractor`,
+`TokenizersBackend` and `CohereAsrProcessor` construction avoids Auto dispatch;
+the model class is installed `CohereAsrForConditionalGeneration`, with
+`local_files_only=True` and `trust_remote_code=False`.
+Controlled fixtures and an executable branch check of the pinned Transformers
+source establish that this explicit tokenizer reads selected `tokenizer.json`
+without consuming `tokenizer.model`. Repository Python and `tokenizer.model`
+remain unselected. This proves the controlled compatibility seam, not the
+contents of gated descriptors or a complete native execution read closure.
 
 ## Runtime baseline and existing installer
 
 The [official model card](https://huggingface.co/CohereLabs/cohere-transcribe-03-2026)
 documents native Transformers support from 5.4.0 and testing with Torch 2.10.0.
-Use an independently qualified ASR adapter recipe on the existing resolver,
-managed Python provider, installer and version manager. The bundled image recipe
+The `cohere-asr` adapter uses the existing resolver, managed Python provider,
+installer and version manager. Its compatibility profile pins Transformers
+exactly 5.4.0 and retains the exact selected Torch version, build and Python
+variant, requiring Torch >=2.4.0 for this native Transformers implementation.
+The floor comes from [the pinned native import gate](https://github.com/huggingface/transformers/blob/v5.4.0/src/transformers/utils/import_utils.py).
+That floor does not claim model qualification for every allowed Torch version.
+The upstream tested Torch 2.10 cohort remains a separate acceptance candidate.
+The bundled image recipe
 couples Torch 2.9.1+cu130, Transformers 4.57.6 and image/Nunchaku dependencies;
 it cannot attest this ASR baseline. Do not overwrite that image preset.
 
@@ -93,6 +109,16 @@ The ordinary Linux Torch wheel on PyPI is a different build with CUDA
 dependencies; its metadata must not be substituted for the CPU index recipe.
 Resolve and retain exact wheel versions, hashes, licenses and installed-file
 identities for the full platform-specific closure through the existing installer.
+The direct ASR install path reuses the existing trusted-source report checks, hash-locked
+requirements, staged RECORD validation and installed-file publication. Its native
+imports must succeed before installation publishes; successful imports are
+recorded as inconclusive because no model was loaded. Its runtime recipe grants
+no image-generation capability and cannot mint audio execution admission.
+The profile is available through native preview/install and existing RPC selection
+using adapter `cohere-asr`; the desktop adapter chooser has not been expanded.
+The older retained resolved-plan installer does not produce this installed-file
+custody manifest and refuses ASR before filesystem or process effects. ASR callers
+must consume the public Ready selection through the direct staged installer.
 
 The inspected host is Linux x86_64, glibc 2.41, Python 3.12.14, with no exposed
 CUDA/ROCm GPU device. At inspection it had 4,056,281,088 bytes free in the

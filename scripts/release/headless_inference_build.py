@@ -50,6 +50,19 @@ def check_environment(environment, target):
     provenance.check_environment(normalized)
 
 
+def source_identity(repository, runner):
+    """Bind Git observations to Cargo's actual existing working directory."""
+    try:
+        top_level = Path(
+            provenance.capture(["git", "rev-parse", "--show-toplevel"], repository, runner)
+        )
+        require(top_level.is_absolute() and top_level.is_dir(), "Git working root unavailable")
+        require(top_level.samefile(repository), "Git working root differs from build directory")
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValueError("Git working root unavailable") from error
+    return provenance.source_identity(repository, runner)
+
+
 def artifact_evidence(stdout, repository, target):
     observed = {}
     finished = False
@@ -171,7 +184,7 @@ def produce(
 
     provenance.check_configuration(repository, environment)
     release_settings = provenance.check_release_manifest(repository)
-    before = provenance.source_identity(repository, tool_runner)
+    before = source_identity(repository, tool_runner)
     require(
         before == {"head": expected["source_commit"], "tree": expected["source_tree"]},
         "source/cohort mismatch",
@@ -258,9 +271,7 @@ def produce(
         package.canonical(core) == package.canonical(expected["core_build_info"]),
         "compiled core PumasBuildInfo mismatch",
     )
-    require(
-        provenance.source_identity(repository, tool_runner) == before, "source changed during build"
-    )
+    require(source_identity(repository, tool_runner) == before, "source changed during build")
     provenance.check_configuration(repository, environment)
     require(
         provenance.attribution_binding(repository) == attribution,

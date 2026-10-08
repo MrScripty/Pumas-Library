@@ -3,6 +3,8 @@
 import copy
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -42,6 +44,8 @@ class BuildCandidateTests(unittest.TestCase):
         self.changed_info = False
         self.status = 0
         self.built = False
+        self.reported_root = self.repository
+        self.root_after_build = None
         self.events = []
         for owner, directory, name, kind, features in (
             ("rpc", "pumas-rpc", "pumas-rpc", "bin", ["inference-plugins", "s3"]),
@@ -84,6 +88,12 @@ class BuildCandidateTests(unittest.TestCase):
             stdout = "a" * 40
         elif command == ["git", "rev-parse", "HEAD^{tree}"]:
             stdout = "b" * 40
+        elif command == ["git", "rev-parse", "--show-toplevel"]:
+            stdout = str(
+                self.root_after_build
+                if self.built and self.root_after_build
+                else self.reported_root
+            )
         elif command == ["rustc", "-Vv"]:
             stdout = "rustc 1.92.0 (ded5c06cf 2025-12-08)\nhost: x86_64-unknown-linux-gnu\n"
         elif command == [str(self.inputs["pumas-rpc"]), "--build-info"]:
@@ -182,6 +192,75 @@ class BuildCandidateTests(unittest.TestCase):
             self.produce()
         self.assertFalse(list(self.output.glob("*.tar.gz")))
 
+    def test_different_git_root_refuses_before_build(self):
+        self.reported_root = self.root / "other-checkout"
+        self.reported_root.mkdir()
+        with self.assertRaisesRegex(ValueError, "Git working root differs"):
+            self.produce()
+        self.assertFalse(self.built)
+
+    def test_unavailable_git_root_refuses_before_build(self):
+        self.reported_root = self.root / "missing-checkout"
+        with self.assertRaisesRegex(ValueError, "Git working root unavailable"):
+            self.produce()
+        self.assertFalse(self.built)
+
+    def test_changed_git_root_after_build_refuses_archive(self):
+        self.root_after_build = self.root / "other-checkout"
+        self.root_after_build.mkdir()
+        with self.assertRaisesRegex(ValueError, "Git working root differs"):
+            self.produce()
+        self.assertFalse(list(self.output.glob("*.tar.gz")))
+
+    def test_real_git_core_worktree_redirect_refuses_before_cargo(self):
+        environment = {
+            name: value for name, value in os.environ.items() if not name.startswith("GIT_")
+        }
+
+        def git(*arguments):
+            return subprocess.run(
+                ["git", *arguments],
+                cwd=self.repository,
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+        git("init")
+        git("config", "user.name", "MrScripty")
+        git("config", "user.email", "TheEnvironmentGuy@protonmail.com")
+        git("add", ".")
+        git("commit", "-m", "Controlled root-binding fixture")
+        expected = self.contract["expected"]
+        expected["source_commit"], expected["source_tree"] = (
+            git("rev-parse", "HEAD"),
+            git("rev-parse", "HEAD^{tree}"),
+        )
+        for name in ("build_info", "core_build_info"):
+            expected[name]["source_revision"] = expected["source_commit"]
+        observed = self.root / "observed-checkout"
+        shutil.copytree(self.repository, observed, ignore=shutil.ignore_patterns(".git"))
+        git("config", "core.worktree", str(observed))
+        manifest = self.repository / "rust/Cargo.toml"
+        manifest.write_text(manifest.read_text() + "\n# Changed actual build input\n")
+        self.assertEqual(git("status", "--porcelain"), "")
+        self.assertEqual(Path(git("rev-parse", "--show-toplevel")), observed)
+        original_runner = self.runner
+
+        def real_git_runner(command, **options):
+            if command[0] == "git":
+                return subprocess.run(command, **options)
+            if command[:2] == ["cargo", "build"]:
+                self.built = True
+                raise AssertionError("Cargo must never be invoked for redirected Git root")
+            return original_runner(command, **options)
+
+        self.runner = real_git_runner
+        with self.assertRaisesRegex(ValueError, "Git working root differs"):
+            self.produce()
+        self.assertFalse(self.built)
+
     def test_failed_build_preserves_diagnostics_without_record(self):
         self.status = 1
         with self.assertRaisesRegex(ValueError, "Cargo build failed"):
@@ -221,6 +300,50 @@ class BuildCandidateTests(unittest.TestCase):
                     subject.check_environment(
                         {name: "/unreviewed/compiler"}, "x86_64-unknown-linux-gnu"
                     )
+
+
+class RealGitRootTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.repository = self.root / "repository"
+        self.repository.mkdir()
+        self.environment = {
+            name: value for name, value in os.environ.items() if not name.startswith("GIT_")
+        }
+        self.git("init")
+        self.git("config", "user.name", "MrScripty")
+        self.git("config", "user.email", "TheEnvironmentGuy@protonmail.com")
+        (self.repository / "tracked-input").write_text("Controlled Git fixture\n")
+        self.git("add", ".")
+        self.git("commit", "-m", "Controlled Git identity fixture")
+        self.expected = {
+            "head": self.git("rev-parse", "HEAD"),
+            "tree": self.git("rev-parse", "HEAD^{tree}"),
+        }
+
+    def runner(self, command, **options):
+        options["env"] = self.environment
+        return subprocess.run(command, **options)
+
+    def git(self, *arguments):
+        return self.runner(
+            ["git", *arguments], cwd=self.repository, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    def test_valid_linked_worktree_keeps_real_root_identity(self):
+        linked = self.root / "linked-worktree"
+        self.git("worktree", "add", "--detach", str(linked), "HEAD")
+        self.assertEqual(subject.source_identity(linked, self.runner), self.expected)
+
+    def test_valid_symlink_alias_keeps_real_root_identity(self):
+        alias = self.root / "alias"
+        try:
+            alias.symlink_to(self.repository, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"native directory symlink unavailable: {error}")
+        self.assertEqual(subject.source_identity(alias, self.runner), self.expected)
 
 
 if __name__ == "__main__":

@@ -13,11 +13,12 @@ separate prerequisite; this slice neither bumps nor relabels the version.
 
 The separately reviewed successors are preserved as bounded commits:
 
-| Slice | Source commit | Qualified scope |
+| Slice | Source commit | Observed scope |
 | --- | --- | --- |
 | HF external-directory refusal | `8e11fb8c91335f6223ea9d0fa02387ea615ba639` | Synthetic package/cache regressions; no invented external root or content digest |
 | Modality-first facade | `7f2d5478dbe3df9378e66f9f0d51dbfaed94cf27` | Controlled selected-model HTTP/owned-adapter contracts and legacy compatibility |
-| Local inference candidate producer | `9feae31e86dab92ca4d3991ca8ef2cc348d727e2` | Controlled build/archive contracts; current 0.7 source refused before Cargo |
+| Installed-audio candidate custody | `4737f0b68f75ceda9118a5bddfd418a498a6bdba` | Actual held runtime/model capabilities and controlled drift/lifetime tests; no production admission grant |
+| Local inference candidate producer | `de62f8a1e05e5e71ebe4214cb43c95d458a6aa58` | Controlled build/archive contracts and actual Git-root regressions; current 0.7 source refused before Cargo |
 
 The final integration evidence records its own exact head/tree and included
 commits. These successors do not change PR59's source or establish native model,
@@ -369,9 +370,13 @@ admission or `for_installed_runtime` behavior change here.
 ## Concrete remaining implementation and qualification gaps
 
 - `AudioRuntimeOwner::for_installed_runtime` is unconditionally
-  `UnqualifiedRuntime` in PR59. The trusted recipe/interpreter/read-set owning
-  contract is unimplemented, not merely awaiting a test. The facade must keep
-  Audio→Text unavailable until that owner path is qualified.
+  `UnqualifiedRuntime` in PR59 and the reviewed successor. The new non-admitting
+  candidate retains actual interpreter/dependency/sidecar capabilities and the
+  exact prepared-model allocation, validates bytes and selected worker code,
+  and preserves their leases. It has no production admission conversion.
+  The trusted recipe, complete native loader/model read containment and actual
+  pinned execution/lifecycle contract remain unimplemented or unqualified,
+  not merely awaiting a test. The facade keeps installed Audio→Text unavailable.
 - Qualified Image→Text vision input/provider declarations and native caption
   inference remain prerequisites. Text→Text, Text→Embeddings and Text→Image
   adapters do not establish vision or arbitrary modality-pair execution.

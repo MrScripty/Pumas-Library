@@ -174,6 +174,34 @@ class BuildCandidateTests(unittest.TestCase):
             self.produce()
         self.assertFalse(list(self.output.glob("*.tar.gz")))
 
+    def test_core_projection_removes_only_rpc_http_schemas_and_detaches_input(self):
+        rpc = copy.deepcopy(self.contract["expected"]["build_info"])
+        rpc["schemas"].append({"name": "pumas.http-core-extension", "version": 7})
+        before = copy.deepcopy(rpc)
+        projected = subject.core_projection(rpc)
+        names = {item["name"] for item in projected["schemas"]}
+        self.assertNotIn("pumas.http-advertisement", names)
+        self.assertNotIn("pumas.http-admission-fence", names)
+        self.assertNotIn("pumas.http-owner-retention", names)
+        self.assertIn({"name": "pumas.http-core-extension", "version": 7}, projected["schemas"])
+        projected["schemas"][0]["version"] = 999
+        self.assertEqual(rpc, before)
+
+    def test_core_cannot_advertise_rpc_retention_independently(self):
+        self.contract["expected"]["core_build_info"]["schemas"].append(
+            {"name": "pumas.http-owner-retention", "version": 1}
+        )
+        with self.assertRaisesRegex(ValueError, "compiled core PumasBuildInfo mismatch"):
+            self.produce()
+
+    def test_core_cannot_advertise_rpc_fence_independently(self):
+        self.contract["expected"]["core_build_info"]["schemas"].append(
+            {"name": "pumas.http-admission-fence", "version": 1}
+        )
+        with self.assertRaisesRegex(ValueError, "compiled core PumasBuildInfo mismatch"):
+            self.produce()
+        self.assertFalse(list(self.output.glob("*.tar.gz")))
+
     def test_default_feature_contamination_refuses_archive(self):
         self.events[0]["features"].append("default")
         with self.assertRaisesRegex(ValueError, "unexpected rpc features"):

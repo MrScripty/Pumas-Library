@@ -130,7 +130,9 @@ def core_projection(rpc):
     ]
     core["protocols"] = [item for item in core["protocols"] if item["name"] != "pumas.local-http"]
     core["schemas"] = [
-        item for item in core["schemas"] if item["name"] != "pumas.http-advertisement"
+        item
+        for item in core["schemas"]
+        if item["name"] not in {"pumas.http-advertisement", "pumas.http-admission-fence", "pumas.http-owner-retention"}
     ]
     return core
 

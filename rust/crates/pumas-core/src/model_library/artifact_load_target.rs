@@ -391,6 +391,18 @@ fn response_from_artifact(
     }
 
     if artifact.artifact_kind == PackageArtifactKind::HfCompatibleDirectory {
+        // The HF facts producer observes managed package roots. External HF
+        // metadata can still select a primary weight file; matching cache labels
+        // cannot qualify that file as an external directory or its read set.
+        if artifact.storage_kind != crate::models::StorageKind::LibraryOwned {
+            return non_ready_response(
+                ModelArtifactState::Invalid,
+                ModelEntryPathState::Invalid,
+                PumasArtifactLoadTargetDiagnosticCode::InvalidArtifact,
+                Some("target.storage_kind"),
+                "external-reference HF directory roots are not qualified for load targets",
+            );
+        }
         let expected_revision = evidence
             .model
             .metadata

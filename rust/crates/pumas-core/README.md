@@ -405,6 +405,10 @@ expected members prevent a ready HF target. `ReadOnlyIndexed` returns indexed
 snapshot evidence without inspecting package files or repairing cache rows.
 Legacy HF observations require owner reinspection; indexed resolution refuses
 their stale tokens, file-shaped paths, and dropped revisions.
+HF load targets currently require library-owned package roots. External-reference
+HF metadata and cache labels do not qualify a directory root or its read set, so
+the shared resolver returns a typed invalid-artifact response. External Diffusers
+directory support follows its separate existing validation contract.
 
 Owner and read-only views capture the existing canonical library root and its
 platform display spelling at startup/open. Indexed HF path checks then compare

@@ -1708,13 +1708,13 @@ enum DirectTorchAttempt {
     Retry,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct StagedFilesManifest {
     pub(crate) files: Vec<StagedFile>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct StagedFile {
     pub(crate) path: String,
@@ -1790,7 +1790,7 @@ pub(crate) fn validate_staged_files(target: &Path, manifest: &StagedFilesManifes
     Ok(())
 }
 
-fn move_verified_packages(target: &Path, runtime: &Path, python_minor: &str) -> Result<()> {
+fn venv_packages_dir(runtime: &Path, python_minor: &str) -> PathBuf {
     #[cfg(windows)]
     let packages = runtime.join("venv").join("Lib").join("site-packages");
     #[cfg(not(windows))]
@@ -1799,6 +1799,133 @@ fn move_verified_packages(target: &Path, runtime: &Path, python_minor: &str) -> 
         .join("lib")
         .join(format!("python{python_minor}"))
         .join("site-packages");
+    packages
+}
+
+/// Exact files produced in a fresh private venv, before dependency resolution.
+/// This is a one-install bootstrap snapshot, never an exemption in capture.
+pub(crate) struct BootstrapPackages {
+    runtime: PathBuf,
+    root: PathBuf,
+    manifest: StagedFilesManifest,
+    directories: Vec<PathBuf>,
+}
+
+impl BootstrapPackages {
+    pub(crate) fn capture(runtime: &Path, python_minor: &str) -> Result<Self> {
+        Self::capture_root(runtime, &venv_packages_dir(runtime, python_minor))
+    }
+
+    fn capture_root(runtime: &Path, root: &Path) -> Result<Self> {
+        for parent in root
+            .ancestors()
+            .take_while(|path| path.starts_with(runtime))
+        {
+            let metadata = std::fs::symlink_metadata(parent).map_err(PumasError::from)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(failed(
+                    "Venv bootstrap root contains a link or non-directory",
+                ));
+            }
+        }
+        let mut files = Vec::new();
+        let mut directories = Vec::new();
+        for entry in walkdir::WalkDir::new(root).follow_links(false) {
+            let entry = entry.map_err(|_| failed("Cannot inspect fresh venv bootstrap"))?;
+            if entry.file_type().is_symlink() {
+                return Err(failed("Venv bootstrap contains a link"));
+            }
+            if entry.path() == root {
+                if !entry.file_type().is_dir() {
+                    return Err(failed("Venv bootstrap root is not a directory"));
+                }
+                continue;
+            }
+            let relative = entry
+                .path()
+                .strip_prefix(root)
+                .map_err(|_| failed("Venv bootstrap escaped its package root"))?;
+            if entry.file_type().is_dir() {
+                directories.push(relative.to_owned());
+            } else if entry.file_type().is_file() {
+                let mut file = std::fs::File::open(entry.path()).map_err(PumasError::from)?;
+                let mut sha = Sha256::new();
+                let mut size = 0_u64;
+                let mut buffer = [0_u8; 65536];
+                loop {
+                    use std::io::Read;
+                    let count = file.read(&mut buffer).map_err(PumasError::from)?;
+                    if count == 0 {
+                        break;
+                    }
+                    sha.update(&buffer[..count]);
+                    size += count as u64;
+                }
+                files.push(StagedFile {
+                    path: relative
+                        .to_str()
+                        .ok_or_else(|| failed("Invalid bootstrap path"))?
+                        .replace(std::path::MAIN_SEPARATOR, "/"),
+                    size,
+                    sha256: format!("{:x}", sha.finalize()),
+                });
+            } else {
+                return Err(failed("Venv bootstrap contains a special file"));
+            }
+            if files.len() + directories.len() > 200_000 {
+                return Err(failed("Venv bootstrap exceeds namespace bound"));
+            }
+        }
+        files.sort_by(|left, right| left.path.cmp(&right.path));
+        directories.sort_by(|left, right| {
+            right
+                .components()
+                .count()
+                .cmp(&left.components().count())
+                .then_with(|| left.cmp(right))
+        });
+        Ok(Self {
+            runtime: runtime.to_owned(),
+            root: root.to_owned(),
+            manifest: StagedFilesManifest { files },
+            directories,
+        })
+    }
+
+    pub(crate) fn remove(&self) -> Result<()> {
+        // Check the entire bootstrap namespace before deleting any byte. New,
+        // replaced or linked members cannot become cleanup exemptions.
+        let observed = Self::capture_root(&self.runtime, &self.root)?;
+        if observed.manifest != self.manifest || observed.directories != self.directories {
+            return Err(failed(
+                "Venv bootstrap changed during dependency resolution",
+            ));
+        }
+        for item in &self.manifest.files {
+            std::fs::remove_file(self.root.join(&item.path)).map_err(PumasError::from)?;
+        }
+        for directory in &self.directories {
+            // Remove only the recorded, now-empty directories; never recurse
+            // through a package tree that may already contain selected bytes.
+            std::fs::remove_dir(self.root.join(directory)).map_err(PumasError::from)?;
+        }
+        if std::fs::read_dir(&self.root)
+            .map_err(PumasError::from)?
+            .next()
+            .is_some()
+        {
+            return Err(failed("Venv bootstrap package root is not empty"));
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn move_verified_packages(
+    target: &Path,
+    runtime: &Path,
+    python_minor: &str,
+) -> Result<()> {
+    let packages = venv_packages_dir(runtime, python_minor);
     std::fs::create_dir_all(&packages).map_err(PumasError::from)?;
     let entries = std::fs::read_dir(target)
         .map_err(PumasError::from)?
@@ -1830,12 +1957,16 @@ fn validate_and_move_direct_torch_packages(
     requirements: &str,
     selection: &DirectTorchSelection<'_>,
     target: &Path,
-    runtime: &Path,
+    bootstrap: &BootstrapPackages,
     manifest: &StagedFilesManifest,
 ) -> Result<()> {
     validate_direct_torch_report(resolution, report, requirements, selection)?;
     validate_staged_files(target, manifest)?;
-    move_verified_packages(target, runtime, selection.minor)
+    if bootstrap.root != venv_packages_dir(&bootstrap.runtime, selection.minor) {
+        return Err(failed("Venv bootstrap does not match selected Python"));
+    }
+    bootstrap.remove()?;
+    move_verified_packages(target, &bootstrap.runtime, selection.minor)
 }
 
 impl VersionInstaller {
@@ -1995,7 +2126,9 @@ impl VersionInstaller {
         std::fs::remove_file(runtime.join("requirements.txt")).map_err(PumasError::from)?;
         std::fs::remove_file(runtime.join("validate_runtime.py")).map_err(PumasError::from)?;
         let mut venv = Command::new(&managed_python.executable);
-        venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
+        venv.args(["-I", "-B", "-m", "venv"])
+            .arg(runtime.join("venv"))
+            .env("PYTHONDONTWRITEBYTECODE", "1");
         self.run_runtime_command(
             venv,
             log_path,
@@ -2005,6 +2138,7 @@ impl VersionInstaller {
         )
         .await?;
 
+        let bootstrap = BootstrapPackages::capture(&runtime, minor)?;
         let version = selection
             .tag
             .strip_prefix('v')
@@ -2016,7 +2150,7 @@ impl VersionInstaller {
         let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
         let mut install = Command::new(&python);
         install
-            .arg("-I")
+            .args(["-I", "-B"])
             .arg(runtime.join("resolve_runtime.py"))
             .args(["--install", "--version", version, "--build", build])
             .args(["--adapter", &selection.adapter])
@@ -2082,7 +2216,7 @@ impl VersionInstaller {
                 python: &python,
             },
             &packages,
-            &runtime,
+            &bootstrap,
             &manifest,
         )?;
         for name in [
@@ -2157,7 +2291,9 @@ impl VersionInstaller {
         }
         let interpreter = &plan.interpreter_path;
         let mut venv = Command::new(interpreter);
-        venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
+        venv.args(["-I", "-B", "-m", "venv"])
+            .arg(runtime.join("venv"))
+            .env("PYTHONDONTWRITEBYTECODE", "1");
         self.run_runtime_command(
             venv,
             log_path,
@@ -2193,7 +2329,7 @@ impl VersionInstaller {
         let download_progress_path = runtime.join("download-progress.json");
         let mut install = Command::new(&python);
         install
-            .arg("-I")
+            .args(["-I", "-B"])
             .arg(runtime.join("resolve_runtime.py"))
             .arg("--_pumas-pip-progress-worker")
             .arg(&download_progress_path)
@@ -2577,6 +2713,7 @@ impl VersionInstaller {
         let mut python_check = Command::new(interpreter);
         python_check.args([
             "-I",
+            "-B",
             "-c",
             "import sys; assert sys.version_info[:2] == (3,12)",
         ]);
@@ -2589,7 +2726,9 @@ impl VersionInstaller {
         )
         .await?;
         let mut venv = Command::new(interpreter);
-        venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
+        venv.args(["-I", "-B", "-m", "venv"])
+            .arg(runtime.join("venv"))
+            .env("PYTHONDONTWRITEBYTECODE", "1");
         self.run_runtime_command(
             venv,
             log_path,
@@ -2603,7 +2742,7 @@ impl VersionInstaller {
         let download_progress_path = runtime.join("download-progress.json");
         let mut install = Command::new(&python);
         install
-            .arg("-I")
+            .args(["-I", "-B"])
             .arg(runtime.join("resolve_runtime.py"))
             .arg("--_pumas-pip-progress-worker")
             .arg(&download_progress_path)
@@ -3081,6 +3220,8 @@ mod managed_python_provenance_tests {
                 size: contents.len() as u64,
             }],
         };
+        std::fs::create_dir_all(venv_packages_dir(&runtime, "3.12")).unwrap();
+        let bootstrap = BootstrapPackages::capture(&runtime, "3.12").unwrap();
         let publish = |lock: &str| {
             validate_and_move_direct_torch_packages(
                 &resolution,
@@ -3088,7 +3229,7 @@ mod managed_python_provenance_tests {
                 lock,
                 &selection,
                 &target,
-                &runtime,
+                &bootstrap,
                 &manifest,
             )
         };
@@ -3255,6 +3396,8 @@ mod managed_python_provenance_tests {
             .iter()
             .position(|a| a.name == "transformers")
             .unwrap();
+        std::fs::create_dir_all(venv_packages_dir(&runtime, "3.12")).unwrap();
+        let bootstrap = BootstrapPackages::capture(&runtime, "3.12").unwrap();
         for wrong in ["4.57.6", "5.4.1"] {
             resolution.artifacts[index].version = wrong.into();
             let (report, lock) = records(&resolution);
@@ -3264,12 +3407,12 @@ mod managed_python_provenance_tests {
                 &lock,
                 &selection,
                 &target,
-                &runtime,
+                &bootstrap,
                 &manifest
             )
             .is_err());
             assert!(target.join("selected.py").exists());
-            assert!(!runtime.join("venv").exists());
+            assert!(std::fs::read_dir(&bootstrap.root).unwrap().next().is_none());
         }
         resolution.artifacts[index].version = "5.4.0".into();
         let (report, lock) = records(&resolution);
@@ -3279,7 +3422,7 @@ mod managed_python_provenance_tests {
             &lock,
             &selection,
             &target,
-            &runtime,
+            &bootstrap,
             &manifest,
         )
         .unwrap();
@@ -3352,6 +3495,60 @@ mod managed_python_provenance_tests {
             "trusted staged wheel"
         );
         assert!(!target.exists());
+    }
+
+    #[test]
+    fn bootstrap_cleanup_refuses_namespace_or_byte_changes_before_removal() {
+        for mutation in ["extra", "bytecode", "changed", "missing", "directory"] {
+            let root = tempfile::tempdir().unwrap();
+            let runtime = root.path().join("runtime");
+            let packages = venv_packages_dir(&runtime, "3.12");
+            std::fs::create_dir_all(packages.join("pip")).unwrap();
+            std::fs::write(packages.join("pip/__init__.py"), b"bootstrap").unwrap();
+            std::fs::write(packages.join("pip/retained.py"), b"must survive refusal").unwrap();
+            let bootstrap = BootstrapPackages::capture(&runtime, "3.12").unwrap();
+            match mutation {
+                "extra" => std::fs::write(packages.join("unexpected.py"), b"unreported").unwrap(),
+                "bytecode" => {
+                    std::fs::write(packages.join("pip/new.pyc"), b"unreported cache").unwrap()
+                }
+                "changed" => {
+                    std::fs::write(packages.join("pip/__init__.py"), b"different").unwrap()
+                }
+                "missing" => std::fs::remove_file(packages.join("pip/__init__.py")).unwrap(),
+                _ => std::fs::create_dir(packages.join("unexpected-empty")).unwrap(),
+            }
+            assert!(bootstrap.remove().is_err(), "{mutation}");
+            assert_eq!(
+                std::fs::read(packages.join("pip/retained.py")).unwrap(),
+                b"must survive refusal"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_cleanup_refuses_linked_files_and_rebound_package_roots() {
+        for root_alias in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let runtime = root.path().join("runtime");
+            let packages = venv_packages_dir(&runtime, "3.12");
+            std::fs::create_dir_all(packages.join("pip")).unwrap();
+            std::fs::write(packages.join("pip/__init__.py"), b"bootstrap").unwrap();
+            let bootstrap = BootstrapPackages::capture(&runtime, "3.12").unwrap();
+            if root_alias {
+                let retained = root.path().join("retained-packages");
+                std::fs::rename(&packages, &retained).unwrap();
+                std::os::unix::fs::symlink(&retained, &packages).unwrap();
+            } else {
+                std::fs::write(packages.join("pip/retained.py"), b"bootstrap").unwrap();
+                std::fs::remove_file(packages.join("pip/__init__.py")).unwrap();
+                std::os::unix::fs::symlink("retained.py", packages.join("pip/__init__.py"))
+                    .unwrap();
+            }
+            assert!(bootstrap.remove().is_err());
+            assert!(packages.join("pip/__init__.py").exists());
+        }
     }
 
     #[tokio::test]

@@ -423,12 +423,32 @@ class ResolverTests(unittest.TestCase):
                         )
             record.write_text(good_record, encoding="utf-8")
 
+    def test_pip_worker_fallback_keeps_isolation_and_bytecode_suppression(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(resolver.sys.modules, {"pip._internal.cli.main": None}),
+            patch.object(
+                resolver.subprocess, "run", return_value=SimpleNamespace(returncode=0)
+            ) as run,
+        ):
+            self.assertEqual(
+                resolver.run_pip_progress_worker(
+                    pathlib.Path(directory) / "progress.json", ["--version"]
+                ),
+                0,
+            )
+        self.assertEqual(
+            run.call_args.args[0],
+            [resolver.sys.executable, "-I", "-B", "-m", "pip", "--version"],
+        )
+
     def test_install_mode_stages_once_and_validates_report_before_writing_lock(self):
         fixture = report()
         commands = []
 
         def fake_run(command, **_kwargs):
             commands.append(command)
+            self.assertEqual(command[1:3], ["-I", "-B"])
             self.assertIn("--target", command)
             self.assertNotIn("--dry-run", command)
             self.assertIn("--only-binary=:all:", command)
@@ -487,8 +507,9 @@ class ResolverTests(unittest.TestCase):
             ):
                 resolver.main()
             self.assertEqual(len(commands), 1)
-            self.assertEqual(commands[0][3], "--_pumas-pip-progress-worker")
-            self.assertEqual(commands[0][4], str(progress_file))
+            self.assertEqual(commands[0][1:3], ["-I", "-B"])
+            self.assertEqual(commands[0][4], "--_pumas-pip-progress-worker")
+            self.assertEqual(commands[0][5], str(progress_file))
             self.assertEqual(commands[0][commands[0].index("--target") + 1], str(target))
             self.assertTrue(target.is_dir())
             self.assertEqual(

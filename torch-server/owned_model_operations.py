@@ -188,9 +188,7 @@ class OwnedModelOperations:
             "audio": audio,
         }
         try:
-            if admission is not None:
-                admission()
-            status = self._native.start(json.dumps(envelope).encode("utf-8"))
+            status = self._native.start(json.dumps(envelope).encode("utf-8"), admission=admission)
         except SpeechOperationError as error:
             raise OwnedOperationError(error.code) from None
         handle = OwnedOperationHandle(value["request_id"], self._token, status.operation_ref)

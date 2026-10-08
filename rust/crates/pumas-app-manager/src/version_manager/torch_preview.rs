@@ -1615,9 +1615,12 @@ impl VersionManager {
         let runtime = self.versions_dir().join(tag);
         let expected = self.expected_torch_version(tag).await?;
         let mut command = Command::new(pumas_library::platform::paths::venv_python(&runtime));
-        command
-            .kill_on_drop(true)
-            .args(["-I", "-c", "import torch; print(torch.__version__)"]);
+        command.kill_on_drop(true).args([
+            "-I",
+            "-B",
+            "-c",
+            "import torch; print(torch.__version__)",
+        ]);
         let output = tokio::time::timeout(Duration::from_secs(20), command.output())
             .await
             .map_err(|_| failed("Installed Torch identity check timed out"))?
@@ -2166,6 +2169,7 @@ impl VersionManager {
         let mut command = Command::new(interpreter);
         let cache_dir = super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
         command
+            .arg("-B")
             .arg(&resolver)
             .args([
                 "--version",
@@ -2354,7 +2358,7 @@ impl VersionManager {
             serde_json::to_string(&distribution_names).map_err(|e| failed(e.to_string()))?;
         let mut hardware_command =
             Command::new(pumas_library::platform::paths::venv_python(&runtime));
-        hardware_command.kill_on_drop(true).arg("-I").arg("-c").arg(r#"import hashlib,importlib.metadata,json,subprocess,sys
+        hardware_command.kill_on_drop(true).args(["-I", "-B"]).arg("-c").arg(r#"import hashlib,importlib.metadata,json,subprocess,sys
 from pathlib import Path
 import torch
 devices=[]

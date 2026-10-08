@@ -131,7 +131,7 @@ def run_pip_progress_worker(progress_path: Path, pip_arguments: list[str]) -> in
     except ImportError:
         _write_download_progress(progress_path, None, False, 0, None, None, False)
         return subprocess.run(
-            [sys.executable, "-I", "-m", "pip", *pip_arguments], check=False
+            [sys.executable, "-I", "-B", "-m", "pip", *pip_arguments], check=False
         ).returncode
 
     try:
@@ -602,7 +602,11 @@ def interpreter_tags(interpreter: str) -> tuple[str, set[str]]:
         "'implementation':sys.implementation.name,'tags':[str(tag) for tag in sys_tags()]}))"
     )
     completed = subprocess.run(
-        [interpreter, "-I", "-c", code], capture_output=True, text=True, timeout=4, check=False
+        [interpreter, "-I", "-B", "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=4,
+        check=False,
     )
     if completed.returncode:
         raise ValueError(f"Installed interpreter {interpreter} cannot report wheel tags")
@@ -633,7 +637,11 @@ def bootstrap_platform_tags(interpreter: str) -> tuple[str, list[str]]:
         "'implementation':sys.implementation.name,'platforms':list(platform_tags())}))"
     )
     completed = subprocess.run(
-        [interpreter, "-I", "-c", code], capture_output=True, text=True, timeout=4, check=False
+        [interpreter, "-I", "-B", "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=4,
+        check=False,
     )
     if completed.returncode:
         raise ValueError("Bootstrap interpreter cannot report native platform tags")
@@ -1311,11 +1319,7 @@ def main() -> None:
         if target == "macos" and args.build == "cpu"
         else f"{args.version}+{args.build}"
     )
-    command = [
-        sys.executable,
-        "-I",
-        "-m",
-        "pip",
+    pip_arguments = [
         "--isolated",
         "install",
         "--cache-dir",
@@ -1338,16 +1342,17 @@ def main() -> None:
         *CORE,
         *extras,
     ]
-    child_command = command
+    child_command = [sys.executable, "-I", "-B", "-m", "pip", *pip_arguments]
     if args.progress_file is not None:
         args.progress_file.unlink(missing_ok=True)
         child_command = [
             sys.executable,
             "-I",
+            "-B",
             str(Path(__file__).resolve()),
             "--_pumas-pip-progress-worker",
             str(args.progress_file),
-            *command[4:],
+            *pip_arguments,
         ]
     completed = subprocess.run(child_command, check=False, capture_output=True, text=True)
     print(completed.stdout, end="", flush=True)

@@ -247,7 +247,8 @@ class OwnedAudioActor:
         entry.cancel.set()
         return self._snapshot(entry)
 
-    async def unload(self, ref):
+    async def unload(self, ref, *, admission=None):
+        """Notify after clean refusals, at the exact-slot unload claim."""
         self._check_loop()
         entry = self._find(ref)
         self._ready(entry, allow_closed=True)
@@ -256,12 +257,15 @@ class OwnedAudioActor:
         lock = self.manager._get_device_lock(entry.slot.device)
         if lock.locked():
             raise OwnedAudioError("runtime_busy")
+        observed = self._loop.create_future()
         # Close exact-slot borrow admission before any suspension or worker call.
         entry.state = "unloading"
         entry.slot.state = SlotState.UNLOADING
         entry.cleanup = "pending"
-        entry.observed = self._loop.create_future()
+        entry.observed = observed
         self._active = entry
+        if admission is not None:
+            admission()
         self._launch(entry, self._run_unload)
         return await self._observe(entry)
 

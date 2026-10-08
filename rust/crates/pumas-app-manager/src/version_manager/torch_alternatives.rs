@@ -309,12 +309,11 @@ fn release_options_command(
     candidates: &[String],
 ) -> Command {
     let mut command = Command::new(interpreter);
-    command.kill_on_drop(true).arg("-I").arg(resolver).args([
-        "--release-options",
-        "--version",
-        version,
-        "--interpreter",
-    ]);
+    command
+        .kill_on_drop(true)
+        .args(["-I", "-B"])
+        .arg(resolver)
+        .args(["--release-options", "--version", version, "--interpreter"]);
     command.arg(interpreter);
     for candidate in candidates {
         command.arg("--python-candidate").arg(candidate);
@@ -801,7 +800,7 @@ impl VersionManager {
         )
         .map_err(PumasError::from)?;
         let mut command = Command::new(&interpreter.executable);
-        command.arg("-I").arg(&resolver).args([
+        command.args(["-I", "-B"]).arg(&resolver).args([
             "--discover",
             "--version",
             version,
@@ -1483,6 +1482,7 @@ mod tests {
             args,
             [
                 "-I",
+                "-B",
                 "/private/resolve_runtime.py",
                 "--release-options",
                 "--version",

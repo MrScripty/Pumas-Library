@@ -283,6 +283,42 @@ class ProcessChannelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["operation_id"], self.operation_id)
         await self.call("unload", self.identity())
 
+    async def test_busy_use_and_unload_refusals_preserve_live_channel_and_exact_work(self):
+        await self.launch(hold=True)
+        await self.load()
+        await self.use()
+        original = self.operation_id
+        for operation, payload in (
+            ("use", {**self.identity(), "request": self.typed_request()}),
+            ("unload", self.identity()),
+        ):
+            refused = await self.call(operation, payload)
+            self.assertEqual(refused["error"], {"code": "runtime_busy", "effect": "not_admitted"})
+        status = await self.call(
+            "status", {**self.identity(original), "wait_for_settlement": False}
+        )
+        self.assertEqual(status["result"]["operation_id"], original)
+        self.assertEqual(
+            (status["result"]["state"], status["result"]["cleanup"]), ("running", "pending")
+        )
+        await self.call("cancel", self.identity(original))
+        final = await self.call("status", {**self.identity(original), "wait_for_settlement": True})
+        self.assertEqual(
+            (final["result"]["state"], final["result"]["cleanup"]), ("cancelled", "confirmed")
+        )
+        unloaded = await self.call("unload", self.identity())
+        self.assertEqual(unloaded["result"]["state"], "retired")
+        # Reload on this same inherited descriptor, preserving the runtime owner.
+        await self.load()
+        await self.use()
+        self.assertNotEqual(self.operation_id, original)
+        await self.call("cancel", self.identity(self.operation_id))
+        final = await self.call(
+            "status", {**self.identity(self.operation_id), "wait_for_settlement": True}
+        )
+        self.assertEqual(final["result"]["cleanup"], "confirmed")
+        await self.call("unload", self.identity())
+
     async def test_admitted_load_cancel_exchange_drains_original_clean_reply(self):
         await self.launch(hold_load=True)
         load = await self.send(

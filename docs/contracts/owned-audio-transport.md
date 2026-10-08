@@ -34,8 +34,11 @@ admission check shares the pending-map lock with quarantine's drain: either a
 closed channel refuses the claim, or quarantine retains the inserted admitted
 entry as an unknown effect. Python load admission is marked at the actor's
 one-shot plan claim, before launching work or constructing its returned status.
-Routine pre-claim refusals preserve the original slot and reusable channel;
-post-claim exceptions retain unknown-effect custody and cannot authorize replay.
+Use admission is marked when retained artifact-borrow custody has transferred;
+unload admission follows clean refusal checks and observer allocation, at the
+exact-slot unload claim. Routine pre-claim refusals preserve the original slot
+and reusable channel. Post-claim exceptions retain unknown-effect custody and
+cannot authorize replay.
 
 `OwnedAudioClient` retains loaded slots and operation borrows. Losing a load
 caller sends an independently correlated cancellation for that exact exchange;
@@ -87,8 +90,20 @@ The runtime owner can retain this byte owner through the exact child cleanup
 lease without changing audio qualification.
 
 Installer validation and all runtime probes suppress Python bytecode generation,
-including validation's sidecar subprocess. Capture still rejects bytecode and
-unreported members; successful import checks do not weaken the retained manifest.
+including validation's sidecar subprocess. Isolated managed-Python, resolver and
+read-only probe commands also use explicit bytecode suppression because `-I`
+ignores Python environment flags. A fresh venv's bootstrap package bytes and
+directories are snapshotted before resolution. They are removed only after the
+entire bootstrap namespace is verified unchanged, before separately verified
+resolved packages are moved in. A resolved package may therefore reuse a bootstrap
+name without being removed or exempted from its dependency manifest. Existing
+runtimes with unreported bootstrap material continue to refuse capture.
+
+The installer-only `validate_runtime.py` member may be absent after direct or
+resolved installation; when a bundled runtime retains it, its bytes must still
+match the embedded source. Other required code remains mandatory. Capture still
+rejects bytecode and unreported members; successful import checks do not weaken
+the retained manifest.
 
 The existing Torch installer materializes the owned worker modules. The private
 worker starts under `-I -B -S`, accepts only three distinct inherited code,

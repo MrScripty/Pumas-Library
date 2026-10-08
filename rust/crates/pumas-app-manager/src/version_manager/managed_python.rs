@@ -376,7 +376,7 @@ impl ManagedPythonProvider {
         let executable = canonical_interpreter_in_depot(&path, &depot)?;
         let mut probe = Command::new(&executable);
         self.private_environment(&mut probe, &staged.cache, &depot);
-        probe.args(["-I", "-c", PYTHON_IDENTITY_PROBE]);
+        probe.args(["-I", "-B", "-c", PYTHON_IDENTITY_PROBE]);
         let observed = self
             .run_depot_command(probe, QUERY_TIMEOUT, 4096, depot_lease)
             .await?;

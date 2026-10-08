@@ -265,7 +265,15 @@ fn capture_installed(
         .iter()
         .filter(|member| member.path().ends_with(".py"))
     {
-        if file_manifest(&runtime.join(member.path()), member.path().into())? != *member {
+        let installed = runtime.join(member.path());
+        // Direct/resolved installers remove this installer-only script. The
+        // bundled installer retains it, and then its exact bytes still matter.
+        if member.path() == "validate_runtime.py"
+            && matches!(std::fs::symlink_metadata(&installed), Err(error) if error.kind() == io::ErrorKind::NotFound)
+        {
+            continue;
+        }
+        if file_manifest(&installed, member.path().into())? != *member {
             return Err(refused(
                 "Installed sidecar differs from embedded selected code",
             ));

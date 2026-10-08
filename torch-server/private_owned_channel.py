@@ -383,8 +383,7 @@ class PrivateOwnedChannel:
         if operation == "unload":
             _fields(payload, {"runtime_instance_id", "slot"})
             ref = self._slot_ref(payload)
-            admitted()
-            return _load_status(await self.actor.unload(ref))
+            return _load_status(await self.actor.unload(ref, admission=admitted))
         if operation == "close":
             _fields(payload, {"runtime_instance_id"})
             self._runtime(payload)

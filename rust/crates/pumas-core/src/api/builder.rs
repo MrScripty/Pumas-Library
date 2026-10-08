@@ -115,18 +115,38 @@ fn start_primary_background_work(
 
     {
         let importer = primary_state.model_importer.clone();
-        runtime_tasks.spawn(async move {
-            inspect_startup_shards(importer).await;
-        });
+        // The blocking scanner must outlive cancellation of background work.
+        // Its finite receipt observes the reader before physical-owner release.
+        if let Err(error) =
+            runtime_tasks.start_owned("inspect startup shards", move |_| async move {
+                inspect_startup_shards(importer).await;
+                Ok(())
+            })
+        {
+            tracing::debug!(%error, "Startup shard inspection was not admitted");
+        }
     }
 
     {
         let ps = primary_state;
+        let importer = ps.model_importer.clone();
+        let scan = runtime_tasks.start_owned(
+            "inspect interrupted startup downloads",
+            move |context| async move {
+                context
+                    .run_blocking("read interrupted startup downloads", move || {
+                        importer.find_interrupted_downloads(&known_download_dirs)
+                    })
+                    .await
+            },
+        );
         runtime_tasks.spawn(async move {
-            let interrupted = ps
-                .model_importer
-                .find_interrupted_downloads_async(known_download_dirs)
-                .await;
+            let Ok(scan) = scan else {
+                return;
+            };
+            let Ok(Ok(interrupted)) = scan.await else {
+                return;
+            };
             if interrupted.is_empty() {
                 return;
             }
@@ -520,8 +540,25 @@ impl PumasApiBuilder {
             let lib_clone = model_library.clone();
             let importer = model_library::ModelImporter::new(lib_clone);
             if importer.has_orphan_candidates_async().await {
+                let reader = importer.clone();
+                let scan = runtime_tasks.start_owned(
+                    "inspect startup orphans",
+                    move |context| async move {
+                        context
+                            .run_blocking("read startup orphan directories", move || {
+                                reader.orphan_candidates()
+                            })
+                            .await
+                    },
+                );
                 runtime_tasks.spawn(async move {
-                    let result = importer.adopt_orphans(false).await;
+                    let Ok(scan) = scan else {
+                        return;
+                    };
+                    let Ok(Ok(orphan_dirs)) = scan.await else {
+                        return;
+                    };
+                    let result = importer.adopt_orphan_candidates(orphan_dirs, false).await;
                     if result.orphans_found > 0 {
                         tracing::info!(
                             "Startup orphan scan: found={}, adopted={}, errors={}",

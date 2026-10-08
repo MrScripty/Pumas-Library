@@ -410,3 +410,57 @@ async fn escaped_runtime_cleanup_ticket_retains_in_process_lifetime() {
     drop(ticket);
     released(&root).await;
 }
+
+#[cfg(feature = "test-support")]
+#[tokio::test]
+async fn shutdown_drains_actual_startup_blocking_readers_before_immediate_reopen() {
+    use std::sync::{Arc, Mutex};
+
+    for operation in ["discover shard recovery", "discover interrupted downloads"] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("library");
+        let registry = LibraryRegistry::open_at(&temp.path().join("registry.db")).unwrap();
+        let api = owner(&root, registry.clone()).await.unwrap();
+        // Both readers are queued after the builder's last suspension. This
+        // current-thread test installs the gate before either task can run.
+        let (entered, waiting) = tokio::sync::oneshot::channel();
+        let entered = Mutex::new(Some(entered));
+        let (release, released) = std::sync::mpsc::channel();
+        let released = Mutex::new(released);
+        api.model_library()
+            .set_blocking_effect_observer_for_test(Some(Arc::new(move |actual| {
+                if actual == operation {
+                    if let Some(entered) = entered.lock().unwrap().take() {
+                        entered.send(()).unwrap();
+                        released.lock().unwrap().recv().unwrap();
+                    }
+                }
+            })));
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mut shutdown = Box::pin(api.shutdown_instance());
+        let early = tokio::time::timeout(Duration::from_millis(30), &mut shutdown).await;
+        let waited_for_reader = early.is_err();
+        assert!(held(&root), "the blocked reader must retain exclusion");
+        release.send(()).unwrap();
+        match early {
+            Ok(result) => result.unwrap(),
+            Err(_) => tokio::time::timeout(Duration::from_secs(5), &mut shutdown)
+                .await
+                .unwrap()
+                .unwrap(),
+        }
+        drop(shutdown);
+        drop(api);
+        let reopened = owner(&root, registry).await;
+        assert!(
+            waited_for_reader,
+            "shutdown returned before the held {operation} reader completed"
+        );
+        let reopened = reopened.expect("completed shutdown must permit immediate reopen");
+        reopened.shutdown_instance().await.unwrap();
+    }
+}

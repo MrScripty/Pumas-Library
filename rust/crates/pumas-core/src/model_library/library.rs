@@ -460,6 +460,18 @@ impl ModelLibrary {
             .expect("blocking effect observer poisoned") = observer;
     }
 
+    #[cfg(feature = "test-support")]
+    pub(crate) fn observe_blocking_read_for_test(&self, operation: &'static str) {
+        let observer = self
+            .blocking_effect_observer
+            .lock()
+            .expect("blocking effect observer poisoned")
+            .clone();
+        if let Some(observer) = observer {
+            observer(operation);
+        }
+    }
+
     pub(crate) async fn remove_link_file(&self, target: &Path) -> Result<()> {
         let target = target.to_path_buf();
         self.run_import_blocking("remove model link", move || {

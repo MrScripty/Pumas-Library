@@ -1301,6 +1301,20 @@ async fn persisted_s3_inspection_cold_read_only_and_live_coexistence() {
         rpc(&server, "get_s3_model_import", json!({})).await["result"]["status"],
         "idle"
     );
+    // Unrelated and explicit-null model metadata must not spend the bounded
+    // publication-candidate budget or hide this one exact recorded binding.
+    let indexed_publication = library.index().get(&model_id).unwrap().unwrap();
+    for index in 0..256 {
+        let mut unrelated = indexed_publication.clone();
+        unrelated.id = format!("aaa/legacy/unrelated-{index:03}");
+        unrelated.path = unrelated.id.clone();
+        unrelated.metadata = if index % 2 == 0 {
+            json!({})
+        } else {
+            json!({"import_publication": null})
+        };
+        library.index().upsert(&unrelated).unwrap();
+    }
     let before = files(root.path());
     let observed = rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"].clone();
     assert_eq!(observed["status"], "complete", "{observed}");
@@ -1323,6 +1337,32 @@ async fn persisted_s3_inspection_cold_read_only_and_live_coexistence() {
         before,
         "inspection must not write persistent files"
     );
+    // An indexed claim is only a candidate. Even a malformed non-null claim
+    // cannot replace canonical metadata and the exact physical receipt checks.
+    for claim in [json!({}), json!(false), json!("malformed claim")] {
+        let mut indexed = indexed_publication.clone();
+        indexed.metadata["import_publication"] = claim;
+        library.index().upsert(&indexed).unwrap();
+        let before = files(root.path());
+        assert_eq!(
+            rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+            observed
+        );
+        assert_eq!(files(root.path()), before);
+    }
+    library.index().upsert(&indexed_publication).unwrap();
+    let metadata_path = library.library_root().join(&model_id).join("metadata.json");
+    let metadata = std::fs::read(&metadata_path).unwrap();
+    for malformed in [b"{broken".to_vec(), b"{}".to_vec()] {
+        std::fs::write(&metadata_path, &malformed).unwrap();
+        let before = files(root.path());
+        let result =
+            rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"].clone();
+        assert_eq!(result["status"], "complete");
+        assert!(result["imports"][0]["model_binding"].is_null());
+        assert_eq!(files(root.path()), before);
+    }
+    std::fs::write(&metadata_path, &metadata).unwrap();
     let rejected = rpc(
         &server,
         "inspect_persisted_s3_imports",

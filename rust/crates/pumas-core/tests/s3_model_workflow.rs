@@ -248,6 +248,89 @@ async fn public_single_and_bundle_workflows_publish_ready_and_settle_exact_recei
 }
 
 #[tokio::test]
+async fn persisted_inspection_refuses_non_json_index_claims_without_mutation() {
+    let root = tempfile::tempdir().unwrap();
+    let stage = tempfile::tempdir().unwrap();
+    let api = setup_api(root.path()).await;
+    let bytes = gguf();
+    let (source, _) = Fixture::serve(vec![wire(&bytes, true), wire(&bytes, false)], false).await;
+    let mut import = request(&source.endpoint, stage.path(), false);
+    let target = format!(".s3-import-{}", import.operation_id);
+    std::fs::create_dir(api.launcher_data_dir().join(&target)).unwrap();
+    import.workspace = AcquisitionWorkspace::from_reserved_directory(
+        &api.launcher_data_dir(),
+        Path::new(&target),
+        Arc::new(()),
+        || Ok(()),
+    )
+    .unwrap();
+    let model = api
+        .import_s3_model(import, S3ModelImportControl::new())
+        .await
+        .unwrap()
+        .model_id
+        .unwrap();
+    assert_eq!(source.finish().await.len(), 2);
+    let original = serde_json::to_value(api.inspect_persisted_s3_imports().await).unwrap();
+    assert_eq!(original["status"], "complete");
+    assert_eq!(original["imports"][0]["model_binding"]["model_id"], model);
+    let db = rusqlite::Connection::open(api.model_library().db_path()).unwrap();
+    db.busy_timeout(Duration::from_secs(5)).unwrap();
+    let canonical: String = db
+        .query_row(
+            "SELECT metadata_json FROM models WHERE id = ?1",
+            [&model],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let acquisition_path = api.launcher_data_dir().join("downloads.json");
+    let acquisitions = std::fs::read(&acquisition_path).unwrap();
+    let metadata_path = api
+        .model_library()
+        .library_root()
+        .join(&model)
+        .join("metadata.json");
+    let metadata = std::fs::read(&metadata_path).unwrap();
+    for invalid in [
+        r#"{"import_publication":NaN}"#,
+        r#"{"import_publication":null,}"#,
+        "{import_publication:null}",
+    ] {
+        db.execute(
+            "UPDATE models SET metadata_json = ?1 WHERE id = ?2",
+            rusqlite::params![invalid, model],
+        )
+        .unwrap();
+        let observed = serde_json::to_value(api.inspect_persisted_s3_imports().await).unwrap();
+        assert_eq!(
+            observed,
+            serde_json::json!({"status":"unavailable"}),
+            "{invalid}"
+        );
+        let retained: String = db
+            .query_row(
+                "SELECT metadata_json FROM models WHERE id = ?1",
+                [&model],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, invalid);
+        assert_eq!(std::fs::read(&acquisition_path).unwrap(), acquisitions);
+        assert_eq!(std::fs::read(&metadata_path).unwrap(), metadata);
+    }
+    db.execute(
+        "UPDATE models SET metadata_json = ?1 WHERE id = ?2",
+        rusqlite::params![canonical, model],
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(api.inspect_persisted_s3_imports().await).unwrap(),
+        original
+    );
+    close(&api).await;
+}
+
+#[tokio::test]
 async fn bounded_prefix_pins_feed_existing_bundle_import_and_cold_exact_receipts() {
     let root = tempfile::TempDir::new().unwrap();
     let stage = tempfile::TempDir::new().unwrap();

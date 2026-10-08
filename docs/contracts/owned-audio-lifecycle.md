@@ -31,8 +31,10 @@ machine; they do not establish that an installed model consumed selected bytes.
 ## Implemented private boundaries
 
 `runtime_profiles::audio_custody` binds retained records to the exact native
-child. The production prepared-byte admission method refuses
-`UnqualifiedRuntime`; the injection seam is compiled only in unit tests. Loads
+child. The shipping runtime qualification factory refuses
+`UnqualifiedRuntime`; only unit tests can qualify a fixed controlled-process
+code snapshot and complete fixture read set. Prepared-byte admission requires
+that opaque runtime owner; decoded JSON cannot create one. Loads
 are distinguished before and after their first wire effect. Opaque slot handles
 allow exclusive in-memory operation borrows and exact unload settlement.
 Each borrow binds the original native operation UUID and requires that same UUID
@@ -72,16 +74,19 @@ qualified immutable runtime recipe; the existing Torch version check is not a
 lasting loader-code custody lease.
 
 The prepared package's closed copied-member set does not yet prove the complete
-installed Transformers read set, including path-valued configuration. A private
-owning transport must bind the parent prepared owner to the actor's one-shot
-plan and match every original load/use/unload reply. That transport is not
-implemented or qualified here. A JSON manifest, path, slot receipt or
-`qualified=true` cannot substitute for it.
+installed Transformers read set, including path-valued configuration. The implemented private inherited-stdio transport binds the parent prepared
+owner to the controlled actor plan and matches original load/use/unload replies.
+Controlled real-process fixtures qualify that boundary; they do not qualify the
+installed interpreter, third-party dependencies or real model loader read set.
+A JSON manifest, path, slot receipt or `qualified=true` cannot substitute for
+that missing production qualification. See [owned audio transport](owned-audio-transport.md).
 
-The native primitive currently returns text without a proven generation finish
-reason. A qualified public result projection must establish that field before
-the private bridge becomes a public typed adapter. Synthetic transcripts do not
-resolve this limitation.
+The detailed native adapter now derives `stop` or `length` from observed
+generated token IDs and the fixed generation bound. Ambiguous or missing
+terminal evidence refuses typed success; legacy text callers keep their prior
+behavior. Controlled fixtures exercise both finish reasons and refusal. Real
+Cohere model execution and its terminal behavior remain unvalidated, so this
+does not enable the public typed adapter.
 
 ## Drain and disposal limits
 

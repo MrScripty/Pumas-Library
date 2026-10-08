@@ -174,7 +174,7 @@ class OwnedAudioActor:
         if self.manager.runtime_instance_id != self._runtime_instance_id:
             raise OwnedAudioError("runtime_replaced")
 
-    async def load(self, plan):
+    def start_load(self, plan):
         self._check_loop()
         if self._closed:
             raise OwnedAudioError("admission_closed")
@@ -226,7 +226,23 @@ class OwnedAudioActor:
         plan._claimed = True
         self._active = entry
         self._launch(entry, self._run_load)
-        return await self._observe(entry)
+        return self._snapshot(entry)
+
+    async def load(self, plan):
+        status = self.start_load(plan)
+        return await self.wait_slot(status.slot_ref)
+
+    async def wait_slot(self, ref):
+        self._check_loop()
+        return await self._observe(self._find(ref))
+
+    def cancel_load(self, ref):
+        self._check_loop()
+        entry = self._find(ref)
+        if entry.state != "loading" or entry.cleanup != "pending":
+            raise OwnedAudioError("not_loading")
+        entry.cancel.set()
+        return self._snapshot(entry)
 
     async def unload(self, ref):
         self._check_loop()

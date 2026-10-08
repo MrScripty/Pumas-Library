@@ -170,6 +170,12 @@ impl PreparedArtifactUse {
         self.read_source.path()
     }
 
+    /// Duplicate the held copied directory for the exact managed child.
+    /// A public locator cannot substitute for this retained source capability.
+    pub(crate) fn clone_read_source_directory(&self) -> std::io::Result<File> {
+        Ok(self.directory.try_clone()?.into_std_file())
+    }
+
     pub(crate) fn manifest_sha256(&self) -> &str {
         &self.manifest_sha256
     }

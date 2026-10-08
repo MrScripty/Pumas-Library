@@ -26,6 +26,7 @@ from loaders.cohere_asr_loader import (
     SpeechRuntimeUnsupported,
     load_cohere_asr,
     transcribe,
+    transcribe_detailed,
     validate_installed_package,
 )
 
@@ -116,6 +117,44 @@ class TranscriptionTests(unittest.TestCase):
 
     def call(self):
         return transcribe(self.model, self.processor, self.audio, "en", self.cancel)
+
+    def detailed(self):
+        self.model.config = types.SimpleNamespace(is_encoder_decoder=True)
+        self.model.generation_config = types.SimpleNamespace(
+            eos_token_id=0,
+            decoder_start_token_id=7,
+            forced_eos_token_id=None,
+        )
+        return transcribe_detailed(self.model, self.processor, self.audio, "en", self.cancel)
+
+    def test_detailed_stop_and_token_bound_preserve_legacy_text(self):
+        self.model.generate.return_value = [[7, 3, 0]]
+        result = self.detailed()
+        self.assertEqual((result.text, result.finish_reason), ("Test transcript.", "stop"))
+        self.assertIs(type(self.call()), str)
+        self.model.generate.return_value = [[7, *([1] * 512)]]
+        self.assertEqual(self.detailed().finish_reason, "length")
+
+    def test_detailed_missing_terminal_wrong_prompt_and_early_eos_refuse(self):
+        for tokens in ([7, 1], [8, 0], [7, 0, 1], [7, *([1] * 513)]):
+            with self.subTest(tokens=tokens), self.assertRaises(SpeechRuntimeUnsupported):
+                self.model.generate.return_value = [tokens]
+                self.detailed()
+        self.processor.decode.assert_not_called()
+
+    def test_detailed_forced_eos_and_unknown_decoder_semantics_refuse_before_generation(self):
+        self.model.config = types.SimpleNamespace(is_encoder_decoder=False)
+        with self.assertRaises(SpeechRuntimeUnsupported):
+            transcribe_detailed(self.model, self.processor, self.audio, "en", self.cancel)
+        self.model.config = types.SimpleNamespace(is_encoder_decoder=True)
+        self.model.generation_config = types.SimpleNamespace(
+            eos_token_id=0,
+            decoder_start_token_id=7,
+            forced_eos_token_id=0,
+        )
+        with self.assertRaises(SpeechRuntimeUnsupported):
+            transcribe_detailed(self.model, self.processor, self.audio, "en", self.cancel)
+        self.model.generate.assert_not_called()
 
     def test_pcm_conversion_language_token_bound_and_owned_buffer_clear(self):
         captured = []

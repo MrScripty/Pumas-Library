@@ -167,7 +167,7 @@ class OwnedModelOperations:
         elif adapter is not None and self._native._adapter is not adapter:
             raise OwnedOperationError("capability_unavailable")
 
-    def start(self, body):
+    def start(self, body, *, admission=None):
         from speech_operations import SpeechOperationError
 
         if self._closed:
@@ -188,6 +188,8 @@ class OwnedModelOperations:
             "audio": audio,
         }
         try:
+            if admission is not None:
+                admission()
             status = self._native.start(json.dumps(envelope).encode("utf-8"))
         except SpeechOperationError as error:
             raise OwnedOperationError(error.code) from None

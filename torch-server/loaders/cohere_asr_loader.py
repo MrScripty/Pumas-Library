@@ -13,6 +13,7 @@ from threading import Event
 from typing import Any
 
 from audio_contract import LANGUAGES, MAX_AUDIO_SAMPLES, MAX_TEXT_BYTES, SAMPLE_RATE
+from native_speech_result import NativeSpeechResult
 
 COHERE_ASR = "cohere-asr"
 
@@ -109,6 +110,72 @@ def _check_cancel(cancel: Event) -> None:
 
 
 def transcribe(model: Any, processor: Any, pcm16le: bytes, language: str, cancel: Event) -> str:
+    return _transcribe(model, processor, pcm16le, language, cancel, detailed=False)
+
+
+def transcribe_detailed(model, processor, pcm16le, language, cancel) -> NativeSpeechResult:
+    """Require concrete EOS/prompt/bound evidence; never infer stop from text.
+
+    This projection is not installed-runtime or read-set qualification. The
+    production gate remains closed. Unsupported decoder/prompt configuration,
+    forced EOS, ambiguous or shortened output refuses a successful result.
+    """
+    return _transcribe(model, processor, pcm16le, language, cancel, detailed=True)
+
+
+def _tokens(value):
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if (
+        type(value) is not list
+        or not value
+        or any(type(token) is not int or token < 0 for token in value)
+    ):
+        raise SpeechRuntimeUnsupported("Native generation token evidence is unsupported")
+    return value
+
+
+def _generation_contract(model, inputs):
+    config = getattr(model, "generation_config", None)
+    if (
+        getattr(getattr(model, "config", None), "is_encoder_decoder", None) is not True
+        or config is None
+        or getattr(config, "forced_eos_token_id", None) is not None
+    ):
+        raise SpeechRuntimeUnsupported("Native generation terminal semantics are unqualified")
+    eos = getattr(config, "eos_token_id", None)
+    if type(eos) is int:
+        eos = [eos]
+    eos = frozenset(_tokens(eos))
+    prefix = inputs.get("decoder_input_ids")
+    if prefix is None:
+        prefix = _tokens([getattr(config, "decoder_start_token_id", None)])
+    else:
+        if hasattr(prefix, "tolist"):
+            prefix = prefix.tolist()
+        if type(prefix) is not list or len(prefix) != 1:
+            raise SpeechRuntimeUnsupported("Native decoder prompt evidence is unsupported")
+        prefix = _tokens(prefix[0])
+    return prefix, eos
+
+
+def _finish_reason(sequence, prefix, eos):
+    tokens = _tokens(sequence)
+    if tokens[: len(prefix)] != prefix:
+        raise SpeechRuntimeUnsupported("Native decoder prompt lineage is unsupported")
+    generated = tokens[len(prefix) :]
+    if not generated or len(generated) > 512 or any(token in eos for token in generated[:-1]):
+        raise SpeechRuntimeUnsupported("Native generation terminal evidence is incoherent")
+    # At the explicit token bound report length, including a terminal token at
+    # that bound; do not claim natural completion from a forced boundary token.
+    if len(generated) == 512:
+        return "length"
+    if generated[-1] in eos:
+        return "stop"
+    raise SpeechRuntimeUnsupported("Native generation omitted terminal evidence")
+
+
+def _transcribe(model, processor, pcm16le, language, cancel, *, detailed):
     """Transcribe one bounded mono 16 kHz recording without creating a thread.
 
     Encoder/preprocessing may not be interruptible. The caller retains custody
@@ -140,6 +207,7 @@ def transcribe(model: Any, processor: Any, pcm16le: bytes, language: str, cancel
         inputs = processor(audio, sampling_rate=SAMPLE_RATE, return_tensors="pt", language=language)
         _check_cancel(cancel)
         inputs = inputs.to(model.device, dtype=model.dtype)
+        contract = _generation_contract(model, inputs) if detailed else None
         with torch.inference_mode():
             output = model.generate(
                 **inputs, max_new_tokens=512, stopping_criteria=stopping_list([CancelCriterion()])
@@ -147,11 +215,12 @@ def transcribe(model: Any, processor: Any, pcm16le: bytes, language: str, cancel
         _check_cancel(cancel)
         if len(output) != 1:
             raise ValueError("ASR runtime returned an unexpected batch")
+        finish_reason = _finish_reason(output[0], *contract) if detailed else None
         text = processor.decode(output[0], skip_special_tokens=True)
         _check_cancel(cancel)
         if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_TEXT_BYTES:
             raise ValueError("ASR runtime returned an invalid or oversized transcript")
-        return text.strip()
+        return NativeSpeechResult(text.strip(), finish_reason) if detailed else text.strip()
     finally:
         original_error = sys.exc_info()[1]
         if device_kind == "cuda":

@@ -21,6 +21,7 @@ from threading import Event, Thread
 import time
 from typing import Any, Callable
 from uuid import UUID, uuid4
+from native_speech_result import NativeSpeechResult
 
 from speech_binding import (
     BINDING_ERROR_CODES,
@@ -86,6 +87,7 @@ class OperationStatus:
     max_settled_receipts: int
     # Monotonic provider time, never an expiry/replay guarantee to other clocks.
     expires_at: float | None
+    finish_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,7 @@ class DrainReport:
 @dataclass
 class _Outcome:
     text: str | None = None
+    finish_reason: str | None = None
     diagnostic: Diagnostic | None = None
     cleanup_diagnostic: Diagnostic | None = None
     quarantine: SpeechCleanupUnconfirmed | None = None
@@ -115,6 +118,7 @@ class _Entry:
     state: str = "running"
     cleanup: str = "pending"
     text: str | None = None
+    finish_reason: str | None = None
     diagnostic: Diagnostic | None = None
     startup_diagnostic: Diagnostic | None = None
     owner_startup_diagnostic: Diagnostic | None = None
@@ -287,7 +291,17 @@ def _invoke(adapter: Callable, loaded: Any, audio: bytes, language: str, cancel:
     try:
         if cancel.is_set():
             raise SpeechCancelled("Speech inference cancelled before invocation")
-        text = adapter(loaded.model, loaded.tokenizer, audio, language, cancel)
+        result = adapter(loaded.model, loaded.tokenizer, audio, language, cancel)
+        finish_reason = None
+        if type(result) is NativeSpeechResult:
+            if type(result.finish_reason) is not str or result.finish_reason not in {
+                "stop",
+                "length",
+            }:
+                raise ValueError("ASR runtime returned an invalid finish reason")
+            text, finish_reason = result.text, result.finish_reason
+        else:
+            text = result  # Legacy internal primitive supplies no terminal evidence.
         if type(text) is not str or len(text) > MAX_TEXT_BYTES:
             raise ValueError("ASR runtime returned an invalid or oversized transcript")
         try:
@@ -296,7 +310,7 @@ def _invoke(adapter: Callable, loaded: Any, audio: bytes, language: str, cancel:
             valid = False
         if not valid:
             raise ValueError("ASR runtime returned an invalid or oversized transcript")
-        return _Outcome(text=text)
+        return _Outcome(text=text, finish_reason=finish_reason)
     except SpeechCleanupUnconfirmed as error:
         return _Outcome(
             diagnostic=_diagnostic(error.original_error, "inference_failed")
@@ -532,6 +546,7 @@ class SpeechOperationOwner:
             self._ttl,
             self._max_receipts,
             None if entry.settled_at is None else entry.settled_at + self._ttl,
+            entry.finish_reason,
         )
 
     def _prune(self):
@@ -727,6 +742,7 @@ class SpeechOperationOwner:
         else:
             entry.state = "completed"
             entry.text = outcome.text
+            entry.finish_reason = outcome.finish_reason
         entry.cleanup = "confirmed"
         entry.audio = None
         entry.worker = None

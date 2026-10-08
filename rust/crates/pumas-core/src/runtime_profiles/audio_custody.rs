@@ -12,6 +12,7 @@
 
 #![allow(dead_code)] // The private native channel is a subsequent integration seam.
 
+use super::audio_runtime::AudioRuntimeOwner;
 use crate::model_library::artifact_use::PreparedArtifactUse;
 use crate::models::RuntimeProfileId;
 use crate::platform::managed_child::ManagedChild;
@@ -73,6 +74,7 @@ struct State {
     child_attached: bool,
     child_drained: bool,
     runtime_instance: Option<String>,
+    runtime_owner: Option<Arc<AudioRuntimeOwner>>,
     next_load: u64,
     entries: HashMap<u64, Entry>,
 }
@@ -118,6 +120,18 @@ impl AudioCustodyRegistry {
         } else {
             Ok(())
         }
+    }
+
+    /// Configure the exact child's immutable code owner before attaching its
+    /// composite lease. Qualification remains internal to that opaque owner.
+    pub(crate) fn retain_runtime(&self, owner: Arc<AudioRuntimeOwner>) -> Result<()> {
+        let mut state = self.lock()?;
+        self.admission_open()?;
+        if state.child_attached || state.child_drained || state.runtime_owner.is_some() {
+            return Err(AudioCustodyError::StaleIdentity);
+        }
+        state.runtime_owner = Some(owner);
+        Ok(())
     }
 
     /// Called once, immediately after spawn and before any ready publication.
@@ -174,19 +188,50 @@ impl AudioCustodyRegistry {
         }
     }
 
-    /// No real recipe/read-set qualifier exists yet. Neither a successful
-    /// handshake nor caller-supplied identity values can open this gate.
+    /// Blocking pre-effect admission under the exact attached runtime owner.
+    /// No real recipe/read-set qualifier exists yet; only unit-test controlled
+    /// code snapshots qualify. Handshakes and JSON cannot open this gate.
     pub(crate) fn reserve_prepared(
         self: &Arc<Self>,
-        _prepared: Arc<PreparedArtifactUse>,
+        prepared: Arc<PreparedArtifactUse>,
     ) -> Result<AudioLoadAdmission> {
-        Err(AudioCustodyError::UnqualifiedRuntime)
+        let runtime = self
+            .lock()?
+            .runtime_owner
+            .clone()
+            .ok_or(AudioCustodyError::UnqualifiedRuntime)?;
+        if !runtime.permits_selected(&prepared) {
+            return Err(AudioCustodyError::UnqualifiedRuntime);
+        }
+        runtime
+            .validate_source()
+            .map_err(|_| AudioCustodyError::Unavailable)?;
+        prepared
+            .validate_read_source()
+            .map_err(|_| AudioCustodyError::Unavailable)?;
+        let token = {
+            let mut state = self.lock()?;
+            if !state
+                .runtime_owner
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &runtime))
+            {
+                return Err(AudioCustodyError::StaleIdentity);
+            }
+            let bytes: Arc<dyn Send + Sync> = prepared.clone();
+            self.retain(&mut state, &bytes)?
+        };
+        Ok(AudioLoadAdmission {
+            registry: self.clone(),
+            token,
+            armed: true,
+        })
     }
 
     // Only the future trusted qualification path may call this after concrete
     // PreparedArtifactUse acquisition and pre-effect validation. Tests use a
     // synthetic destructor witness, without claiming execution qualification.
-    fn retain(&self, state: &mut State, bytes: Arc<dyn Send + Sync>) -> Result<u64> {
+    fn retain(&self, state: &mut State, bytes: &Arc<dyn Send + Sync>) -> Result<u64> {
         self.admission_open()?;
         if !state.child_attached || state.child_drained || state.runtime_instance.is_none() {
             return Err(AudioCustodyError::Unavailable);
@@ -204,7 +249,7 @@ impl AudioCustodyRegistry {
         state.entries.insert(
             token,
             Entry {
-                _bytes: bytes,
+                _bytes: bytes.clone(),
                 phase: Phase::Reserved,
                 slot: None,
                 borrows: 0,
@@ -223,17 +268,20 @@ impl AudioCustodyRegistry {
 
     fn child_drained(&self) {
         self.close_admission();
-        let entries = match self.lock() {
+        let retained = match self.lock() {
             Ok(mut state) => {
                 state.child_drained = true;
-                std::mem::take(&mut state.entries)
+                (
+                    std::mem::take(&mut state.entries),
+                    state.runtime_owner.take(),
+                )
             }
             // Poison is not evidence that retained bookkeeping is coherent.
             Err(_) => return,
         };
         // Scratch disposal can perform filesystem work; never do it under the
         // registry lock or on a synchronous per-operation borrow path.
-        drop(entries);
+        drop(retained);
     }
 
     #[cfg(test)]
@@ -243,7 +291,7 @@ impl AudioCustodyRegistry {
     ) -> Result<AudioLoadAdmission> {
         let token = {
             let mut state = self.lock()?;
-            self.retain(&mut state, bytes)?
+            self.retain(&mut state, &bytes)?
         };
         Ok(AudioLoadAdmission {
             registry: self.clone(),
@@ -263,6 +311,9 @@ impl Drop for AudioCustodyRegistry {
         // Unexpected last-owner loss/poison never disposes unresolved bytes.
         // Normally the attached child lease prevents this path altogether.
         std::mem::forget(std::mem::take(&mut state.entries));
+        if let Some(runtime) = state.runtime_owner.take() {
+            std::mem::forget(runtime);
+        }
     }
 }
 
@@ -414,6 +465,7 @@ impl AudioLoadedSlot {
             registry: self.registry.clone(),
             token: self.token,
             slot: self.slot.clone(),
+            wire_admitted: false,
             armed: true,
         })
     }
@@ -470,6 +522,25 @@ impl AudioOperationBorrow {
         self.armed = false;
         Ok(())
     }
+
+    /// Trusted original-use refusal proving native non-start. Only an unbound
+    /// borrow can take this path; a caller cancellation or generic RPC error
+    /// supplies no such proof. A started/bound operation requires settlement.
+    pub(crate) fn finish_native_not_started(mut self, receipt: &AudioSlotIdentity) -> Result<()> {
+        if receipt != &self.slot || self.operation_id.is_some() {
+            return Err(AudioCustodyError::StaleIdentity);
+        }
+        {
+            let mut state = self.registry.lock()?;
+            let entry = checked_entry(&mut state, self.token, &self.slot, Phase::Ready)?;
+            if entry.borrows != 1 {
+                return Err(AudioCustodyError::Uncertain);
+            }
+            entry.borrows = 0;
+        }
+        self.armed = false;
+        Ok(())
+    }
 }
 
 impl Drop for AudioOperationBorrow {
@@ -484,14 +555,52 @@ pub(crate) struct AudioUnloadAdmission {
     registry: Arc<AudioCustodyRegistry>,
     token: u64,
     slot: AudioSlotIdentity,
+    wire_admitted: bool,
     armed: bool,
 }
 
 impl AudioUnloadAdmission {
+    /// The writer invokes this only after its final caller-loss check, before
+    /// the first byte. Preparation alone must not establish native uncertainty.
+    pub(crate) fn mark_wire_admitted(&mut self) -> Result<()> {
+        let mut state = self.registry.lock()?;
+        let entry = checked_entry(&mut state, self.token, &self.slot, Phase::Unloading)?;
+        if self.wire_admitted || entry.borrows != 0 {
+            return Err(AudioCustodyError::Uncertain);
+        }
+        self.wire_admitted = true;
+        Ok(())
+    }
+
+    /// Only the original owning-channel refusal can establish unload non-start.
+    /// Selected bytes remain retained and the exact loaded slot becomes usable
+    /// again; partial writes, caller loss and generic errors cannot call this.
+    pub(crate) fn finish_native_not_started(mut self, receipt: &AudioSlotIdentity) -> Result<()> {
+        if receipt != &self.slot {
+            return Err(AudioCustodyError::StaleIdentity);
+        }
+        if !self.wire_admitted {
+            return Err(AudioCustodyError::Uncertain);
+        }
+        {
+            let mut state = self.registry.lock()?;
+            let entry = checked_entry(&mut state, self.token, &self.slot, Phase::Unloading)?;
+            if entry.borrows != 0 {
+                return Err(AudioCustodyError::Busy);
+            }
+            entry.phase = Phase::Ready;
+        }
+        self.armed = false;
+        Ok(())
+    }
+
     /// Exact native unload/device cessation, with no outstanding borrows.
     pub(crate) fn finish_native_unloaded(mut self, receipt: &AudioSlotIdentity) -> Result<()> {
         if receipt != &self.slot {
             return Err(AudioCustodyError::StaleIdentity);
+        }
+        if !self.wire_admitted {
+            return Err(AudioCustodyError::Uncertain);
         }
         let entry = {
             let mut state = self.registry.lock()?;
@@ -509,8 +618,19 @@ impl AudioUnloadAdmission {
 
 impl Drop for AudioUnloadAdmission {
     fn drop(&mut self) {
-        if self.armed {
+        if !self.armed {
+            return;
+        }
+        if self.wire_admitted {
             self.registry.mark_uncertain(self.token);
+            return;
+        }
+        if let Ok(mut state) = self.registry.lock() {
+            if let Ok(entry) = checked_entry(&mut state, self.token, &self.slot, Phase::Unloading) {
+                if entry.borrows == 0 {
+                    entry.phase = Phase::Ready;
+                }
+            }
         }
     }
 }
@@ -541,7 +661,7 @@ fn canonical_uuid(value: &str) -> bool {
     uuid::Uuid::parse_str(value).is_ok_and(|id| id.to_string() == value && !id.is_nil())
 }
 
-fn valid_slot(slot: &AudioSlotIdentity) -> bool {
+pub(crate) fn valid_slot(slot: &AudioSlotIdentity) -> bool {
     canonical_uuid(&slot.runtime_instance)
         && canonical_uuid(&slot.load_generation)
         && !slot.slot_id.is_empty()
@@ -575,7 +695,14 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
+            Self::with_runtime(None)
+        }
+
+        fn with_runtime(runtime: Option<Arc<AudioRuntimeOwner>>) -> Self {
             let registry = AudioCustodyRegistry::new(profile(), 7);
+            if let Some(runtime) = runtime {
+                registry.retain_runtime(runtime).unwrap();
+            }
             {
                 let mut state = registry.lock().unwrap();
                 state.pid = Some(42);
@@ -637,6 +764,12 @@ mod tests {
         borrowed
     }
 
+    fn admitted_unload(loaded: &AudioLoadedSlot) -> AudioUnloadAdmission {
+        let mut unload = loaded.begin_unload().unwrap();
+        unload.mark_wire_admitted().unwrap();
+        unload
+    }
+
     #[test]
     fn queued_caller_loss_releases_only_before_wire_admission() {
         let mut fixture = Fixture::new();
@@ -670,9 +803,7 @@ mod tests {
         ));
         borrowed.finish_native_settled(&operation()).unwrap();
         fixture.assert_releases(0);
-        loaded
-            .begin_unload()
-            .unwrap()
+        admitted_unload(&loaded)
             .finish_native_unloaded(&slot())
             .unwrap();
         fixture.assert_releases(1);
@@ -685,8 +816,7 @@ mod tests {
             loaded.begin_unload(),
             Err(AudioCustodyError::Unavailable)
         ));
-        next.begin_unload()
-            .unwrap()
+        admitted_unload(&next)
             .finish_native_unloaded(&slot())
             .unwrap();
         fixture.assert_releases(2);
@@ -805,11 +935,102 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_unload_preparation_restores_ready_without_releasing_bytes() {
+        let fixture = Fixture::new();
+        let loaded = fixture.ready();
+        let reserved = loaded.begin_unload().unwrap();
+        assert!(matches!(
+            loaded.borrow_operation(),
+            Err(AudioCustodyError::Uncertain)
+        ));
+        drop(reserved);
+        fixture.assert_releases(0);
+        loaded
+            .borrow_operation()
+            .unwrap()
+            .finish_native_not_started(&slot())
+            .unwrap();
+        assert_eq!(
+            loaded
+                .begin_unload()
+                .unwrap()
+                .finish_native_unloaded(&slot()),
+            Err(AudioCustodyError::Uncertain)
+        );
+        fixture.assert_releases(0);
+        admitted_unload(&loaded)
+            .finish_native_unloaded(&slot())
+            .unwrap();
+        fixture.assert_releases(1);
+    }
+
+    #[test]
+    fn unadmitted_unload_drop_does_not_overwrite_separate_uncertainty() {
+        let mut fixture = Fixture::new();
+        let loaded = fixture.ready();
+        let reserved = loaded.begin_unload().unwrap();
+        fixture.registry.mark_uncertain(loaded.token);
+        drop(reserved);
+        assert!(matches!(
+            loaded.borrow_operation(),
+            Err(AudioCustodyError::Uncertain)
+        ));
+        fixture.assert_releases(0);
+        fixture.drain();
+        fixture.assert_releases(1);
+    }
+
+    #[test]
+    fn verified_unload_nonstart_preserves_selected_bytes_and_exact_slot_reuse() {
+        let fixture = Fixture::new();
+        let loaded = fixture.ready();
+        admitted_unload(&loaded)
+            .finish_native_not_started(&slot())
+            .unwrap();
+        fixture.assert_releases(0);
+        bound_operation(&loaded)
+            .finish_native_settled(&operation())
+            .unwrap();
+        assert_eq!(
+            loaded
+                .begin_unload()
+                .unwrap()
+                .finish_native_not_started(&slot()),
+            Err(AudioCustodyError::Uncertain)
+        );
+        admitted_unload(&loaded)
+            .finish_native_unloaded(&slot())
+            .unwrap();
+        fixture.assert_releases(1);
+    }
+
+    #[test]
+    fn wrong_unload_nonstart_identity_retains_uncertainty_until_child_drain() {
+        let mut fixture = Fixture::new();
+        let loaded = fixture.ready();
+        let wrong = AudioSlotIdentity {
+            load_generation: INSTANCE.into(),
+            ..slot()
+        };
+        assert_eq!(
+            admitted_unload(&loaded).finish_native_not_started(&wrong),
+            Err(AudioCustodyError::StaleIdentity)
+        );
+        assert!(matches!(
+            loaded.borrow_operation(),
+            Err(AudioCustodyError::Uncertain)
+        ));
+        fixture.assert_releases(0);
+        fixture.drain();
+        fixture.assert_releases(1);
+    }
+
+    #[test]
     fn unknown_unload_and_wrong_unloaded_receipt_retain_bytes() {
         for wrong_receipt in [false, true] {
             let mut fixture = Fixture::new();
             let loaded = fixture.ready();
-            let unload = loaded.begin_unload().unwrap();
+            let unload = admitted_unload(&loaded);
             if wrong_receipt {
                 let wrong = AudioSlotIdentity {
                     runtime_instance: LOAD.into(),
@@ -840,9 +1061,7 @@ mod tests {
         load.finish_native_cleaned(INSTANCE).unwrap();
         fixture.assert_releases(1);
         let loaded = fixture.ready();
-        loaded
-            .begin_unload()
-            .unwrap()
+        admitted_unload(&loaded)
             .finish_native_unloaded(&slot())
             .unwrap();
         fixture.assert_releases(2);
@@ -914,6 +1133,52 @@ mod tests {
     }
 
     #[test]
+    fn original_native_nonstart_refusal_reuses_unbound_borrow_only() {
+        let mut fixture = Fixture::new();
+        let loaded = fixture.ready();
+        loaded
+            .borrow_operation()
+            .unwrap()
+            .finish_native_not_started(&slot())
+            .unwrap();
+        let bound = bound_operation(&loaded);
+        assert_eq!(
+            bound.finish_native_not_started(&slot()),
+            Err(AudioCustodyError::StaleIdentity)
+        );
+        fixture.assert_releases(0);
+        assert!(matches!(
+            loaded.begin_unload(),
+            Err(AudioCustodyError::Uncertain)
+        ));
+        fixture.drain();
+        fixture.assert_releases(1);
+    }
+
+    #[test]
+    fn wrong_native_nonstart_refusal_retains_uncertain_borrow() {
+        let mut fixture = Fixture::new();
+        let loaded = fixture.ready();
+        let wrong = AudioSlotIdentity {
+            load_generation: INSTANCE.into(),
+            ..slot()
+        };
+        assert_eq!(
+            loaded
+                .borrow_operation()
+                .unwrap()
+                .finish_native_not_started(&wrong),
+            Err(AudioCustodyError::StaleIdentity)
+        );
+        assert!(matches!(
+            loaded.borrow_operation(),
+            Err(AudioCustodyError::Uncertain)
+        ));
+        fixture.drain();
+        fixture.assert_releases(1);
+    }
+
+    #[test]
     fn close_refuses_new_work_but_retains_existing_cleanup_authority() {
         let fixture = Fixture::new();
         let loaded = fixture.ready();
@@ -925,9 +1190,7 @@ mod tests {
             loaded.borrow_operation(),
             Err(AudioCustodyError::Unavailable)
         ));
-        loaded
-            .begin_unload()
-            .unwrap()
+        admitted_unload(&loaded)
             .finish_native_unloaded(&slot())
             .unwrap();
         fixture.assert_releases(1);
@@ -1049,7 +1312,103 @@ mod tests {
         ));
         prepared.validate_read_source().unwrap();
         let scratch = prepared.read_source_path().to_owned();
-        let mut admitted = fixture.registry.reserve_fixture(prepared).unwrap();
+        drop(fixture);
+        let code = temp.path().join("controlled-code");
+        std::fs::create_dir(&code).unwrap();
+        std::fs::write(
+            code.join("fixture.py"),
+            b"# controlled code only; no native model\n",
+        )
+        .unwrap();
+        let wrong_read_set =
+            AudioRuntimeOwner::controlled_fixture(&code, &["fixture.py"], &members[..4]).unwrap();
+        assert!(!wrong_read_set.permits_selected(&prepared));
+        drop(wrong_read_set);
+        assert!(AudioRuntimeOwner::controlled_fixture_for_selected(
+            &code,
+            &["fixture.py"],
+            &members[..4],
+            &prepared
+        )
+        .is_err());
+        let code_only =
+            AudioRuntimeOwner::controlled_fixture(&code, &["fixture.py"], &members).unwrap();
+        assert!(!code_only.permits_selected(&prepared));
+        drop(code_only);
+        let runtime = AudioRuntimeOwner::controlled_fixture_for_selected(
+            &code,
+            &["fixture.py"],
+            &members,
+            &prepared,
+        )
+        .unwrap();
+        assert!(runtime.permits_selected(&prepared));
+
+        // Equal model ID, selected names and copied hashes in a different root
+        // still identify another source. The child inherited only the original
+        // prepared owner; paths/digests cannot retarget that authority.
+        let other_library = ModelLibrary::new(temp.path().join("other-library"))
+            .await
+            .unwrap();
+        let other_package = other_library.library_root().join(model_id);
+        std::fs::create_dir_all(&other_package).unwrap();
+        for name in members {
+            std::fs::write(
+                other_package.join(name),
+                std::fs::read(package.join(name)).unwrap(),
+            )
+            .unwrap();
+        }
+        let other_metadata: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(package.join("metadata.json")).unwrap()).unwrap();
+        std::fs::write(
+            other_package.join("metadata.json"),
+            serde_json::to_vec(&other_metadata).unwrap(),
+        )
+        .unwrap();
+        other_library
+            .index()
+            .upsert(&ModelRecord {
+                id: model_id.into(),
+                path: other_package.display().to_string(),
+                cleaned_name: "synthetic-owned".into(),
+                official_name: "Other root equal selected bytes".into(),
+                model_type: "audio".into(),
+                tags: vec![],
+                hashes: HashMap::new(),
+                metadata: other_metadata,
+                updated_at: "fixture".into(),
+            })
+            .unwrap();
+        let other_root = DownloadDestinationRoot::open(other_library.library_root()).unwrap();
+        other_library
+            .install_mutation_authority(
+                crate::api::RuntimeTasks::new(),
+                other_root.clone(),
+                Arc::new(DownloadPersistence::new(
+                    &temp.path().join("other-downloads"),
+                )),
+            )
+            .unwrap();
+        let unrelated = Arc::new(
+            other_library
+                .prepare_cohere_artifact_use(model_id, artifact_id)
+                .unwrap(),
+        );
+        assert_eq!(
+            prepared.manifest().collect::<Vec<_>>(),
+            unrelated.manifest().collect::<Vec<_>>()
+        );
+        assert!(!runtime.permits_selected(&unrelated));
+        let runtime_copy = runtime.read_source_path().to_owned();
+        let weak_runtime = Arc::downgrade(&runtime);
+        let mut fixture = Fixture::with_runtime(Some(runtime));
+        assert!(matches!(
+            fixture.registry.reserve_prepared(unrelated),
+            Err(AudioCustodyError::UnqualifiedRuntime)
+        ));
+        drop(other_root.try_acquire_execution_grant().unwrap());
+        let mut admitted = fixture.registry.reserve_prepared(prepared).unwrap();
         admitted.mark_wire_admitted().unwrap();
         let loaded = admitted.ready(slot()).unwrap();
         assert!(scratch.exists());
@@ -1060,13 +1419,26 @@ mod tests {
         let borrowed = bound_operation(&loaded);
         borrowed.finish_native_settled(&operation()).unwrap();
         assert!(scratch.exists());
-        loaded
-            .begin_unload()
-            .unwrap()
+        admitted_unload(&loaded)
             .finish_native_unloaded(loaded.identity())
             .unwrap();
         assert!(!scratch.exists());
         drop(root.try_acquire_execution_grant().unwrap());
+        let successor = Arc::new(
+            library
+                .prepare_cohere_artifact_use(model_id, artifact_id)
+                .unwrap(),
+        );
+        assert!(!weak_runtime.upgrade().unwrap().permits_selected(&successor));
+        drop(successor);
+        assert!(
+            runtime_copy.exists(),
+            "native unload does not release child code custody"
+        );
+        assert!(weak_runtime.upgrade().is_some());
+        fixture.drain();
+        assert!(!runtime_copy.exists());
+        assert!(weak_runtime.upgrade().is_none());
     }
 
     #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]

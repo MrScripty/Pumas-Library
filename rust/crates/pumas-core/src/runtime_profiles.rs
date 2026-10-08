@@ -1,7 +1,13 @@
 //! Provider-neutral runtime profile service contracts.
 
+#[path = "runtime_profiles/audio_channel.rs"]
+pub(crate) mod audio_channel;
+#[path = "runtime_profiles/audio_client.rs"]
+pub(crate) mod audio_client;
 #[path = "runtime_profiles/audio_custody.rs"]
 pub(crate) mod audio_custody;
+#[path = "runtime_profiles/audio_runtime.rs"]
+pub(crate) mod audio_runtime;
 
 #[path = "runtime_profiles/launch_specs.rs"]
 mod launch_specs;

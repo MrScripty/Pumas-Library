@@ -10,6 +10,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
 
+/// Installation checks may import sidecar code directly or in a child process.
+/// Keep their imports from changing the runtime's retained source-byte tree.
+fn runtime_check_command(python: &Path, script: &Path) -> Command {
+    let mut command = Command::new(python);
+    command.arg(script).env("PYTHONDONTWRITEBYTECODE", "1");
+    command
+}
+
 const MAX_TORCH_ORPHAN_QUARANTINES: usize = 2;
 const MAX_TORCH_DOWNLOAD_SOURCE_BYTES: usize = 2048;
 const TORCH_DOWNLOAD_SPEED_STALE_AFTER: Duration = Duration::from_secs(2);
@@ -2102,8 +2110,7 @@ impl VersionInstaller {
             serde_json::to_vec_pretty(&recipe).map_err(|error| failed(error.to_string()))?,
         )
         .map_err(PumasError::from)?;
-        let mut probe = Command::new(&python);
-        probe.arg(runtime.join("probe_runtime.py"));
+        let probe = runtime_check_command(&python, &runtime.join("probe_runtime.py"));
         self.run_runtime_command(
             probe,
             log_path,
@@ -2217,8 +2224,7 @@ impl VersionInstaller {
                 "Installing resolved wheel artifacts failed; see installation log",
             ));
         }
-        let mut probe = Command::new(&python);
-        probe.arg(runtime.join("probe_runtime.py"));
+        let probe = runtime_check_command(&python, &runtime.join("probe_runtime.py"));
         self.run_runtime_command(
             probe,
             log_path,
@@ -2627,9 +2633,8 @@ impl VersionInstaller {
                 "Installing locked runtime dependencies failed; see installation log",
             ));
         }
-        let mut validate = Command::new(&python);
+        let mut validate = runtime_check_command(&python, &runtime.join("validate_runtime.py"));
         validate
-            .arg(runtime.join("validate_runtime.py"))
             .current_dir(&runtime)
             .env("HF_HUB_OFFLINE", "1")
             .env("PYTHONNOUSERSITE", "1");
@@ -2654,8 +2659,7 @@ impl VersionInstaller {
             serde_json::to_vec_pretty(&resolution).map_err(|e| failed(e.to_string()))?,
         )
         .map_err(PumasError::from)?;
-        let mut probe = Command::new(&python);
-        probe.arg(runtime.join("probe_runtime.py"));
+        let probe = runtime_check_command(&python, &runtime.join("probe_runtime.py"));
         self.run_runtime_command(
             probe,
             log_path,

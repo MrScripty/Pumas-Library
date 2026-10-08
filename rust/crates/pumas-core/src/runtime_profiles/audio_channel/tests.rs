@@ -720,3 +720,224 @@ async fn last_owner_loss_with_outstanding_cancel_does_not_keep_admission_alive()
     assert_eq!(stops.count.load(Ordering::Acquire), 1);
     drop(peer);
 }
+
+struct RecordingChannel {
+    channel: Arc<PrivateAudioChannel>,
+    _peer: DuplexStream,
+    stops: Arc<Stops>,
+    written: Arc<Mutex<Vec<u8>>>,
+}
+
+fn recording_channel() -> RecordingChannel {
+    let (reader, peer) = tokio::io::duplex(1024);
+    let stops = Arc::new(Stops::default());
+    let written = Arc::new(Mutex::new(Vec::new()));
+    let channel = PrivateAudioChannel::from_streams(
+        PartialWriter {
+            remaining: usize::MAX,
+            written: written.clone(),
+        },
+        reader,
+        stops.callback(),
+    );
+    RecordingChannel {
+        channel,
+        _peer: peer,
+        stops,
+        written,
+    }
+}
+
+#[tokio::test]
+async fn closed_during_preparation_rejects_live_and_queued_unadmitted_jobs() {
+    let RecordingChannel {
+        channel,
+        _peer,
+        stops,
+        written,
+    } = recording_channel();
+    let preparing_effects = Arc::new(Effects::default());
+    let (preparation, entered, release) = gated_prepare(&preparing_effects);
+    let preparing = call(&channel, "load", preparation);
+    entered.await.unwrap();
+    let queued_effects = Arc::new(Effects::default());
+    let (reply, queued) = oneshot::channel();
+    channel
+        .queue
+        .send(Job {
+            operation: "load",
+            payload: serde_json::json!({}),
+            prepare: prepare(&queued_effects),
+            reply,
+            cancellation: Arc::new(ExchangeCancellation::default()),
+        })
+        .await
+        .unwrap();
+    channel.quarantine();
+    release.send(()).unwrap();
+    assert_eq!(preparing.await.unwrap(), Err(ChannelError::NotAdmitted));
+    assert!(matches!(queued.await, Ok(Err(ChannelError::NotAdmitted))));
+    assert_eq!(preparing_effects.prepared.load(Ordering::Acquire), 1);
+    assert_eq!(preparing_effects.admitted.load(Ordering::Acquire), 0);
+    assert_eq!(preparing_effects.unadmitted.load(Ordering::Acquire), 1);
+    assert_eq!(preparing_effects.uncertain.load(Ordering::Acquire), 0);
+    assert_eq!(queued_effects.prepared.load(Ordering::Acquire), 0);
+    assert_eq!(stops.count.load(Ordering::Acquire), 1);
+    assert!(written.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn closed_while_waiting_for_permit_refuses_without_preparation() {
+    let RecordingChannel {
+        channel,
+        _peer,
+        stops,
+        written,
+    } = recording_channel();
+    let permits = channel
+        .shared
+        .permits
+        .clone()
+        .acquire_many_owned(MAX_PENDING as u32)
+        .await
+        .unwrap();
+    let effects = Arc::new(Effects::default());
+    let (reply, outcome) = oneshot::channel();
+    channel
+        .queue
+        .send(Job {
+            operation: "load",
+            payload: serde_json::json!({}),
+            prepare: prepare(&effects),
+            reply,
+            cancellation: Arc::new(ExchangeCancellation::default()),
+        })
+        .await
+        .unwrap();
+    // The current-thread executor cannot resume us until the writer consumes
+    // this job and suspends on the exhausted admission semaphore.
+    while channel.queue.capacity() == 0 {
+        tokio::task::yield_now().await;
+    }
+    channel.quarantine();
+    drop(permits);
+    assert!(matches!(outcome.await, Ok(Err(ChannelError::NotAdmitted))));
+    assert_eq!(effects.prepared.load(Ordering::Acquire), 0);
+    assert_eq!(effects.admitted.load(Ordering::Acquire), 0);
+    assert_eq!(stops.count.load(Ordering::Acquire), 1);
+    assert!(written.lock().unwrap().is_empty());
+}
+
+#[test]
+fn closed_before_pending_lock_refuses_stale_open_check_without_claiming_custody() {
+    let stops = Arc::new(Stops::default());
+    let shared = Arc::new(Shared {
+        closed: AtomicBool::new(false),
+        changed: Notify::new(),
+        pending: Mutex::new(HashMap::new()),
+        permits: Arc::new(Semaphore::new(MAX_PENDING)),
+        next_id: AtomicU64::new(1),
+        stop_exact_child: stops.callback(),
+    });
+    let effects = Arc::new(Effects::default());
+    let custody = prepare(&effects)().unwrap();
+    let (reply, result) = oneshot::channel();
+    let (_, write_finished) = oneshot::channel();
+    let entry = Pending {
+        operation: "load",
+        custody,
+        reply,
+        _permit: shared.permits.clone().try_acquire_owned().unwrap(),
+        write_finished,
+    };
+    let cancellation = Arc::new(ExchangeCancellation::default());
+    let locked = shared.pending.lock().unwrap();
+    let (open_checked, checked) = std::sync::mpsc::channel();
+    let writer_shared = shared.clone();
+    let writer_cancellation = cancellation.clone();
+    let writer = std::thread::spawn(move || {
+        // Reproduce the writer's stale pre-lock observation deterministically.
+        assert!(!writer_shared.closed.load(Ordering::Acquire));
+        open_checked.send(()).unwrap();
+        writer_shared.admit_pending(1, entry, &writer_cancellation)
+    });
+    checked.recv().unwrap();
+    let closing = shared.clone();
+    let close = std::thread::spawn(move || closing.quarantine());
+    // Quarantine publishes closed before waiting for the same pending lock.
+    while !shared.closed.load(Ordering::Acquire) {
+        std::thread::yield_now();
+    }
+    drop(locked);
+    assert_eq!(writer.join().unwrap(), Ok(false));
+    close.join().unwrap();
+    assert!(matches!(
+        result.blocking_recv(),
+        Ok(Err(ChannelError::NotAdmitted))
+    ));
+    assert!(!cancellation.admitted.load(Ordering::Acquire));
+    assert!(shared.pending.lock().unwrap().is_empty());
+    assert_eq!(effects.admitted.load(Ordering::Acquire), 0);
+    assert_eq!(effects.unadmitted.load(Ordering::Acquire), 1);
+    assert_eq!(effects.uncertain.load(Ordering::Acquire), 0);
+    assert_eq!(stops.count.load(Ordering::Acquire), 1);
+}
+
+#[tokio::test]
+async fn closure_published_before_permit_release_refuses_without_preparation() {
+    let RecordingChannel {
+        channel,
+        _peer,
+        stops,
+        written,
+    } = recording_channel();
+    let permits = channel
+        .shared
+        .permits
+        .clone()
+        .acquire_many_owned(MAX_PENDING as u32)
+        .await
+        .unwrap();
+    let effects = Arc::new(Effects::default());
+    let (reply, outcome) = oneshot::channel();
+    channel
+        .queue
+        .send(Job {
+            operation: "load",
+            payload: serde_json::json!({}),
+            prepare: prepare(&effects),
+            reply,
+            cancellation: Arc::new(ExchangeCancellation::default()),
+        })
+        .await
+        .unwrap();
+    while channel.queue.capacity() == 0 {
+        tokio::task::yield_now().await;
+    }
+    let locking = channel.shared.clone();
+    let (locked, acquired) = oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let _guard = locking.pending.lock().unwrap();
+        locked.send(()).unwrap();
+        released.recv().unwrap();
+    });
+    acquired.await.unwrap();
+    let closing = channel.shared.clone();
+    let close = std::thread::spawn(move || closing.quarantine());
+    while !channel.shared.closed.load(Ordering::Acquire) {
+        tokio::task::yield_now().await;
+    }
+    // Quarantine has published closed but cannot yet drain the map or close
+    // the semaphore. The waiter obtains a valid permit in that exact window.
+    drop(permits);
+    let result = outcome.await;
+    release.send(()).unwrap();
+    holder.join().unwrap();
+    close.join().unwrap();
+    assert!(matches!(result, Ok(Err(ChannelError::NotAdmitted))));
+    assert_eq!(effects.prepared.load(Ordering::Acquire), 0);
+    assert_eq!(effects.admitted.load(Ordering::Acquire), 0);
+    assert!(written.lock().unwrap().is_empty());
+    assert_eq!(stops.count.load(Ordering::Acquire), 1);
+}

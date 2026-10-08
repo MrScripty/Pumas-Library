@@ -174,7 +174,8 @@ class OwnedAudioActor:
         if self.manager.runtime_instance_id != self._runtime_instance_id:
             raise OwnedAudioError("runtime_replaced")
 
-    def start_load(self, plan):
+    def start_load(self, plan, *, admission=None):
+        """Notify the private caller at claim, before launch or status can fail."""
         self._check_loop()
         if self._closed:
             raise OwnedAudioError("admission_closed")
@@ -225,6 +226,8 @@ class OwnedAudioActor:
         # All retained state exists before one-shot transfer or native startup.
         plan._claimed = True
         self._active = entry
+        if admission is not None:
+            admission()
         self._launch(entry, self._run_load)
         return self._snapshot(entry)
 

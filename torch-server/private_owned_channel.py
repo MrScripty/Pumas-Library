@@ -318,8 +318,7 @@ class PrivateOwnedChannel:
             # This is an injected trusted internal dependency; the shipping
             # factory never implements it. JSON cannot install a qualifier.
             plan = self._gate.prepare_from_parent(payload, self.actor.manager)
-            admitted()
-            started = self.actor.start_load(plan)
+            started = self.actor.start_load(plan, admission=admitted)
             record["load_ref"] = started.slot_ref
             status = await self.actor.wait_slot(started.slot_ref)
             if status.state == "ready":

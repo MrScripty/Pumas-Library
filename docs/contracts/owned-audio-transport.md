@@ -28,6 +28,15 @@ or incoherent receipts and unknown native effects quarantine the channel and
 request stop of its exact child. Valid original `not_admitted` RPC errors keep
 the connection reusable; load/use/unload each apply their own non-start receipt.
 
+Channel closure settles queued, permit-waiting and prepared-but-unadmitted
+requests as `not_admitted`, without custody admission or wire writes. The final
+admission check shares the pending-map lock with quarantine's drain: either a
+closed channel refuses the claim, or quarantine retains the inserted admitted
+entry as an unknown effect. Python load admission is marked at the actor's
+one-shot plan claim, before launching work or constructing its returned status.
+Routine pre-claim refusals preserve the original slot and reusable channel;
+post-claim exceptions retain unknown-effect custody and cannot authorize replay.
+
 `OwnedAudioClient` retains loaded slots and operation borrows. Losing a load
 caller sends an independently correlated cancellation for that exact exchange;
 its acknowledgement never releases the original load. Operation wait/caller
@@ -76,6 +85,10 @@ changed identities or hashes refuse capture. This is selected-byte custody;
 external system libraries and a complete real loader read set remain unqualified.
 The runtime owner can retain this byte owner through the exact child cleanup
 lease without changing audio qualification.
+
+Installer validation and all runtime probes suppress Python bytecode generation,
+including validation's sidecar subprocess. Capture still rejects bytecode and
+unreported members; successful import checks do not weaken the retained manifest.
 
 The existing Torch installer materializes the owned worker modules. The private
 worker starts under `-I -B -S`, accepts only three distinct inherited code,

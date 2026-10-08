@@ -501,3 +501,44 @@ async fn concurrent_direct_install_rejection_does_not_disrupt_active_torch_attem
         .unwrap()
         .contains("download-r2.pytorch.org/whl/cu130/torch-2.9.1"));
 }
+
+#[tokio::test]
+async fn runtime_checks_suppress_bytecode_in_direct_and_child_imports() {
+    let runtime = TempDir::new().unwrap();
+    std::fs::write(runtime.path().join("direct_member.py"), "VALUE = 1\n").unwrap();
+    std::fs::write(runtime.path().join("child_member.py"), "VALUE = 2\n").unwrap();
+    let script = runtime.path().join("check.py");
+    std::fs::write(
+        &script,
+        concat!(
+            "import direct_member, subprocess, sys\n",
+            "subprocess.run([sys.executable, '-c', 'import child_member'], check=True)\n",
+        ),
+    )
+    .unwrap();
+    let python = Path::new(if cfg!(windows) { "python" } else { "python3" });
+    let mut command = runtime_check_command(python, &script);
+    // These settings belong to validation, and must coexist with suppression.
+    command
+        .current_dir(runtime.path())
+        .env("HF_HUB_OFFLINE", "1")
+        .env("PYTHONNOUSERSITE", "1");
+    assert_eq!(
+        command
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == "PYTHONDONTWRITEBYTECODE")
+            .and_then(|(_, value)| value),
+        Some(std::ffi::OsStr::new("1")),
+    );
+    let output = command
+        .output()
+        .await
+        .expect("the sidecar test requires Python");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!runtime.path().join("__pycache__").exists());
+}

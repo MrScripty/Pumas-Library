@@ -96,6 +96,19 @@ struct Job {
     cancellation: Arc<ExchangeCancellation>,
 }
 
+/// Buffered jobs have never transferred custody or written any request bytes.
+/// Even a writer failure must settle their still-live callers as non-starts.
+struct UnadmittedQueue(mpsc::Receiver<Job>);
+
+impl Drop for UnadmittedQueue {
+    fn drop(&mut self) {
+        self.0.close();
+        while let Ok(job) = self.0.try_recv() {
+            let _ = job.reply.send(Err(ChannelError::NotAdmitted));
+        }
+    }
+}
+
 struct Pending {
     operation: &'static str,
     custody: Box<dyn ExchangeCustody>,
@@ -114,6 +127,35 @@ struct Shared {
 }
 
 impl Shared {
+    /// Serialize final admission with quarantine's pending-map drain. A false
+    /// receipt means this entry was refused before custody admission or I/O.
+    fn admit_pending(
+        &self,
+        id: u64,
+        mut entry: Pending,
+        cancellation: &ExchangeCancellation,
+    ) -> Result<bool> {
+        let Ok(mut pending) = self.pending.lock() else {
+            let _ = entry.reply.send(Err(ChannelError::Unknown));
+            return Err(ChannelError::Unknown);
+        };
+        // This check is the admission linearization point. If quarantine has
+        // published closure, no new custody may enter its already-drained map.
+        // If closure follows this check, the same lock makes quarantine wait
+        // for insertion and retain the admitted entry as an unknown effect.
+        if self.closed.load(Ordering::Acquire) {
+            let _ = entry.reply.send(Err(ChannelError::NotAdmitted));
+            return Ok(false);
+        }
+        if let Err(error) = entry.custody.admit() {
+            let _ = entry.reply.send(Err(error));
+            return Ok(false);
+        }
+        cancellation.admitted.store(true, Ordering::Release);
+        pending.insert(id, entry);
+        Ok(true)
+    }
+
     fn quarantine(&self) {
         if self.closed.swap(true, Ordering::AcqRel) {
             return;
@@ -320,11 +362,12 @@ struct Request<'a> {
 
 async fn write_requests<W: AsyncWrite + Unpin>(
     mut writer: W,
-    mut queue: mpsc::Receiver<Job>,
+    queue: mpsc::Receiver<Job>,
     shared: Arc<Shared>,
     channel: std::sync::Weak<PrivateAudioChannel>,
 ) {
     let _exit = WorkerExit(shared.clone());
+    let mut queue = UnadmittedQueue(queue);
     loop {
         let changed = shared.changed.notified();
         tokio::pin!(changed);
@@ -332,15 +375,22 @@ async fn write_requests<W: AsyncWrite + Unpin>(
         if shared.closed.load(Ordering::Acquire) {
             return;
         }
-        let job = tokio::select! { biased; _=&mut changed=>continue, job=queue.recv()=>match job {Some(job)=>job,None=>return} };
+        let job = tokio::select! { biased; _=&mut changed=>continue, job=queue.0.recv()=>match job {Some(job)=>job,None=>return} };
         if job.reply.is_closed() {
             continue;
         }
         let permit = match shared.permits.clone().acquire_owned().await {
             Ok(permit) => permit,
-            Err(_) => return,
+            Err(_) => {
+                let _ = job.reply.send(Err(ChannelError::NotAdmitted));
+                return;
+            }
         };
-        if job.reply.is_closed() || shared.closed.load(Ordering::Acquire) {
+        if job.reply.is_closed() {
+            continue;
+        }
+        if shared.closed.load(Ordering::Acquire) {
+            let _ = job.reply.send(Err(ChannelError::NotAdmitted));
             continue;
         }
         let Ok(id) = shared
@@ -362,7 +412,7 @@ async fn write_requests<W: AsyncWrite + Unpin>(
                 continue;
             }
         };
-        let mut custody = match tokio::task::spawn_blocking(job.prepare).await {
+        let custody = match tokio::task::spawn_blocking(job.prepare).await {
             Ok(Ok(custody)) => custody,
             Ok(Err(error)) => {
                 let _ = job.reply.send(Err(error));
@@ -373,29 +423,28 @@ async fn write_requests<W: AsyncWrite + Unpin>(
                 return;
             }
         };
-        if job.reply.is_closed() || shared.closed.load(Ordering::Acquire) {
+        if job.reply.is_closed() {
+            continue;
+        }
+        if shared.closed.load(Ordering::Acquire) {
+            let _ = job.reply.send(Err(ChannelError::NotAdmitted));
             continue;
         }
         let (written, write_finished) = oneshot::channel();
-        {
-            let Ok(mut pending) = shared.pending.lock() else {
-                return;
-            };
-            if let Err(error) = custody.admit() {
-                let _ = job.reply.send(Err(error));
-                continue;
-            }
-            job.cancellation.admitted.store(true, Ordering::Release);
-            pending.insert(
-                id,
-                Pending {
-                    operation: job.operation,
-                    custody,
-                    reply: job.reply,
-                    _permit: permit,
-                    write_finished,
-                },
-            );
+        match shared.admit_pending(
+            id,
+            Pending {
+                operation: job.operation,
+                custody,
+                reply: job.reply,
+                _permit: permit,
+                write_finished,
+            },
+            &job.cancellation,
+        ) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(_) => return,
         }
         // No request cancellation can abandon a partial write or a reply read.
         if writer

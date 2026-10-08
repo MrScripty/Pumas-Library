@@ -237,6 +237,31 @@ class ProcessChannelTests(unittest.IsolatedAsyncioTestCase):
         closed = await self.call("close", {"runtime_instance_id": self.runtime})
         self.assertTrue(closed["result"]["custody_complete"])
 
+    async def test_busy_load_refusal_keeps_original_slot_and_worker_reusable(self):
+        await self.launch()
+        await self.load()
+        refused = await self.call(
+            "load",
+            {
+                "runtime_instance_id": self.runtime,
+                "model_id": "library/speech",
+                "source_id": "fixture-selected",
+            },
+        )
+        self.assertEqual(refused["error"], {"code": "runtime_busy", "effect": "not_admitted"})
+        await self.use()
+        status = await self.call(
+            "status", {**self.identity(self.operation_id), "wait_for_settlement": True}
+        )
+        self.assertEqual(
+            (status["result"]["state"], status["result"]["cleanup"]), ("completed", "confirmed")
+        )
+        self.assertIn("calls=1", status["result"]["text"])
+        unloaded = await self.call("unload", self.identity())
+        self.assertEqual(
+            (unloaded["result"]["state"], unloaded["result"]["cleanup"]), ("retired", "confirmed")
+        )
+
     async def test_pending_status_can_receive_finite_cancel_out_of_order(self):
         await self.launch(hold=True)
         await self.load()

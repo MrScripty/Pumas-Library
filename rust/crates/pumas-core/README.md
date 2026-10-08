@@ -438,6 +438,20 @@ using the pinned requirement or declaration reference. For durable retention,
 keep the `ModelEnsureRef` returned by ensure and release that exact generation
 when it is no longer needed. Release removes the declaration only.
 
+For calls on a retained `PumasLocalClient`, dropping the caller future skips
+requests still waiting for transport admission. Once admitted, the client owns
+the complete write/read exchange and validates its original request ID before
+allowing another request onto that connection, even if the caller disappears.
+Valid RPC errors leave the connection reusable. Partial IO, malformed responses,
+or invalid correlation close it; later calls return `SharedInstanceLost`.
+Uncertain operations are never retried automatically.
+
+There is no response-drain deadline. A hung peer can block subsequent calls
+while the client remains alive. Dropping the final client owner requests worker
+abortion and socket closure; synchronous disposal cannot await that closure,
+which requires the Tokio runtime to poll the abort. Disposal does not prove
+that server-side work stopped, and it does not drain a hung exchange to completion.
+
 Operational lookup/download methods remain available. UniFFI and the desktop
 bridge continue to expose their existing operational contracts; adopting the
 intent methods through those bindings is separate work. Nodes, fleet management,

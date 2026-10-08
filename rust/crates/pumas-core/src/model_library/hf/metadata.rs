@@ -329,7 +329,7 @@ impl HuggingFaceClient {
         };
 
         // Cache the result
-        write_repo_file_tree_cache(cache_file, &tree).await?;
+        write_repo_file_tree_cache(cache_file, &tree, self.store_lifetime.clone()).await?;
 
         Ok(tree)
     }
@@ -578,9 +578,14 @@ async fn read_repo_file_tree_cache(path: PathBuf) -> Result<Option<RepoFileTree>
         })?
 }
 
-async fn write_repo_file_tree_cache(path: PathBuf, tree: &RepoFileTree) -> Result<()> {
+async fn write_repo_file_tree_cache(
+    path: PathBuf,
+    tree: &RepoFileTree,
+    lifetime: crate::platform::store_lifetime::StoreLifetime,
+) -> Result<()> {
     let tree = tree.clone();
-    tokio::task::spawn_blocking(move || atomic_write_json(&path, &tree, false))
+    lifetime
+        .spawn_blocking(move || atomic_write_json(&path, &tree, false))
         .await
         .map_err(|err| {
             PumasError::Other(format!(

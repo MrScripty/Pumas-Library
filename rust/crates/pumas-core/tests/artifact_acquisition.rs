@@ -129,6 +129,11 @@ async fn ordinary_builder_leaves_legacy_state_read_only_until_explicit_offline_m
     .unwrap();
     std::fs::write(&path, &legacy).unwrap();
     let api = PumasApi::builder(root.path())
+        .with_registry(
+            pumas_library::registry::LibraryRegistry::open_at(&root.path().join("registry.db"))
+                .unwrap(),
+        )
+        .with_connectivity_probe(false)
         .with_hf_client(false)
         .with_process_manager(false)
         .build()

@@ -27,6 +27,9 @@ pub mod permissions;
 pub mod process;
 #[cfg(target_os = "linux")]
 pub(crate) mod runtime_listener;
+// Internal lifetime composition; crash recovery still requires complete effect custody.
+#[allow(dead_code)]
+pub(crate) mod store_lifetime;
 
 // Re-export commonly used items
 pub use paths::{

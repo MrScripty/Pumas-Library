@@ -256,11 +256,19 @@ pub struct ModelIndex {
     conn: Arc<Mutex<Connection>>,
     fts5_config: FTS5Config,
     update_tx: broadcast::Sender<ModelLibraryUpdateEvent>,
+    _store_lifetime: crate::platform::store_lifetime::StoreLifetime,
 }
 
 impl ModelIndex {
     /// Create or open a model index at the given path.
     pub fn new(db_path: impl Into<PathBuf>) -> Result<Self> {
+        Self::new_with_store_lifetime(db_path, Default::default())
+    }
+
+    pub(crate) fn new_with_store_lifetime(
+        db_path: impl Into<PathBuf>,
+        store_lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Result<Self> {
         let db_path = db_path.into();
 
         // Ensure parent directory exists
@@ -289,6 +297,7 @@ impl ModelIndex {
         Self::ensure_intent_schema(&mut conn)?;
 
         let index = Self {
+            _store_lifetime: store_lifetime,
             db_path,
             conn: Arc::new(Mutex::new(conn)),
             fts5_config: FTS5Config::default(),
@@ -310,6 +319,7 @@ impl ModelIndex {
         let (update_tx, _) = broadcast::channel(1);
 
         Ok(Self {
+            _store_lifetime: Default::default(),
             db_path,
             conn: Arc::new(Mutex::new(conn)),
             fts5_config: FTS5Config::default(),

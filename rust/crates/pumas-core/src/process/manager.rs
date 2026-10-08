@@ -77,6 +77,7 @@ impl ObservedChild {
 /// Process manager for inference runtimes.
 #[derive(Clone)]
 pub struct ProcessManager {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     /// Root directory (launcher root or app root).
     root_dir: PathBuf,
     /// Resource tracker.
@@ -96,6 +97,14 @@ pub struct ProcessManager {
 }
 
 impl ProcessManager {
+    pub(crate) fn with_store_lifetime(
+        mut self,
+        lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Self {
+        self.store_lifetime = lifetime;
+        self
+    }
+
     /// Create a new process manager.
     ///
     /// # Arguments
@@ -117,6 +126,7 @@ impl ProcessManager {
         };
 
         Ok(Self {
+            store_lifetime: Default::default(),
             root_dir: root_dir.clone(),
             resource_tracker: Arc::new(ResourceTracker::default()),
             last_launch_log: Arc::new(Mutex::new(None)),
@@ -530,7 +540,9 @@ impl ProcessManager {
             owned
         };
         let thread_name = format!("pumas-{label}-wait");
+        let store_lifetime = self.store_lifetime.clone();
         if let Err(error) = thread::Builder::new().name(thread_name).spawn(move || {
+            let _store_lifetime = store_lifetime;
             #[cfg(target_os = "linux")]
             loop {
                 match owned.observe_and_drain() {

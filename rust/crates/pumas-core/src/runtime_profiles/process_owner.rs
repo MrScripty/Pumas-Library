@@ -51,6 +51,7 @@ pub struct OwnedRuntimeProfileLaunchReceipt {
 
 #[derive(Debug, Default)]
 pub(crate) struct RuntimeProfileProcessOwner {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     registry: Mutex<Registry>,
 }
 
@@ -65,6 +66,7 @@ struct Registry {
 
 #[derive(Debug)]
 struct Session {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     spec: RuntimeProfileLaunchSpec,
     generation: u64,
     model_path: Option<PathBuf>,
@@ -123,6 +125,15 @@ fn failure(message: impl Into<String>) -> PumasError {
 }
 
 impl RuntimeProfileProcessOwner {
+    pub(crate) fn with_store_lifetime(
+        store_lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Self {
+        Self {
+            store_lifetime,
+            registry: Mutex::default(),
+        }
+    }
+
     pub(crate) fn ensure_inactive(&self, profile_id: &RuntimeProfileId) -> Result<()> {
         let registry = self
             .registry
@@ -225,6 +236,7 @@ impl RuntimeProfileProcessOwner {
                     .checked_add(1)
                     .ok_or_else(|| failure("Runtime generation exhausted"))?;
                 let session = Arc::new(Session {
+                    store_lifetime: self.store_lifetime.clone(),
                     observer_stop: tokio::sync::watch::channel(false).0,
                     observer_terminal: tokio::sync::watch::channel(None).0,
                     generation: registry.generation,
@@ -754,8 +766,9 @@ async fn drain_session(session: &Session) -> Result<bool> {
                     Some(completion.0.clone())
                 } else {
                     let custody = session.child_custody.clone();
-                    let worker =
-                        tokio::task::spawn_blocking(move || custody.drain(Duration::from_secs(5)));
+                    let worker = session
+                        .store_lifetime
+                        .spawn_blocking(move || custody.drain(Duration::from_secs(5)));
                     let completion = async move {
                         worker
                             .await

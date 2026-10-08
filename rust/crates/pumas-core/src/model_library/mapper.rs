@@ -266,7 +266,7 @@ impl ModelMapper {
 
         // Remove broken links
         for action in &preview.broken {
-            if let Err(e) = fs::remove_file(&action.target).await {
+            if let Err(e) = self.library.remove_link_file(&action.target).await {
                 result.errors.push((action.target.clone(), e.to_string()));
             } else {
                 result.broken_removed += 1;
@@ -313,7 +313,7 @@ impl ModelMapper {
 
         // Handle broken links
         for action in &preview.broken {
-            if let Err(e) = fs::remove_file(&action.target).await {
+            if let Err(e) = self.library.remove_link_file(&action.target).await {
                 result.errors.push((action.target.clone(), e.to_string()));
             } else {
                 result.broken_removed += 1;
@@ -345,7 +345,7 @@ impl ModelMapper {
                 }
                 ConflictResolution::Overwrite => {
                     // Remove existing and create link
-                    if let Err(e) = fs::remove_file(&action.target).await {
+                    if let Err(e) = self.library.remove_link_file(&action.target).await {
                         result.errors.push((action.target.clone(), e.to_string()));
                         continue;
                     }
@@ -387,22 +387,20 @@ impl ModelMapper {
         app_id: &str,
         app_version: Option<String>,
     ) -> Result<()> {
-        // Ensure target directory exists
-        if let Some(parent) = action.target.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|err| PumasError::io_with_path(err, parent))?;
-        }
-
-        // Try symlink first
+        // The actual directory/link/copy effect retains the originating
+        // library's physical lifetime after mapper/waiter/runtime teardown.
         let source = action.source.clone();
         let target = action.target.clone();
-        let link_type =
-            tokio::task::spawn_blocking(move || Self::create_symlink_or_copy(&source, &target))
-                .await
-                .map_err(|e| {
-                    PumasError::Other(format!("Failed to join create_link task: {}", e))
-                })??;
+        let link_type = self
+            .library
+            .run_import_blocking("create mapped model link", move || {
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|error| PumasError::io_with_path(error, parent))?;
+                }
+                Self::create_symlink_or_copy(&source, &target)
+            })
+            .await??;
 
         // Register the link
         let entry = create_link_entry(

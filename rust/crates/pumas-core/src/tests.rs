@@ -472,10 +472,7 @@ async fn acquisition_integration_startup_retains_separate_pending_custody() {
         assert!(matches!(
             retry,
             Err(PumasError::InvalidParams { message })
-                if message == format!(
-                    "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
-                    temp.path().display(), std::process::id()
-                )
+                if message.contains("already running")
         ));
         assert_eq!(
             serde_json::to_value(registry.get_instance(temp.path()).unwrap().unwrap()).unwrap(),

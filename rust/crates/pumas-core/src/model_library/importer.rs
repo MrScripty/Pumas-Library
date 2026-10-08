@@ -294,7 +294,13 @@ impl ModelImporter {
                     err
                 ))
             })?;
-        tokio::fs::create_dir_all(&target_dir).await?;
+        let directory_for_effect = target_dir.clone();
+        self.library
+            .run_import_blocking("create external model registration", move || {
+                std::fs::create_dir_all(&directory_for_effect)
+                    .map_err(|error| PumasError::io_with_path(error, &directory_for_effect))
+            })
+            .await??;
         let model_id = self.library.get_model_id(&target_dir).ok_or_else(|| {
             PumasError::Other(format!(
                 "Could not determine model ID for external registry artifact {:?}",

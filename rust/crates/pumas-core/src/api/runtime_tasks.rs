@@ -12,6 +12,7 @@ use tokio::task::AbortHandle;
 
 #[derive(Clone)]
 pub(crate) struct RuntimeTasks {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     handle: Handle,
     inner: Arc<Mutex<OwnerState>>,
     owner_refs: Arc<()>,
@@ -65,6 +66,7 @@ impl DrainOutcome {
 /// not keep the registry alive.
 #[derive(Clone)]
 pub(crate) struct RuntimeTaskContext {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     handle: Handle,
     owner: Weak<Mutex<OwnerState>>,
     operation_id: u64,
@@ -76,6 +78,7 @@ impl RuntimeTasks {
         let (progress_tx, _) = watch::channel(0);
         let (tail_tx, _) = watch::channel(None);
         Self {
+            store_lifetime: Default::default(),
             handle: Handle::current(),
             inner: Arc::new(Mutex::new(OwnerState {
                 closed: false,
@@ -93,6 +96,14 @@ impl RuntimeTasks {
             })),
             owner_refs: Arc::new(()),
         }
+    }
+
+    pub(crate) fn with_store_lifetime(
+        mut self,
+        lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Self {
+        self.store_lifetime = lifetime;
+        self
     }
 
     pub(crate) fn runtime_handle(&self) -> Handle {
@@ -114,7 +125,9 @@ impl RuntimeTasks {
             .checked_add(1)
             .expect("runtime background identity exhausted");
         let (start_tx, start_rx) = oneshot::channel();
+        let store_lifetime = self.store_lifetime.clone();
         let handle = self.handle.spawn(async move {
+            let _store_lifetime = store_lifetime;
             if start_rx.await.is_ok() {
                 AssertUnwindSafe(task).catch_unwind().await
             } else {
@@ -166,6 +179,7 @@ impl RuntimeTasks {
             .ok_or_else(|| owner_failure("runtime operation identity exhausted"))?;
 
         let context = RuntimeTaskContext {
+            store_lifetime: self.store_lifetime.clone(),
             handle: self.handle.clone(),
             owner: Arc::downgrade(&self.inner),
             operation_id,
@@ -173,7 +187,9 @@ impl RuntimeTasks {
         let inner = Arc::clone(&self.inner);
         let (start_tx, start_rx) = oneshot::channel();
         let (result_tx, result_rx) = oneshot::channel();
+        let store_lifetime = self.store_lifetime.clone();
         let outer = self.handle.spawn(async move {
+            let _store_lifetime = store_lifetime;
             if start_rx.await.is_err() {
                 return;
             }
@@ -429,6 +445,7 @@ impl RuntimeTaskContext {
             let (start_tx, start_rx) = oneshot::channel();
             let (result_tx, result_rx) = oneshot::channel();
             let blocking_handle = self.handle.clone();
+            let function = self.store_lifetime.retain_for_effect(function);
             let nested = self.handle.spawn(async move {
                 if start_rx.await.is_err() {
                     return;

@@ -726,9 +726,10 @@ fn checkpoint_metadata_fits(metadata: &impl Serialize) -> bool {
 
 impl AcquisitionService {
     pub fn new(store: Arc<AcquisitionStore>) -> Self {
+        let lifetime = store.store_lifetime();
         Self {
             store,
-            supervisor: Arc::new(TaskCustodyOwner::new()),
+            supervisor: Arc::new(TaskCustodyOwner::new().with_store_lifetime(lifetime)),
             checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -740,9 +741,12 @@ impl AcquisitionService {
         store: Arc<AcquisitionStore>,
         capacity: super::AcquisitionCapacity,
     ) -> Result<Self> {
+        let lifetime = store.store_lifetime();
         Ok(Self {
             store,
-            supervisor: Arc::new(TaskCustodyOwner::with_capacity(capacity)?),
+            supervisor: Arc::new(
+                TaskCustodyOwner::with_capacity(capacity)?.with_store_lifetime(lifetime),
+            ),
             checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
         })
     }

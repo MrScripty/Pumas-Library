@@ -148,6 +148,127 @@ Qualify competing-owner, crash, namespace/reused-PID/inaccessible-owner, child l
 and filesystem replacement behavior natively on each supported OS. No shared-store or
 real cluster safety claim follows from local SQLite serialization.
 
+### Internal physical-root lock groundwork (recovery remains disabled)
+
+`platform::store_lifetime::PhysicalStoreLease` is an internal primitive, not a
+new owner API. Its Linux/macOS implementation uses the existing `fs2` dependency to
+lock an independently opened root directory. Same-process independent opens,
+symlink aliases and separate rendezvous registries cannot acquire that same
+physical directory concurrently. Clones share the held descriptor, without an
+explicit unlock or raw-descriptor escape. It creates no lock file or ownership
+marker and does not read PIDs or mutate registry rows. Acquisition on other platforms
+fails explicitly until a native equivalent is implemented and qualified.
+
+`retain_for_effect` moves a lease share into the actual blocking closure, so
+canceling its requester or shutting down the async runtime does not release a
+still-running effect. Dropping the final share closes this process's descriptor;
+a descriptor inherited by a concurrent fork can extend exclusion until it closes,
+normally on exec. Observed native lock reacquisition is not a historical cessation
+receipt or permission to replace a registry row.
+The existing `PumasApi` now acquires this primitive on Linux/macOS before
+constructing model directories or starting owner effects. Creating a missing
+launcher root is the only pre-lease filesystem mutation. The existing registry
+claim is still required, and failed construction, failed shutdown and process
+loss retain their existing generation. No additional public owner API exists.
+Other platforms preserve their existing conservative registry behavior; they
+have no qualified physical-root lifetime implementation.
+
+The lock identifies a physical directory, not a pathname or an entire tree.
+Renaming a held directory preserves its exclusion, while `require_current`
+refuses a captured pathname that is missing or names a replacement. A replacement
+is a different physical object and can have its own lock. That check is only an
+observation: downstream writes need captured filesystem capabilities and their
+own namespace validation. An advisory lock cannot exclude non-participating
+writers. Separate launcher roots that share a symlinked model/storage subtree,
+network filesystems, namespace/host boundaries, and hostile replacement are not
+qualified by this primitive.
+
+This private integration retains the lease through constructor directory/model/
+HF-cache/client workers, `ModelLibrary`, independently cloned `ModelIndex` and
+`LinkRegistry`, `AcquisitionStore`, acquisition blocking workers, `RuntimeTasks`
+and its actual nested closures, migration/report writes, HF search/tree cache
+writes, mapper directory/link/copy/removal leaves, direct and internal-dispatch
+broken-link unlink leaves, external-diffusers registration directory creation,
+runtime-profile configuration/session workers, and legacy process-manager
+clones/child-observer threads. SQLite connection fields are dropped before their
+lifetime share. No lifetime share has an explicit unlock operation.
+
+`shutdown_instance()` drains the existing owners and may release its exact
+registry row, but the physical lock remains held until the `PumasApi`, escaped
+mutable handles and actual retained effects are dropped. Callers must drop those
+handles before constructing another owner, even after shutdown returns. A clean
+shutdown receipt does not revoke an escaped direct index/store handle.
+
+This is live exclusion integration, not full recovery qualification. The full
+inventory and remaining authority gates are:
+
+1. Acquire before constructor effects. Retain directly in the model/index
+   initializer, HF cache/client initialization and filesystem worker closures;
+   dropping a construction future is not evidence those workers stopped.
+   Implemented for current constructor leaves; root creation is synchronous.
+2. Retain in every independently escaping model writer: `ModelLibrary`, cloned
+   `ModelIndex` and `LinkRegistry`, importers/mappers and their path-only effects.
+   The lease must outlive SQLite finalization/checkpoint effects. Cover projection,
+   migration/report, link and cache writes, including read APIs that regenerate
+   durable projections. Implemented for model/index/link, projection and
+   migration/report workers; standalone legacy constructors carry no ownership
+   qualification and remain outside the `PumasApi` composition contract.
+3. Retain in `AcquisitionStore`, consumers/use handles and real task-custody
+   effects. Compose it with existing workspace/root execution grants. A service
+   reference held only by an async observer is insufficient. In particular,
+   `RuntimeTaskContext::run_blocking` must capture it inside its actual closure;
+   acquisition blocking custody now carries this lifetime independently of its
+   existing effect grant. Public service/store and consumer handles retain it.
+4. Join startup orphan adoption, download restoration, intent/watcher
+   reconciliation and runtime-profile state writes to these effect owners.
+   Existing `RuntimeTasks`, acquisition task custody and ordered instance
+   shutdown are the coordination points and now retain this lease. Runtime
+   profile sessions and legacy child observation retain in-process shares. The
+   native watcher's idle callback holds only a weak primary reference; admitted
+   event tasks upgrade and retain the owner. This
+   does not prove child cessation after the process itself dies.
+5. Explicitly qualify or persistently refuse independent child/external custody.
+   Disabling the legacy process manager does not disable managed runtime profiles,
+   conversions/setup/probes, launcher update/restart or external HTTP owners.
+   Arbitrary acquisition callbacks may themselves start independent writers;
+   their successful return does not establish child lifetime custody. The native
+   lock is not deliberately inherited across exec and cannot stand in for it.
+   Conversion/setup/probe descendants, third-party acquisition callback effects,
+   ambient path-only system/update effects and external HTTP owners therefore
+   remain unqualified. Legacy `ProcessManager` is not in the current
+   `shutdown_instance()` stop list; its observer may retain this lock indefinitely
+   while the process remains live.
+6. Persist a versioned physical identity and bounded ownership qualification.
+   Under an actually held exclusive lease, atomically generation-fence registry
+   replacement and reject legacy, unknown and unqualified ownership. Add full
+   constructor failure/cancellation, admitted-effect, real process-loss, stale
+   generation and child-custody integration fixtures before enabling recovery.
+   This is still pending: an alternate empty registry has no historical-owner
+   evidence. A free native lock after process loss is never sufficient to infer
+   whether an old owner left a surviving external writer. No PID-based or
+   lock-only registry replacement has been added.
+
+Native primitive tests exercise same-process contention, alias/different-registry
+exclusion without row changes, final-share release, missing/non-directory/FIFO roots,
+rename/replacement, panic and blocking work surviving requester/runtime shutdown.
+The Linux process fixture observes and reaps SIGKILL before reacquiring the native
+lock, then verifies the old registry row still blocks primary admission. These
+are primitive-level tests, not `PumasApi` restart qualification. The additional
+`physical_owner_lifetime` target exercises the actual `PumasApi` builder, escaped
+library/index/link/store handles, cancelled acquisition waiters, and clean restart
+only after final-share release. Its real-process fixture verifies that SIGKILL
+frees the physical lock but still cannot replace the exact retained registry
+entry. The feature-gated `physical_mapper_lifetime` target gates the actual
+mapper creation/overwrite, direct cleanup, internal-dispatch cleanup and external
+registration directory leaves, cancels their callers and stops their runtime before
+releasing each effect. The cleanup dispatch fixture exercises the existing internal
+branch; it adds no typed IPC wire operation. Its negative control removes only the
+shared leaf lifetime capture while preserving the effect gate.
+Native execution status is recorded separately; source presence is not
+qualification. macOS native
+behavior, Windows implementation, full shared-store identity and full-owner
+process-loss recovery remain pending.
+
 ## Reserved paths and integration dependencies
 
 This slice owns `pumas-core/src/discovery/`, `src/registry/library_registry.rs`,

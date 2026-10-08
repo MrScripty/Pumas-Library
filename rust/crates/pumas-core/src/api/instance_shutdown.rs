@@ -100,7 +100,9 @@ impl PumasApi {
     /// Close local transport admission and observe owned finite effects, IPC,
     /// conversions, managed runtime profiles and acquisition before releasing
     /// this exact registry generation. Cancellation leaves the shared coordinator
-    /// running; failures retain ownership. This is not a physical-store lease.
+    /// running; failures retain ownership. On Linux/macOS physical exclusion
+    /// continues until this API and all escaped lifetime-retaining handles/effects
+    /// are dropped. This receipt does not authorize crash recovery.
     pub async fn shutdown_instance(&self) -> Result<()> {
         begin(self.primary())
             .await

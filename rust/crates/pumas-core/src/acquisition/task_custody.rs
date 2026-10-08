@@ -531,6 +531,7 @@ type ProjectionObserver = Arc<dyn Fn(&'static str) + Send + Sync>;
 /// One owner for all consumer-scoped task and effect custody. A scope is an
 /// access handle, never a separately populated supervisor or task registry.
 pub(crate) struct TaskCustodyOwner {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     state: Mutex<SupervisorState>,
     capacity: AcquisitionCapacity,
     workers: Arc<Semaphore>,
@@ -602,6 +603,7 @@ impl TaskCustodyOwner {
     pub(crate) fn with_capacity(capacity: AcquisitionCapacity) -> crate::Result<Self> {
         let capacity = capacity.validate()?;
         Ok(Self {
+            store_lifetime: Default::default(),
             state: Mutex::default(),
             capacity,
             workers: Arc::new(Semaphore::new(capacity.workers)),
@@ -611,6 +613,14 @@ impl TaskCustodyOwner {
             #[cfg(test)]
             shutdown_keepalive_observer: Mutex::default(),
         })
+    }
+
+    pub(crate) fn with_store_lifetime(
+        mut self,
+        lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Self {
+        self.store_lifetime = lifetime;
+        self
     }
 
     /// Optional paused checkpoint slots share the validated ordinary worker
@@ -1315,7 +1325,9 @@ impl TaskScope {
         };
         let (start, started) = oneshot::channel();
         let outer_capacity = capacity.clone();
+        let store_lifetime = self.owner.store_lifetime.clone();
         let outer = tokio::spawn(async move {
+            let _store_lifetime = store_lifetime;
             let _capacity = outer_capacity;
             if started.await.is_ok() {
                 work(context).await;
@@ -1752,7 +1764,9 @@ impl TaskScope {
         });
         let start_state = Arc::new(AtomicU8::new(TaskStartState::Gated as u8));
         let outer_capacity = capacity.clone();
+        let store_lifetime = self.owner.store_lifetime.clone();
         let outer = tokio::spawn(async move {
+            let _store_lifetime = store_lifetime;
             let _capacity = outer_capacity;
             if started.await.is_err() {
                 return;
@@ -1952,7 +1966,9 @@ impl TaskScope {
         let project_cell = cell.clone();
         let (project_start, project_started) = oneshot::channel();
         let outer_capacity = capacity.clone();
+        let store_lifetime = self.owner.store_lifetime.clone();
         let outer = tokio::spawn(async move {
+            let _store_lifetime = store_lifetime;
             let _capacity = outer_capacity;
             if project_started.await.is_err() {
                 return;
@@ -2341,22 +2357,24 @@ impl TaskScope {
             .lock()
             .expect("acquisition blocking-result observer lock poisoned")
             .clone();
+        let store_lifetime = self.owner.store_lifetime.clone();
         let observer = tokio::spawn(async move {
             let closure_grant = effect_lease.clone();
             let closure_capacity = blocking_capacity.clone();
             let _observer_capacity = blocking_capacity;
             let result = if start_receiver.await.is_ok() {
-                tokio::task::spawn_blocking(move || {
-                    let _grant = closure_grant;
-                    let _blocking_capacity = closure_capacity;
-                    let _worker_capacity = worker_capacity;
-                    #[cfg(test)]
-                    if let Some(observer) = blocking_observer {
-                        observer(operation);
-                    }
-                    function()
-                })
-                .await
+                store_lifetime
+                    .spawn_blocking(move || {
+                        let _grant = closure_grant;
+                        let _blocking_capacity = closure_capacity;
+                        let _worker_capacity = worker_capacity;
+                        #[cfg(test)]
+                        if let Some(observer) = blocking_observer {
+                            observer(operation);
+                        }
+                        function()
+                    })
+                    .await
             } else {
                 return;
             }

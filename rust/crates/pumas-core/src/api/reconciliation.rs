@@ -707,16 +707,19 @@ async fn await_reconciliation(
 pub(crate) fn start_model_library_watcher(
     primary: Arc<PrimaryState>,
 ) -> Result<ModelLibraryWatcher> {
-    let primary_for_watcher = primary.clone();
-    let runtime_tasks = primary.runtime_tasks.clone();
+    // An idle native watcher must not keep a stopped primary/store alive.
+    // Only an admitted callback upgrades and retains the actual owner.
+    let primary_for_watcher = Arc::downgrade(&primary);
     let library_root = primary.model_library.library_root().to_path_buf();
 
     ModelLibraryWatcher::new(
         library_root,
         NetworkConfig::FILE_WATCHER_DEBOUNCE,
         Box::new(move |paths| {
-            let primary = primary_for_watcher.clone();
-            let runtime_tasks = runtime_tasks.clone();
+            let Some(primary) = primary_for_watcher.upgrade() else {
+                return;
+            };
+            let runtime_tasks = primary.runtime_tasks.clone();
             runtime_tasks.spawn(async move {
                 notify_filesystem_changes(primary, paths).await;
             });

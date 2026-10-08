@@ -1,6 +1,8 @@
 //! JSON-RPC request handlers, split by domain.
 
 mod conversion;
+#[cfg(feature = "inference-plugins")]
+mod gateway_stream;
 mod intent;
 mod links;
 mod models;

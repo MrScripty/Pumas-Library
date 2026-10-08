@@ -127,6 +127,20 @@ impl PumasApi {
             .owns_current_listener(profile_id, expected)
     }
 
+    /// Bind transport cancellation to the exact current owned process session.
+    /// The notification requests transport closure; it does not prove child or
+    /// device cessation and gives the caller no process-stop authority.
+    pub fn bind_owned_runtime_transport_stop(
+        &self,
+        profile_id: &RuntimeProfileId,
+        expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
+    ) -> Result<tokio::sync::watch::Receiver<bool>> {
+        self.primary()
+            .runtime_profile_service
+            .process_owner
+            .bind_transport_stop(profile_id, expected)
+    }
+
     pub async fn get_runtime_profiles_snapshot(&self) -> Result<RuntimeProfilesSnapshotResponse> {
         self.primary().runtime_profile_service.snapshot().await
     }

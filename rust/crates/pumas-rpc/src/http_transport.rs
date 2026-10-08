@@ -54,14 +54,54 @@ struct OwnedRequest {
     response: oneshot::Sender<Response<Body>>,
 }
 
+/// Request-local notification. Only handlers whose owned work is safe to
+/// cancel opt in; the transport continues supervising every admitted handler.
+#[derive(Clone)]
+pub struct RequestDisconnect {
+    _signal: watch::Receiver<bool>,
+}
+
+impl RequestDisconnect {
+    #[cfg(any(feature = "inference-plugins", test))]
+    pub(crate) async fn disconnected(mut self) {
+        loop {
+            if *self._signal.borrow_and_update() {
+                return;
+            }
+            if self._signal.changed().await.is_err() {
+                // Normal handler completion closes the sender without a loss.
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+}
+
 fn spawn_request(tasks: &mut JoinSet<()>, app: Router, owned: OwnedRequest) {
     tasks.spawn(async move {
-        let response = match app.oneshot(owned.request.map(Body::new)).await {
+        let OwnedRequest {
+            mut request,
+            mut response,
+        } = owned;
+        let (disconnected, receiver) = watch::channel(false);
+        request
+            .extensions_mut()
+            .insert(RequestDisconnect { _signal: receiver });
+        let handler = app.oneshot(request.map(Body::new));
+        tokio::pin!(handler);
+        let result = tokio::select! {
+            biased;
+            () = response.closed() => {
+                disconnected.send_replace(true);
+                handler.await
+            }
+            result = &mut handler => result,
+        };
+        let result = match result {
             Ok(response) => response,
             Err(never) => match never {},
         };
         // Losing a caller only discards delivery, never the handler's ownership.
-        let _ = owned.response.send(response);
+        let _ = response.send(result);
     });
 }
 
@@ -296,6 +336,48 @@ mod tests {
             HttpShutdownPolicy::from_millis(100).unwrap(),
         ));
         (address, shutdown, owner)
+    }
+
+    #[tokio::test]
+    async fn caller_loss_notifies_opted_in_handler_without_aborting_it() {
+        let entered = Arc::new(Notify::new());
+        let completed = Arc::new(Notify::new());
+        let app = Router::new().route(
+            "/hold",
+            get({
+                let entered = entered.clone();
+                let completed = completed.clone();
+                move |axum::Extension(disconnect): axum::Extension<RequestDisconnect>| {
+                    let entered = entered.clone();
+                    let completed = completed.clone();
+                    async move {
+                        entered.notify_one();
+                        disconnect.disconnected().await;
+                        completed.notify_one();
+                        "caller lost"
+                    }
+                }
+            }),
+        );
+        let (address, shutdown, owner) = start(app).await;
+        let mut caller = TcpStream::connect(address).await.unwrap();
+        caller
+            .write_all(b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), entered.notified())
+            .await
+            .unwrap();
+        drop(caller);
+        tokio::time::timeout(Duration::from_secs(5), completed.notified())
+            .await
+            .expect("HTTP owner did not notify admitted handler of actual socket loss");
+        shutdown.request();
+        tokio::time::timeout(Duration::from_secs(5), owner)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
     }
 
     /// Script failures around a real listener without changing OS resource limits.

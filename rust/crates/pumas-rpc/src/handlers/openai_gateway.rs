@@ -1,14 +1,16 @@
 //! OpenAI-compatible gateway handlers backed by Pumas serving state.
 
+use super::gateway_stream::{self, GenerationTransport};
 use super::openai_gateway_onnx::handle_onnx_embedding;
 use crate::contract::PublicError;
+use crate::http_transport::RequestDisconnect;
 use crate::server::AppState;
 use axum::{
     body::Bytes,
     extract::State,
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    Json,
+    Extension, Json,
 };
 use futures::StreamExt;
 use pumas_app_manager::{
@@ -48,6 +50,8 @@ fn generation_http_client() -> &'static reqwest::Client {
     GENERATION_HTTP_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .connect_timeout(GENERATION_CONNECT_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .build()
             .expect("failed to build generation HTTP client")
     })
@@ -213,6 +217,7 @@ fn openai_models_snapshot_response(snapshot: ServingStatusSnapshot) -> Response 
 pub async fn handle_openai_proxy(
     State(state): State<Arc<AppState>>,
     path: axum::extract::OriginalUri,
+    disconnect: Option<Extension<RequestDisconnect>>,
     body_bytes: Bytes,
 ) -> Response {
     let request_path = path.path();
@@ -335,6 +340,76 @@ pub async fn handle_openai_proxy(
     }
 
     let target_url = format!("{}{}", endpoint.as_str().trim_end_matches('/'), path.path());
+    let mut lifetime = if policy.generation {
+        let permit = match gateway_stream::try_admit() {
+            Ok(permit) => permit,
+            Err(()) => {
+                return openai_error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Generation capacity is occupied",
+                )
+            }
+        };
+        let session_stop = match state.api.observe_owned_runtime_profile(&served.profile_id) {
+            Ok(Some(observation)) if &observation.endpoint_url == endpoint => match state
+                .api
+                .bind_owned_runtime_transport_stop(&served.profile_id, &observation)
+            {
+                Ok(stop) => Some(stop),
+                Err(_) => {
+                    return openai_public_error_response(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        PublicError::unavailable(),
+                    )
+                }
+            },
+            Ok(None) => {
+                let external =
+                    state
+                        .api
+                        .get_runtime_profiles_snapshot()
+                        .await
+                        .is_ok_and(|snapshot| {
+                            snapshot.snapshot.profiles.iter().any(|profile| {
+                                profile.profile_id == served.profile_id
+                                    && profile.provider == served.provider
+                                    && profile.management_mode
+                                        == pumas_library::models::RuntimeManagementMode::External
+                                    && profile.enabled
+                                    && profile.endpoint_url.as_ref() == Some(endpoint)
+                            })
+                        });
+                if !external {
+                    return openai_public_error_response(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        PublicError::unavailable(),
+                    );
+                }
+                None
+            }
+            Ok(Some(_)) => {
+                return openai_public_error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    PublicError::unavailable(),
+                )
+            }
+            Err(_) => {
+                return openai_public_error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    PublicError::unavailable(),
+                )
+            }
+        };
+        Some(GenerationTransport {
+            disconnect: disconnect.map(|Extension(signal)| signal),
+            shutdown: state.shutdown_request.clone(),
+            session_stop,
+            _permit: permit,
+        })
+    } else {
+        None
+    };
+    let streaming = policy.generation && body.get("stream").and_then(Value::as_bool) == Some(true);
     // Generation routes use the shared duration-unbounded transport without
     // any per-request total/read/idle deadline; non-generation routes keep
     // their independently bounded budget on the gateway client.
@@ -354,8 +429,46 @@ pub async fn handle_openai_proxy(
             .json(&body)
             .send()
     };
-    match send.await {
-        Ok(response) => proxy_response(response).await,
+    let response = match lifetime.as_mut() {
+        Some(lifetime) => tokio::select! {
+            biased;
+            () = lifetime.cancelled() => return openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
+            response = send => response,
+        },
+        None => send.await,
+    };
+    match response {
+        Ok(response) if streaming && response.status().is_success() => {
+            let is_sse = response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| {
+                    value
+                        .split(';')
+                        .next()
+                        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/event-stream"))
+                });
+            if !is_sse {
+                return openai_public_error_response(
+                    StatusCode::BAD_GATEWAY,
+                    PublicError::unavailable(),
+                );
+            }
+            gateway_stream::progressive_response(
+                response,
+                lifetime.expect("generation owns transport"),
+                OPENAI_GATEWAY_RESPONSE_BYTES,
+            )
+        }
+        Ok(response) => match lifetime.as_mut() {
+            Some(lifetime) => tokio::select! {
+                biased;
+                () = lifetime.cancelled() => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
+                response = proxy_response(response) => response,
+            },
+            None => proxy_response(response).await,
+        },
         Err(_) => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
     }
 }

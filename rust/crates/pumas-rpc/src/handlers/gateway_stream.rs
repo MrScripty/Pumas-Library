@@ -36,27 +36,53 @@ pub(super) struct GenerationTransport {
     pub(super) _permit: OwnedSemaphorePermit,
 }
 
-impl GenerationTransport {
+/// A shallow view of cancellation signals; it owns no transport or permit.
+#[derive(Clone)]
+pub(super) struct GenerationCancellation {
+    disconnect: Option<RequestDisconnect>,
+    shutdown: ShutdownRequest,
+    session_stop: Option<watch::Receiver<bool>>,
+}
+impl GenerationCancellation {
     pub(super) async fn cancelled(&mut self) {
-        tokio::select! {
-            () = async {
-                match self.disconnect.clone() {
-                    Some(disconnect) => disconnect.disconnected().await,
-                    None => std::future::pending().await,
-                }
-            } => {}
-            () = self.shutdown.clone().requested() => {}
-            () = async {
-                match self.session_stop.as_mut() {
-                    Some(receiver) => loop {
-                        if *receiver.borrow_and_update() || receiver.changed().await.is_err() {
-                            break;
-                        }
-                    },
-                    None => std::future::pending().await,
-                }
-            } => {}
+        await_cancellation(
+            self.disconnect.clone(),
+            self.shutdown.clone(),
+            &mut self.session_stop,
+        )
+        .await;
+    }
+}
+
+impl GenerationTransport {
+    pub(super) fn cancellation(&self) -> GenerationCancellation {
+        GenerationCancellation {
+            disconnect: self.disconnect.clone(),
+            shutdown: self.shutdown.clone(),
+            session_stop: self.session_stop.clone(),
         }
+    }
+    pub(super) async fn cancelled(&mut self) {
+        await_cancellation(
+            self.disconnect.clone(),
+            self.shutdown.clone(),
+            &mut self.session_stop,
+        )
+        .await;
+    }
+}
+async fn await_cancellation(
+    disconnect: Option<RequestDisconnect>,
+    shutdown: ShutdownRequest,
+    session_stop: &mut Option<watch::Receiver<bool>>,
+) {
+    tokio::select! {
+        () = async { match disconnect { Some(disconnect) => disconnect.disconnected().await, None => std::future::pending().await } } => {}
+        () = shutdown.requested() => {}
+        () = async { match session_stop.as_mut() {
+            Some(receiver) => loop { if *receiver.borrow_and_update() || receiver.changed().await.is_err() { break; } },
+            None => std::future::pending().await,
+        } } => {}
     }
 }
 

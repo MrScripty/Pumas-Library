@@ -562,6 +562,9 @@ struct SupervisorState {
     scopes: HashMap<ScopeId, ScopeState>,
     shutdown: Option<ShutdownReceipt>,
     shutdown_driver: Option<JoinHandle<()>>,
+    // Cleanup tasks outlive removal of their scope metadata. Keep their joins
+    // registered here until global shutdown observes actual task completion.
+    cleanup_drivers: Vec<JoinHandle<()>>,
 }
 
 struct ScopeGuard<'a> {
@@ -753,8 +756,25 @@ impl TaskCustodyOwner {
                     for receipt in receipts {
                         failures += receipt.failures().await;
                     }
-                    let _ = result.send(Some(failures));
+                    // Take joins after scope settlement. A destructor waiting
+                    // on admission locking either registered its pending cleanup
+                    // already or now observes settlement and retires synchronously.
+                    let cleanups = {
+                        let mut state = owner
+                            .state
+                            .lock()
+                            .expect("acquisition task custody lock poisoned");
+                        std::mem::take(&mut state.cleanup_drivers)
+                    };
+                    // Scopes dropped before this boundary already have cleanup
+                    // coordinators. Their actual completion is part of settlement.
+                    for cleanup in cleanups {
+                        if cleanup.await.is_err() {
+                            failures += 1;
+                        }
+                    }
                     drop(owner);
+                    let _ = result.send(Some(failures));
                 }));
                 starts.push(start);
             }
@@ -803,6 +823,7 @@ fn begin_scope_shutdown(
         .take()
         .expect("scope registers its finalizer before admission");
     let mut failures = state.retired_failures;
+    let settled_failures = state.settled_failures.clone();
     let (start, started) = oneshot::channel();
     state.shutdown_driver = Some(runtime.spawn(async move {
         let _ = started.await;
@@ -843,8 +864,12 @@ fn begin_scope_shutdown(
         ) {
             failures += 1;
         }
-        let _ = result.send(Some(failures));
+        // The final keepalive can itself drop the scope. Make completed effect
+        // settlement visible to that destructor before releasing its reference,
+        // then publish the public receipt after transient retention is gone.
+        settled_failures.store(failures + 1, Ordering::Release);
         drop(keepalive);
+        let _ = result.send(Some(failures));
     }));
     (receipt, Some(start))
 }
@@ -887,8 +912,9 @@ struct ScopeState {
     retired: Vec<RetiredTask>,
     retired_failures: usize,
     shutdown: Option<ShutdownReceipt>,
+    // Zero is pending; a settled driver stores its failure count plus one.
+    settled_failures: Arc<AtomicUsize>,
     shutdown_driver: Option<JoinHandle<()>>,
-    cleanup_driver: Option<JoinHandle<()>>,
     finalizer: Option<ScopeFinalizer>,
     handle: Weak<TaskScope>,
 }
@@ -897,19 +923,48 @@ struct ScopeState {
 // registered finalizer, then remove the metadata only after their receipt.
 impl Drop for TaskScope {
     fn drop(&mut self) {
+        // Join errors may contain opaque panic payloads; destroy those outside
+        // the custody mutex, after recording their failure provenance.
+        let mut completed_errors = Vec::new();
         let mut state = self
             .owner
             .state
             .lock()
             .expect("acquisition task custody lock poisoned");
+        if !state.closed {
+            for mut driver in std::mem::take(&mut state.cleanup_drivers) {
+                if driver.is_finished() {
+                    match (&mut driver).now_or_never() {
+                        Some(Ok(())) => {}
+                        Some(Err(error)) => {
+                            state.closed_scope_failures += 1;
+                            completed_errors.push(error);
+                        }
+                        None => state.cleanup_drivers.push(driver),
+                    }
+                } else {
+                    state.cleanup_drivers.push(driver);
+                }
+            }
+        }
         let Some(scope) = state.scopes.get_mut(&self.identity) else {
             return;
         };
+        let settled = scope.settled_failures.load(Ordering::Acquire);
+        if settled != 0 {
+            // Completed shutdown must not create a new effect retaining the
+            // physical store. Dispose of captured metadata outside its mutex.
+            state.closed_scope_failures += settled - 1;
+            let removed = state.scopes.remove(&self.identity);
+            drop(state);
+            drop(removed);
+            return;
+        }
         let (receipt, start) = begin_scope_shutdown(scope, self.owner.clone());
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             let owner = self.owner.clone();
             let identity = self.identity;
-            scope.cleanup_driver = Some(runtime.spawn(async move {
+            state.cleanup_drivers.push(runtime.spawn(async move {
                 let failures = receipt.failures().await;
                 let removed = {
                     let mut state = owner
@@ -3067,6 +3122,103 @@ mod tests {
         })
         .await
         .expect("drained worker must release admission");
+    }
+
+    #[tokio::test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    async fn completed_scope_drop_releases_physical_owner_without_new_cleanup() {
+        use crate::platform::store_lifetime::{PhysicalStoreLease, StoreLifetime};
+
+        for fails in [false, true] {
+            let root = tempfile::TempDir::new().unwrap();
+            let owner = Arc::new(
+                TaskCustodyOwner::new()
+                    .with_store_lifetime(StoreLifetime::acquire(root.path()).unwrap()),
+            );
+            let scope = owner
+                .open_scope(move || async move {
+                    if fails {
+                        Err(crate::PumasError::DownloadLifecycleClosed)
+                    } else {
+                        Ok(())
+                    }
+                })
+                .unwrap();
+            assert_eq!(scope.shutdown().await.is_err(), fails);
+            drop(scope);
+            assert_eq!(
+                owner.state.lock().unwrap().closed_scope_failures,
+                usize::from(fails)
+            );
+            assert!(owner.state.lock().unwrap().scopes.is_empty());
+            assert_eq!(owner.request_shutdown().wait().await.is_err(), fails);
+            assert_eq!(owner.request_shutdown().wait().await.is_err(), fails);
+            assert!(PhysicalStoreLease::try_acquire(root.path()).is_err());
+            drop(owner);
+            // No runtime turn, sleeps, retries, or registry mutation between the
+            // last public handle drop and independent physical acquisition.
+            assert!(PhysicalStoreLease::try_acquire(root.path()).is_ok());
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    async fn global_shutdown_drops_last_scope_keepalive_before_its_receipt() {
+        use crate::platform::store_lifetime::{PhysicalStoreLease, StoreLifetime};
+
+        let root = tempfile::TempDir::new().unwrap();
+        let owner = Arc::new(
+            TaskCustodyOwner::new()
+                .with_store_lifetime(StoreLifetime::acquire(root.path()).unwrap()),
+        );
+        let (started_tx, started) = oneshot::channel();
+        let (release_tx, release) = oneshot::channel();
+        let scope = owner
+            .open_scope(move || async move {
+                started_tx.send(()).unwrap();
+                release.await.unwrap();
+                Ok(())
+            })
+            .unwrap();
+        let receipt = owner.request_shutdown();
+        started.await.unwrap();
+        drop(scope);
+        assert!(PhysicalStoreLease::try_acquire(root.path()).is_err());
+        release_tx.send(()).unwrap();
+        receipt.wait().await.unwrap();
+        assert!(owner.state.lock().unwrap().scopes.is_empty());
+        drop(owner);
+        assert!(PhysicalStoreLease::try_acquire(root.path()).is_ok());
+    }
+
+    #[tokio::test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    async fn global_shutdown_joins_cleanup_for_a_previously_dropped_scope() {
+        use crate::platform::store_lifetime::{PhysicalStoreLease, StoreLifetime};
+
+        let root = tempfile::TempDir::new().unwrap();
+        let owner = Arc::new(
+            TaskCustodyOwner::new()
+                .with_store_lifetime(StoreLifetime::acquire(root.path()).unwrap()),
+        );
+        let (started_tx, started) = oneshot::channel();
+        let (release_tx, release) = oneshot::channel();
+        let scope = owner
+            .open_scope(move || async move {
+                started_tx.send(()).unwrap();
+                release.await.unwrap();
+                Ok(())
+            })
+            .unwrap();
+        drop(scope);
+        started.await.unwrap();
+        let receipt = owner.request_shutdown();
+        assert!(PhysicalStoreLease::try_acquire(root.path()).is_err());
+        release_tx.send(()).unwrap();
+        receipt.wait().await.unwrap();
+        assert!(owner.state.lock().unwrap().scopes.is_empty());
+        drop(owner);
+        assert!(PhysicalStoreLease::try_acquire(root.path()).is_ok());
     }
 
     #[tokio::test]

@@ -343,6 +343,7 @@ impl RuntimeTasks {
                             panic_message(payload)
                         )),
                     }
+                    drop(owner);
                     publish_tail_outcome(&inner, DrainOutcome { failures });
                 });
                 let inner = Arc::clone(&self.inner);

@@ -667,6 +667,11 @@ async fn test_new_rejects_existing_primary_without_implicit_client() {
         Ok(_) => panic!("second PumasApi::new should reject an existing primary"),
         Err(err) => err,
     };
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    assert!(
+        matches!(err, PumasError::InvalidParams { message } if message.contains("physical store") && message.contains("Drop existing owner handles"))
+    );
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     assert!(
         matches!(err, PumasError::InvalidParams { message } if message.contains("PumasLocalClient"))
     );

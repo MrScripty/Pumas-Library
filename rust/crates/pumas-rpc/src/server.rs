@@ -2841,7 +2841,7 @@ mod http_discovery_tests {
 
     #[tokio::test]
     async fn bind_failure_publishes_nothing_and_old_router_cannot_describe_successor() {
-        let (_temp, registry, root, api) = api_fixture().await;
+        let (temp, registry, root, api) = api_fixture().await;
         let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         assert!(start(api, &root, occupied.local_addr().unwrap().port())
             .await
@@ -2866,23 +2866,36 @@ mod http_discovery_tests {
         api.start_ipc_server().await.unwrap();
         let server = start(api, &root, 0).await.unwrap();
         let old_description = registry.list_http_services().unwrap().remove(0);
-        registry.unregister_instance(&root).unwrap();
-        let successor = PumasApi::builder(&root)
+        // Inject a hostile rendezvous generation and advertisement. This tests
+        // router fencing without admitting a second live physical-store owner.
+        registry
+            .register_instance(&root, std::process::id(), server.addr().port())
+            .unwrap();
+        let successor = registry.get_instance(&root).unwrap().unwrap();
+        let mut description = old_description.clone();
+        description.instance.generation = successor.started_at.clone();
+        description.service_generation = "hostile-fixture-successor".into();
+        let connection = rusqlite::Connection::open(temp.path().join("registry.db")).unwrap();
+        connection
+            .execute(
+                "UPDATE http_services SET owner_started_at=?1, owner_token=?2,
+             service_generation=?3, description_json=?4 WHERE library_path=?5",
+                rusqlite::params![
+                    successor.started_at,
+                    successor.connection_token,
+                    description.service_generation,
+                    serde_json::to_string(&description).unwrap(),
+                    root.to_string_lossy()
+                ],
+            )
+            .unwrap();
+        assert!(PumasApi::builder(&root)
             .with_registry(registry.clone())
             .with_hf_client(false)
             .with_process_manager(false)
-            .with_connectivity_probe(false)
             .build()
             .await
-            .unwrap();
-        successor.start_ipc_server().await.unwrap();
-        let mut service = successor
-            .prepare_http_service(
-                old_description.endpoint.clone(),
-                crate::discovery::build_info(),
-            )
-            .unwrap();
-        service.publish().unwrap();
+            .is_err());
         let response = reqwest::Client::builder()
             .no_proxy()
             .build()
@@ -2896,12 +2909,14 @@ mod http_discovery_tests {
             .unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
         server.shutdown().await.unwrap();
+        assert_eq!(registry.list_http_services().unwrap()[0], description);
         assert_eq!(
-            registry.list_http_services().unwrap()[0],
-            *service.description()
+            registry
+                .get_instance(&root)
+                .unwrap()
+                .unwrap()
+                .connection_token,
+            successor.connection_token
         );
-        service.revoke().unwrap();
-        service.complete_shutdown(Ok(())).unwrap();
-        successor.shutdown_instance().await.unwrap();
     }
 }

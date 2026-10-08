@@ -261,37 +261,43 @@ async fn stale_publisher_and_revoke_cannot_touch_successor_advertisement() {
     let mut pending = first
         .prepare_http_service(endpoint(2), http_build())
         .unwrap();
-    // Administrative replacement is solely a deterministic hostile-race fixture.
-    registry.unregister_instance(&root).unwrap();
-    let second = PumasApi::builder(&root)
+    // Inject hostile rendezvous metadata without creating a second physical
+    // owner. A replaced registry row cannot authorize live-store takeover.
+    registry
+        .register_instance(&root, std::process::id(), 3)
+        .unwrap();
+    let successor = registry.get_instance(&root).unwrap().unwrap();
+    let library = registry.get_by_path(&root).unwrap().unwrap();
+    let current = HttpServiceDescription {
+        advertisement_schema_version: HTTP_ADVERTISEMENT_SCHEMA_VERSION,
+        service_generation: uuid::Uuid::new_v4().to_string(),
+        instance: InstanceDescription::local(&library, &successor),
+        endpoint: endpoint(3),
+        build_info: http_build(),
+    };
+    registry.publish_http_service(&successor, &current).unwrap();
+    assert!(PumasApi::builder(&root)
         .with_registry(registry.clone())
         .with_hf_client(false)
         .with_process_manager(false)
-        .with_connectivity_probe(false)
         .build()
         .await
-        .unwrap();
-    second.start_ipc_server().await.unwrap();
-    let mut current = second
-        .prepare_http_service(endpoint(3), http_build())
-        .unwrap();
-    current.publish().unwrap();
+        .is_err());
     assert!(pending.publish().is_err());
     assert!(!stale.revoke().unwrap());
-    assert_eq!(
-        registry.list_http_services().unwrap()[0],
-        *current.description()
-    );
+    assert_eq!(registry.list_http_services().unwrap()[0], current);
     stale.complete_shutdown(Ok(())).unwrap();
     pending.complete_shutdown(Ok(())).unwrap();
     first.shutdown_instance().await.unwrap();
+    assert_eq!(registry.list_http_services().unwrap()[0], current);
     assert_eq!(
-        registry.list_http_services().unwrap()[0],
-        *current.description()
+        registry
+            .get_instance(&root)
+            .unwrap()
+            .unwrap()
+            .connection_token,
+        successor.connection_token
     );
-    current.revoke().unwrap();
-    current.complete_shutdown(Ok(())).unwrap();
-    second.shutdown_instance().await.unwrap();
 }
 #[tokio::test]
 async fn owner_shutdown_waits_for_external_receipt_and_blocks_late_publication() {

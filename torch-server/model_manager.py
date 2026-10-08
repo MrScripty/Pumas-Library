@@ -55,6 +55,7 @@ class ModelSlot:
     _loaded: Optional[LoadedModel] = field(default=None, repr=False)
     # Private identity; deliberately absent from existing public slot schemas.
     load_generation: str = field(default_factory=lambda: str(uuid.uuid4()))
+    _owned_owner: Any = field(default=None, repr=False)
 
     def to_dict(self) -> dict:
         return {
@@ -87,6 +88,7 @@ class ModelManager:
         self._runtime_instance_id = str(uuid.uuid4())
         self._last_load_generation = 0
         self._speech_owner = None
+        self._owned_audio_actor = None
         self._speech_artifact_authority = (
             UnavailableArtifactUseAuthority()
             if _speech_artifact_authority is None
@@ -103,6 +105,65 @@ class ModelManager:
 
     def get_slot(self, slot_id: str) -> Optional[ModelSlot]:
         return self.slots.get(slot_id)
+
+    def _install_owned_audio_actor(self, actor) -> None:
+        if (
+            self._owned_audio_actor is not None
+            or self._speech_owner is not None
+            or type(self._speech_artifact_authority) is not UnavailableArtifactUseAuthority
+        ):
+            raise RuntimeError("Owned audio authority is already configured")
+        self._owned_audio_actor = actor
+        self._speech_artifact_authority = actor
+
+    def _reserve_owned_audio_slot(self, actor, model_id, device):
+        # These private hooks run in one owning loop turn without suspension.
+        # Refuse a held registry rather than bypassing another mutation.
+        if self._owned_audio_actor is not actor or self._registry_lock.locked():
+            raise RuntimeError("Owned audio registry is unavailable")
+        if self._active_slot_count() >= self.max_loaded_models:
+            raise RuntimeError("Maximum loaded models reached")
+        if self._last_load_generation >= _MAX_LOAD_GENERATION:
+            raise RuntimeError("Load generation space is exhausted")
+        slot_id = str(uuid.uuid4())[:8]
+        while slot_id in self.slots:
+            slot_id = str(uuid.uuid4())[:8]
+        self._last_load_generation += 1
+        slot = ModelSlot(
+            slot_id,
+            model_id,
+            "",
+            str(device),
+            state=SlotState.LOADING,
+            load_generation=str(uuid.UUID(int=self._last_load_generation)),
+            model_type="cohere-asr",
+            _owned_owner=actor,
+        )
+        self.slots[slot_id] = slot
+        return slot
+
+    def _publish_owned_audio_slot(self, actor, slot, loaded):
+        if (
+            self._owned_audio_actor is not actor
+            or self.slots.get(slot.slot_id) is not slot
+            or slot._owned_owner is not actor
+            or slot.state != SlotState.LOADING
+            or self._registry_lock.locked()
+        ):
+            raise RuntimeError("Owned audio slot changed")
+        slot._loaded = loaded
+        slot.state = SlotState.READY
+
+    def _retire_owned_audio_slot(self, actor, slot):
+        if (
+            self._owned_audio_actor is not actor
+            or self.slots.get(slot.slot_id) is not slot
+            or slot._owned_owner is not actor
+            or self._registry_lock.locked()
+        ):
+            raise RuntimeError("Owned audio slot changed")
+        slot._loaded = None
+        del self.slots[slot.slot_id]
 
     async def set_max_loaded_models(self, max_loaded_models: int) -> None:
         """Update slot limit without invalidating active or loading slots."""
@@ -295,6 +356,8 @@ class ModelManager:
         slot = next((s for s in self.slots.values() if s.model_name == model_name), None)
         if slot is None or slot.state != SlotState.READY or slot._loaded is None:
             raise KeyError("Image model is unavailable")
+        if slot._owned_owner is not None:
+            raise ValueError("Owned model requires an exact operation borrow")
         if slot.model_type not in IMAGE_ADAPTERS:
             raise ValueError("Selected model does not support image generation")
         lock = self._get_device_lock(slot.device)
@@ -419,6 +482,8 @@ class ModelManager:
             slot = self.slots.get(slot_id)
             if slot is None:
                 raise KeyError(f"Slot not found: {slot_id}")
+            if slot._owned_owner is not None:
+                raise RuntimeError("Owned model requires exact owner unload")
             if slot.state == SlotState.LOADING:
                 raise RuntimeError(f"Cannot unload loading slot: {slot_id}")
             if self._get_device_lock(slot.device).locked():
@@ -453,17 +518,29 @@ class ModelManager:
     def get_model_for_inference(self, model_name: str) -> Optional[LoadedModel]:
         """Get a loaded model by name for inference."""
         for slot in self.slots.values():
-            if slot.model_name == model_name and slot.state == SlotState.READY and slot._loaded:
+            if (
+                slot.model_name == model_name
+                and slot.state == SlotState.READY
+                and slot._loaded
+                and slot._owned_owner is None
+            ):
                 return slot._loaded
         return None
 
     def list_model_names(self) -> list[str]:
         """List names of all ready models."""
-        return [slot.model_name for slot in self.slots.values() if slot.state == SlotState.READY]
+        return [
+            slot.model_name
+            for slot in self.slots.values()
+            if slot.state == SlotState.READY and slot._owned_owner is None
+        ]
 
     def _active_slot_count(self) -> int:
         return sum(
-            1 for slot in self.slots.values() if slot.state in (SlotState.READY, SlotState.LOADING)
+            1
+            for slot in self.slots.values()
+            if slot.state in (SlotState.READY, SlotState.LOADING)
+            or getattr(slot, "_owned_owner", None) is not None
         )
 
     async def _mark_slot_error(self, slot_id: str) -> None:

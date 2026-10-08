@@ -1,5 +1,19 @@
 //! Provider-neutral runtime profile service contracts.
 
+#[path = "runtime_profiles/audio_channel.rs"]
+pub(crate) mod audio_channel;
+#[path = "runtime_profiles/audio_client.rs"]
+pub(crate) mod audio_client;
+#[path = "runtime_profiles/audio_custody.rs"]
+pub(crate) mod audio_custody;
+#[path = "runtime_profiles/audio_endpoint.rs"]
+mod audio_endpoint;
+#[path = "runtime_profiles/audio_runtime.rs"]
+pub(crate) mod audio_runtime;
+#[cfg(all(feature = "test-support", target_os = "linux"))]
+pub use audio_endpoint::ControlledAudioEndpointFixture;
+pub use audio_endpoint::{OwnedAudioEndpoint, OwnedAudioEndpointError, OwnedAudioEndpointResult};
+
 #[path = "runtime_profiles/launch_specs.rs"]
 mod launch_specs;
 #[path = "runtime_profiles/launch_strategy.rs"]
@@ -401,6 +415,7 @@ pub struct RuntimeProfileService {
     updates: broadcast::Sender<RuntimeProfileUpdateFeed>,
     operation_locks: Arc<Mutex<HashSet<RuntimeProfileId>>>,
     pub(crate) process_owner: Arc<process_owner::RuntimeProfileProcessOwner>,
+    pub(crate) audio_endpoints: Arc<audio_endpoint::AudioEndpoints>,
     provider_registry: ProviderRegistry,
     provider_adapters: RuntimeProviderAdapters,
 }
@@ -467,6 +482,7 @@ impl RuntimeProfileService {
             updates: broadcast::channel(RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY).0,
             operation_locks: Arc::new(Mutex::new(HashSet::new())),
             process_owner: Arc::new(process_owner::RuntimeProfileProcessOwner::default()),
+            audio_endpoints: Arc::new(audio_endpoint::AudioEndpoints::default()),
             provider_registry,
             provider_adapters,
         }

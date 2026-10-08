@@ -1,0 +1,184 @@
+# Private owned audio transport
+
+This candidate supplies actual private load/use/unload transport. Its usable
+execution scope is a controlled subprocess, not production ASR. The shipping
+runtime qualification constructor refuses admission, and the established public
+modality endpoint continues to report `unqualified_audio_runtime` in shipping
+use. It now resolves an opaque loaded slot through the existing core runtime
+profile service; only controlled integration fixtures can currently register
+one. No separate application transcription API or availability override is
+introduced.
+
+## Exchange ownership
+
+An exact managed child transfers its inherited stdin/stdout pipes once. Frames
+contain a four-byte big-endian length followed by JSON. One retained reader owns
+all original response reads; a serialized writer assigns monotonically increasing
+IDs at admission. A pending settlement wait can overlap a finite cancel control.
+The queue holds one request and at most 64 exchanges can be admitted. Requests
+are bounded to 32 MiB and replies to 64 KiB; overflow refuses or quarantines.
+
+Queued caller loss is checked before preparation and again before the first
+wire effect. An admitted exchange retains its concrete custody through full
+write/flush and the original correlated response. An early reply cannot settle
+a partial write. No request is replayed. Original ID, operation, runtime UUID,
+slot/load generation and operation UUID are validated, with closed receipt
+schemas and duplicate JSON keys rejected at every depth. Partial I/O, malformed
+or incoherent receipts and unknown native effects quarantine the channel and
+request stop of its exact child. Valid original `not_admitted` RPC errors keep
+the connection reusable; load/use/unload each apply their own non-start receipt.
+
+Channel closure settles queued, permit-waiting and prepared-but-unadmitted
+requests as `not_admitted`, without custody admission or wire writes. The final
+admission check shares the pending-map lock with quarantine's drain: either a
+closed channel refuses the claim, or quarantine retains the inserted admitted
+entry as an unknown effect. Python load admission is marked at the actor's
+one-shot plan claim, before launching work or constructing its returned status.
+Use admission is marked when retained artifact-borrow custody has transferred;
+unload admission follows clean refusal checks and observer allocation, at the
+exact-slot unload claim. Routine pre-claim refusals preserve the original slot
+and reusable channel. Post-claim exceptions retain unknown-effect custody and
+cannot authorize replay.
+
+`OwnedAudioClient` retains loaded slots and operation borrows. Losing a load
+caller sends an independently correlated cancellation for that exact exchange;
+its acknowledgement never releases the original load. Operation wait/caller
+loss requests cooperative cancellation while the independently retained status
+observer drains the original native settlement. Unload preparation can be
+cancelled without fencing a ready slot; admission distinguishes an uncertain
+wire effect. Original confirmed native unload or complete exact-child-tree
+drain releases selected model bytes. Runtime code stays retained until the
+child-tree drain. Mere EOF, HTTP closure or cancellation is not cessation.
+
+## Controlled qualification
+
+The Linux Rust process tests construct a genuine indexed Pumas model package,
+acquire `PreparedArtifactUse`, and launch `ManagedChild` from a copied read-only
+13-file Python code snapshot. The child receives a held selected directory FD,
+reads all five fixed members, and computes a result from their actual bytes.
+The controlled qualification binds the exact prepared owner with a weak opaque
+allocation identity, so another root with identical selectors, names or hashes
+cannot replace that inherited source. The weak binding does not extend the root
+grant past validated native unload.
+Native load, use and unload run through the same Python actor, private generic
+modality projection and speech operation owner used by the private channel.
+The original library root remains excluded from cooperating Pumas mutation and
+the independent copied selected source stays retained until original native
+unload or exact-child drain. The tests prove retained scratch,
+root exclusion, same-slot reuse after clean cancellation/errors, and separate
+runtime-code lifetime.
+
+The controlled backend returns a byte-derived synthetic transcript. It parses
+no tensors and performs no model inference. It uses only normalized 16 kHz mono
+PCM16 in these process tests. Separate PCM tests exercise float/stereo conversion.
+The fixture supplies controlled Torch/device behavior and runs isolated Python
+without installed third-party dependencies. Its proof excludes the host Python
+interpreter/stdlib, Torch, Transformers, NumPy's native libraries, GPU behavior,
+real ASR and native macOS/Windows execution.
+
+## Installed byte custody and worker bootstrap
+
+`VersionManager::retain_torch_runtime_bytes` reuses the installed version state,
+existing `installed-files.json` package manifest and the existing Torch versions
+mutation lock. A matching shared managed-Python depot lease excludes cooperating
+provisioning for the retained interpreter tree. The returned core owner captures
+actual selected interpreter, dependency and sidecar member bytes, identities and
+held roots. Missing manifests, unreported package bytes, linked selected members,
+changed identities or hashes refuse capture. This is selected-byte custody;
+external system libraries and a complete real loader read set remain unqualified.
+The runtime owner can retain this byte owner through the exact child cleanup
+lease without changing audio qualification.
+
+Installer validation and all runtime probes suppress Python bytecode generation,
+including validation's sidecar subprocess. Isolated managed-Python, resolver and
+read-only probe commands also use explicit bytecode suppression because `-I`
+ignores Python environment flags. A fresh venv's bootstrap package bytes and
+directories are snapshotted before resolution. They are removed only after the
+entire bootstrap namespace is verified unchanged, before separately verified
+resolved packages are moved in. A resolved package may therefore reuse a bootstrap
+name without being removed or exempted from its dependency manifest. Existing
+runtimes with unreported bootstrap material continue to refuse capture.
+
+The installer-only `validate_runtime.py` member may be absent after direct or
+resolved installation; when a bundled runtime retains it, its bytes must still
+match the embedded source. Other required code remains mandatory. Capture still
+rejects bytecode and unreported members; successful import checks do not weaken
+the retained manifest.
+
+The existing Torch installer materializes the owned worker modules. The private
+worker starts under `-I -B -S`, accepts only three distinct inherited code,
+package and model directory descriptors, and refuses ambient import roots,
+`.pth`, customization hooks, bytecode and linked/special selected members.
+Stdout is reserved for frames before native imports; diagnostics use stderr.
+There is no new installer or decoded qualification flag. Linux descriptor
+bootstrap isolation does not establish interpreter or native-library closure.
+
+The generic route binds model/profile/Pumas-instance identity from the original
+owned load. An alias resolves to that canonical selection before private use.
+Admission is observed at the private writer; caller loss requests cooperative
+cancel while original settlement retains custody. Confirmed non-start request
+errors remain HTTP 400 and clean reuse is tested. Transcription has text output,
+native stop/length evidence, no streaming, and the existing fixed 512-token bound.
+Classification remains unsupported. Capability availability comes from the
+retained slot, which is stronger evidence than advisory task metadata; metadata
+cannot mint an endpoint. Unload, quarantine and child drainage close availability.
+Controlled HTTP tests run through actual managed child, inherited descriptors,
+bootstrap and original native status observation, without tensor inference.
+
+The detailed Cohere adapter preserves legacy string callers and adds explicit
+native `stop`/`length` evidence. Missing or ambiguous terminal evidence is a
+confirmed typed failure, never a fabricated stop. Fixtures exercise EOS, the
+512-token bound and missing evidence; a real model remains unvalidated.
+
+## Upstream integration and remaining gates
+
+Import the private candidate over PR55 head `9e9ba63c022bce52c00256cd42f4a33afb0e6731`
+and its private lifecycle parent `4e40ea0c0493547104dfd2c9985edd9ca3613596`.
+The public PR55 author/committer is connector identity Puma; the separate local
+format candidate used MrScripty and has the same source tree. Do not rewrite
+published author history. Coordinate public changes with the root/integration
+worker; this candidate is not published or merged.
+
+Before making shipping audio available through the existing generic endpoint, the
+owning runtime must qualify and retain the installed interpreter and complete
+immutable dependency/loader code, materialize all imported modules in the
+runtime recipe, and prove the real loader's full selected-model read set.
+The bundled Transformers 4.57.6 recipe is not sufficient for this loader. Bind
+the client and stop callback to that exact process generation, register its
+private slot owner through the existing model-operation boundary, and derive
+availability from this qualification rather than a reply or flag. Validate a
+real model acquired through Pumas under the user's download/terms authorization;
+no model acquisition or inference occurred for this candidate.
+
+Use the recorded offline focused, aggregate and strict lint commands in the
+private handoff. Pantograph consumers should continue using the existing generic
+typed modality contract, retain caller correlation IDs and accept audio refusal
+until the owning runtime gate is satisfied. No authorized real model was present
+in this execution environment: a Pumas-indexed canonical Cohere ASR package with
+all required selected files is missing. The subsequent public-source audit pins
+the proposed official repository revision and documents access terms,
+verification and compatible runtime requirements in
+[Cohere qualification](cohere-native-qualification.md). Gated member bytes,
+digests and accepted access consent remain missing. The bundled runtime remains
+Transformers 4.57.6; the native adapter requires >=5.4. Do not download gated
+assets to bridge those gaps without the user's authorization.
+Do not substitute HTTP status/cancel,
+public paths, manifests or automatic retries for the private custody channel.
+
+## Hung-peer and disposal limits
+
+No production exchange, native-drain or generation timeout is invented. A hung
+peer or native worker may retain custody indefinitely. Lost external callers
+request cancellation but do not destroy the retained observer or prove native
+cessation. An explicit owning-process stop/disposal must drain the exact child
+tree; failed drain parks the real child and its composite lease. The low-level
+channel's last admission sender closes and asks the exact stop callback to run;
+retained in-flight native observers can keep owning-client references alive.
+These scopes must not be confused with last external caller loss.
+
+Poisoned bookkeeping deliberately retains root grants and scratch even after
+child drain and requires owning Pumas-process disposal/restart. Normal unknown
+transport/native cleanup can recover after exact-child-tree drain. Read-only
+copies and held identity/hash validation do not exclude hostile same-user races
+or catastrophic host exit. Test-only hang guards and process cleanup budgets are
+harness safeguards, not newly invented production timeout policy.

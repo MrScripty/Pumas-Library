@@ -29,7 +29,7 @@ impl Capability {
         matches!(self, Self::ChatGeneration | Self::TextGeneration)
     }
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperationRequest {
     pub contract_version: u32,
@@ -44,7 +44,7 @@ pub struct OperationRequest {
     #[serde(default)]
     pub stream: bool,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OperationInput {
     Text {
@@ -70,7 +70,7 @@ pub enum AudioEncoding {
     PcmS16le,
     PcmF32le,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Message {
     pub role: Role,
@@ -91,7 +91,7 @@ pub enum OutputFormat {
     PngBase64,
     Labels,
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OperationOptions {
     TextGeneration {
@@ -315,4 +315,5 @@ pub enum OptionName {
     Width,
     Height,
     Seed,
+    MaxOutputTokens,
 }

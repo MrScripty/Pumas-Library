@@ -18,8 +18,11 @@ are `config.json`, `model.safetensors`, `preprocessor_config.json`,
 `tokenizer.json`, and `tokenizer_config.json`. Supported optional members are
 `added_tokens.json`, `generation_config.json`, `processor_config.json`, and
 `special_tokens_map.json`; a present optional member must be explicitly selected.
-Unknown selections, missing required members, custom-code declarations, and
-unsupported variants are refused.
+Unknown selections, missing required members, unsupported custom-code bindings
+and unsupported variants are refused. Exact known original Cohere `auto_map`
+bindings and tokenizer aliases may remain as inert metadata: the loader uses
+explicit installed native classes and never executes repository Python. See
+[the native qualification contract](cohere-native-qualification.md).
 
 Preparation retains the existing root execution grant before opening selected
 files. It copies actual bytes through held source descriptors into a private
@@ -60,9 +63,10 @@ The owning load path must additionally qualify the installed interpreter,
 recipe, sidecar and loader code, and the loader's complete consumed read set.
 The closed file-copy variant and descriptor checks alone do not prove that an
 installed Transformers processor cannot consume another path-valued setting.
-The bundled Transformers 4.57.6 recipe and current installer module list do not
-qualify native Cohere ASR; the speech operation owner, native loader, and new
-audio helpers must be included in a separately qualified recipe.
+The bundled Transformers 4.57.6 recipe does not qualify native Cohere ASR.
+The installer now includes the speech operation owner, native loader and audio
+helpers; installed selected-byte custody is described in the transport contract.
+A compatible dependency recipe and native execution closure remain required.
 
 Before the first load RPC, the owner must reserve serving/load admission and
 retain prepared-byte custody under the exact managed child generation. A single

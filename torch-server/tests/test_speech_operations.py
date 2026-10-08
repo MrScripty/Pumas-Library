@@ -566,7 +566,15 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
         await manager.unload(slot.slot_id)
 
     async def test_default_adapter_shutdown_during_preprocessing_and_generation(self):
+        import numpy as np
+
         class Inputs(dict):
+            def __init__(self):
+                super().__init__(
+                    input_features=np.zeros((1, 2, 1), dtype=np.float32),
+                    audio_chunk_index=[(0, None)],
+                )
+
             def to(self, *args, **kwargs):
                 return self
 
@@ -581,14 +589,12 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
                         raise RuntimeError("Synthetic stage was not released")
                     return value
 
-                processor = Mock(return_value=Inputs(input_features="fixture"))
+                processor = Mock(return_value=Inputs())
                 model = Mock(device="cpu", dtype="float32")
                 model.generate.return_value = [[1]]
                 processor.decode.return_value = "late synthetic transcript"
                 if phase == "preprocessing":
-                    processor.side_effect = lambda *args, **kwargs: block(
-                        Inputs(input_features="fixture")
-                    )
+                    processor.side_effect = lambda *args, **kwargs: block(Inputs())
                 else:
                     model.generate.side_effect = lambda **kwargs: block([[1]])
                 manager.loaded = types.SimpleNamespace(model=model, tokenizer=processor)
@@ -600,7 +606,16 @@ class SpeechOperationTests(unittest.IsolatedAsyncioTestCase):
                     ),
                     patch.dict(
                         sys.modules,
-                        {"torch": types.SimpleNamespace(inference_mode=contextlib.nullcontext)},
+                        {
+                            "torch": types.SimpleNamespace(
+                                inference_mode=contextlib.nullcontext,
+                                is_tensor=lambda value: isinstance(value, np.ndarray),
+                                is_floating_point=lambda value: np.issubdtype(
+                                    value.dtype, np.floating
+                                ),
+                                isfinite=np.isfinite,
+                            )
+                        },
                     ),
                 ):
                     status = owner.start(encode(payload(owner)))

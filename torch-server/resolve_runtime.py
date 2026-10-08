@@ -131,7 +131,7 @@ def run_pip_progress_worker(progress_path: Path, pip_arguments: list[str]) -> in
     except ImportError:
         _write_download_progress(progress_path, None, False, 0, None, None, False)
         return subprocess.run(
-            [sys.executable, "-I", "-m", "pip", *pip_arguments], check=False
+            [sys.executable, "-I", "-B", "-m", "pip", *pip_arguments], check=False
         ).returncode
 
     try:
@@ -332,6 +332,41 @@ IMAGE = (
     "sentencepiece==0.2.1",
     "protobuf==6.33.4",
 )
+# Native dependency profile only; this does not qualify model execution.
+COHERE_ASR = (
+    "transformers==5.4.0",
+    "accelerate>=1.1.0",
+    "huggingface-hub>=1.5.0,<2.0",
+    "tokenizers>=0.22.0,<=0.23.0",
+    "librosa",
+    "soxr",
+    "soundfile",
+    "sentencepiece",
+    "protobuf",
+    "numpy",
+    "scipy",
+    "numba",
+    "llvmlite",
+)
+COHERE_ASR_PACKAGES = {re.match(r"[a-z0-9-]+", item).group() for item in COHERE_ASR}
+
+
+def validate_cohere_asr_versions(version: str, versions: dict[str, str]) -> None:
+    if Version(version) < Version("2.4.0"):
+        raise ValueError("cohere-asr requires selected Torch >=2.4.0")
+    missing = COHERE_ASR_PACKAGES - versions.keys()
+    if missing:
+        raise ValueError(f"Resolution omitted requested packages: {', '.join(sorted(missing))}")
+    if versions["transformers"] != "5.4.0":
+        raise ValueError("cohere-asr requires native Transformers exactly 5.4.0")
+    if Version(versions["accelerate"]) < Version("1.1.0"):
+        raise ValueError("cohere-asr requires Accelerate >=1.1.0")
+    if not Version("1.5.0") <= Version(versions["huggingface-hub"]) < Version("2.0"):
+        raise ValueError("cohere-asr requires huggingface-hub >=1.5.0,<2.0")
+    if not Version("0.22.0") <= Version(versions["tokenizers"]) <= Version("0.23.0"):
+        raise ValueError("cohere-asr requires tokenizers >=0.22.0,<=0.23.0")
+
+
 NUNCHAKU_URL = (
     "https://github.com/nunchux-ai/nunchaku/releases/download/v1.2.0/"
     "nunchaku-1.2.0%2Btorch2.9-cp312-cp312-linux_x86_64.whl"
@@ -389,7 +424,7 @@ BUILDS = (
     "rocm7.2",
     "rocm7.14",
 )
-ADAPTERS = ("none", "flux2", "nunchaku")
+ADAPTERS = ("none", "flux2", "nunchaku", "cohere-asr")
 MAX_INDEX_REQUESTS = 5
 MAX_INDEX_BYTES = 1_000_000
 INDEX_TIMEOUT_SECONDS = 4
@@ -567,7 +602,11 @@ def interpreter_tags(interpreter: str) -> tuple[str, set[str]]:
         "'implementation':sys.implementation.name,'tags':[str(tag) for tag in sys_tags()]}))"
     )
     completed = subprocess.run(
-        [interpreter, "-I", "-c", code], capture_output=True, text=True, timeout=4, check=False
+        [interpreter, "-I", "-B", "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=4,
+        check=False,
     )
     if completed.returncode:
         raise ValueError(f"Installed interpreter {interpreter} cannot report wheel tags")
@@ -598,7 +637,11 @@ def bootstrap_platform_tags(interpreter: str) -> tuple[str, list[str]]:
         "'implementation':sys.implementation.name,'platforms':list(platform_tags())}))"
     )
     completed = subprocess.run(
-        [interpreter, "-I", "-c", code], capture_output=True, text=True, timeout=4, check=False
+        [interpreter, "-I", "-B", "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=4,
+        check=False,
     )
     if completed.returncode:
         raise ValueError("Bootstrap interpreter cannot report native platform tags")
@@ -990,6 +1033,10 @@ def trusted_wheel_url(
 def adapter_requirements(adapter: str, version: str, build: str) -> tuple[str, ...]:
     if adapter == "none":
         return ()
+    if adapter == "cohere-asr":
+        if Version(version) < Version("2.4.0"):
+            raise ValueError("cohere-asr requires selected Torch >=2.4.0")
+        return COHERE_ASR
     if adapter == "flux2":
         return IMAGE
     if adapter == "nunchaku":
@@ -1062,7 +1109,7 @@ def requirements_from_report(
             {"name": name, "version": item["metadata"]["version"], "url": url, "sha256": digest}
         )
     required = {"torch", *CORE}
-    if adapter != "none":
+    if adapter in ("flux2", "nunchaku"):
         required.update(
             {
                 "torchvision",
@@ -1074,6 +1121,8 @@ def requirements_from_report(
                 "protobuf",
             }
         )
+    if adapter == "cohere-asr":
+        validate_cohere_asr_versions(version, {item["name"]: item["version"] for item in artifacts})
     if adapter == "nunchaku":
         required.add("nunchaku")
     missing = required - seen
@@ -1119,8 +1168,10 @@ def resolution_failure(
         )
     if missing:
         requested = set(CORE)
-        if adapter != "none":
+        if adapter in ("flux2", "nunchaku"):
             requested.update(requirement.partition("==")[0] for requirement in IMAGE)
+        if adapter == "cohere-asr":
+            requested.update(COHERE_ASR_PACKAGES)
         if adapter == "nunchaku":
             requested.add("nunchaku")
         names = [re.match(r"[a-z0-9][a-z0-9._-]*", requirement).group() for requirement in missing]
@@ -1268,11 +1319,7 @@ def main() -> None:
         if target == "macos" and args.build == "cpu"
         else f"{args.version}+{args.build}"
     )
-    command = [
-        sys.executable,
-        "-I",
-        "-m",
-        "pip",
+    pip_arguments = [
         "--isolated",
         "install",
         "--cache-dir",
@@ -1295,16 +1342,17 @@ def main() -> None:
         *CORE,
         *extras,
     ]
-    child_command = command
+    child_command = [sys.executable, "-I", "-B", "-m", "pip", *pip_arguments]
     if args.progress_file is not None:
         args.progress_file.unlink(missing_ok=True)
         child_command = [
             sys.executable,
             "-I",
+            "-B",
             str(Path(__file__).resolve()),
             "--_pumas-pip-progress-worker",
             str(args.progress_file),
-            *command[4:],
+            *pip_arguments,
         ]
     completed = subprocess.run(child_command, check=False, capture_output=True, text=True)
     print(completed.stdout, end="", flush=True)

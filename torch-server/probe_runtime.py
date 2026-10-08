@@ -91,6 +91,68 @@ def adapter_import_probe(modules: tuple[str, ...], symbols: tuple[tuple[str, str
     }
 
 
+def cohere_asr_import_probe() -> dict:
+    """Verify selected native dependency imports, without loading a model."""
+    modules = (
+        "transformers",
+        "accelerate",
+        "huggingface_hub",
+        "tokenizers",
+        "librosa",
+        "soxr",
+        "soundfile",
+        "sentencepiece",
+        "google.protobuf",
+        "numpy",
+        "scipy",
+        "numba",
+        "llvmlite",
+    )
+    symbols = tuple(
+        ("transformers", name)
+        for name in (
+            "CohereAsrFeatureExtractor",
+            "TokenizersBackend",
+            "CohereAsrProcessor",
+            "CohereAsrForConditionalGeneration",
+            "StoppingCriteria",
+            "StoppingCriteriaList",
+        )
+    )
+    result = adapter_import_probe(modules, symbols)
+    result["profile"] = "cohere-asr-transformers-5.4.0"
+    if result["status"] == "unavailable":
+        return result
+    try:
+        from packaging.version import Version
+
+        versions = {
+            name: importlib.metadata.version(name)
+            for name in (
+                "torch",
+                "transformers",
+                "accelerate",
+                "huggingface-hub",
+                "tokenizers",
+            )
+        }
+        if Version(versions["torch"]) < Version("2.4.0"):
+            raise ValueError("cohere-asr requires selected Torch >=2.4.0")
+        if versions["transformers"] != "5.4.0":
+            raise ValueError("cohere-asr requires native Transformers exactly 5.4.0")
+        if Version(versions["accelerate"]) < Version("1.1.0"):
+            raise ValueError("cohere-asr requires Accelerate >=1.1.0")
+        if not Version("1.5.0") <= Version(versions["huggingface-hub"]) < Version("2.0"):
+            raise ValueError("cohere-asr requires huggingface-hub >=1.5.0,<2.0")
+        if not Version("0.22.0") <= Version(versions["tokenizers"]) <= Version("0.23.0"):
+            raise ValueError("cohere-asr requires tokenizers >=0.22.0,<=0.23.0")
+        result["versions"].update(versions)
+    except Exception as error:
+        result.update(status="unavailable", error=str(error))
+    result["scope"] = "native dependency imports only; model and runtime closure unqualified"
+    return result
+
+
 def device_probe(torch) -> tuple[dict, dict]:
     hardware = {
         "cuda": getattr(torch.version, "cuda", None),
@@ -191,6 +253,15 @@ def probe(root: Path) -> dict:
             if selected in (adapter, "bundled")
             else {"status": "not selected", "scope": "optional adapter"}
         )
+    capabilities["cohere_asr"] = (
+        cohere_asr_import_probe()
+        if selected == "cohere-asr"
+        else {"status": "not selected", "scope": "optional adapter"}
+    )
+    capabilities["audio_transcription"] = {
+        "status": "not tested",
+        "scope": "model and owned native runtime closure unqualified",
+    }
     image_device = any(device["capability"] == [12, 0] for device in hardware["devices"])
     capabilities["image_device"] = (
         {"status": "passed", "scope": "NVIDIA sm_120 device visible"}
@@ -217,6 +288,8 @@ def probe(root: Path) -> dict:
     )
     if selected == "none":
         adapter_status = "not selected"
+    elif selected == "cohere-asr":
+        adapter_status = capabilities["cohere_asr"]["status"]
     else:
         adapter_keys = (
             ("nunchaku_z_image", "flux2_klein")
@@ -284,7 +357,10 @@ def main() -> None:
     result = probe(root)
     (root / "probe-results.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result), flush=True)
-    if result["core_status"] != "passed":
+    if result["core_status"] != "passed" or (
+        result["environment"].get("adapter") == "cohere-asr"
+        and result["adapter_status"] != "inconclusive"
+    ):
         raise SystemExit(1)
 
 

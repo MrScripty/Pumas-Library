@@ -155,10 +155,18 @@ pub async fn handle_model_operations(
         Ok(model) => model,
         Err(code) => return error(status_for(code), id, code, false),
     };
-    let available = descriptors(&state, &served)
-        .await
-        .into_iter()
-        .any(|d| d.capability == request.capability && d.availability.available());
+    let available = if request.capability == Capability::AudioTranscription {
+        served.provider == RuntimeProviderId::Torch
+            && state
+                .api
+                .owned_audio_endpoint(&served.profile_id, &served.model_id)
+                .is_some()
+    } else {
+        descriptors(&state, &served)
+            .await
+            .into_iter()
+            .any(|d| d.capability == request.capability && d.availability.available())
+    };
     if !available {
         return error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -166,6 +174,9 @@ pub async fn handle_model_operations(
             ErrorCode::CapabilityUnavailable,
             false,
         );
+    }
+    if request.capability == Capability::AudioTranscription {
+        return dispatch_audio(state, disconnect, &request, &served, body).await;
     }
     let admitted = AtomicBool::new(false);
     let cancellation = Mutex::new(None);
@@ -272,6 +283,87 @@ pub async fn handle_model_operations(
     }
 }
 
+async fn dispatch_audio(
+    state: Arc<AppState>,
+    disconnect: Option<Extension<RequestDisconnect>>,
+    request: &OperationRequest,
+    served: &ServedModelStatus,
+    mut body: serde_json::Value,
+) -> Response {
+    use pumas_library::runtime_profiles::OwnedAudioEndpointError;
+    let id = Some(request.request_id.clone());
+    let Some(endpoint) = state
+        .api
+        .owned_audio_endpoint(&served.profile_id, &served.model_id)
+    else {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            id,
+            ErrorCode::CapabilityUnavailable,
+            false,
+        );
+    };
+    // Canonical selection is fixed by the original owning load, not the alias.
+    body["model"] = serde_json::json!(served.model_id);
+    body["profile"] = serde_json::json!(served.profile_id.as_str());
+    let admitted = Arc::new(AtomicBool::new(false));
+    let result = tokio::select! {
+        biased;
+        () = state.shutdown_request.clone().requested() => {
+            return error(StatusCode::BAD_GATEWAY, id, ErrorCode::TransportLost, admitted.load(Ordering::Acquire));
+        }
+        () = async { match disconnect { Some(Extension(signal)) => signal.disconnected().await, None => std::future::pending().await } } => {
+            return error(StatusCode::BAD_GATEWAY, id, ErrorCode::TransportLost, admitted.load(Ordering::Acquire));
+        }
+        result = endpoint.execute(body, admitted.clone()) => result,
+    };
+    match result {
+        Ok(result) => Json(OperationResponse {
+            contract_version: CONTRACT_VERSION,
+            request_id: request.request_id.clone(),
+            result: OperationResult::Text {
+                text: result.text,
+                finish_reason: if result.length_limited {
+                    FinishReason::Length
+                } else {
+                    FinishReason::Stop
+                },
+            },
+        })
+        .into_response(),
+        Err(OwnedAudioEndpointError::NotAdmitted) => error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            id,
+            ErrorCode::CapabilityUnavailable,
+            false,
+        ),
+        Err(OwnedAudioEndpointError::InvalidRequest) => error(
+            StatusCode::BAD_REQUEST,
+            id,
+            ErrorCode::InvalidRequest,
+            false,
+        ),
+        Err(OwnedAudioEndpointError::UnsupportedContract) => error(
+            StatusCode::BAD_REQUEST,
+            id,
+            ErrorCode::UnsupportedContract,
+            false,
+        ),
+        Err(OwnedAudioEndpointError::ProviderFailure) => error(
+            StatusCode::BAD_GATEWAY,
+            id,
+            ErrorCode::ProviderFailure,
+            true,
+        ),
+        Err(OwnedAudioEndpointError::TransportLost) => error(
+            StatusCode::BAD_GATEWAY,
+            id,
+            ErrorCode::TransportLost,
+            admitted.load(Ordering::Acquire),
+        ),
+    }
+}
+
 async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<CapabilityDescriptor> {
     // Package evidence supplies semantics; an installed loader or matching modalities does not.
     let record = state
@@ -359,7 +451,7 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     vec![InputFormat::PcmS16le, InputFormat::PcmF32le],
                     vec![OutputFormat::Text],
                     None,
-                    vec![],
+                    vec![bound(OptionName::MaxOutputTokens, 512., 512.)],
                 ),
                 Capability::AudioClassification => (
                     SemanticTask::AudioClassification,
@@ -376,11 +468,18 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                 .is_some_and(|provider| provider.supports_openai_endpoint(endpoint))
         });
         let semantics = semantic_match(capability, task, model_type, served.provider);
-        let reason = if matches!(
-            capability,
-            Capability::AudioTranscription | Capability::AudioClassification
-        ) {
+        let reason = if capability == Capability::AudioClassification {
+            Some(AvailabilityReason::UnsupportedAdapter)
+        } else if capability == Capability::AudioTranscription
+            && (served.provider != RuntimeProviderId::Torch
+                || !state
+                    .api
+                    .owned_audio_endpoint(&served.profile_id, &served.model_id)
+                    .is_some_and(|endpoint| endpoint.available()))
+        {
             Some(AvailabilityReason::UnqualifiedAudioRuntime)
+        } else if capability == Capability::AudioTranscription {
+            None
         } else if !adapter {
             Some(AvailabilityReason::UnsupportedAdapter)
         } else if semantics == Some(false) {

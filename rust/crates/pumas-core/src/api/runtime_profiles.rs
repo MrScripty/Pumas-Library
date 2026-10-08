@@ -74,6 +74,19 @@ impl Drop for OwnedRuntimeProfileCleanupTicket {
 }
 
 impl PumasApi {
+    /// Only an existing qualified owning slot can make this endpoint available.
+    /// Installed tags, decoded IDs and caller paths cannot register one.
+    pub fn owned_audio_endpoint(
+        &self,
+        profile: &RuntimeProfileId,
+        model: &str,
+    ) -> Option<crate::runtime_profiles::OwnedAudioEndpoint> {
+        self.primary()
+            .runtime_profile_service
+            .audio_endpoints
+            .selected(self.model_library(), profile, model)
+    }
+
     /// Return a cancellation guard for the exact owned profile generation.
     pub fn owned_runtime_profile_cleanup_ticket(
         &self,

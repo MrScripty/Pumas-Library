@@ -45,6 +45,10 @@ struct Args {
     /// Print build/protocol/schema identity without starting a runtime or server.
     #[arg(long)]
     build_info: bool,
+    /// Authenticate and describe an existing selected local HTTP owner; never start one.
+    #[arg(long, requires = "launcher_root", conflicts_with = "build_info")]
+    #[cfg_attr(feature = "export-contract", arg(conflicts_with_all = ["export_desktop_contract", "export_desktop_fixtures"]))]
+    describe_local_http: bool,
     /// Export the current desktop wire contract without starting a server.
     #[cfg(feature = "export-contract")]
     #[arg(long)]
@@ -90,6 +94,17 @@ fn main() -> Result<()> {
         serde_json::to_writer_pretty(std::io::stdout(), &contract::desktop_contract_schema()?)?;
         return Ok(());
     }
+    if args.describe_local_http {
+        let runtime = Builder::new_current_thread().enable_all().build()?;
+        let root = args
+            .launcher_root
+            .as_deref()
+            .expect("clap requires launcher root");
+        let description = runtime.block_on(discovery::describe_local_http(root))?;
+        serde_json::to_writer_pretty(std::io::stdout(), &description)?;
+        return Ok(());
+    }
+
     let host = server::LoopbackHost::parse(&args.host)?;
     let http_policy = http_transport::HttpShutdownPolicy::from_millis(args.http_shutdown_grace_ms)?;
 
@@ -302,5 +317,32 @@ mod tests {
         );
         assert!(!VERSION_MANAGED_APPS.contains(&AppId::OnnxRuntime));
         assert!(VERSION_MANAGED_APPS.iter().all(AppId::has_version_manager));
+    }
+}
+
+#[cfg(test)]
+mod discovery_cli_tests {
+    use super::*;
+
+    #[test]
+    fn observation_requires_explicit_root_and_distinct_mode() {
+        assert!(Args::try_parse_from(["pumas-rpc", "--describe-local-http"]).is_err());
+        assert!(Args::try_parse_from([
+            "pumas-rpc",
+            "--describe-local-http",
+            "--launcher-root",
+            "/selected",
+            "--build-info"
+        ])
+        .is_err());
+        let args = Args::try_parse_from([
+            "pumas-rpc",
+            "--describe-local-http",
+            "--launcher-root",
+            "/selected",
+        ])
+        .unwrap();
+        assert!(args.describe_local_http);
+        assert_eq!(args.launcher_root, Some(PathBuf::from("/selected")));
     }
 }

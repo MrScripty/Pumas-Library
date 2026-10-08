@@ -1,4 +1,5 @@
 //! Additive selected-model capabilities and closed typed operations.
+mod modality;
 mod projection;
 mod stream;
 #[cfg(test)]
@@ -100,7 +101,8 @@ pub async fn handle_capabilities(
 fn status_for(code: ErrorCode) -> StatusCode {
     match code {
         ErrorCode::ModelNotFound => StatusCode::NOT_FOUND,
-        ErrorCode::AmbiguousModel => StatusCode::CONFLICT,
+        ErrorCode::AmbiguousModel | ErrorCode::AmbiguousOperation => StatusCode::CONFLICT,
+        ErrorCode::UnsupportedModality => StatusCode::UNPROCESSABLE_ENTITY,
         ErrorCode::CapabilityUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::BAD_REQUEST,
     }
@@ -135,8 +137,12 @@ pub async fn handle_model_operations(
             false,
         );
     }
-    let request: OperationRequest = match serde_json::from_slice(&bytes) {
-        Ok(request) => request,
+    // A supplied capability selects the legacy parser even if malformed. This
+    // prevents a rejected legacy request from falling back to another contract.
+    // Deserialize the chosen DTO from the original bytes so duplicate fields
+    // remain invalid rather than being collapsed by the routing-only Value.
+    let capability_present = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(value) => value.get("capability").is_some(),
         Err(_) => {
             return error(
                 StatusCode::BAD_REQUEST,
@@ -146,15 +152,59 @@ pub async fn handle_model_operations(
             )
         }
     };
+    let (request, served, body) = if capability_present {
+        let request: OperationRequest = match serde_json::from_slice(&bytes) {
+            Ok(request) => request,
+            Err(_) => {
+                return error(
+                    StatusCode::BAD_REQUEST,
+                    None,
+                    ErrorCode::InvalidRequest,
+                    false,
+                )
+            }
+        };
+        let id = Some(request.request_id.clone());
+        let body = match projection::provider_request(&request) {
+            Ok(body) => body,
+            Err(code) => return error(status_for(code), id, code, false),
+        };
+        let served = match selected(&state, &request.model, request.profile.as_deref()).await {
+            Ok(model) => model,
+            Err(code) => return error(status_for(code), id, code, false),
+        };
+        (request, served, body)
+    } else {
+        let request: modality::ModalityRequest = match serde_json::from_slice(&bytes) {
+            Ok(request) => request,
+            Err(_) => {
+                return error(
+                    StatusCode::BAD_REQUEST,
+                    None,
+                    ErrorCode::InvalidRequest,
+                    false,
+                )
+            }
+        };
+        let id = Some(request.request_id.clone());
+        if let Err(code) = request.validate() {
+            return error(status_for(code), id, code, false);
+        }
+        let served = match selected(&state, &request.model, request.profile.as_deref()).await {
+            Ok(model) => model,
+            Err(code) => return error(status_for(code), id, code, false),
+        };
+        let request = match request.resolve(&descriptors(&state, &served).await) {
+            Ok(request) => request,
+            Err(code) => return error(status_for(code), id, code, false),
+        };
+        let body = match projection::provider_request(&request) {
+            Ok(body) => body,
+            Err(code) => return error(status_for(code), id, code, false),
+        };
+        (request, served, body)
+    };
     let id = Some(request.request_id.clone());
-    let body = match projection::provider_request(&request) {
-        Ok(body) => body,
-        Err(code) => return error(status_for(code), id, code, false),
-    };
-    let served = match selected(&state, &request.model, request.profile.as_deref()).await {
-        Ok(model) => model,
-        Err(code) => return error(status_for(code), id, code, false),
-    };
     let available = if request.capability == Capability::AudioTranscription {
         served.provider == RuntimeProviderId::Torch
             && state

@@ -168,6 +168,8 @@ pub enum ErrorCode {
     UnsupportedContract,
     ModelNotFound,
     AmbiguousModel,
+    AmbiguousOperation,
+    UnsupportedModality,
     CapabilityUnavailable,
     ProviderFailure,
     InvalidProviderResult,
@@ -258,7 +260,7 @@ pub struct CapabilityDescriptor {
     pub availability: Availability,
     pub option_bounds: Vec<OptionBound>,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticTask {
     ChatGeneration,
@@ -267,8 +269,9 @@ pub enum SemanticTask {
     TextToImage,
     SpeechToText,
     AudioClassification,
+    ImageToText,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InputFormat {
     MessagesText,

@@ -6,6 +6,7 @@ No command builds Cargo, fetches a runtime/model, or publishes a release.
 """
 
 import argparse
+import copy
 import gzip
 import hashlib
 import json
@@ -28,17 +29,20 @@ PLAN = json.loads((Path(__file__).with_name("headless-inference-plan.json")).rea
 TARGETS = {target["id"]: target for target in PLAN["targets"]}
 HEX64 = re.compile(r"[a-f0-9]{64}\Z")
 HEX40 = re.compile(r"[a-f0-9]{40}\Z")
-VERSION = re.compile(r"0\.8\.(0|[1-9][0-9]*)(?:-[A-Za-z0-9.-]+)?\Z")
-IDENTITY_KEYS = {
-    "version",
-    "source_commit",
-    "source_tree",
+VERSION = re.compile(r"0\.[78]\.(0|[1-9][0-9]*)(?:-[A-Za-z0-9.-]+)?\Z")
+# The only live identity is discovery's shared PumasBuildInfo. Tree/schema
+# digests and Cargo feature selection describe the pinned archive cohort only.
+IDENTITY_KEYS = {"build_info"}
+BUILD_INFO_KEYS = {
+    "build_info_schema_version",
+    "component",
+    "package_version",
     "build_id",
-    "protocol_version",
-    "schema_sha256",
-    "inference_enabled",
-    "features",
-    "modalities",
+    "source_revision",
+    "target",
+    "compiled_features",
+    "protocols",
+    "schemas",
 }
 MAX_MANIFEST = 1024 * 1024
 MAX_PACKAGE = 4 * 1024 * 1024 * 1024
@@ -144,23 +148,26 @@ def validate_file_item(item):
     )
 
 
-def validate_build_record(build, target, expected):
+def validate_build_record(build, target, contract):
+    expected = contract["expected"]["build_info"]
     exact_fields(build, BUILD_KEYS, "build record")
     exact_fields(build["source"], {"head", "tree"}, "build source")
     require(
         build["target"] == target["rust_target"]
         and build["host"] == target["rust_target"]
-        and build["profile"] == "release",
+        and build["profile"] == "release"
+        and expected["target"] == target["rust_target"],
         "native production target/profile required",
     )
     require(
-        build["features"] == expected["features"]
-        and build["source"] == {"head": expected["source_commit"], "tree": expected["source_tree"]}
+        build["features"] == contract["rpc_features"]
+        and build["source"]
+        == {"head": expected["source_revision"], "tree": contract["source_tree"]}
         and build["build_id"] == expected["build_id"],
         "build/cohort identity mismatch",
     )
     require(
-        build["version"] == expected["version"] and build["inference_enabled"] is True,
+        build["version"] == expected["package_version"] and build["inference_enabled"] is True,
         "compiled version/features mismatch",
     )
     require(matches(build["binary_sha256"], HEX64, 64), "binary build hash required")
@@ -272,72 +279,97 @@ def read_pinned_json(path, expected_sha256):
 
 
 def validate_contract(contract):
-    exact_fields(contract, {"schema_version", "expected", "requests"}, "compatibility contract")
+    exact_fields(
+        contract,
+        {"schema_version", "expected", "source_tree", "schema_sha256", "rpc_features", "requests"},
+        "compatibility contract",
+    )
     require(
-        type(contract.get("schema_version")) is int and contract["schema_version"] == 1,
+        type(contract["schema_version"]) is int and contract["schema_version"] == 2,
         "unsupported compatibility contract",
     )
-    expected = contract.get("expected", {})
-    exact_fields(expected, IDENTITY_KEYS, "compatibility identity")
-    require(matches(expected["version"], VERSION, 96), "v0.8 candidate version required")
+    exact_fields(contract["expected"], IDENTITY_KEYS, "compatibility identity")
+    info = contract["expected"]["build_info"]
+    exact_fields(info, BUILD_INFO_KEYS, "PumasBuildInfo")
     require(
-        matches(expected["source_commit"], HEX40, 40)
-        and matches(expected["source_tree"], HEX40, 40),
+        type(info["build_info_schema_version"]) is int
+        and info["build_info_schema_version"] == 1
+        and info["component"] == "pumas-rpc",
+        "shared RPC build identity required",
+    )
+    require(matches(info["package_version"], VERSION, 96), "candidate package version required")
+    require(
+        matches(info["source_revision"], HEX40, 40) and matches(contract["source_tree"], HEX40, 40),
         "immutable source identity required",
     )
-    require(matches(expected["build_id"], IDENTIFIER, 128), "bounded build identity required")
+    require(matches(info["build_id"], IDENTIFIER, 128), "bounded build identity required")
+    require(info["target"] in {t["rust_target"] for t in TARGETS.values()}, "build target required")
+    require(matches(contract["schema_sha256"], HEX64, 64), "schema digest required")
+    features = info["compiled_features"]
     require(
-        type(expected["protocol_version"]) is int and 0 < expected["protocol_version"] <= 2**31 - 1,
-        "protocol version required",
-    )
-    require(matches(expected["schema_sha256"], HEX64, 64), "schema digest required")
-    require(expected["inference_enabled"] is True, "inference-disabled distribution refused")
-    for name in ("features", "modalities"):
-        value = expected[name]
-        require(
-            isinstance(value, list)
-            and 0 < len(value) <= 32
-            and all(matches(item, IDENTIFIER, 128) for item in value),
-            f"{name} required",
+        type(features) is list
+        and 0 < len(features) <= 32
+        and all(
+            isinstance(f, str)
+            and len(f) <= 128
+            and re.fullmatch(r"pumas-(?:library|rpc)/[A-Za-z0-9_.+-]+", f)
+            for f in features
         )
-        require(len(value) == len(set(value)), f"duplicate {name}")
+        and len(set(features)) == len(features),
+        "namespaced actual compiled features required",
+    )
     require(
-        set(PLAN["rpc_features_required"]) == set(expected["features"]),
-        "S3 and inference features required",
+        {
+            "pumas-rpc/s3",
+            "pumas-rpc/inference-plugins",
+            "pumas-library/s3",
+            "pumas-library/onnx-runtime",
+        }
+        <= set(features),
+        "S3 and inference compiled features required",
     )
-    bindings = []
-    requests = contract.get("requests", [])
-    require(isinstance(requests, list) and 0 < len(requests) <= 8, "handshake requests required")
-    for request in requests:
-        exact_fields(request, {"path", "bindings"}, "handshake request")
-        path = request.get("path", "")
+    require(
+        type(contract["rpc_features"]) is list
+        and len(contract["rpc_features"]) == len(PLAN["rpc_features_required"])
+        and all(isinstance(f, str) for f in contract["rpc_features"])
+        and set(contract["rpc_features"]) == set(PLAN["rpc_features_required"]),
+        "reviewed Cargo feature selection required",
+    )
+    for field, nested, version_field in (
+        ("protocols", {"name", "versions"}, "versions"),
+        ("schemas", {"name", "version"}, "version"),
+    ):
+        values = info[field]
         require(
-            isinstance(path, str)
-            and len(path) <= 256
-            and re.fullmatch(r"/[A-Za-z0-9_./-]+", path)
-            and not path.startswith("//")
-            and "/.." not in path,
-            "handshake must use a fixed local GET path",
+            type(values) is list and 0 < len(values) <= 32,
+            "bounded protocol/schema advertisements required",
         )
-        require(
-            isinstance(request.get("bindings"), dict) and request["bindings"],
-            "handshake bindings required",
-        )
-        for name, pointer in request["bindings"].items():
+        names = []
+        for value in values:
+            exact_fields(value, nested, "build advertisement")
+            require(matches(value["name"], IDENTIFIER, 128), "advertisement name required")
+            names.append(value["name"])
+            versions = value[version_field] if field == "protocols" else [value[version_field]]
             require(
-                name in IDENTITY_KEYS
-                and isinstance(pointer, str)
-                and len(pointer) <= 256
-                and re.fullmatch(r"/[A-Za-z0-9_.~/-]*", pointer),
-                "invalid JSON pointer binding",
+                type(versions) is list
+                and 0 < len(versions) <= 32
+                and all(type(v) is int and 0 < v <= 2**31 - 1 for v in versions)
+                and len(set(versions)) == len(versions),
+                "protocol/schema version required",
             )
-            require(not re.search(r"~(?![01])", pointer), "invalid JSON pointer escape")
-            bindings.append(name)
+        require(len(set(names)) == len(names), "duplicate advertisement")
     require(
-        len(bindings) == len(set(bindings)) and set(bindings) == IDENTITY_KEYS,
-        "each identity field must have exactly one binding",
+        {"name": "pumas.local-http", "versions": [1]} in info["protocols"]
+        and {"name": "pumas.build-info", "version": 1} in info["schemas"],
+        "local HTTP/build-info contract required",
     )
-    return expected
+    # Fixed real route and field: no caller-defined endpoint or competing identity.
+    require(
+        contract["requests"]
+        == [{"path": "/.well-known/pumas", "bindings": {"build_info": "/build_info"}}],
+        "discovery shared build-info binding required",
+    )
+    return contract["expected"]
 
 
 def check_manifest(manifest):
@@ -354,10 +386,14 @@ def check_manifest(manifest):
     )
     target = TARGETS.get(manifest.get("target"))
     require(target is not None, "unknown target")
-    expected = validate_contract(manifest["compatibility"])
-    require(manifest["version"] == expected["version"], "package version mismatch")
+    validate_contract(manifest["compatibility"])
+    require(
+        manifest["version"]
+        == manifest["compatibility"]["expected"]["build_info"]["package_version"],
+        "package version mismatch",
+    )
     build = manifest["build"]
-    validate_build_record(build, target, expected)
+    validate_build_record(build, target, manifest["compatibility"])
     runtime = manifest["runtime"]
     validate_runtime_record(runtime, target)
     files = manifest["files"]
@@ -388,7 +424,7 @@ def check_manifest(manifest):
         files[target["binary"]]["sha256"] == build["binary_sha256"], "binary/build binding mismatch"
     )
     require(
-        files["protocol-schema.json"]["sha256"] == expected["schema_sha256"],
+        files["protocol-schema.json"]["sha256"] == manifest["compatibility"]["schema_sha256"],
         "schema/cohort mismatch",
     )
     runtime_files = runtime.get("files", {})
@@ -422,8 +458,8 @@ def admitted_metadata(build, runtime, contract, target):
     the caller must review the public build/compatibility/runtime records before
     supplying their pins. Preserve admitted identity and actual command spelling.
     """
-    expected = validate_contract(contract)
-    validate_build_record(build, target, expected)
+    validate_contract(contract)
+    validate_build_record(build, target, contract)
     validate_runtime_record(runtime, target)
     public_build = {
         "version": build["version"],
@@ -452,35 +488,11 @@ def admitted_metadata(build, runtime, contract, target):
             for name, item in runtime["files"].items()
         },
     }
-    public_contract = {
-        "schema_version": 1,
-        "expected": {
-            "version": expected["version"],
-            "source_commit": expected["source_commit"],
-            "source_tree": expected["source_tree"],
-            "build_id": expected["build_id"],
-            "protocol_version": expected["protocol_version"],
-            "schema_sha256": expected["schema_sha256"],
-            "inference_enabled": True,
-            "features": list(expected["features"]),
-            "modalities": list(expected["modalities"]),
-        },
-        "requests": [
-            {
-                "path": request["path"],
-                "bindings": {
-                    name: request["bindings"][name]
-                    for name in IDENTITY_KEYS
-                    if name in request["bindings"]
-                },
-            }
-            for request in contract["requests"]
-        ],
-    }
+    public_contract = copy.deepcopy(contract)
     # Validate the detached snapshot too; caller-owned containers are no longer
     # consulted while copying payloads or serializing either metadata member.
-    expected = validate_contract(public_contract)
-    validate_build_record(public_build, target, expected)
+    validate_contract(public_contract)
+    validate_build_record(public_build, target, public_contract)
     validate_runtime_record(public_runtime, target)
     return public_build, public_runtime, public_contract
 
@@ -511,7 +523,7 @@ def assemble(inputs, build_record, runtime_record, contract, schema, output):
         "schema_version": 1,
         "variant": "headless-inference",
         "qualification": "unverified_candidate",
-        "version": expected["version"],
+        "version": expected["build_info"]["package_version"],
         "target": target["id"],
         "build": build_record,
         "runtime": runtime_record,
@@ -520,7 +532,7 @@ def assemble(inputs, build_record, runtime_record, contract, schema, output):
     }
     require(
         output.name
-        == f"pumas-rpc-inference-{expected['version']}-{target['id']}.{target['format']}",
+        == f"pumas-rpc-inference-{expected['build_info']['package_version']}-{target['id']}.{target['format']}",
         "archive filename/target mismatch",
     )
     with tempfile.TemporaryDirectory(prefix="pumas-inference-stage-") as temporary:
@@ -831,7 +843,7 @@ def smoke(destination, manifest, expected_contract, timeout=45):
                         observed[name] = pointer(document, path)
                 require(
                     canonical(observed) == canonical(expected_contract["expected"]),
-                    "live schema/build/features/modalities mismatch",
+                    "live PumasBuildInfo mismatch",
                 )
                 result = {
                     "target": target["id"],

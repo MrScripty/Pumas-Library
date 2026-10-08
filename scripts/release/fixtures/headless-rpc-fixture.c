@@ -44,7 +44,7 @@ int main(int argc, char **argv) {
         char request[1024] = {0};
         ssize_t received = recv(client, request, sizeof(request) - 1, 0);
         const char *body = FIXTURE_RESPONSE;
-        int found = received > 0 && !strncmp(request, "GET /fixture-handshake ", 23);
+        int found = received > 0 && !strncmp(request, "GET /.well-known/pumas ", 23);
         char header[256];
         int length = snprintf(header, sizeof(header),
             "HTTP/1.1 %s\r\nContent-Type: application/json\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",

@@ -21,23 +21,30 @@ import headless_inference as package
 def fixture(root, target="linux-x86_64"):
     definition = package.TARGETS[target]
     schema = package.canonical({"fixture": "controlled-contract-not-Pumas"})
-    expected = {
-        "version": "0.8.0-test",
-        "source_commit": "a" * 40,
-        "source_tree": "b" * 40,
+    info = {
+        "build_info_schema_version": 1,
+        "component": "pumas-rpc",
+        "package_version": "0.7.0",
+        "source_revision": "a" * 40,
         "build_id": "controlled-fixture",
-        "protocol_version": 1,
-        "schema_sha256": hashlib.sha256(schema).hexdigest(),
-        "inference_enabled": True,
-        "features": ["inference-plugins", "s3"],
-        "modalities": ["fixture_modality"],
-    }
-    contract = {
-        "schema_version": 1,
-        "expected": expected,
-        "requests": [
-            {"path": "/fixture-handshake", "bindings": {name: "/" + name for name in expected}}
+        "target": definition["rust_target"],
+        "compiled_features": [
+            "pumas-rpc/inference-plugins",
+            "pumas-rpc/s3",
+            "pumas-library/s3",
+            "pumas-library/onnx-runtime",
         ],
+        "protocols": [{"name": "pumas.local-http", "versions": [1]}],
+        "schemas": [{"name": "pumas.build-info", "version": 1}],
+    }
+    expected = {"build_info": info}
+    contract = {
+        "schema_version": 2,
+        "expected": expected,
+        "source_tree": "b" * 40,
+        "schema_sha256": hashlib.sha256(schema).hexdigest(),
+        "rpc_features": ["inference-plugins", "s3"],
+        "requests": [{"path": "/.well-known/pumas", "bindings": {"build_info": "/build_info"}}],
     }
     binary = root / "binary"
     binary.write_bytes(b"controlled-binary-not-a-Pumas-release")
@@ -51,10 +58,10 @@ def fixture(root, target="linux-x86_64"):
         "target": definition["rust_target"],
         "host": definition["rust_target"],
         "profile": "release",
-        "features": expected["features"],
-        "source": {"head": expected["source_commit"], "tree": expected["source_tree"]},
-        "build_id": expected["build_id"],
-        "version": expected["version"],
+        "features": contract["rpc_features"],
+        "source": {"head": info["source_revision"], "tree": contract["source_tree"]},
+        "build_id": info["build_id"],
+        "version": info["package_version"],
         "inference_enabled": True,
         "binary_sha256": package.sha256(binary),
         # Declarative admission fixtures, never evidence that Cargo ran.
@@ -94,7 +101,7 @@ def fixture(root, target="linux-x86_64"):
         "LICENSE.txt": license_file,
         "THIRD-PARTY-NOTICES.txt": notices,
     }
-    output = root / f"pumas-rpc-inference-{expected['version']}-{target}.{definition['format']}"
+    output = root / f"pumas-rpc-inference-{info['package_version']}-{target}.{definition['format']}"
     return inputs, build, runtime, contract, schema, output
 
 
@@ -161,19 +168,19 @@ class ArchiveTests(unittest.TestCase):
             runtime["unexpected_secret"] = canary
             runtime["files"]["libonnxruntime.so"]["unexpected_secret"] = canary
             contract["unexpected_secret"] = canary
-            contract["expected"]["modalities"].append(canary)
-            contract["requests"][0]["bindings"]["version"] = "/" + canary
+            contract["expected"]["build_info"]["compiled_features"].append(canary)
+            contract["requests"][0]["bindings"]["build_info"] = "/" + canary
             return copy_payload(source, destination)
 
         def capture_write(path, data):
             written.append(data)
             return write_bytes(path, data)
 
-        with mock.patch.object(package.shutil, "copyfile", side_effect=mutate_inputs):
-            with mock.patch.object(Path, "write_bytes", capture_write):
-                manifest, digest = package.assemble(
-                    inputs, build, runtime, contract, schema, output
-                )
+        with (
+            mock.patch.object(package.shutil, "copyfile", side_effect=mutate_inputs),
+            mock.patch.object(Path, "write_bytes", capture_write),
+        ):
+            manifest, digest = package.assemble(inputs, build, runtime, contract, schema, output)
         self.assertTrue(written)
         self.assertTrue(all(canary.encode() not in data for data in written))
         observed = package.extract_verified(output, digest, self.root / "consumer")
@@ -216,12 +223,14 @@ class ArchiveTests(unittest.TestCase):
         )
         invalid = list(command)
         invalid[invalid.index("--build-record-sha256") + 1] = "0" * 64
-        refused = subprocess.run(invalid, cwd=self.root, capture_output=True, text=True, timeout=10)
+        refused = subprocess.run(
+            invalid, cwd=self.root, capture_output=True, text=True, timeout=10, check=False
+        )
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("trusted metadata hash mismatch", refused.stderr)
         self.assertFalse(output.exists())
         assembled = subprocess.run(
-            command, cwd=self.root, capture_output=True, text=True, timeout=10
+            command, cwd=self.root, capture_output=True, text=True, timeout=10, check=False
         )
         self.assertEqual(assembled.returncode, 0, assembled.stderr)
         report = json.loads(assembled.stdout)
@@ -316,30 +325,30 @@ class ArchiveTests(unittest.TestCase):
 
     def test_exported_metadata_strings_and_types_are_bounded(self):
         cases = {
-            "build_id": lambda build, runtime, contract: contract["expected"].update(
+            "build_id": lambda build, runtime, contract: contract["expected"]["build_info"].update(
                 build_id="x" * 129
             ),
             "toolchain_canary": lambda build, runtime, contract: build.update(
                 rustc=build["rustc"] + " DUMMY_METADATA_CANARY_NOT_A_CREDENTIAL"
             ),
             "pointer": lambda build, runtime, contract: contract["requests"][0]["bindings"].update(
-                version="/" + "x" * 256
+                build_info="/" + "x" * 256
             ),
             "path": lambda build, runtime, contract: contract["requests"][0].update(
                 path="/" + "x" * 256
             ),
-            "modality": lambda build, runtime, contract: contract["expected"].update(
-                modalities=["x" * 129]
+            "modality": lambda build, runtime, contract: contract["expected"]["build_info"].update(
+                compiled_features=["x" * 129]
             ),
-            "protocol": lambda build, runtime, contract: contract["expected"].update(
-                protocol_version=2**31
+            "protocol": lambda build, runtime, contract: contract["expected"]["build_info"].update(
+                protocols=[{"name": "pumas.local-http", "versions": [2**31]}]
             ),
             "runtime_item_type": lambda build, runtime, contract: runtime["files"][
                 "libonnxruntime.so"
             ].update(bytes=True),
-            "extra_feature": lambda build, runtime, contract: contract["expected"][
-                "features"
-            ].append("unreviewed_feature"),
+            "extra_feature": lambda build, runtime, contract: contract["rpc_features"].append(
+                "unreviewed_feature"
+            ),
         }
         for name, mutate in cases.items():
             with self.subTest(name=name):
@@ -377,15 +386,13 @@ class ArchiveTests(unittest.TestCase):
             ("runtime", lambda build, runtime, contract: runtime.update(version="1.24.3")),
             (
                 "inference",
-                lambda build, runtime, contract: contract["expected"].update(
-                    inference_enabled=False
+                lambda build, runtime, contract: contract["expected"]["build_info"].update(
+                    compiled_features=["pumas-rpc/s3"]
                 ),
             ),
             (
                 "schema",
-                lambda build, runtime, contract: contract["expected"].update(
-                    schema_sha256="e" * 64
-                ),
+                lambda build, runtime, contract: contract.update(schema_sha256="e" * 64),
             ),
             ("binary", lambda build, runtime, contract: build.update(binary_sha256="f" * 64)),
         ]
@@ -487,8 +494,8 @@ class ArchiveTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "bounded archive member count"):
             package.extract_verified(archive, package.sha256(archive), self.root / "consumer")
         _, _, _, contract, _, _ = fixture(self.root)
-        contract["requests"][0]["bindings"]["version"] = "/invalid~2escape"
-        with self.assertRaisesRegex(ValueError, "pointer escape"):
+        contract["requests"][0]["bindings"]["build_info"] = "/invalid~2escape"
+        with self.assertRaisesRegex(ValueError, "shared build-info binding"):
             package.validate_contract(contract)
         with self.assertRaisesRegex(ValueError, "array index"):
             package.pointer(["item"], "/-1")
@@ -572,13 +579,13 @@ class ConsumerProcessTests(unittest.TestCase):
         self.run_process_fixture()
 
     def test_live_mismatched_schema_refused_after_exact_extraction(self):
-        self.run_process_fixture({"schema_sha256": "f" * 64})
+        self.run_process_fixture({"schemas": [{"name": "pumas.build-info", "version": 2}]})
 
     def test_live_boolean_integer_and_revision_mismatches_refused(self):
         for mutation in (
-            {"inference_enabled": 1},
-            {"protocol_version": True},
-            {"source_commit": "d" * 40},
+            {"build_info_schema_version": True},
+            {"protocols": [{"name": "pumas.local-http", "versions": [True]}]},
+            {"source_revision": "d" * 40},
         ):
             with self.subTest(mutation=mutation):
                 self.run_process_fixture(mutation)
@@ -589,7 +596,7 @@ class ConsumerProcessTests(unittest.TestCase):
             inputs, build, runtime, contract, schema, output = fixture(root)
             response = copy.deepcopy(contract["expected"])
             if mismatch:
-                response.update(mismatch)
+                response["build_info"].update(mismatch)
             source = Path(__file__).with_name("fixtures") / "headless-rpc-fixture.c"
             binary = inputs["pumas-rpc"]
             # Argument-array invocation: fixture JSON is never passed through a shell.
@@ -614,9 +621,7 @@ class ConsumerProcessTests(unittest.TestCase):
             extracted = root / "consumer"
             package.extract_verified(output, digest, extracted)
             if mismatch:
-                with self.assertRaisesRegex(
-                    ValueError, "live schema/build/features/modalities mismatch"
-                ):
+                with self.assertRaisesRegex(ValueError, "live PumasBuildInfo mismatch"):
                     package.smoke(extracted, manifest, contract, timeout=5)
             else:
                 ambient = {

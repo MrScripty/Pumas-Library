@@ -42,23 +42,23 @@ discovery, advertisement and bootstrap. Packaging reserves only:
 - `scripts/release/fixtures/headless-rpc-fixture.c`
 - this document
 
-The parent assigned discovery ownership of one additive `PumasBuildInfo` and
-protocol compatibility handshake type. Its actual fields and route are pending
-discovery's export. Packaging proposes additive exact release version, full source commit/tree,
-build ID, Rust target, compiled features, protocol version and owner-exported
-schema digest. Modality supplies the required modality identifiers. No new RPC
-route, discovery implementation or competing runtime wire type is introduced.
+The integrated compatibility contract uses discovery's single `PumasBuildInfo`
+without renaming its fields. Contract format 2 requires the real fixed route
+`GET /.well-known/pumas` and projects only `/build_info`. The expected descriptor
+is the exact output of the compiled RPC's `--build-info`: component, package
+version, explicitly supplied build/source/target provenance, namespaced actual
+compiled features, protocols and schema advertisements. Array order is preserved
+and comparison is type strict. Missing provenance cannot qualify a pinned archive.
 
-The helper's `compatibility` JSON is a **provisional packaging projection**: an
-operator-pinned expected identity plus fixed local GET paths/JSON pointers into
-the owner's actual responses. Its semantic field names do not define response
-field names or a new HTTP protocol. The only checked-in route is the controlled
-C fixture's `/fixture-handshake`, which is explicitly not a Pumas route. Before
-actual consumer acceptance, bind this projection to discovery's shared type,
-exact owner schema bytes and actual route, or replace it with that owner's
-export. Feature/modality arrays currently compare in exact order; the owner
-contract must supply the same representation. Do not infer a canonicalization
-rule from these fixtures.
+Archive `source_tree`, `schema_sha256` and `rpc_features` are separate pinned
+cohort metadata, checked against source/build records and packaged owner-contract
+bytes. They are not invented live fields. Cargo feature selection is distinct
+from the actual namespaced compiled-feature list. Identity describes compiled
+support; selected-model readiness remains owned by `GET /v1/capabilities` and
+`POST /v1/model-operations`. No modality readiness is inferred from build identity.
+The source remains 0.7.0 until parent approval of versioning; an unreleased v0.8
+integration candidate may retain that real package version. Archive checks and
+startup do not grant inference, native dependency closure, or release qualification.
 
 Lantern and Tuldok can consume the existing HTTP interface after archive SHA256
 and live owner-contract validation; this does not require a new SDK. Pantograph

@@ -70,6 +70,13 @@ export const RPC_METHOD_REGISTRY = {
     'get_models',
     'refresh_model_index',
     'import_model',
+    'get_s3_transfer_retry',
+    'retry_s3_model_transfer',
+    'inspect_persisted_s3_imports',
+    'start_s3_prefix_discovery',
+    'start_authenticated_s3_prefix_discovery',
+    'get_s3_prefix_discovery',
+    'cancel_s3_prefix_discovery',
     'start_s3_model_import',
     'start_authenticated_s3_model_import',
   'start_s3_model_bundle_import',
@@ -201,6 +208,7 @@ export type RpcRequestSchema = {
 };
 
 export const RPC_METHOD_PARAM_VALIDATION = {
+  inspect_persisted_s3_imports: 'empty-record',
   get_status: 'empty-record',
   get_status_telemetry_snapshot: 'empty-record',
   get_disk_space: 'empty-record',

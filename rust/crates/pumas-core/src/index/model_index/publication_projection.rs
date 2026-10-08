@@ -22,6 +22,31 @@ pub(crate) fn has_publication(record: &ModelRecord) -> bool {
 }
 
 impl ModelIndex {
+    /// Bounded identity candidates only; no metadata projection or index write.
+    #[cfg(feature = "s3")]
+    pub(crate) fn publication_inspection_candidates(&self) -> Result<Vec<(String, String)>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".into(),
+            source: None,
+        })?;
+        let mut statement = conn.prepare(
+            "SELECT id, path, length(CAST(id AS BLOB)), length(CAST(path AS BLOB)) FROM models
+             ORDER BY id LIMIT 129",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut result = Vec::new();
+        while let Some(row) = rows.next()? {
+            if result.len() == 128 || row.get::<_, i64>(2)? > 1024 || row.get::<_, i64>(3)? > 4096 {
+                return Err(PumasError::Validation {
+                    field: "s3.inspection.capacity".into(),
+                    message: "Publication observation exceeds its capacity".into(),
+                });
+            }
+            result.push((row.get(0)?, row.get(1)?));
+        }
+        Ok(result)
+    }
+
     pub(crate) fn import_publication_owner(
         &self,
         publication_id: &str,

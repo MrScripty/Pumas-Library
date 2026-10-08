@@ -13,6 +13,10 @@ import type {
 } from './launcher-root-recovery';
 import type { LauncherRootCommittedPresentation } from './window-presentation';
 import {
+  decodeS3TransferRetryParams, decodeS3TransferRetryState, type S3TransferRetryParams,
+  decodeS3PersistedImportsWire,
+  decodeS3DiscoveryParams, decodeS3AuthenticatedDiscoveryParams, decodeS3DiscoveryOutcome,
+  type S3DiscoveryParams, type S3AuthenticatedDiscoveryParams,
   decodeS3ImportParams,
   decodeS3BundleImportParams,
   decodeS3AuthenticatedBundleImportParams,
@@ -1021,6 +1025,17 @@ const electronAPI = {
   // ========================================
   // Model Import (Phase 2)
   // ========================================
+  get_s3_transfer_retry: (operationId?: string) => validatedApiCall('get_s3_transfer_retry', decodeS3TransferRetryState, requireDecoded(decodeS3ImportStatusParams({operation_id:operationId ?? null}), 'get_s3_transfer_retry')),
+  retry_s3_model_transfer: (request: S3TransferRetryParams) => validatedApiCall('retry_s3_model_transfer', decodeS3ImportOutcome, requireDecoded(decodeS3TransferRetryParams(request), 'retry_s3_model_transfer')),
+  inspect_persisted_s3_imports: () => validatedApiCall('inspect_persisted_s3_imports', decodeS3PersistedImportsWire, {}),
+  start_s3_prefix_discovery: (request: S3DiscoveryParams) =>
+    validatedApiCall('start_s3_prefix_discovery', decodeS3DiscoveryOutcome, requireDecoded(decodeS3DiscoveryParams(request), 'start_s3_prefix_discovery')),
+  start_authenticated_s3_prefix_discovery: (request: S3AuthenticatedDiscoveryParams) =>
+    validatedApiCall('start_authenticated_s3_prefix_discovery', decodeS3DiscoveryOutcome, requireDecoded(decodeS3AuthenticatedDiscoveryParams(request), 'start_authenticated_s3_prefix_discovery')),
+  get_s3_prefix_discovery: (operationId?: string) =>
+    validatedApiCall('get_s3_prefix_discovery', decodeS3DiscoveryOutcome, requireDecoded(decodeS3ImportStatusParams({operation_id: operationId ?? null}), 'get_s3_prefix_discovery')),
+  cancel_s3_prefix_discovery: (operationId: string) =>
+    validatedApiCall('cancel_s3_prefix_discovery', decodeS3DiscoveryOutcome, requireDecoded(decodeS3ImportCancelParams({operation_id: operationId}), 'cancel_s3_prefix_discovery')),
   start_s3_model_bundle_import: (request: S3BundleImportParams) =>
     validatedApiCall('start_s3_model_bundle_import', decodeS3ImportOutcome,
       requireDecoded(decodeS3BundleImportParams(request), 'start_s3_model_bundle_import')),

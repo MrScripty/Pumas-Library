@@ -1,0 +1,175 @@
+{
+  "$defs": {
+    "Availability": {
+      "oneOf": [
+        {
+          "properties": {
+            "state": {
+              "const": "available",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/AvailabilityReason"
+            },
+            "state": {
+              "const": "unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AvailabilityReason": {
+      "enum": [
+        "unsupported_adapter",
+        "unqualified_audio_runtime",
+        "unknown_model_task",
+        "model_task_mismatch",
+        "runtime_unavailable"
+      ],
+      "type": "string"
+    },
+    "Capability": {
+      "enum": [
+        "chat_generation",
+        "text_generation",
+        "text_embedding",
+        "image_generation",
+        "image_to_text",
+        "audio_transcription",
+        "audio_classification"
+      ],
+      "type": "string"
+    },
+    "InputFormat": {
+      "enum": [
+        "messages_text",
+        "png_base64",
+        "jpeg_base64",
+        "messages_image",
+        "text",
+        "text_batch",
+        "pcm_s16le",
+        "pcm_f32le"
+      ],
+      "type": "string"
+    },
+    "OptionBound": {
+      "properties": {
+        "maximum": {
+          "format": "double",
+          "type": "number"
+        },
+        "minimum": {
+          "format": "double",
+          "type": "number"
+        },
+        "option": {
+          "$ref": "#/$defs/OptionName"
+        }
+      },
+      "required": [
+        "option",
+        "minimum",
+        "maximum"
+      ],
+      "type": "object"
+    },
+    "OptionName": {
+      "enum": [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "dimensions",
+        "input_count",
+        "input_characters",
+        "width",
+        "height",
+        "seed",
+        "max_output_tokens",
+        "image_bytes",
+        "image_pixels",
+        "image_count"
+      ],
+      "type": "string"
+    },
+    "OutputFormat": {
+      "enum": [
+        "text",
+        "embeddings_float32",
+        "png_base64",
+        "labels"
+      ],
+      "type": "string"
+    },
+    "SemanticTask": {
+      "enum": [
+        "chat_generation",
+        "text_generation",
+        "text_embedding",
+        "text_to_image",
+        "speech_to_text",
+        "audio_classification",
+        "image_to_text"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "availability": {
+      "$ref": "#/$defs/Availability"
+    },
+    "capability": {
+      "$ref": "#/$defs/Capability"
+    },
+    "input_formats": {
+      "items": {
+        "$ref": "#/$defs/InputFormat"
+      },
+      "type": "array"
+    },
+    "option_bounds": {
+      "items": {
+        "$ref": "#/$defs/OptionBound"
+      },
+      "type": "array"
+    },
+    "output_formats": {
+      "items": {
+        "$ref": "#/$defs/OutputFormat"
+      },
+      "type": "array"
+    },
+    "semantic_task": {
+      "$ref": "#/$defs/SemanticTask"
+    },
+    "streaming": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "capability",
+    "semantic_task",
+    "input_formats",
+    "output_formats",
+    "streaming",
+    "availability",
+    "option_bounds"
+  ],
+  "title": "CapabilityDescriptor",
+  "type": "object"
+}

@@ -1,6 +1,6 @@
 # Local discovery and bootstrap — v0.8 incremental slices
 
-Base: main `5e114f6d8e4559e0a4d67e56000b423120a0fde0`. Scope is local
+Initial design base: `5e114f6d8e4559e0a4d67e56000b423120a0fde0`. Scope is local
 application discovery, not a LAN/fleet daemon. This applies the intent/distribution
 and capability-discovery briefs and the namespace-instance-custody audit.
 
@@ -100,8 +100,8 @@ The first-slice `ProtocolAdvertisement` import remains available, and
 `pumas-rpc --build-info` prints this typed producer identity without constructing a
 runtime, opening a library or starting a listener. The RPC producer includes actual
 RPC and linked core features. Release strings do not substitute for negotiation.
-The modality lane owns inference request/result/capability types, and packaging owns
-assets/manifests; neither needs to create a competing build schema.
+Model-operation contracts define inference request/result/capability types.
+Distribution assets and manifests use this shared build schema.
 
 A prepared `HttpServiceRegistration` is invisible until the listener/router owner
 explicitly publishes it. RPC binds the actual loopback listener and polls its accept
@@ -138,6 +138,21 @@ that its external service stopped. Call `complete_shutdown` only after owned eff
 Completion is terminal even for a never-published registration; publishing another service
 requires a fresh registration and its own unsettled custody receipt.
 The same-registry support boundary and physical-store/namespace limitations remain.
+
+### Request admission follow-up to slice 2
+
+The additive [HTTP admission fence](../contracts/local-http-admission-fence.md)
+binds opted-in requests to the already authenticated core and HTTP service
+generations. RPC advertises schema `pumas.http-admission-fence@1` through the
+existing shared build descriptor. Older peers remain observable, but the typed
+fence helper refuses them. Header-boundary admission checks the retained
+listener identity and existing registry/token fence before any route handler.
+This closes stale URL reuse for fenced requests while leaving startup authority,
+physical lifetime custody and crash reclamation at their existing boundaries.
+Distribution's existing RPC-to-core descriptor projection now removes both
+RPC-only HTTP schemas while preserving unrelated core schemas. Native process
+evidence is recorded
+separately from the controlled custody and registry-replacement fixtures.
 
 ## Slice 3: durable identity and qualified lifetime custody
 
@@ -269,12 +284,28 @@ qualification. macOS native
 behavior, Windows implementation, full shared-store identity and full-owner
 process-loss recovery remain pending.
 
-## Reserved paths and integration dependencies
+### Passive consumer retention follow-up
 
-This slice owns `pumas-core/src/discovery/`, `src/registry/library_registry.rs`,
-`src/ipc/{local_client,protocol}.rs`, `src/api/{builder,state}.rs`, `src/lib.rs`,
-`examples/local_discovery.rs`, and this plan. `src/api/hf.rs` has one test fixture field.
-No inference gateway, HTTP server, contract exports, dependency manifests/locks,
-packaging scripts, release assets or generated reports are changed. Test logs live
-outside Git. The next HTTP slice needs narrow coordination on RPC server/startup
-files and the assigned shared build/protocol descriptor.
+[`local-owner-retention.md`](../contracts/local-owner-retention.md) defines an
+opaque generation-bound passive guard using existing external-service tasks and
+physical lifetime shares. Mandatory-fenced HTTP streaming and a read-only CLI
+holder make it usable by external consumers. Exact row release waits for guards;
+operator HTTP shutdown revokes bodies before core drain. Availability after
+shutdown, external-effect cessation and crash/exec transfer are not promised.
+The optional RPC-only schema uses the existing build descriptor and distribution
+projection. Native process tests and controlled
+fixtures qualify different behavior; neither establishes runtime model readiness
+or a release qualification.
+
+## Explicit startup and distribution projection
+
+The follow-on explicit selected-root reservation is documented in
+[`local-start-authority.md`](../contracts/local-start-authority.md). It transfers
+the existing held native lease and exact pending claim into the current builder,
+and adds an inference-disabled Linux CLI acknowledgment for owned/borrowed HTTP
+access. This closes a bounded typed start-admission gap; automatic historical
+bootstrap and dead-owner recovery remain pending. Passive consumer retention
+cannot transfer across processes. The existing
+`scripts/release/headless_inference_build.py` generator excludes the three RPC-only
+HTTP schemas from the core descriptor, with unrelated schemas retained.
+The actual RPC descriptor remains complete. Desktop/schema exporters are unchanged.

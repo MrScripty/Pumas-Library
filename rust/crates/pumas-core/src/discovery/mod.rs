@@ -17,6 +17,10 @@ use std::path::{Path, PathBuf};
 
 mod http;
 pub use http::*;
+mod start;
+pub use start::{prepare_local_access, LocalStartAuthority, PreparedLocalAccess};
+mod retention;
+pub use retention::LocalOwnerRetention;
 
 pub const DISCOVERY_SCHEMA_VERSION: u32 = 1;
 pub const LOCAL_IPC_PROTOCOL: &str = "pumas.local-ipc";
@@ -366,31 +370,7 @@ pub async fn attach_or_start(
             protocol_version,
         });
     }
-    // Preflight this build's contract before any owner transition.
-    let candidate_library = LibraryEntry {
-        id: String::new(),
-        name: String::new(),
-        path: root.clone(),
-        created_at: String::new(),
-        last_accessed: String::new(),
-        version: None,
-        metadata_json: "{}".into(),
-    };
-    let candidate_instance = InstanceEntry {
-        library_path: root.clone(),
-        pid: 0,
-        port: 0,
-        transport_kind: LocalInstanceTransportKind::LoopbackTcp,
-        endpoint: String::new(),
-        connection_token: None,
-        started_at: String::new(),
-        version: None,
-        status: InstanceStatus::Claiming,
-    };
-    let protocol_version = requirements.negotiate(&InstanceDescription::local(
-        &candidate_library,
-        &candidate_instance,
-    ))?;
+    let protocol_version = preflight_start(&root, requirements)?;
     // The claim transaction refuses a concurrent winner; never replaces an existing row.
     let api = PumasApi::builder(&root)
         .with_registry(registry.clone())
@@ -413,6 +393,34 @@ pub async fn attach_or_start(
         description,
         protocol_version,
     })
+}
+
+fn preflight_start(root: &Path, requirements: &CompatibilityRequirements) -> Result<u32> {
+    // Preflight this build's contract before any owner transition.
+    let candidate_library = LibraryEntry {
+        id: String::new(),
+        name: String::new(),
+        path: root.to_owned(),
+        created_at: String::new(),
+        last_accessed: String::new(),
+        version: None,
+        metadata_json: "{}".into(),
+    };
+    let candidate_instance = InstanceEntry {
+        library_path: root.to_owned(),
+        pid: 0,
+        port: 0,
+        transport_kind: LocalInstanceTransportKind::LoopbackTcp,
+        endpoint: String::new(),
+        connection_token: None,
+        started_at: String::new(),
+        version: None,
+        status: InstanceStatus::Claiming,
+    };
+    requirements.negotiate(&InstanceDescription::local(
+        &candidate_library,
+        &candidate_instance,
+    ))
 }
 
 #[cfg(test)]

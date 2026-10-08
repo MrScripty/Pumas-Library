@@ -304,7 +304,8 @@ pub async fn start_server(
         pumas_library::discovery::LoopbackHttpEndpoint::parse(format!("http://{actual_addr}"))?,
         crate::discovery::build_info(),
     )?;
-    let route_identity = crate::discovery::HttpRouteIdentity::from(advertisement.description());
+    let route_identity =
+        crate::discovery::HttpRouteIdentity::try_from(advertisement.description())?;
     let (catalog_projection, catalog_worker) = CatalogProjection::start(MAX_IN_FLIGHT_RPC_REQUESTS);
     let shutdown_request = ShutdownRequest::default();
     let shutdown_signal = shutdown_request.signal.clone();
@@ -345,7 +346,15 @@ pub async fn start_server(
             is_allowed_origin(origin)
         }))
         .allow_methods([Method::GET, Method::POST])
-        .allow_headers([header::CONTENT_TYPE]);
+        .allow_headers([
+            header::CONTENT_TYPE,
+            axum::http::HeaderName::from_static(
+                pumas_library::discovery::HTTP_INSTANCE_GENERATION_HEADER,
+            ),
+            axum::http::HeaderName::from_static(
+                pumas_library::discovery::HTTP_SERVICE_GENERATION_HEADER,
+            ),
+        ]);
 
     // Build the router
     let app = Router::new()
@@ -354,7 +363,14 @@ pub async fn start_server(
             pumas_library::discovery::HTTP_DISCOVERY_PATH,
             get(crate::discovery::handle_description),
         )
-        .layer(axum::Extension(route_identity))
+        .route(
+            pumas_library::discovery::HTTP_OWNER_RETENTION_PATH,
+            get(crate::owner_retention::handle),
+        )
+        .layer(axum::Extension(
+            crate::owner_retention::RetentionAdmission::default(),
+        ))
+        .layer(axum::Extension(route_identity.clone()))
         .route(
             "/events/model-library-updates",
             get(handle_model_library_update_events),
@@ -390,11 +406,15 @@ pub async fn start_server(
     let app = app
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))
-        .layer(cors)
+        .layer(axum::middleware::from_fn_with_state(
+            (state.clone(), route_identity),
+            crate::discovery::enforce_generation_fence,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             shutdown_request.clone(),
             reject_during_shutdown,
         ))
+        .layer(cors)
         .layer(middleware::from_fn(enforce_local_request))
         .with_state(state.clone());
 

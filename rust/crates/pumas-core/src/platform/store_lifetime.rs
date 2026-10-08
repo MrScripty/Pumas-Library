@@ -158,6 +158,33 @@ mod tests;
 pub(crate) struct StoreLifetime(Option<PhysicalStoreLease>);
 
 impl StoreLifetime {
+    pub(crate) fn require_root(&self, root: &Path) -> crate::Result<()> {
+        let lease = self
+            .0
+            .as_ref()
+            .ok_or_else(|| crate::PumasError::InvalidParams {
+                message: "qualified physical store lease is unavailable".into(),
+            })?;
+        if lease.root() != root {
+            return Err(crate::PumasError::InvalidParams {
+                message: "held physical store and selected root differ".into(),
+            });
+        }
+        self.require_current()
+    }
+
+    pub(crate) fn require_current(&self) -> crate::Result<()> {
+        self.0
+            .as_ref()
+            .ok_or_else(|| crate::PumasError::InvalidParams {
+                message: "qualified physical store lease is unavailable".into(),
+            })?
+            .require_current()
+            .map_err(|error| crate::PumasError::InvalidParams {
+                message: format!("Cannot use held physical Pumas store: {error}"),
+            })
+    }
+
     pub(crate) fn acquire(root: &Path) -> crate::Result<Self> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {

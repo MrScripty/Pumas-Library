@@ -600,6 +600,25 @@ impl LibraryRegistry {
         }))
     }
 
+    /// Check an exact captured claim before admitting reserved constructor effects.
+    pub(crate) fn matches_primary_claim(&self, claim: &PrimaryInstanceClaim) -> Result<bool> {
+        self.lock_conn()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM instances WHERE library_path=?1 AND pid=?2 AND claim_token=?3 AND status='claiming')",
+            params![claim.library_path.to_string_lossy(), claim.pid, claim.claim_token],
+            |row| row.get(0),
+        ).map_err(Into::into)
+    }
+
+    /// Called only by an opaque unstarted reservation that still holds its
+    /// physical lease. Constructor cancellation cannot call this operation.
+    pub(crate) fn release_unstarted_claim(&self, claim: &PrimaryInstanceClaim) -> Result<bool> {
+        let removed = self.lock_conn()?.execute(
+            "DELETE FROM instances WHERE library_path=?1 AND pid=?2 AND claim_token=?3 AND status='claiming'",
+            params![claim.library_path.to_string_lossy(), claim.pid, claim.claim_token],
+        )?;
+        Ok(removed == 1)
+    }
+
     /// Mark a previously claimed instance row as ready for client attachment.
     pub fn mark_instance_ready(&self, path: &Path, claim_token: &str, port: u16) -> Result<()> {
         self.promote_instance_ready(path, claim_token, port)

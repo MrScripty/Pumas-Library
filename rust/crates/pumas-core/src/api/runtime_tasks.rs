@@ -117,6 +117,10 @@ impl RuntimeTasks {
         self.handle.clone()
     }
 
+    pub(crate) fn require_store_root(&self, root: &std::path::Path) -> Result<()> {
+        self.store_lifetime.require_root(root)
+    }
+
     /// Admit callbacks without retaining the primary or its physical store.
     /// The callback must upgrade its weak primary inside the admitted task.
     pub(crate) fn downgrade(&self) -> WeakRuntimeTasks {

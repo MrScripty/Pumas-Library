@@ -1,0 +1,122 @@
+{
+  "source_commit": "926710fa11067c63cae885180db43be5fd7f31f9",
+  "producer_types_sha256": "7e3f586e9f472fa7aa81ebddbd9563ffd4171b9965a086509a6feeba66a484b5",
+  "qualification": "Producer-serialized hypothetical contract fixtures. The available state does not establish runtime availability or consumer acceptance; neither fixture was dispatched.",
+  "available_descriptor_fixture": {
+    "availability": {
+      "state": "available"
+    },
+    "capability": "image_to_text",
+    "input_formats": [
+      "png_base64",
+      "jpeg_base64",
+      "messages_image"
+    ],
+    "option_bounds": [
+      {
+        "maximum": 2048.0,
+        "minimum": 1.0,
+        "option": "max_tokens"
+      },
+      {
+        "maximum": 2.0,
+        "minimum": 0.0,
+        "option": "temperature"
+      },
+      {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "option": "top_p"
+      },
+      {
+        "maximum": 8388608.0,
+        "minimum": 1.0,
+        "option": "image_bytes"
+      },
+      {
+        "maximum": 4194304.0,
+        "minimum": 1.0,
+        "option": "image_pixels"
+      },
+      {
+        "maximum": 4.0,
+        "minimum": 1.0,
+        "option": "image_count"
+      },
+      {
+        "maximum": 4096.0,
+        "minimum": 1.0,
+        "option": "width"
+      },
+      {
+        "maximum": 4096.0,
+        "minimum": 1.0,
+        "option": "height"
+      }
+    ],
+    "output_formats": [
+      "text"
+    ],
+    "semantic_task": "image_to_text",
+    "streaming": false
+  },
+  "unavailable_descriptor_fixture": {
+    "availability": {
+      "reason": "runtime_unavailable",
+      "state": "unavailable"
+    },
+    "capability": "image_to_text",
+    "input_formats": [
+      "png_base64",
+      "jpeg_base64",
+      "messages_image"
+    ],
+    "option_bounds": [
+      {
+        "maximum": 2048.0,
+        "minimum": 1.0,
+        "option": "max_tokens"
+      },
+      {
+        "maximum": 2.0,
+        "minimum": 0.0,
+        "option": "temperature"
+      },
+      {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "option": "top_p"
+      },
+      {
+        "maximum": 8388608.0,
+        "minimum": 1.0,
+        "option": "image_bytes"
+      },
+      {
+        "maximum": 4194304.0,
+        "minimum": 1.0,
+        "option": "image_pixels"
+      },
+      {
+        "maximum": 4.0,
+        "minimum": 1.0,
+        "option": "image_count"
+      },
+      {
+        "maximum": 4096.0,
+        "minimum": 1.0,
+        "option": "width"
+      },
+      {
+        "maximum": 4096.0,
+        "minimum": 1.0,
+        "option": "height"
+      }
+    ],
+    "output_formats": [
+      "text"
+    ],
+    "semantic_task": "image_to_text",
+    "streaming": false
+  }
+}

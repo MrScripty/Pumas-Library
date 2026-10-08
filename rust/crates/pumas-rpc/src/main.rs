@@ -9,6 +9,7 @@ mod discovery;
 mod handlers;
 mod http_admission;
 mod http_transport;
+mod owner_retention;
 #[cfg(feature = "inference-plugins")]
 mod provider_clients;
 #[cfg(feature = "s3")]
@@ -49,6 +50,14 @@ struct Args {
     #[arg(long, requires = "launcher_root", conflicts_with = "build_info")]
     #[cfg_attr(feature = "export-contract", arg(conflicts_with_all = ["export_desktop_contract", "export_desktop_fixtures"]))]
     describe_local_http: bool,
+    /// Explicit selected-root borrow or reserved local start (Linux, inference-disabled).
+    #[arg(long, requires = "launcher_root", conflicts_with_all = ["build_info", "describe_local_http"])]
+    #[cfg_attr(feature = "export-contract", arg(conflicts_with_all = ["export_desktop_contract", "export_desktop_fixtures"]))]
+    attach_or_start_local_http: bool,
+    /// Hold passive retention of an authenticated existing HTTP owner (Linux).
+    #[arg(long, requires = "launcher_root", conflicts_with_all = ["build_info", "describe_local_http", "attach_or_start_local_http"])]
+    #[cfg_attr(feature = "export-contract", arg(conflicts_with_all = ["export_desktop_contract", "export_desktop_fixtures"]))]
+    retain_local_http_owner: bool,
     /// Export the current desktop wire contract without starting a server.
     #[cfg(feature = "export-contract")]
     #[arg(long)]
@@ -80,6 +89,14 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.retain_local_http_owner {
+        let runtime = Builder::new_current_thread().enable_all().build()?;
+        return runtime.block_on(owner_retention::retain_from_cli(
+            args.launcher_root
+                .as_deref()
+                .expect("clap requires launcher root"),
+        ));
+    }
     if args.build_info {
         serde_json::to_writer_pretty(std::io::stdout(), &discovery::build_info())?;
         return Ok(());
@@ -103,6 +120,11 @@ fn main() -> Result<()> {
         let description = runtime.block_on(discovery::describe_local_http(root))?;
         serde_json::to_writer_pretty(std::io::stdout(), &description)?;
         return Ok(());
+    }
+    if args.attach_or_start_local_http
+        && (cfg!(feature = "inference-plugins") || !cfg!(target_os = "linux"))
+    {
+        anyhow::bail!("local HTTP bootstrap is qualified only for Linux inference-disabled builds");
     }
 
     let host = server::LoopbackHost::parse(&args.host)?;
@@ -181,10 +203,36 @@ async fn run(
     // Create the core API instance (model library, system utilities)
     // Use builder with auto_create_dirs so first-run (e.g. portable AppImage)
     // creates the directory structure automatically.
-    let api = pumas_library::PumasApi::builder(&launcher_root)
-        .auto_create_dirs(true)
-        .build()
-        .await?;
+    let api = if args.attach_or_start_local_http {
+        use pumas_library::discovery::{
+            prepare_local_access, CompatibilityRequirements, LocalAccess, PreparedLocalAccess,
+        };
+        let registry = pumas_library::registry::LibraryRegistry::open()?;
+        match prepare_local_access(
+            registry,
+            &launcher_root,
+            &CompatibilityRequirements::default(),
+        )
+        .await?
+        {
+            PreparedLocalAccess::Borrowed(_) => {
+                let description = discovery::describe_local_http(&launcher_root).await?;
+                discovery::print_local_access("borrowed", &description)?;
+                return Ok(());
+            }
+            PreparedLocalAccess::Start(authority) => match authority.start().await? {
+                LocalAccess::Owned { api, .. } => api,
+                LocalAccess::Borrowed { .. } => {
+                    unreachable!("start authority creates only its own generation")
+                }
+            },
+        }
+    } else {
+        pumas_library::PumasApi::builder(&launcher_root)
+            .auto_create_dirs(true)
+            .build()
+            .await?
+    };
 
     #[cfg(feature = "inference-plugins")]
     let version_managers = initialize_version_managers(&launcher_root, &api).await;
@@ -233,6 +281,10 @@ async fn run(
     // Print port for Electron to read (intentional stdout for IPC)
     // This format must match what python-bridge.ts expects
     println!("RPC_PORT={}", addr.port());
+    if args.attach_or_start_local_http {
+        let description = discovery::describe_local_http(&launcher_root).await?;
+        discovery::print_local_access("owned", &description)?;
+    }
 
     info!("RPC server running on {}", addr);
 

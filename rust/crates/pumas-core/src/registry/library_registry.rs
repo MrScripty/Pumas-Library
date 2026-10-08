@@ -735,6 +735,25 @@ impl LibraryRegistry {
     /// Observe valid-generation advertisements. A missing additive table in a
     /// legacy registry is supported; invalid/unreadable schema remains an error.
     pub fn list_http_services(&self) -> Result<Vec<crate::discovery::HttpServiceDescription>> {
+        self.http_services_for_owner(None)
+    }
+
+    /// Select the exact owner before decoding; corrupt foreign rows cannot
+    /// poison a targeted observation. Selected rows retain strict validation.
+    pub(crate) fn http_service_for_instance(
+        &self,
+        instance: &InstanceEntry,
+    ) -> Result<Option<crate::discovery::HttpServiceDescription>> {
+        Ok(self
+            .http_services_for_owner(Some(instance))?
+            .into_iter()
+            .next())
+    }
+
+    fn http_services_for_owner(
+        &self,
+        owner: Option<&InstanceEntry>,
+    ) -> Result<Vec<crate::discovery::HttpServiceDescription>> {
         let conn = self.lock_conn()?;
         let table_exists: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='http_services')", [], |row| row.get(0))?;
@@ -745,16 +764,24 @@ impl LibraryRegistry {
             FROM http_services h JOIN instances i ON h.library_path=i.library_path
             JOIN libraries l ON l.path=i.library_path
             WHERE i.status='ready' AND h.owner_started_at=i.started_at AND h.owner_token=i.connection_token
+            AND (?1 IS NULL OR (i.library_path=?1 AND i.started_at=?2 AND i.connection_token=?3))
             ORDER BY i.started_at DESC")?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        })?;
+        let rows = stmt.query_map(
+            params![
+                owner.map(|instance| instance.library_path.to_string_lossy().into_owned()),
+                owner.map(|instance| instance.started_at.as_str()),
+                owner.and_then(|instance| instance.connection_token.as_deref()),
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )?;
         let mut descriptions = Vec::new();
         for row in rows {
             let (json, library_id, generation, root, service_generation) = row?;

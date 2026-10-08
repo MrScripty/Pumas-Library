@@ -2660,6 +2660,95 @@ mod http_discovery_tests {
         assert!(tokio::net::TcpStream::connect(server.addr()).await.is_err());
     }
     #[tokio::test]
+    async fn corrupt_foreign_http_row_preserves_real_descriptor_and_borrowing() {
+        let (temp, registry, root, api) = api_fixture().await;
+        let other_root = temp.path().join("other");
+        std::fs::create_dir(&other_root).unwrap();
+        let other = PumasApi::builder(&other_root)
+            .with_registry(registry.clone())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .with_connectivity_probe(false)
+            .build()
+            .await
+            .unwrap();
+        other.start_ipc_server().await.unwrap();
+        let healthy_server = start(api, &root, 0).await.unwrap();
+        let corrupt_server = start(other, &other_root, 0).await.unwrap();
+        let descriptions = registry.list_http_services().unwrap();
+        let healthy = descriptions
+            .iter()
+            .find(|d| d.instance.library_root == root)
+            .unwrap();
+        let corrupt = descriptions
+            .iter()
+            .find(|d| d.instance.library_root == other_root)
+            .unwrap();
+        let before = registry.get_instance(&other_root).unwrap().unwrap();
+        let connection = rusqlite::Connection::open(temp.path().join("registry.db")).unwrap();
+        let observer = LocalDiscovery::open_at(&temp.path().join("registry.db")).unwrap();
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        for bad_json in ["{".to_owned(), {
+            let mut value = serde_json::to_value(corrupt).unwrap();
+            value["instance"]["registry_library_id"] = serde_json::json!("wrong-library");
+            value.to_string()
+        }] {
+            connection
+                .execute(
+                    "UPDATE http_services SET description_json=?1 WHERE library_path=?2",
+                    rusqlite::params![bad_json, other_root.to_string_lossy()],
+                )
+                .unwrap();
+            let response = client
+                .get(format!(
+                    "{}{HTTP_DISCOVERY_PATH}",
+                    healthy.endpoint.as_str()
+                ))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), reqwest::StatusCode::OK);
+            assert_eq!(response.headers().get("cache-control").unwrap(), "no-store");
+            assert_eq!(
+                response.json::<HttpServiceDescription>().await.unwrap(),
+                *healthy
+            );
+            let borrowed = observer
+                .borrow_http_service(&root, &CompatibilityRequirements::default())
+                .await
+                .unwrap();
+            assert_eq!(borrowed.description(), healthy);
+            drop(borrowed);
+            let refused = client
+                .get(format!(
+                    "{}{HTTP_DISCOVERY_PATH}",
+                    corrupt.endpoint.as_str()
+                ))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(refused.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+            assert!(observer
+                .borrow_http_service(&other_root, &CompatibilityRequirements::default())
+                .await
+                .is_err());
+            assert!(observer.snapshot().is_err());
+            let retained = registry.get_instance(&other_root).unwrap().unwrap();
+            assert_eq!(retained.connection_token, before.connection_token);
+            assert_eq!(retained.started_at, before.started_at);
+            let retained_json: String = connection
+                .query_row(
+                    "SELECT description_json FROM http_services WHERE library_path=?1",
+                    [other_root.to_string_lossy()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(retained_json, bad_json);
+        }
+        healthy_server.shutdown().await.unwrap();
+        corrupt_server.shutdown().await.unwrap();
+    }
+    #[tokio::test]
     async fn ordinary_server_drop_revokes_admission_but_retains_core_until_catalog_settles() {
         let (_temp, registry, root, api) = api_fixture().await;
         let server = start(api, &root, 0).await.unwrap();

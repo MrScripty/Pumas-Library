@@ -66,6 +66,11 @@ pub struct PumasArtifactLoadTarget {
     pub library_root_id: Option<String>,
     pub storage_kind: StorageKind,
     pub validation_state: AssetValidationState,
+    /// Package observation token used to invalidate resident runtime state.
+    /// Current producers emit `pumas-package-observation-v1:sha256:<digest>`.
+    /// It observes metadata, dependencies, manifest paths and file size/mtime;
+    /// it does not attest the bytes of the complete package. Indexed resolution
+    /// projects the stored observation; owner-fresh resolution reobserves it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

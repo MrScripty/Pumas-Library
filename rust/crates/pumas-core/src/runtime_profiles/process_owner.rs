@@ -401,6 +401,15 @@ impl RuntimeProfileProcessOwner {
         Ok(self.with_listener(id, expected, |_| ())?.is_some())
     }
 
+    pub(crate) fn bind_transport_stop(
+        &self,
+        id: &RuntimeProfileId,
+        expected: &OwnedRuntimeProfileObservation,
+    ) -> Result<tokio::sync::watch::Receiver<bool>> {
+        self.with_listener(id, expected, |session| session.observer_stop.subscribe())?
+            .ok_or_else(|| failure("Runtime endpoint listener is not owned by the admitted child"))
+    }
+
     pub(crate) fn with_running_session<T>(
         &self,
         id: &RuntimeProfileId,
@@ -1625,6 +1634,49 @@ mod tests {
             drain_session(&session).await.unwrap_err().to_string(),
             first
         );
+    }
+
+    #[tokio::test]
+    async fn transport_stop_is_bound_to_exact_owned_listener_generation() {
+        let fixture = Fixture::new();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let (config, spec, guard) = listener_launch(&fixture, address);
+        let id = spec.profile_id.clone();
+        let original = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        wait_for_listener(&original).await;
+        let old_stop = fixture.owner.bind_transport_stop(&id, &original).unwrap();
+        assert!(!*old_stop.borrow());
+        let mut forged = original.clone();
+        forged.generation += 1;
+        assert!(fixture.owner.bind_transport_stop(&id, &forged).is_err());
+        fixture.owner.stop(&id).await.unwrap();
+        assert!(*old_stop.borrow());
+        let (config, spec, guard) = listener_launch(&fixture, address);
+        let replacement = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        wait_for_listener(&replacement).await;
+        let new_stop = fixture
+            .owner
+            .bind_transport_stop(&id, &replacement)
+            .unwrap();
+        assert!(!*new_stop.borrow());
+        assert!(*old_stop.borrow());
+        assert!(fixture.owner.bind_transport_stop(&id, &original).is_err());
+        fixture.owner.stop(&id).await.unwrap();
+        assert!(*new_stop.borrow());
     }
 
     #[tokio::test]

@@ -202,6 +202,8 @@ pub(crate) struct CustomRuntimeProjection {
 pub struct ModelLibrary {
     /// Root directory of the library
     library_root: PathBuf,
+    /// Display spelling of the canonical root, captured before snapshot reads.
+    library_display_root: PathBuf,
     /// SQLite model index with FTS5
     index: ModelIndex,
     /// Link registry for tracking symlinks
@@ -233,27 +235,31 @@ impl ModelLibrary {
     pub async fn new(library_root: impl Into<PathBuf>) -> Result<Self> {
         let library_root = library_root.into();
 
-        let (library_root, index, link_registry) = tokio::task::spawn_blocking(move || {
-            std::fs::create_dir_all(&library_root)?;
-            let library_root = library_root.canonicalize()?;
-            let db_path = library_root.join(DB_FILENAME);
-            let registry_path = library_root.join("link_registry.json");
-            let index = ModelIndex::new(&db_path)?;
-            let link_registry = LinkRegistry::new(registry_path);
-            Ok::<_, PumasError>((library_root, index, link_registry))
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join model library startup initialization task: {}",
-                err
-            ))
-        })??;
+        let (library_root, library_display_root, index, link_registry) =
+            tokio::task::spawn_blocking(move || {
+                std::fs::create_dir_all(&library_root)?;
+                let library_root = library_root.canonicalize()?;
+                let library_display_root =
+                    PathBuf::from(crate::platform::platform_display_path(&library_root));
+                let db_path = library_root.join(DB_FILENAME);
+                let registry_path = library_root.join("link_registry.json");
+                let index = ModelIndex::new(&db_path)?;
+                let link_registry = LinkRegistry::new(registry_path);
+                Ok::<_, PumasError>((library_root, library_display_root, index, link_registry))
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join model library startup initialization task: {}",
+                    err
+                ))
+            })??;
 
         link_registry.load().await?;
 
         let library = Self {
             library_root,
+            library_display_root,
             index,
             link_registry: Arc::new(RwLock::new(link_registry)),
             write_lock: Arc::new(Mutex::new(())),
@@ -2920,6 +2926,7 @@ impl ModelLibrary {
             })?;
         let resolved = resolve_local_model_type_with_persisted_hints_async(
             self.index().clone(),
+            self.library_root.clone(),
             model_dir.clone(),
             metadata.clone(),
             type_info.clone(),
@@ -3096,7 +3103,7 @@ impl ModelLibrary {
             });
         }
         let storage_kind = metadata.storage_kind.unwrap_or(StorageKind::LibraryOwned);
-        let validation_state = metadata.validation_state.unwrap_or(
+        let mut validation_state = metadata.validation_state.unwrap_or(
             if is_diffusers_bundle(&metadata) || storage_kind == StorageKind::ExternalReference {
                 AssetValidationState::Invalid
             } else {
@@ -3116,7 +3123,25 @@ impl ModelLibrary {
             });
         }
 
-        let entry_path = if is_diffusers_bundle(&metadata) {
+        let manifest =
+            super::package_facts::manifest::PackageInspectionManifest::build(&model_dir, &metadata)
+                .await?;
+        let artifact_kind =
+            package_artifact_kind(&model_dir, &metadata, manifest.selected_files()).await?;
+        if artifact_kind == PackageArtifactKind::HfCompatibleDirectory
+            && manifest
+                .entries()
+                .iter()
+                .any(|entry| entry.status() == crate::models::PackageFactStatus::Missing)
+            && validation_state == AssetValidationState::Valid
+        {
+            validation_state = AssetValidationState::Degraded;
+        }
+        let entry_path = if artifact_kind == PackageArtifactKind::HfCompatibleDirectory
+            && storage_kind == StorageKind::LibraryOwned
+        {
+            model_dir.display().to_string()
+        } else if is_diffusers_bundle(&metadata) {
             match storage_kind {
                 StorageKind::LibraryOwned => model_dir.display().to_string(),
                 StorageKind::ExternalReference => {
@@ -3268,7 +3293,6 @@ impl ModelLibrary {
         let Some(facts) = facts else {
             return Ok(false);
         };
-        let expected_ref = context.model_ref();
         let current_revision = context.metadata().upstream_revision.as_deref();
         let revision_coheres = |revision: Option<&str>| {
             revision.is_none_or(|revision| Some(revision) == current_revision)
@@ -3282,17 +3306,7 @@ impl ModelLibrary {
         {
             return Ok(false);
         }
-        Ok(
-            facts.model_ref.model_ref_contract_version == expected_ref.model_ref_contract_version
-                && facts.model_ref.model_id == expected_ref.model_id
-                && facts.model_ref.selected_artifact_id == expected_ref.selected_artifact_id
-                && facts.model_ref.selected_artifact_path == expected_ref.selected_artifact_path
-                && facts.artifact.entry_path == context.descriptor().entry_path
-                && facts.artifact.storage_kind == context.descriptor().storage_kind
-                && facts.artifact.validation_state == context.descriptor().validation_state
-                && facts.artifact.selected_files == context.selected_files()
-                && facts.inspection_manifest.as_ref() == Some(&context.inspection_manifest()),
-        )
+        Ok(context.facts_are_coherent(&facts))
     }
 
     /// Read the final model outputs through the held destination and canonical
@@ -3423,6 +3437,15 @@ impl ModelLibrary {
         &self,
         model_id: &str,
     ) -> Result<ResolvedModelPackageFacts> {
+        self.resolve_model_package_facts_with_observation(model_id)
+            .await
+            .map(|(facts, _)| facts)
+    }
+
+    async fn resolve_model_package_facts_with_observation(
+        &self,
+        model_id: &str,
+    ) -> Result<(ResolvedModelPackageFacts, String)> {
         if let Some(guard) = &self.import_guard {
             guard.require_package_facts()?;
         }
@@ -3462,7 +3485,7 @@ impl ModelLibrary {
                     && cached.source_fingerprint == source_fingerprint
                 {
                     match serde_json::from_str::<ResolvedModelPackageFacts>(&cached.facts_json) {
-                        Ok(facts) => {
+                        Ok(facts) if context.facts_are_coherent(&facts) => {
                             self.validate_import_effect_async(context.model_dir())
                                 .await?;
                             self.upsert_model_package_facts_summary_cache(
@@ -3470,7 +3493,13 @@ impl ModelLibrary {
                                 &source_fingerprint,
                                 &facts,
                             )?;
-                            return Ok(facts);
+                            return Ok((facts, source_fingerprint));
+                        }
+                        Ok(_) => {
+                            tracing::debug!(
+                                model_id,
+                                "Reobserving incoherent cached package facts"
+                            );
                         }
                         Err(err) => {
                             tracing::warn!(
@@ -3638,14 +3667,14 @@ impl ModelLibrary {
                     cache_scope: ModelPackageFactsCacheScope::Detail,
                     package_facts_contract_version: i64::from(PACKAGE_FACTS_CONTRACT_VERSION),
                     producer_revision: context.metadata().updated_date.clone(),
-                    source_fingerprint,
+                    source_fingerprint: source_fingerprint.clone(),
                     facts_json: serde_json::to_string(&facts)?,
                     cached_at: now.clone(),
                     updated_at: now,
                 })?;
         }
 
-        Ok(facts)
+        Ok((facts, source_fingerprint))
     }
 
     fn upsert_model_package_facts_summary_cache(
@@ -3716,8 +3745,10 @@ impl ModelLibrary {
             if cached.package_facts_contract_version == i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
                 && cached.source_fingerprint == source_fingerprint
             {
-                if let Ok(summary) =
+                if let Some(summary) =
                     serde_json::from_str::<ResolvedModelPackageFactsSummary>(&cached.facts_json)
+                        .ok()
+                        .filter(|summary| context.summary_is_coherent(summary))
                 {
                     return Ok(ModelPackageFactsSummaryResult {
                         model_id: model_id.to_string(),
@@ -3736,8 +3767,10 @@ impl ModelLibrary {
             if cached.package_facts_contract_version == i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
                 && cached.source_fingerprint == source_fingerprint
             {
-                if let Ok(facts) =
+                if let Some(facts) =
                     serde_json::from_str::<ResolvedModelPackageFacts>(&cached.facts_json)
+                        .ok()
+                        .filter(|facts| context.facts_are_coherent(facts))
                 {
                     self.upsert_model_package_facts_summary_cache(
                         &context,
@@ -3847,13 +3880,18 @@ impl ModelLibrary {
 
     /// Resolve a selected artifact into an approved runtime load target.
     ///
-    /// The first implementation reads indexed/cache state through the shared
-    /// resolver core. It does not regenerate package facts or call broader
-    /// model-level execution descriptor APIs.
+    /// Owner-fresh resolution reobserves managed packages through the existing
+    /// facts producer. Indexed resolution only projects the stored observation.
     pub async fn resolve_model_artifact_load_target(
         &self,
         request: ResolveModelArtifactLoadTargetRequest,
     ) -> Result<ResolveModelArtifactLoadTargetResponse> {
+        if !super::artifact_load_target::model_id_is_library_relative(&request.model_ref.model_id)
+            || !request.model_ref.migration_diagnostics.is_empty()
+        {
+            return Ok(super::artifact_load_target::invalid_model_reference_response());
+        }
+        let mut observed_fingerprint = None;
         if request.resolution_mode == PumasArtifactLoadTargetResolutionMode::OwnerFresh {
             if let Some(record) = self.index.get(&request.model_ref.model_id)? {
                 if record
@@ -3885,12 +3923,33 @@ impl ModelLibrary {
                     self.index
                         .delete_model_package_facts_cache(&request.model_ref.model_id)?;
                 }
+                if current_record.as_ref().is_some_and(|record| {
+                    record.metadata.get("storage_kind").and_then(Value::as_str)
+                        != Some("external_reference")
+                }) {
+                    // This is the existing owner producer, including publication
+                    // gates, observation comparison, and contextual cache validation.
+                    observed_fingerprint = match self
+                        .resolve_model_package_facts_with_observation(&request.model_ref.model_id)
+                        .await
+                    {
+                        Ok((_, fingerprint)) => Some(fingerprint),
+                        Err(_) => return Ok(library_unavailable_response()),
+                    };
+                }
             }
         }
         let index = self.index.clone();
         let root = self.library_root.clone();
+        let display_root = self.library_display_root.clone();
         tokio::task::spawn_blocking(move || {
-            resolve_artifact_load_target_from_index(&index, &root, request)
+            resolve_artifact_load_target_from_index(
+                &index,
+                &root,
+                &display_root,
+                request,
+                observed_fingerprint.as_deref(),
+            )
         })
         .await
         .map_err(|error| {
@@ -4192,6 +4251,7 @@ impl ModelLibrary {
         })?;
         let resolved = resolve_local_model_type_with_persisted_hints_async(
             self.index().clone(),
+            self.library_root.clone(),
             model_dir.clone(),
             metadata.clone(),
             file_type_info.clone(),
@@ -4918,6 +4978,7 @@ async fn save_overrides_projection_async(
 
 async fn resolve_local_model_type_with_persisted_hints_async(
     index: ModelIndex,
+    library_root: PathBuf,
     model_dir: PathBuf,
     metadata: ModelMetadata,
     file_type_info: Option<ModelTypeInfo>,
@@ -4925,6 +4986,7 @@ async fn resolve_local_model_type_with_persisted_hints_async(
     tokio::task::spawn_blocking(move || {
         resolve_local_model_type_with_persisted_hints(
             &index,
+            &library_root,
             &model_dir,
             &metadata,
             file_type_info.as_ref(),
@@ -7034,6 +7096,7 @@ fn find_primary_model_file_in_selection(
 
 fn resolve_local_model_type_with_persisted_hints(
     index: &ModelIndex,
+    library_root: &Path,
     model_dir: &Path,
     metadata: &ModelMetadata,
     file_type_info: Option<&ModelTypeInfo>,
@@ -7048,9 +7111,14 @@ fn resolve_local_model_type_with_persisted_hints(
         spec_model_type.as_deref(),
         huggingface_evidence.as_ref(),
     )?;
-    let resolved = apply_unresolved_model_type_fallbacks(resolved, model_dir, file_type_info);
+    let resolved =
+        apply_unresolved_model_type_fallbacks(resolved, model_dir, library_root, file_type_info);
 
-    Ok(apply_name_token_disambiguation(resolved, model_dir))
+    Ok(apply_name_token_disambiguation(
+        resolved,
+        model_dir,
+        library_root,
+    ))
 }
 
 fn classification_hints_from_persisted_sources(
@@ -7180,8 +7248,9 @@ fn load_download_marker_hints(model_dir: &Path) -> Option<DownloadMarkerHints> {
 fn apply_name_token_disambiguation(
     mut resolved: ModelTypeResolution,
     model_dir: &Path,
+    library_root: &Path,
 ) -> ModelTypeResolution {
-    let Some(token_type) = detect_model_type_from_name_tokens(model_dir) else {
+    let Some(token_type) = detect_model_type_from_name_tokens(model_dir, library_root) else {
         return resolved;
     };
 
@@ -7214,6 +7283,7 @@ fn apply_name_token_disambiguation(
 fn apply_unresolved_model_type_fallbacks(
     mut resolved: ModelTypeResolution,
     model_dir: &Path,
+    library_root: &Path,
     file_type_info: Option<&ModelTypeInfo>,
 ) -> ModelTypeResolution {
     if resolved.model_type != ModelType::Unknown || resolved.source != "unresolved" {
@@ -7232,7 +7302,7 @@ fn apply_unresolved_model_type_fallbacks(
     }
 
     let Some(file_type_info) = file_type_info else {
-        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir) {
+        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir, library_root) {
             apply_fallback_resolution(
                 &mut resolved,
                 token_type,
@@ -7244,7 +7314,7 @@ fn apply_unresolved_model_type_fallbacks(
         return resolved;
     };
     if file_type_info.model_type == ModelType::Unknown {
-        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir) {
+        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir, library_root) {
             apply_fallback_resolution(
                 &mut resolved,
                 token_type,
@@ -7363,8 +7433,23 @@ fn detect_model_type_from_directory_layout(model_dir: &Path) -> Option<ModelType
     None
 }
 
-fn detect_model_type_from_name_tokens(model_dir: &Path) -> Option<ModelType> {
-    let mut token_pool = model_dir.display().to_string().to_lowercase();
+fn detect_model_type_from_name_tokens(model_dir: &Path, library_root: &Path) -> Option<ModelType> {
+    // Host/library ancestors are not model evidence (and temporary directory
+    // names can contain classification tokens). Preserve only library-relative
+    // type/family/name hints plus immediate members; external paths use basename.
+    let mut token_pool = model_dir
+        .strip_prefix(library_root)
+        .ok()
+        .filter(|relative| {
+            !relative.as_os_str().is_empty()
+                && relative
+                    .components()
+                    .all(|part| matches!(part, Component::Normal(_)))
+        })
+        .map(Path::as_os_str)
+        .or_else(|| model_dir.file_name())
+        .map(|name| name.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
     if let Ok(entries) = std::fs::read_dir(model_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let name = entry.file_name().to_string_lossy().to_lowercase();
@@ -7848,6 +7933,10 @@ pub struct LibraryStats {
 
 #[cfg(test)]
 mod tests {
+    mod hf_load_target_tests {
+        include!("hf_load_target_tests.rs");
+    }
+
     use super::*;
     use crate::intent::{AcquisitionPolicy, ModelRequirement, ModelSelector};
     use crate::models::{
@@ -10788,6 +10877,33 @@ mod tests {
             updated.model_type_resolution_source,
             Some("model-type-name-tokens".to_string())
         );
+    }
+
+    #[test]
+    fn test_name_token_fallback_ignores_host_directory_categories() {
+        let temp = TempDir::new().unwrap();
+        for ancestor in ["vlm", "audio", "diffusion", "vision", "embedding"] {
+            let library_root = temp.path().join(ancestor);
+            let model_dir = library_root.join("unknown/qwen3/qwen3-reranker-4b");
+            std::fs::create_dir_all(&model_dir).unwrap();
+            std::fs::write(model_dir.join("qwen3-reranker-4b.pt"), b"synthetic").unwrap();
+            assert_eq!(
+                detect_model_type_from_name_tokens(&model_dir, &library_root),
+                Some(ModelType::Reranker),
+                "host ancestor {ancestor} must not change model classification"
+            );
+        }
+        for (relative, expected) in [
+            ("audio/vendor/generic-model", ModelType::Audio),
+            ("vlm/qwen/generic-model", ModelType::Vlm),
+            ("reranker/vendor/generic-model", ModelType::Reranker),
+        ] {
+            assert_eq!(
+                detect_model_type_from_name_tokens(&temp.path().join(relative), temp.path()),
+                Some(expected),
+                "legitimate library-relative category must survive"
+            );
+        }
     }
 
     #[tokio::test]

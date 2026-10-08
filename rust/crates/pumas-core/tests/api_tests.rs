@@ -924,7 +924,18 @@ async fn test_resolve_model_package_facts_is_lazy_api_surface() {
     let facts = api.resolve_model_package_facts(model_id).await.unwrap();
 
     assert_eq!(facts.model_ref.model_id, model_id);
-    assert!(facts.artifact.entry_path.ends_with("model.safetensors"));
+    assert_eq!(
+        std::path::Path::new(&facts.artifact.entry_path),
+        model_dir.canonicalize().unwrap()
+    );
+    assert_eq!(
+        facts.artifact.artifact_kind,
+        pumas_library::models::PackageArtifactKind::HfCompatibleDirectory
+    );
+    assert_eq!(
+        facts.model_ref.selected_artifact_path.as_deref(),
+        Some(facts.artifact.entry_path.as_str())
+    );
     assert_eq!(
         facts
             .transformers

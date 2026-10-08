@@ -102,7 +102,7 @@ pub(crate) async fn transformers_package_evidence(
                 .as_ref()
                 .and_then(|evidence| evidence.repo_id.clone())
         }),
-        source_revision: None,
+        source_revision: metadata.upstream_revision.clone(),
         selected_files: selected_files
             .iter()
             .filter(|file| {

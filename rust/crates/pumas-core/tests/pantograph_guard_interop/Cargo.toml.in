@@ -1,0 +1,24 @@
+[workspace]
+
+[package]
+name = "pumas-pantograph-guard-interop"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+default = []
+backend-pytorch = ["inference/backend-pytorch"]
+
+[dependencies]
+inference = { path = @PANTOGRAPH_INFERENCE@, default-features = false }
+pantograph-dependency-planning = { path = @PANTOGRAPH_DEPENDENCY_PLANNING@ }
+pumas-library = { path = @PUMAS_CORE@, default-features = false }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
+serde = "1"
+serde_json = "1"
+base64 = "=0.22.1"
+tempfile = "3"
+
+[lib]
+path = "lib.rs"

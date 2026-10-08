@@ -186,6 +186,20 @@ async fn builder_requires_download_restore_grant_but_no_client_reads_do_not() {
         .with_process_manager(false)
         .build()
         .await;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    assert!(
+        matches!(
+            &retry,
+            Err(PumasError::InvalidParams { message })
+                if message == &format!(
+                    "Pumas library instance is already running for physical store {}. Drop existing owner handles before constructing another owner.",
+                    temp.path().canonicalize().unwrap().display()
+                )
+        ),
+        "unexpected retained-owner refusal: {:?}",
+        retry.as_ref().err()
+    );
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     assert!(matches!(
         retry,
         Err(PumasError::InvalidParams { message })

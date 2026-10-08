@@ -72,6 +72,7 @@ struct Session {
     router_models: Option<Arc<Mutex<RouterModelState>>>,
     stop: AtomicBool,
     child_custody: Arc<crate::platform::managed_child::ManagedChildCustodySlot>,
+    audio_custody: Arc<super::audio_custody::AudioCustodyRegistry>,
     state: Mutex<SessionState>,
     observer_stop: tokio::sync::watch::Sender<bool>,
     observer_terminal: tokio::sync::watch::Sender<Option<bool>>,
@@ -106,6 +107,7 @@ impl Drop for LaunchAdmissionCleanup {
             return;
         }
         self.session.stop.store(true, Ordering::Release);
+        self.session.audio_custody.close_admission();
         self.session.observer_stop.send_replace(true);
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let session = self.session.clone();
@@ -228,6 +230,10 @@ impl RuntimeProfileProcessOwner {
                     observer_stop: tokio::sync::watch::channel(false).0,
                     observer_terminal: tokio::sync::watch::channel(None).0,
                     generation: registry.generation,
+                    audio_custody: super::audio_custody::AudioCustodyRegistry::new(
+                        spec.profile_id.clone(),
+                        registry.generation,
+                    ),
                     router_models,
                     model_path,
                     context_size,
@@ -420,6 +426,18 @@ impl RuntimeProfileProcessOwner {
             .ok_or_else(|| failure("Runtime endpoint listener is not owned by the admitted child"))
     }
 
+    /// Retrieve retained custody only under exact-session/listener validation.
+    /// This does not qualify the runtime or admit an audio load.
+    #[allow(dead_code)] // The owning native channel is a subsequent integration seam.
+    pub(crate) fn audio_custody_for_running_session(
+        &self,
+        id: &RuntimeProfileId,
+        expected: &OwnedRuntimeProfileObservation,
+    ) -> Result<Arc<super::audio_custody::AudioCustodyRegistry>> {
+        self.with_listener(id, expected, |session| session.audio_custody.clone())?
+            .ok_or_else(|| failure("Runtime endpoint listener is not owned by the admitted child"))
+    }
+
     pub(crate) fn begin_router_model_operation(
         self: &Arc<Self>,
         id: &RuntimeProfileId,
@@ -589,6 +607,7 @@ impl RuntimeProfileProcessOwner {
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
             session.stop.store(true, Ordering::Release);
+            session.audio_custody.close_admission();
             session.observer_stop.send_replace(true);
             OwnedRuntimeProfileObservation {
                 generation: session.generation,
@@ -638,6 +657,7 @@ impl RuntimeProfileProcessOwner {
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
             session.stop.store(true, Ordering::Release);
+            session.audio_custody.close_admission();
             session.observer_stop.send_replace(true);
         }
         let mut results = Vec::new();
@@ -656,6 +676,7 @@ impl Drop for RuntimeProfileProcessOwner {
         if let Ok(registry) = self.registry.get_mut() {
             for session in registry.sessions.values() {
                 session.stop.store(true, Ordering::Release);
+                session.audio_custody.close_admission();
                 session.observer_stop.send_replace(true);
             }
         }
@@ -688,6 +709,7 @@ async fn drain_session(session: &Session) -> Result<bool> {
                     .map_err(|_| failure("Runtime process session poisoned"))?;
                 state.observer_error = Some(format!("Router observer failed: {error}"));
                 state.status.state = RuntimeLifecycleState::Failed;
+                session.audio_custody.close_admission();
             }
         }
         let terminal_observer = {
@@ -717,6 +739,7 @@ async fn drain_session(session: &Session) -> Result<bool> {
                     .map_err(|_| failure("Runtime process session poisoned"))?;
                 state.observer_error = Some(format!("Terminal observer failed: {error}"));
                 state.status.state = RuntimeLifecycleState::Failed;
+                session.audio_custody.close_admission();
             }
         }
         let worker = {
@@ -740,6 +763,7 @@ async fn drain_session(session: &Session) -> Result<bool> {
             if let Err(error) = outcome {
                 state.terminal = Some(Err(format!("Runtime worker failed: {error}")));
                 state.status.state = RuntimeLifecycleState::Failed;
+                session.audio_custody.close_admission();
                 session.observer_stop.send_replace(true);
                 session.observer_terminal.send_replace(Some(false));
             }
@@ -887,6 +911,12 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
             ManagedChild::spawn(&mut command, session.child_custody.clone())
                 .map_err(|e| failure(format!("Runtime spawn failed: {e}")))?,
         );
+        // Attach one composite owner before PID/readiness publication. An
+        // undrained ManagedChild parks this same lease with its exact child.
+        session
+            .audio_custody
+            .attach_to_child(child.as_mut().expect("spawned child"))
+            .map_err(|error| failure(format!("Audio child custody failed: {error:?}")))?;
         let pid = child.as_ref().expect("spawned child").id();
         write!(file, "{pid}").map_err(|e| PumasError::io_with_path(e, &config.pid_file))?;
         {
@@ -963,6 +993,7 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         state.status.state = RuntimeLifecycleState::Stopping;
     }
     session.observer_stop.send_replace(true);
+    session.audio_custody.close_admission();
     #[cfg(target_os = "linux")]
     if let Some(models) = &session.router_models {
         RouterModelState::reject_pending(models);

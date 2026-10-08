@@ -97,8 +97,15 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, ErrorCode> 
                 language,
                 max_output_tokens,
             },
-            _,
+            output,
         ) => {
+            if !matches!(
+                (request.capability, output),
+                (Capability::AudioTranscription, OutputFormat::Text)
+                    | (Capability::AudioClassification, OutputFormat::Labels)
+            ) {
+                return Err(ErrorCode::InvalidRequest);
+            }
             let bytes_per_sample = match encoding {
                 AudioEncoding::PcmS16le => 2,
                 AudioEncoding::PcmF32le => 4,

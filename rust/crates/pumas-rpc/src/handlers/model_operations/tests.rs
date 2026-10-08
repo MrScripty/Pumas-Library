@@ -476,6 +476,43 @@ async fn capabilities_are_selected_semantic_truthful_and_audio_fails_before_wire
     assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
 }
 #[tokio::test]
+async fn audio_output_semantics_are_validated_before_runtime_admission() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (_root, state) = fixture(&endpoint, Some("audio->text")).await;
+    let mut value = request_value();
+    value["input"] = json!({"kind":"audio","encoding":"pcm_s16le","sample_rate_hz":16000,"channels":1,"sample_count":1,"data_base64":"AAA="});
+    value["options"] = json!({"kind":"audio"});
+    for (capability, output, expected) in [
+        (
+            "audio_transcription",
+            "text",
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        (
+            "audio_classification",
+            "labels",
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
+        ("audio_transcription", "labels", StatusCode::BAD_REQUEST),
+        ("audio_classification", "text", StatusCode::BAD_REQUEST),
+        ("audio_transcription", "png_base64", StatusCode::BAD_REQUEST),
+        (
+            "audio_classification",
+            "embeddings_float32",
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        value["capability"] = json!(capability);
+        value["output"] = json!(output);
+        let response = operation(state.clone(), value.clone()).await;
+        assert_eq!(response.status(), expected, "{capability}/{output}");
+        let body = json_body(response).await;
+        assert_eq!(body["error"]["outcome"], "not_admitted");
+    }
+    assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
+}
+#[tokio::test]
 async fn unknown_task_fails_closed_and_exact_profile_resolves_ambiguity() {
     let (_root, state) = fixture("http://127.0.0.1:12345", None).await;
     let caps = json_body(

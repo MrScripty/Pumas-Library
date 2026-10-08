@@ -18,6 +18,13 @@ pub(crate) struct RuntimeTasks {
     owner_refs: Arc<()>,
 }
 
+/// A callback admission capability, not a primary or physical-store owner.
+/// Rejected tasks are never polled; accepted tasks use the existing shared drain.
+pub(crate) struct WeakRuntimeTasks {
+    handle: Handle,
+    inner: Weak<Mutex<OwnerState>>,
+}
+
 struct OwnerState {
     closed: bool,
     next_background_id: u64,
@@ -110,51 +117,25 @@ impl RuntimeTasks {
         self.handle.clone()
     }
 
+    /// Admit callbacks without retaining the primary or its physical store.
+    /// The callback must upgrade its weak primary inside the admitted task.
+    pub(crate) fn downgrade(&self) -> WeakRuntimeTasks {
+        WeakRuntimeTasks {
+            handle: self.handle.clone(),
+            inner: Arc::downgrade(&self.inner),
+        }
+    }
+
     /// Register best-effort background work.
     pub(crate) fn spawn<F>(&self, task: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let mut state = self.inner.lock().expect("runtime task owner poisoned");
-        if state.closed {
-            return;
-        }
-        let background_id = state.next_background_id;
-        state.next_background_id = state
-            .next_background_id
-            .checked_add(1)
-            .expect("runtime background identity exhausted");
-        let (start_tx, start_rx) = oneshot::channel();
         let store_lifetime = self.store_lifetime.clone();
-        let handle = self.handle.spawn(async move {
+        spawn_background(&self.inner, &self.handle, async move {
             let _store_lifetime = store_lifetime;
-            if start_rx.await.is_ok() {
-                AssertUnwindSafe(task).catch_unwind().await
-            } else {
-                Ok(())
-            }
+            task.await;
         });
-        state
-            .background
-            .insert(background_id, handle.abort_handle());
-        let inner = Arc::clone(&self.inner);
-        self.handle.spawn(async move {
-            let result = handle.await;
-            let mut state = inner.lock().expect("runtime task owner poisoned");
-            state.background.remove(&background_id);
-            match result {
-                Ok(Err(payload)) => state.failures.push(format!(
-                    "background runtime task panicked: {}",
-                    panic_message(payload)
-                )),
-                Err(error) if !error.is_cancelled() => state
-                    .failures
-                    .push(format!("background runtime task join failed: {error}")),
-                _ => {}
-            }
-            maybe_finish_drain(&mut state);
-        });
-        let _ = start_tx.send(());
     }
 
     /// Synchronously admit finite work and return its independently owned result.
@@ -392,6 +373,62 @@ impl RuntimeTasks {
             .background
             .len()
     }
+}
+
+impl WeakRuntimeTasks {
+    pub(crate) fn spawn<F>(&self, task: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let Some(inner) = self.inner.upgrade() else {
+            return;
+        };
+        spawn_background(&inner, &self.handle, task);
+    }
+}
+
+fn spawn_background<F>(inner: &Arc<Mutex<OwnerState>>, runtime: &Handle, task: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let mut state = inner.lock().expect("runtime task owner poisoned");
+    if state.closed {
+        return;
+    }
+    let background_id = state.next_background_id;
+    state.next_background_id = state
+        .next_background_id
+        .checked_add(1)
+        .expect("runtime background identity exhausted");
+    let (start_tx, start_rx) = oneshot::channel();
+    let handle = runtime.spawn(async move {
+        if start_rx.await.is_ok() {
+            AssertUnwindSafe(task).catch_unwind().await
+        } else {
+            Ok(())
+        }
+    });
+    state
+        .background
+        .insert(background_id, handle.abort_handle());
+    let inner = Arc::clone(inner);
+    runtime.spawn(async move {
+        let result = handle.await;
+        let mut state = inner.lock().expect("runtime task owner poisoned");
+        state.background.remove(&background_id);
+        match result {
+            Ok(Err(payload)) => state.failures.push(format!(
+                "background runtime task panicked: {}",
+                panic_message(payload)
+            )),
+            Err(error) if !error.is_cancelled() => state
+                .failures
+                .push(format!("background runtime task join failed: {error}")),
+            _ => {}
+        }
+        maybe_finish_drain(&mut state);
+    });
+    let _ = start_tx.send(());
 }
 
 impl RuntimeTaskContext {

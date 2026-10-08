@@ -707,24 +707,40 @@ async fn await_reconciliation(
 pub(crate) fn start_model_library_watcher(
     primary: Arc<PrimaryState>,
 ) -> Result<ModelLibraryWatcher> {
-    // An idle native watcher must not keep a stopped primary/store alive.
-    // Only an admitted callback upgrades and retains the actual owner.
-    let primary_for_watcher = Arc::downgrade(&primary);
-    let library_root = primary.model_library.library_root().to_path_buf();
-
     ModelLibraryWatcher::new(
-        library_root,
+        primary.model_library.library_root(),
         NetworkConfig::FILE_WATCHER_DEBOUNCE,
-        Box::new(move |paths| {
-            let Some(primary) = primary_for_watcher.upgrade() else {
+        model_library_change_callback(
+            &primary,
+            #[cfg(any(test, feature = "test-support"))]
+            None,
+        ),
+    )
+}
+
+pub(crate) fn model_library_change_callback(
+    primary: &Arc<PrimaryState>,
+    #[cfg(any(test, feature = "test-support"))] before_admission: Option<
+        Box<dyn Fn() + Send + Sync>,
+    >,
+) -> crate::model_library::ChangeCallback {
+    // Admission precedes the strong primary upgrade. A native callback rejected
+    // after shutdown cannot extend physical exclusion beyond the API's drop.
+    let runtime_tasks = primary.runtime_tasks.downgrade();
+    let primary_for_watcher = Arc::downgrade(primary);
+    Box::new(move |paths| {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(observer) = &before_admission {
+            observer();
+        }
+        let primary_for_work = primary_for_watcher.clone();
+        runtime_tasks.spawn(async move {
+            let Some(primary) = primary_for_work.upgrade() else {
                 return;
             };
-            let runtime_tasks = primary.runtime_tasks.clone();
-            runtime_tasks.spawn(async move {
-                notify_filesystem_changes(primary, paths).await;
-            });
-        }),
-    )
+            notify_filesystem_changes(primary, paths).await;
+        });
+    })
 }
 
 fn model_id_from_path(library_root: &Path, path: &Path) -> Option<String> {

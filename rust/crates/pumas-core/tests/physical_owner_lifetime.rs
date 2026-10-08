@@ -413,6 +413,44 @@ async fn escaped_runtime_cleanup_ticket_retains_in_process_lifetime() {
 
 #[cfg(feature = "test-support")]
 #[tokio::test]
+async fn rejected_watcher_callback_cannot_retain_physical_owner_after_shutdown() {
+    use std::sync::Mutex;
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("library");
+    let registry = LibraryRegistry::open_at(&temp.path().join("registry.db")).unwrap();
+    let api = owner(&root, registry.clone()).await.unwrap();
+    let (entered, waiting) = tokio::sync::oneshot::channel();
+    let entered = Mutex::new(Some(entered));
+    let (release, released) = std::sync::mpsc::channel();
+    let released = Mutex::new(released);
+    let callback = pumas_library::model_library::test_support::watcher_callback_fixture(
+        &api,
+        Box::new(move || {
+            entered.lock().unwrap().take().unwrap().send(()).unwrap();
+            released.lock().unwrap().recv().unwrap();
+        }),
+    );
+    api.shutdown_instance().await.unwrap();
+    let event = root.join("shared-resources/models/changed.json");
+    let callback_thread = std::thread::spawn(move || callback(vec![event]));
+    tokio::time::timeout(Duration::from_secs(5), waiting)
+        .await
+        .unwrap()
+        .unwrap();
+    drop(api);
+
+    // Keep the rejected native callback paused while opening the successor.
+    // Its mere attempt to enter closed admission cannot retain the old store.
+    let reopened = owner(&root, registry).await;
+    release.send(()).unwrap();
+    callback_thread.join().unwrap();
+    let reopened = reopened.expect("rejected callback must not retain the physical owner");
+    reopened.shutdown_instance().await.unwrap();
+}
+
+#[cfg(feature = "test-support")]
+#[tokio::test]
 async fn shutdown_drains_actual_startup_blocking_readers_before_immediate_reopen() {
     use std::sync::{Arc, Mutex};
 
@@ -463,4 +501,52 @@ async fn shutdown_drains_actual_startup_blocking_readers_before_immediate_reopen
         let reopened = reopened.expect("completed shutdown must permit immediate reopen");
         reopened.shutdown_instance().await.unwrap();
     }
+}
+
+#[cfg(feature = "test-support")]
+#[tokio::test]
+async fn admitted_watcher_callback_updates_index_and_drains_before_reopen() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("library");
+    let registry = LibraryRegistry::open_at(&temp.path().join("registry.db")).unwrap();
+    let api = owner(&root, registry.clone()).await.unwrap();
+    let model_id = "llm/watcher/stale";
+    let missing = api.model_library().library_root().join(model_id);
+    api.model_library()
+        .index()
+        .upsert(&pumas_library::index::ModelRecord {
+            id: model_id.into(),
+            path: missing.to_string_lossy().into_owned(),
+            cleaned_name: "stale".into(),
+            official_name: "Stale".into(),
+            model_type: "llm".into(),
+            tags: Vec::new(),
+            hashes: Default::default(),
+            metadata: serde_json::json!({}),
+            updated_at: "2026-10-08T00:00:00Z".into(),
+        })
+        .unwrap();
+    let mut updates = api.model_library().subscribe_model_library_update_events();
+    let callback =
+        pumas_library::model_library::test_support::watcher_callback_fixture(&api, Box::new(|| {}));
+    // The stale row exists only in SQLite; native watcher DB events are filtered.
+    // This callback must actually run reconciliation to remove it.
+    std::thread::spawn(move || callback(vec![missing]))
+        .join()
+        .unwrap();
+    let update = tokio::time::timeout(Duration::from_secs(5), updates.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(update.model_id, model_id);
+    assert_eq!(
+        update.change_kind,
+        pumas_library::models::ModelLibraryChangeKind::ModelRemoved
+    );
+    assert!(api.model_library().index().get(model_id).unwrap().is_none());
+    api.shutdown_instance().await.unwrap();
+    drop(updates);
+    drop(api);
+    let reopened = owner(&root, registry).await.unwrap();
+    reopened.shutdown_instance().await.unwrap();
 }

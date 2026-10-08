@@ -43,3 +43,6 @@ pub(crate) use reconciliation::{
 };
 pub(crate) use runtime_tasks::{RuntimeTaskContext, RuntimeTasks};
 pub(crate) use state::PrimaryState;
+
+#[cfg(feature = "test-support")]
+pub(crate) use reconciliation::model_library_change_callback;

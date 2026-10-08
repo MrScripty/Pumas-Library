@@ -152,3 +152,12 @@ pub async fn clean_broken_links_dispatch(
     .await?;
     Ok(serde_json::from_value(value)?)
 }
+
+/// Build the real model-watcher callback with a caller-owned admission observer.
+/// The observer is fixture-only and grants no new mutation or recovery authority.
+pub fn watcher_callback_fixture(
+    api: &crate::PumasApi,
+    before_admission: Box<dyn Fn() + Send + Sync>,
+) -> super::ChangeCallback {
+    crate::api::model_library_change_callback(api.primary(), Some(before_admission))
+}

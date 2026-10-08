@@ -798,6 +798,77 @@ class OwnerContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     package.discovery.validate_description(value, self.expected, self.root)
 
+    def test_root_binding_uses_existing_directory_identity(self):
+        equivalent_path = os.path.join(str(self.root), ".")
+        self.assertNotEqual(equivalent_path, str(self.root))
+        self.assertTrue(package.discovery.same_library_root(equivalent_path, self.root))
+        self.description["instance"]["library_root"] = equivalent_path
+        package.discovery.validate_description(self.description, self.expected, self.root)
+
+        other = self.root / "different-directory"
+        other.mkdir()
+        regular_file = self.root / "not-a-directory"
+        regular_file.touch()
+        for observed in (
+            str(other),
+            str(regular_file),
+            str(self.root / "missing"),
+            ".",
+            "",
+            None,
+            "invalid\0path",
+        ):
+            with self.subTest(observed=observed):
+                self.assertFalse(package.discovery.same_library_root(observed, self.root))
+                self.description["instance"]["library_root"] = observed
+                with self.assertRaisesRegex(ValueError, "library owner context"):
+                    package.discovery.validate_description(
+                        self.description, self.expected, self.root
+                    )
+
+    def test_root_binding_refuses_identity_lookup_errors(self):
+        for error in (OSError("unavailable"), ValueError("invalid path")):
+            with self.subTest(error=error), mock.patch.object(Path, "samefile", side_effect=error):
+                self.assertFalse(package.discovery.same_library_root(str(self.root), self.root))
+
+    def test_root_binding_does_not_case_fold_distinct_directories(self):
+        upper, lower = self.root / "CaseSensitiveRoot", self.root / "casesensitiveroot"
+        upper.mkdir()
+        lower.mkdir(exist_ok=True)
+        if upper.samefile(lower):
+            self.skipTest("host filesystem treats these spellings as the same directory")
+        self.assertFalse(package.discovery.same_library_root(str(upper), lower))
+
+    @unittest.skipUnless(os.name == "nt", "requires native Windows filesystem identity")
+    def test_native_windows_extended_length_owner_root(self):
+        # Rust's canonicalize may return this extended-length spelling while
+        # Python resolves the ordinary selected input without that prefix.
+        ordinary = str(self.root.resolve(strict=True))
+        self.assertFalse(
+            ordinary.startswith("\\\\?\\"), "test needs an ordinary temporary-directory spelling"
+        )
+        extended = (
+            "\\\\?\\UNC\\" + ordinary[2:] if ordinary.startswith("\\\\") else "\\\\?\\" + ordinary
+        )
+        self.assertNotEqual(ordinary, extended)
+        self.assertTrue(Path(ordinary).samefile(extended))
+        self.description["instance"]["library_root"] = extended
+        package.discovery.validate_description(self.description, self.expected, Path(ordinary))
+        self.assertTrue(package.discovery.same_library_root(ordinary, Path(extended)))
+
+        different = self.root / "different-native-directory"
+        different.mkdir()
+        with self.assertRaisesRegex(ValueError, "library owner context"):
+            package.discovery.validate_description(self.description, self.expected, different)
+        for field in ("registry_library_id", "generation"):
+            changed = copy.deepcopy(self.description)
+            changed["instance"][field] = ""
+            with (
+                self.subTest(field=field),
+                self.assertRaisesRegex(ValueError, "library owner context"),
+            ):
+                package.discovery.validate_description(changed, self.expected, Path(ordinary))
+
     def test_generic_fixture_projection_is_not_an_owner(self):
         with self.assertRaisesRegex(ValueError, "HttpServiceDescription fields"):
             package.discovery.validate_description(self.expected, self.expected, self.root)

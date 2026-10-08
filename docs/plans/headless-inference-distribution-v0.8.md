@@ -77,6 +77,11 @@ The packaging verifier executes that command from the verified extracted binary,
 validates both pinned build objects and selected root/registry library ID/core
 and HTTP generations, fetches only `/.well-known/pumas` on a numeric loopback
 endpoint without redirects/proxies, then repeats the authenticated observation.
+The selected root is bound to the advertised root using the native filesystem's
+existing directory identity (`samefile`), including Windows ordinary versus
+extended-length canonical spellings. Relative, missing, non-directory or
+unavailable observed paths are refused. No prefix removal or case folding is
+used to guess identity; this check does not retain a physical lifetime lease.
 Any change fails. A matching arbitrary HTTP response without the existing
 Pumas-owned authentication path is insufficient. Library IDs remain registry
 context, not physical-library identities. Consumers must keep model acquisition
@@ -220,7 +225,10 @@ leaves the controlled owner running; refused attach has no startup fallback.
 Early exit, readiness timeout, invalid port, redirects, forced-stop failure and
 observer timeout without stopping a borrowed service are also covered. Neither synthetic runtime bytes nor the C executable are real
 Pumas/ORT evidence. Windows/macOS process and inference evidence is unavailable.
-The Node wrapper is discovered by the existing source release test glob:
+The existing three-platform native QA job also runs `OwnerContractTests`; on
+Windows this executes the ordinary/extended-length root identity regression.
+Linux-only results cannot establish that native Windows check. The Node wrapper
+is discovered by the existing source release test glob:
 
 ```bash
 python3 -m unittest discover -s scripts/release -p test_headless_inference.py -v

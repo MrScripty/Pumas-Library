@@ -191,6 +191,30 @@ def identity(value):
     return isinstance(value, str) and 0 < len(value) <= 128 and not any(ord(c) < 32 for c in value)
 
 
+def same_library_root(observed, selected):
+    """Compare existing directory identity using the native filesystem.
+
+    Rust and Python may spell the same Windows canonical path differently (for
+    example the extended-length prefix). String rewriting or case folding is
+    not identity evidence. samefile uses the platform's device/file identity;
+    this observation retains no directory handle or lifetime lease.
+    """
+    if not isinstance(observed, str) or not observed:
+        return False
+    try:
+        observed_path = Path(observed)
+        selected_path = Path(selected)
+        return (
+            observed_path.is_absolute()
+            and observed_path.is_dir()
+            and selected_path.is_dir()
+            and observed_path.samefile(selected_path)
+        )
+    except (OSError, ValueError):
+        # Unavailable or invalid paths never authorize a different owner.
+        return False
+
+
 def validate_description(description, expected, root, expected_endpoint=None):
     fields(description, SERVICE_FIELDS, "HttpServiceDescription")
     require(
@@ -220,7 +244,7 @@ def validate_description(description, expected, root, expected_endpoint=None):
     require(
         identity(instance["registry_library_id"])
         and identity(instance["generation"])
-        and instance["library_root"] == str(Path(root).resolve(strict=True)),
+        and same_library_root(instance["library_root"], root),
         "missing or changed library owner context",
     )
     protocols = advertisements(instance["protocols"], True)

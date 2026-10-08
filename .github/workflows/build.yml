@@ -204,6 +204,9 @@ jobs:
       - run: python -m pip install -r torch-server/requirements-dev.txt
       - run: python -m ruff check torch-server scripts/release
       - run: python -m ruff format --check torch-server scripts/release
+      - name: Test native headless owner root identity
+        working-directory: scripts/release
+        run: python -m unittest -v test_headless_inference.OwnerContractTests
       # Fixtures validate tags and resolver behavior; the native tests below
       # validate host APIs without claiming GPU inference or model support.
       - run: python -m unittest discover -s torch-server/tests

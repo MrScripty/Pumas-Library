@@ -1,5 +1,7 @@
 //! Native source-facing composition; synthetic sources, no account access.
 #![cfg(feature = "s3")]
+#[path = "support/store_refusal.rs"]
+mod store_refusal;
 use pumas_library::{
     acquisition::{
         AcquisitionPhase, AcquisitionRetryPolicy, AcquisitionWorkspace, S3Addressing,
@@ -92,13 +94,19 @@ impl Drop for Fixture {
     }
 }
 async fn setup_api(root: &Path) -> PumasApi {
-    PumasApi::builder(root)
+    match PumasApi::builder(root)
         .auto_create_dirs(true)
         .with_hf_client(false)
         .with_process_manager(false)
         .build()
         .await
-        .unwrap()
+    {
+        Ok(api) => api,
+        Err(error) => panic!(
+            "original API open failed: {error}; {}",
+            store_refusal::observation(root)
+        ),
+    }
 }
 async fn close(api: &PumasApi) {
     api.shutdown_instance().await.unwrap();

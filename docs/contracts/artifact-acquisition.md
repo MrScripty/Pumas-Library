@@ -244,7 +244,61 @@ is still not an atomic multi-object snapshot or a ready artifact set. Callers
 choose exact logical paths and supply authoritative SHA-256 evidence, then use
 the existing explicit manifest/acquisition/import path. Its VersionId range pins,
 namespace validation, verification, receipts, retry policy and persistence formats
-remain unchanged. There is no new prefix RPC/desktop or automatic import path.
+remain unchanged.
+
+The additive desktop prefix discovery starts (`start_s3_prefix_discovery` and
+`start_authenticated_s3_prefix_discovery`) require an explicit HTTPS origin,
+region, bucket, addressing, raw prefix, operation UUID and 100–30000 ms deadline.
+`get_s3_prefix_discovery` observes that same UUID; lost acknowledgement never
+resubmits source access. `cancel_s3_prefix_discovery` requests cancellation;
+Running remains nonterminal until the existing owned S3 worker finishes. Imports
+and discovery share one bounded worker admission, and shutdown cancels and drains
+it. The facade applies the requested whole-discovery deadline around enumeration;
+the native reader is configured with a bounded one-second margin to prevent its
+transport timeout from racing the typed Deadline result. Credentials use the existing Deserialize-only one-request channel and are
+held only by the transient native reader, never safe observations or persistence.
+
+Discovery reuses core enumeration with page size 16, eight pages, 32 objects,
+64 KiB per-page XML and 256 KiB total XML. Complete alone contains ordered exact
+key/VersionId/opaque-ETag/decimal-u64-size observations and page count, including
+an empty complete listing. Projection additionally bounds ETag to 1024 bytes and
+serialized result to 60 KiB within the existing 64 KiB transport envelope.
+Incomplete (capacity), Deadline, Cancelled and Unavailable expose no partial
+objects; rejected/not-found/idle observations grant no selection. Output schemas
+are closed, including object entries, before privileged IPC forwarding. No
+continuation token, reflected provider error or credential is returned.
+
+The existing import dialog uses a 15-second discovery deadline. Users explicitly
+choose each primary/auxiliary object, enter logical output paths and authoritative
+SHA-256 values, then submit the unchanged single/bundle import commands. ETags and
+listing sizes never stand in for digests. Selected pins are scoped to the exact
+endpoint/region/bucket/addressing and are cleared when it changes. Source query
+changes discard/cancel stale discovery; close/unmount cancels discovery without
+cancelling an existing import. Discovery opens no workspace/acquisition consumer,
+creates no receipt or model, and installs nothing. No automatic import, source
+configuration persistence, core reader policy change or real-provider acceptance
+is implied by this additive RPC/desktop facade.
+
+Desktop retained-transfer retry is explicit and same-process only.
+`get_s3_transfer_retry` reports availability for the observed operation;
+`retry_s3_model_transfer` accepts only that operation UUID and optional fresh
+one-use credentials. It cannot replace the source, key/VersionId/path/digest pin
+set, acquisition identity or import intent. The process must still hold its
+original physical reservation, and both the core operation and outer workspace
+scope must have drained before retry becomes available. A distinct attempt token
+fences late completion even though the operation UUID remains unchanged.
+
+Before source work, retry rechecks the exact durable acquisition record,
+receipt absence, admissible Transferring/FilesReady phase and held root/stage
+identity. Publication or uncertain custody does not authorize retry. Completed
+files are reverified before reuse; partial bytes may restart from zero. Prior
+credentials are discarded and authenticated retries require new inputs. A lost
+acknowledgement causes observation of the same operation, never automatic replay.
+
+`inspect_persisted_s3_imports` is a bounded read-only projection of at most 32
+owned records and recorded publication bindings. It cannot recreate physical
+custody, admit retry, reconcile publication or prove that a model is available.
+Cold retry remains unsupported; restart preserves retained work for inspection.
 
 [AWS GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html) and [Object metadata](https://docs.aws.amazon.com/AmazonS3/latest/API/API_Object.html) provide source semantics. A maintained SDK supplies signing and request mechanics. Pumas owns selected identity, allowed access, acquisition attempts, destination custody and verification.
 

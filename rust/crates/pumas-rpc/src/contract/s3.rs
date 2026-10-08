@@ -26,7 +26,7 @@ pub(crate) struct S3CredentialParams {
     session_token: Option<String>,
 }
 impl S3CredentialParams {
-    fn validate(&self) -> Result<(), PublicError> {
+    pub(super) fn validate(&self) -> Result<(), PublicError> {
         for value in [&self.access_key_id, &self.secret_access_key]
             .into_iter()
             .chain(self.session_token.as_ref())
@@ -366,6 +366,56 @@ pub(crate) struct S3ImportCancelParams {
     )]
     pub operation_id: String,
 }
+/// Explicit same-process retry. Original source/pins/intent are held by the owner.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct S3TransferRetryParams {
+    #[cfg_attr(
+        feature = "export-contract",
+        schemars(regex(
+            pattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        ))
+    )]
+    pub operation_id: String,
+    pub credentials: Option<S3CredentialParams>,
+}
+impl S3TransferRetryParams {
+    pub(crate) fn validate(&self) -> Result<(), PublicError> {
+        validate_s3_id(&self.operation_id)?;
+        if let Some(credentials) = &self.credentials {
+            credentials.validate()?;
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum S3TransferRetryState {
+    Ready {
+        #[cfg_attr(
+            feature = "export-contract",
+            schemars(regex(
+                pattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            ))
+        )]
+        operation_id: String,
+        authentication_required: bool,
+    },
+    Unavailable {
+        reason: S3TransferRetryReason,
+    },
+}
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum S3TransferRetryReason {
+    NoLiveCustody,
+    Busy,
+    NotRetryable,
+}
+
 fn valid_id(id: &str) -> bool {
     id.len() == 36
         && id.bytes().enumerate().all(|(i, c)| {
@@ -536,6 +586,44 @@ mod tests {
                 .unwrap(),
         )
     }
+    #[test]
+    fn retry_wire_never_admits_replacement_pins_or_credentials_on_status() {
+        assert!(decode("get_s3_transfer_retry", json!({"operation_id":ID})).is_ok());
+        assert!(decode(
+            "retry_s3_model_transfer",
+            json!({"operation_id":ID,"credentials":null})
+        )
+        .is_ok());
+        for key in [
+            "source",
+            "endpoint",
+            "region",
+            "bucket",
+            "addressing",
+            "key",
+            "version_id",
+            "sha256",
+            "files",
+            "family",
+            "stage",
+        ] {
+            let input = json!({"operation_id":ID,"credentials":null,key:"altered"});
+            assert_eq!(
+                decode("retry_s3_model_transfer", input)
+                    .err()
+                    .unwrap()
+                    .error
+                    .code,
+                -32602
+            );
+        }
+        assert!(decode(
+            "get_s3_transfer_retry",
+            json!({"operation_id":ID,"credentials":{}})
+        )
+        .is_err());
+    }
+
     #[test]
     fn source_commands_are_closed_and_reject_secrets_bad_pins_and_origins() {
         assert!(matches!(

@@ -13,6 +13,7 @@ use pumas_library::{
     OpenAiGatewayEndpoint,
 };
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, warn};
 
 pub(crate) async fn handle_onnx_embedding(
@@ -21,6 +22,7 @@ pub(crate) async fn handle_onnx_embedding(
     requested_model: &str,
     endpoint: OpenAiGatewayEndpoint,
     body: Value,
+    admission: Option<&AtomicBool>,
 ) -> Response {
     if endpoint != OpenAiGatewayEndpoint::Embeddings {
         return openai_error_response_with_code(
@@ -44,6 +46,9 @@ pub(crate) async fn handle_onnx_embedding(
         "routing ONNX embedding request through in-process session manager"
     );
 
+    if let Some(marker) = admission {
+        marker.store(true, Ordering::Release);
+    }
     match state.onnx_session_manager.embed(request).await {
         Ok(response) => Json(openai_embedding_response(response, requested_model)).into_response(),
         Err(error) => {

@@ -1,8 +1,12 @@
 //! JSON-RPC request handlers, split by domain.
 
 mod conversion;
+#[cfg(feature = "inference-plugins")]
+mod gateway_stream;
 mod intent;
 mod links;
+#[cfg(feature = "inference-plugins")]
+mod model_operations;
 mod models;
 #[cfg(feature = "inference-plugins")]
 mod ollama;
@@ -75,6 +79,8 @@ use tracing::{debug, error, warn};
 
 const MODEL_LIBRARY_UPDATE_STREAM_LIMIT: usize = 250;
 
+#[cfg(feature = "inference-plugins")]
+pub use model_operations::{handle_capabilities, handle_model_operations};
 #[cfg(feature = "inference-plugins")]
 pub use openai_gateway::{handle_openai_models, handle_openai_proxy};
 
@@ -523,6 +529,70 @@ async fn dispatch_admitted_command(
     command: RpcCommand,
 ) -> Result<RpcOutcome, RpcDispatchError> {
     let result: pumas_library::Result<RpcOutcome> = match command {
+        RpcCommand::StartS3PrefixDiscovery { request } => {
+            #[cfg(feature = "s3")]
+            {
+                state
+                    .s3_imports
+                    .start_discovery(request, None)
+                    .map(RpcOutcome::S3Discovery)
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                let _ = request;
+                Ok(RpcOutcome::S3Discovery(
+                    crate::contract::S3DiscoveryOutcome::Unavailable,
+                ))
+            }
+        }
+        RpcCommand::StartAuthenticatedS3PrefixDiscovery { request } => {
+            #[cfg(feature = "s3")]
+            {
+                state
+                    .s3_imports
+                    .start_discovery(request.source, Some(request.credentials))
+                    .map(RpcOutcome::S3Discovery)
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                let _ = request;
+                Ok(RpcOutcome::S3Discovery(
+                    crate::contract::S3DiscoveryOutcome::Unavailable,
+                ))
+            }
+        }
+        RpcCommand::GetS3PrefixDiscovery { operation_id } => {
+            #[cfg(feature = "s3")]
+            {
+                state
+                    .s3_imports
+                    .discovery_snapshot(operation_id.as_deref())
+                    .map(RpcOutcome::S3Discovery)
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                let _ = operation_id;
+                Ok(RpcOutcome::S3Discovery(
+                    crate::contract::S3DiscoveryOutcome::Unavailable,
+                ))
+            }
+        }
+        RpcCommand::CancelS3PrefixDiscovery { operation_id } => {
+            #[cfg(feature = "s3")]
+            {
+                state
+                    .s3_imports
+                    .cancel_discovery(&operation_id)
+                    .map(RpcOutcome::S3Discovery)
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                let _ = operation_id;
+                Ok(RpcOutcome::S3Discovery(
+                    crate::contract::S3DiscoveryOutcome::Unavailable,
+                ))
+            }
+        }
         RpcCommand::StartS3ModelBundleImport { request } => {
             #[cfg(feature = "s3")]
             {
@@ -600,6 +670,55 @@ async fn dispatch_admitted_command(
                 let _ = request;
                 Ok(RpcOutcome::S3Import(
                     crate::contract::S3ImportOutcome::Unavailable,
+                ))
+            }
+        }
+        RpcCommand::GetS3TransferRetry { operation_id } => {
+            #[cfg(feature = "s3")]
+            {
+                state
+                    .s3_imports
+                    .retry_state(operation_id.as_deref())
+                    .map(RpcOutcome::S3TransferRetry)
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                let _ = operation_id;
+                Ok(RpcOutcome::S3TransferRetry(
+                    crate::contract::S3TransferRetryState::Unavailable {
+                        reason: crate::contract::S3TransferRetryReason::NoLiveCustody,
+                    },
+                ))
+            }
+        }
+        RpcCommand::RetryS3ModelTransfer { request } => {
+            #[cfg(feature = "s3")]
+            {
+                state.s3_imports.retry(request).map(RpcOutcome::S3Import)
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                let _ = request;
+                Ok(RpcOutcome::S3Import(
+                    crate::contract::S3ImportOutcome::Unavailable,
+                ))
+            }
+        }
+        RpcCommand::InspectPersistedS3Imports => {
+            #[cfg(feature = "s3")]
+            {
+                let value = state.api.inspect_persisted_s3_imports().await;
+                Ok(RpcOutcome::S3PersistedImports(
+                    serde_json::from_value(
+                        serde_json::to_value(value).map_err(pumas_library::PumasError::from)?,
+                    )
+                    .map_err(pumas_library::PumasError::from)?,
+                ))
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                Ok(RpcOutcome::S3PersistedImports(
+                    crate::contract::S3PersistedImportsWire::Unavailable,
                 ))
             }
         }
@@ -1158,7 +1277,12 @@ async fn source_commands_report_unavailable_without_s3_feature() {
         observed,
         serde_json::json!({"outcome":{"status":"unavailable"},"bundle_progress":null})
     );
+    let discovery = serde_json::json!({"operation_id":id,"endpoint":"https://source.invalid","region":"fixture-region","bucket":"fixture-bucket","addressing":"path","prefix":"models/","timeout_ms":1000});
     for command in [
+        RpcCommand::StartS3PrefixDiscovery { request: serde_json::from_value(discovery.clone()).unwrap() },
+        RpcCommand::StartAuthenticatedS3PrefixDiscovery { request: serde_json::from_value(serde_json::json!({"source":discovery,"credentials":{"access_key_id":"synthetic-disabled-key","secret_access_key":"synthetic-disabled-secret","session_token":null}})).unwrap() },
+        RpcCommand::GetS3PrefixDiscovery { operation_id: Some(id.into()) },
+        RpcCommand::CancelS3PrefixDiscovery { operation_id: id.into() },
         RpcCommand::StartS3ModelBundleImport {request:serde_json::from_value(bundle.clone()).unwrap()},
         RpcCommand::StartAuthenticatedS3ModelBundleImport {request:serde_json::from_value(serde_json::json!({"source":bundle,"credentials":{"access_key_id":"synthetic-disabled-key","secret_access_key":"synthetic-disabled-secret"}})).unwrap()},
 

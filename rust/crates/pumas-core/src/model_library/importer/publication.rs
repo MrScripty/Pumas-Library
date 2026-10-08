@@ -84,6 +84,136 @@ pub(crate) fn read_held_canonical_import_metadata(
     Ok(Some(metadata))
 }
 
+#[cfg(feature = "s3")]
+fn inspection_document<T: serde::de::DeserializeOwned>(
+    destination: &DownloadRecoveryDestination,
+    filename: &str,
+    budget: &mut u64,
+) -> Result<T> {
+    let file = destination.open_import_file(filename)?;
+    let limit = (*budget).min(64 * 1024);
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(PumasError::Validation {
+            field: EVIDENCE_SIZE_FIELD.into(),
+            message: "Persisted publication observation exceeds its capacity".into(),
+        });
+    }
+    *budget -= bytes.len() as u64;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+/// Exact recorded binding only; no readiness, acknowledgment or settlement.
+#[cfg(feature = "s3")]
+pub(in crate::model_library) fn inspect_acquired_bindings(
+    library: &ModelLibrary,
+    acquisitions: &BTreeMap<uuid::Uuid, crate::acquisition::AcquisitionConsumerReceipt>,
+) -> Result<BTreeMap<uuid::Uuid, crate::S3RecordedModelBinding>> {
+    let candidates = library.index().publication_inspection_candidates()?;
+    let root = crate::model_library::DownloadDestinationRoot::open_import_read_only(
+        library.library_root(),
+    )?;
+    let mut bindings = BTreeMap::new();
+    let mut budget = 1024 * 1024;
+    for (model_id, indexed_path) in &candidates {
+        let model_path = Path::new(model_id);
+        if model_id.is_empty()
+            || !model_path
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_)))
+        {
+            continue;
+        }
+        let path = library.library_root().join(model_path);
+        if Path::new(indexed_path) != model_path && Path::new(indexed_path) != path {
+            continue;
+        }
+        let observed = (|| -> Result<Option<(uuid::Uuid, crate::S3RecordedModelBinding)>> {
+            let destination = root.resolve(&path)?;
+            let receipt: PublicationReceipt =
+                inspection_document(&destination, RECEIPT_FILENAME, &mut budget)?;
+            let Some(acquisition) = receipt.acquisition.as_ref() else {
+                return Ok(None);
+            };
+            let id = uuid::Uuid::parse_str(&acquisition.acquisition_id)
+                .map_err(|_| PumasError::Other("Invalid recorded acquisition identity".into()))?;
+            if acquisitions.get(&id) != Some(acquisition) {
+                return Ok(None);
+            }
+            let metadata: ModelMetadata =
+                inspection_document(&destination, "metadata.json", &mut budget)?;
+            let Some(identity) = metadata.import_publication.as_ref() else {
+                return Ok(None);
+            };
+            let publication = uuid::Uuid::parse_str(&receipt.id)
+                .map_err(|_| PumasError::Other("Invalid recorded publication identity".into()))?;
+            let payload_matches = match acquisition.verified_files.as_slice() {
+                [file] => receipt
+                    .payload
+                    .matches_single_file(file.bytes, &file.sha256),
+                files if !files.is_empty() => receipt.payload.matches_file_set(
+                    files
+                        .iter()
+                        .map(|file| (file.path.as_str(), file.bytes, file.sha256.as_str())),
+                ),
+                _ => false,
+            };
+            if receipt.version != 2
+                || receipt.model_id != *model_id
+                || metadata.model_id.as_deref() != Some(model_id)
+                || identity.version != 1
+                || identity.id != receipt.id
+                || publication.to_string() != receipt.id
+                || !payload_matches
+                || !destination.import_payload_root_matches(&receipt.payload)?
+                || inspection_document::<PublicationReceipt>(
+                    &destination,
+                    RECEIPT_FILENAME,
+                    &mut budget,
+                )? != receipt
+                || serde_json::to_value(inspection_document::<ModelMetadata>(
+                    &destination,
+                    "metadata.json",
+                    &mut budget,
+                )?)? != serde_json::to_value(&metadata)?
+            {
+                return Ok(None);
+            }
+            Ok(Some((
+                id,
+                crate::S3RecordedModelBinding {
+                    model_id: model_id.clone(),
+                    publication_id: receipt.id,
+                    publication_state: match receipt.state {
+                        ReceiptState::Pending => crate::S3RecordedPublicationState::Pending,
+                        ReceiptState::Confirmed => crate::S3RecordedPublicationState::Confirmed,
+                    },
+                },
+            )))
+        })();
+        match observed {
+            Ok(Some((id, binding))) => {
+                if bindings.insert(id, binding).is_some() {
+                    return Err(PumasError::Other(
+                        "Recorded model binding is ambiguous".into(),
+                    ));
+                }
+            }
+            Err(PumasError::Validation { field, message }) if field == EVIDENCE_SIZE_FIELD => {
+                return Err(PumasError::Validation { field, message })
+            }
+            _ => {} // Missing, mutated or foreign output cannot establish a binding.
+        }
+    }
+    if library.index().publication_inspection_candidates()? != candidates {
+        return Err(PumasError::Other(
+            "Recorded model candidates changed".into(),
+        ));
+    }
+    Ok(bindings)
+}
+
 /// Public indexed/cache consumers share this bounded observation. The SQLite
 /// snapshot is necessary but cannot replace a missing canonical primary record.
 /// It deliberately does not traverse payloads or hash model files per query.

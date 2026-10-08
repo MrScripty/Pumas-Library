@@ -279,6 +279,28 @@ mod uuid_value_map {
 }
 
 impl AcquisitionStore {
+    /// One validated canonical image, without lock-file creation or custody.
+    #[cfg(feature = "s3")]
+    pub(crate) fn inspection_snapshot(&self) -> Result<(Vec<u8>, AcquisitionDocument)> {
+        let _guard = self
+            .mutation
+            .lock()
+            .map_err(|_| PumasError::Other("Acquisition store lock is poisoned".into()))?;
+        let target = AtomicJsonTarget::open(&self.path)?;
+        let Some((bytes, value)) = target.read_downloads_observation(1024 * 1024)? else {
+            return Ok((Vec::new(), AcquisitionDocument::empty()));
+        };
+        let document: AcquisitionDocument = serde_json::from_value(value)?;
+        document.validate()?;
+        if document.acquisitions.len() > 128 {
+            return Err(PumasError::Validation {
+                field: "s3.inspection.capacity".into(),
+                message: "Persisted observation exceeds its capacity".into(),
+            });
+        }
+        Ok((bytes, document))
+    }
+
     pub fn new(data_dir: &Path) -> Self {
         Self::new_with_store_lifetime(data_dir, Default::default())
     }

@@ -2,7 +2,29 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
+import { mkdtemp, mkdir, symlink, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { schemaType, generate } from './generate-desktop-contract.mjs';
+
+test('bundled runtime helpers are identical across symlinked dependency workspaces', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'pumas-contract-workspace-'));
+  try {
+    await mkdir(join(workspace, 'node_modules'));
+    await symlink(fileURLToPath(new URL('../node_modules/ajv', import.meta.url)), join(workspace, 'node_modules/ajv'), 'dir');
+    const contract = {format:'pumas-desktop-contract-1',dialect:'http://json-schema.org/draft-07/schema#',
+      schemas:{Text:{type:'string',minLength:1},Items:{type:'array',uniqueItems:true,items:{type:'object'}}}};
+    const expected = await generate(contract);
+    const relocated = await generate(contract, {runtimeRoot:workspace});
+    assert.deepEqual(relocated, expected);
+    assert.ok(!expected['desktop-contract.validators.js'].includes(workspace));
+    assert.ok(!expected['desktop-contract.validators.js'].includes('node_modules/'));
+    const validators = await import(`data:text/javascript;base64,${Buffer.from(relocated['desktop-contract.validators.js']).toString('base64')}`);
+    assert.equal(validators.validateText(''), false);
+    assert.equal(validators.validateItems([{a:1},{a:1}]), false);
+    assert.equal(validators.validateItems([{a:1},{a:2}]), true);
+  } finally { await rm(workspace, {recursive:true,force:true}); }
+});
 
 test('generated contract is independent of the invocation working directory', () => {
   const generator = new URL('./generate-desktop-contract.mjs', import.meta.url).href;

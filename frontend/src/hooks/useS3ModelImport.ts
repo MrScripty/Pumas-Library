@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { importAPI } from '../api/import';
-import { decodeS3BundleImportParams, decodeS3AuthenticatedBundleImportParams, type S3PinnedFileParams, type S3BundleProgressWire, decodeS3ImportParams, decodeS3AuthenticatedImportParams, type S3CredentialParams, type S3ImportOutcome, type S3ImportParams } from '../generated/desktop-contract';
+import { decodeS3TransferRetryParams, decodeS3BundleImportParams, decodeS3AuthenticatedBundleImportParams, type S3PinnedFileParams, type S3BundleProgressWire, decodeS3ImportParams, decodeS3AuthenticatedImportParams, type S3CredentialParams, type S3ImportOutcome, type S3ImportParams } from '../generated/desktop-contract';
 
 type Observation = { id?: string; token: object };
 export type S3ImportDraft = Record<keyof Omit<S3ImportParams, 'operation_id'>, string>;
@@ -145,6 +145,31 @@ export function useS3ModelImport(onImported?: () => void, bundleObservation = fa
     }
   };
 
+  const retry = async (credentials?: S3CredentialParams) => {
+    if (busy.current || snapshot?.status !== 'finished' || snapshot.result.status === 'completed') return;
+    const id = snapshot.operation_id;
+    const decoded = decodeS3TransferRetryParams({operation_id:id,credentials:credentials ?? null});
+    if (decoded.status !== 'valid') { setError('Enter fresh valid credentials for this retry. The inputs were cleared.'); return; }
+    const token = {}; busy.current = true; owner.current = token; query.current = id;
+    setCommandBusy(true); setObservation(null); setError(null); setBundleProgress(null);
+    try {
+      const value = await importAPI.retryS3ModelTransfer(decoded.value);
+      if (!mounted.current || owner.current !== token) return;
+      if ((value.status === 'running' || value.status === 'finished') && value.operation_id === id) {
+        apply(token,value);
+        if (value.status === 'running') setObservation({id,token});
+      } else {
+        setError('Retry was refused or its result is uncertain. Observing the original operation without resubmitting.');
+        setObservation({id,token});
+      }
+    } catch {
+      if (mounted.current && owner.current === token) {
+        setError('Retry acknowledgement is unavailable. Observing the same operation without resubmitting.');
+        setObservation({id,token});
+      }
+    } finally { busy.current = false; if (mounted.current && owner.current === token) setCommandBusy(false); }
+  };
+
   const cancel = async () => {
     if (busy.current || snapshot?.status !== 'running') return;
     const token = {};
@@ -192,5 +217,5 @@ export function useS3ModelImport(onImported?: () => void, bundleObservation = fa
   return { snapshot, bundleProgress,
     startBundle: (draft: S3ImportDraft, auxiliaries: readonly S3PinnedFileParams[], credentials?: S3CredentialParams) => startRequest(draft, credentials, auxiliaries), error, commandBusy, start: (draft: S3ImportDraft) => startRequest(draft),
     startAuthenticated: (draft: S3ImportDraft, credentials: S3CredentialParams) => startRequest(draft, credentials),
-    cancel, observeAgain };
+    retry, cancel, observeAgain };
 }

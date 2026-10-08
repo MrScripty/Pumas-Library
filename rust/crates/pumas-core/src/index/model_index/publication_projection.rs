@@ -22,6 +22,44 @@ pub(crate) fn has_publication(record: &ModelRecord) -> bool {
 }
 
 impl ModelIndex {
+    /// Bounded identity candidates only; no metadata projection or index write.
+    #[cfg(feature = "s3")]
+    pub(crate) fn publication_inspection_candidates(&self) -> Result<Vec<(String, String)>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".into(),
+            source: None,
+        })?;
+        // Count non-null publication claims, not unrelated library models.
+        // Keep malformed non-null claims in the candidate set. json_type also
+        // accepts JSON5, so retain strictly invalid JSON for explicit refusal
+        // within this same read snapshot rather than silently filtering it out.
+        let mut statement = conn.prepare(
+            "SELECT id, path, length(CAST(id AS BLOB)), length(CAST(path AS BLOB)),
+                    json_valid(metadata_json) FROM models
+             WHERE CASE WHEN json_valid(metadata_json)
+                        THEN json_type(metadata_json, '$.import_publication') != 'null'
+                        ELSE 1 END
+             ORDER BY id LIMIT 129",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut result = Vec::new();
+        while let Some(row) = rows.next()? {
+            if !row.get::<_, bool>(4)? {
+                return Err(PumasError::Other(
+                    "Indexed publication metadata is not valid JSON".into(),
+                ));
+            }
+            if result.len() == 128 || row.get::<_, i64>(2)? > 1024 || row.get::<_, i64>(3)? > 4096 {
+                return Err(PumasError::Validation {
+                    field: "s3.inspection.capacity".into(),
+                    message: "Publication observation exceeds its capacity".into(),
+                });
+            }
+            result.push((row.get(0)?, row.get(1)?));
+        }
+        Ok(result)
+    }
+
     pub(crate) fn import_publication_owner(
         &self,
         publication_id: &str,
@@ -159,6 +197,118 @@ impl ModelIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(feature = "s3")]
+    fn publication_inspection_filters_absent_and_null_claims_before_the_bound() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = ModelIndex::new(temp.path().join("models.db")).unwrap();
+        for count in 0..256 {
+            let mut unrelated = record(false);
+            unrelated.id = format!("aaa/unrelated/{count:03}");
+            unrelated.path = unrelated.id.clone();
+            unrelated.metadata = if count % 2 == 0 {
+                serde_json::json!({})
+            } else {
+                serde_json::json!({"import_publication": null})
+            };
+            index.upsert(&unrelated).unwrap();
+        }
+        let mut expected = Vec::new();
+        // A malformed non-null claim must still face canonical receipt checks.
+        for (count, claim) in [
+            serde_json::json!({}),
+            serde_json::json!(false),
+            serde_json::json!("bad"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut candidate = record(false);
+            candidate.id = format!("zzz/publication/{count}");
+            candidate.path = candidate.id.clone();
+            candidate.metadata["import_publication"] = claim;
+            index.upsert(&candidate).unwrap();
+            expected.push((candidate.id, candidate.path));
+        }
+        let before: i64 = index
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT total_changes()", [], |row| row.get(0))
+            .unwrap();
+        let mut events = index.subscribe_model_library_update_events();
+        assert_eq!(index.publication_inspection_candidates().unwrap(), expected);
+        assert_eq!(index.publication_inspection_candidates().unwrap(), expected);
+        assert!(events.try_recv().is_err());
+        let after: i64 = index
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT total_changes()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(before, after, "inspection must not mutate the index");
+    }
+
+    #[test]
+    #[cfg(feature = "s3")]
+    fn publication_inspection_keeps_claim_capacity_identity_and_json_refusals() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = ModelIndex::new(temp.path().join("models.db")).unwrap();
+        for count in 0..128 {
+            let mut candidate = record(false);
+            candidate.id = format!("publication/{count:03}");
+            candidate.path = candidate.id.clone();
+            index.upsert(&candidate).unwrap();
+        }
+        assert_eq!(
+            index.publication_inspection_candidates().unwrap().len(),
+            128
+        );
+        let extra = record(false);
+        index.upsert(&extra).unwrap();
+        assert!(
+            matches!(index.publication_inspection_candidates(), Err(PumasError::Validation { field, .. }) if field == "s3.inspection.capacity")
+        );
+        index.delete(&extra.id).unwrap();
+        let mut oversized = index.get("publication/000").unwrap().unwrap();
+        oversized.path = "é".repeat(2049);
+        index.upsert(&oversized).unwrap();
+        assert!(
+            matches!(index.publication_inspection_candidates(), Err(PumasError::Validation { field, .. }) if field == "s3.inspection.capacity")
+        );
+        oversized.path = oversized.id.clone();
+        index.upsert(&oversized).unwrap();
+        index.delete("publication/127").unwrap();
+        let mut oversized_id = record(false);
+        oversized_id.id = "é".repeat(513);
+        index.upsert(&oversized_id).unwrap();
+        assert!(
+            matches!(index.publication_inspection_candidates(), Err(PumasError::Validation { field, .. }) if field == "s3.inspection.capacity")
+        );
+        index.delete(&oversized_id.id).unwrap();
+        // The FTS triggers reject broken JSON outright, but SQLite accepts
+        // JSON5 and can normalize these invalid strict-JSON claims to null.
+        for invalid in [
+            r#"{"import_publication":NaN}"#,
+            r#"{"import_publication":null,}"#,
+            "{import_publication:null}",
+        ] {
+            index
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE models SET metadata_json = ?1 WHERE id = ?2",
+                    params![invalid, oversized.id],
+                )
+                .unwrap();
+            assert!(
+                index.publication_inspection_candidates().is_err(),
+                "{invalid}"
+            );
+        }
+    }
+
     fn record(ready: bool) -> ModelRecord {
         ModelRecord {
             id: "vision/test/model".into(),

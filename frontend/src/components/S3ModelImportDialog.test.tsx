@@ -65,7 +65,7 @@ describe('S3 import dialog content and commands (DOM fixture)', () => {
     hook.snapshot = { status: 'finished', operation_id: 'fixture-id', result: { status: 'cancelled', retained_work: true } };
     const view = render(<S3ModelImportDialog onClose={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Import pinned object' })).toBeDisabled();
-    expect(screen.getByText(/Reconcile retained work/)).toBeInTheDocument();
+    expect(screen.getByText(/other retained work requires reconciliation/)).toBeInTheDocument();
     hook.snapshot = { status: 'unavailable' };
     view.rerender(<S3ModelImportDialog onClose={vi.fn()} />);
     expect(screen.getByText(/backend built with the S3 feature/)).toBeInTheDocument();

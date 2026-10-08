@@ -1,14 +1,14 @@
 //! HTTP server implementation using Axum.
 
 use crate::catalog_projection::CatalogProjection;
+#[cfg(feature = "inference-plugins")]
+use crate::handlers::{
+    handle_capabilities, handle_model_operations, handle_openai_models, handle_openai_proxy,
+    handle_runtime_profile_update_events, handle_serving_status_update_events,
+};
 use crate::handlers::{
     handle_health, handle_model_download_update_events, handle_model_library_update_events,
     handle_rpc, handle_status_telemetry_update_events,
-};
-#[cfg(feature = "inference-plugins")]
-use crate::handlers::{
-    handle_openai_models, handle_openai_proxy, handle_runtime_profile_update_events,
-    handle_serving_status_update_events,
 };
 use crate::http_admission::{enforce_local_request, is_allowed_origin};
 #[cfg(feature = "inference-plugins")]
@@ -379,6 +379,8 @@ pub async fn start_server(
             "/events/serving-status-updates",
             get(handle_serving_status_update_events),
         )
+        .route("/v1/capabilities", get(handle_capabilities))
+        .route("/v1/model-operations", post(handle_model_operations))
         .route("/v1/models", get(handle_openai_models))
         .route("/v1/chat/completions", post(handle_openai_proxy))
         .route("/v1/completions", post(handle_openai_proxy))

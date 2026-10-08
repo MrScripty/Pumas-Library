@@ -1091,6 +1091,7 @@ impl ModelLibrary {
         } else if let Some(metadata) = metadata.as_ref() {
             resolve_local_model_type_with_persisted_hints(
                 self.index(),
+                self.library_root(),
                 &model_dir,
                 metadata,
                 file_type_info.as_ref(),
@@ -1105,6 +1106,7 @@ impl ModelLibrary {
                     None,
                 )?,
                 &model_dir,
+                self.library_root(),
                 file_type_info.as_ref(),
             )
         };

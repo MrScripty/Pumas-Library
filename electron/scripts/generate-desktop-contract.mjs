@@ -3,6 +3,7 @@ import { fileURLToPath, URL } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import Ajv from 'ajv';
 import standaloneCode from 'ajv/dist/standalone/index.js';
 import { _ } from 'ajv/dist/compile/codegen/index.js';
@@ -113,7 +114,7 @@ export function schemaType(schema) {
   }
 }
 
-export async function generate(contract) {
+export async function generate(contract, { runtimeRoot = resolve(root, 'electron') } = {}) {
   if (contract.format !== 'pumas-desktop-contract-1' || contract.dialect !== 'http://json-schema.org/draft-07/schema#') throw new Error('Unsupported contract format/dialect');
   const ajv = new Ajv({strict: true, strictTypes: false, validateFormats: false, code: {source: true, esm: true}, allErrors: false});
   addWireRefinements(ajv);
@@ -131,7 +132,27 @@ export async function generate(contract) {
     ajv.addSchema(schema, name);
     exports[`validate${name}`] = name;
   }
-  const compiled = await build({absWorkingDir:root, stdin:{contents:standaloneCode(ajv, exports), resolveDir:resolve(root,'electron'), sourcefile:'desktop-contract.validators.js'}, bundle:true, platform:'browser', format:'esm', write:false, target:'es2022'});
+  // Give bundled AJV helpers stable virtual names. Physical package locations
+  // may point into another worktree or a package-manager store through symlinks.
+  // Neither those paths nor the invocation directory belong in checked-in output.
+  const runtimeRequire = createRequire(resolve(runtimeRoot, 'package.json'));
+  const runtimePlugin = {
+    name: 'portable-contract-runtime',
+    setup(builder) {
+      builder.onResolve({filter: /^ajv\/dist\/runtime\//}, args => ({
+        path: args.path, namespace: 'contract-runtime',
+        pluginData: {filename: runtimeRequire.resolve(args.path)},
+      }));
+      builder.onResolve({filter: /.*/, namespace: 'contract-runtime'}, args => ({
+        path: args.path, namespace: 'contract-runtime',
+        pluginData: {filename: createRequire(args.pluginData.filename).resolve(args.path)},
+      }));
+      builder.onLoad({filter: /.*/, namespace: 'contract-runtime'}, async args => ({
+        contents: await readFile(args.pluginData.filename, 'utf8'), loader: 'js', pluginData: args.pluginData,
+      }));
+    },
+  };
+  const compiled = await build({absWorkingDir:root, stdin:{contents:standaloneCode(ajv, exports), resolveDir:resolve(root,'electron'), sourcefile:'desktop-contract.validators.js'}, plugins:[runtimePlugin], bundle:true, platform:'browser', format:'esm', write:false, target:'es2022'});
   const hash = createHash('sha256').update(JSON.stringify(contract)).digest('hex');
   const banner = `// Generated from pumas-rpc contract.rs; SHA256 ${hash}. DO NOT EDIT.\n`;
   const names = Object.keys(contract.schemas).sort();

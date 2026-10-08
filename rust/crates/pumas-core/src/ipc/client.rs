@@ -5,8 +5,8 @@
 //!
 //! # Thread Safety
 //!
-//! The client uses a tokio `Mutex` to serialize access to the TCP stream,
-//! allowing safe concurrent use from multiple async tasks.
+//! A client-owned worker serializes exchanges and retains the TCP stream when
+//! a caller stops waiting. Queued calls whose callers disappear are skipped.
 
 use super::protocol::{read_frame, write_frame, IpcRequest, IpcResponse, LocalIpcOperation};
 #[cfg(test)]
@@ -15,14 +15,17 @@ use crate::config::RegistryConfig;
 use crate::{PumasError, Result};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use tracing::debug;
 
 /// IPC client that connects to a primary instance's server.
 #[derive(Debug)]
 pub(crate) struct IpcClient {
-    stream: Mutex<TcpStream>,
+    exchanges: mpsc::Sender<Exchange>,
+    worker: JoinHandle<()>,
     #[cfg(test)]
     addr: SocketAddr,
     next_id: AtomicU64,
@@ -30,6 +33,21 @@ pub(crate) struct IpcClient {
     pub primary_pid: u32,
     /// Port of the primary instance (for error reporting).
     pub primary_port: u16,
+}
+
+#[derive(Debug)]
+struct Exchange {
+    id: u64,
+    bytes: Vec<u8>,
+    reply: oneshot::Sender<Result<serde_json::Value>>,
+}
+
+impl Drop for IpcClient {
+    fn drop(&mut self) {
+        // Final-owner disposal requests socket closure, not server cancellation.
+        // Drop cannot await the worker; its stream closes when abort is polled.
+        self.worker.abort();
+    }
 }
 
 impl IpcClient {
@@ -53,20 +71,36 @@ impl IpcClient {
 
         debug!("IPC client connected to {} (PID {})", addr, pid);
 
-        Ok(Self {
-            stream: Mutex::new(stream),
+        Ok(Self::from_stream(stream, addr, pid))
+    }
+
+    fn from_stream<S>(stream: S, addr: SocketAddr, pid: u32) -> Self
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
+        // One queued exchange; further callers wait in cancellation-safe send.
+        let (exchanges, receiver) = mpsc::channel(1);
+        let worker = tokio::spawn(run_exchanges(stream, receiver, pid, addr.port()));
+        Self {
+            exchanges,
+            worker,
             #[cfg(test)]
             addr,
             next_id: AtomicU64::new(1),
             primary_pid: pid,
             primary_port: addr.port(),
-        })
+        }
     }
 
     /// Call a JSON-RPC method on the primary instance.
     ///
     /// Returns the result value on success, or a `PumasError` on failure.
     /// If the connection is broken, returns `SharedInstanceLost`.
+    ///
+    /// Dropping this future skips a queued call. Once admitted, the client owns
+    /// the full exchange until the original reply is drained and validated.
+    /// A silent peer can retain that custody indefinitely; there is no read
+    /// timeout or automatic replay of an uncertain operation.
     pub(crate) async fn call(
         &self,
         operation: LocalIpcOperation,
@@ -76,32 +110,23 @@ impl IpcClient {
         let request = IpcRequest::new(operation, params, id);
         let request_bytes = serde_json::to_vec(&request)?;
 
-        let mut stream = self.stream.lock().await;
-        let (mut reader, mut writer) = stream.split();
-
-        // Send request
-        write_frame(&mut writer, &request_bytes)
+        let (reply, result) = oneshot::channel();
+        self.exchanges
+            .send(Exchange {
+                id,
+                bytes: request_bytes,
+                reply,
+            })
             .await
-            .map_err(|_| PumasError::SharedInstanceLost {
-                pid: self.primary_pid,
-                port: self.primary_port,
-            })?;
+            .map_err(|_| self.connection_lost())?;
+        result.await.map_err(|_| self.connection_lost())?
+    }
 
-        // Read response
-        let response_bytes = read_frame(&mut reader)
-            .await
-            .map_err(|_| PumasError::SharedInstanceLost {
-                pid: self.primary_pid,
-                port: self.primary_port,
-            })?
-            .ok_or(PumasError::SharedInstanceLost {
-                pid: self.primary_pid,
-                port: self.primary_port,
-            })?;
-
-        let response: IpcResponse =
-            serde_json::from_slice(&response_bytes).map_err(invalid_response)?;
-        response.into_result(id)
+    fn connection_lost(&self) -> PumasError {
+        PumasError::SharedInstanceLost {
+            pid: self.primary_pid,
+            port: self.primary_port,
+        }
     }
 
     /// Call a JSON-RPC method on the primary instance using a fresh blocking socket.
@@ -163,12 +188,60 @@ impl IpcClient {
     }
 }
 
+async fn run_exchanges<S>(
+    mut stream: S,
+    mut exchanges: mpsc::Receiver<Exchange>,
+    pid: u32,
+    port: u16,
+) where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    while let Some(exchange) = exchanges.recv().await {
+        // Admission boundary: cancellation observed here has no wire effect.
+        // After this check, receiver closure must not interrupt framing or read.
+        if exchange.reply.is_closed() {
+            continue;
+        }
+        let response = async {
+            let lost = || PumasError::SharedInstanceLost { pid, port };
+            write_frame(&mut stream, &exchange.bytes)
+                .await
+                .map_err(|_| lost())?;
+            let bytes = read_frame(&mut stream)
+                .await
+                .map_err(|_| lost())?
+                .ok_or_else(lost)?;
+            let response: IpcResponse = serde_json::from_slice(&bytes).map_err(invalid_response)?;
+            response.validate_envelope(exchange.id)?;
+            Ok(response)
+        }
+        .await;
+
+        match response {
+            Ok(response) => {
+                // A valid RPC error is an ordinary completed exchange.
+                let _ = exchange.reply.send(response.into_result(exchange.id));
+            }
+            Err(error) => {
+                let _ = exchange.reply.send(Err(error));
+                // No resynchronization/retry after partial IO or incoherent data.
+                // Drop the stream and queue; subsequent calls report owner loss.
+                break;
+            }
+        }
+    }
+}
+
 fn invalid_response(error: serde_json::Error) -> PumasError {
     PumasError::Json {
         message: "Invalid local IPC response envelope".to_string(),
         source: Some(error),
     }
 }
+
+#[cfg(test)]
+#[path = "client/cancellation_tests.rs"]
+mod cancellation_tests;
 
 #[cfg(test)]
 mod tests {

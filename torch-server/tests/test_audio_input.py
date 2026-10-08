@@ -15,8 +15,13 @@ from audio_input import AudioInputError, normalize_audio
 def audio(values, *, rate=16000, channels=1, encoding="pcm_s16le"):
     code = "h" if encoding == "pcm_s16le" else "f"
     data = struct.pack("<" + code * len(values), *values)
-    return {"encoding": encoding, "sample_rate_hz": rate, "channels": channels,
-            "sample_count": len(values) // channels, "data_base64": base64.b64encode(data).decode("ascii")}
+    return {
+        "encoding": encoding,
+        "sample_rate_hz": rate,
+        "channels": channels,
+        "sample_count": len(values) // channels,
+        "data_base64": base64.b64encode(data).decode("ascii"),
+    }
 
 
 def pcm(result):
@@ -29,7 +34,9 @@ class AudioInputTests(unittest.TestCase):
         self.assertEqual(normalize_audio(value), value)
 
     def test_stereo_is_actually_downmixed_and_float_is_quantized(self):
-        result = normalize_audio(audio([0.5, -0.5, 1.0, 0.0, -1.0, 0.0], channels=2, encoding="pcm_f32le"))
+        result = normalize_audio(
+            audio([0.5, -0.5, 1.0, 0.0, -1.0, 0.0], channels=2, encoding="pcm_f32le")
+        )
         self.assertEqual(result["channels"], 1)
         self.assertEqual(result["sample_count"], 3)
         np.testing.assert_array_equal(pcm(result), [0, 16384, -16384])
@@ -57,18 +64,29 @@ class AudioInputTests(unittest.TestCase):
 
     def test_invalid_declarations_and_nonfinite_float_refuse(self):
         valid = audio([0, 1])
-        for field, value in [("channels", True), ("channels", 3), ("sample_rate_hz", 0),
-                             ("sample_rate_hz", 16000.0), ("sample_count", 3),
-                             ("encoding", "wav"), ("data_base64", "??")]:
+        for field, value in [
+            ("channels", True),
+            ("channels", 3),
+            ("sample_rate_hz", 0),
+            ("sample_rate_hz", 16000.0),
+            ("sample_count", 3),
+            ("encoding", "wav"),
+            ("data_base64", "??"),
+        ]:
             with self.subTest(field=field, value=value):
-                with self.assertRaises(AudioInputError): normalize_audio({**valid, field: value})
+                with self.assertRaises(AudioInputError):
+                    normalize_audio({**valid, field: value})
         for value in [float("nan"), float("inf"), 1.5]:
-            with self.assertRaises(AudioInputError): normalize_audio(audio([value], encoding="pcm_f32le"))
-        with self.assertRaises(AudioInputError): normalize_audio({**valid, "path": "/not/authority"})
+            with self.assertRaises(AudioInputError):
+                normalize_audio(audio([value], encoding="pcm_f32le"))
+        with self.assertRaises(AudioInputError):
+            normalize_audio({**valid, "path": "/not/authority"})
 
     def test_duration_is_checked_before_decode(self):
         value = {**audio([0]), "sample_count": 480001}
-        with self.assertRaises(AudioInputError): normalize_audio(value)
+        with self.assertRaises(AudioInputError):
+            normalize_audio(value)
 
 
-if __name__ == "__main__": unittest.main()
+if __name__ == "__main__":
+    unittest.main()

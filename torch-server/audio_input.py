@@ -104,5 +104,5 @@ def _resample(samples, source_rate, output_count, np):
         weights = cutoff * np.sinc(cutoff * distance) * window * valid
         normalization = weights.sum(axis=1)
         values = samples[np.clip(indices, 0, len(samples) - 1)]
-        output[start:start + len(positions)] = (weights * values).sum(axis=1) / normalization
+        output[start : start + len(positions)] = (weights * values).sum(axis=1) / normalization
     return output

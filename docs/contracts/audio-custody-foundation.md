@@ -60,9 +60,10 @@ The owning load path must additionally qualify the installed interpreter,
 recipe, sidecar and loader code, and the loader's complete consumed read set.
 The closed file-copy variant and descriptor checks alone do not prove that an
 installed Transformers processor cannot consume another path-valued setting.
-The bundled Transformers 4.57.6 recipe and current installer module list do not
-qualify native Cohere ASR; the speech operation owner, native loader, and new
-audio helpers must be included in a separately qualified recipe.
+The bundled Transformers 4.57.6 recipe does not qualify native Cohere ASR.
+The installer now includes the speech operation owner, native loader and audio
+helpers; installed selected-byte custody is described in the transport contract.
+A compatible dependency recipe and native execution closure remain required.
 
 Before the first load RPC, the owner must reserve serving/load admission and
 retain prepared-byte custody under the exact managed child generation. A single

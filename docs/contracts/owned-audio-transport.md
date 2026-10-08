@@ -127,10 +127,13 @@ private handoff. Pantograph consumers should continue using the existing generic
 typed modality contract, retain caller correlation IDs and accept audio refusal
 until the owning runtime gate is satisfied. No authorized real model was present
 in this execution environment: a Pumas-indexed canonical Cohere ASR package with
-all required selected files is missing, and no source repository, immutable
-source revision, member digests or accepted model terms were provided. The
-bundled runtime remains Transformers 4.57.6; the native adapter requires >=5.4.
-Do not invent a model identity or download gated assets to bridge those gaps.
+all required selected files is missing. The subsequent public-source audit pins
+the proposed official repository revision and documents access terms,
+verification and compatible runtime requirements in
+[Cohere qualification](cohere-native-qualification.md). Gated member bytes,
+digests and accepted access consent remain missing. The bundled runtime remains
+Transformers 4.57.6; the native adapter requires >=5.4. Do not download gated
+assets to bridge those gaps without the user's authorization.
 Do not substitute HTTP status/cancel,
 public paths, manifests or automatic retries for the private custody channel.
 

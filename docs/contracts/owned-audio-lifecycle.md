@@ -60,18 +60,22 @@ Caller wait cancellation requests native cancellation without releasing custody.
 
 The public Rust typed endpoint validates the same transcription/classification
 output distinction and still reports audio unavailable before provider I/O.
-No audio route, public status/cancel route, qualified recipe, model download or
-production capability is added by this slice.
+The existing generic modality route now resolves a privately owned slot. Shipping
+audio remains unavailable; no public status/cancel route, qualified recipe, model
+download or production capability is added. See the transport contract for the
+later controlled integration boundary.
 
 ## Concrete qualification blockers
 
 The execution environment has no installed Torch or Transformers and no
 qualified local speech model. The bundled recipe pins Transformers 4.57.6,
 while the native loader requires the supported Cohere ASR implementation. The
-installer does not materialize the speech operation owner, native audio loader,
-PCM helpers or new actor/bridge. These must be included in a separately
-qualified immutable runtime recipe; the existing Torch version check is not a
-lasting loader-code custody lease.
+installer now materializes the speech operation owner, native audio loader,
+PCM helpers and actor/bridge, and installed-byte custody retains their actual
+bytes. A separately qualified compatible dependency recipe and native execution
+closure remain required; the existing Torch version check is not a lasting
+loader-code custody lease. The pinned model and access prerequisites are in
+[Cohere qualification](cohere-native-qualification.md).
 
 The prepared package's closed copied-member set does not yet prove the complete
 installed Transformers read set, including path-valued configuration. The implemented private inherited-stdio transport binds the parent prepared

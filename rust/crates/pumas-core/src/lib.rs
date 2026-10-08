@@ -51,6 +51,8 @@ pub mod plugins;
 pub mod process;
 pub mod providers;
 pub mod registry;
+#[cfg(target_os = "linux")]
+mod runtime_native_closure;
 pub mod runtime_profiles;
 pub mod runtime_read_source;
 pub mod serving;

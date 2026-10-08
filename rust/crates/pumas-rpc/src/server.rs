@@ -565,6 +565,10 @@ pub async fn start_server(
             .map(|_| ())
             .map_err(|error| pumas_library::PumasError::Other(error.to_string()));
         let report = advertisement.complete_shutdown(cessation);
+        // Revocation failure can leave the settlement sender inside this
+        // registration. Close that abandoned receipt before awaiting its core
+        // observer; it must fail and retain authority instead of waiting on us.
+        drop(advertisement);
         // Only now may the core observe external settlement and release its row.
         let core = state.api.shutdown_instance().await;
         let failures = [
@@ -2704,6 +2708,46 @@ mod http_discovery_tests {
         assert!(registry.list_http_services().unwrap().is_empty());
         assert!(registry.get_instance(&root).unwrap().is_some());
         assert!(tokio::net::TcpStream::connect(server.addr()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn failed_advertisement_revoke_settles_shutdown_and_retains_core_authority() {
+        let (temp, registry, root, api) = api_fixture().await;
+        let server = start(api, &root, 0).await.unwrap();
+        let owner = registry.get_instance(&root).unwrap().unwrap();
+        let description = registry.list_http_services().unwrap().remove(0);
+        // Fail the real SQLite deletion, leaving publication and its settlement
+        // sender retained. This exercises complete_shutdown's early error path.
+        let connection = rusqlite::Connection::open(temp.path().join("registry.db")).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_http_revoke BEFORE DELETE ON http_services
+                 BEGIN SELECT RAISE(ABORT, 'controlled HTTP revoke failure'); END;",
+            )
+            .unwrap();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(3), server.shutdown())
+            .await
+            .expect("failed HTTP revocation must settle instead of retaining its sender forever");
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("controlled HTTP revoke failure"), "{error}");
+        let retained = registry.get_instance(&root).unwrap().unwrap();
+        assert_eq!(retained.started_at, owner.started_at);
+        assert_eq!(retained.connection_token, owner.connection_token);
+        assert_eq!(registry.list_http_services().unwrap()[0], description);
+        assert!(tokio::net::TcpStream::connect(server.addr()).await.is_err());
+        assert!(matches!(
+            registry
+                .try_claim_instance(&root, std::process::id())
+                .unwrap(),
+            pumas_library::registry::InstanceClaimResult::Occupied(_)
+        ));
+        // Clearing the injected storage fault cannot turn an abandoned receipt
+        // into cessation evidence, even through a repeated shared waiter.
+        connection
+            .execute_batch("DROP TRIGGER reject_http_revoke")
+            .unwrap();
+        assert!(server.shutdown().await.is_err());
+        assert!(registry.get_instance(&root).unwrap().is_some());
     }
 
     #[tokio::test]

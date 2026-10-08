@@ -88,6 +88,23 @@ fn normalize_torch_lock_error(error: std::io::Error) -> std::io::Error {
 }
 
 impl TorchVersionsLock {
+    pub(crate) fn try_acquire_read(versions_dir: &Path) -> std::io::Result<Self> {
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
+        }
+        let file = options.open(versions_dir.join(".torch-versions.lock"))?;
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::other("Torch lock is not regular"));
+        }
+        FileExt::try_lock_shared(&file).map_err(normalize_torch_lock_error)?;
+        Ok(Self {
+            _file: Arc::new(file),
+        })
+    }
     pub(crate) fn try_acquire(versions_dir: &Path) -> std::io::Result<Self> {
         let file = std::fs::OpenOptions::new()
             .read(true)
@@ -1196,6 +1213,42 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
             include_str!("../../../../../../torch-server/model_manager.py"),
         ),
         (
+            "owned_worker.py",
+            include_str!("../../../../../../torch-server/owned_worker.py"),
+        ),
+        (
+            "private_owned_channel.py",
+            include_str!("../../../../../../torch-server/private_owned_channel.py"),
+        ),
+        (
+            "owned_audio.py",
+            include_str!("../../../../../../torch-server/owned_audio.py"),
+        ),
+        (
+            "owned_model_operations.py",
+            include_str!("../../../../../../torch-server/owned_model_operations.py"),
+        ),
+        (
+            "speech_operations.py",
+            include_str!("../../../../../../torch-server/speech_operations.py"),
+        ),
+        (
+            "native_speech_result.py",
+            include_str!("../../../../../../torch-server/native_speech_result.py"),
+        ),
+        (
+            "audio_input.py",
+            include_str!("../../../../../../torch-server/audio_input.py"),
+        ),
+        (
+            "audio_contract.py",
+            include_str!("../../../../../../torch-server/audio_contract.py"),
+        ),
+        (
+            "loaders/cohere_asr_loader.py",
+            include_str!("../../../../../../torch-server/loaders/cohere_asr_loader.py"),
+        ),
+        (
             "speech_binding.py",
             include_str!("../../../../../../torch-server/speech_binding.py"),
         ),
@@ -1646,19 +1699,19 @@ enum DirectTorchAttempt {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct StagedFilesManifest {
-    files: Vec<StagedFile>,
+pub(crate) struct StagedFilesManifest {
+    pub(crate) files: Vec<StagedFile>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct StagedFile {
-    path: String,
-    sha256: String,
-    size: u64,
+pub(crate) struct StagedFile {
+    pub(crate) path: String,
+    pub(crate) sha256: String,
+    pub(crate) size: u64,
 }
 
-fn validate_staged_files(target: &Path, manifest: &StagedFilesManifest) -> Result<()> {
+pub(crate) fn validate_staged_files(target: &Path, manifest: &StagedFilesManifest) -> Result<()> {
     if manifest.files.is_empty() || manifest.files.len() > 200_000 {
         return Err(failed("Torch staged file manifest is empty or oversized"));
     }

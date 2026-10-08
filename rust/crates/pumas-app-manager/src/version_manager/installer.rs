@@ -9,6 +9,7 @@ use super::managed_python::ManagedPythonIdentity;
 pub(crate) use torch::is_torch_runtime_release;
 pub(crate) use torch::retry_pending_torch_cleanup;
 pub(crate) use torch::TorchVersionsLock;
+pub(crate) use torch::{validate_staged_files, write_embedded_torch_runtime, StagedFilesManifest};
 pub(crate) struct TorchInstallPlan {
     pub(crate) preview: crate::version_manager::TorchPreview,
     pub(crate) requirements: String,

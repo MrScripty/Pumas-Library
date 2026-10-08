@@ -52,6 +52,7 @@ pub mod process;
 pub mod providers;
 pub mod registry;
 pub mod runtime_profiles;
+pub mod runtime_read_source;
 pub mod serving;
 pub mod system;
 

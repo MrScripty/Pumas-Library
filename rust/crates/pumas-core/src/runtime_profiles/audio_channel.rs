@@ -26,6 +26,8 @@ pub(crate) type Result<T> = std::result::Result<T, ChannelError>;
 pub(crate) enum ChannelError {
     NotAdmitted,
     NativeRejected,
+    InvalidRequest,
+    UnsupportedContract,
     Unknown,
     Incoherent,
     Limit,

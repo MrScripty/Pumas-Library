@@ -20,7 +20,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use std::sync::Weak;
 
 struct Member {
@@ -32,7 +32,7 @@ struct Member {
 
 enum Qualification {
     Unavailable,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     ControlledProcess {
         model_read_set: BTreeSet<String>,
         selected: Option<Weak<PreparedArtifactUse>>,
@@ -50,6 +50,7 @@ pub(crate) struct AudioRuntimeOwner {
     copied_root: Dir,
     read_source: tempfile::TempDir,
     manifest_sha256: String,
+    installed_bytes: Option<Arc<crate::runtime_read_source::RetainedRuntimeReadSource>>,
 }
 
 impl std::fmt::Debug for AudioRuntimeOwner {
@@ -72,17 +73,38 @@ impl AudioRuntimeOwner {
         self.read_source.path()
     }
 
+    /// Duplicate the held copied root, rather than re-opening its locator.
+    pub(crate) fn clone_read_source_directory(&self) -> std::io::Result<Dir> {
+        self.copied_root.try_clone()
+    }
+
+    /// Attach independently captured installed bytes before sharing/child
+    /// attachment. Byte custody never changes this owner's qualification.
+    pub(crate) fn with_retained_installed_bytes(
+        owner: Arc<Self>,
+        installed: Arc<crate::runtime_read_source::RetainedRuntimeReadSource>,
+    ) -> Result<Arc<Self>> {
+        installed.validate()?;
+        let mut owner =
+            Arc::try_unwrap(owner).map_err(|_| refusal("runtime owner already shared"))?;
+        if owner.installed_bytes.is_some() {
+            return Err(refusal("runtime installed bytes already retained"));
+        }
+        owner.installed_bytes = Some(installed);
+        Ok(Arc::new(owner))
+    }
+
     pub(crate) fn manifest_sha256(&self) -> &str {
         &self.manifest_sha256
     }
 
     /// In-memory qualification check, without callback or filesystem work.
     pub(crate) fn permits_selected(&self, prepared: &PreparedArtifactUse) -> bool {
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "test-support")))]
         let _ = prepared;
         match &self.qualification {
             Qualification::Unavailable => false,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             Qualification::ControlledProcess {
                 model_read_set,
                 selected,
@@ -102,6 +124,9 @@ impl AudioRuntimeOwner {
 
     /// Blocking pre-effect scan. Native operation borrows never call this.
     pub(crate) fn validate_source(&self) -> Result<()> {
+        if let Some(installed) = &self.installed_bytes {
+            installed.validate()?;
+        }
         if !same_directory(
             &self.source_root,
             &open_pinned_directory(&self.source_path)?,
@@ -194,7 +219,7 @@ impl AudioRuntimeOwner {
     /// Actual-copy qualification of fixed controlled-process code only. The
     /// fixture's complete model read set is selected by trusted test code, never
     /// decoded from native replies. This factory is absent from shipping builds.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn controlled_fixture(
         source_path: &Path,
         selected_code: &[&str],
@@ -214,7 +239,7 @@ impl AudioRuntimeOwner {
     /// rather than another selection with equal names, bytes or a wire locator.
     /// Weak keeps allocation identity stable without extending its root grant
     /// after validated native unload. Code-only fixtures never admit model use.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn controlled_fixture_for_selected(
         source_path: &Path,
         selected_code: &[&str],
@@ -254,6 +279,7 @@ impl AudioRuntimeOwner {
             copied_root,
             read_source,
             manifest_sha256: String::new(),
+            installed_bytes: None,
         };
         let mut created = BTreeSet::new();
         for path in selected {

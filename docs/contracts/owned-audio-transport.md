@@ -3,8 +3,11 @@
 This candidate supplies actual private load/use/unload transport. Its usable
 execution scope is a controlled subprocess, not production ASR. The shipping
 runtime qualification constructor refuses admission, and the established public
-modality endpoint continues to report `unqualified_audio_runtime`. No separate
-application transcription API or availability override is introduced.
+modality endpoint continues to report `unqualified_audio_runtime` in shipping
+use. It now resolves an opaque loaded slot through the existing core runtime
+profile service; only controlled integration fixtures can currently register
+one. No separate application transcription API or availability override is
+introduced.
 
 ## Exchange ownership
 
@@ -61,6 +64,39 @@ without installed third-party dependencies. Its proof excludes the host Python
 interpreter/stdlib, Torch, Transformers, NumPy's native libraries, GPU behavior,
 real ASR and native macOS/Windows execution.
 
+## Installed byte custody and worker bootstrap
+
+`VersionManager::retain_torch_runtime_bytes` reuses the installed version state,
+existing `installed-files.json` package manifest and the existing Torch versions
+mutation lock. A matching shared managed-Python depot lease excludes cooperating
+provisioning for the retained interpreter tree. The returned core owner captures
+actual selected interpreter, dependency and sidecar member bytes, identities and
+held roots. Missing manifests, unreported package bytes, linked selected members,
+changed identities or hashes refuse capture. This is selected-byte custody;
+external system libraries and a complete real loader read set remain unqualified.
+The runtime owner can retain this byte owner through the exact child cleanup
+lease without changing audio qualification.
+
+The existing Torch installer materializes the owned worker modules. The private
+worker starts under `-I -B -S`, accepts only three distinct inherited code,
+package and model directory descriptors, and refuses ambient import roots,
+`.pth`, customization hooks, bytecode and linked/special selected members.
+Stdout is reserved for frames before native imports; diagnostics use stderr.
+There is no new installer or decoded qualification flag. Linux descriptor
+bootstrap isolation does not establish interpreter or native-library closure.
+
+The generic route binds model/profile/Pumas-instance identity from the original
+owned load. An alias resolves to that canonical selection before private use.
+Admission is observed at the private writer; caller loss requests cooperative
+cancel while original settlement retains custody. Confirmed non-start request
+errors remain HTTP 400 and clean reuse is tested. Transcription has text output,
+native stop/length evidence, no streaming, and the existing fixed 512-token bound.
+Classification remains unsupported. Capability availability comes from the
+retained slot, which is stronger evidence than advisory task metadata; metadata
+cannot mint an endpoint. Unload, quarantine and child drainage close availability.
+Controlled HTTP tests run through actual managed child, inherited descriptors,
+bootstrap and original native status observation, without tensor inference.
+
 The detailed Cohere adapter preserves legacy string callers and adds explicit
 native `stop`/`length` evidence. Missing or ambiguous terminal evidence is a
 confirmed typed failure, never a fabricated stop. Fixtures exercise EOS, the
@@ -75,7 +111,7 @@ format candidate used MrScripty and has the same source tree. Do not rewrite
 published author history. Coordinate public changes with the root/integration
 worker; this candidate is not published or merged.
 
-Before exposing audio through the existing generic modality endpoint, the
+Before making shipping audio available through the existing generic endpoint, the
 owning runtime must qualify and retain the installed interpreter and complete
 immutable dependency/loader code, materialize all imported modules in the
 runtime recipe, and prove the real loader's full selected-model read set.
@@ -89,7 +125,13 @@ no model acquisition or inference occurred for this candidate.
 Use the recorded offline focused, aggregate and strict lint commands in the
 private handoff. Pantograph consumers should continue using the existing generic
 typed modality contract, retain caller correlation IDs and accept audio refusal
-until the owning runtime gate is satisfied. Do not substitute HTTP status/cancel,
+until the owning runtime gate is satisfied. No authorized real model was present
+in this execution environment: a Pumas-indexed canonical Cohere ASR package with
+all required selected files is missing, and no source repository, immutable
+source revision, member digests or accepted model terms were provided. The
+bundled runtime remains Transformers 4.57.6; the native adapter requires >=5.4.
+Do not invent a model identity or download gated assets to bridge those gaps.
+Do not substitute HTTP status/cancel,
 public paths, manifests or automatic retries for the private custody channel.
 
 ## Hung-peer and disposal limits

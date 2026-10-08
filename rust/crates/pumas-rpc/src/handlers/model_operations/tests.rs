@@ -512,6 +512,229 @@ async fn audio_output_semantics_are_validated_before_runtime_admission() {
     }
     assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
 }
+
+#[cfg(target_os = "linux")]
+async fn controlled_audio_state(
+    length: bool,
+    hold: bool,
+) -> (
+    TempDir,
+    Arc<AppState>,
+    pumas_library::runtime_profiles::ControlledAudioEndpointFixture,
+) {
+    let root = TempDir::new().unwrap();
+    let state = Arc::new(crate::handlers::test_support::build_test_app_state(root.path()).await);
+    let worker = pumas_library::runtime_profiles::ControlledAudioEndpointFixture::launch(
+        &state.api, length, hold,
+    )
+    .await;
+    let profile = RuntimeProfileId::parse("controlled-audio-private").unwrap();
+    let mut config = RuntimeProfileConfig::default_ollama();
+    config.profile_id = profile.clone();
+    config.provider = RuntimeProviderId::Torch;
+    config.provider_mode = RuntimeProviderMode::TorchServe;
+    config.management_mode = RuntimeManagementMode::Managed;
+    config.endpoint_url = None;
+    config.port = None;
+    state.api.upsert_runtime_profile(config).await.unwrap();
+    state
+        .api
+        .record_served_model(ServedModelStatus {
+            model_id: "library/speech".into(),
+            model_alias: Some("speech".into()),
+            provider: RuntimeProviderId::Torch,
+            profile_id: profile,
+            load_state: ServedModelLoadState::Loaded,
+            device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+            context_size: None,
+            keep_loaded: true,
+            endpoint_url: None,
+            memory_bytes: None,
+            loaded_at: None,
+            last_error: None,
+        })
+        .await
+        .unwrap();
+    (root, state, worker)
+}
+
+fn audio_request() -> Value {
+    json!({"contract_version":1,"request_id":"audio-request-17","model":"speech","capability":"audio_transcription","input":{"kind":"audio","encoding":"pcm_s16le","sample_rate_hz":16000,"channels":1,"sample_count":1,"data_base64":"AAA="},"output":"text","options":{"kind":"audio"}})
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn generic_audio_http_uses_owned_process_and_preserves_native_terminal_evidence() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        for length in [false, true] {
+            let (_root, state, worker) = controlled_audio_state(length, false).await;
+            let (url, server) = public_server(state.clone()).await;
+            let client = reqwest::Client::new();
+            let caps: Value = client
+                .get(format!("{url}/v1/capabilities?model=speech"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(
+                caps["capabilities"][4]["availability"]["state"],
+                "available"
+            );
+            assert_eq!(caps["capabilities"][4]["streaming"], false);
+            assert_eq!(
+                caps["capabilities"][5]["availability"]["reason"],
+                "unsupported_adapter"
+            );
+            for call in [1, 2] {
+                let response = client
+                    .post(format!("{url}/v1/model-operations"))
+                    .json(&audio_request())
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                let value: Value = response.json().await.unwrap();
+                assert_eq!(value["request_id"], "audio-request-17");
+                assert_eq!(
+                    value["result"]["finish_reason"],
+                    if length { "length" } else { "stop" }
+                );
+                assert!(value["result"]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains(&format!("calls={call};pcm=0000")));
+            }
+            worker.unload().await;
+            let response = client
+                .post(format!("{url}/v1/model-operations"))
+                .json(&audio_request())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            let value: Value = response.json().await.unwrap();
+            assert_eq!(value["error"]["outcome"], "not_admitted");
+            state.shutdown_request.request();
+            server.await.unwrap().unwrap();
+            worker.stop().await;
+        }
+    })
+    .await
+    .expect("controlled HTTP process fixture hung");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn owned_audio_route_refuses_unsupported_requests_and_stale_selection_without_replay() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let (_root, state, worker) = controlled_audio_state(false, false).await;
+        for limit in [42, 511, 513] {
+            let mut value = audio_request();
+            // Each refusal reaches either the typed boundary or confirmed
+            // native non-start, and the clean following request is call one.
+            value["options"]["max_output_tokens"] = json!(limit);
+            let response = operation(state.clone(), value).await;
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(
+                json_body(response).await["error"]["outcome"],
+                "not_admitted"
+            );
+        }
+        let mut classify = audio_request();
+        classify["capability"] = json!("audio_classification");
+        classify["output"] = json!("labels");
+        assert_eq!(
+            operation(state.clone(), classify).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        let mut stream = audio_request();
+        stream["stream"] = json!(true);
+        assert_eq!(
+            operation(state.clone(), stream).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+        let mut malformed = audio_request();
+        malformed["input"]["data_base64"] = json!("not-base64");
+        let response = operation(state.clone(), malformed).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let failure = json_body(response).await;
+        assert_eq!(failure["error"]["code"], "invalid_request");
+        assert_eq!(failure["error"]["outcome"], "not_admitted");
+        let result = json_body(operation(state.clone(), audio_request()).await).await;
+        assert!(result["result"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("calls=1;"));
+        let profile = RuntimeProfileId::parse("controlled-audio-private").unwrap();
+        assert!(state
+            .api
+            .owned_audio_endpoint(&profile, "other-model")
+            .is_none());
+        assert!(state
+            .api
+            .owned_audio_endpoint(
+                &RuntimeProfileId::parse("other-profile").unwrap(),
+                "library/speech"
+            )
+            .is_none());
+        let other_root = TempDir::new().unwrap();
+        let other_state =
+            crate::handlers::test_support::build_test_app_state(other_root.path()).await;
+        assert!(other_state
+            .api
+            .owned_audio_endpoint(&profile, "library/speech")
+            .is_none());
+        worker.stop().await;
+        assert!(state
+            .api
+            .owned_audio_endpoint(&profile, "library/speech")
+            .is_none());
+        assert_eq!(
+            json_body(operation(state.clone(), audio_request()).await).await["error"]["outcome"],
+            "not_admitted"
+        );
+    })
+    .await
+    .expect("controlled generic audio fixture hung");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn audio_http_caller_loss_keeps_original_settlement_and_clean_next_request() {
+    tokio::time::timeout(Duration::from_secs(30), async {
+        let (_root, state, mut worker) = controlled_audio_state(false, true).await;
+        let (url, server) = public_server(state.clone()).await;
+        let client = reqwest::Client::new();
+        for _ in 0..2 {
+            let client = client.clone();
+            let operation_url = format!("{url}/v1/model-operations");
+            let caller = tokio::spawn(async move {
+                client
+                    .post(operation_url)
+                    .json(&audio_request())
+                    .send()
+                    .await
+            });
+            worker.wait_use_started().await;
+            caller.abort();
+            assert!(caller.await.unwrap_err().is_cancelled());
+            // The harness notification observes original native settlement,
+            // rather than a cancellation acknowledgement or waiter disposal.
+            worker.wait_idle().await;
+        }
+        worker.unload().await;
+        state.shutdown_request.request();
+        server.await.unwrap().unwrap();
+        worker.stop().await;
+    })
+    .await
+    .expect("controlled HTTP cancellation fixture hung");
+}
 #[tokio::test]
 async fn unknown_task_fails_closed_and_exact_profile_resolves_ambiguity() {
     let (_root, state) = fixture("http://127.0.0.1:12345", None).await;

@@ -52,6 +52,8 @@ MEMBERS = (
     "tokenizer_config.json",
 )
 CODE = (
+    "owned_worker.py",
+    "tests/owned_worker_fixture.py",
     "owned_audio.py",
     "model_manager.py",
     "device_manager.py",
@@ -175,7 +177,7 @@ class Gate:
         plan._custody.released = True
 
 
-async def run(args):
+def create_channel(args):
     manager = ModelManager(Devices())
     if args.unqualified:
         from private_owned_channel import create_private_owned_channel
@@ -189,6 +191,7 @@ async def run(args):
         def native(model, processor, pcm, language, cancel):
             model.calls += 1
             if args.hold_use_until_cancel:
+                print("controlled use entered", file=sys.stderr, flush=True)
                 cancel.wait()
             reason = _finish_reason([7, *model.tokens], [7], frozenset({0}))
             return NativeSpeechResult(
@@ -197,6 +200,11 @@ async def run(args):
             )
 
         channel = PrivateOwnedChannel(actor, native_gate=gate, adapter=native)
+    return channel
+
+
+async def run(args):
+    channel = create_channel(args)
     if args.channel_fd is None:
         await channel.serve_stdio()
     else:

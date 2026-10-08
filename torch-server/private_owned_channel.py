@@ -139,7 +139,7 @@ class PrivateOwnedChannel:
         self._records = {}
         self._read_transport = None
 
-    async def serve_stdio(self):
+    async def serve_stdio(self, *, output=None):
         """Own the exact inherited stdin/stdout pair; stdout contains frames only."""
         loop = asyncio.get_running_loop()
         reader = asyncio.StreamReader(limit=MAX_REQUEST_BYTES + 4)
@@ -148,7 +148,9 @@ class PrivateOwnedChannel:
             sys.stdin.buffer,
         )
         protocol = _PipeWriterProtocol(loop)
-        transport, _ = await loop.connect_write_pipe(lambda: protocol, sys.stdout.buffer)
+        transport, _ = await loop.connect_write_pipe(
+            lambda: protocol, sys.stdout.buffer if output is None else output
+        )
         writer = asyncio.StreamWriter(transport, protocol, None, loop)
         try:
             await self.serve(reader, writer)

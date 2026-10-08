@@ -46,6 +46,7 @@ mod constraints;
 mod dependencies;
 mod installer;
 mod launcher;
+mod managed_depot_lease;
 mod managed_python;
 pub mod ollama;
 mod operation_receipt;
@@ -54,6 +55,7 @@ pub mod size_calculator;
 mod state;
 mod torch_alternatives;
 mod torch_preview;
+mod torch_read_source;
 mod torch_workspace;
 
 pub use constraints::ConstraintsManager;

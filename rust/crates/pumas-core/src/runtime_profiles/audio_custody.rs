@@ -84,6 +84,8 @@ pub(crate) struct AudioCustodyRegistry {
     generation: u64,
     admission_closed: AtomicBool,
     state: Mutex<State>,
+    #[cfg(any(test, feature = "test-support"))]
+    idle_changed: tokio::sync::Notify,
 }
 
 impl fmt::Debug for AudioCustodyRegistry {
@@ -103,6 +105,8 @@ impl AudioCustodyRegistry {
             generation,
             admission_closed: AtomicBool::new(false),
             state: Mutex::new(State::default()),
+            #[cfg(any(test, feature = "test-support"))]
+            idle_changed: tokio::sync::Notify::new(),
         })
     }
 
@@ -112,6 +116,8 @@ impl AudioCustodyRegistry {
 
     pub(crate) fn close_admission(&self) {
         self.admission_closed.store(true, Ordering::Release);
+        #[cfg(any(test, feature = "test-support"))]
+        self.idle_changed.notify_waiters();
     }
 
     fn admission_open(&self) -> Result<()> {
@@ -433,6 +439,32 @@ pub(crate) struct AudioLoadedSlot {
 }
 
 impl AudioLoadedSlot {
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) async fn wait_idle(&self) -> Result<()> {
+        loop {
+            let changed = self.registry.idle_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            self.registry.admission_open()?;
+            {
+                let mut state = self.registry.lock()?;
+                if checked_entry(&mut state, self.token, &self.slot, Phase::Ready)?.borrows == 0 {
+                    return Ok(());
+                }
+            }
+            changed.await;
+        }
+    }
+    pub(crate) fn profile_id(&self) -> &RuntimeProfileId {
+        &self.registry.profile_id
+    }
+    pub(crate) fn available(&self) -> bool {
+        self.registry.admission_open().is_ok()
+            && self.registry.lock().is_ok_and(|mut state| {
+                checked_entry(&mut state, self.token, &self.slot, Phase::Ready).is_ok()
+            })
+    }
+
     pub(crate) fn identity(&self) -> &AudioSlotIdentity {
         &self.slot
     }
@@ -519,6 +551,8 @@ impl AudioOperationBorrow {
             }
             entry.borrows = 0;
         }
+        #[cfg(any(test, feature = "test-support"))]
+        self.registry.idle_changed.notify_waiters();
         self.armed = false;
         Ok(())
     }
@@ -538,6 +572,8 @@ impl AudioOperationBorrow {
             }
             entry.borrows = 0;
         }
+        #[cfg(any(test, feature = "test-support"))]
+        self.registry.idle_changed.notify_waiters();
         self.armed = false;
         Ok(())
     }

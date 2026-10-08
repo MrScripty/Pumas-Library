@@ -123,11 +123,10 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, ErrorCode> 
             {
                 return Err(ErrorCode::InvalidRequest);
             }
-            // Deserialization checks the existing owner's closed language vocabulary.
-            // Byte decoding, normalization and custody belong to that owner; no audio
-            // adapter is admitted by this slice, for either default or explicit language.
+            // Byte decoding and normalization belong to the owned native bridge.
+            // Returning this closed shape grants no runtime or model authority.
             let _declared_language = language;
-            return Err(ErrorCode::CapabilityUnavailable);
+            return serde_json::to_value(request).map_err(|_| ErrorCode::InvalidRequest);
         }
         _ => return Err(ErrorCode::InvalidRequest),
     }

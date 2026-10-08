@@ -165,6 +165,7 @@ impl OwnedAudioClient {
                         admission,
                         runtime,
                         client,
+                        model,
                     }))
                 }),
             )
@@ -176,13 +177,22 @@ impl OwnedAudioClient {
         slot: &OwnedAudioSlot,
         request: Value,
     ) -> Result<OwnedAudioOperation> {
+        self.start_with_admission(slot, request, None).await
+    }
+
+    pub(crate) async fn start_with_admission(
+        self: &Arc<Self>,
+        slot: &OwnedAudioSlot,
+        request: Value,
+        marker: Option<Arc<AtomicBool>>,
+    ) -> Result<OwnedAudioOperation> {
         if !Arc::ptr_eq(self, &slot.owner.client) {
             return Err(ChannelError::NotAdmitted);
         }
         let owner = slot.owner.clone();
         let client = Arc::downgrade(self);
         let identity = owner.slot.identity();
-        self.channel.exchange("use",json!({"runtime_instance_id":self.runtime,"slot":Slot::from(identity),"request":request}),Box::new(move||Ok(Box::new(Custody::Use {owner,borrow:None,client})))).await
+        self.channel.exchange("use",json!({"runtime_instance_id":self.runtime,"slot":Slot::from(identity),"request":request}),Box::new(move||Ok(Box::new(Custody::Use {owner,borrow:None,client,marker})))).await
     }
 
     pub(crate) async fn execute(
@@ -295,6 +305,23 @@ impl std::fmt::Debug for OwnedAudioSlot {
     }
 }
 impl OwnedAudioSlot {
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) async fn wait_idle(&self) {
+        self.owner.slot.wait_idle().await.unwrap();
+    }
+    pub(crate) fn profile_id(&self) -> &RuntimeProfileId {
+        self.owner.slot.profile_id()
+    }
+    pub(crate) fn model_id(&self) -> &str {
+        &self.owner.model
+    }
+
+    pub(crate) fn client(&self) -> &Arc<OwnedAudioClient> {
+        &self.owner.client
+    }
+    pub(crate) fn available(&self) -> bool {
+        !self.owner.retired.load(Ordering::Acquire) && self.owner.slot.available()
+    }
     pub(crate) fn identity(&self) -> &AudioSlotIdentity {
         self.owner.slot.identity()
     }
@@ -303,6 +330,7 @@ struct SlotOwner {
     slot: Arc<AudioLoadedSlot>,
     client: Arc<OwnedAudioClient>,
     retired: Arc<AtomicBool>,
+    model: String,
 }
 impl Drop for SlotOwner {
     fn drop(&mut self) {
@@ -468,11 +496,13 @@ enum Custody {
         admission: AudioLoadAdmission,
         runtime: String,
         client: Weak<OwnedAudioClient>,
+        model: String,
     },
     Use {
         owner: Arc<SlotOwner>,
         borrow: Option<AudioOperationBorrow>,
         client: Weak<OwnedAudioClient>,
+        marker: Option<Arc<AtomicBool>>,
     },
     Observe {
         operation: Arc<Operation>,
@@ -492,13 +522,21 @@ impl ExchangeCustody for Custody {
             Self::Load { admission, .. } => admission
                 .mark_wire_admitted()
                 .map_err(|_| ChannelError::NotAdmitted),
-            Self::Use { owner, borrow, .. } => {
+            Self::Use {
+                owner,
+                borrow,
+                marker,
+                ..
+            } => {
                 *borrow = Some(
                     owner
                         .slot
                         .borrow_operation()
                         .map_err(|_| ChannelError::NotAdmitted)?,
                 );
+                if let Some(marker) = marker {
+                    marker.store(true, Ordering::Release);
+                }
                 Ok(())
             }
             Self::Unload { admission, .. } => admission
@@ -529,6 +567,7 @@ impl ExchangeCustody for Custody {
                 admission,
                 runtime,
                 client,
+                model,
             } => {
                 let reply = match reply {
                     NativeReply::Error(error) if error.effect == NativeEffect::NotAdmitted => {
@@ -572,6 +611,7 @@ impl ExchangeCustody for Custody {
                         slot,
                         client,
                         retired: Arc::new(AtomicBool::new(false)),
+                        model,
                     }),
                 }))
             }
@@ -579,6 +619,7 @@ impl ExchangeCustody for Custody {
                 owner,
                 borrow,
                 client,
+                marker: _,
             } => {
                 let mut borrow = borrow.ok_or(ChannelError::Incoherent)?;
                 let reply = match reply {
@@ -586,7 +627,11 @@ impl ExchangeCustody for Custody {
                         borrow
                             .finish_native_not_started(owner.slot.identity())
                             .map_err(|_| ChannelError::Incoherent)?;
-                        return Err(ChannelError::NativeRejected);
+                        return Err(match error.code.as_str() {
+                            "invalid_request" => ChannelError::InvalidRequest,
+                            "unsupported_contract" => ChannelError::UnsupportedContract,
+                            _ => ChannelError::NativeRejected,
+                        });
                     }
                     reply => reply.decode::<UseReply>()?,
                 };
@@ -707,6 +752,9 @@ impl ExchangeCustody for Custody {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(any(test, feature = "test-support"), target_os = "linux"))]
+#[path = "audio_client/fixture.rs"]
+pub(crate) mod fixture;
+#[cfg(all(test, target_os = "linux"))]
 #[path = "audio_client/tests.rs"]
 mod tests;

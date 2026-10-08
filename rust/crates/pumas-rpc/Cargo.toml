@@ -72,6 +72,7 @@ inference-plugins = [
 
 [dev-dependencies]
 native-tls = "0.2"
+rusqlite = { workspace = true }
 pumas-library = { workspace = true, default-features = false, features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = { workspace = true }

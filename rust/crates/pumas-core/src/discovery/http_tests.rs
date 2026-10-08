@@ -394,3 +394,157 @@ fn legacy_http_observation_does_not_migrate_registry() {
         .unwrap();
     assert!(!exists);
 }
+
+#[tokio::test]
+async fn scoped_http_lookup_isolates_corrupt_foreign_rows_and_refuses_corrupt_target() {
+    for corruption in ["malformed", "new-format", "context"] {
+        let (temp, registry, root, api) = fixture().await;
+        let other_root = temp.path().join("other");
+        std::fs::create_dir(&other_root).unwrap();
+        let other = PumasApi::builder(&other_root)
+            .with_registry(registry.clone())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .with_connectivity_probe(false)
+            .build()
+            .await
+            .unwrap();
+        other.start_ipc_server().await.unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut healthy = api
+            .prepare_http_service(
+                endpoint(listener.local_addr().unwrap().port()),
+                http_build(),
+            )
+            .unwrap();
+        healthy.publish().unwrap();
+        let mut corrupt = other
+            .prepare_http_service(endpoint(1), http_build())
+            .unwrap();
+        corrupt.publish().unwrap();
+        let before = registry.get_instance(&other_root).unwrap().unwrap();
+        let mut value = serde_json::to_value(corrupt.description()).unwrap();
+        let json = match corruption {
+            "malformed" => "{".to_owned(),
+            "new-format" => {
+                value["advertisement_schema_version"] = serde_json::json!(2);
+                value["endpoint"] = serde_json::json!({"url": "future-structured-endpoint"});
+                value.to_string()
+            }
+            _ => {
+                value["instance"]["registry_library_id"] = serde_json::json!("wrong-library");
+                value.to_string()
+            }
+        };
+        let connection = rusqlite::Connection::open(temp.path().join("registry.db")).unwrap();
+        connection
+            .execute(
+                "UPDATE http_services SET description_json=?1 WHERE library_path=?2",
+                rusqlite::params![json, other_root.to_string_lossy()],
+            )
+            .unwrap();
+        let observer = LocalDiscovery::open_at(&temp.path().join("registry.db")).unwrap();
+        assert!(registry.list_http_services().is_err());
+        assert!(observer.snapshot().is_err());
+        assert!(other.advertised_http_service().is_err());
+        assert!(observer
+            .borrow_http_service(&other_root, &CompatibilityRequirements::default())
+            .await
+            .is_err());
+        assert_eq!(
+            api.advertised_http_service().unwrap().as_ref(),
+            Some(healthy.description()),
+            "{corruption}"
+        );
+        let body = serde_json::to_string(&api.advertised_http_service().unwrap().unwrap()).unwrap();
+        let server = tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            assert!(socket.read(&mut request).await.unwrap() > 0);
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+        let borrowed = observer
+            .borrow_http_service(&root, &CompatibilityRequirements::default())
+            .await
+            .unwrap();
+        assert_eq!(borrowed.description(), healthy.description());
+        server.await.unwrap();
+        drop(borrowed);
+        let retained = registry.get_instance(&other_root).unwrap().unwrap();
+        assert_eq!(retained.connection_token, before.connection_token);
+        assert_eq!(retained.started_at, before.started_at);
+        let retained_json: String = connection
+            .query_row(
+                "SELECT description_json FROM http_services WHERE library_path=?1",
+                [other_root.to_string_lossy()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained_json, json);
+        healthy.revoke().unwrap();
+        healthy.complete_shutdown(Ok(())).unwrap();
+        corrupt.revoke().unwrap();
+        corrupt.complete_shutdown(Ok(())).unwrap();
+        api.shutdown_instance().await.unwrap();
+        other.shutdown_instance().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn scoped_http_lookup_rejects_stale_owner_and_does_not_migrate_legacy_table() {
+    let (temp, registry, _root, api) = fixture().await;
+    let owner = api.primary().ready_instance.get().unwrap().clone();
+    let mut service = api.prepare_http_service(endpoint(1), http_build()).unwrap();
+    service.publish().unwrap();
+    assert_eq!(
+        registry.http_service_for_instance(&owner).unwrap().as_ref(),
+        Some(service.description())
+    );
+    let mut stale = owner.clone();
+    stale.started_at.push_str("-stale");
+    assert!(registry
+        .http_service_for_instance(&stale)
+        .unwrap()
+        .is_none());
+    stale = owner.clone();
+    stale.connection_token = Some("wrong-token".into());
+    assert!(registry
+        .http_service_for_instance(&stale)
+        .unwrap()
+        .is_none());
+    stale.connection_token = None;
+    assert!(registry
+        .http_service_for_instance(&stale)
+        .unwrap()
+        .is_none());
+    service.revoke().unwrap();
+    service.complete_shutdown(Ok(())).unwrap();
+    let connection = rusqlite::Connection::open(temp.path().join("registry.db")).unwrap();
+    connection.execute("DROP TABLE http_services", []).unwrap();
+    let observer = LocalDiscovery::open_at(&temp.path().join("registry.db")).unwrap();
+    assert!(observer
+        .registry
+        .http_service_for_instance(&owner)
+        .unwrap()
+        .is_none());
+    let exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='http_services')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!exists);
+    api.shutdown_instance().await.unwrap();
+}

@@ -565,6 +565,10 @@ pub async fn start_server(
             .map(|_| ())
             .map_err(|error| pumas_library::PumasError::Other(error.to_string()));
         let report = advertisement.complete_shutdown(cessation);
+        // Revocation failure can leave the settlement sender inside this
+        // registration. Close that abandoned receipt before awaiting its core
+        // observer; it must fail and retain authority instead of waiting on us.
+        drop(advertisement);
         // Only now may the core observe external settlement and release its row.
         let core = state.api.shutdown_instance().await;
         let failures = [
@@ -2656,6 +2660,95 @@ mod http_discovery_tests {
         assert!(tokio::net::TcpStream::connect(server.addr()).await.is_err());
     }
     #[tokio::test]
+    async fn corrupt_foreign_http_row_preserves_real_descriptor_and_borrowing() {
+        let (temp, registry, root, api) = api_fixture().await;
+        let other_root = temp.path().join("other");
+        std::fs::create_dir(&other_root).unwrap();
+        let other = PumasApi::builder(&other_root)
+            .with_registry(registry.clone())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .with_connectivity_probe(false)
+            .build()
+            .await
+            .unwrap();
+        other.start_ipc_server().await.unwrap();
+        let healthy_server = start(api, &root, 0).await.unwrap();
+        let corrupt_server = start(other, &other_root, 0).await.unwrap();
+        let descriptions = registry.list_http_services().unwrap();
+        let healthy = descriptions
+            .iter()
+            .find(|d| d.instance.library_root == root)
+            .unwrap();
+        let corrupt = descriptions
+            .iter()
+            .find(|d| d.instance.library_root == other_root)
+            .unwrap();
+        let before = registry.get_instance(&other_root).unwrap().unwrap();
+        let connection = rusqlite::Connection::open(temp.path().join("registry.db")).unwrap();
+        let observer = LocalDiscovery::open_at(&temp.path().join("registry.db")).unwrap();
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        for bad_json in ["{".to_owned(), {
+            let mut value = serde_json::to_value(corrupt).unwrap();
+            value["instance"]["registry_library_id"] = serde_json::json!("wrong-library");
+            value.to_string()
+        }] {
+            connection
+                .execute(
+                    "UPDATE http_services SET description_json=?1 WHERE library_path=?2",
+                    rusqlite::params![bad_json, other_root.to_string_lossy()],
+                )
+                .unwrap();
+            let response = client
+                .get(format!(
+                    "{}{HTTP_DISCOVERY_PATH}",
+                    healthy.endpoint.as_str()
+                ))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), reqwest::StatusCode::OK);
+            assert_eq!(response.headers().get("cache-control").unwrap(), "no-store");
+            assert_eq!(
+                response.json::<HttpServiceDescription>().await.unwrap(),
+                *healthy
+            );
+            let borrowed = observer
+                .borrow_http_service(&root, &CompatibilityRequirements::default())
+                .await
+                .unwrap();
+            assert_eq!(borrowed.description(), healthy);
+            drop(borrowed);
+            let refused = client
+                .get(format!(
+                    "{}{HTTP_DISCOVERY_PATH}",
+                    corrupt.endpoint.as_str()
+                ))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(refused.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+            assert!(observer
+                .borrow_http_service(&other_root, &CompatibilityRequirements::default())
+                .await
+                .is_err());
+            assert!(observer.snapshot().is_err());
+            let retained = registry.get_instance(&other_root).unwrap().unwrap();
+            assert_eq!(retained.connection_token, before.connection_token);
+            assert_eq!(retained.started_at, before.started_at);
+            let retained_json: String = connection
+                .query_row(
+                    "SELECT description_json FROM http_services WHERE library_path=?1",
+                    [other_root.to_string_lossy()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(retained_json, bad_json);
+        }
+        healthy_server.shutdown().await.unwrap();
+        corrupt_server.shutdown().await.unwrap();
+    }
+    #[tokio::test]
     async fn ordinary_server_drop_revokes_admission_but_retains_core_until_catalog_settles() {
         let (_temp, registry, root, api) = api_fixture().await;
         let server = start(api, &root, 0).await.unwrap();
@@ -2704,6 +2797,46 @@ mod http_discovery_tests {
         assert!(registry.list_http_services().unwrap().is_empty());
         assert!(registry.get_instance(&root).unwrap().is_some());
         assert!(tokio::net::TcpStream::connect(server.addr()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn failed_advertisement_revoke_settles_shutdown_and_retains_core_authority() {
+        let (temp, registry, root, api) = api_fixture().await;
+        let server = start(api, &root, 0).await.unwrap();
+        let owner = registry.get_instance(&root).unwrap().unwrap();
+        let description = registry.list_http_services().unwrap().remove(0);
+        // Fail the real SQLite deletion, leaving publication and its settlement
+        // sender retained. This exercises complete_shutdown's early error path.
+        let connection = rusqlite::Connection::open(temp.path().join("registry.db")).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_http_revoke BEFORE DELETE ON http_services
+                 BEGIN SELECT RAISE(ABORT, 'controlled HTTP revoke failure'); END;",
+            )
+            .unwrap();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(3), server.shutdown())
+            .await
+            .expect("failed HTTP revocation must settle instead of retaining its sender forever");
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("controlled HTTP revoke failure"), "{error}");
+        let retained = registry.get_instance(&root).unwrap().unwrap();
+        assert_eq!(retained.started_at, owner.started_at);
+        assert_eq!(retained.connection_token, owner.connection_token);
+        assert_eq!(registry.list_http_services().unwrap()[0], description);
+        assert!(tokio::net::TcpStream::connect(server.addr()).await.is_err());
+        assert!(matches!(
+            registry
+                .try_claim_instance(&root, std::process::id())
+                .unwrap(),
+            pumas_library::registry::InstanceClaimResult::Occupied(_)
+        ));
+        // Clearing the injected storage fault cannot turn an abandoned receipt
+        // into cessation evidence, even through a repeated shared waiter.
+        connection
+            .execute_batch("DROP TRIGGER reject_http_revoke")
+            .unwrap();
+        assert!(server.shutdown().await.is_err());
+        assert!(registry.get_instance(&root).unwrap().is_some());
     }
 
     #[tokio::test]

@@ -207,12 +207,13 @@ impl PumasApi {
 
     /// Read-only HTTP handler observation. Closing/changed owners are unavailable.
     pub fn advertised_http_service(&self) -> Result<Option<HttpServiceDescription>> {
-        let instance = self.instance_description()?;
-        let registry = self.primary().registry.as_ref().unwrap();
-        Ok(registry.list_http_services()?.into_iter().find(|service| {
-            service.instance.library_root == instance.library_root
-                && service.instance.generation == instance.generation
-        }))
+        self.instance_description()?;
+        let primary = self.primary();
+        primary
+            .registry
+            .as_ref()
+            .unwrap()
+            .http_service_for_instance(primary.ready_instance.get().unwrap())
     }
 }
 
@@ -247,18 +248,15 @@ impl LocalDiscovery {
             .registry
             .get_instance(&library.path)?
             .ok_or_else(|| invalid("no tracked library owner"))?;
-        let (core, core_description, _) =
-            tokio::time::timeout_at(deadline, super::attach(instance, &library, requirements))
-                .await
-                .map_err(|_| invalid("local HTTP bootstrap deadline elapsed"))??;
+        let (core, core_description, _) = tokio::time::timeout_at(
+            deadline,
+            super::attach(instance.clone(), &library, requirements),
+        )
+        .await
+        .map_err(|_| invalid("local HTTP bootstrap deadline elapsed"))??;
         let advertised = self
             .registry
-            .list_http_services()?
-            .into_iter()
-            .find(|service| {
-                service.instance.library_root == library.path
-                    && service.instance.generation == core_description.generation
-            })
+            .http_service_for_instance(&instance)?
             .ok_or_else(|| invalid("selected owner has no HTTP advertisement"))?;
         let observed = tokio::time::timeout_at(deadline, fetch_description(&advertised.endpoint))
             .await

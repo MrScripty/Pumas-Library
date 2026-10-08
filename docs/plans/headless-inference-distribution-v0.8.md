@@ -161,8 +161,15 @@ The build-record adapter requires `version`, `target`, `host`, `profile`,
 `features`, `source: {head, tree}`, `build_id`, `inference_enabled`, `binary_sha256`,
 `command` and `rustc`. Target and host must match the native tuple; profile must
 be release. `headless_inference_build.py` now produces that record from observed
-Cargo artifacts rather than asking a caller to assert that Cargo ran. It checks
-an immutable clean source head/tree, actual native compiler host, checked release
+Cargo artifacts rather than asking a caller to assert that Cargo ran. Before and
+after Cargo, Git's `--show-toplevel` must identify the actual build directory by
+native `samefile` directory identity. A redirected `core.worktree`, unavailable
+root or changed root is refused; valid linked worktrees and symlink aliases of
+the same directory remain usable. Git/compiler observations use the explicit
+build environment, with Git routing/config and compiler/wrapper overrides
+refused. These are unsigned before/after observations under trusted local
+custody, not proof that compilation inputs were immutable during a build.
+It also checks a clean source head/tree, actual native compiler host, checked release
 profile, forbidden flag/config overrides, current S3 attribution, and exact
 core/RPC features. It forces `ORT_SKIP_DOWNLOAD=1`, offline/locked compilation,
 and one Cargo build job. An uncached official dependency or missing native tool

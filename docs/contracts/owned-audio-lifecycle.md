@@ -1,8 +1,8 @@
 # Bounded owned audio lifecycle
 
-This slice extends PR55's selected-byte and PCM foundations with private
-ownership primitives. Production native audio admission and the public generic
-endpoint remain unavailable. Controlled workers establish the ownership state
+The selected-byte and PCM contracts use private ownership primitives for
+native audio. The generic operation endpoint exists, while production audio
+admission remains unavailable. Controlled workers establish the ownership state
 machine; they do not establish that an installed model consumed selected bytes.
 
 ## Required ownership path
@@ -56,15 +56,25 @@ a complete executable read closure. Equal model manifests cannot retarget the
 candidate to another prepared allocation. Dropping the candidate releases its
 last custody references only when no other owner remains.
 
-This candidate has no qualification flag, deserialization or conversion into an
-admitted runtime. The shipping `AudioRuntimeOwner::for_installed_runtime`
-constructor remains unimplemented and refuses. The fixed remaining requirements
-are a trusted interpreter/dependency recipe, complete native loader read closure,
+This candidate has no qualification flag or deserialization. The constructor
+`AudioRuntimeOwner::for_installed_runtime(candidate, &selected)` implements
+conditional ownership transfer from held capabilities, but its shipping policy
+resolver still refuses. A fixed positive policy exists only in unit tests;
+neither shipping nor `test-support` builds contain that policy. Remaining
+requirements are a trusted interpreter/dependency recipe, complete native loader
+read closure,
 complete model read containment, and pinned native execution/lifecycle
 acceptance. Captured selected trees and sidecar equality discharge none of these
 requirements. Controlled candidate tests use dummy interpreter/dependency bytes
 and synthetic unparsed weights; they establish custody and refusal behavior,
 not an installed Cohere runtime or real transcription.
+
+The conditional Python gate uses the same private provider protocol and staged
+native acquisition. It retains each returned object and refuses cleanup when a
+constructor leaves unknown native allocations. Its shipping catalog is empty;
+the default factory and hello expectation remain unavailable. See
+[conditional construction](installed-audio-constructor.md) for the source scope,
+fixed fixture evidence and remaining production proof requirements.
 
 `owned_audio.OwnedAudioActor` owns native load and unload independently of caller
 tasks. Its unavailable default gate performs no model load. Controlled gates
@@ -89,9 +99,9 @@ later controlled integration boundary.
 
 ## Concrete qualification blockers
 
-The execution environment has no installed Torch or Transformers and no
-qualified local speech model. The bundled recipe pins Transformers 4.57.6,
-while the native loader requires the supported Cohere ASR implementation. The
+The native dependency cohort and speech model remain unqualified. The bundled
+image recipe pins Transformers 4.57.6, while the native ASR loader requires the
+supported Cohere ASR implementation from Transformers 5.4.0. The
 installer now materializes the speech operation owner, native audio loader,
 PCM helpers and actor/bridge, and installed-byte custody retains their actual
 bytes. A separately qualified compatible dependency recipe and native execution
@@ -100,8 +110,9 @@ loader-code custody lease. The pinned model and access prerequisites are in
 [Cohere qualification](cohere-native-qualification.md).
 
 The prepared package's closed copied-member set does not yet prove the complete
-installed Transformers read set, including path-valued configuration. The implemented private inherited-stdio transport binds the parent prepared
-owner to the controlled actor plan and matches original load/use/unload replies.
+installed Transformers read set, including path-valued configuration. The
+private inherited-stdio transport binds the parent prepared owner to the
+controlled actor plan and matches original load/use/unload replies.
 Controlled real-process fixtures qualify that boundary; they do not qualify the
 installed interpreter, third-party dependencies or real model loader read set.
 A JSON manifest, path, slot receipt or `qualified=true` cannot substitute for

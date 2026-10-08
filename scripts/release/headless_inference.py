@@ -513,6 +513,7 @@ def assemble(inputs, build_record, runtime_record, contract, schema, output):
                     owned_partial = True
                     for member in sorted(stage.iterdir()):
                         archive.add(member, arcname=member.name, recursive=False)
+            require(temporary_output.stat().st_size <= MAX_PACKAGE, "archive exceeds bounded size")
             # Hard link refuses a racing destination; publication is local only.
             os.link(temporary_output, output)
         finally:

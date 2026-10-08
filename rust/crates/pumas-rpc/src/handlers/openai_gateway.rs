@@ -221,6 +221,8 @@ pub(super) struct OperationAdmission<'a> {
     pub marker: &'a AtomicBool,
     pub expected: &'a ServedModelStatus,
     pub cancellation: &'a Mutex<Option<GenerationCancellation>>,
+    /// Only the finite selected-model vision lane requires live image support.
+    pub vision: bool,
 }
 
 /// OpenAI-compatible proxy for served models.
@@ -322,7 +324,10 @@ pub(super) async fn dispatch_openai(
         }
     };
 
-    if admission.is_some_and(|context| !same_selection(&served, context.expected)) {
+    if admission.is_some_and(|context| {
+        !same_selection(&served, context.expected)
+            || (context.vision && served.loaded_at != context.expected.loaded_at)
+    }) {
         return openai_public_error_response(
             StatusCode::SERVICE_UNAVAILABLE,
             PublicError::unavailable(),
@@ -404,6 +409,39 @@ pub(super) async fn dispatch_openai(
             .cancellation
             .lock()
             .expect("request-local cancellation mutex") = Some(lifetime.cancellation());
+    }
+    if admission.is_some_and(|context| context.vision) {
+        let guard = async {
+            if !super::model_operations::vision::ready(&state, &served).await {
+                return false;
+            }
+            // Profile changes and fresh selection are checked after the probe,
+            // which can await a slow response. External endpoints do not confer
+            // an owned session identity or immutable artifact attestation.
+            if !super::model_operations::vision::supported_profile(&state, &served).await {
+                return false;
+            }
+            matches!(find_selected_served_model(&state, requested_model.as_str(), profile).await,
+                Ok(OpenAiServedModelLookup::Found(fresh))
+                    if same_selection(&fresh, &served) && fresh.loaded_at == served.loaded_at)
+        };
+        let Some(lifetime) = lifetime.as_mut() else {
+            return openai_public_error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                PublicError::unavailable(),
+            );
+        };
+        let ready = tokio::select! {
+            biased;
+            () = lifetime.cancelled() => false,
+            ready = guard => ready,
+        };
+        if !ready {
+            return openai_public_error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                PublicError::unavailable(),
+            );
+        }
     }
     let streaming = policy.generation && body.get("stream").and_then(Value::as_bool) == Some(true);
     // Generation routes use the shared duration-unbounded transport without

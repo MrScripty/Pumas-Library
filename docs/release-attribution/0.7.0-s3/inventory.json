@@ -194,8 +194,16 @@
       "version": "0.6.2"
     },
     {
+      "name": "bytemuck",
+      "version": "1.25.2"
+    },
+    {
       "name": "byteorder",
       "version": "1.5.0"
+    },
+    {
+      "name": "byteorder-lite",
+      "version": "0.1.0"
     },
     {
       "name": "bytes",
@@ -256,6 +264,10 @@
     {
       "name": "clap_lex",
       "version": "0.7.7"
+    },
+    {
+      "name": "cmake",
+      "version": "0.1.58"
     },
     {
       "name": "cmov",
@@ -446,6 +458,10 @@
       "version": "2.3.0"
     },
     {
+      "name": "fdeflate",
+      "version": "0.3.7"
+    },
+    {
       "name": "filetime",
       "version": "0.2.27"
     },
@@ -528,6 +544,10 @@
     {
       "name": "futures-util",
       "version": "0.3.31"
+    },
+    {
+      "name": "gcd",
+      "version": "2.3.0"
     },
     {
       "name": "generic-array",
@@ -664,6 +684,10 @@
     {
       "name": "idna_adapter",
       "version": "1.2.1"
+    },
+    {
+      "name": "image",
+      "version": "0.25.10"
     },
     {
       "name": "indexmap",
@@ -822,6 +846,10 @@
       "version": "0.1.18"
     },
     {
+      "name": "moxcms",
+      "version": "0.8.1"
+    },
+    {
       "name": "native-tls",
       "version": "0.2.14"
     },
@@ -966,6 +994,10 @@
       "version": "0.3.32"
     },
     {
+      "name": "png",
+      "version": "0.18.1"
+    },
+    {
       "name": "portable-atomic",
       "version": "1.13.0"
     },
@@ -984,6 +1016,10 @@
     {
       "name": "proc-macro2",
       "version": "1.0.107"
+    },
+    {
+      "name": "pxfm",
+      "version": "0.1.30"
     },
     {
       "name": "quanta",
@@ -1239,7 +1275,15 @@
     },
     {
       "name": "thiserror",
+      "version": "1.0.69"
+    },
+    {
+      "name": "thiserror",
       "version": "2.0.18"
+    },
+    {
+      "name": "thiserror-impl",
+      "version": "1.0.69"
     },
     {
       "name": "thiserror-impl",
@@ -1332,6 +1376,14 @@
     {
       "name": "try-lock",
       "version": "0.2.5"
+    },
+    {
+      "name": "turbojpeg",
+      "version": "1.5.1"
+    },
+    {
+      "name": "turbojpeg-sys",
+      "version": "1.2.0"
     },
     {
       "name": "typenum",
@@ -2273,6 +2325,27 @@
       ]
     },
     {
+      "name": "bytemuck",
+      "version": "1.25.2",
+      "license_declared": "Zlib OR Apache-2.0 OR MIT",
+      "source": "https://crates.io/api/v1/crates/bytemuck/1.25.2/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "e3ba223bb1423f0aad8c3dfce0fe3148db48926d41e6fbc3afbbf5ff9e1c89cb"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "9df9ba60a11af705f2e451b53762686e615d86f76b169cf075c3237730dbd7e2"
+        },
+        {
+          "path": "LICENSE-ZLIB",
+          "sha256": "84b34dd7608f7fb9b17bd588a6bf392bf7de504e2716f024a77d89f1b145a151"
+        }
+      ]
+    },
+    {
       "name": "byteorder",
       "version": "1.5.0",
       "license_declared": "Unlicense OR MIT",
@@ -2283,6 +2356,23 @@
           "path": "COPYING",
           "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"
         },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"
+        },
+        {
+          "path": "UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c"
+        }
+      ]
+    },
+    {
+      "name": "byteorder-lite",
+      "version": "0.1.0",
+      "license_declared": "Unlicense OR MIT",
+      "source": "https://crates.io/api/v1/crates/byteorder-lite/0.1.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
         {
           "path": "LICENSE-MIT",
           "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"
@@ -2549,6 +2639,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6"
+        }
+      ]
+    },
+    {
+      "name": "cmake",
+      "version": "0.1.58",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/cmake/0.1.58/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397"
         }
       ]
     },
@@ -3332,6 +3439,23 @@
       ]
     },
     {
+      "name": "fdeflate",
+      "version": "0.3.7",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/fdeflate/0.3.7/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "c77a4cf9da729987d0fe7ccd811e3bd27393914ddf3d23467c18cc22954513b3"
+        }
+      ]
+    },
+    {
       "name": "filetime",
       "version": "0.2.27",
       "license_declared": "MIT/Apache-2.0",
@@ -3685,6 +3809,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd"
+        }
+      ]
+    },
+    {
+      "name": "gcd",
+      "version": "2.3.0",
+      "license_declared": "MIT/Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/gcd/2.3.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "4c9222d8d8ec233ffc1b317729878430f2db2a49cb2324c856a02e9848a3c185"
         }
       ]
     },
@@ -4199,6 +4340,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "8b43ce8accd61e9d370b5ca9e9c4f953279b5c239926c62315b40e24df51b726"
+        }
+      ]
+    },
+    {
+      "name": "image",
+      "version": "0.25.10",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/image/0.25.10/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "c77a4cf9da729987d0fe7ccd811e3bd27393914ddf3d23467c18cc22954513b3"
         }
       ]
     },
@@ -4902,6 +5060,23 @@
       ]
     },
     {
+      "name": "moxcms",
+      "version": "0.8.1",
+      "license_declared": "BSD-3-Clause OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/moxcms/0.8.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE.md",
+          "sha256": "90bf2d659c43045111b65c733ab2a6d4cbcb422a098368c8c58a9ba3db4ed0c5"
+        },
+        {
+          "path": "LICENSE.md",
+          "sha256": "2aa92cada6431e75615e3fe6cb1a9082c98f777d48ae1c087c0da0e37f7b8bff"
+        }
+      ]
+    },
+    {
       "name": "native-tls",
       "version": "0.2.14",
       "license_declared": "MIT OR Apache-2.0",
@@ -5462,6 +5637,23 @@
       ]
     },
     {
+      "name": "png",
+      "version": "0.18.1",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/png/0.18.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "eaf40297c75da471f7cda1f3458e8d91b4b2ec866e609527a13acfa93b638652"
+        }
+      ]
+    },
+    {
       "name": "portable-atomic",
       "version": "1.13.0",
       "license_declared": "Apache-2.0 OR MIT",
@@ -5539,6 +5731,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "pxfm",
+      "version": "0.1.30",
+      "license_declared": "BSD-3-Clause OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/pxfm/0.1.30/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE.md",
+          "sha256": "90bf2d659c43045111b65c733ab2a6d4cbcb422a098368c8c58a9ba3db4ed0c5"
+        },
+        {
+          "path": "LICENSE.md",
+          "sha256": "2aa92cada6431e75615e3fe6cb1a9082c98f777d48ae1c087c0da0e37f7b8bff"
         }
       ]
     },
@@ -6611,9 +6820,43 @@
     },
     {
       "name": "thiserror",
+      "version": "1.0.69",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/thiserror/1.0.69/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "thiserror",
       "version": "2.0.18",
       "license_declared": "MIT OR Apache-2.0",
       "source": "https://crates.io/api/v1/crates/thiserror/2.0.18/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "thiserror-impl",
+      "version": "1.0.69",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/thiserror-impl/1.0.69/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6962,6 +7205,48 @@
         {
           "path": "LICENSE",
           "sha256": "c816a0749cdc6bf062a5111c159723de51b2bfac66a1dac2655abd9e6b1583eb"
+        }
+      ]
+    },
+    {
+      "name": "turbojpeg",
+      "version": "1.5.1",
+      "license_declared": "Unlicense OR MIT",
+      "source": "https://crates.io/api/v1/crates/turbojpeg/1.5.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE",
+          "sha256": "1c99d306def307c6e570615a484c65e6eafdd7717913f42118b65847830c5123"
+        },
+        {
+          "path": "UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c"
+        }
+      ]
+    },
+    {
+      "name": "turbojpeg-sys",
+      "version": "1.2.0",
+      "license_declared": "Unlicense OR MIT",
+      "source": "https://crates.io/api/v1/crates/turbojpeg-sys/1.2.0/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "libjpeg-turbo/LICENSE.md",
+          "sha256": "96f5b328adbb78eeaaec6980d73fd558cb1e4d62560ed615646bc3cf5e532430"
+        },
+        {
+          "path": "libjpeg-turbo/README.ijg",
+          "sha256": "75815e3bf6484201a3c3d17a1bbf10f2e8e3237f84df10a2357ea896db2a81d6"
+        },
+        {
+          "path": "libjpeg-turbo/release/License.rtf",
+          "sha256": "d26120ab237f87dea10aa4fa7fd4243cadffd26e54eb2f3903d5fb0f8ed336b2"
+        },
+        {
+          "path": "turbojpeg-sys-LICENSE",
+          "sha256": "1c99d306def307c6e570615a484c65e6eafdd7717913f42118b65847830c5123"
         }
       ]
     },
@@ -8599,6 +8884,11 @@
       "file": "simd-LICENSE",
       "source": "https://raw.githubusercontent.com/Nugine/simd/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE",
       "sha256": "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d"
+    },
+    {
+      "file": "turbojpeg-sys-LICENSE",
+      "source": "https://raw.githubusercontent.com/honzasp/rust-turbojpeg/05da705c6b6147baec1834a4c1f0de5e1df2614b/LICENSE",
+      "sha256": "1c99d306def307c6e570615a484c65e6eafdd7717913f42118b65847830c5123"
     }
   ],
   "managed_python": [
@@ -8946,15 +9236,15 @@
     "electron/package.json": "1f2b68e5819cbea84a2d8f25bbdda5d8288b3c1bf90a52162dc414c5938d72d8",
     "frontend/package.json": "0f3d0d26b1155cdabd7a5b1f93d2b99aff64b70105760284343adeb1afb6ca2e",
     "pnpm-lock.yaml": "78cac9b50e2f28d293420ffb8b9d57889a723669a3969b3a670dd3e6cbfdda18",
-    "rust/Cargo.lock": "194c01c102ad4dadada121b6975cf8aa43ad91bc37211d9b1969193e890b5e99",
+    "rust/Cargo.lock": "3029fb7234f78372a691bcbbec409871dba35fdf79a6a0b678105ae2ac836225",
     "rust/Cargo.toml": "20bc7d7e683b50911c3182ad3056bd09a3b0fc00081cb38904dc7651346a7ebd",
     "rust/crates/pumas-app-manager/Cargo.toml": "1093f1165c8ffc78567548aca81779386648594227978c1f77e048ac247e0f74",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "e2e79a8c63500fa060e079edc21484bdc231e1941c6a5ebf65584c3efc95be6f",
     "rust/crates/pumas-core/Cargo.toml": "d4403c6e15b9d2c3540473253835ed51bb2f0f82339141054636602450ad9c55",
-    "rust/crates/pumas-rpc/Cargo.toml": "37f65b5ff9d40da620d5651c1ca63614c1ac67f483a7749efe173369961d3c01",
+    "rust/crates/pumas-rpc/Cargo.toml": "92b67b71767f6f495895c6d35a7c72107cfccc1cb60dedc400dd7f301a3a97f8",
     "scripts/release/artifact-plan.json": "d5e4a2700728ba61cabca36d727efd477d716f3b50cc90fa9ce7f5e7959c7b0c",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
     "scripts/release/torch-managed-python-acceptance.py": "b0486387627d6ae98b4b6533adcceed93e93ebf868385626f3b13f1fb949893b"
   },
-  "notices_sha256": "90d6b8226b5cee95faa44b15a11e51e923b87d4442797715725f8c07231d5612"
+  "notices_sha256": "0c43fcdc282c4cd3c6e0a0239733986c935b41a5c42508eabeb3a937ea78932b"
 }

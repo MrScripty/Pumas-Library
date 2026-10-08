@@ -29,6 +29,7 @@ REQUIRED_CODE = (
     "audio_contract.py",
     "loaders/__init__.py",
     "loaders/cohere_asr_loader.py",
+    "loaders/owned_cohere_source.py",
 )
 REQUIRED_MODEL = frozenset(
     {

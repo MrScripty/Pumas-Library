@@ -351,6 +351,12 @@ async fn source_prefix_rpc_https_discovery_and_explicit_bundle() {
         }
         server.shutdown().await.unwrap();
         if let Some(model) = expected_model {
+            let expected_records = acquisition.store().acquisitions().unwrap();
+            // Shutdown drains work; retained observers still own the physical store.
+            // Release those handles before this genuinely cold constructor.
+            drop(library);
+            drop(acquisition);
+            drop(server);
             let cold = pumas_library::PumasApi::builder(root.path())
                 .auto_create_dirs(true)
                 .with_hf_client(false)
@@ -368,7 +374,7 @@ async fn source_prefix_rpc_https_discovery_and_explicit_bundle() {
                 Some(pumas_library::models::ImportState::Ready)
             );
             let cold_records = cold.acquisition().store().acquisitions().unwrap();
-            assert_eq!(cold_records, acquisition.store().acquisitions().unwrap());
+            assert_eq!(cold_records, expected_records);
             cold.shutdown_intent().await.unwrap();
             cold.shutdown_downloads().await.unwrap();
             cold.shutdown_acquisition().await.unwrap();

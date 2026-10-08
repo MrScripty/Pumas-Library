@@ -38,6 +38,13 @@ pub(crate) fn build_info() -> PumasBuildInfo {
         name: "pumas.http-advertisement".into(),
         version: HTTP_ADVERTISEMENT_SCHEMA_VERSION,
     });
+    // Compile-time parser feature identity is separate from per-model live
+    // readiness and real-model qualification in /v1/capabilities.
+    #[cfg(feature = "inference-plugins")]
+    info.schemas.push(SchemaAdvertisement {
+        name: "pumas.model-operations.image-to-text".into(),
+        version: 1,
+    });
     info
 }
 

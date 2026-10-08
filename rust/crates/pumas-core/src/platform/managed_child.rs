@@ -11,6 +11,14 @@ use std::time::{Duration, Instant};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
+// Field order releases the newly attached guard before earlier prerequisites.
+// In runtime sessions the audio guard observes child drain before the retained
+// physical-store lifetime can close its final native lock descriptor.
+struct CompositeCleanupLease {
+    _current: Arc<dyn Send + Sync>,
+    _previous: Arc<dyn Send + Sync>,
+}
+
 pub struct ManagedChild {
     child: Option<Child>,
     drained: bool,
@@ -224,8 +232,24 @@ impl ManagedChild {
         ))
     }
 
+    /// Retain every attached lease with this exact child until confirmed drain.
+    /// Later guards drop before previously attached prerequisites.
     pub fn attach_cleanup_lease<T: Send + Sync + 'static>(&mut self, lease: Arc<T>) {
-        self.cleanup_lease = Some(lease);
+        let current: Arc<dyn Send + Sync> = lease;
+        self.cleanup_lease = Some(match self.cleanup_lease.take() {
+            Some(previous) => Arc::new(CompositeCleanupLease {
+                _current: current,
+                _previous: previous,
+            }),
+            None => current,
+        });
+    }
+
+    /// Share the existing deterministic failure controller with lifecycle tests.
+    /// This accessor is absent from shipping and test-support builds.
+    #[cfg(all(test, target_os = "linux", not(target_env = "uclibc")))]
+    pub(crate) fn test_observation_failure_control(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.force_observation_failure.clone()
     }
 
     pub fn listener_custody(&self) -> ManagedListenerCustody {

@@ -1,6 +1,6 @@
 # Private owned audio transport
 
-This candidate supplies actual private load/use/unload transport. Its usable
+The private channel supplies actual load/use/unload transport. Its usable
 execution scope is a controlled subprocess, not production ASR. The shipping
 runtime qualification constructor refuses admission, and the established public
 modality endpoint continues to report `unqualified_audio_runtime` in shipping
@@ -130,40 +130,28 @@ native `stop`/`length` evidence. Missing or ambiguous terminal evidence is a
 confirmed typed failure, never a fabricated stop. Fixtures exercise EOS, the
 512-token bound and missing evidence; a real model remains unvalidated.
 
-## Upstream integration and remaining gates
+## Production qualification and consumer contract
 
-Import the private candidate over PR55 head `9e9ba63c022bce52c00256cd42f4a33afb0e6731`
-and its private lifecycle parent `4e40ea0c0493547104dfd2c9985edd9ca3613596`.
-The public PR55 author/committer is connector identity Puma; the separate local
-format candidate used MrScripty and has the same source tree. Do not rewrite
-published author history. Coordinate public changes with the root/integration
-worker; this candidate is not published or merged.
+Before shipping audio is available through the generic endpoint, the runtime
+must qualify and retain the installed interpreter and complete immutable
+loader/dependency code, materialize every imported module in its runtime
+recipe, and enforce the full selected-model read set. Bind the client and stop
+callback to the exact process generation and register the private slot owner
+through the existing model-operation boundary. Derive availability from this
+qualification and retained slot, rather than a reply or caller-supplied flag.
 
-Before making shipping audio available through the existing generic endpoint, the
-owning runtime must qualify and retain the installed interpreter and complete
-immutable dependency/loader code, materialize all imported modules in the
-runtime recipe, and prove the real loader's full selected-model read set.
-The bundled Transformers 4.57.6 recipe is not sufficient for this loader. Bind
-the client and stop callback to that exact process generation, register its
-private slot owner through the existing model-operation boundary, and derive
-availability from this qualification rather than a reply or flag. Validate a
-real model acquired through Pumas under the user's download/terms authorization;
-no model acquisition or inference occurred for this candidate.
+Consumers use the generic typed modality contract, retain correlation IDs and
+accept audio refusal until runtime qualification is satisfied. Obtain the
+pinned model through Pumas's authorized acquisition path, verify every selected
+member, and qualify real native load, finite inference and disposal. The
+proposed model revision, member verification and compatible runtime requirements
+are documented in [Cohere qualification](cohere-native-qualification.md).
+The bundled image recipe uses Transformers 4.57.6; the native ASR profile pins
+Transformers 5.4.0. Controlled transport tests do not establish real model
+compatibility, transcription quality or complete native read containment.
 
-Use the recorded offline focused, aggregate and strict lint commands in the
-private handoff. Pantograph consumers should continue using the existing generic
-typed modality contract, retain caller correlation IDs and accept audio refusal
-until the owning runtime gate is satisfied. No authorized real model was present
-in this execution environment: a Pumas-indexed canonical Cohere ASR package with
-all required selected files is missing. The subsequent public-source audit pins
-the proposed official repository revision and documents access terms,
-verification and compatible runtime requirements in
-[Cohere qualification](cohere-native-qualification.md). Gated member bytes,
-digests and accepted access consent remain missing. The bundled runtime remains
-Transformers 4.57.6; the native adapter requires >=5.4. Do not download gated
-assets to bridge those gaps without the user's authorization.
-Do not substitute HTTP status/cancel,
-public paths, manifests or automatic retries for the private custody channel.
+HTTP status/cancel requests, public paths, manifests and automatic retries
+cannot replace the private custody channel.
 
 ## Hung-peer and disposal limits
 

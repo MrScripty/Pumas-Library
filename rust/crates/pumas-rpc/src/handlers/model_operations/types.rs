@@ -5,6 +5,7 @@ pub const CONTRACT_VERSION: u32 = 1;
 pub const MAX_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_EVENT_BYTES: usize = 256 * 1024;
 
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
@@ -12,13 +13,14 @@ pub enum Capability {
     TextGeneration,
     TextEmbedding,
     ImageGeneration,
+    ImageToText,
     AudioTranscription,
     AudioClassification,
 }
 impl Capability {
     pub fn path(self) -> Option<&'static str> {
         Some(match self {
-            Self::ChatGeneration => "/v1/chat/completions",
+            Self::ChatGeneration | Self::ImageToText => "/v1/chat/completions",
             Self::TextGeneration => "/v1/completions",
             Self::TextEmbedding => "/v1/embeddings",
             Self::ImageGeneration => "/v1/images/generations",
@@ -29,6 +31,7 @@ impl Capability {
         matches!(self, Self::ChatGeneration | Self::TextGeneration)
     }
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperationRequest {
@@ -44,6 +47,7 @@ pub struct OperationRequest {
     #[serde(default)]
     pub stream: bool,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OperationInput {
@@ -56,6 +60,13 @@ pub enum OperationInput {
     TextBatch {
         texts: Vec<String>,
     },
+    Image {
+        encoding: ImageEncoding,
+        data_base64: String,
+    },
+    ImageMessages {
+        messages: Vec<ImageMessage>,
+    },
     Audio {
         encoding: AudioEncoding,
         sample_rate_hz: u32,
@@ -64,18 +75,47 @@ pub enum OperationInput {
         data_base64: String,
     },
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageEncoding {
+    Png,
+    Jpeg,
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageMessage {
+    pub role: Role,
+    pub content: Vec<ImagePart>,
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ImagePart {
+    Text {
+        text: String,
+    },
+    Image {
+        encoding: ImageEncoding,
+        data_base64: String,
+    },
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioEncoding {
     PcmS16le,
     PcmF32le,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Message {
     pub role: Role,
     pub content: String,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
@@ -83,6 +123,7 @@ pub enum Role {
     User,
     Assistant,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputFormat {
@@ -91,6 +132,7 @@ pub enum OutputFormat {
     PngBase64,
     Labels,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OperationOptions {
@@ -120,6 +162,7 @@ pub enum OperationOptions {
     },
 }
 /// The existing private speech owner's closed language vocabulary.
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AudioLanguage {
@@ -139,6 +182,7 @@ pub enum AudioLanguage {
     Ko,
 }
 
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
@@ -146,6 +190,7 @@ pub enum FinishReason {
     Length,
     ContentFilter,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OperationResult {
@@ -161,6 +206,7 @@ pub enum OperationResult {
         seed: u32,
     },
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -177,29 +223,34 @@ pub enum ErrorCode {
     ResponseLimit,
     TransportLost,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
     NotAdmitted,
     Unknown,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize)]
 pub struct OperationError {
     pub code: ErrorCode,
     pub outcome: Outcome,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
 pub struct OperationResponse {
     pub contract_version: u32,
     pub request_id: String,
     pub result: OperationResult,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {
     pub contract_version: u32,
     pub request_id: Option<String>,
     pub error: OperationError,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StreamEvent {
@@ -233,6 +284,7 @@ impl StreamEvent {
         }
     }
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilityQuery {
@@ -240,6 +292,7 @@ pub struct CapabilityQuery {
     #[serde(default)]
     pub profile: Option<String>,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
 pub struct CapabilitiesResponse {
     pub supported_contract_versions: Vec<u32>,
@@ -250,6 +303,7 @@ pub struct CapabilitiesResponse {
     pub max_stream_event_bytes: usize,
     pub capabilities: Vec<CapabilityDescriptor>,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
 pub struct CapabilityDescriptor {
     pub capability: Capability,
@@ -260,6 +314,7 @@ pub struct CapabilityDescriptor {
     pub availability: Availability,
     pub option_bounds: Vec<OptionBound>,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticTask {
@@ -271,15 +326,20 @@ pub enum SemanticTask {
     AudioClassification,
     ImageToText,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InputFormat {
     MessagesText,
+    PngBase64,
+    JpegBase64,
+    MessagesImage,
     Text,
     TextBatch,
     PcmS16le,
     PcmF32le,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum Availability {
@@ -291,6 +351,7 @@ impl Availability {
         matches!(self, Self::Available)
     }
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AvailabilityReason {
@@ -300,12 +361,14 @@ pub enum AvailabilityReason {
     ModelTaskMismatch,
     RuntimeUnavailable,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
 pub struct OptionBound {
     pub option: OptionName,
     pub minimum: f64,
     pub maximum: f64,
 }
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OptionName {
@@ -319,4 +382,135 @@ pub enum OptionName {
     Height,
     Seed,
     MaxOutputTokens,
+    ImageBytes,
+    ImagePixels,
+    ImageCount,
+}
+
+#[cfg(test)]
+mod image_to_text_grammar_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn vision_named_dto_is_closed_and_preserves_image_parts() {
+        let input = json!({"kind":"image_messages","messages":[{"role":"user","content":[{"kind":"text","text":"caption"},{"kind":"image","encoding":"jpeg","data_base64":"AA=="}]}]});
+        let parsed: OperationInput = serde_json::from_value(input.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), input);
+        for bad in [
+            json!({"kind":"image","encoding":"webp","data_base64":"AA=="}),
+            json!({"kind":"image","encoding":"png","data_base64":"AA==","url":"file:///private"}),
+            json!({"kind":"image_messages","messages":[{"role":"user","content":[{"kind":"audio","data_base64":"AA=="}]}]}),
+            json!({"kind":"image_messages","messages":[{"role":"user","content":[{"kind":"text","text":"caption","provider_options":{}}]}]}),
+        ] {
+            assert!(serde_json::from_value::<OperationInput>(bad).is_err());
+        }
+    }
+
+    #[test]
+    fn vision_is_finite_and_legacy_messages_still_require_string_content() {
+        assert_eq!(Capability::ImageToText.path(), Some("/v1/chat/completions"));
+        assert!(!Capability::ImageToText.text_generation());
+        assert_eq!(
+            serde_json::to_value(Capability::ImageToText).unwrap(),
+            "image_to_text"
+        );
+        assert!(serde_json::from_value::<OperationInput>(json!({"kind":"messages","messages":[{"role":"user","content":[{"kind":"image","encoding":"png","data_base64":"AA=="}]}]})).is_err());
+        let raw = br#"{"kind":"image","encoding":"png","encoding":"jpeg","data_base64":"AA=="}"#;
+        assert!(serde_json::from_slice::<OperationInput>(raw).is_err());
+    }
+}
+
+#[cfg(all(test, feature = "export-contract"))]
+mod image_to_text_schema_tests {
+    use super::super::{modality::ModalityRequest, projection};
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn image_to_text_actual_dto_schema_export() {
+        // These are the actual DTO schemas. Cross-field admission, image-byte
+        // validity and numeric policy still belong to the Rust validators.
+        let schemas: [(&str, Value); 6] = [
+            (
+                "operation-request.schema.json",
+                serde_json::to_value(schemars::schema_for!(OperationRequest)).unwrap(),
+            ),
+            (
+                "modality-request.schema.json",
+                serde_json::to_value(schemars::schema_for!(ModalityRequest)).unwrap(),
+            ),
+            (
+                "capabilities-response.schema.json",
+                serde_json::to_value(schemars::schema_for!(CapabilitiesResponse)).unwrap(),
+            ),
+            (
+                "capability-descriptor.schema.json",
+                serde_json::to_value(schemars::schema_for!(CapabilityDescriptor)).unwrap(),
+            ),
+            (
+                "operation-response.schema.json",
+                serde_json::to_value(schemars::schema_for!(OperationResponse)).unwrap(),
+            ),
+            (
+                "error-response.schema.json",
+                serde_json::to_value(schemars::schema_for!(ErrorResponse)).unwrap(),
+            ),
+        ];
+        let capability_schema = serde_json::to_value(schemars::schema_for!(Capability)).unwrap();
+        let capabilities = capability_schema["enum"].as_array().unwrap();
+        assert!(capabilities.contains(&json!("image_to_text")));
+        assert!(capabilities.contains(&json!("chat_generation")));
+        let input_schema = serde_json::to_value(schemars::schema_for!(InputFormat)).unwrap();
+        let formats = input_schema["enum"].as_array().unwrap();
+        for format in [
+            "png_base64",
+            "jpeg_base64",
+            "messages_image",
+            "messages_text",
+        ] {
+            assert!(formats.contains(&json!(format)));
+        }
+
+        let named = json!({"contract_version":1,"request_id":"schema-vision","model":"selected-vision","capability":"image_to_text","input":{"kind":"image","encoding":"png","data_base64":"AA=="},"output":"text","options":{"kind":"text_generation"}});
+        let valid_shape: OperationRequest = serde_json::from_value(named.clone()).unwrap();
+        projection::validate_image_to_text_request(&valid_shape).unwrap();
+        let mut malformed = named.clone();
+        malformed["input"]["url"] = json!("https://unselected.example/image");
+        assert!(serde_json::from_value::<OperationRequest>(malformed).is_err());
+        for field in ["stream", "options"] {
+            let mut bad = named.clone();
+            if field == "stream" {
+                bad["stream"] = json!(true);
+            } else {
+                bad["options"]["max_tokens"] = json!(2049);
+            }
+            let parsed: OperationRequest = serde_json::from_value(bad).unwrap();
+            assert_eq!(
+                projection::validate_image_to_text_request(&parsed),
+                Err(ErrorCode::InvalidRequest)
+            );
+        }
+        let facade = json!({"contract_version":1,"request_id":"schema-facade","model":"selected-vision","input":{"kind":"image","encoding":"jpeg","data_base64":"AA=="},"output":"text","semantic_task":"image_to_text"});
+        serde_json::from_value::<ModalityRequest>(facade.clone())
+            .unwrap()
+            .validate()
+            .unwrap();
+        let mut bad_facade = facade;
+        bad_facade["input"]["encoding"] = json!("webp");
+        assert!(serde_json::from_value::<ModalityRequest>(bad_facade).is_err());
+
+        if let Some(directory) = std::env::var_os("PUMAS_IMAGE_CONTRACT_EXPORT_DIR") {
+            let directory = std::path::PathBuf::from(directory);
+            assert!(
+                directory.is_dir(),
+                "schema export requires the provided existing directory"
+            );
+            for (filename, schema) in schemas {
+                let mut bytes = serde_json::to_vec_pretty(&schema).unwrap();
+                bytes.push(b'\n');
+                std::fs::write(directory.join(filename), bytes).unwrap();
+            }
+        }
+    }
 }

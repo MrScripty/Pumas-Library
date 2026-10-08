@@ -387,6 +387,21 @@ class ArchiveTests(unittest.TestCase):
                 )
                 self.assertEqual(observed["qualification"], "unverified_candidate")
 
+    def test_archive_overhead_exceeding_physical_budget_refused_before_publication(self):
+        for target in package.TARGETS:
+            with self.subTest(target=target):
+                root = self.root / target
+                root.mkdir()
+                inputs, build, runtime, contract, schema, output = fixture(root, target)
+                # The controlled payload fits, but real tar/ZIP framing and metadata
+                # exceed this scaled budget. No fake archive writer is involved.
+                with mock.patch.object(package, "MAX_PACKAGE", 1024):
+                    with self.assertRaisesRegex(ValueError, "archive exceeds bounded size"):
+                        package.assemble(inputs, build, runtime, contract, schema, output)
+                self.assertFalse(output.exists())
+                self.assertFalse(output.with_name(output.name + ".sha256").exists())
+                self.assertFalse(output.with_name(output.name + ".partial").exists())
+
     def test_feature_revision_schema_runtime_and_content_mismatches_refused(self):
         cases = [
             ("features", lambda build, runtime, contract: build.update(features=["s3"])),

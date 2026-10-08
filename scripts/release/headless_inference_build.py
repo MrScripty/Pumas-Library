@@ -129,8 +129,13 @@ def core_projection(rpc):
         name for name in core["compiled_features"] if not name.startswith("pumas-rpc/")
     ]
     core["protocols"] = [item for item in core["protocols"] if item["name"] != "pumas.local-http"]
+    vision_schema = {"name": "pumas.model-operations.image-to-text", "version": 1}
+    vision_compiled = "pumas-rpc/inference-plugins" in rpc["compiled_features"]
     core["schemas"] = [
-        item for item in core["schemas"] if item["name"] != "pumas.http-advertisement"
+        item
+        for item in core["schemas"]
+        if item["name"] != "pumas.http-advertisement"
+        and not (vision_compiled and item == vision_schema)
     ]
     return core
 
@@ -174,6 +179,12 @@ def produce(
     require(version == expected["version"], "source package version mismatch")
     environment = dict(os.environ if environment is None else environment)
     check_environment(environment, target["rust_target"])
+    cargo_home = Path(environment.get("CARGO_HOME", Path.home() / ".cargo"))
+    if not cargo_home.is_absolute():
+        cargo_home = repository / cargo_home
+    # Cargo executes in repository, whereas this producer can be launched from
+    # elsewhere. Freeze one absolute home for both config observations and children.
+    environment["CARGO_HOME"] = str(cargo_home.resolve())
     environment.update(ORT_SKIP_DOWNLOAD="1", CARGO_BUILD_JOBS="1", CARGO_INCREMENTAL="0")
 
     def tool_runner(command, **options):

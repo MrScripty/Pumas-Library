@@ -304,6 +304,31 @@ class ProvenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "target Rust flag"):
             subject.check_environment({"CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS": "bad"})
 
+    def test_turbojpeg_routes_refuse_before_s3_cargo_even_when_empty(self):
+        for prefix in ("", "X86_64_UNKNOWN_LINUX_GNU_", "AARCH64_APPLE_DARWIN_"):
+            for suffix in (
+                "SOURCE",
+                "STATIC",
+                "DYNAMIC",
+                "SHARED",
+                "BINDING",
+                "LIB_DIR",
+                "LIB_PATH",
+                "INCLUDE_DIR",
+                "INCLUDE_PATH",
+            ):
+                for value in ("", "0", "1", "/outside"):
+                    with self.subTest(prefix=prefix, suffix=suffix, value=value):
+                        with self.assertRaisesRegex(ValueError, "TurboJPEG routing/binding"):
+                            subject.build_provenance(
+                                self.repository,
+                                self.output,
+                                self.runner,
+                                {f"{prefix}TURBOJPEG_{suffix}": value},
+                            )
+                        self.assertFalse(self.built)
+                        self.assertFalse(self.output.exists())
+
 
 class InstalledInputsTests(unittest.TestCase):
     def setUp(self):

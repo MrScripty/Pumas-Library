@@ -26,6 +26,20 @@ pub trait OnnxEmbeddingBackend: Send + Sync {
         &self,
         request: OnnxEmbeddingRequest,
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError>;
+
+    /// Mark possible execution at the backend's admission boundary. Custom
+    /// backends without a finer boundary conservatively mark before `embed`.
+    /// A previously marked operation must never be reset by a later refusal.
+    async fn embed_with_admission(
+        &self,
+        request: OnnxEmbeddingRequest,
+        admission: Option<&AtomicBool>,
+    ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
+        if let Some(marker) = admission {
+            marker.store(true, Ordering::Release);
+        }
+        self.embed(request).await
+    }
 }
 
 #[derive(Debug)]
@@ -86,8 +100,30 @@ where
         &self,
         request: OnnxEmbeddingRequest,
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
+        self.embed_with_admission(request, None).await
+    }
+
+    /// Waiting for capacity is not admission. The selected backend marks only
+    /// when the operation may execute; cancellation while queued leaves it clear.
+    pub async fn embed_with_admission(
+        &self,
+        request: OnnxEmbeddingRequest,
+        admission: Option<&AtomicBool>,
+    ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
         let _permit = self.operation_permit().await?;
-        self.backend.embed(request).await
+        self.backend.embed_with_admission(request, admission).await
+    }
+
+    /// Controlled test custody of the real operation queue; never inference evidence.
+    #[cfg(feature = "test-support")]
+    pub async fn acquire_all_operation_permits_for_test(
+        &self,
+    ) -> tokio::sync::OwnedSemaphorePermit {
+        self.semaphore
+            .clone()
+            .acquire_many_owned(self.max_concurrent_operations)
+            .await
+            .expect("controlled operation semaphore must remain open")
     }
 
     pub async fn shutdown(

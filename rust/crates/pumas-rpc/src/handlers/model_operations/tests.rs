@@ -27,7 +27,7 @@ fn request_value() -> Value {
 fn request() -> OperationRequest {
     serde_json::from_value(request_value()).unwrap()
 }
-async fn json_body(response: Response) -> Value {
+pub(super) async fn json_body(response: Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), MAX_BYTES).await.unwrap()).unwrap()
 }
 async fn typed_stream(bytes: Vec<u8>) -> String {
@@ -321,7 +321,7 @@ async fn projection_fault_immediately_drops_provider_and_body_disposal_closes_si
         assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
 }
-async fn fixture(endpoint: &str, task: Option<&str>) -> (TempDir, Arc<AppState>) {
+pub(super) async fn fixture(endpoint: &str, task: Option<&str>) -> (TempDir, Arc<AppState>) {
     let root = TempDir::new().unwrap();
     let state = Arc::new(crate::handlers::test_support::build_test_app_state(root.path()).await);
     record(&state, endpoint, "llama-cpu", "llama").await;
@@ -351,7 +351,7 @@ async fn fixture(endpoint: &str, task: Option<&str>) -> (TempDir, Arc<AppState>)
     }
     (root, state)
 }
-async fn record(state: &AppState, endpoint: &str, profile: &str, alias: &str) {
+pub(super) async fn record(state: &AppState, endpoint: &str, profile: &str, alias: &str) {
     let mut config = RuntimeProfileConfig::default_ollama();
     config.profile_id = RuntimeProfileId::parse(profile).unwrap();
     config.provider = RuntimeProviderId::LlamaCpp;
@@ -382,7 +382,7 @@ async fn record(state: &AppState, endpoint: &str, profile: &str, alias: &str) {
         .await
         .unwrap();
 }
-async fn operation(state: Arc<AppState>, value: Value) -> Response {
+pub(super) async fn operation(state: Arc<AppState>, value: Value) -> Response {
     handle_model_operations(
         State(state),
         None,
@@ -390,7 +390,7 @@ async fn operation(state: Arc<AppState>, value: Value) -> Response {
     )
     .await
 }
-async fn backend_request(socket: &mut TcpStream) -> String {
+pub(super) async fn backend_request(socket: &mut TcpStream) -> String {
     let mut bytes = Vec::new();
     let header_end = loop {
         let mut b = [0];
@@ -413,7 +413,7 @@ async fn backend_request(socket: &mut TcpStream) -> String {
     socket.read_exact(&mut bytes[header_end..]).await.unwrap();
     String::from_utf8(bytes).unwrap()
 }
-async fn public_server(
+pub(super) async fn public_server(
     state: Arc<AppState>,
 ) -> (String, tokio::task::JoinHandle<anyhow::Result<()>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -976,8 +976,8 @@ fn source_task_preserves_classification_semantics_instead_of_only_modalities() {
     );
 }
 
-#[tokio::test]
-async fn native_fake_embedding_session_is_available_and_projects_finite_vectors() {
+// Synthetic session only: no ONNX runtime or model inference is performed.
+async fn controlled_embedding_state() -> (TempDir, Arc<AppState>) {
     let root = TempDir::new().unwrap();
     let state = Arc::new(crate::handlers::test_support::build_test_app_state(root.path()).await);
     let model_root = root.path().join("synthetic-onnx");
@@ -1017,6 +1017,22 @@ async fn native_fake_embedding_session_is_available_and_projects_finite_vectors(
         })
         .await
         .unwrap();
+    (root, state)
+}
+
+fn controlled_embedding_request() -> Value {
+    let mut value = request_value();
+    value["model"] = json!("nomic");
+    value["capability"] = json!("text_embedding");
+    value["input"] = json!({"kind":"text_batch","texts":["one","two"]});
+    value["output"] = json!("embeddings_float32");
+    value["options"] = json!({"kind":"embeddings","dimensions":4});
+    value
+}
+
+#[tokio::test]
+async fn native_fake_embedding_session_is_available_and_projects_finite_vectors() {
+    let (_root, state) = controlled_embedding_state().await;
     let caps = json_body(
         handle_capabilities(
             State(state.clone()),
@@ -1036,12 +1052,7 @@ async fn native_fake_embedding_session_is_available_and_projects_finite_vectors(
         caps["capabilities"][0]["availability"]["state"],
         "unavailable"
     );
-    let mut value = request_value();
-    value["model"] = json!("nomic");
-    value["capability"] = json!("text_embedding");
-    value["input"] = json!({"kind":"text_batch","texts":["one","two"]});
-    value["output"] = json!("embeddings_float32");
-    value["options"] = json!({"kind":"embeddings","dimensions":4});
+    let value = controlled_embedding_request();
     for named in [true, false] {
         let mut value = value.clone();
         if !named {
@@ -1055,6 +1066,98 @@ async fn native_fake_embedding_session_is_available_and_projects_finite_vectors(
         assert_eq!(result["result"]["vectors"][0].as_array().unwrap().len(), 4);
         assert!(result.get("usage").is_none());
     }
+}
+
+#[tokio::test]
+async fn typed_onnx_embedding_cancelled_in_operation_queue_is_not_admitted() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let (_root, state) = controlled_embedding_state().await;
+        let held = Arc::new(std::sync::Mutex::new(None));
+        let (entered, waiting) = oneshot::channel();
+        let entered = Arc::new(std::sync::Mutex::new(Some(entered)));
+        let gate: Arc<dyn Fn() -> futures::future::BoxFuture<'static, ()> + Send + Sync> = {
+            let state = state.clone();
+            let held = held.clone();
+            Arc::new(move || {
+                let state = state.clone();
+                let held = held.clone();
+                let entered = entered.clone();
+                Box::pin(async move {
+                    let permit = state
+                        .onnx_session_manager
+                        .acquire_all_operation_permits_for_test()
+                        .await;
+                    *held.lock().unwrap() = Some(permit);
+                    entered.lock().unwrap().take().unwrap().send(()).unwrap();
+                })
+            })
+        };
+        let request_state = state.clone();
+        let request_task = tokio::spawn(
+            super::super::openai_gateway_onnx::TEST_BEFORE_ONNX_EMBED.scope(gate, async move {
+                operation(request_state, controlled_embedding_request()).await
+            }),
+        );
+        waiting.await.unwrap();
+        // The hook completed while owning every actual manager permit. The
+        // embedding is now pending in that queue, before backend execution.
+        assert!(!request_task.is_finished());
+        state.shutdown_request.request();
+        let response = request_task.await.unwrap();
+        let status = response.status();
+        let body = json_body(response).await;
+        drop(held.lock().unwrap().take());
+        assert_eq!(state.onnx_session_manager.list().await.unwrap().len(), 1);
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            body["error"],
+            json!({"code":"transport_lost","outcome":"not_admitted"})
+        );
+        assert_eq!(body["request_id"], "request-17");
+    })
+    .await
+    .expect("controlled ONNX queue cancellation fixture hung");
+}
+
+#[tokio::test]
+async fn typed_onnx_embedding_unloaded_after_availability_is_not_admitted() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let (_root, state) = controlled_embedding_state().await;
+        let gate: Arc<dyn Fn() -> futures::future::BoxFuture<'static, ()> + Send + Sync> = {
+            let state = state.clone();
+            Arc::new(move || {
+                let state = state.clone();
+                Box::pin(async move {
+                    let model = pumas_library::OnnxModelId::parse("embeddings/nomic").unwrap();
+                    assert!(state
+                        .onnx_session_manager
+                        .unload(&model)
+                        .await
+                        .unwrap()
+                        .is_some());
+                })
+            })
+        };
+        // The actual unload happens after typed availability has observed the
+        // loaded session, immediately before the real manager/backend lookup.
+        let response = super::super::openai_gateway_onnx::TEST_BEFORE_ONNX_EMBED
+            .scope(
+                gate,
+                operation(state.clone(), controlled_embedding_request()),
+            )
+            .await;
+        let status = response.status();
+        let body = json_body(response).await;
+        assert!(state.onnx_session_manager.list().await.unwrap().is_empty());
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            body["error"],
+            json!({"code":"capability_unavailable","outcome":"not_admitted"})
+        );
+        assert_eq!(body["request_id"], "request-17");
+    })
+    .await
+    .expect("controlled ONNX unload race fixture hung");
 }
 #[tokio::test]
 async fn body_extractor_limit_returns_the_fixed_typed_not_admitted_error() {
@@ -1293,8 +1396,6 @@ async fn modality_facade_ambiguity_and_unsupported_pairs_have_no_provider_effect
         "capability_unavailable"
     );
     for input in [
-        json!({"kind":"image","encoding":"png","data_base64":"iVBORw0KGgo="}),
-        json!({"kind":"messages","messages":[{"role":"user","content":[{"kind":"text","text":"caption"},{"kind":"image","encoding":"png","data_base64":"iVBORw0KGgo="}]}]}),
         json!({"kind":"messages","messages":[{"role":"user","content":[{"kind":"audio","encoding":"pcm_s16le","sample_rate_hz":16000,"channels":1,"sample_count":1,"data_base64":"AAA="}]}]}),
     ] {
         let mut value = modality_request();
@@ -1356,6 +1457,15 @@ fn declared(capability: Capability, available: bool) -> CapabilityDescriptor {
             SemanticTask::TextToImage,
             vec![InputFormat::Text],
             vec![OutputFormat::PngBase64],
+        ),
+        Capability::ImageToText => (
+            SemanticTask::ImageToText,
+            vec![
+                InputFormat::PngBase64,
+                InputFormat::JpegBase64,
+                InputFormat::MessagesImage,
+            ],
+            vec![OutputFormat::Text],
         ),
         Capability::AudioTranscription => (
             SemanticTask::SpeechToText,
@@ -1565,6 +1675,166 @@ async fn modality_facade_and_legacy_reject_raw_duplicate_fields_before_provider_
     assert_eq!(
         json_body(response).await["error"]["outcome"],
         "not_admitted"
+    );
+    assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
+}
+
+async fn unavailable_streaming_descriptor_http_case(task: Option<&str>, reason: &str) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (_root, state) = fixture(&endpoint, task).await;
+    if reason == "runtime_unavailable" {
+        // Real readiness refusal: an external profile was selectable; changing
+        // it to managed leaves no exact owned session transport/stop custody.
+        let mut profile = state
+            .api
+            .get_runtime_profiles_snapshot()
+            .await
+            .unwrap()
+            .snapshot
+            .profiles
+            .into_iter()
+            .find(|profile| profile.profile_id.as_str() == "llama-cpu")
+            .unwrap();
+        profile.management_mode = RuntimeManagementMode::Managed;
+        state.api.upsert_runtime_profile(profile).await.unwrap();
+    }
+    let (public, owner) = public_server(state.clone()).await;
+    let client = reqwest::Client::new();
+    // Use the real descriptor producer through the public capabilities route.
+    // Hand-authored descriptors must not hide readiness's streaming=false.
+    let response = client
+        .get(format!("{public}/v1/capabilities?model=llama"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let capabilities: Value = response.json().await.unwrap();
+    for capability in ["chat_generation", "text_generation"] {
+        let descriptor = capabilities["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|descriptor| descriptor["capability"] == capability)
+            .unwrap();
+        assert_eq!(descriptor["availability"]["state"], "unavailable");
+        assert_eq!(descriptor["availability"]["reason"], reason);
+        assert_eq!(descriptor["streaming"], false);
+    }
+    for named in [true, false] {
+        for capability in ["chat_generation", "text_generation"] {
+            for streaming in [false, true] {
+                let mut value = modality_request();
+                value["stream"] = json!(streaming);
+                if named {
+                    value["capability"] = json!(capability);
+                    value["options"] = json!({"kind":"text_generation"});
+                    if capability == "chat_generation" {
+                        value["input"] = json!({"kind":"messages","messages":[{"role":"user","content":"hello"}]});
+                    }
+                } else {
+                    value["semantic_task"] = json!(capability);
+                }
+                let response = client
+                    .post(format!("{public}/v1/model-operations"))
+                    .json(&value)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.status(),
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "{reason}: named={named}, {capability}, streaming={streaming}"
+                );
+                let response: Value = response.json().await.unwrap();
+                assert_eq!(response["error"]["code"], "capability_unavailable");
+                assert_eq!(response["error"]["outcome"], "not_admitted");
+                assert_eq!(response["request_id"], "modality-17");
+            }
+        }
+    }
+    // A semantic hint is unnecessary when all possible text tasks are
+    // unavailable: this is availability refusal, never successful admission.
+    let mut value = modality_request();
+    value["stream"] = json!(true);
+    let response = client
+        .post(format!("{public}/v1/model-operations"))
+        .json(&value)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let response: Value = response.json().await.unwrap();
+    assert_eq!(response["error"]["code"], "capability_unavailable");
+    assert_eq!(response["error"]["outcome"], "not_admitted");
+    assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
+    state.shutdown_request.request();
+    owner.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn unavailable_streaming_unknown_model_task_keeps_declared_text_unavailable() {
+    unavailable_streaming_descriptor_http_case(None, "unknown_model_task").await;
+}
+
+#[tokio::test]
+async fn unavailable_streaming_missing_managed_runtime_keeps_declared_text_unavailable() {
+    unavailable_streaming_descriptor_http_case(Some("text-generation"), "runtime_unavailable")
+        .await;
+}
+
+#[tokio::test]
+async fn unavailable_streaming_preserves_nontext_refusal_and_available_text_ambiguity() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (_root, state) = fixture(&endpoint, Some("text-generation")).await;
+    let served = selected(&state, "llama", None).await.unwrap();
+    let declarations = descriptors(&state, &served).await;
+    for capability in [Capability::ChatGeneration, Capability::TextGeneration] {
+        let descriptor = declarations
+            .iter()
+            .find(|item| item.capability == capability)
+            .unwrap();
+        assert!(descriptor.availability.available());
+        assert!(descriptor.streaming);
+    }
+    for (output, options) in [
+        ("embeddings_float32", json!({"kind":"embeddings"})),
+        (
+            "png_base64",
+            json!({"kind":"image_generation","width":512,"height":512}),
+        ),
+        ("labels", json!({"kind":"audio"})),
+    ] {
+        let mut value = modality_request();
+        value["stream"] = json!(true);
+        value["output"] = json!(output);
+        value["options"] = options;
+        let response = operation(state.clone(), value).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{output}"
+        );
+        let response = json_body(response).await;
+        assert_eq!(response["error"]["code"], "unsupported_modality");
+        assert_eq!(response["error"]["outcome"], "not_admitted");
+    }
+    let mut value = modality_request();
+    value["stream"] = json!(true);
+    let response = operation(state.clone(), value).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let response = json_body(response).await;
+    assert_eq!(response["error"]["code"], "ambiguous_operation");
+    assert_eq!(response["error"]["outcome"], "not_admitted");
+    let mut value = modality_request();
+    value["stream"] = json!(true);
+    value["semantic_task"] = json!("text_embedding");
+    let response = operation(state, value).await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        json_body(response).await["error"]["code"],
+        "unsupported_modality"
     );
     assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
 }

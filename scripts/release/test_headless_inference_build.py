@@ -1,6 +1,7 @@
 """Controlled build subprocesses and fixture bytes; no Cargo/model/ORT execution."""
 
 import copy
+from contextlib import chdir
 import json
 import os
 import shutil
@@ -17,6 +18,27 @@ from test_headless_inference import fixture
 
 
 class BuildCandidateTests(unittest.TestCase):
+    def test_all_turbojpeg_routes_refuse_before_any_subprocess_even_when_empty(self):
+        names = (
+            "STATIC",
+            "DYNAMIC",
+            "SHARED",
+            "SOURCE",
+            "LIB_DIR",
+            "LIB_PATH",
+            "INCLUDE_DIR",
+            "INCLUDE_PATH",
+            "BINDING",
+        )
+        for prefix in ("", "X86_64_UNKNOWN_LINUX_GNU_", "AARCH64_APPLE_DARWIN_"):
+            for name in names:
+                for value in ("", "0", "1", "/outside/library"):
+                    with self.subTest(prefix=prefix, name=name, value=value):
+                        self.calls.clear()
+                        with self.assertRaisesRegex(ValueError, "TurboJPEG routing/binding"):
+                            self.produce(environment={f"{prefix}TURBOJPEG_{name}": value})
+                        self.assertEqual(self.calls, [])
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -74,6 +96,7 @@ class BuildCandidateTests(unittest.TestCase):
         self.calls.append(command)
         if command[:2] == ["cargo", "build"]:
             self.built = True
+            self.cargo_environment = dict(kwargs["env"])
             self.assertEqual(kwargs["env"]["ORT_SKIP_DOWNLOAD"], "1")
             self.assertEqual(kwargs["env"]["CARGO_BUILD_JOBS"], "1")
             self.assertEqual(kwargs["env"]["PUMAS_SOURCE_REVISION"], "a" * 40)
@@ -105,15 +128,20 @@ class BuildCandidateTests(unittest.TestCase):
             stdout = ""
         return SimpleNamespace(stdout=stdout, returncode=0)
 
-    def produce(self):
+    def produce(self, environment=None, real_configuration=False):
         with (
-            patch.object(subject.provenance, "check_configuration"),
+            patch.object(
+                subject.provenance,
+                "check_configuration",
+                wraps=subject.provenance.check_configuration if real_configuration else None,
+            ) as configuration_check,
             patch.object(
                 subject.provenance, "attribution_binding", return_value={"controlled": True}
             ),
             patch.object(subject.platform, "system", return_value="Linux"),
             patch.object(subject.platform, "machine", return_value="x86_64"),
         ):
+            self.configuration_check = configuration_check
             return subject.produce(
                 self.repository,
                 "linux-x86_64",
@@ -125,7 +153,9 @@ class BuildCandidateTests(unittest.TestCase):
                 self.inputs["THIRD-PARTY-NOTICES.txt"],
                 self.output,
                 runner=self.runner,
-                environment={"CARGO_HOME": str(self.root / "cargo")},
+                environment=environment
+                if environment is not None
+                else {"CARGO_HOME": str(self.root / "cargo")},
             )
 
     def test_builds_then_assembles_exact_inference_source_cohort(self):
@@ -152,6 +182,82 @@ class BuildCandidateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "v0.8 candidate version required"):
             self.produce()
         self.assertFalse(self.built)
+
+    def test_compiled_rpc_vision_schema_projects_to_existing_core_identity(self):
+        self.contract["expected"]["build_info"]["schemas"].append(
+            {"name": "pumas.model-operations.image-to-text", "version": 1}
+        )
+        evidence = self.produce()
+        self.assertEqual(
+            evidence["compiled_core_projection"], self.contract["expected"]["core_build_info"]
+        )
+        self.assertIn(
+            {"name": "pumas.model-operations.image-to-text", "version": 1},
+            evidence["compiled_build_info"]["schemas"],
+        )
+
+    def test_unknown_rpc_schema_or_vision_version_is_not_stripped(self):
+        for index, schema in enumerate(
+            (
+                {"name": "pumas.model-operations.image-to-text", "version": 2},
+                {"name": "pumas.unreviewed-rpc-schema", "version": 1},
+            )
+        ):
+            with self.subTest(schema=schema):
+                rpc = copy.deepcopy(self.contract["expected"]["build_info"])
+                rpc["schemas"].append(schema)
+                projection = subject.core_projection(rpc)
+                self.assertIn(schema, projection["schemas"])
+                self.assertNotEqual(projection, self.contract["expected"]["core_build_info"])
+                self.output = self.root / f"schema-refusal-{index}"
+                self.contract["expected"]["build_info"]["schemas"].append(schema)
+                with self.assertRaisesRegex(ValueError, "compiled core PumasBuildInfo mismatch"):
+                    self.produce()
+                self.contract["expected"]["build_info"]["schemas"].pop()
+                self.assertFalse(list(self.output.glob("*.tar.gz")))
+
+    def test_vision_schema_without_compiled_feature_is_not_stripped(self):
+        rpc = copy.deepcopy(self.contract["expected"]["build_info"])
+        rpc["compiled_features"].remove("pumas-rpc/inference-plugins")
+        schema = {"name": "pumas.model-operations.image-to-text", "version": 1}
+        rpc["schemas"].append(schema)
+        self.assertIn(schema, subject.core_projection(rpc)["schemas"])
+
+    def test_relative_cargo_home_is_frozen_for_pre_post_checks_and_build(self):
+        launch_directory = self.root / "launch-directory"
+        launch_directory.mkdir()
+        cargo_home = self.repository / "relative-cargo-home"
+        with chdir(launch_directory):
+            self.produce(environment={"CARGO_HOME": "relative-cargo-home"}, real_configuration=True)
+        expected_home = str(cargo_home.resolve())
+        self.assertEqual(self.configuration_check.call_count, 2)
+        for call in self.configuration_check.call_args_list:
+            self.assertEqual(call.args[0], self.repository)
+            self.assertEqual(call.args[1]["CARGO_HOME"], expected_home)
+        self.assertEqual(self.cargo_environment["CARGO_HOME"], expected_home)
+
+    def test_relative_cargo_home_new_config_is_refused_after_build(self):
+        launch_directory = self.root / "launch-directory"
+        launch_directory.mkdir()
+        cargo_home = self.repository / "relative-cargo-home"
+        original_runner = self.runner
+
+        def introduce_config(command, **options):
+            if command[:2] == ["cargo", "build"]:
+                cargo_home.mkdir()
+                (cargo_home / "config.toml").write_text(
+                    "[profile.release]\nlto = false\ncodegen-units = 16\n"
+                )
+            return original_runner(command, **options)
+
+        self.runner = introduce_config
+        with chdir(launch_directory):
+            with self.assertRaisesRegex(ValueError, "active Cargo config files"):
+                self.produce(
+                    environment={"CARGO_HOME": "relative-cargo-home"}, real_configuration=True
+                )
+        self.assertTrue(self.built)
+        self.assertFalse(list(self.output.glob("*.tar.gz")))
 
     def test_runtime_byte_mismatch_refuses_before_any_build(self):
         next(iter(self.runtime_inputs.values())).write_bytes(b"changed runtime")
@@ -273,6 +379,48 @@ class BuildCandidateTests(unittest.TestCase):
             subject.check_environment(
                 {"CARGO_PROFILE_RELEASE_LTO": "false"}, "x86_64-unknown-linux-gnu"
             )
+
+    def test_relative_cargo_home_uses_build_directory_for_config_refusal(self):
+        launch_directory = self.root / "launch-directory"
+        launch_directory.mkdir()
+        cargo_home = self.repository / "relative-cargo-home"
+        cargo_home.mkdir()
+        (cargo_home / "config.toml").write_text(
+            "[profile.release]\nlto = false\ncodegen-units = 16\n"
+        )
+        original_runner = self.runner
+
+        def refuse_cargo(command, **options):
+            if command[:2] == ["cargo", "build"]:
+                self.built = True
+                raise AssertionError(
+                    "Cargo reached despite active build-directory CARGO_HOME config"
+                )
+            return original_runner(command, **options)
+
+        with (
+            chdir(launch_directory),
+            patch.object(
+                subject.provenance, "attribution_binding", return_value={"controlled": True}
+            ),
+            patch.object(subject.platform, "system", return_value="Linux"),
+            patch.object(subject.platform, "machine", return_value="x86_64"),
+        ):
+            with self.assertRaisesRegex(ValueError, "active Cargo config files"):
+                subject.produce(
+                    self.repository,
+                    "linux-x86_64",
+                    self.contract,
+                    self.runtime,
+                    self.runtime_inputs,
+                    self.schema,
+                    self.inputs["LICENSE.txt"],
+                    self.inputs["THIRD-PARTY-NOTICES.txt"],
+                    self.output,
+                    runner=refuse_cargo,
+                    environment={"CARGO_HOME": "relative-cargo-home"},
+                )
+        self.assertFalse(self.built)
 
     def test_git_routing_override_refuses_before_source_observation(self):
         for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT"):

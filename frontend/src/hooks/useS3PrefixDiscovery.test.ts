@@ -10,6 +10,12 @@ const id = 'c3f7d104-1234-4321-abcd-aaaaaaaaaaaa';
 const draft: S3ImportDraft = {endpoint:'https://source.invalid',bucket:'fixture-bucket',region:'fixture-region',addressing:'path',
   key:'',version_id:'',sha256:'',filename:'',family:'',official_name:''};
 const complete: S3DiscoveryOutcome = {status:'complete',operation_id:id,objects:[],pages:1};
+const running: S3DiscoveryOutcome = {status:'running',operation_id:id};
+function deferred<T>() {
+  let resolve!: (value:T)=>void;
+  const promise=new Promise<T>(done=>{resolve=done;});
+  return {promise,resolve};
+}
 describe('source-scoped prefix discovery observation', () => {
   beforeEach(() => {vi.useFakeTimers();vi.resetAllMocks();vi.spyOn(crypto,'randomUUID').mockReturnValue(id);
     calls.cancel.mockResolvedValue({status:'running',operation_id:id});calls.get.mockResolvedValue(complete);});
@@ -50,5 +56,56 @@ describe('source-scoped prefix discovery observation', () => {
     calls.start.mockResolvedValue({status:'running',operation_id:id});calls.get.mockResolvedValue({status:'running',operation_id:id});
     const {result,unmount}=renderHook(useS3PrefixDiscovery);await act(async () => {await result.current.start(draft,'models/');});
     await act(async () => {await result.current.cancel();});expect(result.current.busy).toBe(true);unmount();expect(calls.cancel).toHaveBeenCalledWith(id);
+  });
+  it('keeps one poll timer after cancellation replaces a pending observation', async () => {
+    calls.start.mockResolvedValue(running);calls.get.mockResolvedValue(running);
+    const {result}=renderHook(useS3PrefixDiscovery);
+    await act(async()=>{await result.current.start(draft,'models/');});
+    await act(async()=>{await result.current.cancel();});
+    expect(calls.get).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});
+    expect(calls.get).toHaveBeenCalledTimes(5);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+  it('coalesces rapid observe and cancel actions while an observation is in flight', async () => {
+    const read=deferred<S3DiscoveryOutcome>(),cancel=deferred<S3DiscoveryOutcome>();
+    calls.start.mockResolvedValue(running);calls.get.mockReturnValueOnce(read.promise).mockResolvedValue(running);
+    calls.cancel.mockReturnValueOnce(cancel.promise);
+    const {result}=renderHook(useS3PrefixDiscovery);
+    await act(async()=>{await result.current.start(draft,'models/');await vi.advanceTimersByTimeAsync(250);});
+    let cancellation!:Promise<void>;
+    await act(async()=>{
+      cancellation=result.current.cancel();
+      for(let index=0;index<20;index++){result.current.observeAgain();void result.current.cancel();}
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(calls.get).toHaveBeenCalledTimes(1);expect(calls.cancel).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async()=>{cancel.resolve(running);await cancellation;});
+    expect(calls.get).toHaveBeenCalledTimes(1);
+    await act(async()=>{read.resolve(running);});
+    expect(vi.getTimerCount()).toBe(1);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(250);});
+    expect(calls.get).toHaveBeenCalledTimes(2);expect(vi.getTimerCount()).toBe(1);
+  });
+  it('coalesces synchronous manual observations and resumes after a rejected read', async () => {
+    calls.start.mockResolvedValue(running);calls.get.mockRejectedValueOnce(new Error('fixture transport failure')).mockResolvedValue(complete);
+    const {result}=renderHook(useS3PrefixDiscovery);await act(async()=>{await result.current.start(draft,'models/');});
+    await act(async()=>{for(let index=0;index<20;index++)result.current.observeAgain();});
+    expect(calls.get).toHaveBeenCalledTimes(1);expect(vi.getTimerCount()).toBe(0);expect(result.current.error).toMatch(/unavailable/);
+    await act(async()=>{result.current.observeAgain();});
+    expect(calls.get).toHaveBeenCalledTimes(2);expect(result.current.snapshot).toEqual(complete);expect(result.current.busy).toBe(false);
+  });
+  it('fences old observations and cancellation acknowledgements after reset and same-UUID restart', async () => {
+    const oldRead=deferred<S3DiscoveryOutcome>(),oldCancel=deferred<S3DiscoveryOutcome>();
+    calls.start.mockResolvedValue(running);calls.get.mockReturnValueOnce(oldRead.promise).mockResolvedValue(complete);calls.cancel.mockReturnValueOnce(oldCancel.promise);
+    const {result}=renderHook(useS3PrefixDiscovery);await act(async()=>{await result.current.start(draft,'old/');await vi.advanceTimersByTimeAsync(250);});
+    let cancellation!:Promise<void>;act(()=>{cancellation=result.current.cancel();result.current.reset();});
+    await act(async()=>{await result.current.start(draft,'new/');oldRead.resolve(running);oldCancel.resolve(running);await cancellation;});
+    expect(vi.getTimerCount()).toBe(1);expect(calls.get).toHaveBeenCalledTimes(1);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(250);});
+    expect(result.current.snapshot).toEqual(complete);expect(calls.get).toHaveBeenCalledTimes(2);expect(vi.getTimerCount()).toBe(0);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});expect(calls.get).toHaveBeenCalledTimes(2);
   });
 });

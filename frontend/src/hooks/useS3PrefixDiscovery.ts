@@ -4,27 +4,38 @@ import { importAPI } from '../api/import';
 import { decodeS3DiscoveryParams, decodeS3AuthenticatedDiscoveryParams, type S3CredentialParams, type S3DiscoveryOutcome } from '../generated/desktop-contract';
 import type { S3ImportDraft } from './useS3ModelImport';
 
+type DiscoveryOwner = {id: string; observing: boolean; cancelling: boolean};
+
 /** Credentials exist only in the start call. Each result belongs to an exact
  * source query; cancellation/closing revokes observation without importing. */
 export function useS3PrefixDiscovery() {
   const [snapshot, setSnapshot] = useState<S3DiscoveryOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const current = useRef<{id: string; token: object} | null>(null);
+  const current = useRef<DiscoveryOwner | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
+  const clearPoll = useCallback(() => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  }, []);
   const reset = useCallback(() => {
     const old = current.current;
     current.current = null;
-    if (timer.current !== null) clearTimeout(timer.current);
+    clearPoll();
     if (old) void importAPI.cancelS3PrefixDiscovery(old.id).catch(() => {});
     if (mounted.current) { setSnapshot(null); setError(null); setBusy(false); }
-  }, []);
+  }, [clearPoll]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; reset(); }; }, [reset]);
 
-  const observe = async (owner: {id: string; token: object}, first?: S3DiscoveryOutcome) => {
+  const observe = async (owner: DiscoveryOwner, first?: S3DiscoveryOutcome) => {
     const live = () => mounted.current && current.current === owner;
     if (!live()) return;
+    clearPoll();
+    // A timer, manual refresh and cancellation acknowledgement share one read.
+    // Clearing a timer alone cannot fence an already in-flight observation.
+    if (owner.observing) return;
+    owner.observing = true;
     try {
       const value = first ?? await importAPI.getS3PrefixDiscovery(owner.id);
       if (!live()) return;
@@ -34,6 +45,8 @@ export function useS3PrefixDiscovery() {
       else { current.current = null; setBusy(false); }
     } catch {
       if (live()) { setSnapshot(null); setError('Discovery observation is unavailable. Observe again or cancel the same query.'); }
+    } finally {
+      owner.observing = false;
     }
   };
   const start = async (draft: S3ImportDraft, prefix: string, credentials?: S3CredentialParams) => {
@@ -46,7 +59,7 @@ export function useS3PrefixDiscovery() {
     if (decoded.status !== 'valid' || auth?.status === 'invalid' || (auth && auth.status !== 'valid')) {
       setError('Check the HTTPS source, prefix and one-use credentials.'); return;
     }
-    const owner = {id: decoded.value.operation_id, token: {}};
+    const owner: DiscoveryOwner = {id: decoded.value.operation_id, observing: false, cancelling: false};
     current.current = owner; setBusy(true); setSnapshot(null); setError(null);
     try {
       const value = auth?.status === 'valid'
@@ -62,9 +75,11 @@ export function useS3PrefixDiscovery() {
   };
   const cancel = async () => {
     const owner = current.current;
-    if (!owner) return;
+    if (!owner || owner.cancelling) return;
+    owner.cancelling = true;
     try { await importAPI.cancelS3PrefixDiscovery(owner.id); void observe(owner); }
     catch { if (mounted.current && current.current === owner) setError('Cancellation is unconfirmed. Observe the same query again.'); }
+    finally { owner.cancelling = false; }
   };
   return {snapshot, error, busy, start, cancel, reset,
     observeAgain: () => { if (current.current) void observe(current.current); }};

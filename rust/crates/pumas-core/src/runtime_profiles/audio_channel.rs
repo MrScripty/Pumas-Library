@@ -98,15 +98,53 @@ struct Job {
 
 /// Buffered jobs have never transferred custody or written any request bytes.
 /// Even a writer failure must settle their still-live callers as non-starts.
-struct UnadmittedQueue(mpsc::Receiver<Job>);
+struct UnadmittedQueue {
+    receiver: mpsc::Receiver<Job>,
+    shared: Arc<Shared>,
+}
 
 impl Drop for UnadmittedQueue {
     fn drop(&mut self) {
-        self.0.close();
-        while let Ok(job) = self.0.try_recv() {
+        // Publish closure before destroying the receiver. Producers serialize
+        // their final permit send with quarantine's pending-map lock.
+        self.shared.quarantine();
+        // Another closer may have published closed but still be waiting for a
+        // producer holding this lock. Do not destroy its receiver until that
+        // producer's checked send has finished, even on a poisoned lock.
+        {
+            let _pending = self.shared.pending.lock();
+            self.receiver.close();
+        }
+        while let Ok(job) = self.receiver.try_recv() {
             let _ = job.reply.send(Err(ChannelError::NotAdmitted));
         }
     }
+}
+
+async fn enqueue(queue: &mpsc::Sender<Job>, shared: &Shared, job: Job) -> Result<()> {
+    let permit = match queue.reserve().await {
+        Ok(permit) => permit,
+        Err(_) => {
+            let _ = job.reply.send(Err(ChannelError::NotAdmitted));
+            return Err(ChannelError::NotAdmitted);
+        }
+    };
+    enqueue_reserved(shared, permit, job)
+}
+
+fn enqueue_reserved(shared: &Shared, permit: mpsc::Permit<'_, Job>, job: Job) -> Result<()> {
+    // Tokio permits survive Receiver::close/drop. Serialize the final send
+    // against closure so no granted permit can strand a job in a dead queue.
+    let Ok(_pending) = shared.pending.lock() else {
+        let _ = job.reply.send(Err(ChannelError::Unknown));
+        return Err(ChannelError::Unknown);
+    };
+    if shared.closed.load(Ordering::Acquire) {
+        let _ = job.reply.send(Err(ChannelError::NotAdmitted));
+        return Err(ChannelError::NotAdmitted);
+    }
+    permit.send(job);
+    Ok(())
 }
 
 struct Pending {
@@ -258,16 +296,18 @@ impl PrivateAudioChannel {
             armed: true,
         };
         let (reply, result) = oneshot::channel();
-        self.queue
-            .send(Job {
+        enqueue(
+            &self.queue,
+            &self.shared,
+            Job {
                 operation,
                 payload,
                 prepare,
                 reply,
                 cancellation,
-            })
-            .await
-            .map_err(|_| ChannelError::NotAdmitted)?;
+            },
+        )
+        .await?;
         let result = result.await.map_err(|_| ChannelError::Unknown)?;
         guard.armed = false;
         let result = result?;
@@ -286,19 +326,23 @@ impl PrivateAudioChannel {
         }
         let id = cancellation.wire_id.load(Ordering::Acquire);
         let queue = self.queue.clone();
+        let shared = self.shared.clone();
         tokio::spawn(async move {
             // Cancellation controls have their own original IDs. Their finite
             // error cannot replay or retarget the original load admission.
             let (reply, result) = oneshot::channel();
-            let _ = queue
-                .send(Job {
+            let _ = enqueue(
+                &queue,
+                &shared,
+                Job {
                     operation: "cancel_exchange",
                     payload: serde_json::json!({"target_exchange_id":id}),
                     prepare: Box::new(move || Ok(Box::new(CancelExchangeCustody { target: id }))),
                     reply,
                     cancellation: Arc::new(ExchangeCancellation::default()),
-                })
-                .await;
+                },
+            )
+            .await;
             drop(queue);
             let _ = result.await;
         });
@@ -366,8 +410,10 @@ async fn write_requests<W: AsyncWrite + Unpin>(
     shared: Arc<Shared>,
     channel: std::sync::Weak<PrivateAudioChannel>,
 ) {
-    let _exit = WorkerExit(shared.clone());
-    let mut queue = UnadmittedQueue(queue);
+    let mut queue = UnadmittedQueue {
+        receiver: queue,
+        shared: shared.clone(),
+    };
     loop {
         let changed = shared.changed.notified();
         tokio::pin!(changed);
@@ -375,7 +421,7 @@ async fn write_requests<W: AsyncWrite + Unpin>(
         if shared.closed.load(Ordering::Acquire) {
             return;
         }
-        let job = tokio::select! { biased; _=&mut changed=>continue, job=queue.0.recv()=>match job {Some(job)=>job,None=>return} };
+        let job = tokio::select! { biased; _=&mut changed=>continue, job=queue.receiver.recv()=>match job {Some(job)=>job,None=>return} };
         if job.reply.is_closed() {
             continue;
         }

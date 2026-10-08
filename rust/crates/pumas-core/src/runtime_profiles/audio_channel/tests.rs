@@ -883,7 +883,7 @@ fn closed_before_pending_lock_refuses_stale_open_check_without_claiming_custody(
     assert_eq!(stops.count.load(Ordering::Acquire), 1);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn closure_published_before_permit_release_refuses_without_preparation() {
     let RecordingChannel {
         channel,
@@ -940,4 +940,54 @@ async fn closure_published_before_permit_release_refuses_without_preparation() {
     assert_eq!(effects.admitted.load(Ordering::Acquire), 0);
     assert!(written.lock().unwrap().is_empty());
     assert_eq!(stops.count.load(Ordering::Acquire), 1);
+}
+
+#[tokio::test]
+async fn permit_granted_before_queue_drop_still_gets_nonstart_receipt() {
+    let stops = Arc::new(Stops::default());
+    let shared = Arc::new(Shared {
+        closed: AtomicBool::new(false),
+        changed: Notify::new(),
+        pending: Mutex::new(HashMap::new()),
+        permits: Arc::new(Semaphore::new(MAX_PENDING)),
+        next_id: AtomicU64::new(1),
+        stop_exact_child: stops.callback(),
+    });
+    let (sender, receiver) = mpsc::channel(1);
+    // Reproduce enqueue's suspension boundary: the sender owns a valid permit,
+    // but the writer exits before the final synchronous send can run.
+    let permit = sender.reserve().await.unwrap();
+    drop(UnadmittedQueue {
+        receiver,
+        shared: shared.clone(),
+    });
+    let (reply, mut outcome) = oneshot::channel();
+    let retained = Arc::new(());
+    let payload = Arc::downgrade(&retained);
+    let cancellation = Arc::new(ExchangeCancellation::default());
+    let sent = enqueue_reserved(
+        &shared,
+        permit,
+        Job {
+            operation: "load",
+            payload: serde_json::json!({}),
+            prepare: Box::new(move || {
+                let _retained = retained;
+                panic!("unadmitted job must not prepare");
+            }),
+            reply,
+            cancellation: cancellation.clone(),
+        },
+    );
+    assert_eq!(sent, Err(ChannelError::NotAdmitted));
+    // No timeout or final-sender disposal supplies the outcome. The same
+    // production send helper must settle the reply and drop retained payloads.
+    assert!(matches!(
+        outcome.try_recv(),
+        Ok(Err(ChannelError::NotAdmitted))
+    ));
+    assert!(payload.upgrade().is_none());
+    assert!(!cancellation.admitted.load(Ordering::Acquire));
+    assert_eq!(stops.count.load(Ordering::Acquire), 1);
+    drop(sender);
 }

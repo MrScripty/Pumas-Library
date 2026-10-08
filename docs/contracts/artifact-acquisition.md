@@ -133,8 +133,16 @@ facts, pinned manifest entries, a model import spec, a reserved workspace, finit
 retry budgets, a retained operation UUID and optional ephemeral credentials.
 Its request is not Debug/serde-enabled; only phase/current-file byte progress is
 serializable. Selection runs under the same bounded acquisition consumer scope
-as transfer, and verified single/bundled GGUF publication uses the existing
-importer and exact receipt pipeline. The stable demand owner is
+as transfer. Model publication delegates to the shared descriptor/receipt-bound
+`ModelImporter::import_acquired_model` qualification bridge and the existing
+atomic copied-import publisher. S3 remains a generic object store: acquisition
+success, qualified model publication and backend compatibility are separate
+outcomes. The [bounded acceptance contract](../plans/artifact-acquisition/reports/acquisition-model-bridge-2026-10-08.md)
+includes GGUF, genuine single-file safetensors and complete supported safetensors
+packages. The [ONNX structural extension](../plans/artifact-acquisition/reports/acquired-onnx-package-2026-10-08.md)
+also qualifies bounded static FLOAT graphs and their selected relative external
+tensor files. This qualification leaves task classification unknown and does not
+authorize runtime admission. Existing GGUF importer entry points remain compatible. The stable demand owner is
 `model.s3.workflow`. Neither source access nor credentials enter the importer
 payload or progress; no account/source-configuration persistence is introduced.
 
@@ -178,8 +186,11 @@ Controlled HTTPS/RPC and DOM/preload fixtures support this secret boundary;
 packaged/browser behavior and real-provider acceptance remain separate.
 
 The additive desktop bundle starts take 2–32 explicit per-file key/VersionId/
-logical-path/SHA-256 pins and one exact primary GGUF basename, with only the
-existing native inert auxiliary formats. Complete structural preflight uses
+logical-path/SHA-256 pins and one exact selected primary weight logical path.
+Safe nested primaries and additional weight shards/components are admitted as
+source selections; extensions grant no model authority. Native and desktop S3
+imports delegate byte/package qualification to the shared acquired-model importer.
+Complete structural preflight uses
 `S3Reader::validate_manifest_entries` plus shared manifest validation before
 job/workspace admission; it grants no selection or byte-verification authority.
 Importer-owned reserved roots and their normalized aliases/descendants are
@@ -191,8 +202,13 @@ A checked HEAD for the exact immutable VersionId and explicit size zero yields
 an empty acquisition stream without GET or an impossible byte range. The shared
 workspace writer, SHA-256 verifier and receipt owner still verify and publish
 every selected member. Missing/invalid Content-Length or an absent/wrong-version
-object fails selection; an empty file never stands for unknown length. Empty
-auxiliaries are supported, while the primary must pass existing GGUF validation.
+object fails selection; an empty file never stands for unknown length. GGUF
+retains its existing inert auxiliary policy, including empty auxiliary files. Safetensors files and bounded
+complete supported packages must satisfy shared config/tokenizer/processor/index/
+shard/component closure before registration. ONNX graphs must satisfy the shared
+bounded structural class and exact external-tensor closure. Unsupported packages
+and custom code remain refused; registration does not establish backend
+compatibility or inference readiness.
 Public range reads remain nonempty; selection and `s3/manifest.rs` identity
 implementation are unchanged. Anonymous/authenticated single-object wire shapes remain unchanged;
 bundle authentication uses the same ephemeral credential DTO and constructors.

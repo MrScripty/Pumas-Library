@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 895171ea82db33eca5d91ab73961da7634b2804c5386582b306312dd59f5541b. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 335d6f3ee70b06b1895de25767308de05db0959c1894fac408b31fc9d1461b49. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;

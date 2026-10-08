@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 895171ea82db33eca5d91ab73961da7634b2804c5386582b306312dd59f5541b. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 335d6f3ee70b06b1895de25767308de05db0959c1894fac408b31fc9d1461b49. DO NOT EDIT.
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -13779,13 +13779,13 @@ var validateS3AuthenticatedBundleImportParams = validate108;
 var schema122 = { "additionalProperties": false, "properties": { "access_key_id": { "maxLength": 4096, "minLength": 1, "pattern": "^(?!.*[/,=])[!-~]+(?![\\s\\S])", "type": "string" }, "secret_access_key": { "maxLength": 4096, "minLength": 1, "pattern": "^[!-~]+(?![\\s\\S])", "type": "string" }, "session_token": { "maxLength": 4096, "minLength": 1, "pattern": "^[!-~]+(?![\\s\\S])", "type": ["string", "null"] } }, "required": ["access_key_id", "secret_access_key"], "type": "object" };
 var pattern28 = new RegExp("^(?!.*[/,=])[!-~]+(?![\\s\\S])", "u");
 var pattern29 = new RegExp("^[!-~]+(?![\\s\\S])", "u");
-var schema123 = { "additionalProperties": false, "description": "Explicit complete GGUF + selected inert data/text file set.", "properties": { "addressing": { "$ref": "#/definitions/S3AddressingWire" }, "bucket": { "maxLength": 255, "minLength": 1, "type": "string" }, "endpoint": { "maxLength": 4096, "minLength": 1, "pattern": "^https://[^/@?#]+/?$", "type": "string" }, "family": { "maxLength": 255, "minLength": 1, "type": "string" }, "files": { "items": { "$ref": "#/definitions/S3PinnedFileParams" }, "maxItems": 32, "minItems": 2, "type": "array" }, "official_name": { "maxLength": 255, "minLength": 1, "type": "string" }, "operation_id": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "primary_logical_path": { "maxLength": 255, "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$", "type": "string" }, "region": { "maxLength": 255, "minLength": 1, "type": "string" } }, "required": ["operation_id", "endpoint", "region", "bucket", "addressing", "files", "primary_logical_path", "family", "official_name"], "type": "object" };
+var schema123 = { "additionalProperties": false, "description": "Exact selected model/package bytes. Shared import qualification follows transfer.", "properties": { "addressing": { "$ref": "#/definitions/S3AddressingWire" }, "bucket": { "maxLength": 255, "minLength": 1, "type": "string" }, "endpoint": { "maxLength": 4096, "minLength": 1, "pattern": "^https://[^/@?#]+/?$", "type": "string" }, "family": { "maxLength": 255, "minLength": 1, "type": "string" }, "files": { "items": { "$ref": "#/definitions/S3PinnedFileParams" }, "maxItems": 32, "minItems": 2, "type": "array" }, "official_name": { "maxLength": 255, "minLength": 1, "type": "string" }, "operation_id": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "primary_logical_path": { "maxLength": 1024, "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$", "pumasPortablePath": true, "pumasUtf8Max": 1024, "type": "string" }, "region": { "maxLength": 255, "minLength": 1, "type": "string" } }, "required": ["operation_id", "endpoint", "region", "bucket", "addressing", "files", "primary_logical_path", "family", "official_name"], "type": "object" };
 var schema124 = { "enum": ["path", "virtual_hosted"], "type": "string" };
 var pattern31 = new RegExp("^https://[^/@?#]+/?$", "u");
 var pattern32 = new RegExp("^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$", "u");
 var pattern33 = new RegExp("^[0-9a-fA-F]{64}$", "u");
 var pattern34 = new RegExp("^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$", "u");
-var pattern36 = new RegExp("^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$", "u");
+var pattern36 = new RegExp("^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$", "u");
 function validate109(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -14116,8 +14116,8 @@ function validate109(data, { instancePath = "", parentData, parentDataProperty, 
                           const _errs29 = errors;
                           if (errors === _errs29) {
                             if (typeof data12 === "string") {
-                              if (func5(data12) > 255) {
-                                validate109.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/maxLength", keyword: "maxLength", params: { limit: 255 }, message: "must NOT have more than 255 characters" }];
+                              if (func5(data12) > 1024) {
+                                validate109.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
                                 return false;
                               } else {
                                 if (func5(data12) < 1) {
@@ -14125,8 +14125,21 @@ function validate109(data, { instancePath = "", parentData, parentDataProperty, 
                                   return false;
                                 } else {
                                   if (!pattern36.test(data12)) {
-                                    validate109.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/pattern", keyword: "pattern", params: { pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$" }, message: 'must match pattern "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$"' }];
+                                    validate109.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/pattern", keyword: "pattern", params: { pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$" }, message: 'must match pattern "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"' }];
                                     return false;
+                                  } else {
+                                    if (data12.length === 0 || data12.includes(String.fromCharCode(92)) || /[:*?"<>|]/.test(data12) || Array.from(data12).some((letter) => letter.codePointAt(0) < 32 || letter.codePointAt(0) >= 127 && letter.codePointAt(0) <= 159) || data12.split("/").some((component) => {
+                                      const stem = component.split(".")[0].replace(/[a-z]/g, (letter) => letter.toUpperCase());
+                                      return component.length === 0 || component === "." || component === ".." || /[. ]$/.test(component) || encodeURIComponent(component).replace(/%[0-9A-F]{2}/g, "x").length > 255 || ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].includes(stem) || /^(COM|LPT)[1-9]$/.test(stem);
+                                    })) {
+                                      validate109.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/pumasPortablePath", keyword: "pumasPortablePath", params: {}, message: 'must pass "pumasPortablePath" keyword validation' }];
+                                      return false;
+                                    } else {
+                                      if (encodeURIComponent(data12).replace(/%[0-9A-F]{2}/g, "x").length > 1024) {
+                                        validate109.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/pumasUtf8Max", keyword: "pumasUtf8Max", params: {}, message: 'must pass "pumasUtf8Max" keyword validation' }];
+                                        return false;
+                                      }
+                                    }
                                   }
                                 }
                               }
@@ -14704,7 +14717,7 @@ function validate111(data, { instancePath = "", parentData, parentDataProperty, 
 }
 var validateS3AuthenticatedImportParams = validate114;
 var schema131 = { "additionalProperties": false, "properties": { "access_key_id": { "maxLength": 4096, "minLength": 1, "pattern": "^(?!.*[/,=])[!-~]+(?![\\s\\S])", "type": "string" }, "secret_access_key": { "maxLength": 4096, "minLength": 1, "pattern": "^[!-~]+(?![\\s\\S])", "type": "string" }, "session_token": { "maxLength": 4096, "minLength": 1, "pattern": "^[!-~]+(?![\\s\\S])", "type": ["string", "null"] } }, "required": ["access_key_id", "secret_access_key"], "type": "object" };
-var schema132 = { "additionalProperties": false, "properties": { "addressing": { "$ref": "#/definitions/S3AddressingWire" }, "bucket": { "maxLength": 255, "minLength": 1, "type": "string" }, "endpoint": { "maxLength": 4096, "minLength": 1, "pattern": "^https://[^/@?#]+/?$", "type": "string" }, "family": { "maxLength": 255, "minLength": 1, "type": "string" }, "filename": { "maxLength": 255, "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$", "type": "string" }, "key": { "maxLength": 1024, "minLength": 1, "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$", "type": "string" }, "official_name": { "maxLength": 255, "minLength": 1, "type": "string" }, "operation_id": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "region": { "maxLength": 255, "minLength": 1, "type": "string" }, "sha256": { "pattern": "^[0-9a-fA-F]{64}$", "type": "string" }, "version_id": { "maxLength": 4096, "minLength": 1, "pattern": "^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$", "type": "string" } }, "required": ["operation_id", "endpoint", "region", "bucket", "addressing", "key", "version_id", "filename", "sha256", "family", "official_name"], "type": "object" };
+var schema132 = { "additionalProperties": false, "properties": { "addressing": { "$ref": "#/definitions/S3AddressingWire" }, "bucket": { "maxLength": 255, "minLength": 1, "type": "string" }, "endpoint": { "maxLength": 4096, "minLength": 1, "pattern": "^https://[^/@?#]+/?$", "type": "string" }, "family": { "maxLength": 255, "minLength": 1, "type": "string" }, "filename": { "maxLength": 1024, "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$", "pumasPortablePath": true, "pumasUtf8Max": 1024, "type": "string" }, "key": { "maxLength": 1024, "minLength": 1, "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$", "type": "string" }, "official_name": { "maxLength": 255, "minLength": 1, "type": "string" }, "operation_id": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "region": { "maxLength": 255, "minLength": 1, "type": "string" }, "sha256": { "pattern": "^[0-9a-fA-F]{64}$", "type": "string" }, "version_id": { "maxLength": 4096, "minLength": 1, "pattern": "^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$", "type": "string" } }, "required": ["operation_id", "endpoint", "region", "bucket", "addressing", "key", "version_id", "filename", "sha256", "family", "official_name"], "type": "object" };
 var schema133 = { "enum": ["path", "virtual_hosted"], "type": "string" };
 function validate115(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
@@ -14823,8 +14836,8 @@ function validate115(data, { instancePath = "", parentData, parentDataProperty, 
                     const _errs11 = errors;
                     if (errors === _errs11) {
                       if (typeof data4 === "string") {
-                        if (func5(data4) > 255) {
-                          validate115.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/maxLength", keyword: "maxLength", params: { limit: 255 }, message: "must NOT have more than 255 characters" }];
+                        if (func5(data4) > 1024) {
+                          validate115.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
                           return false;
                         } else {
                           if (func5(data4) < 1) {
@@ -14832,8 +14845,21 @@ function validate115(data, { instancePath = "", parentData, parentDataProperty, 
                             return false;
                           } else {
                             if (!pattern36.test(data4)) {
-                              validate115.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/pattern", keyword: "pattern", params: { pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$" }, message: 'must match pattern "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$"' }];
+                              validate115.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/pattern", keyword: "pattern", params: { pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$" }, message: 'must match pattern "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"' }];
                               return false;
+                            } else {
+                              if (data4.length === 0 || data4.includes(String.fromCharCode(92)) || /[:*?"<>|]/.test(data4) || Array.from(data4).some((letter) => letter.codePointAt(0) < 32 || letter.codePointAt(0) >= 127 && letter.codePointAt(0) <= 159) || data4.split("/").some((component) => {
+                                const stem = component.split(".")[0].replace(/[a-z]/g, (letter) => letter.toUpperCase());
+                                return component.length === 0 || component === "." || component === ".." || /[. ]$/.test(component) || encodeURIComponent(component).replace(/%[0-9A-F]{2}/g, "x").length > 255 || ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].includes(stem) || /^(COM|LPT)[1-9]$/.test(stem);
+                              })) {
+                                validate115.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/pumasPortablePath", keyword: "pumasPortablePath", params: {}, message: 'must pass "pumasPortablePath" keyword validation' }];
+                                return false;
+                              } else {
+                                if (encodeURIComponent(data4).replace(/%[0-9A-F]{2}/g, "x").length > 1024) {
+                                  validate115.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/pumasUtf8Max", keyword: "pumasUtf8Max", params: {}, message: 'must pass "pumasUtf8Max" keyword validation' }];
+                                  return false;
+                                }
+                              }
                             }
                           }
                         }
@@ -16536,7 +16562,7 @@ function validate117(data, { instancePath = "", parentData, parentDataProperty, 
   return errors === 0;
 }
 var validateS3BundleImportParams = validate127;
-var schema142 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "S3AddressingWire": { "enum": ["path", "virtual_hosted"], "type": "string" }, "S3PinnedFileParams": { "additionalProperties": false, "properties": { "key": { "maxLength": 1024, "minLength": 1, "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$", "type": "string" }, "logical_path": { "minLength": 1, "pumasPortablePath": true, "pumasUtf8Max": 1024, "type": "string" }, "sha256": { "pattern": "^[0-9a-fA-F]{64}$", "type": "string" }, "version_id": { "maxLength": 4096, "minLength": 1, "pattern": "^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$", "type": "string" } }, "required": ["key", "version_id", "logical_path", "sha256"], "type": "object" } }, "description": "Explicit complete GGUF + selected inert data/text file set.", "properties": { "addressing": { "$ref": "#/definitions/S3AddressingWire" }, "bucket": { "maxLength": 255, "minLength": 1, "type": "string" }, "endpoint": { "maxLength": 4096, "minLength": 1, "pattern": "^https://[^/@?#]+/?$", "type": "string" }, "family": { "maxLength": 255, "minLength": 1, "type": "string" }, "files": { "items": { "$ref": "#/definitions/S3PinnedFileParams" }, "maxItems": 32, "minItems": 2, "type": "array" }, "official_name": { "maxLength": 255, "minLength": 1, "type": "string" }, "operation_id": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "primary_logical_path": { "maxLength": 255, "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$", "type": "string" }, "region": { "maxLength": 255, "minLength": 1, "type": "string" } }, "required": ["operation_id", "endpoint", "region", "bucket", "addressing", "files", "primary_logical_path", "family", "official_name"], "title": "S3BundleImportParams", "type": "object" };
+var schema142 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "S3AddressingWire": { "enum": ["path", "virtual_hosted"], "type": "string" }, "S3PinnedFileParams": { "additionalProperties": false, "properties": { "key": { "maxLength": 1024, "minLength": 1, "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$", "type": "string" }, "logical_path": { "minLength": 1, "pumasPortablePath": true, "pumasUtf8Max": 1024, "type": "string" }, "sha256": { "pattern": "^[0-9a-fA-F]{64}$", "type": "string" }, "version_id": { "maxLength": 4096, "minLength": 1, "pattern": "^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$", "type": "string" } }, "required": ["key", "version_id", "logical_path", "sha256"], "type": "object" } }, "description": "Exact selected model/package bytes. Shared import qualification follows transfer.", "properties": { "addressing": { "$ref": "#/definitions/S3AddressingWire" }, "bucket": { "maxLength": 255, "minLength": 1, "type": "string" }, "endpoint": { "maxLength": 4096, "minLength": 1, "pattern": "^https://[^/@?#]+/?$", "type": "string" }, "family": { "maxLength": 255, "minLength": 1, "type": "string" }, "files": { "items": { "$ref": "#/definitions/S3PinnedFileParams" }, "maxItems": 32, "minItems": 2, "type": "array" }, "official_name": { "maxLength": 255, "minLength": 1, "type": "string" }, "operation_id": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "primary_logical_path": { "maxLength": 1024, "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$", "pumasPortablePath": true, "pumasUtf8Max": 1024, "type": "string" }, "region": { "maxLength": 255, "minLength": 1, "type": "string" } }, "required": ["operation_id", "endpoint", "region", "bucket", "addressing", "files", "primary_logical_path", "family", "official_name"], "title": "S3BundleImportParams", "type": "object" };
 var schema143 = { "enum": ["path", "virtual_hosted"], "type": "string" };
 function validate127(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
@@ -16868,8 +16894,8 @@ function validate127(data, { instancePath = "", parentData, parentDataProperty, 
                           const _errs29 = errors;
                           if (errors === _errs29) {
                             if (typeof data12 === "string") {
-                              if (func5(data12) > 255) {
-                                validate127.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/maxLength", keyword: "maxLength", params: { limit: 255 }, message: "must NOT have more than 255 characters" }];
+                              if (func5(data12) > 1024) {
+                                validate127.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
                                 return false;
                               } else {
                                 if (func5(data12) < 1) {
@@ -16877,8 +16903,21 @@ function validate127(data, { instancePath = "", parentData, parentDataProperty, 
                                   return false;
                                 } else {
                                   if (!pattern36.test(data12)) {
-                                    validate127.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/pattern", keyword: "pattern", params: { pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$" }, message: 'must match pattern "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$"' }];
+                                    validate127.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/pattern", keyword: "pattern", params: { pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$" }, message: 'must match pattern "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"' }];
                                     return false;
+                                  } else {
+                                    if (data12.length === 0 || data12.includes(String.fromCharCode(92)) || /[:*?"<>|]/.test(data12) || Array.from(data12).some((letter) => letter.codePointAt(0) < 32 || letter.codePointAt(0) >= 127 && letter.codePointAt(0) <= 159) || data12.split("/").some((component) => {
+                                      const stem = component.split(".")[0].replace(/[a-z]/g, (letter) => letter.toUpperCase());
+                                      return component.length === 0 || component === "." || component === ".." || /[. ]$/.test(component) || encodeURIComponent(component).replace(/%[0-9A-F]{2}/g, "x").length > 255 || ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].includes(stem) || /^(COM|LPT)[1-9]$/.test(stem);
+                                    })) {
+                                      validate127.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/pumasPortablePath", keyword: "pumasPortablePath", params: {}, message: 'must pass "pumasPortablePath" keyword validation' }];
+                                      return false;
+                                    } else {
+                                      if (encodeURIComponent(data12).replace(/%[0-9A-F]{2}/g, "x").length > 1024) {
+                                        validate127.errors = [{ instancePath: instancePath + "/primary_logical_path", schemaPath: "#/properties/primary_logical_path/pumasUtf8Max", keyword: "pumasUtf8Max", params: {}, message: 'must pass "pumasUtf8Max" keyword validation' }];
+                                        return false;
+                                      }
+                                    }
                                   }
                                 }
                               }
@@ -20544,7 +20583,7 @@ function validate144(data, { instancePath = "", parentData, parentDataProperty, 
   return errors === 0;
 }
 var validateS3ImportParams = validate152;
-var schema166 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "S3AddressingWire": { "enum": ["path", "virtual_hosted"], "type": "string" } }, "properties": { "addressing": { "$ref": "#/definitions/S3AddressingWire" }, "bucket": { "maxLength": 255, "minLength": 1, "type": "string" }, "endpoint": { "maxLength": 4096, "minLength": 1, "pattern": "^https://[^/@?#]+/?$", "type": "string" }, "family": { "maxLength": 255, "minLength": 1, "type": "string" }, "filename": { "maxLength": 255, "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$", "type": "string" }, "key": { "maxLength": 1024, "minLength": 1, "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$", "type": "string" }, "official_name": { "maxLength": 255, "minLength": 1, "type": "string" }, "operation_id": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "region": { "maxLength": 255, "minLength": 1, "type": "string" }, "sha256": { "pattern": "^[0-9a-fA-F]{64}$", "type": "string" }, "version_id": { "maxLength": 4096, "minLength": 1, "pattern": "^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$", "type": "string" } }, "required": ["operation_id", "endpoint", "region", "bucket", "addressing", "key", "version_id", "filename", "sha256", "family", "official_name"], "title": "S3ImportParams", "type": "object" };
+var schema166 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "S3AddressingWire": { "enum": ["path", "virtual_hosted"], "type": "string" } }, "properties": { "addressing": { "$ref": "#/definitions/S3AddressingWire" }, "bucket": { "maxLength": 255, "minLength": 1, "type": "string" }, "endpoint": { "maxLength": 4096, "minLength": 1, "pattern": "^https://[^/@?#]+/?$", "type": "string" }, "family": { "maxLength": 255, "minLength": 1, "type": "string" }, "filename": { "maxLength": 1024, "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$", "pumasPortablePath": true, "pumasUtf8Max": 1024, "type": "string" }, "key": { "maxLength": 1024, "minLength": 1, "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+(?:/(?!\\.{1,2}(?:/|$))[^/\\u0000-\\u001F\\u007F-\\u009F]+)*$", "type": "string" }, "official_name": { "maxLength": 255, "minLength": 1, "type": "string" }, "operation_id": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "region": { "maxLength": 255, "minLength": 1, "type": "string" }, "sha256": { "pattern": "^[0-9a-fA-F]{64}$", "type": "string" }, "version_id": { "maxLength": 4096, "minLength": 1, "pattern": "^(?!null$)[^\\u0000-\\u001F\\u007F-\\u009F]+$", "type": "string" } }, "required": ["operation_id", "endpoint", "region", "bucket", "addressing", "key", "version_id", "filename", "sha256", "family", "official_name"], "title": "S3ImportParams", "type": "object" };
 var schema167 = { "enum": ["path", "virtual_hosted"], "type": "string" };
 function validate152(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
@@ -20663,8 +20702,8 @@ function validate152(data, { instancePath = "", parentData, parentDataProperty, 
                     const _errs11 = errors;
                     if (errors === _errs11) {
                       if (typeof data4 === "string") {
-                        if (func5(data4) > 255) {
-                          validate152.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/maxLength", keyword: "maxLength", params: { limit: 255 }, message: "must NOT have more than 255 characters" }];
+                        if (func5(data4) > 1024) {
+                          validate152.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
                           return false;
                         } else {
                           if (func5(data4) < 1) {
@@ -20672,8 +20711,21 @@ function validate152(data, { instancePath = "", parentData, parentDataProperty, 
                             return false;
                           } else {
                             if (!pattern36.test(data4)) {
-                              validate152.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/pattern", keyword: "pattern", params: { pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$" }, message: 'must match pattern "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$"' }];
+                              validate152.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/pattern", keyword: "pattern", params: { pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$" }, message: 'must match pattern "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"' }];
                               return false;
+                            } else {
+                              if (data4.length === 0 || data4.includes(String.fromCharCode(92)) || /[:*?"<>|]/.test(data4) || Array.from(data4).some((letter) => letter.codePointAt(0) < 32 || letter.codePointAt(0) >= 127 && letter.codePointAt(0) <= 159) || data4.split("/").some((component) => {
+                                const stem = component.split(".")[0].replace(/[a-z]/g, (letter) => letter.toUpperCase());
+                                return component.length === 0 || component === "." || component === ".." || /[. ]$/.test(component) || encodeURIComponent(component).replace(/%[0-9A-F]{2}/g, "x").length > 255 || ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].includes(stem) || /^(COM|LPT)[1-9]$/.test(stem);
+                              })) {
+                                validate152.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/pumasPortablePath", keyword: "pumasPortablePath", params: {}, message: 'must pass "pumasPortablePath" keyword validation' }];
+                                return false;
+                              } else {
+                                if (encodeURIComponent(data4).replace(/%[0-9A-F]{2}/g, "x").length > 1024) {
+                                  validate152.errors = [{ instancePath: instancePath + "/filename", schemaPath: "#/properties/filename/pumasUtf8Max", keyword: "pumasUtf8Max", params: {}, message: 'must pass "pumasUtf8Max" keyword validation' }];
+                                  return false;
+                                }
+                              }
                             }
                           }
                         }

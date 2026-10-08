@@ -87,7 +87,7 @@ export function useS3ModelImport(onImported?: () => void, bundleObservation = fa
     const id = crypto.randomUUID();
     const decoded = decodeS3ImportParams({ ...draft, operation_id: id });
     if (decoded.status !== 'valid') {
-      setError('Check all required source fields, the HTTPS origin, GGUF filename and 64-digit SHA-256.');
+      setError('Check all required source fields, the HTTPS origin, safe primary weight path and 64-digit SHA-256.');
       return;
     }
     const authenticated = credentials === undefined ? null : decodeS3AuthenticatedImportParams({ source: decoded.value, credentials });

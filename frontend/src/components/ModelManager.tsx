@@ -6,7 +6,7 @@
  */
 
 import React, { useMemo, useRef, useState } from 'react';
-import type { ModelCategory, ModelInfo, RemoteModelInfo } from '../types/apps';
+import type { ModelCategory, ModelInfo, RemoteModelInfo, RemoteSearchSource } from '../types/apps';
 import type { RouterProfileSyncStatus, ServedModelStatus, ServingEndpointStatus } from '../types/api-serving';
 import type { ServingControlObservation } from '../hooks/useServingStatus';
 import { useDownloadCompletionRefresh } from '../hooks/useDownloadCompletionRefresh';
@@ -79,6 +79,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   onChooseExistingLibrary,
 }) => {
   const [showS3Import, setShowS3Import] = useState(false);
+  const [remoteSearchSource, setRemoteSearchSource] = useState<RemoteSearchSource>('huggingface');
   const [conversionModel, setConversionModel] = useState<ModelInfo | null>(null);
   const libraryRegionRef = useRef<HTMLDivElement>(null);
   const conversionDirection = formatConversionDirection(conversionModel?.primaryFormat);
@@ -135,9 +136,11 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     isLoading: isRemoteLoading,
     hydratingRepoIds,
     hydrateModelDetails,
+    isCachedSearch,
   } = useRemoteModelSearch({
     enabled: isDownloadMode,
     searchQuery,
+    source: remoteSearchSource,
   });
 
   const filterList = isDownloadMode ? remoteKinds : categories;
@@ -200,6 +203,10 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   // Handlers
   const handleStartRemoteDownload = async (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => {
+    if (isCachedSearch) {
+      setDownloadErrors((previous) => ({ ...previous, [model.repoId]: 'Switch to Hugging Face search for current download details.' }));
+      return;
+    }
     await startRemoteModelDownload({
       filenames,
       model,
@@ -256,6 +263,13 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         isPickingModels={isPicking}
         onHfAuthClick={openHfAuth}
         showModeToggle={Boolean(onAddModels)}
+        remoteSearchSource={isCachedSearch ? 'cached' : 'huggingface'}
+        onRemoteSearchSourceChange={(source) => {
+          setRemoteSearchSource(source);
+          if (source === 'huggingface' && searchQuery.trim().startsWith('cache:')) {
+            setSearchQuery(searchQuery.trim().slice(6));
+          }
+        }}
       />
 
       {!isDownloadMode && <div className="px-4 py-2"><button type="button" onClick={() => setShowS3Import(true)}
@@ -295,6 +309,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
               onClearFilters={handleClearRemoteFilters}
               selectedKind={selectedKind}
               onHfAuthClick={openHfAuth}
+              isCachedSearch={isCachedSearch}
             />
           ) : (
             <>

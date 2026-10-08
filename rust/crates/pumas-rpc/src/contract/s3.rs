@@ -130,8 +130,8 @@ pub(crate) struct S3ImportParams {
     #[cfg_attr(
         feature = "export-contract",
         schemars(
-            length(min = 1, max = 255),
-            regex(pattern = "^[A-Za-z0-9][A-Za-z0-9._-]*\\.[gG][gG][uU][fF]$")
+            length(min = 1, max = 1024),
+            regex(pattern = "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$")
         )
     )]
     pub filename: String,
@@ -153,7 +153,7 @@ pub(crate) enum S3AddressingWire {
     VirtualHosted,
 }
 
-/// Explicit complete GGUF + selected inert data/text file set.
+/// Exact selected model/package bytes. Shared import qualification follows transfer.
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -219,8 +219,8 @@ impl S3BundleImportParams {
         let primary = self.primary()?;
         primary.validate()?;
         for file in &self.files {
-            // Reuse existing pin/source validation; only the logical primary
-            // basename has the GGUF restriction.
+            // Validate source pins without assigning model semantics to a member.
+            // The complete selected set is qualified by the shared importer.
             let member = S3ImportParams {
                 key: file.key.clone(),
                 version_id: file.version_id.clone(),
@@ -230,17 +230,6 @@ impl S3BundleImportParams {
             member.validate()?;
             let path = &file.logical_path;
             if path.is_empty() || path.len() > 1024 || path.chars().any(char::is_control) {
-                return Err(PublicError::invalid_params());
-            }
-            if path != &self.primary_logical_path
-                && !std::path::Path::new(path)
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .is_some_and(|ext| {
-                        ["json", "txt", "md", "model", "tiktoken", "vocab", "merges"]
-                            .contains(&ext.to_ascii_lowercase().as_str())
-                    })
-            {
                 return Err(PublicError::invalid_params());
             }
         }
@@ -442,7 +431,7 @@ impl S3ImportParams {
             (&self.bucket, 255),
             (&self.key, 1024),
             (&self.version_id, 4096),
-            (&self.filename, 255),
+            (&self.filename, 1024),
             (&self.family, 255),
             (&self.official_name, 255),
         ] {
@@ -462,14 +451,34 @@ impl S3ImportParams {
         {
             return Err(PublicError::invalid_params());
         }
-        let filename = self.filename.as_bytes();
-        if !filename[0].is_ascii_alphanumeric()
-            || !filename
-                .iter()
-                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(b))
-            || !self.filename.to_ascii_lowercase().ends_with(".gguf")
-        {
+        if self.filename.split('/').any(|component| {
+            component.is_empty()
+                || !component.as_bytes()[0].is_ascii_alphanumeric()
+                || !component
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        }) {
             return Err(PublicError::invalid_params());
+        }
+        // Source-independent logical-path admission; extensions grant no model
+        // authority. Full namespace/hash and package validation happen later.
+        pumas_library::acquisition::ArtifactFile::new(
+            self.filename.clone(),
+            "desktop.preflight",
+            None,
+            None,
+            pumas_library::acquisition::FileVerificationRequirement::CompleteRepresentation,
+        )
+        .map_err(|_| PublicError::invalid_params())?;
+        // Check destination normalization and the namespace root. Nested
+        // primaries also enter package requests, which preserve their layout.
+        // Importer documents must be refused before workspace allocation.
+        for path in [
+            self.filename.as_str(),
+            self.filename.split('/').next().unwrap_or_default(),
+        ] {
+            pumas_library::model_library::ModelImporter::validate_acquired_payload_paths(&[path])
+                .map_err(|_| PublicError::invalid_params())?;
         }
         if self.sha256.len() != 64 || !self.sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(PublicError::invalid_params());
@@ -795,5 +804,113 @@ mod bundle_contract_tests {
         input["files"][1]["credentials"] = credentials;
         assert!(decode("start_s3_model_bundle_import", input).is_err());
         assert!(decode("get_s3_model_bundle_import", json!({})).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod public_bridge_contract_tests {
+    use crate::contract::{AdmittedRpcRequest, RpcAdmissionError};
+
+    fn decode(method: &str, params: Value) -> Result<AdmittedRpcRequest, RpcAdmissionError> {
+        AdmittedRpcRequest::decode(
+            &serde_json::to_vec(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
+                .unwrap(),
+        )
+    }
+    use serde_json::{json, Value};
+
+    fn file(path: &str) -> Value {
+        json!({"operation_id":"c3f7d104-1234-4321-abcd-aaaaaaaaaaaa",
+            "endpoint":"https://source.invalid","region":"fixture-region",
+            "bucket":"fixture-bucket","addressing":"path","key":"models/exact",
+            "version_id":"v1","filename":path,"sha256":"a".repeat(64),
+            "family":"fixture","official_name":"Public bridge"})
+    }
+    fn package(primary: &str) -> Value {
+        let mut request = file(primary);
+        for key in ["key", "version_id", "filename", "sha256"] {
+            request.as_object_mut().unwrap().remove(key);
+        }
+        request["primary_logical_path"] = json!(primary);
+        request["files"] = json!([
+            {"key":"models/weights","version_id":"v1","logical_path":primary,"sha256":"a".repeat(64)},
+            {"key":"models/other","version_id":"v2","logical_path":"model-00002.safetensors","sha256":"b".repeat(64)},
+            {"key":"models/index","version_id":"v3","logical_path":"model.safetensors.index.json","sha256":"c".repeat(64)}]);
+        request
+    }
+    #[test]
+    fn transport_admission_does_not_claim_model_qualification() {
+        for path in [
+            "weights.gguf",
+            "model.safetensors",
+            "model.onnx",
+            "unknown.data",
+        ] {
+            assert!(
+                decode("start_s3_model_import", file(path)).is_ok(),
+                "{path}"
+            );
+            assert!(decode("start_authenticated_s3_model_import", json!({
+                "source":file(path),"credentials":{"access_key_id":"fixture-key", "secret_access_key":"fixture-secret"}
+            })).is_ok());
+        }
+    }
+    #[test]
+    fn package_selection_admits_weight_members_and_nested_primary() {
+        for primary in [
+            "model-00001.safetensors",
+            "unet/diffusion_pytorch_model.safetensors",
+        ] {
+            assert!(decode("start_s3_model_bundle_import", package(primary)).is_ok());
+        }
+    }
+    #[test]
+    fn primary_paths_remain_safe_and_bounded() {
+        for path in [
+            "../model.safetensors",
+            "unet/../model.safetensors",
+            "/model.safetensors",
+            "unet//model.safetensors",
+            "unet/CON.safetensors",
+            "unet/model.safetensors.",
+            "unet/model.safetensors ",
+            "unet\\model.safetensors",
+        ] {
+            assert!(
+                decode("start_s3_model_import", file(path)).is_err(),
+                "{path}"
+            );
+            assert!(
+                decode("start_s3_model_bundle_import", package(path)).is_err(),
+                "{path}"
+            );
+        }
+        assert!(decode("start_s3_model_import", file(&"a".repeat(1025))).is_err());
+    }
+    #[test]
+    fn missing_primary_aliasing_and_reserved_output_remain_refused() {
+        for path in [
+            "metadata.json",
+            "METADATA.JSON",
+            "metadata.json/weights.safetensors",
+        ] {
+            assert!(
+                decode("start_s3_model_import", file(path)).is_err(),
+                "{path}"
+            );
+            assert!(decode("start_authenticated_s3_model_import", json!({
+                "source":file(path),"credentials":{"access_key_id":"fixture-key", "secret_access_key":"fixture-secret"}
+            })).is_err(), "{path}");
+            assert!(
+                decode("start_s3_model_bundle_import", package(path)).is_err(),
+                "{path}"
+            );
+        }
+        let mut request = package("model.safetensors");
+        request["primary_logical_path"] = json!("unselected.safetensors");
+        assert!(decode("start_s3_model_bundle_import", request).is_err());
+        let mut request = package("model.safetensors");
+        request["files"][1]["logical_path"] = json!("MODEL.SAFETENSORS");
+        assert!(decode("start_s3_model_bundle_import", request).is_err());
     }
 }

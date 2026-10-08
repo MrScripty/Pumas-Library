@@ -1,0 +1,25 @@
+# Present retained HF detail discovery through the existing UI
+
+The [explicit local discovery API](hf-local-detail-discovery-2026-10-08.md) supplies `cache:` search, source admission, visibility exclusions and bounded reads. The existing `search_hf_models` RPC and adapter signatures already carry the query and complete `modelCard`; the UI consumes those contracts without adding a producer, privileged IPC method or generated schema.
+
+## User workflow
+
+In Model Manager, enter model search and choose **Cached details (offline)**. An empty query browses the retained anonymous detail family. Typed queries reuse the existing search state and filters. The preserved manual `cache:` prefix also selects this presentation; selecting Hugging Face strips that prefix. The default remains ordinary Hugging Face search. No unavailable ordinary query silently falls back to cached results.
+
+Cached rows show the exact observation source URL, observation time, freshness expiration, explicit stale or “within TTL at search” status, and observed revision (or “Not recorded”). The status is an observation at search time, not current online confirmation. The banner and row explain that current access, download selection and backend readiness require their normal live checks. The UI validates the owner marker and provenance before display and clears cached annotations on ordinary results; malformed cached provenance produces an error rather than ordinary-looking rows.
+
+Cached search passes zero hydration and offers no new download selection or detail menus, including quant-derived and All Files fallbacks. Existing known download jobs retain Pause/Resume/Cancel controls by existing job keys; these do not select a new artifact. Source/query context changes hide previous rows immediately. Debounce cancellation suppresses queued requests and generation checks ignore late search/hydration responses. These are client delivery protections, not cancellation of an already admitted server read.
+
+## Qualification
+
+`qualify-hf-cached-search-ui.py` launches the actual minimal `pumas-rpc` binary with an owned launcher root and XDG config, seeds actual anonymous observation envelopes, and inserts one owned ordinary exact-search SQLite fixture after the producer initializes its unchanged schema. Private, gated and unknown-visibility fixtures must be excluded. Exact fresh/stale/missing-revision markers, filtered browse, bounded-limit refusal, unchanged observation bytes, abandoned delivery and live download-detail/acquisition refusal are checked. Failed acquisition must leave empty model and download lists.
+
+Both uppercase and lowercase proxy variables route upstream requests to an owned refusing loopback server; no real HF, provider or model download is contacted. Request counts measure zero additional upstream calls during cached browse/filter. Startup checks may attempt GitHub through that refusing oracle and are recorded separately. The qualification fixture preserves the process home environment. The helper refuses ambient CLI token presence (including symlinks), removes HF_TOKEN and requires a new owned XDG config without credentials. This is bounded anonymous qualification, not full home isolation. Each RPC/fetch/process wait is bounded; shutdown completes cleanup before reporting errors.
+
+The mounted workflow uses actual ModelManager, source chooser, search hook, filters, list and summary. It consumes actual HTTP RPC responses when `PUMAS_HF_UI_RPC_URL` is set, and controlled responses otherwise. Unrelated library/download hooks and the adapter transport entry are mocked. Tests cover blank browse, source/time/revision presentation, nonpublic exclusion, nonempty quant tags without download menus, new query filtering, immediate switching, cancelled debounce, late actual response delivery and unavailable ordinary search without fallback. This qualifies mounted React/jsdom plus a launched real RPC process. It does not qualify native Electron, preload/privileged IPC, a real browser window, screenshots, actual online HF success, provider acceptance or inference.
+
+## Integration and verification
+
+The UI depends on the anonymous detail-cache protocol, aggregate budget and explicit local discovery API. Cargo qualification uses locked dependencies and `ORT_SKIP_DOWNLOAD=1`. The existing official locked frontend dependencies provide the test/build tooling; no dependency or lockfile change is required.
+
+Recorded qualification passed 25 focused frontend tests, the 904-test/135-file frontend suite, three mounted actual-RPC workflows, one launched RPC integration test, scoped ESLint, TypeScript, Vite library-only build, strict scoped RPC Clippy, Rust formatting, Python compilation and whitespace checks. Core production sources were unchanged by the UI work, and no new full-core run is claimed here. The inherited core registry test failure on a read-only default user configuration directory remains documented in the local-discovery report. These results do not establish native Electron, privileged IPC, real online HF success or inference.

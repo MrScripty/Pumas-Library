@@ -77,6 +77,8 @@ use walkdir::WalkDir;
 pub(crate) const TEMP_IMPORT_PREFIX: &str = ".tmp_import_";
 
 mod acquired;
+mod acquired_onnx;
+mod acquired_package;
 #[cfg(test)]
 mod acquisition_integration_tests;
 #[cfg(test)]

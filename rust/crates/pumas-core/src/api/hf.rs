@@ -5297,3 +5297,6 @@ pub(super) mod tests {
         api.shutdown_downloads().await.unwrap();
     }
 }
+
+#[cfg(test)]
+mod model_detail_cache_tests;

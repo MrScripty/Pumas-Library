@@ -1286,6 +1286,10 @@ fn refine_named(name: &str, schema: &mut Value) {
                 properties["models"]["pumasCatalogMap"] = true.into();
             }
 
+            "S3ImportParams" => {
+                properties["filename"]["pumasPortablePath"] = true.into();
+                properties["filename"]["pumasUtf8Max"] = 1024.into();
+            }
             "S3BundleImportParams" => {
                 let existing = schemars::schema_for!(S3ImportParams);
                 let existing = serde_json::to_value(existing).expect("schema serialization");
@@ -1300,6 +1304,8 @@ fn refine_named(name: &str, schema: &mut Value) {
                     properties[field] = existing["properties"][field].clone();
                 }
                 properties["primary_logical_path"] = existing["properties"]["filename"].clone();
+                properties["primary_logical_path"]["pumasPortablePath"] = true.into();
+                properties["primary_logical_path"]["pumasUtf8Max"] = 1024.into();
             }
             "S3PinnedFileParams" => {
                 let existing = serde_json::to_value(schemars::schema_for!(S3ImportParams))

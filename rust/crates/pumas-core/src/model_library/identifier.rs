@@ -84,11 +84,27 @@ pub fn identify_model_type(path: impl AsRef<Path>) -> Result<ModelTypeInfo> {
 }
 
 /// Identify through a held descriptor. The path supplies format/context hints,
-/// never the input bytes. Callers of the GGUF-only acquired path admit its magic
-/// before this function, so no directory-context discovery is performed there.
+/// never the input bytes. Local imports may also inspect directory context;
+/// acquired imports use `identify_model_descriptor` to disable that discovery.
 pub(crate) fn identify_model_reader<R: Read + Seek>(
     file: &mut R,
     path: &Path,
+) -> Result<ModelTypeInfo> {
+    identify_model_reader_with_context(file, path, true)
+}
+
+/// Held acquisition inputs must never discover neighboring files by pathname.
+pub(crate) fn identify_model_descriptor<R: Read + Seek>(
+    file: &mut R,
+    path: &Path,
+) -> Result<ModelTypeInfo> {
+    identify_model_reader_with_context(file, path, false)
+}
+
+fn identify_model_reader_with_context<R: Read + Seek>(
+    file: &mut R,
+    path: &Path,
+    context: bool,
 ) -> Result<ModelTypeInfo> {
     // Read first bytes for magic detection
     let mut header = [0u8; 64];
@@ -116,7 +132,7 @@ pub(crate) fn identify_model_reader<R: Read + Seek>(
 
     match format {
         FileFormat::Gguf => identify_gguf(file, path),
-        FileFormat::Safetensors => identify_safetensors(file, path),
+        FileFormat::Safetensors => identify_safetensors(file, path, context),
         _ => Ok(ModelTypeInfo {
             format,
             model_type: ModelType::Unknown,
@@ -496,7 +512,11 @@ fn skip_gguf_value_impl<R: Read>(file: &mut R, value_type: u32, depth: usize) ->
 }
 
 /// Identify safetensors model details.
-fn identify_safetensors<R: Read + Seek>(file: &mut R, path: &Path) -> Result<ModelTypeInfo> {
+fn identify_safetensors<R: Read + Seek>(
+    file: &mut R,
+    path: &Path,
+    context: bool,
+) -> Result<ModelTypeInfo> {
     // Safetensors format:
     // 0-7: header size (u64, little-endian)
     // 8+: JSON header with tensor metadata
@@ -525,14 +545,15 @@ fn identify_safetensors<R: Read + Seek>(file: &mut R, path: &Path) -> Result<Mod
 
     // Check directory context for embedding indicators
     // This catches embedding models that don't have distinctive tensor patterns
-    if model_type != ModelType::Embedding && is_embedding_from_context(path) {
+    if context && model_type != ModelType::Embedding && is_embedding_from_context(path) {
         model_type = ModelType::Embedding;
     }
 
     // Check directory context for audio indicators.
     // Audio models often reuse transformer or diffusion architectures, so we check
     // for all types except Audio (already correct) and Embedding (has its own context).
-    if model_type != ModelType::Audio
+    if context
+        && model_type != ModelType::Audio
         && model_type != ModelType::Embedding
         && is_audio_from_context(path)
     {
@@ -540,9 +561,10 @@ fn identify_safetensors<R: Read + Seek>(file: &mut R, path: &Path) -> Result<Mod
     }
 
     // Promote LLM-like tensor layouts with explicit multimodal config into VLM.
-    if model_type == ModelType::Llm && is_vlm_from_context(path) {
+    if context && model_type == ModelType::Llm && is_vlm_from_context(path) {
         model_type = ModelType::Vlm;
-    } else if (model_type == ModelType::Unknown || model_type == ModelType::Diffusion)
+    } else if context
+        && (model_type == ModelType::Unknown || model_type == ModelType::Diffusion)
         && is_vision_from_context(path)
     {
         model_type = ModelType::Vision;
@@ -1010,6 +1032,36 @@ pub fn extract_gguf_metadata(path: impl AsRef<Path>) -> Result<HashMap<String, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acquired_descriptor_identification_ignores_unselected_context() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("model.safetensors");
+        let header = br#"{"weight":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}}"#;
+        let bytes = [
+            (header.len() as u64).to_le_bytes().as_slice(),
+            header.as_slice(),
+            1_f32.to_le_bytes().as_slice(),
+        ]
+        .concat();
+        std::fs::write(&path, bytes).unwrap();
+        std::fs::write(
+            temp.path().join("config.json"),
+            br#"{"model_type":"vit","image_size":1}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            identify_model_type(&path).unwrap().model_type,
+            ModelType::Vision
+        );
+        let mut file = std::fs::File::open(&path).unwrap();
+        assert_eq!(
+            identify_model_descriptor(&mut file, &path)
+                .unwrap()
+                .model_type,
+            ModelType::Unknown
+        );
+    }
 
     #[test]
     fn test_detect_format_safetensors() {

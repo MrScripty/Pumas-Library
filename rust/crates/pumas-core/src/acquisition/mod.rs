@@ -7,6 +7,7 @@
 
 mod github_release;
 mod http;
+mod local;
 mod manifest;
 #[cfg(feature = "s3")]
 mod s3;
@@ -16,6 +17,7 @@ pub(crate) mod task_custody;
 mod workspace;
 
 pub use http::{AcquisitionHttpClient, HttpAttemptHost};
+pub use local::AcquisitionLocalSource;
 #[cfg(feature = "s3")]
 pub use s3::{
     S3Addressing, S3ConditionalManifestEntry, S3Credentials, S3ManifestEntry, S3ManifestSelection,
@@ -38,8 +40,8 @@ pub use manifest::{
 
 pub use service::{
     AcquiredArtifactUse, AcquisitionConsumer, AcquisitionConsumerReceipt, AcquisitionDemand,
-    AcquisitionHost, AcquisitionHttpRequest, AcquisitionHttpSource, AcquisitionPhase,
-    AcquisitionRecord, AcquisitionRetryPolicy, AcquisitionService,
+    AcquisitionHost, AcquisitionHttpRequest, AcquisitionHttpSource, AcquisitionLocalRequest,
+    AcquisitionPhase, AcquisitionRecord, AcquisitionRetryPolicy, AcquisitionService,
 };
 pub use store::AcquisitionStore;
 pub use workspace::{

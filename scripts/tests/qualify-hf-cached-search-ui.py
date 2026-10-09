@@ -92,6 +92,18 @@ def seed_ordinary_search(root):
                    ("online-fixture", None, 25, 0, '["acme/OnlineFixture"]', now))
 
 
+def seed_demand_search(root):
+    now = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(root / "shared-resources/cache/search.sqlite") as db:
+        for name in ("First", "Second"):
+            db.execute("INSERT OR REPLACE INTO repo_details (repo_id,last_modified,name,developer,kind,formats,quants,download_options,url,downloads,total_size_bytes,cached_at,last_accessed,data_size_bytes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       ("acme/" + name, now, name, "acme", "text-generation",
+                        '["gguf"]', '["Q4_K_M"]', '[]',
+                        "https://huggingface.co/acme/" + name, 1, None, now, now, 1024))
+        db.execute("INSERT OR REPLACE INTO search_cache (query_normalized,kind,result_limit,result_offset,result_repo_ids,searched_at) VALUES (?,?,?,?,?,?)",
+                   ("demand-fixture", None, 25, 0, '["acme/First","acme/Second"]', now))
+
+
 def rpc(base, method, params, request_id=1):
     check(base.startswith("http://127.0.0.1:"), "qualification only contacts loopback")
     request = urllib.request.Request(base + "/rpc", data=json.dumps({
@@ -108,6 +120,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rpc", type=Path, required=True)
     parser.add_argument("--only-rpc", action="store_true")
+    parser.add_argument("--demand-details", action="store_true",
+                        help="Also qualify deferred detail failure/retry in mounted React with real RPC")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     output = args.output or Path(tempfile.mkdtemp(prefix="pumas-hf-ui-"))
@@ -170,6 +184,21 @@ def main():
         check(len(results["filtered"]["models"]) == 1, "local new-query filter failed")
         check(len(proxy.calls) == cached_calls_before, "cached browse/filter attempted upstream: " + str(proxy.calls))
         results["cached_upstream_call_count"] = len(proxy.calls) - cached_calls_before
+        if args.demand_details:
+            check(not args.only_rpc, "demand detail qualification requires the mounted UI")
+            seed_demand_search(root)
+            demand_before = len(proxy.calls)
+            results["demand_search"] = rpc(base, "search_hf_models", {"query": "demand-fixture", "limit": 25, "hydrate_limit": 0})
+            check(results["demand_search"]["success"], "demand discovery failed")
+            check(len(results["demand_search"]["models"]) == 2, "demand fixture selection changed")
+            check(len(proxy.calls) == demand_before, "discovery eagerly attempted detail requests")
+            demand_environment = dict(os.environ, PUMAS_HF_DEMAND_RPC_URL=base)
+            with (output / "demand-workflow.log").open("w") as log:
+                run = subprocess.run(["node", "node_modules/vitest/vitest.mjs", "run", "src/components/HfDemandDetailsWorkflow.test.tsx"], cwd=ROOT / "frontend", env=demand_environment, stdout=log, stderr=subprocess.STDOUT, timeout=60)
+            check(run.returncode == 0, "mounted demand qualification failed; see demand-workflow.log")
+            results["demand_upstream_refusals"] = proxy.calls[demand_before:]
+            check(len(results["demand_upstream_refusals"]) == 2,
+                  "selected failure and explicit retry must each attempt one owned upstream request")
         results["ordinary"] = rpc(base, "search_hf_models", {"query": "online-fixture", "limit": 25, "hydrate_limit": 6})
         check(results["ordinary"]["success"] and results["ordinary"]["models"][0]["name"] == "OnlineFixture", "preserved ordinary exact-search fixture failed")
         results["offline_miss"] = rpc(base, "search_hf_models", {"query": "owned-upstream-unavailable", "limit": 25, "hydrate_limit": 0})

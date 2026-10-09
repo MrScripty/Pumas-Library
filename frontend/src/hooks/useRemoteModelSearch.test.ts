@@ -107,7 +107,7 @@ describe('useRemoteModelSearch', () => {
       await Promise.resolve();
     });
 
-    expect(searchHfModelsMock).toHaveBeenCalledWith('mistral', null, 25, 6);
+    expect(searchHfModelsMock).toHaveBeenCalledWith('mistral', null, 25, 0);
     expect(result.current.results).toHaveLength(3);
     expect(result.current.kinds).toEqual(['all', 'text-generation', 'vision']);
     expect(result.current.error).toBeNull();

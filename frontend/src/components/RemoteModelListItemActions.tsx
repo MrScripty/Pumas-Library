@@ -15,6 +15,7 @@ interface RemoteModelActionProps {
   hasExactDetails: boolean;
   hasFileGroups: boolean;
   isHydratingDetails: boolean;
+  hydrationError?: string;
   isMenuOpen: boolean;
   model: RemoteModelInfo;
   downloadKey: string;
@@ -122,6 +123,7 @@ export function RemoteModelListItemActions({
   hasExactDetails,
   hasFileGroups,
   isHydratingDetails,
+  hydrationError,
   isMenuOpen,
   model,
   downloadKey,
@@ -145,7 +147,7 @@ export function RemoteModelListItemActions({
     !flags.isDownloading &&
     !flags.isPaused &&
     !flags.isErrored &&
-    ((!hasExactDetails && Boolean(onHydrateModelDetails)) || downloadOptions.length > 0);
+    ((!hasExactDetails && Boolean(onHydrateModelDetails)) || hasExactDetails || downloadOptions.length > 0);
   const hasMenuTrigger = hasQueueAnotherTrigger || hasPrimaryMenuTrigger;
 
   const handleMenuOpenChange = (nextIsOpen: boolean) => {
@@ -196,7 +198,7 @@ export function RemoteModelListItemActions({
           hasPrimaryMenuTrigger && menuTriggerProps
             ? (event) => {
                 menuTriggerProps.onClick(event);
-                if (!isMenuOpen && !hasExactDetails && onHydrateModelDetails) {
+                if (!isMenuOpen && !hasExactDetails && !hydrationError && onHydrateModelDetails) {
                   void onHydrateModelDetails(model);
                 }
               }
@@ -244,6 +246,8 @@ export function RemoteModelListItemActions({
         hasExactDetails={hasExactDetails}
         hasFileGroups={hasFileGroups}
         isHydratingDetails={isHydratingDetails}
+        hydrationError={hydrationError}
+        onLoadDetails={onHydrateModelDetails ? () => { void onHydrateModelDetails(model); } : undefined}
         model={model}
         selectedGroups={selectedGroups}
         selectedTotalBytes={selectedTotalBytes}

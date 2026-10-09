@@ -9,6 +9,8 @@ interface RemoteModelDownloadMenuProps {
   hasExactDetails: boolean;
   hasFileGroups: boolean;
   isHydratingDetails: boolean;
+  hydrationError?: string;
+  onLoadDetails?: () => void;
   model: RemoteModelInfo;
   selectedGroups: Set<string>;
   selectedTotalBytes: number;
@@ -28,6 +30,8 @@ export function RemoteModelDownloadMenu({
   hasExactDetails,
   hasFileGroups,
   isHydratingDetails,
+  hydrationError,
+  onLoadDetails,
   model,
   selectedGroups,
   selectedTotalBytes,
@@ -44,6 +48,16 @@ export function RemoteModelDownloadMenu({
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           Loading exact download details...
         </div>
+      ) : hydrationError || (!hasExactDetails && onLoadDetails) ? (
+        <div className="space-y-2 px-3 py-3 text-xs text-[hsl(var(--text-secondary))]">
+          {hydrationError ? <p role="alert">{hydrationError}</p> : <p>Load download details to choose files.</p>}
+          {onLoadDetails && <button type="button" onClick={onLoadDetails}
+            className="text-[hsl(var(--launcher-accent-primary))] hover:underline">
+            {hydrationError ? 'Retry download details' : 'Load download details'}
+          </button>}
+        </div>
+      ) : downloadOptions.length === 0 ? (
+        <p className="px-3 py-3 text-xs text-[hsl(var(--text-muted))]">No downloadable files were found.</p>
       ) : hasFileGroups ? (
         <>
           {downloadOptions.map((option) => {

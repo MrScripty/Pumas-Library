@@ -5,15 +5,15 @@
  * Extracted from ModelManager.tsx
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import type { RemoteModelInfo, RemoteSearchSource } from '../types/apps';
 import { effectiveSearchSource, presentSearchResults } from '../utils/hfCachedDiscovery';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
+import { hasExactDownloadDetails } from '../utils/hfDownloadDetails';
 
 const logger = getLogger('useRemoteModelSearch');
-const DEFAULT_HYDRATE_LIMIT = 6;
 const EMPTY_RESULTS: RemoteModelInfo[] = [];
 
 interface UseRemoteModelSearchOptions {
@@ -21,19 +21,6 @@ interface UseRemoteModelSearchOptions {
   searchQuery: string;
   debounceMs?: number;
   source?: RemoteSearchSource;
-}
-
-function hasExactDownloadDetails(model: RemoteModelInfo): boolean {
-  if (typeof model.totalSizeBytes === 'number' && model.totalSizeBytes > 0) {
-    return true;
-  }
-
-  return (
-    model.downloadOptions?.some(
-      (option) =>
-        (typeof option.sizeBytes === 'number' && option.sizeBytes > 0) || Boolean(option.fileGroup)
-    ) ?? false
-  );
 }
 
 export function useRemoteModelSearch({
@@ -47,8 +34,12 @@ export function useRemoteModelSearch({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hydratingRepoIds, setHydratingRepoIds] = useState<Set<string>>(new Set());
+  const [hydratedRepoIds, setHydratedRepoIds] = useState<Set<string>>(new Set());
+  const [hydrationErrors, setHydrationErrors] = useState<Record<string, string>>({});
   const generationRef = useRef(0);
   const resultsRef = useRef<RemoteModelInfo[]>([]);
+  const hydratedRepoIdsRef = useRef<Set<string>>(new Set());
+  const hydrationContextRef = useRef<string | null>(null);
   const inFlightHydrationsRef = useRef<Map<string, Promise<void>>>(new Map());
   const selectedSource = effectiveSearchSource(searchQuery, source);
   const requestContext = JSON.stringify([enabled, selectedSource, searchQuery.trim()]);
@@ -59,9 +50,14 @@ export function useRemoteModelSearch({
     inFlightHydrationsRef.current.clear();
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     resultsRef.current = visibleResults;
   }, [visibleResults]);
+
+  useLayoutEffect(() => {
+    hydrationContextRef.current = requestContext;
+    return () => { hydrationContextRef.current = null; };
+  }, [requestContext]);
 
   // Get unique kinds from results
   const kinds = useMemo(() => {
@@ -78,6 +74,9 @@ export function useRemoteModelSearch({
     generationRef.current += 1;
     inFlightHydrationsRef.current.clear();
     setHydratingRepoIds(new Set());
+    setHydratedRepoIds(new Set());
+    hydratedRepoIdsRef.current.clear();
+    setHydrationErrors({});
     setResults([]);
     setError(null);
     setIsLoading(false);
@@ -111,8 +110,9 @@ export function useRemoteModelSearch({
       try {
         const query = selectedSource === 'cached' && !trimmedQuery.startsWith('cache:')
           ? `cache:${trimmedQuery}` : trimmedQuery;
-        const result = await api.search_hf_models(query, null, 25,
-          selectedSource === 'cached' ? 0 : DEFAULT_HYDRATE_LIMIT);
+        // Discovery may reuse local details, but must not fetch a tree/config
+        // for each result. A selected menu requests its details separately.
+        const result = await api.search_hf_models(query, null, 25, 0);
         if (!isActive || generation !== generationRef.current) {
           return;
         }
@@ -152,11 +152,13 @@ export function useRemoteModelSearch({
   }, [enabled, searchQuery, debounceMs, selectedSource, requestContext]);
 
   const hydrateModelDetails = useCallback(async (model: RemoteModelInfo): Promise<void> => {
-    if (selectedSource === 'cached') return;
-    if (!isAPIAvailable()) {
+    if (!enabled || selectedSource === 'cached' || hydrationContextRef.current !== requestContext) return;
+    const currentModel = resultsRef.current.find(entry => entry.repoId === model.repoId);
+    if (!currentModel || hasExactDownloadDetails(currentModel) || hydratedRepoIdsRef.current.has(model.repoId)) {
       return;
     }
-    if (hasExactDownloadDetails(model)) {
+    if (!isAPIAvailable()) {
+      setHydrationErrors(prev => ({ ...prev, [model.repoId]: 'Hugging Face download details are unavailable.' }));
       return;
     }
 
@@ -167,7 +169,16 @@ export function useRemoteModelSearch({
     }
 
     const generation = generationRef.current;
-    const request = (async () => {
+    const isCurrent = () => generation === generationRef.current && hydrationContextRef.current === requestContext;
+    // Register before invocation: even a synchronous transport throw must
+    // settle the registered request, so a later explicit retry remains usable.
+    const request = Promise.resolve().then(async () => {
+      if (!isCurrent()) return;
+      setHydrationErrors(prev => {
+        const next = { ...prev };
+        delete next[repoId];
+        return next;
+      });
       setHydratingRepoIds((prev) => {
         const next = new Set(prev);
         next.add(repoId);
@@ -175,11 +186,11 @@ export function useRemoteModelSearch({
       });
 
       try {
-        const response = await api.get_hf_download_details(repoId, model.quants);
+        const response = await api.get_hf_download_details(repoId, currentModel.quants);
         if (!response.success) {
           throw new APIError(response.error, 'get_hf_download_details');
         }
-        if (generation !== generationRef.current) {
+        if (!isCurrent()) {
           return;
         }
         const details = response.details;
@@ -192,6 +203,8 @@ export function useRemoteModelSearch({
             ? { ...option.fileGroup, filenames: [...option.fileGroup.filenames] }
             : option.fileGroup,
         }));
+        hydratedRepoIdsRef.current.add(repoId);
+        setHydratedRepoIds(new Set(hydratedRepoIdsRef.current));
 
         setResults((prev) =>
           prev.map((entry) =>
@@ -206,7 +219,7 @@ export function useRemoteModelSearch({
         );
       } catch (hydrateError) {
         const latest = resultsRef.current.find((entry) => entry.repoId === repoId);
-        if (generation !== generationRef.current || !latest) {
+        if (!isCurrent() || !latest) {
           return;
         }
 
@@ -214,8 +227,10 @@ export function useRemoteModelSearch({
           repoId,
           error: hydrateError instanceof Error ? hydrateError.message : hydrateError,
         });
+        setHydrationErrors(prev => ({ ...prev, [repoId]: hydrateError instanceof Error
+          ? hydrateError.message : 'Download details are unavailable.' }));
       } finally {
-        if (generation === generationRef.current) {
+        if (isCurrent()) {
           inFlightHydrationsRef.current.delete(repoId);
           setHydratingRepoIds((prev) => {
             const next = new Set(prev);
@@ -224,11 +239,11 @@ export function useRemoteModelSearch({
           });
         }
       }
-    })();
+    });
 
     inFlightHydrationsRef.current.set(repoId, request);
     return request;
-  }, [selectedSource]);
+  }, [enabled, selectedSource, requestContext]);
 
   return {
     results: visibleResults,
@@ -237,6 +252,8 @@ export function useRemoteModelSearch({
     error,
     isLoading,
     hydratingRepoIds,
+    hydratedRepoIds,
+    hydrationErrors,
     hydrateModelDetails,
   };
 }

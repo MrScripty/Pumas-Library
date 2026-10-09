@@ -976,8 +976,8 @@ fn source_task_preserves_classification_semantics_instead_of_only_modalities() {
     );
 }
 
-#[tokio::test]
-async fn native_fake_embedding_session_is_available_and_projects_finite_vectors() {
+// Synthetic session only: no ONNX runtime or model inference is performed.
+async fn controlled_embedding_state() -> (TempDir, Arc<AppState>) {
     let root = TempDir::new().unwrap();
     let state = Arc::new(crate::handlers::test_support::build_test_app_state(root.path()).await);
     let model_root = root.path().join("synthetic-onnx");
@@ -1017,6 +1017,22 @@ async fn native_fake_embedding_session_is_available_and_projects_finite_vectors(
         })
         .await
         .unwrap();
+    (root, state)
+}
+
+fn controlled_embedding_request() -> Value {
+    let mut value = request_value();
+    value["model"] = json!("nomic");
+    value["capability"] = json!("text_embedding");
+    value["input"] = json!({"kind":"text_batch","texts":["one","two"]});
+    value["output"] = json!("embeddings_float32");
+    value["options"] = json!({"kind":"embeddings","dimensions":4});
+    value
+}
+
+#[tokio::test]
+async fn native_fake_embedding_session_is_available_and_projects_finite_vectors() {
+    let (_root, state) = controlled_embedding_state().await;
     let caps = json_body(
         handle_capabilities(
             State(state.clone()),
@@ -1036,19 +1052,105 @@ async fn native_fake_embedding_session_is_available_and_projects_finite_vectors(
         caps["capabilities"][0]["availability"]["state"],
         "unavailable"
     );
-    let mut value = request_value();
-    value["model"] = json!("nomic");
-    value["capability"] = json!("text_embedding");
-    value["input"] = json!({"kind":"text_batch","texts":["one","two"]});
-    value["output"] = json!("embeddings_float32");
-    value["options"] = json!({"kind":"embeddings","dimensions":4});
-    let response = operation(state, value).await;
+    let response = operation(state, controlled_embedding_request()).await;
     assert_eq!(response.status(), StatusCode::OK);
     let result = json_body(response).await;
     assert_eq!(result["result"]["kind"], "embeddings");
     assert_eq!(result["result"]["vectors"].as_array().unwrap().len(), 2);
     assert_eq!(result["result"]["vectors"][0].as_array().unwrap().len(), 4);
     assert!(result.get("usage").is_none());
+}
+
+#[tokio::test]
+async fn typed_onnx_embedding_cancelled_in_operation_queue_is_not_admitted() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let (_root, state) = controlled_embedding_state().await;
+        let held = Arc::new(std::sync::Mutex::new(None));
+        let (entered, waiting) = oneshot::channel();
+        let entered = Arc::new(std::sync::Mutex::new(Some(entered)));
+        let gate: Arc<dyn Fn() -> futures::future::BoxFuture<'static, ()> + Send + Sync> = {
+            let state = state.clone();
+            let held = held.clone();
+            Arc::new(move || {
+                let state = state.clone();
+                let held = held.clone();
+                let entered = entered.clone();
+                Box::pin(async move {
+                    let permit = state
+                        .onnx_session_manager
+                        .acquire_all_operation_permits_for_test()
+                        .await;
+                    *held.lock().unwrap() = Some(permit);
+                    entered.lock().unwrap().take().unwrap().send(()).unwrap();
+                })
+            })
+        };
+        let request_state = state.clone();
+        let request_task = tokio::spawn(
+            super::super::openai_gateway_onnx::TEST_BEFORE_ONNX_EMBED.scope(gate, async move {
+                operation(request_state, controlled_embedding_request()).await
+            }),
+        );
+        waiting.await.unwrap();
+        // The hook completed while owning every actual manager permit. The
+        // embedding is now pending in that queue, before backend execution.
+        assert!(!request_task.is_finished());
+        state.shutdown_request.request();
+        let response = request_task.await.unwrap();
+        let status = response.status();
+        let body = json_body(response).await;
+        drop(held.lock().unwrap().take());
+        assert_eq!(state.onnx_session_manager.list().await.unwrap().len(), 1);
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            body["error"],
+            json!({"code":"transport_lost","outcome":"not_admitted"})
+        );
+        assert_eq!(body["request_id"], "request-17");
+    })
+    .await
+    .expect("controlled ONNX queue cancellation fixture hung");
+}
+
+#[tokio::test]
+async fn typed_onnx_embedding_unloaded_after_availability_is_not_admitted() {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let (_root, state) = controlled_embedding_state().await;
+        let gate: Arc<dyn Fn() -> futures::future::BoxFuture<'static, ()> + Send + Sync> = {
+            let state = state.clone();
+            Arc::new(move || {
+                let state = state.clone();
+                Box::pin(async move {
+                    let model = pumas_library::OnnxModelId::parse("embeddings/nomic").unwrap();
+                    assert!(state
+                        .onnx_session_manager
+                        .unload(&model)
+                        .await
+                        .unwrap()
+                        .is_some());
+                })
+            })
+        };
+        // The actual unload happens after typed availability has observed the
+        // loaded session, immediately before the real manager/backend lookup.
+        let response = super::super::openai_gateway_onnx::TEST_BEFORE_ONNX_EMBED
+            .scope(
+                gate,
+                operation(state.clone(), controlled_embedding_request()),
+            )
+            .await;
+        let status = response.status();
+        let body = json_body(response).await;
+        assert!(state.onnx_session_manager.list().await.unwrap().is_empty());
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(
+            body["error"],
+            json!({"code":"capability_unavailable","outcome":"not_admitted"})
+        );
+        assert_eq!(body["request_id"], "request-17");
+    })
+    .await
+    .expect("controlled ONNX unload race fixture hung");
 }
 #[tokio::test]
 async fn body_extractor_limit_returns_the_fixed_typed_not_admitted_error() {

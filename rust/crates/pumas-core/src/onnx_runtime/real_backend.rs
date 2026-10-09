@@ -1,4 +1,10 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+};
 
 use async_trait::async_trait;
 
@@ -53,9 +59,17 @@ impl OnnxEmbeddingBackend for OnnxEmbeddingBackendKind {
         &self,
         request: OnnxEmbeddingRequest,
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
+        self.embed_with_admission(request, None).await
+    }
+
+    async fn embed_with_admission(
+        &self,
+        request: OnnxEmbeddingRequest,
+        admission: Option<&AtomicBool>,
+    ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
         match self {
-            Self::Fake(backend) => backend.embed(request).await,
-            Self::Real(backend) => backend.embed(request).await,
+            Self::Fake(backend) => backend.embed_with_admission(request, admission).await,
+            Self::Real(backend) => backend.embed_with_admission(request, admission).await,
         }
     }
 }
@@ -112,6 +126,14 @@ impl OnnxEmbeddingBackend for RealOnnxEmbeddingBackend {
         &self,
         request: OnnxEmbeddingRequest,
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
+        self.embed_with_admission(request, None).await
+    }
+
+    async fn embed_with_admission(
+        &self,
+        request: OnnxEmbeddingRequest,
+        admission: Option<&AtomicBool>,
+    ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
         let mut sessions = self
             .sessions
             .lock()
@@ -119,6 +141,9 @@ impl OnnxEmbeddingBackend for RealOnnxEmbeddingBackend {
         let session = sessions
             .get_mut(&request.model_id)
             .ok_or_else(|| OnnxRuntimeError::not_loaded(&request.model_id))?;
+        if let Some(marker) = admission {
+            marker.store(true, Ordering::Release);
+        }
         session.embed(request)
     }
 }

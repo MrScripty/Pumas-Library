@@ -1612,7 +1612,11 @@ async fn persisted_s3_inspection_cold_read_only_and_live_coexistence() {
     assert_eq!(source.finish().len(), 2);
     // Retained cancellation blocks new live admission; reopening does not resume it.
     server.shutdown().await.unwrap();
+    // This observer keeps the old physical store alive even after server shutdown.
+    drop(library);
+    drop(server);
     let cold = reopen(root.path()).await;
+    let library = cold.model_library().clone();
     let server = start_server(
         cold,
         LoopbackHost::parse("127.0.0.1").unwrap(),

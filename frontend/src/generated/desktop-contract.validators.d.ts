@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 53c21887b94343127190a9d86769d7ca481fc629b5a24bd30598f21608cc210b. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 c49367dc3c766530b8eb44d1e9ed1150167dc6fdbadf3e40bdf3f80c8d1d8f3a. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -37,6 +37,8 @@ export declare function validateInstalledVersionsOutcome(value: unknown): boolea
 export declare function validateLibraryModelMetadataOutcome(value: unknown): boolean;
 export declare function validateLinkHealthOutcome(value: unknown): boolean;
 export declare function validateModelIndexRefreshOutcome(value: unknown): boolean;
+export declare function validateModelLookupOutcome(value: unknown): boolean;
+export declare function validateModelLookupParams(value: unknown): boolean;
 export declare function validateModelsOutcome(value: unknown): boolean;
 export declare function validatePartialDownloadOutcome(value: unknown): boolean;
 export declare function validatePreviewTorchRuntimeParams(value: unknown): boolean;

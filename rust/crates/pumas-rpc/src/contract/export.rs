@@ -765,6 +765,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         S3ReadMode,
         S3BundleImportParams,
         S3PinnedFileParams,
+        S3ConditionalFileParams,
+        S3SelectedFileParams,
         S3AuthenticatedBundleImportParams,
         S3BundleImportObservation,
         S3AuthenticatedImportParams,
@@ -899,6 +901,24 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
     Ok(schema)
 }
 
+fn sdk_size_pattern() -> String {
+    let max = "9223372036854775807";
+    let mut alternatives = vec!["0".to_owned(), "[1-9][0-9]{0,17}".to_owned()];
+    for (i, digit) in max.bytes().enumerate() {
+        let minimum = if i == 0 { b'1' } else { b'0' };
+        if digit > minimum {
+            let mut term = format!("{}[{}-{}]", &max[..i], minimum as char, (digit - 1) as char);
+            let remaining = max.len() - i - 1;
+            if remaining > 0 {
+                term.push_str(&format!("[0-9]{{{remaining}}}"));
+            }
+            alternatives.push(term);
+        }
+    }
+    alternatives.push(max.into());
+    format!(r"^(?:{})(?![\s\S])", alternatives.join("|"))
+}
+
 // These named wire refinements project existing constructor invariants, not
 // authorization. The generator owns their executable TypeScript projection.
 fn refine_named(name: &str, schema: &mut Value) {
@@ -931,6 +951,47 @@ fn refine_named(name: &str, schema: &mut Value) {
         let required = conditional["required"].as_array_mut().unwrap();
         required.retain(|field| field != "version_id");
         required.push("read_mode".into());
+        *schema = serde_json::json!({"oneOf":[versioned,conditional]});
+        if let Some(definitions) = definitions {
+            schema["definitions"] = definitions;
+        }
+        return;
+    }
+    if name == "S3BundleImportParams" {
+        let definitions = schema.get("definitions").cloned();
+        let mut versioned = schema.clone();
+        let object = versioned.as_object_mut().expect("S3 bundle schema");
+        for key in ["$schema", "title", "definitions"] {
+            object.remove(key);
+        }
+        let existing = serde_json::to_value(schemars::schema_for!(S3ImportParams))
+            .expect("schema serialization");
+        for field in [
+            "operation_id",
+            "endpoint",
+            "region",
+            "bucket",
+            "family",
+            "official_name",
+        ] {
+            object["properties"][field] = existing["properties"][field].clone();
+        }
+        object["properties"]["primary_logical_path"] = existing["properties"]["filename"].clone();
+        object["properties"]["primary_logical_path"]["pumasPortablePath"] = true.into();
+        object["properties"]["primary_logical_path"]["pumasUtf8Max"] = 1024.into();
+        object["properties"]["read_mode"] =
+            serde_json::json!({"type":"string","const":"version_id"});
+        object["properties"]["files"]["items"] =
+            serde_json::json!({"$ref":"#/definitions/S3PinnedFileParams"});
+        let mut conditional = versioned.clone();
+        conditional["properties"]["read_mode"] =
+            serde_json::json!({"type":"string","const":"conditional"});
+        conditional["properties"]["files"]["items"] =
+            serde_json::json!({"$ref":"#/definitions/S3ConditionalFileParams"});
+        conditional["required"]
+            .as_array_mut()
+            .unwrap()
+            .push("read_mode".into());
         *schema = serde_json::json!({"oneOf":[versioned,conditional]});
         if let Some(definitions) = definitions {
             schema["definitions"] = definitions;
@@ -1360,24 +1421,6 @@ fn refine_named(name: &str, schema: &mut Value) {
             "S3DiscoveryParams" => {
                 properties["read_mode"] = serde_json::json!({"type":"string","const":"version_id"});
             }
-            "S3BundleImportParams" => {
-                properties["read_mode"] = serde_json::json!({"type":"string","const":"version_id"});
-                let existing = schemars::schema_for!(S3ImportParams);
-                let existing = serde_json::to_value(existing).expect("schema serialization");
-                for field in [
-                    "operation_id",
-                    "endpoint",
-                    "region",
-                    "bucket",
-                    "family",
-                    "official_name",
-                ] {
-                    properties[field] = existing["properties"][field].clone();
-                }
-                properties["primary_logical_path"] = existing["properties"]["filename"].clone();
-                properties["primary_logical_path"]["pumasPortablePath"] = true.into();
-                properties["primary_logical_path"]["pumasUtf8Max"] = 1024.into();
-            }
             "S3PinnedFileParams" => {
                 let existing = serde_json::to_value(schemars::schema_for!(S3ImportParams))
                     .expect("schema serialization");
@@ -1391,6 +1434,21 @@ fn refine_named(name: &str, schema: &mut Value) {
                 properties["logical_path"]["minLength"] = 1.into();
                 properties["logical_path"]["pumasUtf8Max"] = 1024.into();
                 properties["logical_path"]["pumasPortablePath"] = true.into();
+            }
+            "S3ConditionalFileParams" => {
+                let existing = serde_json::to_value(schemars::schema_for!(S3ImportParams))
+                    .expect("schema serialization");
+                for field in ["key", "sha256"] {
+                    properties[field] = existing["properties"][field].clone();
+                }
+                properties["logical_path"]["minLength"] = 1.into();
+                properties["logical_path"]["pumasUtf8Max"] = 1024.into();
+                properties["logical_path"]["pumasPortablePath"] = true.into();
+                properties["expected_etag"]["pattern"] =
+                    r#"^"[^\u0000-\u0020"\u007F]*"(?![\s\S])"#.into();
+                properties["expected_etag"]["minLength"] = 2.into();
+                properties["expected_etag"]["pumasUtf8Max"] = 16384.into();
+                properties["expected_size"]["pattern"] = sdk_size_pattern().into();
             }
             "CatalogSearchOutcome" => {
                 properties["query"]["pumasUtf8Max"] = MAX_IDENTIFIER_BYTES.into();

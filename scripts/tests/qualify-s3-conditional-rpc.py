@@ -145,11 +145,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 class Process:
-    def __init__(self, binary, root, proxy):
+    def __init__(self, binary, root, proxy, *, existing=False):
         self.root, self.reader, self.child, self.stderr = root, None, None, None
-        root.mkdir()
+        root.mkdir(exist_ok=existing)
         config = root / "config"
-        config.mkdir()
+        config.mkdir(exist_ok=existing)
         env = dict(os.environ, XDG_CONFIG_HOME=str(config), XDG_CACHE_HOME=str(root / "cache"),
                    HF_HOME=str(root / "hf"), HF_TOKEN_PATH=str(root / "hf/token"), ORT_SKIP_DOWNLOAD="1", SSL_CERT_FILE=str(
                        ROOT / "rust/crates/pumas-core/tests/fixtures/http-tls/localhost.pem"))
@@ -312,9 +312,10 @@ def qualify(binary):
                             {"key":"b", "version_id":"v2", "logical_path":"config.json", "sha256":"0"*64}])
                         discovery = {k:v for k,v in params.items() if k not in ["key", "filename", "sha256", "family", "official_name"]}
                         discovery.update(prefix="", timeout_ms=1000)
-                        for method, row in [("start_s3_model_bundle_import", bundle), ("start_s3_prefix_discovery", discovery)]:
-                            error = process.rpc(method, row)["error"]
-                            check(error["code"] == -32000 and "unsupported" in error["message"], "unsupported mode not explicit")
+                        error = process.rpc("start_s3_model_bundle_import", bundle)["error"]
+                        check(error["code"] == -32602, "conditional bundle accepted VersionId members")
+                        error = process.rpc("start_s3_prefix_discovery", discovery)["error"]
+                        check(error["code"] == -32000 and "unsupported" in error["message"], "unsupported prefix mode not explicit")
                         check(not source.calls and not state(root)["acquisitions"], "preflight performed I/O/admission")
                         check(not list(root.rglob(".s3-import-*")), "preflight reserved workspace")
                     if case == "versioned":

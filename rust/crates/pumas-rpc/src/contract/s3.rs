@@ -103,7 +103,7 @@ pub(crate) fn require_versioned_set(mode: S3ReadMode) -> Result<(), PublicError>
         return Err(PublicError {
             code: -32000,
             class: PublicErrorClass::Unavailable,
-            message: "Conditional S3 mode is unsupported for bundles and prefix discovery.",
+            message: "Conditional S3 mode is unsupported for prefix discovery.",
         });
     }
     Ok(())
@@ -202,7 +202,7 @@ pub(crate) struct S3BundleImportParams {
     pub bucket: String,
     pub addressing: S3AddressingWire,
     #[cfg_attr(feature = "export-contract", schemars(length(min = 2, max = 32)))]
-    pub files: Vec<S3PinnedFileParams>,
+    pub files: Vec<S3SelectedFileParams>,
     pub primary_logical_path: String,
     pub family: String,
     pub official_name: String,
@@ -215,6 +215,70 @@ pub(crate) struct S3PinnedFileParams {
     pub version_id: String,
     pub logical_path: String,
     pub sha256: String,
+}
+/// Closed authored facts; no VersionId can be supplied for a mutable object.
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct S3ConditionalFileParams {
+    pub key: String,
+    pub logical_path: String,
+    pub sha256: String,
+    pub expected_etag: String,
+    /// Canonical decimal preserves the SDK's full signed-64 size range in JS.
+    pub expected_size: String,
+}
+#[derive(Clone, Deserialize)]
+#[serde(untagged)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum S3SelectedFileParams {
+    Versioned(S3PinnedFileParams),
+    Conditional(S3ConditionalFileParams),
+}
+impl S3SelectedFileParams {
+    fn facts(&self) -> (&str, &str, &str, &str) {
+        match self {
+            Self::Versioned(file) => (
+                &file.key,
+                &file.logical_path,
+                &file.sha256,
+                &file.version_id,
+            ),
+            Self::Conditional(file) => (&file.key, &file.logical_path, &file.sha256, ""),
+        }
+    }
+}
+impl S3ConditionalFileParams {
+    fn size(&self) -> Result<u64, PublicError> {
+        let value = &self.expected_size;
+        if value.is_empty()
+            || value.len() > 19
+            || !value.bytes().all(|b| b.is_ascii_digit())
+            || (value.len() > 1 && value.starts_with('0'))
+        {
+            return Err(PublicError::invalid_params());
+        }
+        value
+            .parse::<u64>()
+            .ok()
+            .filter(|size| *size <= i64::MAX as u64)
+            .ok_or_else(PublicError::invalid_params)
+    }
+    fn validate_etag(&self) -> Result<(), PublicError> {
+        let tag = &self.expected_etag;
+        // Exact native HTTP opaque-tag grammar, including empty/Unicode tags.
+        if tag.len() >= 2
+            && tag.starts_with('"')
+            && tag.ends_with('"')
+            && tag[1..tag.len() - 1]
+                .bytes()
+                .all(|byte| byte == 0x21 || (0x23..=0x7e).contains(&byte) || byte >= 0x80)
+        {
+            Ok(())
+        } else {
+            Err(PublicError::invalid_params())
+        }
+    }
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -231,92 +295,125 @@ impl S3AuthenticatedBundleImportParams {
 }
 impl S3BundleImportParams {
     pub(crate) fn primary(&self) -> Result<S3ImportParams, PublicError> {
+        if !(2..=32).contains(&self.files.len()) {
+            return Err(PublicError::invalid_params());
+        }
         let primary = self
             .files
             .iter()
-            .find(|file| file.logical_path == self.primary_logical_path)
+            .find(|file| file.facts().1 == self.primary_logical_path)
             .ok_or_else(PublicError::invalid_params)?;
+        let (key, _, sha256, version_id) = primary.facts();
         Ok(S3ImportParams {
             operation_id: self.operation_id.clone(),
             endpoint: self.endpoint.clone(),
             region: self.region.clone(),
             bucket: self.bucket.clone(),
             addressing: self.addressing,
-            key: primary.key.clone(),
-            version_id: primary.version_id.clone(),
-            read_mode: S3ReadMode::VersionId,
+            key: key.into(),
+            version_id: version_id.into(),
+            read_mode: self.read_mode,
             filename: self.primary_logical_path.clone(),
-            sha256: primary.sha256.clone(),
+            sha256: sha256.into(),
             family: self.family.clone(),
             official_name: self.official_name.clone(),
         })
     }
     pub(crate) fn validate(&self) -> Result<(), PublicError> {
-        require_versioned_set(self.read_mode)?;
         if !(2..=32).contains(&self.files.len()) {
             return Err(PublicError::invalid_params());
         }
         let primary = self.primary()?;
         primary.validate()?;
-        for file in &self.files {
-            // Validate source pins without assigning model semantics to a member.
-            // The complete selected set is qualified by the shared importer.
-            let member = S3ImportParams {
-                key: file.key.clone(),
-                version_id: file.version_id.clone(),
-                sha256: file.sha256.clone(),
-                ..primary.clone()
-            };
-            member.validate()?;
-            let path = &file.logical_path;
+        let mut sorted: Vec<_> = self.files.iter().collect();
+        sorted.sort_by(|a, b| a.facts().1.cmp(b.facts().1));
+        let mut files = Vec::with_capacity(sorted.len());
+        let mut tags = std::collections::BTreeMap::new();
+        let mut pins = Vec::with_capacity(sorted.len());
+        for file in sorted {
+            let (key, path, sha256, version_id) = file.facts();
             if path.is_empty() || path.len() > 1024 || path.chars().any(char::is_control) {
                 return Err(PublicError::invalid_params());
             }
+            let member = S3ImportParams {
+                key: key.into(),
+                version_id: version_id.into(),
+                sha256: sha256.into(),
+                ..primary.clone()
+            };
+            member.validate()?;
+            let (source_key, size) = match (self.read_mode, file) {
+                (S3ReadMode::VersionId, S3SelectedFileParams::Versioned(_)) => (
+                    serde_json::to_string(&(key, version_id))
+                        .map_err(|_| PublicError::invalid_params())?,
+                    None,
+                ),
+                (S3ReadMode::Conditional, S3SelectedFileParams::Conditional(file)) => {
+                    file.validate_etag()?;
+                    let size = file.size()?;
+                    if tags
+                        .insert(key, file.expected_etag.as_str())
+                        .is_some_and(|old| old != file.expected_etag)
+                    {
+                        return Err(PublicError::invalid_params());
+                    }
+                    pins.push((key, file.expected_etag.as_str(), size));
+                    (key.into(), Some(size))
+                }
+                _ => return Err(PublicError::invalid_params()),
+            };
+            files.push(
+                pumas_library::acquisition::ArtifactFile::new(
+                    path,
+                    source_key,
+                    size,
+                    Some(
+                        pumas_library::acquisition::Sha256Evidence::new("caller.sha256", sha256)
+                            .map_err(|_| PublicError::invalid_params())?,
+                    ),
+                    pumas_library::acquisition::FileVerificationRequirement::Sha256,
+                )
+                .map_err(|_| PublicError::invalid_params())?,
+            );
         }
-        // Shared manifest validation is the final pure namespace/evidence
-        // authority even when S3 support is compiled out.
-        let files = self.native_entries()?;
+        let (authority, revision, strength) = match self.read_mode {
+            S3ReadMode::VersionId => (
+                "s3.explicit_versions",
+                "desktop.explicit".into(),
+                pumas_library::acquisition::RevisionStrength::Immutable,
+            ),
+            S3ReadMode::Conditional => (
+                "s3.explicit_conditional_objects",
+                serde_json::to_string(&pins).map_err(|_| PublicError::invalid_params())?,
+                pumas_library::acquisition::RevisionStrength::Weak,
+            ),
+        };
         let source = pumas_library::acquisition::ArtifactSourceIdentity::new(
             "s3",
             "desktop.preflight",
             pumas_library::acquisition::ArtifactRevisionEvidence::new(
-                "s3.explicit_versions",
-                "desktop.explicit",
-                pumas_library::acquisition::RevisionStrength::Immutable,
+                authority, revision, strength,
             )
             .map_err(|_| PublicError::invalid_params())?,
         )
         .map_err(|_| PublicError::invalid_params())?;
-        let files = files
-            .into_iter()
-            .map(|entry| {
-                pumas_library::acquisition::ArtifactFile::new(
-                    entry.logical_path,
-                    serde_json::to_string(&(entry.source_key, entry.version))
-                        .map_err(|_| PublicError::invalid_params())?,
-                    None,
-                    Some(entry.expected_sha256),
-                    pumas_library::acquisition::FileVerificationRequirement::Sha256,
-                )
-                .map_err(|_| PublicError::invalid_params())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
         pumas_library::acquisition::ArtifactManifest::new(source, files)
             .map_err(|_| PublicError::invalid_params())?;
         pumas_library::model_library::ModelImporter::validate_acquired_payload_paths(
             &self
                 .files
                 .iter()
-                .map(|file| file.logical_path.as_str())
+                .map(|file| file.facts().1)
                 .collect::<Vec<_>>(),
         )
         .map_err(|_| PublicError::invalid_params())
     }
+    #[cfg(feature = "s3")]
     pub(crate) fn native_entries(&self) -> Result<Vec<BundleEntry>, PublicError> {
         self.files
             .iter()
-            .map(|file| {
-                Ok(BundleEntry {
+            .map(|file| match file {
+                S3SelectedFileParams::Versioned(file) => Ok(BundleEntry {
                     source_key: file.key.clone(),
                     version: file.version_id.clone(),
                     logical_path: file.logical_path.clone(),
@@ -325,21 +422,39 @@ impl S3BundleImportParams {
                         file.sha256.clone(),
                     )
                     .map_err(|_| PublicError::invalid_params())?,
-                })
+                }),
+                _ => Err(PublicError::invalid_params()),
+            })
+            .collect()
+    }
+    #[cfg(feature = "s3")]
+    pub(crate) fn native_conditional_entries(
+        &self,
+    ) -> Result<Vec<pumas_library::acquisition::S3ConditionalManifestEntry>, PublicError> {
+        self.files
+            .iter()
+            .map(|file| match file {
+                S3SelectedFileParams::Conditional(file) => {
+                    Ok(pumas_library::acquisition::S3ConditionalManifestEntry {
+                        source_key: file.key.clone(),
+                        logical_path: file.logical_path.clone(),
+                        expected_etag: file.expected_etag.clone(),
+                        expected_size: file.size()?,
+                        expected_sha256: pumas_library::acquisition::Sha256Evidence::new(
+                            "caller.sha256",
+                            file.sha256.clone(),
+                        )
+                        .map_err(|_| PublicError::invalid_params())?,
+                    })
+                }
+                _ => Err(PublicError::invalid_params()),
             })
             .collect()
     }
 }
-// The native S3 entry is optional; keep the non-S3 parser using shared evidence.
+// Pure DTO/shared-manifest preflight above also applies to builds without S3.
 #[cfg(feature = "s3")]
 type BundleEntry = pumas_library::acquisition::S3ManifestEntry;
-#[cfg(not(feature = "s3"))]
-pub(crate) struct BundleEntry {
-    pub source_key: String,
-    pub version: String,
-    pub logical_path: String,
-    pub expected_sha256: pumas_library::acquisition::Sha256Evidence,
-}
 #[derive(Clone, Debug, Serialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -964,5 +1079,72 @@ mod public_bridge_contract_tests {
         let mut request = package("model.safetensors");
         request["files"][1]["logical_path"] = json!("MODEL.SAFETENSORS");
         assert!(decode("start_s3_model_bundle_import", request).is_err());
+    }
+}
+
+#[cfg(test)]
+mod authored_bundle_tests {
+    use super::*;
+    use serde_json::{json, Value};
+    fn params() -> Value {
+        json!({"operation_id":"c3f7d104-1234-4321-abcd-aaaaaaaaaaaa","endpoint":"https://source.invalid",
+            "region":"fixture","bucket":"fixture","addressing":"path","family":"fixture","official_name":"Authored",
+            "read_mode":"conditional","primary_logical_path":"weights.gguf","files":[
+                {"key":"objects/weights","logical_path":"weights.gguf","sha256":"0".repeat(64),"expected_etag":"\"selected\"","expected_size":"24"},
+                {"key":"objects/notes","logical_path":"notes.txt","sha256":"0".repeat(64),"expected_etag":"\"\"","expected_size":"0"}]})
+    }
+    fn valid(value: Value) -> bool {
+        serde_json::from_value::<S3BundleImportParams>(value)
+            .is_ok_and(|wire| wire.validate().is_ok())
+    }
+    #[test]
+    fn exact_sizes_tags_and_uniform_modes_match_both_feature_profiles() {
+        for size in ["0", "9007199254740993", "9223372036854775807"] {
+            for tag in ["\"\"", "\"opaque-é-😀\""] {
+                let mut value = params();
+                value["files"][1]["expected_size"] = size.into();
+                value["files"][1]["expected_etag"] = tag.into();
+                assert!(valid(value));
+            }
+        }
+        for size in [
+            json!(null),
+            json!(1),
+            json!(""),
+            json!("01"),
+            json!("-1"),
+            json!("1e2"),
+            json!("1\n"),
+            json!("9223372036854775808"),
+            json!("18446744073709551616"),
+        ] {
+            let mut value = params();
+            value["files"][1]["expected_size"] = size;
+            assert!(!valid(value));
+        }
+        for tag in ["selected", "W/\"selected\"", "\"a\"b\"", "\"a\nb\""] {
+            let mut value = params();
+            value["files"][1]["expected_etag"] = tag.into();
+            assert!(!valid(value));
+        }
+        let mut value = params();
+        value["files"][1]["logical_path"] = format!("{}data.json", "a/".repeat(520)).into();
+        assert!(!valid(value));
+        for version in [json!(null), json!(""), json!("null"), json!("v1")] {
+            let mut value = params();
+            value["files"][1]["version_id"] = version;
+            assert!(!valid(value));
+        }
+        for mode in ["version_id", "unknown"] {
+            let mut value = params();
+            value["read_mode"] = mode.into();
+            assert!(!valid(value));
+        }
+        let mut value = params();
+        value.as_object_mut().unwrap().remove("read_mode");
+        assert!(!valid(value));
+        let mut value = params();
+        value["files"][1] = json!({"key":"objects/notes","logical_path":"notes.txt","sha256":"0".repeat(64),"version_id":"v1"});
+        assert!(!valid(value));
     }
 }

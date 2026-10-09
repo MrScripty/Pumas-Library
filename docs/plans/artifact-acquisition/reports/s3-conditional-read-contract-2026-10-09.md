@@ -89,9 +89,10 @@ and this slice does not qualify that catalog consumer or fix its reconciliation.
 The existing anonymous and authenticated single-object RPC starts now expose
 explicit `read_mode: "conditional"` with VersionId omitted. Omitted mode requires
 the existing VersionId pin. Generated desktop contracts represent these as closed
-alternatives; conditional bundle and prefix modes fail explicitly as unsupported.
-There is no conditional bundle resolver, prefix discovery or UI mode. Existing
-VersionId callers need no source change.
+alternatives. The subsequent [authored conditional bundle slice](s3-authored-conditional-rpc-2026-10-09.md)
+exposes explicitly authored 2–32-member sets through the existing bundle RPC
+starts; conditional prefix discovery remains unsupported. Existing VersionId
+callers need no source change, and the existing dialog continues to use pins.
 
 Owned HTTPS fixtures launch the production RPC process and qualify genuine
 safetensors, anonymous/explicit authentication, legacy VersionId admission, weak

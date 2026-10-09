@@ -524,6 +524,15 @@ pub struct AcquisitionRetryPolicy {
 
 #[async_trait::async_trait]
 pub trait AcquisitionHost: HttpAttemptHost {
+    /// Optional consumer-owned cleanup for cancellation before verified use.
+    /// The current worker drains its effects and checks its exact receipt-free
+    /// transfer before running this closure, then withdraws only after success.
+    /// The closure must revoke and clear only its held workspace capability.
+    /// Other failures, pause, and cancellation after handoff do not call it.
+    fn cancelled_transfer_cleanup(&mut self) -> Option<Box<dyn FnOnce() -> Result<()> + Send>> {
+        None
+    }
+
     /// Optional observation only: an exact manifest member is about to acquire.
     /// Default no-op preserves existing hosts and transfer/publication policy.
     fn file_started(&mut self, _index: usize) {}
@@ -951,6 +960,47 @@ impl AcquisitionService {
             "validate acquisition schema eligibility",
             move || store.require_acquisition_schema(),
         )
+        .await
+    }
+
+    async fn cleanup_cancelled_transfer(
+        &self,
+        context: &TaskContext,
+        operation: AcquisitionOperation,
+        cleanup: Box<dyn FnOnce() -> Result<()> + Send>,
+    ) -> Result<()> {
+        if !context.shares_scope(&operation.context)
+            || !context.generation().matches(operation.context.generation())
+            || !context.is_current_role(super::task_custody::TaskRole::Worker)
+        {
+            return Err(invalid(
+                "Cancellation cleanup belongs to another operation generation",
+            ));
+        }
+        match context.drain_blocking().await {
+            Ok(0) => {}
+            result => {
+                return Err(invalid(&format!(
+                    "Transfer effects unsettled before cancellation cleanup: {result:?}"
+                )))
+            }
+        }
+        let store = self.store.clone();
+        let expected = operation.record.clone();
+        owned(context, "check exact unreceipted transfer", move || {
+            store.require_unreceipted_transfer(&expected)
+        })
+        .await?;
+        owned(
+            context,
+            "revoke and clean cancelled transfer output",
+            cleanup,
+        )
+        .await?;
+        let store = self.store.clone();
+        owned(context, "withdraw exact cancelled transfer", move || {
+            store.withdraw_unreceipted_transfer(&operation.record)
+        })
         .await
     }
 
@@ -2108,6 +2158,8 @@ impl AcquisitionConsumer {
                         message: "An adopted consumer operation cannot be replayed".into(),
                     });
                 }
+                let cancelled_operation = operation.clone();
+                let transfer = async {
                 for (file_index, source) in request.sources.iter().enumerate() {
                     host.file_started(file_index);
                     let bytes = service
@@ -2123,9 +2175,26 @@ impl AcquisitionConsumer {
                         .await?;
                     host.file_acquired(file_index, bytes);
                 }
-                let lease = service
+                service
                     .files_ready_with_host(&context, operation, request.workspace, host.as_mut())
-                    .await?;
+                    .await
+                }.await;
+                let lease = match transfer {
+                    Ok(lease) => lease,
+                    Err(error @ PumasError::DownloadCancelled) => {
+                        if let Some(cleanup) = host.cancelled_transfer_cleanup() {
+                            if let Err(cleanup) = service.cleanup_cancelled_transfer(
+                                &context, cancelled_operation, cleanup,
+                            ).await {
+                                return Err(PumasError::Other(format!(
+                                    "{error}; cancelled transfer cleanup: {cleanup}"
+                                )));
+                            }
+                        }
+                        return Err(error);
+                    }
+                    Err(error) => return Err(error),
+                };
                 let expected = lease.record().clone();
                 let use_lease = match &expected.phase {
                     AcquisitionPhase::Using { lease } | AcquisitionPhase::Adopted { lease } => {
@@ -2766,6 +2835,44 @@ mod tests {
             _error: Option<&str>,
         ) -> Result<()> {
             Ok(())
+        }
+    }
+
+    type TransferCleanup = Box<dyn FnOnce() -> Result<()> + Send>;
+
+    struct CleaningHost {
+        controls: ControlledHost,
+        cleanup: Mutex<Option<TransferCleanup>>,
+    }
+
+    #[async_trait::async_trait]
+    impl HttpAttemptHost for CleaningHost {
+        async fn pause_requested(&self) {
+            self.controls.pause_requested().await;
+        }
+        fn pause_requested_now(&self) -> bool {
+            self.controls.pause_requested_now()
+        }
+        fn cancel_requested(&self) -> bool {
+            self.controls.cancel_requested()
+        }
+        async fn record_progress(&mut self, bytes: u64) -> Result<()> {
+            self.controls.record_progress(bytes).await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AcquisitionHost for CleaningHost {
+        fn cancelled_transfer_cleanup(&mut self) -> Option<Box<dyn FnOnce() -> Result<()> + Send>> {
+            self.cleanup.lock().unwrap().take()
+        }
+        async fn retry(
+            &mut self,
+            attempt: u32,
+            delay: Option<Duration>,
+            error: Option<&str>,
+        ) -> Result<()> {
+            self.controls.retry(attempt, delay, error).await
         }
     }
 
@@ -3563,6 +3670,15 @@ mod tests {
 
     #[tokio::test]
     async fn host_cancellation_during_file_set_sealing_prevents_consumer_handoff() {
+        cancelled_seal_fixture(false).await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_transfer_cleanup_waits_for_seal_effect_and_withdraws_before_return() {
+        cancelled_seal_fixture(true).await;
+    }
+
+    async fn cancelled_seal_fixture(clean_transfer: bool) {
         let timeout = Duration::from_secs(5);
         let temp = tempfile::TempDir::new().unwrap();
         let stage = temp.path().join("stage");
@@ -3600,6 +3716,21 @@ mod tests {
             progress: progress_sender,
         };
         let controls = host.clone();
+        let cleanup_started = Arc::new(AtomicBool::new(false));
+        let cleanup_observer = cleanup_started.clone();
+        let cleanup_file = stage.join("payload.bin");
+        let host: Box<dyn AcquisitionHost> = if clean_transfer {
+            Box::new(CleaningHost {
+                controls: host,
+                cleanup: Mutex::new(Some(Box::new(move || {
+                    cleanup_observer.store(true, Ordering::SeqCst);
+                    std::fs::remove_file(cleanup_file)?;
+                    Ok(())
+                }))),
+            })
+        } else {
+            Box::new(host)
+        };
 
         let (seal_started_sender, seal_started) = tokio::sync::oneshot::channel();
         let seal_started_sender = Mutex::new(Some(seal_started_sender));
@@ -3637,7 +3768,7 @@ mod tests {
         let publish_calls = Arc::new(AtomicUsize::new(0));
         let publish_observer = publish_calls.clone();
         let running_consumer = consumer.clone();
-        let waiter = tokio::spawn(async move {
+        let mut waiter = tokio::spawn(async move {
             running_consumer
                 .acquire_http(
                     AcquisitionHttpRequest {
@@ -3651,7 +3782,7 @@ mod tests {
                         retry: retry(),
                     },
                     reqwest::Client::new(),
-                    Box::new(host),
+                    host,
                     move |_| async move {
                         prepare_observer.fetch_add(1, Ordering::SeqCst);
                         Ok::<((), Value), PumasError>(((), Value::Null))
@@ -3685,6 +3816,11 @@ mod tests {
 
         controls.cancel();
         assert!(!reservation_released.load(Ordering::SeqCst));
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut waiter)
+            .await
+            .is_err());
+        assert!(!cleanup_started.load(Ordering::SeqCst));
+        assert_eq!(store.acquisitions().unwrap(), before_cancel);
         release_seal_sender.send(()).unwrap();
         let result = tokio::time::timeout(timeout, waiter)
             .await
@@ -3700,9 +3836,22 @@ mod tests {
             .expect("local HTTP source must finish")
             .expect("local HTTP source must not panic");
 
-        assert_eq!(store.acquisitions().unwrap(), before_cancel);
+        if clean_transfer {
+            let mut withdrawn = record.clone();
+            withdrawn.phase = AcquisitionPhase::Withdrawn;
+            withdrawn.files.clear();
+            assert_eq!(
+                store.acquisitions().unwrap().get(&record.id),
+                Some(&withdrawn)
+            );
+            assert!(cleanup_started.load(Ordering::SeqCst));
+            assert!(!stage.join("payload.bin").exists());
+        } else {
+            assert_eq!(store.acquisitions().unwrap(), before_cancel);
+            assert!(!cleanup_started.load(Ordering::SeqCst));
+            assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        }
         assert!(store.consumer_receipt(record.id).unwrap().is_none());
-        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
         assert!(!ready_mutation_started.load(Ordering::SeqCst));
         assert!(!handoff_mutation_started.load(Ordering::SeqCst));
         assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);

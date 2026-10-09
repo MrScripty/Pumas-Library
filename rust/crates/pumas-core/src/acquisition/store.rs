@@ -479,6 +479,46 @@ impl AcquisitionStore {
         Ok(())
     }
 
+    pub(crate) fn require_unreceipted_transfer(&self, expected: &AcquisitionRecord) -> Result<()> {
+        let transaction = self.transaction(true)?;
+        let document = transaction.document()?;
+        if !matches!(
+            expected.phase,
+            super::service::AcquisitionPhase::Transferring
+                | super::service::AcquisitionPhase::FilesReady
+        ) || document.acquisitions.get(&expected.id) != Some(expected)
+            || document.consumer_receipts.contains_key(&expected.id)
+        {
+            return Err(invalid_receipt(
+                "Withdrawal requires an exact unreceipted transfer",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Cleanup has completed in the exact transfer worker. Recheck its record
+    /// atomically; no Using/Adopted lease or successor can be released here.
+    pub(crate) fn withdraw_unreceipted_transfer(&self, expected: &AcquisitionRecord) -> Result<()> {
+        let transaction = self.transaction(false)?;
+        let mut document = transaction.document()?;
+        if !matches!(
+            expected.phase,
+            super::service::AcquisitionPhase::Transferring
+                | super::service::AcquisitionPhase::FilesReady
+        ) || document.acquisitions.get(&expected.id) != Some(expected)
+            || document.consumer_receipts.contains_key(&expected.id)
+        {
+            return Err(invalid_receipt(
+                "Withdrawal requires an exact unreceipted transfer",
+            ));
+        }
+        let record = document.acquisitions.get_mut(&expected.id).unwrap();
+        record.phase = super::service::AcquisitionPhase::Withdrawn;
+        record.files.clear();
+        document.validate()?;
+        require_durable(transaction.publish_document(&document))
+    }
+
     /// Commit cancellation only for the unchanged, unreceipted consumer lease.
     pub(crate) fn withdraw_unreceipted_use(&self, expected: &AcquisitionRecord) -> Result<()> {
         let transaction = self.transaction(false)?;
@@ -1191,6 +1231,86 @@ mod tests {
         assert_eq!(
             store.acquisitions().unwrap()[&expected.id].phase,
             AcquisitionPhase::Adopted { lease }
+        );
+    }
+
+    #[test]
+    fn transfer_withdrawal_rejects_stale_or_using_records_and_preserves_other_demand() {
+        for phase in [AcquisitionPhase::Transferring, AcquisitionPhase::FilesReady] {
+            let temp = tempfile::TempDir::new().unwrap();
+            let path = temp.path().join("downloads.json");
+            let expected = record(Uuid::new_v4(), "cancelled-transfer", "owned/path", phase);
+            let other = record(
+                Uuid::new_v4(),
+                "other-owner",
+                "other/path",
+                AcquisitionPhase::Transferring,
+            );
+            let original = document(vec![expected.clone(), other.clone()]);
+            std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+            let store = AcquisitionStore::new(temp.path());
+            let mut wrong = expected.clone();
+            wrong.workspace.relative_target = "another/path".into();
+            let before = std::fs::read(&path).unwrap();
+            assert!(store.require_unreceipted_transfer(&wrong).is_err());
+            assert!(store.withdraw_unreceipted_transfer(&wrong).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            let using = record(
+                expected.id,
+                "cancelled-transfer",
+                "owned/path",
+                AcquisitionPhase::Using {
+                    lease: Uuid::new_v4(),
+                },
+            );
+            std::fs::write(
+                &path,
+                serde_json::to_vec(&document(vec![using.clone(), other.clone()])).unwrap(),
+            )
+            .unwrap();
+            let before = std::fs::read(&path).unwrap();
+            assert!(store.require_unreceipted_transfer(&using).is_err());
+            assert!(store.withdraw_unreceipted_transfer(&using).is_err());
+            assert!(store.withdraw_unreceipted_transfer(&expected).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+            store.require_unreceipted_transfer(&expected).unwrap();
+            store.withdraw_unreceipted_transfer(&expected).unwrap();
+            let after = store.acquisitions().unwrap();
+            assert_eq!(after[&expected.id].phase, AcquisitionPhase::Withdrawn);
+            assert!(after[&expected.id].files.is_empty());
+            assert_eq!(after[&other.id], other);
+        }
+    }
+
+    #[test]
+    fn transfer_withdrawal_parent_sync_failure_is_not_acknowledged() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let temp = tempfile::TempDir::new().unwrap();
+        let expected = record(
+            Uuid::new_v4(),
+            "cancelled-transfer",
+            "owned/path",
+            AcquisitionPhase::Transferring,
+        );
+        let mut store = AcquisitionStore::new(temp.path());
+        require_durable(
+            store
+                .transaction(false)
+                .unwrap()
+                .publish_document(&document(vec![expected.clone()])),
+        )
+        .unwrap();
+        let fault = Arc::new(crate::metadata::PublicationSyncFault::default());
+        store.publication_fault = Some(fault.clone());
+        fault.fail.store(true, Ordering::SeqCst);
+        assert_parent_sync_failure(store.withdraw_unreceipted_transfer(&expected).unwrap_err());
+        assert_eq!(fault.attempts.load(Ordering::SeqCst), 1);
+        // Visible rename is not a durability acknowledgement.
+        assert_eq!(
+            store.acquisitions().unwrap()[&expected.id].phase,
+            AcquisitionPhase::Withdrawn
         );
     }
 

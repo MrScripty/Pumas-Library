@@ -1425,11 +1425,18 @@ pub(crate) enum DownloadStatusOutcome {
 }
 
 impl DownloadStatusOutcome {
+    #[cfg(any(feature = "export-contract", test))]
     pub(crate) fn new(progress: Option<ModelDownloadProgress>) -> Result<Self, PumasError> {
+        Self::new_diagnosed(progress).map_err(DownloadProgressFailure::into_domain)
+    }
+
+    pub(crate) fn new_diagnosed(
+        progress: Option<ModelDownloadProgress>,
+    ) -> Result<Self, DownloadProgressFailure> {
         Ok(match progress {
             Some(progress) => Self::Found(Box::new(DownloadStatusFoundOutcome {
                 success: true,
-                progress: DownloadProgressOutcome::try_from(progress)?,
+                progress: DownloadProgressOutcome::try_diagnosed(progress)?,
             })),
             None => Self::Missing(DownloadStatusMissingOutcome {
                 success: false,
@@ -1477,16 +1484,36 @@ struct DownloadProgressOutcome {
     error: Option<&'static str>,
 }
 
-impl TryFrom<ModelDownloadProgress> for DownloadProgressOutcome {
-    type Error = PumasError;
+/// Private, closed diagnostics; no domain values or messages reach logs or wire.
+pub(crate) enum DownloadProgressFailure {
+    LibraryModelId,
+    NumericEvidence,
+}
 
-    fn try_from(progress: ModelDownloadProgress) -> Result<Self, Self::Error> {
+impl DownloadProgressFailure {
+    pub(crate) const fn category(&self) -> &'static str {
+        match self {
+            Self::LibraryModelId => "library_model_id",
+            Self::NumericEvidence => "numeric_evidence",
+        }
+    }
+
+    pub(crate) fn into_domain(self) -> PumasError {
+        invalid_domain_outcome(match self {
+            Self::LibraryModelId => "download library model ID",
+            Self::NumericEvidence => "download progress numeric evidence",
+        })
+    }
+}
+
+impl DownloadProgressOutcome {
+    fn try_diagnosed(progress: ModelDownloadProgress) -> Result<Self, DownloadProgressFailure> {
         if progress
             .library_model_id
             .as_deref()
             .is_some_and(|model_id| DownloadRecoveryModelId::parse(model_id).is_none())
         {
-            return Err(invalid_domain_outcome("download library model ID"));
+            return Err(DownloadProgressFailure::LibraryModelId);
         }
         if [progress.downloaded_bytes, progress.total_bytes]
             .into_iter()
@@ -1504,7 +1531,7 @@ impl TryFrom<ModelDownloadProgress> for DownloadProgressOutcome {
             .flatten()
             .any(|value| !value.is_finite() || value < 0.0)
         {
-            return Err(invalid_domain_outcome("download progress numeric evidence"));
+            return Err(DownloadProgressFailure::NumericEvidence);
         }
         Ok(Self {
             download_id: progress.download_id,
@@ -1527,6 +1554,14 @@ impl TryFrom<ModelDownloadProgress> for DownloadProgressOutcome {
                 .error
                 .map(|_| "The model download did not complete successfully."),
         })
+    }
+}
+
+impl TryFrom<ModelDownloadProgress> for DownloadProgressOutcome {
+    type Error = PumasError;
+
+    fn try_from(progress: ModelDownloadProgress) -> Result<Self, Self::Error> {
+        Self::try_diagnosed(progress).map_err(DownloadProgressFailure::into_domain)
     }
 }
 

@@ -2,7 +2,7 @@
 
 use crate::contract::{
     DownloadListOutcome, DownloadMutationOutcome, DownloadStartedOutcome, DownloadStatusOutcome,
-    PartialDownloadOutcome,
+    PartialDownloadOutcome, PublicError,
 };
 use crate::server::AppState;
 use pumas_library::model_library::{DownloadRecoveryModelId, DownloadRecoveryToken};
@@ -51,7 +51,32 @@ pub async fn get_model_download_status(
     state: &AppState,
     download_id: &str,
 ) -> pumas_library::Result<DownloadStatusOutcome> {
-    DownloadStatusOutcome::new(state.api.get_hf_download_progress(download_id).await?)
+    project_download_status(state.api.get_hf_download_progress(download_id).await)
+}
+
+pub(in crate::handlers) fn project_download_status(
+    lookup: pumas_library::Result<Option<pumas_library::models::ModelDownloadProgress>>,
+) -> pumas_library::Result<DownloadStatusOutcome> {
+    let progress = lookup.inspect_err(|error| {
+        status_failure("state_lookup", "domain_lookup", error);
+    })?;
+    DownloadStatusOutcome::new_diagnosed(progress).map_err(|failure| {
+        let category = failure.category();
+        let error = failure.into_domain();
+        status_failure("outcome_validation", category, &error);
+        error
+    })
+}
+
+fn status_failure(stage: &'static str, category: &'static str, error: &pumas_library::PumasError) {
+    let public = PublicError::from(error);
+    tracing::error!(
+        failure_stage = stage,
+        failure_category = category,
+        error_code = public.code,
+        error_class = public.class.as_str(),
+        "RPC download status failed"
+    );
 }
 
 pub async fn cancel_model_download(

@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 c49367dc3c766530b8eb44d1e9ed1150167dc6fdbadf3e40bdf3f80c8d1d8f3a. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 c2d3c7dfdc5f68a90f7e38c1e70540e4a768a73c986162735b174f01830dbaf3. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -55,6 +55,7 @@ export declare function validateS3AuthenticatedDiscoveryParams(value: unknown): 
 export declare function validateS3AuthenticatedImportParams(value: unknown): boolean;
 export declare function validateS3BundleImportObservation(value: unknown): boolean;
 export declare function validateS3BundleImportParams(value: unknown): boolean;
+export declare function validateS3ConditionalFileParams(value: unknown): boolean;
 export declare function validateS3CredentialParams(value: unknown): boolean;
 export declare function validateS3DiscoveryOutcome(value: unknown): boolean;
 export declare function validateS3DiscoveryParams(value: unknown): boolean;
@@ -66,6 +67,7 @@ export declare function validateS3ImportStatusParams(value: unknown): boolean;
 export declare function validateS3PersistedImportsWire(value: unknown): boolean;
 export declare function validateS3PinnedFileParams(value: unknown): boolean;
 export declare function validateS3ReadMode(value: unknown): boolean;
+export declare function validateS3SelectedFileParams(value: unknown): boolean;
 export declare function validateS3TransferRetryParams(value: unknown): boolean;
 export declare function validateS3TransferRetryState(value: unknown): boolean;
 export declare function validateSearchCatalogParams(value: unknown): boolean;

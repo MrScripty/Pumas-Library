@@ -1431,6 +1431,11 @@ impl VersionManager {
             None
         };
         let torch_versions_lock = self.acquire_torch_versions_lock_for_mutation().await?;
+        let torch_revision = torch_versions_lock
+            .as_ref()
+            .map(|lock| installer::TorchRevisionLease::mutation(&self.versions_dir(), tag, lock))
+            .transpose()
+            .map_err(PumasError::from)?;
         // Another backend may have changed metadata while this manager was open.
         if let Some(lock) = &torch_versions_lock {
             self.state.write().await.refresh_with_lock(lock).await?;
@@ -1478,7 +1483,9 @@ impl VersionManager {
         let app_id = self.app_id;
         let versions_for_removal = self.versions_dir();
         let cleanup_lock = native_versions_lock.clone();
+        let removal_revision = torch_revision.clone();
         let remove = move || {
+            let _removal_revision = removal_revision;
             if let Some(lock) = cleanup_lock {
                 installer::mark_native_attempt_removed(&versions_for_removal, &removed_tag, lock)?
                     .into_result()?;

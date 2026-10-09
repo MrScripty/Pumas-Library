@@ -84,6 +84,8 @@ fn read_torch_download_progress(path: &Path) -> Option<TorchDownloadProgress> {
 #[derive(Clone)]
 pub(crate) struct TorchVersionsLock {
     _file: std::sync::Arc<std::fs::File>,
+    versions_dir: PathBuf,
+    mutation: bool,
 }
 
 fn normalize_torch_lock_error(error: std::io::Error) -> std::io::Error {
@@ -95,35 +97,28 @@ fn normalize_torch_lock_error(error: std::io::Error) -> std::io::Error {
     }
 }
 
+#[cfg(all(test, target_os = "linux"))]
+#[path = "torch_revision_tests.rs"]
+mod revision_tests;
+
 impl TorchVersionsLock {
     pub(crate) fn try_acquire_read(versions_dir: &Path) -> std::io::Result<Self> {
-        let mut options = std::fs::OpenOptions::new();
-        options.read(true).write(true).create(true).truncate(false);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
-        }
-        let file = options.open(versions_dir.join(".torch-versions.lock"))?;
-        if !file.metadata()?.is_file() {
-            return Err(std::io::Error::other("Torch lock is not regular"));
-        }
+        let file = open_torch_lock(versions_dir, ".torch-versions.lock")?;
         FileExt::try_lock_shared(&file).map_err(normalize_torch_lock_error)?;
         Ok(Self {
             _file: Arc::new(file),
+            versions_dir: versions_dir.to_owned(),
+            mutation: false,
         })
     }
     pub(crate) fn try_acquire(versions_dir: &Path) -> std::io::Result<Self> {
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(versions_dir.join(".torch-versions.lock"))?;
+        let file = open_torch_lock(versions_dir, ".torch-versions.lock")?;
         file.try_lock_exclusive()
             .map_err(normalize_torch_lock_error)?;
         Ok(Self {
             _file: std::sync::Arc::new(file),
+            versions_dir: versions_dir.to_owned(),
+            mutation: true,
         })
     }
 
@@ -143,6 +138,113 @@ impl TorchVersionsLock {
                 Err(error) => return Err(error),
             }
         }
+    }
+}
+
+fn open_torch_lock(versions_dir: &Path, name: &str) -> std::io::Result<std::fs::File> {
+    let metadata = std::fs::symlink_metadata(versions_dir)?;
+    if !metadata.is_dir()
+        || metadata.file_type().is_symlink()
+        || std::fs::canonicalize(versions_dir)? != versions_dir
+    {
+        return Err(std::io::Error::other("Torch lock root is not canonical"));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
+    }
+    let path = versions_dir.join(name);
+    let file = options.open(&path)?;
+    let opened = file.metadata()?;
+    let named = std::fs::symlink_metadata(path)?;
+    if !opened.is_file() || !named.is_file() || named.file_type().is_symlink() {
+        return Err(std::io::Error::other("Torch lock is not regular"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if opened.nlink() != 1 || opened.dev() != named.dev() || opened.ino() != named.ino() {
+            return Err(std::io::Error::other(
+                "Torch lock inode is aliased or changed",
+            ));
+        }
+    }
+    Ok(file)
+}
+
+/// Permanent per-registration exclusion in the existing versions namespace.
+/// Never place/unlink this inode inside a removable runtime or temporary stage.
+/// Admission order is global selection/publication, then nonblocking revision.
+/// Read owners release the global guard before capture and retain this guard
+/// through actual byte/process custody. It grants no import/qualification proof.
+#[derive(Clone)]
+pub(crate) struct TorchRevisionLease {
+    _file: Arc<std::fs::File>,
+    versions_dir: PathBuf,
+    tag: String,
+    mutation: bool,
+}
+
+impl TorchRevisionLease {
+    pub(crate) fn read(
+        versions_dir: &Path,
+        tag: &str,
+        selection: &TorchVersionsLock,
+    ) -> std::io::Result<Self> {
+        if selection.versions_dir != versions_dir {
+            return Err(std::io::Error::other(
+                "Torch selection belongs to another owner root",
+            ));
+        }
+        Self::acquire(versions_dir, tag, false)
+    }
+
+    pub(crate) fn mutation(
+        versions_dir: &Path,
+        tag: &str,
+        publication: &TorchVersionsLock,
+    ) -> std::io::Result<Self> {
+        if publication.versions_dir != versions_dir || !publication.mutation {
+            return Err(std::io::Error::other(
+                "Torch revision mutation requires its owner publication guard",
+            ));
+        }
+        Self::acquire(versions_dir, tag, true)
+    }
+
+    fn acquire(versions_dir: &Path, tag: &str, mutation: bool) -> std::io::Result<Self> {
+        if tag.is_empty()
+            || tag.len() > 200
+            || matches!(tag, "." | "..")
+            || !tag
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-._+".contains(&b))
+        {
+            return Err(std::io::Error::other(
+                "Invalid Torch revision registration key",
+            ));
+        }
+        let name = format!(".torch-revision-{:x}.lock", Sha256::digest(tag.as_bytes()));
+        let file = open_torch_lock(versions_dir, &name)?;
+        if mutation {
+            FileExt::try_lock_exclusive(&file)
+        } else {
+            FileExt::try_lock_shared(&file)
+        }
+        .map_err(normalize_torch_lock_error)?;
+        Ok(Self {
+            _file: Arc::new(file),
+            versions_dir: versions_dir.to_owned(),
+            tag: tag.to_owned(),
+            mutation,
+        })
+    }
+
+    fn owns_mutation(&self, versions_dir: &Path, tag: &str) -> bool {
+        self.mutation && self.versions_dir == versions_dir && self.tag == tag
     }
 }
 
@@ -266,12 +368,30 @@ pub(super) fn write_pending_publish_marker(path: &Path, runtime: &Path) -> std::
 pub(super) struct TorchPendingStage {
     directory: tempfile::TempDir,
     marker: PathBuf,
+    _revision: TorchRevisionLease,
     // Drop last, after stage and marker cleanup (including TempDir's Drop).
     _lock: TorchVersionsLock,
 }
 
 impl TorchPendingStage {
+    #[cfg(test)]
     fn new(versions_dir: &Path, tag: &str, lock: TorchVersionsLock) -> Result<Self> {
+        let revision =
+            TorchRevisionLease::mutation(versions_dir, tag, &lock).map_err(PumasError::from)?;
+        Self::new_with_revision(versions_dir, tag, lock, revision)
+    }
+
+    fn new_with_revision(
+        versions_dir: &Path,
+        tag: &str,
+        lock: TorchVersionsLock,
+        revision: TorchRevisionLease,
+    ) -> Result<Self> {
+        if !revision.owns_mutation(versions_dir, tag) {
+            return Err(failed(
+                "Torch stage requires its exact revision mutation guard",
+            ));
+        }
         let directory = tempfile::Builder::new()
             .prefix(".torch-install-")
             .tempdir_in(versions_dir)
@@ -286,6 +406,7 @@ impl TorchPendingStage {
         Ok(Self {
             directory,
             marker,
+            _revision: revision,
             _lock: lock,
         })
     }
@@ -312,6 +433,19 @@ impl TorchPendingStage {
             return Err(failed("Torch installer scratch path is not a directory"));
         }
         Ok(scratch)
+    }
+}
+
+fn try_revision_cleanup(
+    versions_dir: &Path,
+    tag: &str,
+    lock: &TorchVersionsLock,
+) -> std::io::Result<Option<TorchRevisionLease>> {
+    match TorchRevisionLease::mutation(versions_dir, tag, lock) {
+        Ok(revision) => Ok(Some(revision)),
+        // Retained revision A must not stop cleanup/publication of revision B.
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
@@ -355,7 +489,7 @@ pub(crate) fn retry_pending_torch_cleanup(
 fn retry_pending_torch_cleanup_locked(
     versions_dir: &Path,
     metadata_manager: &MetadataManager,
-    _lock: &TorchVersionsLock,
+    lock: &TorchVersionsLock,
 ) -> std::io::Result<()> {
     let entries = match std::fs::read_dir(versions_dir) {
         Ok(entries) => entries,
@@ -376,6 +510,9 @@ fn retry_pending_torch_cleanup_locked(
         if stable_torch_tag(&tag).is_none() || !entry.file_type()?.is_file() {
             continue;
         }
+        let Some(_revision) = try_revision_cleanup(versions_dir, &tag, lock)? else {
+            continue;
+        };
         let marker_bytes = std::fs::read(&marker)?;
         let durable_owner = if marker_bytes == TORCH_PUBLISHING_MARKER {
             None // Legacy marker: retain the inner marker as ownership proof.
@@ -476,6 +613,9 @@ fn retry_pending_torch_cleanup_locked(
         if stable_torch_tag(&tag).is_none() {
             continue;
         }
+        let Some(_revision) = try_revision_cleanup(versions_dir, &tag, lock)? else {
+            continue;
+        };
         let stage = versions_dir.join(&stage_name);
         let quarantine = versions_dir.join(format!(".torch-quarantine-{stage_name}"));
         if stage.exists() && !quarantine.exists() {
@@ -1102,19 +1242,30 @@ pub(super) fn prune_torch_orphan_quarantines(
         return Ok(());
     }
     let lock = TorchVersionsLock::try_acquire(versions_dir)?;
-    prune_torch_orphan_quarantines_locked(versions_dir, max_keep, only_tag, &lock)
+    prune_torch_orphan_quarantines_locked(versions_dir, max_keep, only_tag, &lock, None)
 }
 
 fn prune_torch_orphan_quarantines_locked(
     versions_dir: &Path,
     max_keep: usize,
     only_tag: Option<&str>,
-    _lock: &TorchVersionsLock,
+    lock: &TorchVersionsLock,
+    held_revision: Option<&TorchRevisionLease>,
 ) -> std::io::Result<()> {
     let mut quarantines = list_owned_torch_orphan_quarantines(versions_dir)?;
     quarantines.retain(|quarantine| only_tag.is_none_or(|tag| quarantine.tag == tag));
     quarantines.sort_by(|left, right| right.timestamp_ms.cmp(&left.timestamp_ms));
     for quarantine in quarantines.into_iter().skip(max_keep) {
+        let _revision = if held_revision
+            .is_some_and(|held| held.owns_mutation(versions_dir, &quarantine.tag))
+        {
+            None
+        } else {
+            let Some(revision) = try_revision_cleanup(versions_dir, &quarantine.tag, lock)? else {
+                continue;
+            };
+            Some(revision)
+        };
         if let Err(error) = std::fs::remove_dir_all(quarantine.path) {
             if error.kind() != std::io::ErrorKind::NotFound {
                 return Err(error);
@@ -2455,11 +2606,14 @@ impl VersionInstaller {
             .map_err(PumasError::from)?;
         retry_pending_torch_cleanup_locked(&versions_dir, &self.metadata_manager, &versions_lock)
             .map_err(PumasError::from)?;
+        let destination_revision = TorchRevisionLease::mutation(&versions_dir, tag, &versions_lock)
+            .map_err(PumasError::from)?;
         if let Err(error) = prune_torch_orphan_quarantines_locked(
             &versions_dir,
             MAX_TORCH_ORPHAN_QUARANTINES,
             None,
             &versions_lock,
+            Some(&destination_revision),
         ) {
             warn!(%error, "Torch orphan cleanup before install failed");
         }
@@ -2476,7 +2630,7 @@ impl VersionInstaller {
                     Utc::now().timestamp_millis()
                 ));
                 let from = destination.clone();
-                let recovery_lease = versions_lock.clone();
+                let recovery_lease = (versions_lock.clone(), destination_revision.clone());
                 tokio::task::spawn_blocking(move || {
                     let _recovery_lease = recovery_lease;
                     pumas_library::platform::filesystem::rename_directory_noreplace(
@@ -2492,6 +2646,7 @@ impl VersionInstaller {
                     MAX_TORCH_ORPHAN_QUARANTINES,
                     None,
                     &versions_lock,
+                    Some(&destination_revision),
                 ) {
                     warn!(%error, "Torch orphan cleanup after recovery failed");
                 }
@@ -2515,8 +2670,12 @@ impl VersionInstaller {
         }
         // Staging shares the publication filesystem; failed attempts never enter
         // installed-version state. TempDir removes this attempt on every exit.
-        let staging =
-            std::sync::Arc::new(TorchPendingStage::new(&versions_dir, tag, versions_lock)?);
+        let staging = std::sync::Arc::new(TorchPendingStage::new_with_revision(
+            &versions_dir,
+            tag,
+            versions_lock,
+            destination_revision,
+        )?);
         let logs = self.logs_dir();
         fs::create_dir_all(&logs).await.map_err(PumasError::from)?;
         let log_path = logs.join(format!(
@@ -2626,9 +2785,13 @@ impl VersionInstaller {
         tracker.complete_installation(successful);
         drop(tracker);
         if successful {
-            if let Err(error) =
-                prune_torch_orphan_quarantines_locked(&versions_dir, 0, Some(tag), &staging._lock)
-            {
+            if let Err(error) = prune_torch_orphan_quarantines_locked(
+                &versions_dir,
+                0,
+                Some(tag),
+                &staging._lock,
+                Some(&staging._revision),
+            ) {
                 warn!(%error, "Torch orphan cleanup after install failed");
             }
         }

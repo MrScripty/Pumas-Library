@@ -2,7 +2,7 @@
 //! Linux managed CPython only. System ELF libraries, loader search paths and
 //! model-specific executable read sets are deliberately not attested here.
 
-use super::installer::{self, StagedFilesManifest, TorchVersionsLock};
+use super::installer::{self, StagedFilesManifest, TorchRevisionLease, TorchVersionsLock};
 use super::managed_depot_lease::ManagedDepotLease;
 use super::*;
 use pumas_library::runtime_read_source::{
@@ -16,6 +16,11 @@ use std::io::{self, Read};
 impl VersionManager {
     /// Retain actual interpreter, dependency and embedded sidecar selections.
     /// This does not grant serving availability or complete execution proof.
+    /// Only the selected revision bytes and interpreter depot are retained;
+    /// registration/selection metadata may change. Unrelated revision
+    /// publication remains possible. Acquire before any
+    /// interpreter/import work and retain through actual process retirement.
+    /// This is byte custody, not an interpreter/import registration witness.
     pub async fn retain_torch_runtime_bytes(
         &self,
         tag: &str,
@@ -44,9 +49,11 @@ impl VersionManager {
                 return Err(refused("Torch runtime is not installed"));
             }
         }
+        let revision = TorchRevisionLease::read(&versions, tag, &lock).map_err(PumasError::from)?;
         let runtime = versions.join(tag);
         let launcher = self.launcher_root.clone();
-        tokio::task::spawn_blocking(move || capture_installed(&launcher, &runtime, lock))
+        drop(lock);
+        tokio::task::spawn_blocking(move || capture_installed(&launcher, &runtime, revision))
             .await
             .map_err(|error| refused(format!("Runtime byte capture task failed: {error}")))?
     }
@@ -165,7 +172,7 @@ fn tree_manifest(
 fn capture_installed(
     launcher: &Path,
     runtime: &Path,
-    lock: TorchVersionsLock,
+    revision: TorchRevisionLease,
 ) -> Result<Arc<RetainedRuntimeReadSource>> {
     if !cfg!(target_os = "linux") {
         return Err(refused(
@@ -289,7 +296,7 @@ fn capture_installed(
         ));
     }
     let (interpreter_members, interpreter_omissions) = tree_manifest(&depot, &[], true)?;
-    let shared_lock = Arc::new(lock);
+    let shared_lock = Arc::new(revision);
     let selections = vec![
         RuntimeReadRoot::new(
             RuntimeReadRole::Interpreter,

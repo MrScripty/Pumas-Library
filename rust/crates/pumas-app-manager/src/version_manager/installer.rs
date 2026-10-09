@@ -8,6 +8,7 @@ mod torch_tests;
 use super::managed_python::ManagedPythonIdentity;
 pub(crate) use torch::is_torch_runtime_release;
 pub(crate) use torch::retry_pending_torch_cleanup;
+pub(crate) use torch::TorchRevisionLease;
 pub(crate) use torch::TorchVersionsLock;
 #[cfg(test)]
 pub(crate) use torch::{move_verified_packages, BootstrapPackages};

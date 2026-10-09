@@ -74,6 +74,264 @@ class UnavailableOwnedNativeGate:
         raise OwnedAudioError("native_runtime_unqualified")
 
 
+# Source-owned policy catalog. No installed interpreter/model read containment
+# or native lifecycle policy is qualified, so the shipping catalog is empty.
+# Tests temporarily install a fixed controlled policy; wire/env/metadata cannot.
+_INSTALLED_AUDIO_POLICIES = ()
+
+
+class _InstalledAudioSourceProof:
+    """Opaque, single-use original source capability; never wire qualification."""
+
+    __slots__ = ("_policy", "_source", "_identity", "_released", "_gate", "_lineage")
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError("Installed source proofs come from a source-owned policy")
+
+    @classmethod
+    def _from_source_policy(cls, policy, source, *, manager, model_id, source_id):
+        if not any(policy is candidate for candidate in _INSTALLED_AUDIO_POLICIES):
+            raise OwnedAudioError("native_runtime_unqualified")
+        runtime = manager.runtime_instance_id
+        if any(
+            type(value) is not str or not 1 <= len(value) <= 256
+            for value in (runtime, model_id, source_id)
+        ):
+            raise OwnedAudioError("invalid_load_plan")
+        # Blocking source inspection happens before gate/actor admission, not
+        # inside its synchronous claim. This is a policy prerequisite, no claim
+        # that package paths/digests or an import probe establish qualification.
+        policy.validate_source(source)
+        proof = object.__new__(cls)
+        proof._policy, proof._source = policy, source
+        proof._identity = (runtime, model_id, source_id, manager)
+        proof._released, proof._gate, proof._lineage = False, None, None
+        # The source owner must atomically retain one original proof. It may not
+        # mint another proof/identity for an already retained/consumed source.
+        policy.bind_retention(source, proof)
+        return proof
+
+    @property
+    def runtime_instance_id(self):
+        return self._identity[0]
+
+    @property
+    def model_id(self):
+        return self._identity[1]
+
+    @property
+    def source_id(self):
+        return self._identity[2]
+
+    @property
+    def manager(self):
+        return self._identity[3]
+
+    def __repr__(self):
+        return "<InstalledAudioSourceProof>"
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("Installed source proofs are not serializable")
+
+    def __copy__(self):
+        raise TypeError("Installed source proofs are not copyable")
+
+    def __deepcopy__(self, memo):
+        raise TypeError("Installed source proofs are not copyable")
+
+
+class _InstalledAudioCustody:
+    def __init__(self, proof):
+        from loaders.cohere_asr_loader import RetainedSpeechAcquisition
+
+        self.proof = proof
+        self.acquisition = RetainedSpeechAcquisition()
+        self.loaded = None
+        self.cleaned = False
+
+
+class _InstalledOwnedNativeGate:
+    """Conditional source plumbing only; the shipping policy catalog is empty.
+
+    A future source-owned policy must validate complete original runtime/model
+    capabilities with blocking validate_source, atomically bind one source proof
+    with nonblocking bind_retention, observe actual native disposal before
+    dispose_native returns and close actual model capabilities in release_source.
+    Paths/manifests/import/version probes and a child boolean supply none of
+    these authorities. Controlled tests qualify no installed runtime.
+    """
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError("Installed gates come from the original source owner")
+
+    @classmethod
+    def _from_source_owner(cls, source):
+        if len(_INSTALLED_AUDIO_POLICIES) != 1:
+            raise OwnedAudioError("native_runtime_unqualified")
+        policy = _INSTALLED_AUDIO_POLICIES[0]
+        proof = policy.retain_source(source)
+        if (
+            type(proof) is not _InstalledAudioSourceProof
+            or proof._policy is not policy
+            or proof._source is not source
+            or proof._gate is not None
+        ):
+            raise OwnedAudioError("native_runtime_unqualified")
+        gate = object.__new__(cls)
+        gate._proof, gate._plan, gate._actor = proof, None, None
+        gate._validate_memory()
+        policy.validate_source(source)
+        proof._gate = gate
+        return gate
+
+    def _validate_memory(self):
+        proof = self._proof
+        if not any(proof._policy is candidate for candidate in _INSTALLED_AUDIO_POLICIES):
+            raise OwnedAudioError("native_runtime_unqualified")
+        if proof._released:
+            raise OwnedAudioError("artifact_custody_unavailable")
+        if proof._gate is not None and proof._gate is not self:
+            raise OwnedAudioError("invalid_load_plan")
+
+    def bind_actor(self, manager, actor):
+        """Original manager and actor identities only; no filesystem callback."""
+        self._validate_memory()
+        if (
+            manager is not self._proof.manager
+            or manager.runtime_instance_id != self._proof.runtime_instance_id
+            or self._actor is not None
+        ):
+            raise OwnedAudioError("invalid_load_plan")
+        self._actor = actor
+
+    def prepare_from_parent(self, payload, manager):
+        self._validate_memory()
+        proof = self._proof
+        if (
+            type(payload) is not dict
+            or payload.keys() != {"runtime_instance_id", "model_id", "source_id"}
+            or any(type(value) is not str for value in payload.values())
+            or payload["runtime_instance_id"] != proof.runtime_instance_id
+            or manager is not proof.manager
+            or manager.runtime_instance_id != proof.runtime_instance_id
+            or payload["model_id"] != proof.model_id
+            or payload["source_id"] != proof.source_id
+            or (self._plan is not None and self._plan._claimed)
+        ):
+            raise OwnedAudioError("invalid_load_plan")
+        # Wire preparation stays nonblocking. Source construction inspected the
+        # retained capability; the native worker verifies its current bytes and
+        # identity again before any native API/import/constructor effect.
+        if self._plan is None:
+            self._plan = OwnedLoadPlan._from_native_gate(
+                self,
+                runtime_instance_id=proof.runtime_instance_id,
+                model_id=proof.model_id,
+                custody=_InstalledAudioCustody(proof),
+                device="cpu",
+            )
+        return self._plan
+
+    def _plan_lineage(self, plan, *, claimed=False):
+        self._validate_memory()
+        proof = self._proof
+        if (
+            type(plan) is not OwnedLoadPlan
+            or plan is not self._plan
+            or plan._gate is not self
+            or self._actor is None
+            or self._actor.manager is not proof.manager
+            or self._actor.manager.runtime_instance_id != proof.runtime_instance_id
+            or proof.manager._owned_audio_actor is not self._actor
+            or type(plan._custody) is not _InstalledAudioCustody
+            or plan._custody.proof is not proof
+            or plan.runtime_instance_id != proof.runtime_instance_id
+            or plan.model_id != proof.model_id
+            or (claimed and (plan._claimed is not True or proof._lineage is not plan))
+        ):
+            raise OwnedAudioError("invalid_load_plan")
+        if plan.device != "cpu":
+            raise OwnedAudioError("native_runtime_unsupported")
+
+    def admit(self, plan, runtime_instance_id):
+        # This actor/event-loop boundary performs retained in-memory checks only.
+        self._plan_lineage(plan)
+        if runtime_instance_id != self._proof.runtime_instance_id:
+            raise OwnedAudioError("invalid_load_plan")
+
+    def admit_device(self, plan, device):
+        self._plan_lineage(plan)
+        if device.type != "cpu" or str(device) != "cpu":
+            raise OwnedAudioError("native_runtime_unsupported")
+        if self._proof._lineage is None:
+            if plan._claimed:
+                raise OwnedAudioError("invalid_load_plan")
+            self._proof._lineage = plan
+        elif self._proof._lineage is not plan:
+            raise OwnedAudioError("invalid_load_plan")
+
+    def load(self, plan, device):
+        from loaders.cohere_asr_loader import load_cohere_asr_retained
+        from loaders.owned_cohere_source import HeldCohereReadSource
+
+        self._plan_lineage(plan, claimed=True)
+        self.admit_device(plan, device)
+        custody = plan._custody
+        if custody.loaded is not None or custody.cleaned or custody.acquisition.objects:
+            raise OwnedAudioError("invalid_load_plan")
+        # Original source and selected file capabilities are never submitted.
+        self._proof._policy.validate_source(self._proof._source)
+        source = self._proof._policy.model_source(self._proof._source)
+        if type(source) is not HeldCohereReadSource:
+            raise OwnedAudioError("artifact_custody_unavailable")
+        custody.acquisition.retain("model_read_source", source)
+        if source.source_owner is not self._proof._source:
+            raise OwnedAudioError("artifact_custody_unavailable")
+        self._proof._policy.validate_source(self._proof._source)
+        model, processor, kind = load_cohere_asr_retained(source, device, custody.acquisition)
+        custody.loaded = LoadedModel(model, processor, device, kind)
+        return custody.loaded
+
+    def cleanup(self, plan, loaded, device):
+        self._plan_lineage(plan, claimed=True)
+        self.admit_device(plan, device)
+        custody = plan._custody
+        if loaded is not custody.loaded or custody.cleaned:
+            raise OwnedAudioError("invalid_load_plan")
+        acquisition = custody.acquisition
+        if acquisition.unknown_allocations or acquisition.in_flight is not None:
+            # Dropping known Python objects cannot prove constructor-failure
+            # native cessation. Keep every stage and original source in custody.
+            raise OwnedAudioError("native_cleanup_unconfirmed")
+        self._proof._policy.dispose_native(acquisition, device)
+        acquisition.clear_after_cleanup()
+        custody.cleaned = True
+
+    def release_custody(self, plan):
+        self._plan_lineage(plan, claimed=True)
+        custody = plan._custody
+        acquisition = custody.acquisition
+        if (
+            acquisition.objects
+            or acquisition.unknown_allocations
+            or acquisition.in_flight is not None
+            or (
+                custody.loaded is not None
+                and (
+                    not custody.cleaned
+                    or custody.loaded.model is not None
+                    or custody.loaded.tokenizer is not None
+                )
+            )
+        ):
+            raise OwnedAudioError("artifact_custody_unavailable")
+        # Actual source/model descriptor closure belongs to its original owner.
+        # Runtime roles remain held by the process parent through exact drain.
+        self._proof._policy.release_source(self._proof._source)
+        self._proof._released = True
+        custody.loaded = None
+
+
 @dataclass(frozen=True)
 class OwnedAudioStatus:
     slot_ref: SpeechSlotRef
@@ -158,6 +416,8 @@ class OwnedAudioActor:
         self._max_settled_receipts = max_settled_receipts
         self._active = None
         self._closed = False
+        if hasattr(self._gate, "bind_actor"):
+            self._gate.bind_actor(manager, self)
         manager._install_owned_audio_actor(self)
 
     @property
@@ -213,6 +473,8 @@ class OwnedAudioActor:
             raise OwnedAudioError("load_admission_failed") from None
         if device.type not in ("cpu", "cuda"):
             raise OwnedAudioError("native_runtime_unsupported")
+        if hasattr(self._gate, "admit_device"):
+            self._gate.admit_device(plan, device)
         slot = self.manager._reserve_owned_audio_slot(self, plan.model_id, device)
         try:
             ref = self.manager.speech_slot_ref(slot.slot_id)

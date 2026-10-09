@@ -537,8 +537,627 @@ class QuarantineTests(unittest.TestCase):
                 self.assertNotIn("Traceback", error)
 
 
+# Fixed-source conditional plumbing tests only. This policy is never imported
+# or catalogued by shipping code and qualifies neither Torch nor model inference.
+class HeldInstalledFixtureSource:
+    def __init__(self, root, manager):
+        import os
+
+        self.root, self.manager = root, manager
+        self.proof = None
+        self.released = False
+        self.releases = 0
+        self.validations = []
+        self.native_calls = []
+        self.disposals = []
+        self.fail_stage = None
+        self.hold_model = False
+        self.model_entered, self.model_continue = threading.Event(), threading.Event()
+        self.model_continue.set()
+        self.directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        self.root_identity = self.identity(os.fstat(self.directory))
+        self.members = {}
+        bodies = {
+            "config.json": json.dumps(
+                {"model_type": "cohere_asr", "architectures": ["CohereAsrForConditionalGeneration"]}
+            ).encode(),
+            "model.safetensors": b"synthetic fixture, no tensors",
+            "tokenizer.json": b"{}",
+            "tokenizer_config.json": b"{}",
+            "preprocessor_config.json": b"{}",
+        }
+        for name, body in bodies.items():
+            (root / name).write_bytes(body)
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self.directory)
+            self.members[name] = (fd, self.identity(os.fstat(fd)), body)
+
+    @staticmethod
+    def identity(value):
+        return value.st_dev, value.st_ino, value.st_size
+
+    def inspect(self):
+        import os
+
+        if self.released:
+            raise OwnedAudioError("artifact_custody_unavailable")
+        # Actual current fixed fixture bytes and descriptor identities, not a
+        # metadata hash/locator promoted into installed runtime qualification.
+        if self.identity(os.stat(self.root)) != self.identity(os.fstat(self.directory)):
+            raise OwnedAudioError("artifact_custody_unavailable")
+        for name, (fd, identity, body) in self.members.items():
+            if (
+                self.identity(os.fstat(fd)) != identity
+                or self.identity(os.stat(name, dir_fd=self.directory, follow_symlinks=False))
+                != identity
+                or os.pread(fd, len(body) + 1, 0) != body
+            ):
+                raise OwnedAudioError("artifact_custody_unavailable")
+        self.validations.append(threading.get_ident())
+
+    def close_model_capabilities(self):
+        import os
+
+        assert not self.released
+        for fd, _, _ in self.members.values():
+            os.close(fd)
+        os.close(self.directory)
+        self.released = True
+        self.releases += 1
+
+    def abort_unclaimed_fixture(self):
+        # Explicit test source-owner abort only when no native claim exists.
+        if not self.released:
+            self.close_model_capabilities()
+
+    def stage(self, name):
+        self.native_calls.append(name)
+        if name == "model" and self.hold_model:
+            self.model_entered.set()
+            if not self.model_continue.wait(5):
+                raise RuntimeError("Controlled model constructor was not released")
+        if self.fail_stage == name:
+            raise RuntimeError("controlled native constructor uncertainty")
+
+
+class FixedInstalledFixturePolicy:
+    def retain_source(self, source):
+        from owned_audio import _InstalledAudioSourceProof
+
+        if type(source) is not HeldInstalledFixtureSource:
+            raise OwnedAudioError("native_runtime_unqualified")
+        if source.proof is None:
+            return _InstalledAudioSourceProof._from_source_policy(
+                self,
+                source,
+                manager=source.manager,
+                model_id="library/speech",
+                source_id="fixed-installed-fixture",
+            )
+        return source.proof
+
+    def bind_retention(self, source, proof):
+        if source.proof is not None:
+            raise OwnedAudioError("invalid_load_plan")
+        source.proof = proof
+
+    def validate_source(self, source):
+        source.inspect()
+
+    def model_source(self, source):
+        from loaders.owned_cohere_source import HeldCohereReadSource
+
+        return HeldCohereReadSource._from_members(
+            source, {name: member[0] for name, member in source.members.items()}
+        )
+
+    def dispose_native(self, acquisition, device):
+        assert device.type == "cpu" and not acquisition.unknown_allocations
+        self.source.disposals.append(tuple(acquisition.objects))
+        if self.source.fail_stage == "dispose":
+            raise RuntimeError("controlled disposal uncertainty")
+
+    def release_source(self, source):
+        assert source is self.source
+        source.close_model_capabilities()
+
+
+_INSTALLED_STAGES = (
+    "model_read_source",
+    "native_api",
+    "processor_classes",
+    "feature_extractor",
+    "tokenizer_backend",
+    "tokenizer_options",
+    "tokenizer",
+    "processor",
+    "model_classes",
+    "config",
+    "generation_config",
+    "weights",
+    "model",
+    "model_eval",
+)
+
+
+def fixed_installed_native_modules(source):
+    import types
+
+    module = types.ModuleType("transformers")
+    tokenizers = types.ModuleType("tokenizers")
+    safetensors = types.ModuleType("safetensors.torch")
+
+    class NativeObject:
+        def __init__(self, kind):
+            self.kind = kind
+            self.device = Device()
+
+        def eval(self):
+            source.stage("model_eval")
+
+    class Feature:
+        @staticmethod
+        def from_dict(options):
+            assert options == {}
+            source.stage("feature_extractor")
+            return NativeObject("feature_extractor")
+
+    class Tokenizer:
+        def __init__(self, *, tokenizer_object, **options):
+            assert tokenizer_object.kind == "tokenizer_backend" and options == {}
+            source.stage("tokenizer")
+
+    class Backend:
+        @staticmethod
+        def from_str(raw):
+            assert raw == "{}"
+            source.stage("tokenizer_backend")
+            return NativeObject("tokenizer_backend")
+
+    class Config:
+        @staticmethod
+        def from_dict(options):
+            assert options == {
+                "model_type": "cohere_asr",
+                "architectures": ["CohereAsrForConditionalGeneration"],
+            }
+            source.stage("config")
+            return NativeObject("config")
+
+    class Generation:
+        @staticmethod
+        def from_model_config(config):
+            assert config.kind == "config"
+            source.stage("generation_config")
+            return NativeObject("generation_config")
+
+    def weights(filename, *, device):
+        import os
+
+        assert device == "cpu" and filename.startswith("/proc/self/fd/")
+        # The loader now consumes an immutable copy, retaining the original
+        # separately for allocation identity/custody validation.
+        import fcntl
+
+        assert source.identity(os.stat(filename)) != source.members["model.safetensors"][1]
+        with open(filename, "rb") as sealed:
+            required = (
+                fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL
+            )
+            assert fcntl.fcntl(sealed.fileno(), fcntl.F_GET_SEALS) & required == required
+        with open(filename, "rb") as reader:
+            assert reader.read() == source.members["model.safetensors"][2]
+        source.stage("weights")
+        return {"owned_fixture_weight": NativeObject("weight")}
+
+    class Processor:
+        def __init__(self, *, feature_extractor, tokenizer):
+            source.stage("processor")
+            self.feature_extractor, self.tokenizer = feature_extractor, tokenizer
+
+    class Model:
+        @staticmethod
+        def from_pretrained(root, **options):
+            assert root is None
+            assert options.pop("config").kind == "config"
+            assert options.pop("generation_config").kind == "generation_config"
+            assert options.pop("state_dict")["owned_fixture_weight"].kind == "weight"
+            assert options == {
+                "local_files_only": True,
+                "trust_remote_code": False,
+                "use_safetensors": True,
+                "device_map": "cpu",
+                "attn_implementation": "eager",
+                "dtype": "auto",
+                "output_loading_info": True,
+            }
+            source.stage("model")
+            report = {
+                "missing_keys": set(),
+                "unexpected_keys": set(),
+                "mismatched_keys": set(),
+                "error_msgs": [],
+            }
+            if getattr(source, "incomplete_weights", False):
+                report["missing_keys"].add("unselected-weight")
+            return NativeObject("model"), report
+
+    module.CohereAsrFeatureExtractor = Feature
+    module.TokenizersBackend = Tokenizer
+    module.CohereAsrProcessor = Processor
+    module.CohereAsrForConditionalGeneration = Model
+    module.CohereAsrConfig, module.GenerationConfig = Config, Generation
+    module.StoppingCriteria, module.StoppingCriteriaList = object, list
+    tokenizers.Tokenizer, tokenizers.AddedToken = Backend, object
+    safetensors.load_file = weights
+    if source.fail_stage == "processor_classes":
+        del module.TokenizersBackend
+    if source.fail_stage == "model_classes":
+        del module.CohereAsrConfig
+    return {"transformers": module, "tokenizers": tokenizers, "safetensors.torch": safetensors}
+
+
+def installed_payload(manager):
+    return {
+        "runtime_instance_id": manager.runtime_instance_id,
+        "model_id": "library/speech",
+        "source_id": "fixed-installed-fixture",
+    }
+
+
+class InstalledConditionalPlumbingTests(unittest.IsolatedAsyncioTestCase):
+    def fixture(self):
+        import tempfile
+        from owned_audio import _InstalledOwnedNativeGate
+
+        root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        manager = _TestModelManager(Devices())
+        source = HeldInstalledFixtureSource(root, manager)
+        policy = FixedInstalledFixturePolicy()
+        policy.source = source
+        self.enterContext(patch("owned_audio._INSTALLED_AUDIO_POLICIES", (policy,)))
+        self.enterContext(patch.dict(sys.modules, fixed_installed_native_modules(source)))
+        gate = _InstalledOwnedNativeGate._from_source_owner(source)
+        actor = OwnedAudioActor(manager, native_gate=gate)
+        self.addAsyncCleanup(self.clean_fixture, actor, source)
+        return source, policy, gate, actor, manager
+
+    async def clean_fixture(self, actor, source):
+        source.model_continue.set()
+        await eventually(lambda: actor._active is None)
+        for entry in list(actor._entries.values()):
+            if entry.state == "ready":
+                await actor.unload(entry.ref)
+        actor.close_admission()
+        source.abort_unclaimed_fixture()
+
+    async def test_shipping_catalog_and_factory_remain_unqualified(self):
+        from owned_audio import _InstalledOwnedNativeGate, _InstalledAudioSourceProof
+        from private_owned_channel import (
+            _create_installed_private_owned_channel,
+            create_private_owned_channel,
+        )
+
+        manager = _TestModelManager(Devices())
+        for source in ({"qualified": True, "path": "/installed"}, object(), None):
+            with self.assertRaisesRegex(OwnedAudioError, "native_runtime_unqualified"):
+                _InstalledOwnedNativeGate._from_source_owner(source)
+            with self.assertRaisesRegex(OwnedAudioError, "native_runtime_unqualified"):
+                _create_installed_private_owned_channel(manager, source)
+        with self.assertRaises(TypeError):
+            _InstalledAudioSourceProof()
+        channel = create_private_owned_channel(manager)
+        self.assertIsNone(channel._gate)
+        self.assertEqual(type(channel.actor._gate).__name__, "UnavailableOwnedNativeGate")
+
+    async def test_fixed_source_private_provider_load_use_unload_closes_original_capabilities(self):
+        import os
+        from native_speech_result import NativeSpeechResult
+        from private_owned_channel import PrivateOwnedChannel
+
+        source, policy, gate, actor, manager = self.fixture()
+        original_fds = [source.directory, *(value[0] for value in source.members.values())]
+        channel = PrivateOwnedChannel(
+            actor,
+            native_gate=gate,
+            adapter=lambda *args: NativeSpeechResult("controlled transcript", "stop"),
+        )
+        plan = gate.prepare_from_parent(installed_payload(manager), manager)
+        with patch.object(
+            policy, "validate_source", side_effect=AssertionError("admit must not scan")
+        ):
+            self.assertIs(gate.prepare_from_parent(installed_payload(manager), manager), plan)
+            gate.admit(plan, manager.runtime_instance_id)
+        ready = await channel._dispatch(
+            "load", installed_payload(manager), lambda: None, {"cancel": False, "load_ref": None}
+        )
+        self.assertEqual((ready["state"], ready["cleanup"]), ("ready", "retained"))
+        self.assertFalse(actor.status(channel._bridge._slot_ref).production_available)
+        self.assertIs(plan._custody.proof._source, source)
+        self.assertEqual(
+            set(plan._custody.acquisition.objects),
+            set(_INSTALLED_STAGES),
+        )
+        request = {
+            "contract_version": 1,
+            "request_id": "fixed-source-use",
+            "model": "library/speech",
+            "capability": "audio_transcription",
+            "input": {
+                "kind": "audio",
+                "encoding": "pcm_s16le",
+                "sample_rate_hz": 16000,
+                "channels": 1,
+                "sample_count": 1,
+                "data_base64": "AAA=",
+            },
+            "output": "text",
+            "options": {"kind": "audio"},
+        }
+        use = await channel._dispatch(
+            "use",
+            {
+                "runtime_instance_id": manager.runtime_instance_id,
+                "slot": ready["slot"],
+                "request": request,
+            },
+            lambda: None,
+            {},
+        )
+        settled = await channel._dispatch(
+            "status",
+            {
+                "runtime_instance_id": manager.runtime_instance_id,
+                "slot": ready["slot"],
+                "operation_id": use["operation_id"],
+                "wait_for_settlement": True,
+            },
+            lambda: None,
+            {},
+        )
+        self.assertEqual(
+            (settled["state"], settled["text"], settled["finish_reason"]),
+            ("completed", "controlled transcript", "stop"),
+        )
+        retired = await channel._dispatch(
+            "unload",
+            {"runtime_instance_id": manager.runtime_instance_id, "slot": ready["slot"]},
+            lambda: None,
+            {},
+        )
+        self.assertEqual((retired["state"], retired["cleanup"]), ("retired", "confirmed"))
+        self.assertEqual(source.releases, 1)
+        self.assertFalse(plan._custody.acquisition.objects)
+        self.assertIsNone(plan._custody.loaded)
+        for fd in original_fds:
+            with self.assertRaises(OSError):
+                os.fstat(fd)
+        for action in (
+            lambda: gate.prepare_from_parent(installed_payload(manager), manager),
+            lambda: gate.release_custody(plan),
+        ):
+            with self.assertRaisesRegex(OwnedAudioError, "artifact_custody_unavailable"):
+                action()
+        self.assertEqual(source.releases, 1)
+        self.assertTrue(any(thread != threading.get_ident() for thread in source.validations))
+
+    async def test_original_manager_same_uuid_and_plan_source_lineage_cannot_be_retargeted(self):
+        from owned_audio import _InstalledOwnedNativeGate, _InstalledAudioSourceProof
+
+        source, policy, gate, actor, manager = self.fixture()
+        before = len(source.validations)
+        for field in ("model_id", "source_id", "runtime_instance_id"):
+            payload = installed_payload(manager)
+            payload[field] = "wrong"
+            with self.assertRaisesRegex(OwnedAudioError, "invalid_load_plan"):
+                gate.prepare_from_parent(payload, manager)
+        other = _TestModelManager(Devices())
+        other._runtime_instance_id = manager.runtime_instance_id
+        with self.assertRaisesRegex(OwnedAudioError, "invalid_load_plan"):
+            gate.prepare_from_parent(installed_payload(manager), other)
+        with self.assertRaisesRegex(OwnedAudioError, "invalid_load_plan"):
+            OwnedAudioActor(other, native_gate=gate)
+        with self.assertRaisesRegex(OwnedAudioError, "native_runtime_unqualified"):
+            _InstalledOwnedNativeGate._from_source_owner(source)
+        with self.assertRaisesRegex(OwnedAudioError, "invalid_load_plan"):
+            _InstalledAudioSourceProof._from_source_policy(
+                policy, source, manager=manager, model_id="retarget", source_id="retarget"
+            )
+        self.assertEqual(
+            before + 1, len(source.validations)
+        )  # only attempted source-owner re-retention inspected
+        plan = gate.prepare_from_parent(installed_payload(manager), manager)
+        for action in (copy.copy, copy.deepcopy, pickle.dumps):
+            with self.assertRaises(TypeError):
+                action(plan._custody.proof)
+        plan.model_id = "retarget"
+        with self.assertRaises(OwnedAudioError):
+            await actor.load(plan)
+        plan.model_id = "library/speech"
+        foreign = OwnedLoadPlan._from_native_gate(
+            gate,
+            runtime_instance_id=manager.runtime_instance_id,
+            model_id=plan.model_id,
+            custody=plan._custody,
+        )
+        for action in (
+            lambda: gate.admit(foreign, manager.runtime_instance_id),
+            lambda: gate.cleanup(foreign, None, Device()),
+            lambda: gate.release_custody(foreign),
+        ):
+            with self.assertRaises(OwnedAudioError):
+                action()
+        self.assertFalse(plan._claimed)
+        self.assertFalse(manager.slots)
+        self.assertFalse(source.native_calls)
+        ready = await actor.load(plan)
+        with self.assertRaisesRegex(OwnedAudioError, "invalid_load_plan"):
+            gate.prepare_from_parent(installed_payload(manager), manager)
+        with self.assertRaisesRegex(OwnedAudioError, "invalid_load_plan"):
+            gate.cleanup(plan, object(), Device())
+        self.assertFalse(source.disposals)
+        await actor.unload(ready.slot_ref)
+        self.assertEqual(source.releases, 1)
+
+    async def test_actual_cpu_mismatch_refuses_before_claim_and_current_source_drift_before_native(
+        self,
+    ):
+        source, policy, gate, actor, manager = self.fixture()
+        plan = gate.prepare_from_parent(installed_payload(manager), manager)
+        original = manager.device_manager.resolve_device
+        manager.device_manager.resolve_device = lambda _: Device("cuda")
+        with self.assertRaisesRegex(OwnedAudioError, "native_runtime_unsupported"):
+            await actor.load(plan)
+        self.assertFalse(plan._claimed)
+        self.assertIsNone(gate._proof._lineage)
+        self.assertFalse(manager.slots)
+        manager.device_manager.resolve_device = original
+        (source.root / "model.safetensors").write_bytes(b"changed after source preparation")
+        failed = await actor.load(plan)
+        self.assertEqual(
+            (failed.state, failed.cleanup, failed.error_code),
+            ("failed", "confirmed", "load_failed"),
+        )
+        self.assertFalse(source.native_calls)
+        self.assertEqual(source.releases, 1)
+
+    async def test_reader_from_another_owner_refuses_before_native_acquisition(self):
+        from loaders.owned_cohere_source import HeldCohereReadSource
+
+        source, policy, gate, actor, manager = self.fixture()
+        reader = HeldCohereReadSource._from_members(
+            object(), {name: value[0] for name, value in source.members.items()}
+        )
+        self.addCleanup(reader.close)
+        plan = gate.prepare_from_parent(installed_payload(manager), manager)
+        with patch.object(policy, "model_source", return_value=reader):
+            failed = await actor.load(plan)
+        self.assertEqual((failed.state, failed.cleanup), ("failed", "confirmed"))
+        self.assertFalse(source.native_calls)
+        self.assertIsNone(reader.source_owner)
+        self.assertEqual(source.releases, 1)
+
+    async def test_incomplete_weights_disposes_returned_model_before_source_release(self):
+        source, policy, gate, actor, manager = self.fixture()
+        source.incomplete_weights = True
+        plan = gate.prepare_from_parent(installed_payload(manager), manager)
+        failed = await actor.load(plan)
+        self.assertEqual((failed.state, failed.cleanup), ("failed", "confirmed"))
+        self.assertIn("model", source.disposals[0])
+        self.assertIn("weights", source.disposals[0])
+        self.assertIn("model_read_source", source.disposals[0])
+        self.assertNotIn("model_eval", source.native_calls)
+        self.assertEqual(source.releases, 1)
+        self.assertFalse(plan._custody.acquisition.objects)
+
+    async def test_lost_constructor_caller_retains_each_completed_stage_until_actual_return(self):
+        source, policy, gate, actor, manager = self.fixture()
+        source.hold_model = True
+        source.model_continue.clear()
+        plan = gate.prepare_from_parent(installed_payload(manager), manager)
+        caller = asyncio.create_task(actor.load(plan))
+        await eventually(source.model_entered.is_set)
+        caller.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await caller
+        entry = actor._active
+        self.assertFalse(source.released)
+        self.assertEqual(plan._custody.acquisition.in_flight, "model")
+        self.assertIn("feature_extractor", plan._custody.acquisition.objects)
+        self.assertIn("tokenizer", plan._custody.acquisition.objects)
+        self.assertIn("processor", plan._custody.acquisition.objects)
+        self.assertTrue(manager._get_device_lock("cpu").locked())
+        source.model_continue.set()
+        await eventually(lambda: entry.cleanup == "confirmed")
+        self.assertEqual((entry.state, entry.error_code), ("failed", "cancelled"))
+        self.assertEqual(source.releases, 1)
+        self.assertFalse(plan._custody.acquisition.objects)
+
+
+async def installed_quarantine_fixture(stage):
+    import os
+    import tempfile
+    from owned_audio import _InstalledOwnedNativeGate
+
+    with tempfile.TemporaryDirectory() as folder:
+        manager = _TestModelManager(Devices())
+        source = HeldInstalledFixtureSource(Path(folder).resolve(), manager)
+        source.fail_stage = stage
+        policy = FixedInstalledFixturePolicy()
+        policy.source = source
+        with (
+            patch("owned_audio._INSTALLED_AUDIO_POLICIES", (policy,)),
+            patch.dict(sys.modules, fixed_installed_native_modules(source)),
+        ):
+            gate = _InstalledOwnedNativeGate._from_source_owner(source)
+            actor = OwnedAudioActor(manager, native_gate=gate)
+            plan = gate.prepare_from_parent(installed_payload(manager), manager)
+            if stage == "native_api":
+                with patch(
+                    "loaders.cohere_asr_loader._native_api",
+                    side_effect=RuntimeError("controlled native import uncertainty"),
+                ):
+                    status = await actor.load(plan)
+            elif stage == "tokenizer_options":
+                with patch(
+                    "loaders.owned_cohere_source.tokenizer_options",
+                    side_effect=RuntimeError("controlled special token uncertainty"),
+                ):
+                    status = await actor.load(plan)
+            else:
+                status = await actor.load(plan)
+            if stage == "dispose":
+                status = await actor.unload(status.slot_ref)
+            assert (status.state, status.cleanup) == ("cleanup_unconfirmed", "unconfirmed")
+            assert actor in _CUSTODIANS and not source.released and source.releases == 0
+            assert manager._get_device_lock("cpu").locked()
+            assert source.proof._source is source
+            os.fstat(source.directory)
+            reader = plan._custody.acquisition.objects["model_read_source"]
+            assert reader.source_owner is source
+            assert (
+                source.identity(os.stat(reader.weights_filename()))
+                != source.members["model.safetensors"][1]
+            )
+            with open(reader.weights_filename(), "rb") as weights:
+                assert weights.read() == source.members["model.safetensors"][2]
+            expected = (
+                set(_INSTALLED_STAGES)
+                if stage == "dispose"
+                else set(_INSTALLED_STAGES[: _INSTALLED_STAGES.index(stage)])
+            )
+            assert set(plan._custody.acquisition.objects) == expected
+            assert plan._custody.acquisition.unknown_allocations is (stage != "dispose")
+            actor.close_admission()
+            print("installed conditional custody retained: " + stage, flush=True)
+            # Stay within the source policy's retained lifetime during the
+            # attempted orderly shutdown; only the test parent kills the child.
+            await actor._hold_quarantine(actor._active)
+
+
+class InstalledQuarantinePlumbingTests(unittest.TestCase):
+    def test_every_uncertain_native_stage_and_disposal_retains_original_source(self):
+        for stage in (*_INSTALLED_STAGES[1:], "dispose"):
+            with self.subTest(stage=stage):
+                child = subprocess.Popen(
+                    [sys.executable, __file__, "--installed-quarantine", stage],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                try:
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        child.communicate(timeout=3)
+                finally:
+                    child.kill()
+                    output, error = child.communicate(timeout=3)
+                self.assertIn("installed conditional custody retained: " + stage, output)
+                self.assertNotIn("Traceback", error)
+
+
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--quarantine":
+    if len(sys.argv) == 3 and sys.argv[1] == "--installed-quarantine":
+        asyncio.run(installed_quarantine_fixture(sys.argv[2]))
+    elif len(sys.argv) == 3 and sys.argv[1] == "--quarantine":
         asyncio.run(quarantine_fixture(sys.argv[2]))
     else:
         unittest.main()

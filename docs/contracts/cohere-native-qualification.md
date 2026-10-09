@@ -140,6 +140,17 @@ Do not add datasets or inference-server extras solely because optional examples
 use them. See [pinned feature extraction](https://github.com/huggingface/transformers/blob/v5.4.0/src/transformers/models/cohere_asr/feature_extraction_cohere_asr.py)
 and [pinned package requirements](https://github.com/huggingface/transformers/blob/v5.4.0/setup.py).
 
+## Conditional source implementation
+
+The [installed audio constructor](installed-audio-constructor.md) retains the
+original prepared allocation, conditionally transfers runtime custody, and uses
+sealed Linux memfd snapshots for selected model descriptor and weights reads.
+Its private loader constructs explicit classes from those bytes without model
+package/cache lookup. Shipping policy remains empty: immutable model snapshots
+alone do not establish interpreter/dependency trust, native filesystem read
+containment, real transcription, or native disposal. The positive policies and
+native constructors in unit tests are controlled fixtures.
+
 ## Remaining execution and acceptance gates
 
 Selected installed Python files and the managed-depot lease establish byte

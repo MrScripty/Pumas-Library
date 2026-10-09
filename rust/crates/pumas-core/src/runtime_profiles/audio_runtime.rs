@@ -22,9 +22,7 @@ use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
-#[cfg(any(test, feature = "test-support"))]
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 struct Member {
     path: String,
@@ -35,6 +33,10 @@ struct Member {
 
 enum Qualification {
     Unavailable,
+    Installed {
+        model_read_set: BTreeSet<String>,
+        selected: Weak<PreparedArtifactUse>,
+    },
     #[cfg(any(test, feature = "test-support"))]
     ControlledProcess {
         model_read_set: BTreeSet<String>,
@@ -46,7 +48,7 @@ enum Qualification {
 /// A caller may retain its Arc; the child composite guard owns the final copy.
 pub(crate) struct AudioRuntimeOwner {
     qualification: Qualification,
-    source_path: PathBuf,
+    source_path: Option<PathBuf>,
     source_root: Dir,
     members: Vec<Member>,
     directories: Vec<(String, Dir)>,
@@ -65,10 +67,25 @@ impl std::fmt::Debug for AudioRuntimeOwner {
 }
 
 impl AudioRuntimeOwner {
-    /// Installed recipe/interpreter/read-set qualification does not exist yet.
-    /// This factory does not accept decoded evidence or execute import probes.
-    pub(crate) fn for_installed_runtime() -> std::result::Result<Arc<Self>, AudioCustodyError> {
-        Err(AudioCustodyError::UnqualifiedRuntime)
+    /// Conditional installed-owner construction from concrete retained custody.
+    /// The private shipping policy resolver currently refuses: no verified full
+    /// native/model read-containment and lifecycle policy exists. Neither the
+    /// candidate nor decoded evidence can grant that missing qualification.
+    pub(crate) fn for_installed_runtime(
+        candidate: installed::InstalledAudioRuntimeCandidate,
+        selected: &Arc<PreparedArtifactUse>,
+    ) -> std::result::Result<Arc<Self>, AudioCustodyError> {
+        candidate.into_runtime_owner(selected, installed::InstalledAudioPolicy::shipping())
+    }
+
+    /// The same conditional constructor with a fixed, source-owned policy for
+    /// dummy bytes only. Absent from shipping AND test-support library builds.
+    #[cfg(test)]
+    fn for_fixed_installed_fixture(
+        candidate: installed::InstalledAudioRuntimeCandidate,
+        selected: &Arc<PreparedArtifactUse>,
+    ) -> std::result::Result<Arc<Self>, AudioCustodyError> {
+        candidate.into_runtime_owner(selected, installed::InstalledAudioPolicy::fixed_fixture())
     }
 
     /// Private copied code path for the admitted child, never a locator grant.
@@ -103,10 +120,21 @@ impl AudioRuntimeOwner {
 
     /// In-memory qualification check, without callback or filesystem work.
     pub(crate) fn permits_selected(&self, prepared: &PreparedArtifactUse) -> bool {
-        #[cfg(not(any(test, feature = "test-support")))]
-        let _ = prepared;
         match &self.qualification {
             Qualification::Unavailable => false,
+            Qualification::Installed {
+                model_read_set,
+                selected,
+            } => {
+                selected
+                    .upgrade()
+                    .is_some_and(|bound| std::ptr::eq(bound.as_ref(), prepared))
+                    && prepared
+                        .manifest()
+                        .map(|member| member.relative_path.clone())
+                        .collect::<BTreeSet<_>>()
+                        == *model_read_set
+            }
             #[cfg(any(test, feature = "test-support"))]
             Qualification::ControlledProcess {
                 model_read_set,
@@ -130,10 +158,12 @@ impl AudioRuntimeOwner {
         if let Some(installed) = &self.installed_bytes {
             installed.validate()?;
         }
+        if let Some(source_path) = &self.source_path {
+            if !same_directory(&self.source_root, &open_pinned_directory(source_path)?)? {
+                return Err(refusal("runtime source root identity changed"));
+            }
+        }
         if !same_directory(
-            &self.source_root,
-            &open_pinned_directory(&self.source_path)?,
-        )? || !same_directory(
             &self.copied_root,
             &open_pinned_directory(self.read_source.path())?,
         )? {
@@ -268,14 +298,26 @@ impl AudioRuntimeOwner {
     }
 
     fn snapshot(source_path: &Path, selected: &BTreeSet<String>) -> Result<Self> {
-        let source_root = open_pinned_directory(source_path)?;
+        Self::snapshot_directory(
+            open_pinned_directory(source_path)?,
+            Some(source_path.to_owned()),
+            selected,
+        )
+    }
+
+    /// Copy from the held directory capability, with no ambient locator grant.
+    fn snapshot_directory(
+        source_root: Dir,
+        source_path: Option<PathBuf>,
+        selected: &BTreeSet<String>,
+    ) -> Result<Self> {
         let read_source = tempfile::Builder::new()
             .prefix("pumas-audio-code-")
             .tempdir()?;
         let copied_root = open_pinned_directory(read_source.path())?;
         let mut owner = Self {
             qualification: Qualification::Unavailable,
-            source_path: source_path.to_owned(),
+            source_path,
             source_root,
             members: Vec::with_capacity(selected.len()),
             directories: vec![],
@@ -565,11 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn shipping_factory_refuses_and_code_snapshot_is_independent_of_originals() {
-        assert!(matches!(
-            AudioRuntimeOwner::for_installed_runtime(),
-            Err(AudioCustodyError::UnqualifiedRuntime)
-        ));
+    fn code_snapshot_is_independent_of_originals() {
         let root = source();
         let owner = prepare(&root);
         assert_eq!(owner.manifest_sha256().len(), 64);

@@ -1257,6 +1257,10 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
             include_str!("../../../../../../torch-server/loaders/cohere_asr_loader.py"),
         ),
         (
+            "loaders/owned_cohere_source.py",
+            include_str!("../../../../../../torch-server/loaders/owned_cohere_source.py"),
+        ),
+        (
             "speech_binding.py",
             include_str!("../../../../../../torch-server/speech_binding.py"),
         ),

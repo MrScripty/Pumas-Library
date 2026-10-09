@@ -74,7 +74,7 @@ async fn ensure(api: &PumasApi, request: &EnsureModelRequest) -> ModelDeclaratio
 }
 
 #[tokio::test]
-async fn duplicate_ensure_and_restart_preserve_identity_without_claiming_availability() {
+async fn duplicate_ensure_and_orderly_restart_preserve_identity_without_claiming_availability() {
     let root = TempDir::new().unwrap();
     let _registry = RegistryGuard::new(root.path());
     let api = open(root.path()).await;
@@ -97,7 +97,7 @@ async fn duplicate_ensure_and_restart_preserve_identity_without_claiming_availab
         ),
         "{status:?}"
     );
-    api.shutdown_intent().await.unwrap();
+    api.shutdown_instance().await.unwrap();
     drop(api);
     let reopened = open(root.path()).await;
     let status = reopened
@@ -110,7 +110,7 @@ async fn duplicate_ensure_and_restart_preserve_identity_without_claiming_availab
     };
     assert_eq!(declaration.reference, first.reference);
     assert!(!matches!(state, ObservedModelState::Available { .. }));
-    reopened.shutdown_intent().await.unwrap();
+    reopened.shutdown_instance().await.unwrap();
 }
 
 #[tokio::test]
@@ -149,7 +149,7 @@ async fn two_consumers_retain_files_until_both_release_and_administrator_deletes
 }
 
 #[tokio::test]
-async fn old_generation_and_wrong_consumer_cannot_release_a_new_declaration() {
+async fn old_generation_and_wrong_consumer_cannot_release_after_orderly_restart() {
     let root = TempDir::new().unwrap();
     let _registry = RegistryGuard::new(root.path());
     let api = open(root.path()).await;
@@ -166,11 +166,34 @@ async fn old_generation_and_wrong_consumer_cannot_release_a_new_declaration() {
         api.intent().release_model(&first.reference).await.unwrap(),
         ReleaseModelOutcome::AlreadyAbsent { .. }
     ));
+    api.shutdown_instance().await.unwrap();
+    drop(api);
+    let api = open(root.path()).await;
     let replacement = ensure(&api, &req).await;
+    assert_eq!(
+        first.reference.declaration_id,
+        replacement.reference.declaration_id
+    );
     assert_ne!(first.reference.generation, replacement.reference.generation);
+    let mut wrong_replacement = replacement.reference.clone();
+    wrong_replacement.consumer_key = "consumer-b".to_owned();
+    assert!(matches!(
+        api.intent()
+            .release_model(&wrong_replacement)
+            .await
+            .unwrap(),
+        ReleaseModelOutcome::Conflict { .. }
+    ));
     assert!(matches!(
         api.intent().release_model(&first.reference).await.unwrap(),
         ReleaseModelOutcome::Conflict { .. }
+    ));
+    assert!(matches!(
+        api.intent()
+            .get_ensure_status(&first.reference)
+            .await
+            .unwrap(),
+        GetEnsureStatusOutcome::Conflict
     ));
     assert!(matches!(
         api.intent()
@@ -179,7 +202,7 @@ async fn old_generation_and_wrong_consumer_cannot_release_a_new_declaration() {
             .unwrap(),
         GetEnsureStatusOutcome::Found { .. }
     ));
-    api.shutdown_intent().await.unwrap();
+    api.shutdown_instance().await.unwrap();
 }
 
 #[tokio::test]

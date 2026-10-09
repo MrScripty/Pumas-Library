@@ -36,7 +36,6 @@ impl PumasLocalClient {
     }
 
     pub fn ready_instances_in_registry(registry: &LibraryRegistry) -> Result<Vec<InstanceEntry>> {
-        let _ = registry.cleanup_stale()?;
         Ok(registry
             .list_instances()?
             .into_iter()
@@ -61,6 +60,12 @@ impl PumasLocalClient {
         let addr = loopback_tcp_addr(&instance)?;
         let client = IpcClient::connect(addr, instance.pid).await?;
         Ok(Self { client, instance })
+    }
+
+    /// Read-only live handshake. The caller must negotiate compatibility before use.
+    pub async fn describe_instance(&self) -> Result<crate::discovery::InstanceDescription> {
+        self.call_owner_method(LocalIpcOperation::DescribeInstance, serde_json::json!({}))
+            .await
     }
 
     pub fn instance(&self) -> &InstanceEntry {
@@ -596,6 +601,7 @@ mod tests {
             .register_instance(root.path(), std::process::id(), server.port)
             .unwrap();
         let instance = registry.get_instance(root.path()).unwrap().unwrap();
+        owner.ready_instance.set(instance.clone()).unwrap();
         let token = instance.connection_token.clone().unwrap();
 
         // Observe test failures only after shutting down the disposable owners.

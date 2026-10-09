@@ -2866,6 +2866,7 @@ dependencies = [
  "pumas-app-manager",
  "pumas-library",
  "reqwest",
+ "rusqlite",
  "same-file",
  "schemars",
  "serde",

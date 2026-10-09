@@ -123,19 +123,9 @@ fn capture_rpc_diagnostic(capture: &StdMutex<String>, line: &str) {
 impl RpcProcess {
     async fn stop(mut self) {
         let _: Value = rpc(self.port, "shutdown", json!({})).await;
-        #[cfg(unix)]
-        {
-            let pid = self.child.id().expect("RPC child exited before SIGINT");
-            let signal = tokio::process::Command::new("kill")
-                .arg("-INT")
-                .arg(pid.to_string())
-                .status()
-                .await
-                .unwrap();
-            assert!(signal.success(), "failed to request orderly RPC shutdown");
-        }
-        #[cfg(not(unix))]
-        self.child.start_kill().unwrap();
+        // The response acknowledges admission only. The process exits after
+        // its composed shutdown has drained owners and released the registry.
+        // Forced cleanup belongs to Drop on timeout/failure, never this path.
         let status = tokio::time::timeout(Duration::from_secs(30), self.child.wait())
             .await
             .unwrap_or_else(|_| {
@@ -146,15 +136,12 @@ impl RpcProcess {
             })
             .unwrap();
 
-        #[cfg(not(unix))]
-        let _ = status; // Tokio has no portable graceful console signal for a child process.
         for drain in self.drains.drain(..) {
             tokio::time::timeout(Duration::from_secs(2), drain)
                 .await
                 .expect("RPC output drain did not close after shutdown")
                 .unwrap();
         }
-        #[cfg(unix)]
         assert!(
             status.success(),
             "RPC process shutdown failed: {status}\n{}",

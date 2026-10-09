@@ -245,6 +245,11 @@ pub(crate) struct PrimaryState {
     pub(crate) server_handle: tokio::sync::Mutex<Option<ipc::IpcServerHandle>>,
     /// Global registry connection used for singleton claim ownership.
     pub(crate) registry: Option<registry::LibraryRegistry>,
+    /// Immutable ready generation retained by this owner for authentication and release.
+    pub(crate) ready_instance: std::sync::OnceLock<registry::InstanceEntry>,
+    pub(crate) external_service_tasks: RuntimeTasks,
+    pub(crate) instance_shutdown:
+        std::sync::OnceLock<super::instance_shutdown::InstanceShutdownReceipt>,
     /// Pending startup claim that will be promoted to a ready instance row once IPC starts.
     pub(crate) instance_claim: tokio::sync::Mutex<Option<registry::PrimaryInstanceClaim>>,
 }
@@ -261,6 +266,23 @@ impl ipc::server::IpcDispatch for PrimaryState {
         params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, PumasError> {
         match method {
+            "describe_instance" => {
+                validate_local_client_connection_token(self, &params)?;
+                let registry = self
+                    .registry
+                    .as_ref()
+                    .ok_or_else(|| PumasError::Other("registry unavailable".into()))?;
+                let instance = self
+                    .ready_instance
+                    .get()
+                    .ok_or_else(|| PumasError::Other("owner is not ready".into()))?;
+                let library = registry
+                    .get_by_path(&instance.library_path)?
+                    .ok_or_else(|| PumasError::Other("library registration unavailable".into()))?;
+                Ok(serde_json::to_value(
+                    crate::discovery::InstanceDescription::local(&library, instance),
+                )?)
+            }
             "intent_query_models" => {
                 validate_local_client_connection_token(self, &params)?;
                 let requirement = parse_ipc_param(&params, "requirement")?;
@@ -1609,6 +1631,9 @@ impl PrimaryState {
             server_handle: Mutex::new(None),
             registry: Some(registry::LibraryRegistry::open_at(&root.join("registry.db")).unwrap()),
             instance_claim: Mutex::new(None),
+            ready_instance: std::sync::OnceLock::new(),
+            external_service_tasks: RuntimeTasks::default(),
+            instance_shutdown: std::sync::OnceLock::new(),
         })
     }
 }
@@ -1663,9 +1688,20 @@ fn validate_local_client_connection_token_value(
                 .to_string(),
         });
     };
-    let expected = registry
-        .get_instance(&launcher_root_from_primary(primary))?
-        .and_then(|instance| instance.connection_token)
+    let owned = primary
+        .ready_instance
+        .get()
+        .ok_or_else(|| PumasError::Other("owner is not ready".into()))?;
+    let current = registry
+        .get_instance(&owned.library_path)?
+        .ok_or_else(|| PumasError::Other("owner generation unavailable".into()))?;
+    if current.started_at != owned.started_at || current.connection_token != owned.connection_token
+    {
+        return Err(PumasError::Other("owner generation changed".into()));
+    }
+    let expected = owned
+        .connection_token
+        .clone()
         .ok_or_else(|| PumasError::InvalidParams {
             message: "running Pumas instance is missing a local client connection token"
                 .to_string(),

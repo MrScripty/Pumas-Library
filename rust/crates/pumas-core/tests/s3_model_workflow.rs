@@ -101,9 +101,7 @@ async fn setup_api(root: &Path) -> PumasApi {
         .unwrap()
 }
 async fn close(api: &PumasApi) {
-    api.shutdown_intent().await.unwrap();
-    api.shutdown_downloads().await.unwrap();
-    api.shutdown_acquisition().await.unwrap();
+    api.shutdown_instance().await.unwrap();
 }
 fn request(endpoint: &str, stage: &Path, aux: bool) -> S3ModelImportRequest {
     std::fs::create_dir(stage.join("stage")).unwrap();

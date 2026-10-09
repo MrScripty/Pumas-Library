@@ -2314,7 +2314,7 @@ mod tests {
             .unwrap();
             server.await.unwrap();
             manager.shutdown_installations().await.unwrap();
-            api.shutdown_acquisition().await.unwrap();
+            api.shutdown_instance().await.unwrap();
             let versions = manager.versions_dir();
             let output = manager.version_path("b1234+cpu").join("bin/llama-server");
             let output_before = std::fs::read(&output).unwrap();
@@ -2392,7 +2392,7 @@ mod tests {
             );
             assert_eq!(std::fs::read(&store_path).unwrap(), store_before);
             reopened.shutdown_installations().await.unwrap();
-            reopened_api.shutdown_acquisition().await.unwrap();
+            reopened_api.shutdown_instance().await.unwrap();
         }
     }
 
@@ -2585,7 +2585,7 @@ mod tests {
                     .to_string_lossy()
                     .starts_with(".llama-install-")
             }));
-        api.shutdown_acquisition().await.unwrap();
+        api.shutdown_instance().await.unwrap();
         drop(manager);
         drop(api);
         // A fresh service and manager must admit a new attempt for the same tag.
@@ -2652,7 +2652,7 @@ mod tests {
                 .len(),
             1
         );
-        reopened_api.shutdown_acquisition().await.unwrap();
+        reopened_api.shutdown_instance().await.unwrap();
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -2773,7 +2773,7 @@ mod tests {
         .unwrap();
         server.await.unwrap();
         assert!(manager.shutdown_installations().await.is_err());
-        api.shutdown_acquisition().await.unwrap();
+        api.shutdown_instance().await.unwrap();
         let retained_bytes = std::fs::read(&store_path).unwrap();
         let retained: serde_json::Value = serde_json::from_slice(&retained_bytes).unwrap();
         assert_eq!(retained, before_failure);
@@ -3455,7 +3455,7 @@ mod tests {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
-    async fn native_receipt_post_rename_interruption_cold_reopen_refuses_changed_output_and_settles(
+    async fn native_receipt_post_rename_interruption_service_restart_refuses_changed_output_and_settles(
     ) {
         use sha2::Digest;
         use std::os::unix::fs::MetadataExt;
@@ -3521,20 +3521,23 @@ mod tests {
         }
 
         let root = TempDir::new().unwrap();
+        // This isolated fixture owns only acquisition and native installation.
+        // It proves receipt recovery after those workers drain, not release of
+        // an unresolved PumasApi owner or recovery after process termination.
+        std::fs::create_dir_all(root.path().join("launcher-data")).unwrap();
+        let open_acquisition = || {
+            Arc::new(AcquisitionService::new(Arc::new(
+                pumas_library::acquisition::AcquisitionStore::new(
+                    &root.path().join("launcher-data"),
+                ),
+            )))
+        };
         let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
-        let api = pumas_library::PumasApi::builder(root.path())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .build()
-            .await
-            .unwrap();
-        let mut manager = VersionManager::new_with_acquisition(
-            root.path(),
-            AppId::LlamaCpp,
-            api.acquisition().clone(),
-        )
-        .await
-        .unwrap();
+        let acquisition = open_acquisition();
+        let mut manager =
+            VersionManager::new_with_acquisition(root.path(), AppId::LlamaCpp, acquisition.clone())
+                .await
+                .unwrap();
         manager.github_client = Arc::new(
             GitHubClient::with_loopback_api(
                 manager.cache_dir(),
@@ -3579,7 +3582,7 @@ mod tests {
             .is_none());
         // The supervisor drains, then reports the deliberately unresolved
         // receipt-bearing Using record as shutdown failure.
-        assert!(api.shutdown_acquisition().await.is_err());
+        assert!(acquisition.shutdown().await.is_err());
 
         let store_path = root.path().join("launcher-data/downloads.json");
         let metadata_path = root.path().join("launcher-data/metadata").join(format!(
@@ -3646,29 +3649,24 @@ mod tests {
         drop(updates);
         drop(once);
         drop(manager);
-        drop(api);
+        drop(acquisition);
 
         // Alter only this fixture's receipt-bound launcher, preserving its inode.
         std::fs::write(&launcher, b"altered receipt-bound launcher").unwrap();
         let altered = snapshot(&destination);
         // The fixture source server is already closed. This does not directly
         // observe whether recovery attempts a request.
-        let blocked_api = pumas_library::PumasApi::builder(root.path())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .build()
-            .await
-            .unwrap();
+        let blocked_acquisition = open_acquisition();
         let error = match VersionManager::new_with_acquisition(
             root.path(),
             AppId::LlamaCpp,
-            blocked_api.acquisition().clone(),
+            blocked_acquisition.clone(),
         )
         .await
         {
             Ok(manager) => {
                 manager.shutdown_installations().await.unwrap();
-                panic!("conflicting output must refuse cold recovery")
+                panic!("conflicting output must refuse service recovery")
             }
             Err(error) => error,
         };
@@ -3678,7 +3676,7 @@ mod tests {
             ),
             "{error}"
         );
-        assert!(blocked_api.shutdown_acquisition().await.is_err());
+        assert!(blocked_acquisition.shutdown().await.is_err());
         assert_eq!(file_snapshot(&store_path).unwrap(), retained_store_state);
         assert_eq!(read_document(), retained);
         assert_eq!(snapshot(&workspace), retained_workspace);
@@ -3688,7 +3686,7 @@ mod tests {
             .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
             .unwrap()
             .is_none());
-        drop(blocked_api);
+        drop(blocked_acquisition);
 
         // Restore the exact fixture bytes in place, then baseline timestamps.
         std::fs::write(&launcher, expected_launcher).unwrap();
@@ -3706,16 +3704,11 @@ mod tests {
                 .map(|entry| (&entry.0, entry.1, entry.2, entry.3, &entry.8))
                 .collect::<Vec<_>>()
         );
-        let reopened_api = pumas_library::PumasApi::builder(root.path())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .build()
-            .await
-            .unwrap();
+        let reopened_acquisition = open_acquisition();
         let reopened = VersionManager::new_with_acquisition(
             root.path(),
             AppId::LlamaCpp,
-            reopened_api.acquisition().clone(),
+            reopened_acquisition.clone(),
         )
         .await
         .unwrap();
@@ -3736,7 +3729,7 @@ mod tests {
         assert!(!stage.exists());
         assert!(!workspace.exists());
         reopened.shutdown_installations().await.unwrap();
-        reopened_api.shutdown_acquisition().await.unwrap();
+        reopened_acquisition.shutdown().await.unwrap();
         let settled = read_document();
         assert_eq!(settled["consumer_receipts"], retained["consumer_receipts"]);
         assert_eq!(settled["acquisitions"].as_object().unwrap().len(), 1);
@@ -3745,18 +3738,13 @@ mod tests {
         assert_eq!(settled["acquisitions"][id], expected);
         let settled_metadata = file_snapshot(&metadata_path);
         drop(reopened);
-        drop(reopened_api);
+        drop(reopened_acquisition);
 
-        let stable_api = pumas_library::PumasApi::builder(root.path())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .build()
-            .await
-            .unwrap();
+        let stable_acquisition = open_acquisition();
         let stable = VersionManager::new_with_acquisition(
             root.path(),
             AppId::LlamaCpp,
-            stable_api.acquisition().clone(),
+            stable_acquisition.clone(),
         )
         .await
         .unwrap();
@@ -3772,7 +3760,7 @@ mod tests {
         );
         assert_eq!(file_snapshot(&metadata_path), settled_metadata);
         stable.shutdown_installations().await.unwrap();
-        stable_api.shutdown_acquisition().await.unwrap();
+        stable_acquisition.shutdown().await.unwrap();
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -3812,16 +3800,21 @@ mod tests {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
-    #[ignore = "spawned only by the parent SIGKILL recovery regression"]
+    #[ignore = "spawned only by the parent SIGKILL retained-owner regression"]
     async fn native_receipt_post_rename_sigkill_child() {
         const ROOT_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_ROOT";
         const BASE_URL_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_BASE_URL";
+        const REGISTRY_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_REGISTRY";
         const MARKER_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_MARKER";
 
         let root = PathBuf::from(std::env::var_os(ROOT_ENV).expect("child root is required"));
         let base_url = std::env::var(BASE_URL_ENV).expect("child source URL is required");
         let marker = PathBuf::from(std::env::var_os(MARKER_ENV).expect("child marker is required"));
+        let registry_path =
+            PathBuf::from(std::env::var_os(REGISTRY_ENV).expect("child registry is required"));
+        let registry = pumas_library::registry::LibraryRegistry::open_at(&registry_path).unwrap();
         let api = pumas_library::PumasApi::builder(&root)
+            .with_registry(registry)
             .with_hf_client(false)
             .with_process_manager(false)
             .build()
@@ -3849,7 +3842,8 @@ mod tests {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
-    async fn native_receipt_post_rename_sigkill_cold_reopen_recovers_without_source_replay() {
+    async fn native_receipt_post_rename_sigkill_retains_owner_and_refuses_reopen_without_source_replay(
+    ) {
         use sha2::Digest;
         use std::os::unix::fs::PermissionsExt;
         use std::os::unix::process::ExitStatusExt;
@@ -3886,11 +3880,14 @@ mod tests {
         const CHILD_TEST: &str = "version_manager::tests::native_receipt_post_rename_sigkill_child";
         const ROOT_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_ROOT";
         const BASE_URL_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_BASE_URL";
+        const REGISTRY_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_REGISTRY";
         const MARKER_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_MARKER";
 
         let root = TempDir::new().unwrap();
         let control = TempDir::new().unwrap();
         let marker = control.path().join("post-rename-boundary");
+        let registry_path = control.path().join("registry.db");
+        let registry = pumas_library::registry::LibraryRegistry::open_at(&registry_path).unwrap();
         let (server, observed, release, base_url, mut requests, stop_server) =
             native_archive_fixture_with_request_monitor(root.path()).await;
         let executable = std::env::current_exe().unwrap();
@@ -3903,10 +3900,12 @@ mod tests {
             .env(ROOT_ENV, root.path())
             .env(BASE_URL_ENV, &base_url)
             .env(MARKER_ENV, &marker)
+            .env(REGISTRY_ENV, &registry_path)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
+        let child_pid = child.id();
         let mut child = NativeInstallChildGuard(Some(child));
 
         tokio::time::timeout(Duration::from_secs(5), observed)
@@ -3969,8 +3968,8 @@ mod tests {
         child.disarm();
 
         let store_path = root.path().join("launcher-data/downloads.json");
-        let retained: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap();
+        let retained_bytes = std::fs::read(&store_path).unwrap();
+        let retained: serde_json::Value = serde_json::from_slice(&retained_bytes).unwrap();
         let acquisitions = retained["acquisitions"].as_object().unwrap();
         assert_eq!(acquisitions.len(), 1);
         assert_eq!(retained["consumer_receipts"].as_object().unwrap().len(), 1);
@@ -4024,93 +4023,52 @@ mod tests {
             .unwrap()
             .is_none());
 
-        let recovery_api = pumas_library::PumasApi::builder(root.path())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .build()
-            .await
-            .unwrap();
-        let recovered = VersionManager::new_with_acquisition(
-            root.path(),
-            AppId::LlamaCpp,
-            recovery_api.acquisition().clone(),
-        )
-        .await
-        .unwrap();
+        let retained_owner = registry.get_instance(root.path()).unwrap().unwrap();
+        assert_eq!(retained_owner.pid, child_pid);
         assert_eq!(
-            recovered.get_installed_versions().await.unwrap(),
-            vec!["b1234+cpu"]
+            retained_owner.status,
+            pumas_library::registry::InstanceStatus::Ready
         );
-        assert!(destination.join("bin/llama-server").is_file());
-        assert!(!stage.exists());
-        assert!(!workspace.exists());
-        let recovered_metadata = recovered
-            .metadata_manager
-            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            serde_json::to_value(recovered_metadata).unwrap(),
-            receipt["payload"]["metadata"]
-        );
-        recovered.shutdown_installations().await.unwrap();
-        recovery_api.shutdown_acquisition().await.unwrap();
-
-        let settled: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap();
-        assert_eq!(settled["consumer_receipts"], retained["consumer_receipts"]);
-        assert_eq!(settled["acquisitions"].as_object().unwrap().len(), 1);
-        let mut expected_record = record.clone();
-        expected_record["phase"]["state"] = serde_json::json!("adopted");
-        assert_eq!(settled["acquisitions"][acquisition_id], expected_record);
-        drop(recovered);
-        drop(recovery_api);
-
-        let stable_api = pumas_library::PumasApi::builder(root.path())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .build()
-            .await
-            .unwrap();
-        let stable = VersionManager::new_with_acquisition(
-            root.path(),
-            AppId::LlamaCpp,
-            stable_api.acquisition().clone(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            stable.get_installed_versions().await.unwrap(),
-            vec!["b1234+cpu"]
-        );
-        assert_eq!(
-            native_tree_sha256(&destination),
-            receipt["payload"]["output_tree_sha256"]
-        );
-        assert_eq!(
-            std::fs::read(&receipt_launcher).unwrap(),
-            std::fs::read(destination.join("bin/llama-server")).unwrap()
-        );
-        assert_eq!(
-            serde_json::to_value(
-                stable
-                    .metadata_manager
-                    .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
-                    .unwrap()
-                    .unwrap()
-            )
-            .unwrap(),
-            receipt["payload"]["metadata"]
-        );
-        stable.shutdown_installations().await.unwrap();
-        stable_api.shutdown_acquisition().await.unwrap();
-        let after_stable_reopen: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap();
-        assert_eq!(after_stable_reopen["acquisitions"], settled["acquisitions"]);
+        let retained_owner = serde_json::to_value(retained_owner).unwrap();
+        let retained_workspace = native_tree_sha256(&workspace);
+        let retained_output = native_tree_sha256(&destination);
+        // Reaping this child establishes its exit, not ordered cessation of all
+        // effects admitted by the owning instance. Keep its exact generation
+        // and receipt custody; a PID-only reclaim cannot authorize recovery.
+        for _ in 0..2 {
+            let result = pumas_library::PumasApi::builder(root.path())
+                .with_registry(registry.clone())
+                .with_hf_client(false)
+                .with_process_manager(false)
+                .build()
+                .await;
+            assert!(matches!(
+                result,
+                Err(PumasError::InvalidParams { message })
+                    if message == format!(
+                        "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
+                        root.path().display(), child_pid
+                    )
+            ));
+            assert_eq!(
+                serde_json::to_value(registry.get_instance(root.path()).unwrap().unwrap()).unwrap(),
+                retained_owner
+            );
+            assert_eq!(std::fs::read(&store_path).unwrap(), retained_bytes);
+            assert_eq!(native_tree_sha256(&workspace), retained_workspace);
+            assert_eq!(native_tree_sha256(&destination), retained_output);
+            assert!(!stage.exists());
+            assert!(MetadataManager::new(root.path())
+                .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+                .unwrap()
+                .is_none());
+        }
 
         match tokio::time::timeout(Duration::from_secs(1), requests.recv()).await {
             Err(_) => {}
-            Ok(Some(request)) => panic!("recovery replayed a controlled source request: {request}"),
+            Ok(Some(request)) => {
+                panic!("blocked reopen replayed a controlled source request: {request}")
+            }
             Ok(None) => panic!("source monitor closed before the no-replay check"),
         }
         drop(stop_server);
@@ -4127,7 +4085,7 @@ mod tests {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
-    async fn native_receipt_publication_conflict_cold_reopen_reconciles_without_reacquiring() {
+    async fn native_receipt_publication_conflict_service_restart_reconciles_without_reacquiring() {
         use sha2::Digest;
         use std::os::unix::fs::MetadataExt;
 
@@ -4170,20 +4128,23 @@ mod tests {
         }
 
         let root = TempDir::new().unwrap();
+        // This isolated fixture owns only acquisition and native installation.
+        // It proves receipt recovery after those workers drain, not release of
+        // an unresolved PumasApi owner or recovery after process termination.
+        std::fs::create_dir_all(root.path().join("launcher-data")).unwrap();
+        let open_acquisition = || {
+            Arc::new(AcquisitionService::new(Arc::new(
+                pumas_library::acquisition::AcquisitionStore::new(
+                    &root.path().join("launcher-data"),
+                ),
+            )))
+        };
         let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
-        let api = pumas_library::PumasApi::builder(root.path())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .build()
-            .await
-            .unwrap();
-        let mut manager = VersionManager::new_with_acquisition(
-            root.path(),
-            AppId::LlamaCpp,
-            api.acquisition().clone(),
-        )
-        .await
-        .unwrap();
+        let acquisition = open_acquisition();
+        let mut manager =
+            VersionManager::new_with_acquisition(root.path(), AppId::LlamaCpp, acquisition.clone())
+                .await
+                .unwrap();
         manager.github_client = Arc::new(
             GitHubClient::with_loopback_api(
                 manager.cache_dir(),
@@ -4237,7 +4198,7 @@ mod tests {
             .is_none());
         // The supervisor drains, then reports the deliberately unresolved
         // receipt-bearing Using record as shutdown failure.
-        assert!(api.shutdown_acquisition().await.is_err());
+        assert!(acquisition.shutdown().await.is_err());
         let store_path = root.path().join("launcher-data/downloads.json");
         let read_document = || -> serde_json::Value {
             serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap()
@@ -4284,26 +4245,21 @@ mod tests {
         drop(updates);
         drop(pause);
         drop(manager);
-        drop(api);
+        drop(acquisition);
 
         // The source server is joined and closed. Neither reopen is allowed to
         // replace this acquisition/receipt or mutate retained bytes to make progress.
-        let blocked_api = pumas_library::PumasApi::builder(root.path())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .build()
-            .await
-            .unwrap();
+        let blocked_acquisition = open_acquisition();
         let error = match VersionManager::new_with_acquisition(
             root.path(),
             AppId::LlamaCpp,
-            blocked_api.acquisition().clone(),
+            blocked_acquisition.clone(),
         )
         .await
         {
             Ok(manager) => {
                 manager.shutdown_installations().await.unwrap();
-                panic!("conflicting output must refuse cold recovery")
+                panic!("conflicting output must refuse service recovery")
             }
             Err(error) => error,
         };
@@ -4313,7 +4269,7 @@ mod tests {
             ),
             "{error}"
         );
-        assert!(blocked_api.shutdown_acquisition().await.is_err());
+        assert!(blocked_acquisition.shutdown().await.is_err());
         assert_eq!(read_document()["acquisitions"], retained["acquisitions"]);
         assert_eq!(
             read_document()["consumer_receipts"],
@@ -4325,20 +4281,15 @@ mod tests {
             .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
             .unwrap()
             .is_none());
-        drop(blocked_api);
+        drop(blocked_acquisition);
 
-        // Remove only the test's conflicting directory, then compose fresh owners.
+        // Remove only the test's conflicting directory, then compose fresh service owners.
         std::fs::remove_dir_all(&destination).unwrap();
-        let reopened_api = pumas_library::PumasApi::builder(root.path())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .build()
-            .await
-            .unwrap();
+        let reopened_acquisition = open_acquisition();
         let reopened = VersionManager::new_with_acquisition(
             root.path(),
             AppId::LlamaCpp,
-            reopened_api.acquisition().clone(),
+            reopened_acquisition.clone(),
         )
         .await
         .unwrap();
@@ -4359,7 +4310,7 @@ mod tests {
         assert!(!stage.exists());
         assert!(!workspace.exists());
         reopened.shutdown_installations().await.unwrap();
-        reopened_api.shutdown_acquisition().await.unwrap();
+        reopened_acquisition.shutdown().await.unwrap();
         let settled = read_document();
         assert_eq!(settled["consumer_receipts"], retained["consumer_receipts"]);
         assert_eq!(settled["acquisitions"].as_object().unwrap().len(), 1);
@@ -4367,7 +4318,7 @@ mod tests {
         expected["phase"]["state"] = serde_json::json!("adopted");
         assert_eq!(settled["acquisitions"][id], expected);
         drop(reopened);
-        drop(reopened_api);
+        drop(reopened_acquisition);
     }
 
     /// Model a new, unowned leaf appearing after successful owned cleanup.

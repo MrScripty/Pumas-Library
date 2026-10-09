@@ -32,6 +32,9 @@ experimental documentation are inventory, not an accepted support tuple.
 This module therefore stays a Pumas-owned, source-exported CLI example under
 `scripts/consumers`; external consumers retain their existing HTTP adapters.
 Its immutable source pin and exact producer binary hash form separate inputs.
+The [actual Chrema native cohort](../plans/artifact-acquisition/reports/chrema-native-consumer-2026-10-09.md)
+records bounded authentication, catalog/lookup and caller cleanup through that
+consumer's published adapter; it does not qualify inference or other callers.
 It is absent from the existing flat headless archive inventory, which remains
 packaging-owned. Including an example in an archive or promoting an installable
 client/native host tuple needs its own accepted distribution contract. No new

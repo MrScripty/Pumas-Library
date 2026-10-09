@@ -26,6 +26,8 @@ interface RemoteModelsListProps {
   downloadStatusByRepo: Record<string, DownloadStatus>;
   downloadErrors: Record<string, string>;
   hydratingRepoIds: Set<string>;
+  hydratedRepoIds?: Set<string>;
+  hydrationErrors?: Record<string, string>;
   onHydrateModelDetails?: (model: RemoteModelInfo) => Promise<void>;
   onStartDownload: (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => Promise<void>;
   onCancelDownload: (downloadKey: string) => Promise<void>;
@@ -67,6 +69,8 @@ export function RemoteModelsList({
   downloadStatusByRepo,
   downloadErrors,
   hydratingRepoIds,
+  hydratedRepoIds,
+  hydrationErrors,
   onHydrateModelDetails,
   onStartDownload,
   onCancelDownload,
@@ -154,6 +158,8 @@ export function RemoteModelsList({
             activeArtifactLabels={[...new Set(activeArtifactLabels)]}
             modelError={modelError}
             isHydratingDetails={isHydratingDetails}
+            hasHydratedDetails={hydratedRepoIds?.has(model.repoId) ?? false}
+            hydrationError={hydrationErrors?.[model.repoId]}
             isMenuOpen={openQuantMenuRepoId === model.repoId}
             selectedGroups={repoSelected}
             onToggleMenu={() =>

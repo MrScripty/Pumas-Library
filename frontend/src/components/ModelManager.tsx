@@ -135,6 +135,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     error: remoteError,
     isLoading: isRemoteLoading,
     hydratingRepoIds,
+    hydratedRepoIds,
+    hydrationErrors,
     hydrateModelDetails,
     isCachedSearch,
   } = useRemoteModelSearch({
@@ -299,6 +301,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
               downloadStatusByRepo={downloadStatusByRepo}
               downloadErrors={downloadErrors}
               hydratingRepoIds={hydratingRepoIds}
+              hydratedRepoIds={hydratedRepoIds}
+              hydrationErrors={hydrationErrors}
               onHydrateModelDetails={hydrateModelDetails}
               onStartDownload={handleStartRemoteDownload}
               onCancelDownload={cancelDownload}

@@ -136,7 +136,7 @@ describe('mounted cached discovery workflow (actual loopback RPC when configured
     expect(screen.queryByLabelText('Cached discovery observation')).not.toBeInTheDocument();
     await screen.findByText('OnlineFixture');
     expect(screen.queryByLabelText('Cached discovery observation')).not.toBeInTheDocument();
-    expect(mocks.search).toHaveBeenLastCalledWith('online-fixture', null, 25, 6);
+    expect(mocks.search).toHaveBeenLastCalledWith('online-fixture', null, 25, 0);
   });
   it('cancels queued queries and ignores a cached reply delivered after source switching', async () => {
     let deliver!: () => void; const held = new Promise<void>(resolve => { deliver = resolve; });

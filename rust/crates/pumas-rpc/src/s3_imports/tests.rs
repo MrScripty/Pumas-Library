@@ -320,6 +320,11 @@ async fn source_rpc_https_owned_import_cancel_and_shutdown() {
                 "settled inputs must be cleaned by their reservation owner"
             );
             server.shutdown().await.unwrap();
+            // A cold owner needs every previous physical-store share released.
+            drop(consumer);
+            drop(acquisition);
+            drop(library);
+            drop(server);
             let cold = pumas_library::PumasApi::builder(root.path())
                 .auto_create_dirs(true)
                 .with_hf_client(false)

@@ -461,6 +461,8 @@ class LocalHttpSession:
         body = json.dumps(request, allow_nan=False).encode()
         status, result = await self._json_http("POST", "/v1/model-operations", body,
                                                timeout=None, limit=MAX_OPERATION)
+        if result is None:
+            return {"status": status, "body": None}
         if "contract_version" in result:
             _require(type(result["contract_version"]) is int and result["contract_version"] == 1,
                      "unsupported operation response contract")
@@ -498,7 +500,10 @@ class LocalHttpSession:
                          and int(lengths[0]) <= limit
                          and not any(line.lower().startswith("transfer-encoding:") for line in lines[1:]),
                          "unsupported or oversized reference response framing")
-                result = _decode(await reader.readexactly(int(lengths[0])))
+                data = await reader.readexactly(int(lengths[0]))
+                if not data and int(status[1]) != 200:
+                    return int(status[1]), None  # Native fencing can refuse before the JSON handler.
+                result = _decode(data)
                 _require(type(result) is dict, "object HTTP response required")
                 return int(status[1]), result
         finally:

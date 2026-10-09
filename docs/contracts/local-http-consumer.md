@@ -178,7 +178,9 @@ The same reference session also offers `capabilities(model, profile=None)` and
 `model_operation(request)` over the existing `/v1/capabilities` and
 `/v1/model-operations` routes. Both use the authenticated selected endpoint and
 paired generation fences. They return `{"status": HTTP_STATUS, "body": JSON_OBJECT}`,
-preserving producer errors, outcomes and typed result fields. Capability replies
+preserving producer errors, outcomes and typed result fields. An empty non-200
+response has `body=None`; native pre-handler fencing returns such a 409 without
+an operation envelope. The reference invents no error/outcome field. Capability replies
 advertise `supported_contract_versions`; they do not contain an operation's
 `contract_version` field. The reference requires a common version 1 and leaves
 capability selection to the existing descriptor helper and server admission.
@@ -203,8 +205,8 @@ The request remains the producer's modality-first JSON object. No named
 `capability` field is admitted by this method. Use the selected declarations'
 `semantic_task` when the server reports ambiguity; options do not choose a task.
 Input, model/profile identity, adapter selection and option semantics remain
-producer-owned. The reference validates response correlation and retains
-pre-handler fencing errors even when they have no operation request ID.
+producer-owned. The reference validates operation response correlation and
+retains pre-handler refusal status without fabricating a request ID.
 
 Model operations support finite JSON responses with the existing 32 MiB transport
 bound. Connection establishment has a ten-second limit; after connection there

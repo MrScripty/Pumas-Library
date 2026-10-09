@@ -36,6 +36,11 @@ use std::path::Path;
 #[cfg_attr(not(feature = "s3"), allow(dead_code))]
 mod s3;
 pub(crate) use s3::*;
+#[cfg_attr(not(feature = "s3"), allow(dead_code))]
+mod s3_discovery;
+mod s3_persisted;
+pub(crate) use s3_discovery::*;
+pub(crate) use s3_persisted::*;
 
 const MAX_METHOD_BYTES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 4 * 1024;
@@ -205,6 +210,25 @@ pub(crate) struct RpcAdmissionError {
 /// Its method is still resolved by the producer dispatcher, where unknown
 /// names become method-not-found without reaching a domain handler.
 pub(crate) enum RpcCommand {
+    InspectPersistedS3Imports,
+    GetS3TransferRetry {
+        operation_id: Option<String>,
+    },
+    RetryS3ModelTransfer {
+        request: S3TransferRetryParams,
+    },
+    StartS3PrefixDiscovery {
+        request: S3DiscoveryParams,
+    },
+    StartAuthenticatedS3PrefixDiscovery {
+        request: S3AuthenticatedDiscoveryParams,
+    },
+    GetS3PrefixDiscovery {
+        operation_id: Option<String>,
+    },
+    CancelS3PrefixDiscovery {
+        operation_id: String,
+    },
     StartS3ModelBundleImport {
         request: S3BundleImportParams,
     },
@@ -462,6 +486,15 @@ pub(crate) enum RpcCommand {
 impl RpcCommand {
     pub(crate) fn method(&self) -> &str {
         match self {
+            Self::StartS3PrefixDiscovery { .. } => "start_s3_prefix_discovery",
+            Self::InspectPersistedS3Imports => "inspect_persisted_s3_imports",
+            Self::GetS3TransferRetry { .. } => "get_s3_transfer_retry",
+            Self::RetryS3ModelTransfer { .. } => "retry_s3_model_transfer",
+            Self::StartAuthenticatedS3PrefixDiscovery { .. } => {
+                "start_authenticated_s3_prefix_discovery"
+            }
+            Self::GetS3PrefixDiscovery { .. } => "get_s3_prefix_discovery",
+            Self::CancelS3PrefixDiscovery { .. } => "cancel_s3_prefix_discovery",
             Self::StartS3ModelBundleImport { .. } => "start_s3_model_bundle_import",
             Self::StartAuthenticatedS3ModelBundleImport { .. } => {
                 "start_authenticated_s3_model_bundle_import"
@@ -594,6 +627,9 @@ impl SecretToken {
 /// Only the temporary `Legacy` branch may carry arbitrary JSON. It is removed
 /// one domain group at a time as typed commands move into this module.
 pub(crate) enum RpcOutcome {
+    S3PersistedImports(S3PersistedImportsWire),
+    S3TransferRetry(S3TransferRetryState),
+    S3Discovery(S3DiscoveryOutcome),
     S3Import(S3ImportOutcome),
     S3BundleImport(S3BundleImportObservation),
     S3ImportCancel(S3ImportCancelOutcome),
@@ -718,6 +754,9 @@ impl RpcOutcome {
 
     pub(crate) fn into_value(self) -> Result<Value, PublicError> {
         let result = match self {
+            Self::S3Discovery(value) => serde_json::to_value(value),
+            Self::S3PersistedImports(value) => serde_json::to_value(value),
+            Self::S3TransferRetry(value) => serde_json::to_value(value),
             Self::S3Import(value) => serde_json::to_value(value),
             Self::S3BundleImport(value) => serde_json::to_value(value),
             Self::S3ImportCancel(value) => serde_json::to_value(value),
@@ -6145,6 +6184,50 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             .and_then(DownloadModelFromHfParams::into_request)
     };
     match method {
+        "get_s3_transfer_retry" => {
+            let request = parse_params::<S3ImportStatusParams>(params)?;
+            if let Some(id) = &request.operation_id {
+                validate_s3_id(id)?;
+            }
+            Ok(RpcCommand::GetS3TransferRetry {
+                operation_id: request.operation_id,
+            })
+        }
+        "retry_s3_model_transfer" => {
+            let request = parse_params::<S3TransferRetryParams>(params)?;
+            request.validate()?;
+            Ok(RpcCommand::RetryS3ModelTransfer { request })
+        }
+        "inspect_persisted_s3_imports" => {
+            empty()?;
+            Ok(RpcCommand::InspectPersistedS3Imports)
+        }
+        "start_s3_prefix_discovery" => {
+            let request = parse_params::<S3DiscoveryParams>(params)?;
+            request.validate()?;
+            Ok(RpcCommand::StartS3PrefixDiscovery { request })
+        }
+        "start_authenticated_s3_prefix_discovery" => {
+            let request = parse_params::<S3AuthenticatedDiscoveryParams>(params)?;
+            request.validate()?;
+            Ok(RpcCommand::StartAuthenticatedS3PrefixDiscovery { request })
+        }
+        "get_s3_prefix_discovery" => {
+            let request = parse_params::<S3ImportStatusParams>(params)?;
+            if let Some(id) = &request.operation_id {
+                validate_s3_id(id)?;
+            }
+            Ok(RpcCommand::GetS3PrefixDiscovery {
+                operation_id: request.operation_id,
+            })
+        }
+        "cancel_s3_prefix_discovery" => {
+            let request = parse_params::<S3ImportCancelParams>(params)?;
+            validate_s3_id(&request.operation_id)?;
+            Ok(RpcCommand::CancelS3PrefixDiscovery {
+                operation_id: request.operation_id,
+            })
+        }
         "start_s3_model_bundle_import" => {
             let request = parse_params::<S3BundleImportParams>(params)?;
             request.validate()?;

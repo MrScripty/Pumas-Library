@@ -9,9 +9,11 @@ async fn path_exists(path: &Path) -> Result<bool> {
 }
 
 async fn load_migration_checkpoint_async(
+    lifetime: crate::platform::store_lifetime::StoreLifetime,
     path: PathBuf,
 ) -> Result<Option<MigrationCheckpointState>> {
-    tokio::task::spawn_blocking(move || load_migration_checkpoint(&path))
+    lifetime
+        .spawn_blocking(move || load_migration_checkpoint(&path))
         .await
         .map_err(|err| {
             PumasError::Other(format!(
@@ -22,10 +24,12 @@ async fn load_migration_checkpoint_async(
 }
 
 async fn save_migration_checkpoint_async(
+    lifetime: crate::platform::store_lifetime::StoreLifetime,
     path: PathBuf,
     state: MigrationCheckpointState,
 ) -> Result<()> {
-    tokio::task::spawn_blocking(move || save_migration_checkpoint(&path, &state))
+    lifetime
+        .spawn_blocking(move || save_migration_checkpoint(&path, &state))
         .await
         .map_err(|err| {
             PumasError::Other(format!(
@@ -36,9 +40,11 @@ async fn save_migration_checkpoint_async(
 }
 
 async fn load_package_facts_cache_migration_checkpoint_async(
+    lifetime: crate::platform::store_lifetime::StoreLifetime,
     path: PathBuf,
 ) -> Result<Option<PackageFactsCacheMigrationCheckpointState>> {
-    tokio::task::spawn_blocking(move || load_package_facts_cache_migration_checkpoint(&path))
+    lifetime
+        .spawn_blocking(move || load_package_facts_cache_migration_checkpoint(&path))
         .await
         .map_err(|err| {
             PumasError::Other(format!(
@@ -49,26 +55,28 @@ async fn load_package_facts_cache_migration_checkpoint_async(
 }
 
 async fn save_package_facts_cache_migration_checkpoint_async(
+    lifetime: crate::platform::store_lifetime::StoreLifetime,
     path: PathBuf,
     state: PackageFactsCacheMigrationCheckpointState,
 ) -> Result<()> {
-    tokio::task::spawn_blocking(move || {
-        save_package_facts_cache_migration_checkpoint(&path, &state)
-    })
-    .await
-    .map_err(|err| {
-        PumasError::Other(format!(
-            "Failed to join package-facts migration checkpoint save task: {}",
-            err
-        ))
-    })?
+    lifetime
+        .spawn_blocking(move || save_package_facts_cache_migration_checkpoint(&path, &state))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join package-facts migration checkpoint save task: {}",
+                err
+            ))
+        })?
 }
 
 async fn write_migration_execution_reports_async(
+    lifetime: crate::platform::store_lifetime::StoreLifetime,
     library_root: PathBuf,
     report: MigrationExecutionReport,
 ) -> Result<()> {
-    tokio::task::spawn_blocking(move || write_migration_execution_reports(&library_root, &report))
+    lifetime
+        .spawn_blocking(move || write_migration_execution_reports(&library_root, &report))
         .await
         .map_err(|err| {
             PumasError::Other(format!(
@@ -79,42 +87,48 @@ async fn write_migration_execution_reports_async(
 }
 
 async fn write_package_facts_cache_migration_dry_run_reports_async(
+    lifetime: crate::platform::store_lifetime::StoreLifetime,
     library_root: PathBuf,
     report: PackageFactsCacheMigrationDryRunReport,
 ) -> Result<()> {
-    tokio::task::spawn_blocking(move || {
-        write_package_facts_cache_migration_dry_run_reports(&library_root, &report)
-    })
-    .await
-    .map_err(|err| {
-        PumasError::Other(format!(
-            "Failed to join package-facts migration dry-run report write task: {}",
-            err
-        ))
-    })?
+    lifetime
+        .spawn_blocking(move || {
+            write_package_facts_cache_migration_dry_run_reports(&library_root, &report)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join package-facts migration dry-run report write task: {}",
+                err
+            ))
+        })?
 }
 
 async fn write_package_facts_cache_migration_execution_reports_async(
+    lifetime: crate::platform::store_lifetime::StoreLifetime,
     library_root: PathBuf,
     report: PackageFactsCacheMigrationExecutionReport,
 ) -> Result<()> {
-    tokio::task::spawn_blocking(move || {
-        write_package_facts_cache_migration_execution_reports(&library_root, &report)
-    })
-    .await
-    .map_err(|err| {
-        PumasError::Other(format!(
-            "Failed to join package-facts migration execution report write task: {}",
-            err
-        ))
-    })?
+    lifetime
+        .spawn_blocking(move || {
+            write_package_facts_cache_migration_execution_reports(&library_root, &report)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join package-facts migration execution report write task: {}",
+                err
+            ))
+        })?
 }
 
 async fn append_migration_report_index_entry_async(
+    lifetime: crate::platform::store_lifetime::StoreLifetime,
     library_root: PathBuf,
     entry: MigrationReportIndexEntry,
 ) -> Result<()> {
-    tokio::task::spawn_blocking(move || append_migration_report_index_entry(&library_root, entry))
+    lifetime
+        .spawn_blocking(move || append_migration_report_index_entry(&library_root, entry))
         .await
         .map_err(|err| {
             PumasError::Other(format!(
@@ -513,11 +527,13 @@ impl ModelLibrary {
         report.machine_readable_report_path = Some(json_report_path.display().to_string());
         report.human_readable_report_path = Some(markdown_report_path.display().to_string());
         write_package_facts_cache_migration_dry_run_reports_async(
+            self.store_lifetime.clone(),
             self.library_root.clone(),
             report.clone(),
         )
         .await?;
         append_migration_report_index_entry_async(
+            self.store_lifetime.clone(),
             self.library_root.clone(),
             MigrationReportIndexEntry {
                 generated_at: report.generated_at.clone(),
@@ -681,20 +697,24 @@ impl ModelLibrary {
         let mut resumed_from_checkpoint = false;
         let mut checkpoint_state = if path_exists(&checkpoint_path).await? {
             resumed_from_checkpoint = true;
-            load_package_facts_cache_migration_checkpoint_async(checkpoint_path.clone())
-                .await?
-                .ok_or_else(|| {
-                    PumasError::Other(format!(
-                        "Package-facts migration checkpoint file exists but could not be loaded: {}",
-                        checkpoint_path.display()
-                    ))
-                })?
+            load_package_facts_cache_migration_checkpoint_async(
+                self.store_lifetime.clone(),
+                checkpoint_path.clone(),
+            )
+            .await?
+            .ok_or_else(|| {
+                PumasError::Other(format!(
+                    "Package-facts migration checkpoint file exists but could not be loaded: {}",
+                    checkpoint_path.display()
+                ))
+            })?
         } else {
             let dry_run = self
                 .generate_package_facts_cache_migration_dry_run_report()
                 .await?;
             let initialized = package_facts_cache_checkpoint_from_dry_run(&dry_run);
             save_package_facts_cache_migration_checkpoint_async(
+                self.store_lifetime.clone(),
                 checkpoint_path.clone(),
                 initialized.clone(),
             )
@@ -712,6 +732,7 @@ impl ModelLibrary {
             checkpoint_state.completed_results.push(result);
             checkpoint_state.updated_at = chrono::Utc::now().to_rfc3339();
             save_package_facts_cache_migration_checkpoint_async(
+                self.store_lifetime.clone(),
                 checkpoint_path.clone(),
                 checkpoint_state.clone(),
             )
@@ -744,9 +765,14 @@ impl ModelLibrary {
         }
 
         if checkpoint_state.pending_work.is_empty() {
-            let _ = fs::remove_file(&checkpoint_path).await;
+            let checkpoint_path = checkpoint_path.clone();
+            let _ = self
+                .store_lifetime
+                .spawn_blocking(move || std::fs::remove_file(checkpoint_path))
+                .await;
         } else {
             save_package_facts_cache_migration_checkpoint_async(
+                self.store_lifetime.clone(),
                 checkpoint_path.clone(),
                 checkpoint_state.clone(),
             )
@@ -758,11 +784,13 @@ impl ModelLibrary {
         report.machine_readable_report_path = Some(json_report_path.display().to_string());
         report.human_readable_report_path = Some(markdown_report_path.display().to_string());
         write_package_facts_cache_migration_execution_reports_async(
+            self.store_lifetime.clone(),
             self.library_root.clone(),
             report.clone(),
         )
         .await?;
         append_migration_report_index_entry_async(
+            self.store_lifetime.clone(),
             self.library_root.clone(),
             MigrationReportIndexEntry {
                 generated_at: report.generated_at.clone(),
@@ -1063,6 +1091,7 @@ impl ModelLibrary {
         } else if let Some(metadata) = metadata.as_ref() {
             resolve_local_model_type_with_persisted_hints(
                 self.index(),
+                self.library_root(),
                 &model_dir,
                 metadata,
                 file_type_info.as_ref(),
@@ -1077,6 +1106,7 @@ impl ModelLibrary {
                     None,
                 )?,
                 &model_dir,
+                self.library_root(),
                 file_type_info.as_ref(),
             )
         };
@@ -1358,7 +1388,7 @@ impl ModelLibrary {
         let mut resumed_from_checkpoint = false;
         let mut checkpoint_state = if path_exists(&checkpoint_path).await? {
             resumed_from_checkpoint = true;
-            load_migration_checkpoint_async(checkpoint_path.clone())
+            load_migration_checkpoint_async(self.store_lifetime.clone(), checkpoint_path.clone())
                 .await?
                 .ok_or_else(|| {
                     PumasError::Other(format!(
@@ -1407,7 +1437,12 @@ impl ModelLibrary {
                 pending_moves,
                 completed_results,
             };
-            save_migration_checkpoint_async(checkpoint_path.clone(), initialized.clone()).await?;
+            save_migration_checkpoint_async(
+                self.store_lifetime.clone(),
+                checkpoint_path.clone(),
+                initialized.clone(),
+            )
+            .await?;
             initialized
         };
 
@@ -1420,8 +1455,12 @@ impl ModelLibrary {
                 .await?;
             checkpoint_state.completed_results.push(result);
             checkpoint_state.updated_at = chrono::Utc::now().to_rfc3339();
-            save_migration_checkpoint_async(checkpoint_path.clone(), checkpoint_state.clone())
-                .await?;
+            save_migration_checkpoint_async(
+                self.store_lifetime.clone(),
+                checkpoint_path.clone(),
+                checkpoint_state.clone(),
+            )
+            .await?;
         }
 
         let publication_blocked = checkpoint_state
@@ -1471,18 +1510,32 @@ impl ModelLibrary {
         }
 
         if checkpoint_state.pending_moves.is_empty() && !publication_blocked {
-            let _ = fs::remove_file(&checkpoint_path).await;
+            let checkpoint_path = checkpoint_path.clone();
+            let _ = self
+                .store_lifetime
+                .spawn_blocking(move || std::fs::remove_file(checkpoint_path))
+                .await;
         } else {
-            save_migration_checkpoint_async(checkpoint_path.clone(), checkpoint_state.clone())
-                .await?;
+            save_migration_checkpoint_async(
+                self.store_lifetime.clone(),
+                checkpoint_path.clone(),
+                checkpoint_state.clone(),
+            )
+            .await?;
         }
 
         let (json_report_path, markdown_report_path) =
             migration_report_paths(&self.library_root, "execution");
         report.machine_readable_report_path = Some(json_report_path.display().to_string());
         report.human_readable_report_path = Some(markdown_report_path.display().to_string());
-        write_migration_execution_reports_async(self.library_root.clone(), report.clone()).await?;
+        write_migration_execution_reports_async(
+            self.store_lifetime.clone(),
+            self.library_root.clone(),
+            report.clone(),
+        )
+        .await?;
         append_migration_report_index_entry_async(
+            self.store_lifetime.clone(),
             self.library_root.clone(),
             MigrationReportIndexEntry {
                 generated_at: report.generated_at.clone(),

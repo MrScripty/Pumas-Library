@@ -329,6 +329,14 @@ impl ManagedPythonProvider {
                 )
             })?;
         let depot = private_install_depot(&self.root, self.target.pin(), &selected)?;
+        let depot_lease = Arc::new(
+            super::managed_depot_lease::ManagedDepotLease::mutation(&depot).map_err(|_| {
+                ManagedPythonFailure::new(
+                    ManagedPythonFailureKind::Inconclusive,
+                    "Managed interpreter depot is retained or unavailable",
+                )
+            })?,
+        );
 
         let mut install = self.uv_command(&staged.binary, &staged.cache, &depot);
         install.args([
@@ -339,7 +347,8 @@ impl ManagedPythonProvider {
             "--no-registry",
         ]);
         install.arg(&selected.version);
-        self.run_bounded(install, INSTALL_TIMEOUT, 4096).await?;
+        self.run_depot_command(install, INSTALL_TIMEOUT, 4096, depot_lease.clone())
+            .await?;
 
         let mut find = self.uv_command(&staged.binary, &staged.cache, &depot);
         find.args([
@@ -349,7 +358,9 @@ impl ManagedPythonProvider {
             "--no-python-downloads",
         ]);
         find.arg(&selected.version);
-        let output = self.run_bounded(find, QUERY_TIMEOUT, 4096).await?;
+        let output = self
+            .run_depot_command(find, QUERY_TIMEOUT, 4096, depot_lease.clone())
+            .await?;
         let path = std::str::from_utf8(&output)
             .ok()
             .and_then(|text| {
@@ -365,8 +376,10 @@ impl ManagedPythonProvider {
         let executable = canonical_interpreter_in_depot(&path, &depot)?;
         let mut probe = Command::new(&executable);
         self.private_environment(&mut probe, &staged.cache, &depot);
-        probe.args(["-I", "-c", PYTHON_IDENTITY_PROBE]);
-        let observed = self.run_bounded(probe, QUERY_TIMEOUT, 4096).await?;
+        probe.args(["-I", "-B", "-c", PYTHON_IDENTITY_PROBE]);
+        let observed = self
+            .run_depot_command(probe, QUERY_TIMEOUT, 4096, depot_lease)
+            .await?;
         let observed: ObservedPython = serde_json::from_slice(&observed).map_err(|_| {
             ManagedPythonFailure::new(
                 ManagedPythonFailureKind::Inconclusive,
@@ -444,6 +457,24 @@ impl ManagedPythonProvider {
         max_output: usize,
     ) -> ProviderResult<Vec<u8>> {
         run_bounded(&self.root, &self.cleanup, command, deadline, max_output).await
+    }
+
+    async fn run_depot_command(
+        &self,
+        command: Command,
+        deadline: Duration,
+        max_output: usize,
+        lease: Arc<super::managed_depot_lease::ManagedDepotLease>,
+    ) -> ProviderResult<Vec<u8>> {
+        run_bounded_with_lease(
+            &self.root,
+            &self.cleanup,
+            command,
+            deadline,
+            max_output,
+            Some(lease),
+        )
+        .await
     }
 
     async fn stage_uv(&self) -> ProviderResult<StagedUv> {
@@ -853,9 +884,20 @@ fn write_bounded_binary(input: &mut impl Read, output: &Path) -> ProviderResult<
 async fn run_bounded(
     root: &Path,
     cleanup: &TorchCleanupTasks,
+    command: Command,
+    deadline: Duration,
+    max_output: usize,
+) -> ProviderResult<Vec<u8>> {
+    run_bounded_with_lease(root, cleanup, command, deadline, max_output, None).await
+}
+
+async fn run_bounded_with_lease(
+    root: &Path,
+    cleanup: &TorchCleanupTasks,
     mut command: Command,
     deadline: Duration,
     max_output: usize,
+    depot: Option<Arc<super::managed_depot_lease::ManagedDepotLease>>,
 ) -> ProviderResult<Vec<u8>> {
     let temporary = private_directory(root, "tmp")?;
     let workspace = Arc::new(
@@ -893,7 +935,9 @@ async fn run_bounded(
             "Managed provider process could not start",
         )
     })?;
-    child.attach_cleanup_lease(workspace.clone());
+    // The exact child carries mutation exclusion through cancellation/failed
+    // drain; dropping an ensure_minor waiter cannot expose a still-running uv.
+    child.attach_cleanup_lease(Arc::new((workspace.clone(), depot)));
     let until = tokio::time::Instant::now() + deadline;
     let result = loop {
         match std::fs::metadata(&output_path) {
@@ -1396,6 +1440,34 @@ mod tests {
             .args(["-c", "echo $$ > \"$1\"; sleep 30 & wait", "sh"])
             .arg(marker);
         command
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn cancelled_depot_mutation_retains_lease_until_exact_child_tree_drain() {
+        let root = tempfile::tempdir().unwrap();
+        let depot = tempfile::tempdir().unwrap();
+        let cleanup = Arc::new(TorchCleanupTasks::default());
+        let provider = Arc::new(ManagedPythonProvider::new(root.path(), cleanup.clone()).unwrap());
+        let marker = root.path().join("leased-cancelled-group");
+        let command = sleeping_tree_command(&marker);
+        let lease = Arc::new(
+            super::super::managed_depot_lease::ManagedDepotLease::mutation(depot.path()).unwrap(),
+        );
+        let running = tokio::spawn(async move {
+            provider
+                .run_depot_command(command, Duration::from_secs(30), 4096, lease)
+                .await
+        });
+        let group = wait_for_process_group_marker(&marker).await;
+        assert!(super::super::managed_depot_lease::ManagedDepotLease::read(depot.path()).is_err());
+        running.abort();
+        assert!(running.await.unwrap_err().is_cancelled());
+        cleanup.close();
+        cleanup.drain().await.unwrap();
+        cleanup.drain_child_slots().await.unwrap();
+        assert!(!pumas_library::platform::linux_group::group_has_live_members(group).unwrap());
+        super::super::managed_depot_lease::ManagedDepotLease::read(depot.path()).unwrap();
     }
 
     #[cfg(target_os = "linux")]

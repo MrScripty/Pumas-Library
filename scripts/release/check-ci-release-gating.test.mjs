@@ -93,6 +93,17 @@ test('native workspace custody and cleanup run on every native QA platform', () 
       `${name} must run without a platform-specific skip`);
   }
 });
+test('headless owner identity checks include native Windows on ordinary PRs', () => {
+  const native = job('torch-quality');
+  assert.match(native, /os: \[ubuntu-24\.04, windows-2025, macos-15\]/);
+  assert.doesNotMatch(native, /^    if:/m);
+  assert.ok(native.includes(
+    '      - name: Test native headless owner root identity\n'
+    + '        working-directory: scripts/release\n'
+    + '        run: python -m unittest -v test_headless_inference.OwnerContractTests\n',
+  ), 'owner identity tests must run without a platform or release skip');
+});
+
 // PowerShell's final native exit code must not mask a preceding failing test.
 test('native baseline gates keep each cargo command in its own step', () => {
   const native = job('torch-quality');

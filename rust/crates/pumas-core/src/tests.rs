@@ -146,21 +146,13 @@ async fn builder_requires_download_restore_grant_but_no_client_reads_do_not() {
         .await
         .unwrap();
     let library_root = initial.model_library().library_root().to_path_buf();
-    initial.shutdown_downloads().await.unwrap();
+    initial.shutdown_instance().await.unwrap();
     drop(initial);
 
     let root = DownloadDestinationRoot::open(&library_root).unwrap();
     let grant = root.try_acquire_execution_grant().unwrap();
     let store_path = temp.path().join("launcher-data/downloads.json");
     let store_before = std::fs::read(&store_path).ok();
-    let busy = PumasApi::builder(temp.path())
-        .auto_create_dirs(true)
-        .with_process_manager(false)
-        .build()
-        .await;
-    assert!(matches!(busy, Err(PumasError::DownloadRootBusy)));
-    assert_eq!(std::fs::read(&store_path).ok(), store_before);
-
     let without_client = PumasApi::builder(temp.path())
         .auto_create_dirs(true)
         .with_hf_client(false)
@@ -169,19 +161,58 @@ async fn builder_requires_download_restore_grant_but_no_client_reads_do_not() {
         .await
         .unwrap();
     assert!(without_client.list_models().await.unwrap().is_empty());
-    without_client.shutdown_downloads().await.unwrap();
+    without_client.shutdown_instance().await.unwrap();
     assert_eq!(std::fs::read(&store_path).ok(), store_before);
     drop(without_client);
-    drop(grant);
 
-    let restored = PumasApi::builder(temp.path())
+    let busy = PumasApi::builder(temp.path())
         .auto_create_dirs(true)
         .with_process_manager(false)
         .build()
-        .await
-        .expect("startup must retry required restore after contention ends");
-    assert!(restored.list_hf_downloads().await.unwrap().is_empty());
-    restored.shutdown_downloads().await.unwrap();
+        .await;
+    assert!(matches!(busy, Err(PumasError::DownloadRootBusy)));
+    assert_eq!(std::fs::read(&store_path).ok(), store_before);
+
+    drop(grant);
+
+    let registry = registry::LibraryRegistry::open().unwrap();
+    let retained_claim = registry.get_instance(temp.path()).unwrap().unwrap();
+    assert_eq!(retained_claim.status, registry::InstanceStatus::Claiming);
+    let retained_claim = serde_json::to_value(retained_claim).unwrap();
+    // Releasing the contended download root does not establish cessation of
+    // a failed owning-instance construction or release its startup claim.
+    let retry = PumasApi::builder(temp.path())
+        .auto_create_dirs(true)
+        .with_process_manager(false)
+        .build()
+        .await;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    assert!(
+        matches!(
+            &retry,
+            Err(PumasError::InvalidParams { message })
+                if message == &format!(
+                    "Pumas library instance is already running for physical store {}. Drop existing owner handles before constructing another owner.",
+                    temp.path().canonicalize().unwrap().display()
+                )
+        ),
+        "unexpected retained-owner refusal: {:?}",
+        retry.as_ref().err()
+    );
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    assert!(matches!(
+        retry,
+        Err(PumasError::InvalidParams { message })
+            if message == format!(
+                "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
+                temp.path().display(), std::process::id()
+            )
+    ));
+    assert_eq!(
+        serde_json::to_value(registry.get_instance(temp.path()).unwrap().unwrap()).unwrap(),
+        retained_claim
+    );
+    assert_eq!(std::fs::read(&store_path).ok(), store_before);
 }
 
 #[tokio::test]
@@ -410,7 +441,13 @@ async fn acquisition_integration_startup_retains_separate_pending_custody() {
         std::fs::read(destination.join("detector.onnx")).unwrap(),
         payload
     );
-    assert_startup_retained_evidence(&api, &copied_pending, &copied_metadata, &shards).await;
+    assert_startup_retained_evidence(
+        api.model_library(),
+        &copied_pending,
+        &copied_metadata,
+        &shards,
+    )
+    .await;
     let acquisitions = store.acquisition_store().acquisitions().unwrap();
     let using = acquisitions
         .values()
@@ -425,37 +462,50 @@ async fn acquisition_integration_startup_retains_separate_pending_custody() {
         .read_hf_completion_receipt(acquisition_id)
         .unwrap()
         .is_none());
-    // Shutdown reports the retained importer failure, but must drain before
-    // the fixture repairs the obstruction and opens a fresh owning instance.
+    // Failed shutdown retains the exact owning generation. Repairing this
+    // fixture's obstruction cannot authorize a new owner or receipt replay.
     assert!(matches!(
         api.shutdown_downloads().await,
         Err(PumasError::DownloadShutdownFailed { failures }) if failures > 0
     ));
+    assert!(api.shutdown_instance().await.is_err());
+    let registry = registry::LibraryRegistry::open().unwrap();
+    let retained_owner = registry.get_instance(temp.path()).unwrap().unwrap();
+    assert_eq!(retained_owner.status, registry::InstanceStatus::Ready);
+    let retained_owner = serde_json::to_value(retained_owner).unwrap();
+    let library = api.model_library().clone();
     drop(api);
     std::fs::remove_file(destination.join("metadata.json")).unwrap();
 
     for _ in 0..2 {
-        let api = PumasApi::builder(temp.path())
+        let retry = PumasApi::builder(temp.path())
             .auto_create_dirs(true)
             .with_process_manager(false)
             .build()
-            .await
-            .expect("unrelated API services start with retained recovery custody");
-        let downloads = api.list_hf_downloads().await.unwrap();
-        assert_eq!(downloads.len(), 1);
-        assert_eq!(downloads[0].status, DownloadStatus::Error);
+            .await;
+        assert!(matches!(
+            retry,
+            Err(PumasError::InvalidParams { message })
+                if message.contains("already running")
+        ));
+        assert_eq!(
+            serde_json::to_value(registry.get_instance(temp.path()).unwrap().unwrap()).unwrap(),
+            retained_owner
+        );
         let inventory = store.load_lifecycle_inventory_strict().unwrap();
         assert_eq!(inventory.downloads.len(), 1);
+        assert_eq!(inventory.downloads[0].status, DownloadStatus::Error);
         assert!(inventory
             .queue_admissions
             .contains_key("builder-import-retry"));
         assert_eq!(
             serde_json::to_value(&inventory.queue_admissions["builder-import-retry"]).unwrap(),
             original_admission,
-            "reopen must preserve exact queue custody without an issued receipt"
+            "blocked reopen must preserve exact queue custody without an issued receipt"
         );
         assert!(std::fs::read(destination.join("metadata.json")).is_err());
-        assert_startup_retained_evidence(&api, &copied_pending, &copied_metadata, &shards).await;
+        assert_startup_retained_evidence(&library, &copied_pending, &copied_metadata, &shards)
+            .await;
         assert!(store
             .read_hf_completion_receipt(acquisition_id)
             .unwrap()
@@ -468,8 +518,6 @@ async fn acquisition_integration_startup_retains_separate_pending_custody() {
             std::fs::read(destination.join("detector.onnx")).unwrap(),
             payload
         );
-        let _ = api.shutdown_downloads().await;
-        drop(api);
     }
 }
 
@@ -633,6 +681,11 @@ async fn test_new_rejects_existing_primary_without_implicit_client() {
         Ok(_) => panic!("second PumasApi::new should reject an existing primary"),
         Err(err) => err,
     };
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    assert!(
+        matches!(err, PumasError::InvalidParams { message } if message.contains("physical store") && message.contains("Drop existing owner handles"))
+    );
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     assert!(
         matches!(err, PumasError::InvalidParams { message } if message.contains("PumasLocalClient"))
     );

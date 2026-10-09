@@ -70,6 +70,7 @@ pub(crate) struct IntentDownloadObservation {
 
 /// Client for HuggingFace Hub API operations.
 pub struct HuggingFaceClient {
+    pub(super) store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     /// Configured mutation authority; absent for standalone search-only clients.
     pub(super) destination_root: Option<super::download_recovery::DownloadDestinationRoot>,
     /// HTTP client for API requests (has total timeout)
@@ -189,6 +190,7 @@ impl HuggingFaceClient {
 
     fn clone_for_invocation(&self) -> Self {
         Self {
+            store_lifetime: self.store_lifetime.clone(),
             destination_root: self.destination_root.clone(),
             client: self.client.clone(),
             download_client: self.download_client.clone(),
@@ -247,6 +249,13 @@ impl HuggingFaceClient {
         let root = super::download_recovery::DownloadDestinationRoot::open(path)?;
         self.set_download_destination_root(root);
         Ok(())
+    }
+
+    pub(crate) fn set_store_lifetime(
+        &mut self,
+        lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) {
+        self.store_lifetime = lifetime;
     }
 
     pub(crate) fn set_download_destination_root(
@@ -349,6 +358,7 @@ impl HuggingFaceClient {
             crate::acquisition::AcquisitionStore::new(&cache_dir),
         )));
         Ok(Self {
+            store_lifetime: Default::default(),
             destination_root: None,
             client,
             download_client,

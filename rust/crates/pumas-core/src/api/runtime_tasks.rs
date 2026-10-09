@@ -12,9 +12,17 @@ use tokio::task::AbortHandle;
 
 #[derive(Clone)]
 pub(crate) struct RuntimeTasks {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     handle: Handle,
     inner: Arc<Mutex<OwnerState>>,
     owner_refs: Arc<()>,
+}
+
+/// A callback admission capability, not a primary or physical-store owner.
+/// Rejected tasks are never polled; accepted tasks use the existing shared drain.
+pub(crate) struct WeakRuntimeTasks {
+    handle: Handle,
+    inner: Weak<Mutex<OwnerState>>,
 }
 
 struct OwnerState {
@@ -65,6 +73,7 @@ impl DrainOutcome {
 /// not keep the registry alive.
 #[derive(Clone)]
 pub(crate) struct RuntimeTaskContext {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     handle: Handle,
     owner: Weak<Mutex<OwnerState>>,
     operation_id: u64,
@@ -76,6 +85,7 @@ impl RuntimeTasks {
         let (progress_tx, _) = watch::channel(0);
         let (tail_tx, _) = watch::channel(None);
         Self {
+            store_lifetime: Default::default(),
             handle: Handle::current(),
             inner: Arc::new(Mutex::new(OwnerState {
                 closed: false,
@@ -95,49 +105,41 @@ impl RuntimeTasks {
         }
     }
 
+    pub(crate) fn with_store_lifetime(
+        mut self,
+        lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Self {
+        self.store_lifetime = lifetime;
+        self
+    }
+
+    pub(crate) fn runtime_handle(&self) -> Handle {
+        self.handle.clone()
+    }
+
+    pub(crate) fn require_store_root(&self, root: &std::path::Path) -> Result<()> {
+        self.store_lifetime.require_root(root)
+    }
+
+    /// Admit callbacks without retaining the primary or its physical store.
+    /// The callback must upgrade its weak primary inside the admitted task.
+    pub(crate) fn downgrade(&self) -> WeakRuntimeTasks {
+        WeakRuntimeTasks {
+            handle: self.handle.clone(),
+            inner: Arc::downgrade(&self.inner),
+        }
+    }
+
     /// Register best-effort background work.
     pub(crate) fn spawn<F>(&self, task: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let mut state = self.inner.lock().expect("runtime task owner poisoned");
-        if state.closed {
-            return;
-        }
-        let background_id = state.next_background_id;
-        state.next_background_id = state
-            .next_background_id
-            .checked_add(1)
-            .expect("runtime background identity exhausted");
-        let (start_tx, start_rx) = oneshot::channel();
-        let handle = self.handle.spawn(async move {
-            if start_rx.await.is_ok() {
-                AssertUnwindSafe(task).catch_unwind().await
-            } else {
-                Ok(())
-            }
+        let store_lifetime = self.store_lifetime.clone();
+        spawn_background(&self.inner, &self.handle, async move {
+            let _store_lifetime = store_lifetime;
+            task.await;
         });
-        state
-            .background
-            .insert(background_id, handle.abort_handle());
-        let inner = Arc::clone(&self.inner);
-        self.handle.spawn(async move {
-            let result = handle.await;
-            let mut state = inner.lock().expect("runtime task owner poisoned");
-            state.background.remove(&background_id);
-            match result {
-                Ok(Err(payload)) => state.failures.push(format!(
-                    "background runtime task panicked: {}",
-                    panic_message(payload)
-                )),
-                Err(error) if !error.is_cancelled() => state
-                    .failures
-                    .push(format!("background runtime task join failed: {error}")),
-                _ => {}
-            }
-            maybe_finish_drain(&mut state);
-        });
-        let _ = start_tx.send(());
     }
 
     /// Synchronously admit finite work and return its independently owned result.
@@ -162,6 +164,7 @@ impl RuntimeTasks {
             .ok_or_else(|| owner_failure("runtime operation identity exhausted"))?;
 
         let context = RuntimeTaskContext {
+            store_lifetime: self.store_lifetime.clone(),
             handle: self.handle.clone(),
             owner: Arc::downgrade(&self.inner),
             operation_id,
@@ -169,7 +172,9 @@ impl RuntimeTasks {
         let inner = Arc::clone(&self.inner);
         let (start_tx, start_rx) = oneshot::channel();
         let (result_tx, result_rx) = oneshot::channel();
+        let store_lifetime = self.store_lifetime.clone();
         let outer = self.handle.spawn(async move {
+            let _store_lifetime = store_lifetime;
             if start_rx.await.is_err() {
                 return;
             }
@@ -323,6 +328,7 @@ impl RuntimeTasks {
                             panic_message(payload)
                         )),
                     }
+                    drop(owner);
                     publish_tail_outcome(&inner, DrainOutcome { failures });
                 });
                 let inner = Arc::clone(&self.inner);
@@ -371,6 +377,62 @@ impl RuntimeTasks {
             .background
             .len()
     }
+}
+
+impl WeakRuntimeTasks {
+    pub(crate) fn spawn<F>(&self, task: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let Some(inner) = self.inner.upgrade() else {
+            return;
+        };
+        spawn_background(&inner, &self.handle, task);
+    }
+}
+
+fn spawn_background<F>(inner: &Arc<Mutex<OwnerState>>, runtime: &Handle, task: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let mut state = inner.lock().expect("runtime task owner poisoned");
+    if state.closed {
+        return;
+    }
+    let background_id = state.next_background_id;
+    state.next_background_id = state
+        .next_background_id
+        .checked_add(1)
+        .expect("runtime background identity exhausted");
+    let (start_tx, start_rx) = oneshot::channel();
+    let handle = runtime.spawn(async move {
+        if start_rx.await.is_ok() {
+            AssertUnwindSafe(task).catch_unwind().await
+        } else {
+            Ok(())
+        }
+    });
+    state
+        .background
+        .insert(background_id, handle.abort_handle());
+    let inner = Arc::clone(inner);
+    runtime.spawn(async move {
+        let result = handle.await;
+        let mut state = inner.lock().expect("runtime task owner poisoned");
+        state.background.remove(&background_id);
+        match result {
+            Ok(Err(payload)) => state.failures.push(format!(
+                "background runtime task panicked: {}",
+                panic_message(payload)
+            )),
+            Err(error) if !error.is_cancelled() => state
+                .failures
+                .push(format!("background runtime task join failed: {error}")),
+            _ => {}
+        }
+        maybe_finish_drain(&mut state);
+    });
+    let _ = start_tx.send(());
 }
 
 impl RuntimeTaskContext {
@@ -425,6 +487,7 @@ impl RuntimeTaskContext {
             let (start_tx, start_rx) = oneshot::channel();
             let (result_tx, result_rx) = oneshot::channel();
             let blocking_handle = self.handle.clone();
+            let function = self.store_lifetime.retain_for_effect(function);
             let nested = self.handle.spawn(async move {
                 if start_rx.await.is_err() {
                     return;

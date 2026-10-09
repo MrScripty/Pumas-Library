@@ -4358,6 +4358,9 @@ pub(super) mod tests {
             server_handle: Mutex::new(None),
             registry: None,
             instance_claim: Mutex::new(None),
+            ready_instance: std::sync::OnceLock::new(),
+            external_service_tasks: RuntimeTasks::default(),
+            instance_shutdown: std::sync::OnceLock::new(),
         };
         // Exercise the production API without a global registry, IPC listener,
         // filesystem watcher, or background connectivity probe.
@@ -5294,3 +5297,6 @@ pub(super) mod tests {
         api.shutdown_downloads().await.unwrap();
     }
 }
+
+#[cfg(test)]
+mod model_detail_cache_tests;

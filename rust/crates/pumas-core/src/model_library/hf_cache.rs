@@ -134,6 +134,7 @@ pub struct HfSearchCache {
     conn: Arc<Mutex<Connection>>,
     /// Cache configuration.
     config: HfCacheConfig,
+    _store_lifetime: crate::platform::store_lifetime::StoreLifetime,
 }
 
 impl HfSearchCache {
@@ -146,6 +147,14 @@ impl HfSearchCache {
 
     /// Create a new cache with custom configuration.
     pub fn with_config(db_path: impl AsRef<Path>, config: HfCacheConfig) -> Result<Self> {
+        Self::with_config_and_store_lifetime(db_path, config, Default::default())
+    }
+
+    pub(crate) fn with_config_and_store_lifetime(
+        db_path: impl AsRef<Path>,
+        config: HfCacheConfig,
+        store_lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Result<Self> {
         let db_path = db_path.as_ref();
 
         // Create parent directory if needed
@@ -165,6 +174,7 @@ impl HfSearchCache {
         let cache = Self {
             conn: Arc::new(Mutex::new(conn)),
             config,
+            _store_lifetime: store_lifetime,
         };
 
         cache.init_schema()?;

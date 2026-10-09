@@ -133,8 +133,16 @@ facts, pinned manifest entries, a model import spec, a reserved workspace, finit
 retry budgets, a retained operation UUID and optional ephemeral credentials.
 Its request is not Debug/serde-enabled; only phase/current-file byte progress is
 serializable. Selection runs under the same bounded acquisition consumer scope
-as transfer, and verified single/bundled GGUF publication uses the existing
-importer and exact receipt pipeline. The stable demand owner is
+as transfer. Model publication delegates to the shared descriptor/receipt-bound
+`ModelImporter::import_acquired_model` qualification bridge and the existing
+atomic copied-import publisher. S3 remains a generic object store: acquisition
+success, qualified model publication and backend compatibility are separate
+outcomes. The [bounded acceptance contract](../plans/artifact-acquisition/reports/acquisition-model-bridge-2026-10-08.md)
+includes GGUF, genuine single-file safetensors and complete supported safetensors
+packages. The [ONNX structural extension](../plans/artifact-acquisition/reports/acquired-onnx-package-2026-10-08.md)
+also qualifies bounded static FLOAT graphs and their selected relative external
+tensor files. This qualification leaves task classification unknown and does not
+authorize runtime admission. Existing GGUF importer entry points remain compatible. The stable demand owner is
 `model.s3.workflow`. Neither source access nor credentials enter the importer
 payload or progress; no account/source-configuration persistence is introduced.
 
@@ -178,8 +186,11 @@ Controlled HTTPS/RPC and DOM/preload fixtures support this secret boundary;
 packaged/browser behavior and real-provider acceptance remain separate.
 
 The additive desktop bundle starts take 2–32 explicit per-file key/VersionId/
-logical-path/SHA-256 pins and one exact primary GGUF basename, with only the
-existing native inert auxiliary formats. Complete structural preflight uses
+logical-path/SHA-256 pins and one exact selected primary weight logical path.
+Safe nested primaries and additional weight shards/components are admitted as
+source selections; extensions grant no model authority. Native and desktop S3
+imports delegate byte/package qualification to the shared acquired-model importer.
+Complete structural preflight uses
 `S3Reader::validate_manifest_entries` plus shared manifest validation before
 job/workspace admission; it grants no selection or byte-verification authority.
 Importer-owned reserved roots and their normalized aliases/descendants are
@@ -191,8 +202,13 @@ A checked HEAD for the exact immutable VersionId and explicit size zero yields
 an empty acquisition stream without GET or an impossible byte range. The shared
 workspace writer, SHA-256 verifier and receipt owner still verify and publish
 every selected member. Missing/invalid Content-Length or an absent/wrong-version
-object fails selection; an empty file never stands for unknown length. Empty
-auxiliaries are supported, while the primary must pass existing GGUF validation.
+object fails selection; an empty file never stands for unknown length. GGUF
+retains its existing inert auxiliary policy, including empty auxiliary files. Safetensors files and bounded
+complete supported packages must satisfy shared config/tokenizer/processor/index/
+shard/component closure before registration. ONNX graphs must satisfy the shared
+bounded structural class and exact external-tensor closure. Unsupported packages
+and custom code remain refused; registration does not establish backend
+compatibility or inference readiness.
 Public range reads remain nonempty; selection and `s3/manifest.rs` identity
 implementation are unchanged. Anonymous/authenticated single-object wire shapes remain unchanged;
 bundle authentication uses the same ephemeral credential DTO and constructors.
@@ -244,7 +260,61 @@ is still not an atomic multi-object snapshot or a ready artifact set. Callers
 choose exact logical paths and supply authoritative SHA-256 evidence, then use
 the existing explicit manifest/acquisition/import path. Its VersionId range pins,
 namespace validation, verification, receipts, retry policy and persistence formats
-remain unchanged. There is no new prefix RPC/desktop or automatic import path.
+remain unchanged.
+
+The additive desktop prefix discovery starts (`start_s3_prefix_discovery` and
+`start_authenticated_s3_prefix_discovery`) require an explicit HTTPS origin,
+region, bucket, addressing, raw prefix, operation UUID and 100–30000 ms deadline.
+`get_s3_prefix_discovery` observes that same UUID; lost acknowledgement never
+resubmits source access. `cancel_s3_prefix_discovery` requests cancellation;
+Running remains nonterminal until the existing owned S3 worker finishes. Imports
+and discovery share one bounded worker admission, and shutdown cancels and drains
+it. The facade applies the requested whole-discovery deadline around enumeration;
+the native reader is configured with a bounded one-second margin to prevent its
+transport timeout from racing the typed Deadline result. Credentials use the existing Deserialize-only one-request channel and are
+held only by the transient native reader, never safe observations or persistence.
+
+Discovery reuses core enumeration with page size 16, eight pages, 32 objects,
+64 KiB per-page XML and 256 KiB total XML. Complete alone contains ordered exact
+key/VersionId/opaque-ETag/decimal-u64-size observations and page count, including
+an empty complete listing. Projection additionally bounds ETag to 1024 bytes and
+serialized result to 60 KiB within the existing 64 KiB transport envelope.
+Incomplete (capacity), Deadline, Cancelled and Unavailable expose no partial
+objects; rejected/not-found/idle observations grant no selection. Output schemas
+are closed, including object entries, before privileged IPC forwarding. No
+continuation token, reflected provider error or credential is returned.
+
+The existing import dialog uses a 15-second discovery deadline. Users explicitly
+choose each primary/auxiliary object, enter logical output paths and authoritative
+SHA-256 values, then submit the unchanged single/bundle import commands. ETags and
+listing sizes never stand in for digests. Selected pins are scoped to the exact
+endpoint/region/bucket/addressing and are cleared when it changes. Source query
+changes discard/cancel stale discovery; close/unmount cancels discovery without
+cancelling an existing import. Discovery opens no workspace/acquisition consumer,
+creates no receipt or model, and installs nothing. No automatic import, source
+configuration persistence, core reader policy change or real-provider acceptance
+is implied by this additive RPC/desktop facade.
+
+Desktop retained-transfer retry is explicit and same-process only.
+`get_s3_transfer_retry` reports availability for the observed operation;
+`retry_s3_model_transfer` accepts only that operation UUID and optional fresh
+one-use credentials. It cannot replace the source, key/VersionId/path/digest pin
+set, acquisition identity or import intent. The process must still hold its
+original physical reservation, and both the core operation and outer workspace
+scope must have drained before retry becomes available. A distinct attempt token
+fences late completion even though the operation UUID remains unchanged.
+
+Before source work, retry rechecks the exact durable acquisition record,
+receipt absence, admissible Transferring/FilesReady phase and held root/stage
+identity. Publication or uncertain custody does not authorize retry. Completed
+files are reverified before reuse; partial bytes may restart from zero. Prior
+credentials are discarded and authenticated retries require new inputs. A lost
+acknowledgement causes observation of the same operation, never automatic replay.
+
+`inspect_persisted_s3_imports` is a bounded read-only projection of at most 32
+owned records and recorded publication bindings. It cannot recreate physical
+custody, admit retry, reconcile publication or prove that a model is available.
+Cold retry remains unsupported; restart preserves retained work for inspection.
 
 [AWS GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html) and [Object metadata](https://docs.aws.amazon.com/AmazonS3/latest/API/API_Object.html) provide source semantics. A maintained SDK supplies signing and request mechanics. Pumas owns selected identity, allowed access, acquisition attempts, destination custody and verification.
 
@@ -282,7 +352,7 @@ Persisting progress is not the same as making the file bytes durable. After a cr
 
 Acquisition FilesReady and model/runtime publication are distinct commits. The managed HF importer issues receipt version 1 only after complete finalization and durable metadata, index and applicable pinned package-facts outputs. The receipt binds the acquisition ID, persisted `Using` lease, HF demand and operation, current queue admission, manifest and ordered verified-file receipts, destination/workspace identity, resulting model ID, and a versioned canonical output projection. Canonical JSON sorts object keys recursively, preserves array order and explicit nulls, and rejects unsupported values. Its projection contract explicitly lists metadata, model-index and package-facts fields; package-facts content includes its independent contract version. Cold recovery compares current read-only outputs to the issuer-published proof, never computes new proof from current outputs alone. Partial imports and ordinary model-import callers have no receipt authority. A crash before receipt publication, unsupported/malformed receipt, or changed/missing output remains recovery-required and never replays import effects. Unknown publication visibility is failure, not success.
 
-The current Q1 candidate also routes llama.cpp archive acquisition through the shared consumer. Its native receipt binds the exact tag/metadata and hashes of the extracted output tree and launcher. The installer claims its cancellation/publication arbitration before returning the prepared receipt payload, so an accepted cancellation cannot later be replayed as an installation; after the claim, cancellation is refused and restart may finish the exact staged publication. If cancellation wins before receipt issuance, the installer durably revokes the exact attempt, drains and removes its owned workspace under the native lock, then withdraws only the unchanged, receipt-free `Using` lease. Cleanup or withdrawal failure retains recovery custody and prevents same-tag retry from selecting the unresolved attempt. Cold recovery verifies or completes publication from a committed receipt, settles the same acquisition, and explicitly reclaims its owned workspace. A retained `Using` acquisition without a receipt or exact withdrawal remains unresolved. Source-only composed review found no substantiated P0–P3 issue; objective-level consumer/platform evidence is still required.
+The current Q1 candidate also routes llama.cpp archive acquisition through the shared consumer. Its native receipt binds the exact tag/metadata and hashes of the extracted output tree and launcher. The installer claims its cancellation/publication arbitration before returning the prepared receipt payload, so an accepted cancellation cannot later be replayed as an installation; after the claim, cancellation is refused and restart may finish the exact staged publication. If cancellation wins before receipt issuance, the installer durably revokes the exact attempt, drains and removes its owned workspace under the native lock, then withdraws only the unchanged, receipt-free `Using` lease. Cleanup or withdrawal failure retains recovery custody and prevents same-tag retry from selecting the unresolved attempt. Cold recovery verifies or completes publication from a committed receipt, settles the same acquisition, and explicitly reclaims its owned workspace. A retained `Using` acquisition without a receipt or exact withdrawal remains unresolved.
 
 Receipt publication conditionally validates the exact durable `Using` lease, demand/manifest/files, non-revoked queue admission, workspace/destination, and held root grant in the same canonical store transaction. A cold worker does not renew or replace that lease before checking its receipt. Only after read-only validation may it obtain a private receipt-qualified settlement capability. Acquisition transition to `Adopted` and exact queue release are one atomic `AcquisitionStore` document publication; the immutable receipt remains paired with the adopted acquisition as completion history. Thus recovery has no intermediate acknowledgement-with-unreleased-queue state. An identical already-published receipt is idempotent; conflicting, orphaned, duplicated, malformed, or unknown-version receipts fail closed. No implicit receipt pruning exists; any future terminal-record compaction must remove the exact acquisition and receipt together under a separately selected retention policy. Migration never manufactures receipts, so pre-receipt `Using` remains unresolved even if output files match. No cross-store exactly-once remote-I/O guarantee is assumed.
 

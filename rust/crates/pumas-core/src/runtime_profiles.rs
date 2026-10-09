@@ -1,5 +1,19 @@
 //! Provider-neutral runtime profile service contracts.
 
+#[path = "runtime_profiles/audio_channel.rs"]
+pub(crate) mod audio_channel;
+#[path = "runtime_profiles/audio_client.rs"]
+pub(crate) mod audio_client;
+#[path = "runtime_profiles/audio_custody.rs"]
+pub(crate) mod audio_custody;
+#[path = "runtime_profiles/audio_endpoint.rs"]
+mod audio_endpoint;
+#[path = "runtime_profiles/audio_runtime.rs"]
+pub(crate) mod audio_runtime;
+#[cfg(all(feature = "test-support", target_os = "linux"))]
+pub use audio_endpoint::ControlledAudioEndpointFixture;
+pub use audio_endpoint::{OwnedAudioEndpoint, OwnedAudioEndpointError, OwnedAudioEndpointResult};
+
 #[path = "runtime_profiles/launch_specs.rs"]
 mod launch_specs;
 #[path = "runtime_profiles/launch_strategy.rs"]
@@ -393,6 +407,7 @@ impl RuntimeProviderAdapter for OnnxRuntimeProviderAdapter {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeProfileService {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     launcher_root: PathBuf,
     config_path: PathBuf,
     write_lock: Arc<RwLock<()>>,
@@ -400,6 +415,7 @@ pub struct RuntimeProfileService {
     updates: broadcast::Sender<RuntimeProfileUpdateFeed>,
     operation_locks: Arc<Mutex<HashSet<RuntimeProfileId>>>,
     pub(crate) process_owner: Arc<process_owner::RuntimeProfileProcessOwner>,
+    pub(crate) audio_endpoints: Arc<audio_endpoint::AudioEndpoints>,
     provider_registry: ProviderRegistry,
     provider_adapters: RuntimeProviderAdapters,
 }
@@ -455,6 +471,7 @@ impl RuntimeProfileService {
     ) -> Self {
         let launcher_root = launcher_root.as_ref().to_path_buf();
         Self {
+            store_lifetime: Default::default(),
             config_path: launcher_root
                 .join("launcher-data")
                 .join("metadata")
@@ -465,26 +482,40 @@ impl RuntimeProfileService {
             updates: broadcast::channel(RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY).0,
             operation_locks: Arc::new(Mutex::new(HashSet::new())),
             process_owner: Arc::new(process_owner::RuntimeProfileProcessOwner::default()),
+            audio_endpoints: Arc::new(audio_endpoint::AudioEndpoints::default()),
             provider_registry,
             provider_adapters,
         }
     }
 
+    pub(crate) fn with_store_lifetime(
+        mut self,
+        lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Self {
+        self.process_owner = Arc::new(
+            process_owner::RuntimeProfileProcessOwner::with_store_lifetime(lifetime.clone()),
+        );
+        self.store_lifetime = lifetime;
+        self
+    }
+
     pub async fn snapshot(&self) -> Result<RuntimeProfilesSnapshotResponse> {
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
-        let config = tokio::task::spawn_blocking(move || {
-            let _guard = write_lock.write().map_err(|_| {
-                PumasError::Other("Failed to acquire runtime profile config lock".to_string())
-            })?;
-            load_or_initialize_config(&config_path)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join runtime profile snapshot task: {err}"
-            ))
-        })??;
+        let config = self
+            .store_lifetime
+            .spawn_blocking(move || {
+                let _guard = write_lock.write().map_err(|_| {
+                    PumasError::Other("Failed to acquire runtime profile config lock".to_string())
+                })?;
+                load_or_initialize_config(&config_path)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join runtime profile snapshot task: {err}"
+                ))
+            })??;
 
         let snapshot = self.apply_runtime_statuses(config.snapshot())?;
 
@@ -502,19 +533,21 @@ impl RuntimeProfileService {
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
         let requested_cursor = cursor.map(ToOwned::to_owned);
-        let config_cursor = tokio::task::spawn_blocking(move || {
-            let _guard = write_lock.write().map_err(|_| {
-                PumasError::Other("Failed to acquire runtime profile config lock".to_string())
-            })?;
-            let config = load_or_initialize_config(&config_path)?;
-            Ok::<_, PumasError>(config.cursor)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join runtime profile update-feed task: {err}"
-            ))
-        })??;
+        let config_cursor = self
+            .store_lifetime
+            .spawn_blocking(move || {
+                let _guard = write_lock.write().map_err(|_| {
+                    PumasError::Other("Failed to acquire runtime profile config lock".to_string())
+                })?;
+                let config = load_or_initialize_config(&config_path)?;
+                Ok::<_, PumasError>(config.cursor)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join runtime profile update-feed task: {err}"
+                ))
+            })??;
         let feed = self.build_update_feed(requested_cursor.as_deref(), &config_cursor)?;
 
         Ok(RuntimeProfileUpdateFeedResponse {
@@ -534,8 +567,9 @@ impl RuntimeProfileService {
     ) -> Result<Option<RuntimeProfileEvent>> {
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
-        let default_status =
-            tokio::task::spawn_blocking(move || -> Result<Option<RuntimeProfileStatus>> {
+        let default_status = self
+            .store_lifetime
+            .spawn_blocking(move || -> Result<Option<RuntimeProfileStatus>> {
                 let _guard = write_lock.write().map_err(|_| {
                     PumasError::Other("Failed to acquire runtime profile config lock".to_string())
                 })?;
@@ -585,19 +619,20 @@ impl RuntimeProfileService {
         let write_lock = self.write_lock.clone();
         let launcher_root = self.launcher_root.clone();
         let provider_registry = self.provider_registry.clone();
-        tokio::task::spawn_blocking(move || {
-            let _guard = write_lock.write().map_err(|_| {
-                PumasError::Other("Failed to acquire runtime profile config lock".to_string())
-            })?;
-            let config = load_or_initialize_config(&config_path)?;
-            derive_managed_profile_launch_specs(&launcher_root, &config, &provider_registry)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join runtime profile launch-spec task: {err}"
-            ))
-        })?
+        self.store_lifetime
+            .spawn_blocking(move || {
+                let _guard = write_lock.write().map_err(|_| {
+                    PumasError::Other("Failed to acquire runtime profile config lock".to_string())
+                })?;
+                let config = load_or_initialize_config(&config_path)?;
+                derive_managed_profile_launch_specs(&launcher_root, &config, &provider_registry)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join runtime profile launch-spec task: {err}"
+                ))
+            })?
     }
 
     pub async fn managed_profile_launch_spec(
@@ -778,30 +813,31 @@ impl RuntimeProfileService {
         let write_lock = self.write_lock.clone();
         let launcher_root = self.launcher_root.clone();
         let provider_registry = self.provider_registry.clone();
-        tokio::task::spawn_blocking(move || {
-            let _guard = write_lock.write().map_err(|_| {
-                PumasError::Other("Failed to acquire runtime profile config lock".to_string())
-            })?;
-            let config = load_or_initialize_config(&config_path)?;
-            let selected_profile_id = profile_id
-                .or_else(|| config.default_profile_id.clone())
-                .ok_or_else(|| PumasError::InvalidParams {
-                    message: "runtime profile id is required".to_string(),
+        self.store_lifetime
+            .spawn_blocking(move || {
+                let _guard = write_lock.write().map_err(|_| {
+                    PumasError::Other("Failed to acquire runtime profile config lock".to_string())
                 })?;
-            resolve_config_profile_endpoint(
-                &launcher_root,
-                &config,
-                &provider_registry,
-                provider,
-                selected_profile_id,
-            )
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join runtime profile endpoint resolution task: {err}"
-            ))
-        })?
+                let config = load_or_initialize_config(&config_path)?;
+                let selected_profile_id = profile_id
+                    .or_else(|| config.default_profile_id.clone())
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "runtime profile id is required".to_string(),
+                    })?;
+                resolve_config_profile_endpoint(
+                    &launcher_root,
+                    &config,
+                    &provider_registry,
+                    provider,
+                    selected_profile_id,
+                )
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join runtime profile endpoint resolution task: {err}"
+                ))
+            })?
     }
 
     pub async fn resolve_model_endpoint(
@@ -846,45 +882,46 @@ impl RuntimeProfileService {
         let write_lock = self.write_lock.clone();
         let launcher_root = self.launcher_root.clone();
         let provider_registry = self.provider_registry.clone();
-        tokio::task::spawn_blocking(move || {
-            let _guard = write_lock.write().map_err(|_| {
-                PumasError::Other("Failed to acquire runtime profile config lock".to_string())
-            })?;
-            let config = load_or_initialize_config(&config_path)?;
-            let supports_default_profile_fallback = provider_registry
-                .get(provider)
-                .map(|behavior| behavior.supports_default_profile_fallback)
-                .unwrap_or(false);
-            let routed_profile_id = explicit_profile_id
-                .or_else(|| {
-                    config
-                        .routes
-                        .iter()
-                        .find(|route| route.provider == provider && route.model_id == model_id)
-                        .and_then(|route| route.profile_id.clone())
-                })
-                .or_else(|| {
-                    supports_default_profile_fallback
-                        .then(|| config.default_profile_id.clone())
-                        .flatten()
-                })
-                .ok_or_else(|| PumasError::InvalidParams {
-                    message: "runtime profile id is required".to_string(),
+        self.store_lifetime
+            .spawn_blocking(move || {
+                let _guard = write_lock.write().map_err(|_| {
+                    PumasError::Other("Failed to acquire runtime profile config lock".to_string())
                 })?;
-            resolve_config_profile_endpoint(
-                &launcher_root,
-                &config,
-                &provider_registry,
-                provider,
-                routed_profile_id,
-            )
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join model runtime profile endpoint resolution task: {err}"
-            ))
-        })?
+                let config = load_or_initialize_config(&config_path)?;
+                let supports_default_profile_fallback = provider_registry
+                    .get(provider)
+                    .map(|behavior| behavior.supports_default_profile_fallback)
+                    .unwrap_or(false);
+                let routed_profile_id = explicit_profile_id
+                    .or_else(|| {
+                        config
+                            .routes
+                            .iter()
+                            .find(|route| route.provider == provider && route.model_id == model_id)
+                            .and_then(|route| route.profile_id.clone())
+                    })
+                    .or_else(|| {
+                        supports_default_profile_fallback
+                            .then(|| config.default_profile_id.clone())
+                            .flatten()
+                    })
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "runtime profile id is required".to_string(),
+                    })?;
+                resolve_config_profile_endpoint(
+                    &launcher_root,
+                    &config,
+                    &provider_registry,
+                    provider,
+                    routed_profile_id,
+                )
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join model runtime profile endpoint resolution task: {err}"
+                ))
+            })?
     }
 
     pub async fn model_route_auto_load(
@@ -901,23 +938,24 @@ impl RuntimeProfileService {
 
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
-        tokio::task::spawn_blocking(move || {
-            let _guard = write_lock.write().map_err(|_| {
-                PumasError::Other("Failed to acquire runtime profile config lock".to_string())
-            })?;
-            let config = load_or_initialize_config(&config_path)?;
-            Ok(config
-                .routes
-                .iter()
-                .find(|route| route.provider == provider && route.model_id == model_id)
-                .map(|route| route.auto_load))
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join model runtime route auto-load task: {err}"
-            ))
-        })?
+        self.store_lifetime
+            .spawn_blocking(move || {
+                let _guard = write_lock.write().map_err(|_| {
+                    PumasError::Other("Failed to acquire runtime profile config lock".to_string())
+                })?;
+                let config = load_or_initialize_config(&config_path)?;
+                Ok(config
+                    .routes
+                    .iter()
+                    .find(|route| route.provider == provider && route.model_id == model_id)
+                    .map(|route| route.auto_load))
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join model runtime route auto-load task: {err}"
+                ))
+            })?
     }
 
     fn ensure_profile_available_for_operation(
@@ -965,23 +1003,25 @@ impl RuntimeProfileService {
     {
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
-        let (response, cursor) = tokio::task::spawn_blocking(move || {
-            let _guard = write_lock.write().map_err(|_| {
-                PumasError::Other("Failed to acquire runtime profile config lock".to_string())
-            })?;
-            let mut config = load_or_initialize_config(&config_path)?;
-            let response = mutate(&mut config)?;
-            bump_cursor(&mut config);
-            let cursor = config.cursor.clone();
-            atomic_write_json(&config_path, &config, true)?;
-            Ok::<_, PumasError>((response, cursor))
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join runtime profile mutation task: {err}"
-            ))
-        })??;
+        let (response, cursor) = self
+            .store_lifetime
+            .spawn_blocking(move || {
+                let _guard = write_lock.write().map_err(|_| {
+                    PumasError::Other("Failed to acquire runtime profile config lock".to_string())
+                })?;
+                let mut config = load_or_initialize_config(&config_path)?;
+                let response = mutate(&mut config)?;
+                bump_cursor(&mut config);
+                let cursor = config.cursor.clone();
+                atomic_write_json(&config_path, &config, true)?;
+                Ok::<_, PumasError>((response, cursor))
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join runtime profile mutation task: {err}"
+                ))
+            })??;
         self.publish_feed(RuntimeProfileUpdateFeed::snapshot_required(cursor));
         Ok(response)
     }

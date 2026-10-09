@@ -23,6 +23,7 @@
 
 pub(crate) mod artifact_identity;
 mod artifact_load_target;
+pub(crate) mod artifact_use;
 mod dependencies;
 pub(crate) mod dependency_pins;
 mod directory_import;
@@ -44,6 +45,7 @@ mod model_type_resolver;
 mod mutation_authority;
 mod naming;
 mod package_facts;
+mod package_selection;
 mod read_only;
 pub mod sharding;
 mod task_signature;

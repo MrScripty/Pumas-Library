@@ -707,21 +707,40 @@ async fn await_reconciliation(
 pub(crate) fn start_model_library_watcher(
     primary: Arc<PrimaryState>,
 ) -> Result<ModelLibraryWatcher> {
-    let primary_for_watcher = primary.clone();
-    let runtime_tasks = primary.runtime_tasks.clone();
-    let library_root = primary.model_library.library_root().to_path_buf();
-
     ModelLibraryWatcher::new(
-        library_root,
+        primary.model_library.library_root(),
         NetworkConfig::FILE_WATCHER_DEBOUNCE,
-        Box::new(move |paths| {
-            let primary = primary_for_watcher.clone();
-            let runtime_tasks = runtime_tasks.clone();
-            runtime_tasks.spawn(async move {
-                notify_filesystem_changes(primary, paths).await;
-            });
-        }),
+        model_library_change_callback(
+            &primary,
+            #[cfg(any(test, feature = "test-support"))]
+            None,
+        ),
     )
+}
+
+pub(crate) fn model_library_change_callback(
+    primary: &Arc<PrimaryState>,
+    #[cfg(any(test, feature = "test-support"))] before_admission: Option<
+        Box<dyn Fn() + Send + Sync>,
+    >,
+) -> crate::model_library::ChangeCallback {
+    // Admission precedes the strong primary upgrade. A native callback rejected
+    // after shutdown cannot extend physical exclusion beyond the API's drop.
+    let runtime_tasks = primary.runtime_tasks.downgrade();
+    let primary_for_watcher = Arc::downgrade(primary);
+    Box::new(move |paths| {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(observer) = &before_admission {
+            observer();
+        }
+        let primary_for_work = primary_for_watcher.clone();
+        runtime_tasks.spawn(async move {
+            let Some(primary) = primary_for_work.upgrade() else {
+                return;
+            };
+            notify_filesystem_changes(primary, paths).await;
+        });
+    })
 }
 
 fn model_id_from_path(library_root: &Path, path: &Path) -> Option<String> {

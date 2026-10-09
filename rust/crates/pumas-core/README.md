@@ -361,6 +361,15 @@ local admission, drains admitted local effects, then drains downloads, even if
 the requesting waiter is dropped. `shutdown_downloads()` retains its narrower
 meaning. Neither operation stops inference runtimes.
 
+An orderly owner restart must first await successful `shutdown_instance()`;
+subsystem shutdown and synchronous `Drop` are not owner-release receipts.
+Failed construction, failed composed shutdown, and abrupt process exit retain
+the registry generation and block another primary. Acknowledged declarations,
+releases, and replacement generations can survive process loss and be inspected
+read-only without authorizing owner takeover. Automatic primary crash recovery
+awaits a qualified physical-store lifetime mechanism. Persistence after process
+loss and generation/ABA protection across orderly restart are separate claims.
+
 The index contains the versioned declaration authority for
 ensure/release. Its additive migration is transactional and writer connections
 use SQLite FULL synchronization. Declaration and deletion-claim rows survive
@@ -385,11 +394,41 @@ GGUF quantization constraints require header evidence; filename-derived guesses
 remain insufficient, and canonical header labels such as `MOSTLY_Q4_K_M` match
 `Q4_K_M` without changing the recorded evidence.
 
-Some existing local Hugging Face directory packages expose a primary-file entry
-path with a directory load-target kind. The intent interface reports
-`Incomplete` for that inconsistency rather than returning a handle with the
-wrong path kind. Correcting that existing package/load-target contract is
-separate work.
+Managed Hugging Face directory packages use their canonical package directory
+in execution descriptors, package facts, and artifact load targets. Persisted
+upstream revisions survive the facts and target projections, including literal
+legacy `main` revisions without claiming immutable provenance.
+
+`resolve_model_artifact_load_target` in `OwnerFresh` mode reobserves managed
+packages through the existing package-facts producer. Missing selected or
+expected members prevent a ready HF target. `ReadOnlyIndexed` returns indexed
+snapshot evidence without inspecting package files or repairing cache rows.
+Legacy HF observations require owner reinspection; indexed resolution refuses
+their stale tokens, file-shaped paths, and dropped revisions.
+HF load targets currently require library-owned package roots. External-reference
+HF metadata and cache labels do not qualify a directory root or its read set, so
+the shared resolver returns a typed invalid-artifact response. External Diffusers
+directory support follows its separate existing validation contract.
+
+Owner and read-only views capture the existing canonical library root and its
+platform display spelling at startup/open. Indexed HF path checks then compare
+against that stored display root without probing package directories. Relative
+and symlink root aliases select the same index; Windows verbatim drive and UNC
+prefixes follow the existing display contract. Portable relative model IDs are
+required before joining paths. Physical canonical roots remain the custody basis.
+
+Target `content_fingerprint` projects the cache's exact
+`pumas-package-observation-v1:sha256:<digest>` token. The protocol version is part
+of the observation hash domain. It covers canonical metadata, descriptor,
+dependencies, manifest paths, file sizes and mtimes. This is a resident-cache
+invalidation observation, not a whole-package content digest: equal-length
+byte changes that restore mtime may leave it unchanged. Primary-file hashes and
+managed acquisition verification remain separate evidence.
+
+The synthetic producer tests and the pinned Pantograph guard interoperability
+runner at `tests/pantograph_guard_interop/run.py` exercise this handoff without
+loading model tensors. Real Cohere processor-file completeness requires a
+separate pinned member-manifest audit, and runtime compatibility is not claimed.
 
 See the native [local intent example](examples/intent_model.rs) and [managed
 acquisition example](examples/intent_acquire.rs) for the public call shapes.
@@ -411,6 +450,20 @@ not release a declaration or cancel admitted work. Reconnect and query status
 using the pinned requirement or declaration reference. For durable retention,
 keep the `ModelEnsureRef` returned by ensure and release that exact generation
 when it is no longer needed. Release removes the declaration only.
+
+For calls on a retained `PumasLocalClient`, dropping the caller future skips
+requests still waiting for transport admission. Once admitted, the client owns
+the complete write/read exchange and validates its original request ID before
+allowing another request onto that connection, even if the caller disappears.
+Valid RPC errors leave the connection reusable. Partial IO, malformed responses,
+or invalid correlation close it; later calls return `SharedInstanceLost`.
+Uncertain operations are never retried automatically.
+
+There is no response-drain deadline. A hung peer can block subsequent calls
+while the client remains alive. Dropping the final client owner requests worker
+abortion and socket closure; synchronous disposal cannot await that closure,
+which requires the Tokio runtime to poll the abort. Disposal does not prove
+that server-side work stopped, and it does not drain a hung exchange to completion.
 
 Operational lookup/download methods remain available. UniFFI and the desktop
 bridge continue to expose their existing operational contracts; adopting the

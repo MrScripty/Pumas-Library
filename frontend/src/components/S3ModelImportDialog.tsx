@@ -1,5 +1,8 @@
+import { S3TransferRetryPanel } from './S3TransferRetryPanel';
 import { useEffect, useRef, useState } from 'react';
 import { ModalDialog } from './ui/ModalDialog';
+import { S3PersistedImportsPanel } from './S3PersistedImportsPanel';
+import { useS3PrefixDiscovery } from '../hooks/useS3PrefixDiscovery';
 import { useS3ModelImport, type S3ImportDraft } from '../hooks/useS3ModelImport';
 import type { S3PinnedFileParams, S3ImportOutcome } from '../generated/desktop-contract';
 
@@ -10,7 +13,7 @@ const fields = [
   ['key', 'Exact object key', ''],
   ['version_id', 'Immutable VersionId', ''],
   ['sha256', 'Expected SHA-256', '64 hexadecimal digits'],
-  ['filename', 'Library GGUF filename', 'weights.gguf'],
+  ['filename', 'Primary weight logical path', 'model.safetensors or unet/diffusion_pytorch_model.safetensors'],
   ['family', 'Model family', ''],
   ['official_name', 'Model name', ''],
 ] as const;
@@ -37,6 +40,7 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
   const nextRow = useRef(0);
   const [auxiliaries, setAuxiliaries] = useState<Array<S3PinnedFileParams & {id: number}>>([]);
   const [authenticated, setAuthenticated] = useState(false);
+  const selectionSource = useRef<string | null>(null);
   const clearCredentials = () => {
     for (const input of [accessKey.current, secretKey.current, sessionToken.current]) {
       if (input) input.value = '';
@@ -47,20 +51,34 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
     const inputs = [accessKey.current, secretKey.current, sessionToken.current];
     return () => { for (const input of inputs) if (input) input.value = ''; };
   }, [authenticated]);
-  const close = () => { clearCredentials(); onClose(); };
+  const discovery = useS3PrefixDiscovery();
+  const [prefix, setPrefix] = useState('models/');
+  const [retryCredentialEpoch, setRetryCredentialEpoch] = useState(0);
+  const close = () => { setRetryCredentialEpoch(epoch => epoch + 1); clearCredentials(); discovery.reset(); onClose(); };
   const [draft, setDraft] = useState<S3ImportDraft>({ endpoint: '', region: '', bucket: '', addressing: 'path', key: '', version_id: '', filename: 'weights.gguf', sha256: '', family: '', official_name: '' });
-  const { snapshot, bundleProgress, error, commandBusy, start, startBundle, startAuthenticated, cancel, observeAgain } = useS3ModelImport(onImported, true);
-  const editable = canStart(snapshot) && !commandBusy;
+  const { snapshot, bundleProgress, error, commandBusy, start, startBundle, startAuthenticated, cancel, observeAgain, retry } = useS3ModelImport(onImported, true);
+  const sourceIdentity = JSON.stringify([draft.endpoint, draft.region, draft.bucket, draft.addressing]);
+  useEffect(() => {
+    if (selectionSource.current !== null && selectionSource.current !== sourceIdentity) {
+      selectionSource.current = null;
+      setDraft(previous => ({...previous, key: '', version_id: '', filename: '', sha256: ''}));
+      setAuxiliaries([]);
+    }
+  }, [sourceIdentity]);
+  const editable = canStart(snapshot) && !commandBusy && !discovery.busy;
+  useEffect(() => { discovery.reset(); }, [draft.endpoint, draft.region, draft.bucket, draft.addressing, prefix, authenticated, discovery.reset]);
   const active = snapshot?.status === 'running';
   const cancellable = active && ['pending', 'selecting', 'acquiring'].includes(snapshot.progress.phase);
   return (
     <ModalDialog isOpen ariaLabelledBy="s3-import-title" ariaDescribedBy="s3-import-description" onClose={close}
       initialFocusRef={closeButton} contentClassName="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-secondary))] p-6 text-[hsl(var(--launcher-text-primary))]">
       <h2 id="s3-import-title" className="text-lg font-semibold">Import from S3</h2>
-      <p id="s3-import-description" className="my-3 text-sm">Import a pinned GGUF and optional explicitly selected data/text files over HTTPS. Anonymous access is the default. Supply the exact VersionId and expected SHA-256; a key alone is insufficient.</p>
+      <p id="s3-import-description" className="my-3 text-sm">Import a pinned model file or complete model package over HTTPS. GGUF and safetensors are qualified by the shared importer. Anonymous access is the default. Supply every exact VersionId and expected SHA-256; a key alone is insufficient.</p>
+      <S3PersistedImportsPanel />
+      <S3TransferRetryPanel outcome={snapshot} busy={commandBusy} onRetry={retry} clearEpoch={retryCredentialEpoch} />
       <form autoComplete="off" onSubmit={event => {
         event.preventDefault();
-        if (!editable) return;
+        if (!editable || (selectionSource.current !== null && selectionSource.current !== sourceIdentity)) return;
         const files = auxiliaries.map(({key,version_id,logical_path,sha256}) => ({key,version_id,logical_path,sha256}));
         if (!authenticated) { if (files.length) void startBundle(draft, files); else void start(draft); return; }
         const credentials = { access_key_id: accessKey.current?.value ?? '',
@@ -74,7 +92,7 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
             <label key={key} className="block text-sm">{label}
               <input className={inputClass} name={key} required
                 type={key === 'endpoint' ? 'url' : 'text'} placeholder={placeholder}
-                maxLength={key === 'key' ? 1024 : key === 'endpoint' || key === 'version_id' ? 4096 : key === 'sha256' ? 64 : 255}
+                maxLength={key === 'key' || key === 'filename' ? 1024 : key === 'endpoint' || key === 'version_id' ? 4096 : key === 'sha256' ? 64 : 255}
                 value={draft[key]} onChange={event => setDraft(previous => ({ ...previous, [key]: event.target.value }))} />
             </label>
           ))}
@@ -84,18 +102,50 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
             </select>
           </label>
         </fieldset>
+        <section aria-label="S3 prefix discovery" className="my-4 space-y-2">
+          <label className="block text-sm">Object prefix<input className={inputClass} maxLength={1024} value={prefix}
+            disabled={!editable} onChange={event => setPrefix(event.target.value)} /></label>
+          <p className="text-sm">Discover up to 32 objects within 15 seconds. Results pin observed versions; ETags are not SHA-256. Choose files and provide output paths and trusted SHA-256 values before importing.</p>
+          <button type="button" className={buttonClass} disabled={!editable} onClick={() => {
+            const credentials = authenticated ? {access_key_id: accessKey.current?.value ?? '',
+              secret_access_key: secretKey.current?.value ?? '', session_token: sessionToken.current?.value || null} : undefined;
+            clearCredentials(); void discovery.start(draft, prefix, credentials);
+          }}>Discover prefix</button>
+          {discovery.busy && <button type="button" className={buttonClass} onClick={() => { void discovery.cancel(); }}>Cancel discovery</button>}
+          {discovery.error && <><p role="alert">{discovery.error}</p><button type="button" className={buttonClass} onClick={discovery.observeAgain}>Observe discovery again</button></>}
+          {discovery.snapshot?.status === 'running' && <p role="status">Discovering the complete prefix and pinning versions…</p>}
+          {discovery.snapshot?.status === 'incomplete' && <p role="status">Discovery exceeded its capacity. Narrow the prefix; no partial selection is available.</p>}
+          {discovery.snapshot?.status === 'deadline' && <p role="status">Discovery reached its deadline. No selection is available.</p>}
+          {discovery.snapshot?.status === 'cancelled' && <p role="status">Discovery cancelled. No files were imported.</p>}
+          {discovery.snapshot?.status === 'unavailable' && <p role="status">Discovery is unavailable for this source or backend. No selection is available.</p>}
+          {discovery.snapshot?.status === 'rejected' && <p role="status">Discovery was refused. Check the source and observe any existing S3 operation.</p>}
+          {discovery.snapshot?.status === 'complete' && <>
+            <p role="status">Complete discovery: {discovery.snapshot.objects.length} objects across {discovery.snapshot.pages} pages. Discovery does not import files.</p>
+            <ul>{discovery.snapshot.objects.map(object => <li key={object.key} className="my-2 break-all">
+              <span>{object.key} — version {object.version_id}, {object.size_bytes} bytes</span>
+              <button type="button" className={buttonClass} disabled={!editable} onClick={() => {
+                selectionSource.current = sourceIdentity;
+                setDraft(previous => ({...previous, key: object.key, version_id: object.version_id, filename: '', sha256: ''}));
+              }}>Use {object.key} as primary</button>
+              <button type="button" className={buttonClass} disabled={!editable || auxiliaries.length >= 31} onClick={() => {
+                selectionSource.current = sourceIdentity;
+                setAuxiliaries(rows => [...rows, {id: nextRow.current++, key: object.key, version_id: object.version_id, logical_path: '', sha256: ''}]);
+              }}>Add {object.key} as package file</button>
+            </li>)}</ul>
+          </>}
+        </section>
         <fieldset disabled={!editable} className="mt-4 space-y-3">
-          <legend>Selected auxiliary files</legend>
-          <p className="text-sm">Each file needs its exact key, immutable VersionId, output path and SHA-256. Supported auxiliaries: json, txt, md, model, tiktoken, vocab and merges. Empty auxiliary files are supported; the primary must contain valid GGUF data. All selected files must verify before registration.</p>
+          <legend>Additional selected package files</legend>
+          <p className="text-sm">Keep the original package paths. Select the weight index and every shard, model config, tokenizer assets and required processor. Standard SD/SDXL packages also need model_index.json and all required components. Each file needs its exact key, immutable VersionId, output path and SHA-256. Unsupported formats or incomplete packages are refused before model registration.</p>
           {auxiliaries.map((file, index) => <fieldset key={file.id} className="grid grid-cols-1 sm:grid-cols-2 gap-3 border p-3">
-            <legend>Auxiliary {index + 1}</legend>
+            <legend>Package file {index + 1}</legend>
             {([['key','exact object key',1024],['version_id','immutable VersionId',4096],['logical_path','logical output path',1024],['sha256','expected SHA-256',64]] as const).map(([field,label,max]) =>
-              <label key={field} className="block text-sm">Auxiliary {index + 1} {label}<input className={inputClass} required maxLength={max} value={file[field]}
+              <label key={field} className="block text-sm">Package file {index + 1} {label}<input className={inputClass} required maxLength={max} value={file[field]}
                 onChange={event => setAuxiliaries(rows => rows.map(row => row.id === file.id ? {...row,[field]:event.target.value} : row))} /></label>)}
-            <button type="button" className={buttonClass} onClick={() => setAuxiliaries(rows => rows.filter(row => row.id !== file.id))}>Remove auxiliary {index + 1}</button>
+            <button type="button" className={buttonClass} onClick={() => setAuxiliaries(rows => rows.filter(row => row.id !== file.id))}>Remove package file {index + 1}</button>
           </fieldset>)}
           <button type="button" className={buttonClass} disabled={auxiliaries.length >= 31}
-            onClick={() => setAuxiliaries(rows => [...rows,{id:nextRow.current++,key:'',version_id:'',logical_path:'',sha256:''}])}>Add auxiliary file</button>
+            onClick={() => setAuxiliaries(rows => [...rows,{id:nextRow.current++,key:'',version_id:'',logical_path:'',sha256:''}])}>Add package file</button>
         </fieldset>
         <fieldset disabled={!editable} className="mt-4">
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={authenticated}
@@ -122,12 +172,13 @@ export function S3ModelImportDialog({ onClose, onImported }: { onClose: () => vo
         </div>}
         {snapshot?.status === 'not_found' && <p role="alert" className="mt-4">The operation result is unavailable. Check the library and reconcile retained work before importing this source again. Operation: {snapshot.operation_id}</p>}
         {snapshot?.status === 'finished' && <div role={snapshot.result.status === 'completed' ? 'status' : 'alert'} className="mt-4">
-          {snapshot.result.status === 'completed' ? <p>Model registered: {snapshot.result.model_id}</p>
+          {snapshot.result.status === 'completed' ? <><p>Model registered: {snapshot.result.model_id}</p><p>Registration does not establish backend compatibility or inference readiness.</p></>
             : snapshot.result.status === 'cancelled' ? <p>Import cancelled.</p>
               : <><p>{snapshot.result.error.message}</p>{snapshot.result.published_model_id && <p>Publication may exist for {snapshot.result.published_model_id}; verify the library before retrying.</p>}</>}
-          {snapshot.result.status !== 'completed' && snapshot.result.retained_work && <p>Input or publication custody may remain. Reconcile retained work before retrying; this dialog will not resubmit it.</p>}
+          {snapshot.result.status !== 'completed' && snapshot.result.retained_work && <p>Input or publication custody may remain. Only an eligible transfer held by this process can be retried explicitly; other retained work requires reconciliation.</p>}
         </div>}
         {error && <p role="alert" className="mt-4">{error}</p>}
+        <p className="my-3 text-sm">Verified bytes must pass model qualification before registration. ONNX/external tensors, executable custom code and unsupported package classes are not admitted by this import path.</p>
         <p className="my-4 text-sm">Closing this dialog leaves admitted work running. Reopen it to observe the result. Cancellation is available until registration starts.</p>
         <div className="flex flex-wrap gap-2">
           <button className={buttonClass} type="submit" disabled={!editable}>Import pinned object</button>

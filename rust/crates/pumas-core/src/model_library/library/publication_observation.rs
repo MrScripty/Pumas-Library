@@ -62,6 +62,17 @@ fn mark_record_unavailable(record: &mut ModelRecord, path: &Path, code: &str, me
 }
 
 impl ModelLibrary {
+    #[cfg(feature = "s3")]
+    pub(crate) fn inspect_acquired_bindings(
+        &self,
+        receipts: &std::collections::BTreeMap<
+            uuid::Uuid,
+            crate::acquisition::AcquisitionConsumerReceipt,
+        >,
+    ) -> Result<std::collections::BTreeMap<uuid::Uuid, crate::S3RecordedModelBinding>> {
+        super::super::importer::publication::inspect_acquired_bindings(self, receipts)
+    }
+
     pub(super) fn observe_publication_records(&self, records: &mut [ModelRecord]) -> Result<()> {
         for record in records {
             if super::super::importer::publication::indexed_publication_ready(

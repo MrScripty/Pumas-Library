@@ -148,6 +148,154 @@ class AdapterImportProbeTests(TestCase):
         ).hexdigest()
         self.assertEqual(result["context"]["hardware_fingerprint"], expected_fingerprint)
 
+    def test_cohere_asr_probe_exact_native_classes_and_versions_are_only_import_evidence(self):
+        symbols = {
+            name: object()
+            for name in (
+                "CohereAsrFeatureExtractor",
+                "TokenizersBackend",
+                "CohereAsrProcessor",
+                "CohereAsrForConditionalGeneration",
+                "StoppingCriteria",
+                "StoppingCriteriaList",
+            )
+        }
+        versions = {
+            "torch": "2.10.0+cpu",
+            "transformers": "5.4.0",
+            "accelerate": "1.12.0",
+            "huggingface-hub": "1.5.0",
+            "tokenizers": "0.22.2",
+        }
+        with (
+            patch.object(
+                probe_runtime.importlib, "import_module", return_value=SimpleNamespace(**symbols)
+            ) as imported,
+            patch.object(
+                probe_runtime.importlib.metadata,
+                "version",
+                side_effect=lambda name: versions.get(name, "1.0.0"),
+            ),
+        ):
+            result = probe_runtime.cohere_asr_import_probe()
+        self.assertEqual(result["status"], "inconclusive")
+        self.assertIn("runtime closure unqualified", result["scope"])
+        self.assertEqual(result["profile"], "cohere-asr-transformers-5.4.0")
+        self.assertIn("librosa", [call.args[0] for call in imported.call_args_list])
+        for name, wrong in (
+            ("torch", "2.3.1+cpu"),
+            ("transformers", "4.57.6"),
+            ("transformers", "5.4.1"),
+            ("accelerate", "1.0.0"),
+            ("huggingface-hub", "2.0.0"),
+            ("tokenizers", "0.23.1"),
+        ):
+            with (
+                self.subTest(name=name, wrong=wrong),
+                patch.object(
+                    probe_runtime.importlib,
+                    "import_module",
+                    return_value=SimpleNamespace(**symbols),
+                ),
+                patch.object(
+                    probe_runtime.importlib.metadata,
+                    "version",
+                    side_effect=lambda key: wrong if key == name else versions.get(key, "1.0.0"),
+                ),
+            ):
+                self.assertEqual(probe_runtime.cohere_asr_import_probe()["status"], "unavailable")
+        del symbols["TokenizersBackend"]
+        with patch.object(
+            probe_runtime.importlib, "import_module", return_value=SimpleNamespace(**symbols)
+        ):
+            self.assertEqual(probe_runtime.cohere_asr_import_probe()["status"], "unavailable")
+
+    def test_cohere_asr_selection_is_independent_of_image_device_and_bundled_imports(self):
+        class Tensor:
+            def __matmul__(self, _other):
+                return self
+
+            def tolist(self):
+                return [[2.0, 2.0], [2.0, 2.0]]
+
+        torch = SimpleNamespace(__version__="2.10.0+cpu", ones=lambda *_: Tensor())
+
+        async def health():
+            return {"status": "ok", "protocol": 3}
+
+        serve = SimpleNamespace(
+            create_app=lambda: SimpleNamespace(
+                routes=[SimpleNamespace(path="/health", endpoint=health)]
+            )
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "serve.py").write_text("# fixture")
+            for selected in ("cohere-asr", "bundled", "none"):
+                (root / "resolution.json").write_text(
+                    json.dumps({"torch": torch.__version__, "adapter": selected, "artifacts": []})
+                )
+                with (
+                    patch.dict("sys.modules", {"serve": serve}),
+                    patch.object(probe_runtime.importlib, "import_module", return_value=torch),
+                    patch.object(
+                        probe_runtime,
+                        "device_probe",
+                        return_value=(
+                            {"cuda": None, "hip": None, "devices": []},
+                            {"status": "unavailable"},
+                        ),
+                    ),
+                    patch.object(
+                        probe_runtime,
+                        "adapter_import_probe",
+                        return_value={"status": "inconclusive"},
+                    ),
+                    patch.object(
+                        probe_runtime,
+                        "cohere_asr_import_probe",
+                        return_value={"status": "inconclusive"},
+                    ) as asr,
+                ):
+                    result = probe_runtime.probe(root)
+                self.assertEqual(asr.call_count, int(selected == "cohere-asr"))
+                self.assertEqual(result["core_status"], "passed")
+                self.assertEqual(
+                    result["capabilities"]["audio_transcription"]["status"], "not tested"
+                )
+                if selected == "cohere-asr":
+                    self.assertEqual(result["adapter_status"], "inconclusive")
+                    self.assertEqual(
+                        result["capabilities"]["flux2_klein"]["status"], "not selected"
+                    )
+
+    def test_selected_cohere_asr_missing_imports_refuse_profile_publication(self):
+        for selected, status, fails in (
+            ("cohere-asr", "unavailable", True),
+            ("cohere-asr", "inconclusive", False),
+            ("flux2", "unavailable", False),
+        ):
+            with (
+                tempfile.TemporaryDirectory() as directory,
+                patch.object(probe_runtime, "__file__", str(Path(directory) / "probe_runtime.py")),
+                patch.object(
+                    probe_runtime,
+                    "probe",
+                    return_value={
+                        "core_status": "passed",
+                        "adapter_status": status,
+                        "environment": {"adapter": selected},
+                    },
+                ),
+                patch("builtins.print"),
+            ):
+                if fails:
+                    with self.assertRaises(SystemExit):
+                        probe_runtime.main()
+                else:
+                    probe_runtime.main()
+                self.assertTrue((Path(directory) / "probe-results.json").is_file())
+
     def test_device_failure_is_scoped(self):
         fake_torch = SimpleNamespace(
             version=SimpleNamespace(cuda="13.0", hip=None),

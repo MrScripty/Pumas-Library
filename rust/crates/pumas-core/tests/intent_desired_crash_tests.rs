@@ -1,17 +1,20 @@
+//! Public acknowledgements remain durable after abrupt process exit. Reading
+//! their stored evidence does not authorize a replacement primary instance.
 #![warn(unsafe_code)]
-#![allow(clippy::await_holding_lock)]
 
 use pumas_library::intent::{
     AcquisitionPolicy, ArtifactRequirement, EnsureModelOutcome, EnsureModelRequest,
-    GetEnsureStatusOutcome, ModelDeclaration, ModelEnsureRef, ModelRequirement, ModelSelector,
-    ObservedModelState, ReleaseModelOutcome,
+    GetEnsureStatusOutcome, ModelDeclaration, ModelRequirement, ModelSelector, ObservedModelState,
+    ReleaseModelOutcome,
 };
 use pumas_library::models::PumasModelRef;
-use pumas_library::PumasApi;
+use pumas_library::registry::{InstanceStatus, LibraryRegistry};
+use pumas_library::{PumasApi, PumasError};
+use rusqlite::{Connection, OpenFlags};
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -20,33 +23,12 @@ const CHILD_ROOT: &str = "PUMAS_INTENT_CRASH_ROOT";
 const CHILD_PHASE: &str = "PUMAS_INTENT_CRASH_PHASE";
 const CHILD_ACK: &str = "PUMAS_INTENT_CRASH_ACK";
 const CHILD_RELEASE: &str = "PUMAS_INTENT_CRASH_RELEASE";
-const CHILD_REFERENCE: &str = "PUMAS_INTENT_CRASH_REFERENCE";
 const CHILD_REGISTRY: &str = "PUMAS_REGISTRY_DB_PATH";
 
-static REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-struct RegistryGuard(std::sync::MutexGuard<'static, ()>);
-
-impl RegistryGuard {
-    #[allow(unsafe_code)]
-    fn new(registry: &Path) -> Self {
-        let guard = REGISTRY_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        // SAFETY: This integration-test process serializes registry environment access.
-        unsafe { std::env::set_var(CHILD_REGISTRY, registry) };
-        Self(guard)
-    }
-}
-
-impl Drop for RegistryGuard {
-    #[allow(unsafe_code)]
-    fn drop(&mut self) {
-        let _ = &self.0;
-        // SAFETY: The guard still owns this process's registry environment access.
-        unsafe { std::env::remove_var(CHILD_REGISTRY) };
-    }
+#[derive(Serialize, Deserialize)]
+struct Acknowledgement {
+    first: ModelDeclaration,
+    replacement: Option<ModelDeclaration>,
 }
 
 fn request() -> EnsureModelRequest {
@@ -65,14 +47,25 @@ fn request() -> EnsureModelRequest {
     }
 }
 
-async fn open(root: &Path) -> PumasApi {
+async fn open(root: &Path, registry: &Path) -> PumasApi {
     PumasApi::builder(root)
+        .with_registry(LibraryRegistry::open_at(registry).unwrap())
         .auto_create_dirs(true)
         .with_hf_client(false)
         .with_process_manager(false)
+        .with_connectivity_probe(false)
         .build()
         .await
         .unwrap()
+}
+
+async fn ensure(api: &PumasApi) -> ModelDeclaration {
+    let outcome = api.intent().ensure_model(&request()).await.unwrap();
+    let EnsureModelOutcome::Accepted { declaration, state } = outcome else {
+        panic!("ensure was not durably accepted: {outcome:?}")
+    };
+    assert!(!matches!(state, ObservedModelState::Available { .. }));
+    declaration
 }
 
 fn durable_marker(path: &Path, bytes: &[u8]) {
@@ -93,7 +86,7 @@ fn wait_for_release(path: &Path) {
 }
 
 #[tokio::test]
-#[ignore = "subprocess helper invoked by acknowledged_intent_survives_abrupt_exit_and_release_preserves_aba"]
+#[ignore = "subprocess helper for acknowledged intent persistence and retained-owner refusal"]
 async fn intent_desired_crash_child() {
     let Some(root) = std::env::var_os(CHILD_ROOT).map(PathBuf::from) else {
         return;
@@ -101,31 +94,70 @@ async fn intent_desired_crash_child() {
     let phase = std::env::var(CHILD_PHASE).unwrap();
     let ack = PathBuf::from(std::env::var_os(CHILD_ACK).unwrap());
     let release = PathBuf::from(std::env::var_os(CHILD_RELEASE).unwrap());
-    let api = open(&root).await;
-
-    match phase.as_str() {
-        "ensure" => {
-            let outcome = api.intent().ensure_model(&request()).await.unwrap();
-            let EnsureModelOutcome::Accepted { declaration, state } = outcome else {
-                panic!("ensure was not durably accepted: {outcome:?}")
-            };
-            assert!(!matches!(state, ObservedModelState::Available { .. }));
-            durable_marker(&ack, &serde_json::to_vec(&declaration).unwrap());
-        }
-        "release" => {
-            let reference: ModelEnsureRef = serde_json::from_slice(
-                &std::fs::read(std::env::var_os(CHILD_REFERENCE).unwrap()).unwrap(),
-            )
-            .unwrap();
-            let outcome = api.intent().release_model(&reference).await.unwrap();
-            assert!(matches!(outcome, ReleaseModelOutcome::Released { .. }));
-            durable_marker(&ack, b"released");
+    let registry = PathBuf::from(std::env::var_os(CHILD_REGISTRY).unwrap());
+    let api = open(&root, &registry).await;
+    let first = ensure(&api).await;
+    let replacement = match phase.as_str() {
+        "ensure" => None,
+        "release" | "replacement" => {
+            assert!(matches!(
+                api.intent().release_model(&first.reference).await.unwrap(),
+                ReleaseModelOutcome::Released { .. }
+            ));
+            assert!(matches!(
+                api.intent()
+                    .get_ensure_status(&first.reference)
+                    .await
+                    .unwrap(),
+                GetEnsureStatusOutcome::NotFound
+            ));
+            if phase == "replacement" {
+                let replacement = ensure(&api).await;
+                assert_eq!(
+                    first.reference.declaration_id,
+                    replacement.reference.declaration_id
+                );
+                assert_ne!(first.reference.generation, replacement.reference.generation);
+                assert!(matches!(
+                    api.intent().release_model(&first.reference).await.unwrap(),
+                    ReleaseModelOutcome::Conflict { .. }
+                ));
+                assert!(matches!(
+                    api.intent()
+                        .get_ensure_status(&first.reference)
+                        .await
+                        .unwrap(),
+                    GetEnsureStatusOutcome::Conflict
+                ));
+                Some(replacement)
+            } else {
+                None
+            }
         }
         other => panic!("unknown child phase {other}"),
-    }
-
+    };
+    durable_marker(
+        &ack,
+        &serde_json::to_vec(&Acknowledgement { first, replacement }).unwrap(),
+    );
     wait_for_release(&release);
+    // Deliberately skip Drop and composed shutdown, retaining the real abrupt
+    // process-loss boundary. No writer is admitted on this root afterward.
     std::process::exit(0);
+}
+
+struct OwnedChild {
+    child: Child,
+    exit_observed: bool,
+}
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        if !self.exit_observed {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
 }
 
 fn spawn_child(
@@ -134,10 +166,8 @@ fn spawn_child(
     phase: &str,
     ack: &Path,
     release: &Path,
-    reference: Option<&Path>,
-) -> Child {
-    let mut command = Command::new(std::env::current_exe().unwrap());
-    command
+) -> OwnedChild {
+    let child = Command::new(std::env::current_exe().unwrap())
         .arg("--ignored")
         .arg("--exact")
         .arg(CHILD_TEST)
@@ -149,120 +179,162 @@ fn spawn_child(
         .env(CHILD_REGISTRY, registry)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    if let Some(reference) = reference {
-        command.env(CHILD_REFERENCE, reference);
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    OwnedChild {
+        child,
+        exit_observed: false,
     }
-    command.spawn().unwrap()
 }
 
-fn wait_for_ack(child: &mut Child, ack: &Path) {
+fn wait_for_ack(child: &mut OwnedChild, ack: &Path) {
     for _ in 0..1200 {
         if ack.is_file() {
             return;
         }
-        if let Some(status) = child.try_wait().unwrap() {
+        if let Some(status) = child.child.try_wait().unwrap() {
+            child.exit_observed = true;
             panic!("crash helper exited before acknowledgement ({status})");
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    let _ = child.kill();
     panic!("timed out waiting for crash helper acknowledgement");
 }
 
-fn finish_abrupt_exit(mut child: Child, release: &Path) -> Child {
+fn finish_abrupt_exit(child: &mut OwnedChild, release: &Path) {
     durable_marker(release, b"exit");
-    let status = child.wait().unwrap();
+    let status = child.child.wait().unwrap();
+    child.exit_observed = true;
     assert!(status.success(), "crash helper failed with {status}");
-    // On Windows this retains the exited process object and pins its PID while
-    // recovery checks liveness. An unrelated process cannot reuse that PID.
-    child
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct StoredDeclaration {
+    declaration_id: String,
+    consumer_key: String,
+    original_requirement_json: String,
+    generation: String,
+    model_id: Option<String>,
+    bound_target_json: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+fn read_declarations(root: &Path) -> Vec<StoredDeclaration> {
+    // A read-only SQL observer inspects the actual persisted rows, including
+    // committed WAL content. It neither constructs a service nor migrates data.
+    let connection = Connection::open_with_flags(
+        root.join("shared-resources/models/models.db"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let mut query = connection
+        .prepare(
+            "SELECT declaration_id, consumer_key, original_requirement_json, generation,
+                model_id, bound_target_json, created_at, updated_at
+         FROM intent_declarations ORDER BY declaration_id",
+        )
+        .unwrap();
+    query
+        .query_map([], |row| {
+            Ok(StoredDeclaration {
+                declaration_id: row.get(0)?,
+                consumer_key: row.get(1)?,
+                original_requirement_json: row.get(2)?,
+                generation: row.get(3)?,
+                model_id: row.get(4)?,
+                bound_target_json: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
 }
 
 #[tokio::test]
-async fn acknowledged_intent_survives_abrupt_exit_and_release_preserves_aba() {
-    let temp = TempDir::new().unwrap();
-    let root = temp.path().join("library");
-    let registry = temp.path().join("registry.db");
-    let ensure_ack = temp.path().join("ensure-ack.json");
-    let ensure_release = temp.path().join("ensure-exit");
-    let mut ensure_child = spawn_child(
-        &root,
-        &registry,
-        "ensure",
-        &ensure_ack,
-        &ensure_release,
-        None,
-    );
-    wait_for_ack(&mut ensure_child, &ensure_ack);
-    let first: ModelDeclaration =
-        serde_json::from_slice(&std::fs::read(&ensure_ack).unwrap()).unwrap();
-    let ensure_child = finish_abrupt_exit(ensure_child, &ensure_release);
-
-    let registry_guard = RegistryGuard::new(&registry);
-    let api = open(&root).await;
-    let status = api
-        .intent()
-        .get_ensure_status(&first.reference)
-        .await
-        .unwrap();
-    let GetEnsureStatusOutcome::Found { declaration, state } = status else {
-        panic!("acknowledged declaration was lost after abrupt exit: {status:?}")
-    };
-    assert_eq!(declaration, first);
-    assert!(!matches!(state, ObservedModelState::Available { .. }));
-    drop(api);
-    drop(registry_guard);
-
-    let reference_path = temp.path().join("reference.json");
-    std::fs::write(
-        &reference_path,
-        serde_json::to_vec(&first.reference).unwrap(),
-    )
-    .unwrap();
-    let release_ack = temp.path().join("release-ack");
-    let release_exit = temp.path().join("release-exit");
-    let mut release_child = spawn_child(
-        &root,
-        &registry,
-        "release",
-        &release_ack,
-        &release_exit,
-        Some(&reference_path),
-    );
-    wait_for_ack(&mut release_child, &release_ack);
-    let release_child = finish_abrupt_exit(release_child, &release_exit);
-
-    let _registry_guard = RegistryGuard::new(&registry);
-    let reopened = open(&root).await;
-    assert!(matches!(
-        reopened
-            .intent()
-            .get_ensure_status(&first.reference)
-            .await
-            .unwrap(),
-        GetEnsureStatusOutcome::NotFound
-    ));
-    let replacement = match reopened.intent().ensure_model(&request()).await.unwrap() {
-        EnsureModelOutcome::Accepted { declaration, state } => {
-            assert!(!matches!(state, ObservedModelState::Available { .. }));
-            declaration
+async fn acknowledged_intent_commit_release_and_aba_survive_abrupt_exit_without_owner_reclaim() {
+    for phase in ["ensure", "release", "replacement"] {
+        // Each abrupt boundary starts with its own legitimate primary. A prior
+        // crashed root is never made writable through a different registry or
+        // lower-level service. Orderly public-API restart/ABA is tested separately.
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("library");
+        let registry_path = temp.path().join("registry.db");
+        let ack = temp.path().join("ack.json");
+        let release = temp.path().join("exit");
+        let mut child = spawn_child(&root, &registry_path, phase, &ack, &release);
+        wait_for_ack(&mut child, &ack);
+        let acknowledgement: Acknowledgement =
+            serde_json::from_slice(&std::fs::read(&ack).unwrap()).unwrap();
+        let registry = LibraryRegistry::open_read_only_at(&registry_path).unwrap();
+        let owner = registry.get_instance(&root).unwrap().unwrap();
+        assert_eq!(owner.pid, child.child.id());
+        assert_eq!(owner.status, InstanceStatus::Ready);
+        let retained_owner = serde_json::to_value(&owner).unwrap();
+        let before = read_declarations(&root);
+        if phase == "release" {
+            assert!(
+                before.is_empty(),
+                "acknowledged release still has a declaration"
+            );
+        } else {
+            assert_eq!(before.len(), 1);
+            let expected = acknowledgement
+                .replacement
+                .as_ref()
+                .unwrap_or(&acknowledgement.first);
+            assert_eq!(before[0].declaration_id, expected.reference.declaration_id);
+            assert_eq!(before[0].consumer_key, expected.reference.consumer_key);
+            assert_eq!(before[0].generation, expected.reference.generation);
+            assert_eq!(
+                serde_json::from_str::<ModelRequirement>(&before[0].original_requirement_json)
+                    .unwrap(),
+                expected.requirement
+            );
+            let ModelSelector::LocalModel { model_ref } =
+                &expected.resolved_requirement.as_ref().unwrap().selector
+            else {
+                panic!("fixture must resolve to its explicit local model");
+            };
+            assert_eq!(
+                before[0].model_id.as_deref(),
+                Some(model_ref.model_id.as_str())
+            );
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(
+                    before[0].bound_target_json.as_ref().unwrap()
+                )
+                .unwrap(),
+                serde_json::json!({"kind": "local", "model_ref": model_ref})
+            );
         }
-        other => panic!("replacement ensure was not accepted: {other:?}"),
-    };
-    assert_eq!(
-        replacement.reference.declaration_id,
-        first.reference.declaration_id
-    );
-    assert_ne!(replacement.reference.generation, first.reference.generation);
-    assert!(matches!(
-        reopened
-            .intent()
-            .get_ensure_status(&first.reference)
-            .await
-            .unwrap(),
-        GetEnsureStatusOutcome::Conflict
-    ));
-    reopened.shutdown_intent().await.unwrap();
-    drop((ensure_child, release_child));
+        finish_abrupt_exit(&mut child, &release);
+        assert_eq!(
+            read_declarations(&root),
+            before,
+            "lost acknowledged {phase} after process exit"
+        );
+        for _ in 0..2 {
+            let retry = PumasApi::builder(&root)
+                .with_registry(LibraryRegistry::open_at(&registry_path).unwrap())
+                .with_hf_client(false)
+                .with_process_manager(false)
+                .with_connectivity_probe(false)
+                .build()
+                .await;
+            assert!(
+                matches!(retry, Err(PumasError::InvalidParams { message }) if message == format!(
+                    "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.", root.display(), owner.pid
+                ))
+            );
+            assert_eq!(
+                serde_json::to_value(registry.get_instance(&root).unwrap().unwrap()).unwrap(),
+                retained_owner
+            );
+            assert_eq!(read_declarations(&root), before);
+        }
+    }
 }

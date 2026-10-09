@@ -15,7 +15,7 @@ Define that contract independently of HTTP, JSON-RPC, MCP, or an eventual fleet
 protocol. This prepares the API layers for the next Pumas release without
 implementing distributed Pumas.
 
-Scope follows the user's 2026-09-12 instruction and sections 1–3 of the
+Scope follows sections 1–3 of the
 [intent/discovery/distribution brief](../../breif/intent-discovery-distribution.md).
 The brief's distributed proposals are architectural context, not requirements
 for this plan. The [agent brief](../../breif/agent-interaction-mcp.md) supplies a
@@ -467,6 +467,15 @@ acknowledged declaration disappears, no duplicate artifact writer is admitted,
 and no false available state is returned. Document supported filesystem/platform
 evidence limits rather than generalizing a Linux-only result.
 
+Current retained-owner qualification separates those gates: process-exit
+fixtures prove acknowledged SQLite persistence through read-only observations
+and prove that the same registry refuses another primary. Public owner reopen
+and ABA behavior use successful composed shutdown. Neither a surviving durable
+declaration nor reaping the root process supplies a crash-recovery receipt;
+automatic primary restart remains blocked pending qualified physical-store
+lifetime ownership. The current boundary is recorded in
+`reports/m3b-local-desired-state.md`.
+
 **Re-plan if:** A second library owner, destructive migration, independent task
 scheduler, or remote identity becomes necessary.
 
@@ -551,9 +560,6 @@ ordinary persisted resume, owned shutdown, verified indexed availability, and on
 real upstream acquisition. Broader hard-crash recovery remains unaccepted in I2;
 M3b established its bounded durable-state guarantees with the recorded process-exit evidence.
 
-No separate worktree or branch is required by this plan. Preserve unrelated
-working-tree changes and coordinate serial edits to shared source/plan owners.
-
 Re-plan if identity semantics conflict with real consumers, safe acquisition or
 persistence cannot meet the contract, the scope needs new remote capabilities,
 or the release needs a smaller deliverable. A release cut may ship accepted
@@ -570,9 +576,7 @@ milestones; never relabel lookup-only behavior as completed `ensure_model`.
   the existing architecture/core/RPC guides; create an ADR only for a decision
   that needs a separate durable rationale.
 
-The user authorized implementation of this identified plan on 2026-09-12.
-Their request to continue implementation starts the previously planned work;
-M1, M2a, M2, M3a, M3b, and M4 are accepted; this local implementation plan is complete. The canonical plan path is
-`docs/plans/local-intent-api-2026-09-12/plan.md`. Subsequent invocations use
-`continue` while active. Final transport and consumer evidence is recorded in
+M1, M2a, M2, M3a, M3b, and M4 are accepted within their recorded local scope;
+this local implementation plan is complete. Final transport and consumer
+evidence is recorded in
 [the M4 report](reports/m4-local-transports.md).

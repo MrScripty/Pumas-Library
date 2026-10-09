@@ -13,7 +13,7 @@ fn authenticated_params(endpoint: &str, token: bool) -> Value {
     json!({"source": params(endpoint), "credentials":{"access_key_id":ACCESS,"secret_access_key":SECRET,"session_token":if token {Some(TOKEN)} else {None}}})
 }
 #[cfg(all(target_os = "linux", not(feature = "inference-plugins")))]
-fn gguf() -> Vec<u8> {
+pub(super) fn gguf() -> Vec<u8> {
     [
         b"GGUF".as_slice(),
         &3_u32.to_le_bytes(),
@@ -22,11 +22,15 @@ fn gguf() -> Vec<u8> {
     ]
     .concat()
 }
-fn params(endpoint: &str) -> Value {
+pub(super) fn params(endpoint: &str) -> Value {
     json!({"operation_id":ID,"endpoint":endpoint,"region":"fixture-region","bucket":"fixture-bucket","addressing":"path","key":"models/weights.gguf","version_id":"desktop-v1","filename":"weights.gguf","sha256":HASH,"family":"fixture","official_name":"Desktop GGUF"})
 }
 #[cfg(all(target_os = "linux", not(feature = "inference-plugins")))]
-async fn rpc(server: &crate::server::ServerHandle, method: &str, params: Value) -> Value {
+pub(super) async fn rpc(
+    server: &crate::server::ServerHandle,
+    method: &str,
+    params: Value,
+) -> Value {
     reqwest::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(3))
@@ -143,7 +147,7 @@ impl Source {
     }
 }
 #[cfg(all(target_os = "linux", not(feature = "inference-plugins")))]
-async fn terminal(server: &crate::server::ServerHandle) -> Value {
+pub(super) async fn terminal(server: &crate::server::ServerHandle) -> Value {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let result = rpc(server, "get_s3_model_import", json!({"operation_id":ID})).await;
@@ -316,6 +320,11 @@ async fn source_rpc_https_owned_import_cancel_and_shutdown() {
                 "settled inputs must be cleaned by their reservation owner"
             );
             server.shutdown().await.unwrap();
+            // A cold owner needs every previous physical-store share released.
+            drop(consumer);
+            drop(acquisition);
+            drop(library);
+            drop(server);
             let cold = pumas_library::PumasApi::builder(root.path())
                 .auto_create_dirs(true)
                 .with_hf_client(false)
@@ -442,7 +451,9 @@ fn source_authenticated_preflight_keeps_failures_out_of_job_and_snapshots() {
             .unwrap(),
         S3ImportOutcome::Running { .. }
     ));
-    let job = receiver.try_recv().unwrap();
+    let Job::Import(job) = receiver.try_recv().unwrap() else {
+        panic!("expected import job")
+    };
     let redacted = format!("{:?}", job.credentials.unwrap());
     let snapshot = serde_json::to_string(&client.snapshot(None).unwrap()).unwrap();
     for secret in [ACCESS, SECRET, TOKEN] {
@@ -672,7 +683,6 @@ fn source_bundle_structural_preflight_refuses_entire_set_before_admission() {
         ("logical_path", json!("../data.json")),
         ("logical_path", json!("WEIGHTS.GGUF")),
         ("logical_path", json!("weights.gguf.part/data.json")),
-        ("logical_path", json!("config/run.py")),
         ("logical_path", json!("metadata.json")),
         ("logical_path", json!("overrides.json")),
         ("logical_path", json!("metadata.json/notes.txt")),
@@ -688,13 +698,16 @@ fn source_bundle_structural_preflight_refuses_entire_set_before_admission() {
         ("sha256", json!("bad")),
     ] {
         let mut input = bundle_params("https://source.invalid");
-        input["files"][1][field] = value;
-        assert!(matches!(
-            client
-                .admit_bundle(serde_json::from_value(input).unwrap(), None)
-                .unwrap(),
-            S3ImportOutcome::Rejected { .. }
-        ));
+        input["files"][1][field] = value.clone();
+        assert!(
+            matches!(
+                client
+                    .admit_bundle(serde_json::from_value(input).unwrap(), None)
+                    .unwrap(),
+                S3ImportOutcome::Rejected { .. }
+            ),
+            "field={field}; value={value}"
+        );
         assert!(matches!(
             client.snapshot(None).unwrap(),
             S3ImportOutcome::Idle
@@ -727,7 +740,39 @@ fn source_bundle_structural_preflight_refuses_entire_set_before_admission() {
             .unwrap(),
         S3ImportOutcome::Running { .. }
     ));
-    assert_eq!(receiver.try_recv().unwrap().entries.len(), 2);
+    let Job::Import(job) = receiver.try_recv().unwrap() else {
+        panic!("expected import job")
+    };
+    assert_eq!(job.entries.len(), 2);
+    client.close();
+}
+
+#[test]
+fn source_bundle_transport_admission_preserves_unqualified_custom_code_selection() {
+    let (client, mut receiver) = S3Imports::channel();
+    let mut input = bundle_params("https://source.invalid");
+    input["files"][1]["logical_path"] = json!("config/run.py");
+    let request: S3BundleImportParams = serde_json::from_value(input).unwrap();
+    let expected_entries = request.native_entries().unwrap();
+    assert!(matches!(
+        client.admit_bundle(request, None).unwrap(),
+        S3ImportOutcome::Running { .. }
+    ));
+    let Job::Import(job) = receiver.try_recv().unwrap() else {
+        panic!("expected unqualified import job")
+    };
+    assert_eq!(job.entries.len(), expected_entries.len());
+    for (actual, expected) in job.entries.iter().zip(&expected_entries) {
+        assert_eq!(actual.source_key, expected.source_key);
+        assert_eq!(actual.version, expected.version);
+        assert_eq!(actual.logical_path, expected.logical_path);
+        assert_eq!(actual.expected_sha256, expected.expected_sha256);
+    }
+    assert!(matches!(
+        client.snapshot(None).unwrap(),
+        S3ImportOutcome::Running { .. }
+    ));
+    assert!(receiver.try_recv().is_err());
     client.close();
 }
 
@@ -930,7 +975,6 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
             "../bad.json",
             "WEIGHTS.GGUF",
             "weights.gguf.part/data.json",
-            "run.py",
             "metadata.json",
             "overrides.json",
             "metadata.json/notes.txt",
@@ -942,7 +986,7 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
             let mut bad = input.clone();
             bad["files"][1]["logical_path"] = json!(path);
             let denied = rpc(&server, "start_s3_model_bundle_import", bad).await;
-            assert_eq!(denied["error"]["code"], -32602);
+            assert_eq!(denied["error"]["code"], -32602, "path={path}");
             assert_eq!(
                 rpc(&server, "get_s3_model_import", json!({})).await["result"]["status"],
                 "idle"
@@ -1169,4 +1213,484 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
             }
         }
     }
+}
+
+#[cfg(all(target_os = "linux", not(feature = "inference-plugins")))]
+#[tokio::test]
+async fn persisted_s3_inspection_cold_read_only_and_live_coexistence() {
+    const MARKER: &str = "PUMAS_S3_PERSISTED_INSPECTION_CHILD";
+    if std::env::var_os(MARKER).is_none() {
+        let config = tempfile::tempdir().unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "s3_imports::tests::persisted_s3_inspection_cold_read_only_and_live_coexistence",
+                "--nocapture",
+            ])
+            .env(MARKER, "1")
+            .env("XDG_CONFIG_HOME", config.path())
+            .env(
+                "SSL_CERT_FILE",
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../pumas-core/tests/fixtures/http-tls/localhost.pem"),
+            )
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+    async fn terminal_for(server: &crate::server::ServerHandle, id: &str) -> Value {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let result = rpc(server, "get_s3_model_import", json!({"operation_id":id})).await;
+                assert!(result["error"].is_null(), "{result}");
+                if result["result"]["status"] == "finished" {
+                    break result["result"].clone();
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap()
+    }
+    fn files(root: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+        walk_owned_files(root)
+            .into_iter()
+            .map(|path| {
+                let bytes = std::fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect()
+    }
+    async fn reopen(root: &Path) -> pumas_library::PumasApi {
+        pumas_library::PumasApi::builder(root)
+            .auto_create_dirs(true)
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap()
+    }
+    let root = tempfile::tempdir().unwrap();
+    let api = reopen(root.path()).await;
+    let server = start_server(
+        api,
+        LoopbackHost::parse("127.0.0.1").unwrap(),
+        0,
+        crate::http_transport::HttpShutdownPolicy::default(),
+    )
+    .await
+    .unwrap();
+    let source = Source::start(0);
+    assert_eq!(
+        rpc(&server, "start_s3_model_import", params(&source.endpoint)).await["result"]["status"],
+        "running"
+    );
+    let completed = terminal(&server).await;
+    let model_id = completed["result"]["model_id"].as_str().unwrap().to_owned();
+    assert_eq!(source.finish().len(), 2);
+    server.shutdown().await.unwrap();
+    let cold = reopen(root.path()).await;
+    let library = cold.model_library().clone();
+    let store_path = walk_owned_files(root.path())
+        .into_iter()
+        .find(|path| path.file_name().unwrap() == "downloads.json")
+        .unwrap();
+    let original = std::fs::read(&store_path).unwrap();
+    let saved: Value = serde_json::from_slice(&original).unwrap();
+    let acquisition_id = saved["acquisitions"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap()
+        .to_owned();
+    let receipt_path = library
+        .library_root()
+        .join(&model_id)
+        .join(".pumas-import-receipt.json");
+    // The producer filename is obtained from its actual saved output, not assumed.
+    let receipt_path = if receipt_path.exists() {
+        receipt_path
+    } else {
+        walk_owned_files(&library.library_root().join(&model_id))
+            .into_iter()
+            .find(|path| {
+                std::fs::read(path)
+                    .ok()
+                    .and_then(|data| serde_json::from_slice::<Value>(&data).ok())
+                    .is_some_and(|value| value.get("acquisition").is_some())
+            })
+            .unwrap()
+    };
+    let publication = std::fs::read(&receipt_path).unwrap();
+    let server = start_server(
+        cold,
+        LoopbackHost::parse("127.0.0.1").unwrap(),
+        0,
+        crate::http_transport::HttpShutdownPolicy::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        rpc(&server, "get_s3_model_import", json!({})).await["result"]["status"],
+        "idle"
+    );
+    // Unrelated and explicit-null model metadata must not spend the bounded
+    // publication-candidate budget or hide this one exact recorded binding.
+    let indexed_publication = library.index().get(&model_id).unwrap().unwrap();
+    for index in 0..256 {
+        let mut unrelated = indexed_publication.clone();
+        unrelated.id = format!("aaa/legacy/unrelated-{index:03}");
+        unrelated.path = unrelated.id.clone();
+        unrelated.metadata = if index % 2 == 0 {
+            json!({})
+        } else {
+            json!({"import_publication": null})
+        };
+        library.index().upsert(&unrelated).unwrap();
+    }
+    let before = files(root.path());
+    let observed = rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"].clone();
+    assert_eq!(observed["status"], "complete", "{observed}");
+    let row = &observed["imports"][0];
+    assert_eq!(observed["imports"].as_array().unwrap().len(), 1);
+    assert_eq!(row["operation_id"], ID);
+    assert_eq!(row["acquisition_id"], acquisition_id);
+    assert_eq!(row["phase"], "adopted");
+    assert_eq!(row["receipt_present"], true);
+    assert_eq!(row["model_binding"]["model_id"], model_id);
+    assert_eq!(row["model_binding"]["publication_state"], "confirmed");
+    for _ in 0..3 {
+        assert_eq!(
+            rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+            observed
+        );
+    }
+    assert_eq!(
+        files(root.path()),
+        before,
+        "inspection must not write persistent files"
+    );
+    // An indexed claim is only a candidate. Even a malformed non-null claim
+    // cannot replace canonical metadata and the exact physical receipt checks.
+    for claim in [json!({}), json!(false), json!("malformed claim")] {
+        let mut indexed = indexed_publication.clone();
+        indexed.metadata["import_publication"] = claim;
+        library.index().upsert(&indexed).unwrap();
+        let before = files(root.path());
+        assert_eq!(
+            rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+            observed
+        );
+        assert_eq!(files(root.path()), before);
+    }
+    library.index().upsert(&indexed_publication).unwrap();
+    let metadata_path = library.library_root().join(&model_id).join("metadata.json");
+    let metadata = std::fs::read(&metadata_path).unwrap();
+    for malformed in [b"{broken".to_vec(), b"{}".to_vec()] {
+        std::fs::write(&metadata_path, &malformed).unwrap();
+        let before = files(root.path());
+        let result =
+            rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"].clone();
+        assert_eq!(result["status"], "complete");
+        assert!(result["imports"][0]["model_binding"].is_null());
+        assert_eq!(files(root.path()), before);
+    }
+    std::fs::write(&metadata_path, &metadata).unwrap();
+    let rejected = rpc(
+        &server,
+        "inspect_persisted_s3_imports",
+        json!({"credentials":{"secret":"synthetic-do-not-reflect"}}),
+    )
+    .await;
+    assert_eq!(rejected["error"]["code"], -32602);
+    assert!(!rejected.to_string().contains("synthetic-do-not-reflect"));
+    // Missing lock must not be recreated, and missing output does not erase custody.
+    let lock = store_path.parent().unwrap().join(".downloads.lock");
+    std::fs::remove_file(&lock).unwrap();
+    assert_eq!(
+        rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+        observed
+    );
+    assert!(!lock.exists());
+    std::fs::remove_file(&receipt_path).unwrap();
+    let missing = rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"].clone();
+    assert_eq!(missing["imports"][0]["phase"], "adopted");
+    assert!(missing["imports"][0]["model_binding"].is_null());
+    std::fs::write(&receipt_path, &publication).unwrap();
+    // Mutated/foreign recorded publication cannot establish this model binding.
+    for field in ["model_id", "acquisition_id", "root"] {
+        let mut value: Value = serde_json::from_slice(&publication).unwrap();
+        match field {
+            "model_id" => value["model_id"] = json!("foreign/model"),
+            "acquisition_id" => {
+                value["acquisition"]["acquisition_id"] =
+                    json!("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa")
+            }
+            _ => value["payload"]["library_root"]["volume"] = json!(0),
+        }
+        std::fs::write(&receipt_path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let before = files(root.path());
+        let result =
+            rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"].clone();
+        assert_eq!(result["status"], "complete");
+        assert!(
+            result["imports"][0]["model_binding"].is_null(),
+            "{field}: {result}"
+        );
+        assert_eq!(files(root.path()), before);
+    }
+    std::fs::write(&receipt_path, vec![b' '; 64 * 1024 + 1]).unwrap();
+    assert_eq!(
+        rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+        json!({"status":"incomplete"})
+    );
+    let mut pending: Value = serde_json::from_slice(&publication).unwrap();
+    pending["state"] = json!("pending");
+    std::fs::write(&receipt_path, serde_json::to_vec(&pending).unwrap()).unwrap();
+    let before = files(root.path());
+    let result = rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"].clone();
+    assert_eq!(
+        result["imports"][0]["model_binding"]["publication_state"],
+        "pending"
+    );
+    assert_eq!(files(root.path()), before);
+    std::fs::write(&receipt_path, &publication).unwrap();
+    // Using + confirmed output remains Using: inspection cannot settle or recover a final result.
+    let mut using = saved.clone();
+    using["acquisitions"][&acquisition_id]["phase"]["state"] = json!("using");
+    std::fs::write(&store_path, serde_json::to_vec(&using).unwrap()).unwrap();
+    let uncertain = rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"].clone();
+    assert_eq!(uncertain["imports"][0]["phase"], "using");
+    assert_eq!(
+        uncertain["imports"][0]["model_binding"]["model_id"],
+        model_id
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(&store_path).unwrap()).unwrap(),
+        using
+    );
+    for foreign in ["consumer", "root", "locator"] {
+        let mut value = saved.clone();
+        let record = &mut value["acquisitions"][&acquisition_id];
+        match foreign {
+            "consumer" => record["demand"]["consumer"] = json!("unrelated.consumer"),
+            "root" => record["workspace"]["root_identity"] = json!("foreign-root"),
+            _ => record["workspace"]["relative_target"] = json!("foreign-stage"),
+        }
+        let record = value["acquisitions"][&acquisition_id].clone();
+        let receipt = &mut value["consumer_receipts"][&acquisition_id];
+        receipt["owner"] = record["demand"]["consumer"].clone();
+        receipt["demand"] = record["demand"].clone();
+        receipt["workspace"] = record["workspace"].clone();
+        std::fs::write(&store_path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let before = files(root.path());
+        let result =
+            rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"].clone();
+        assert_eq!(
+            result,
+            json!({"status":"complete","imports":[]}),
+            "{foreign}: {result}"
+        );
+        assert_eq!(files(root.path()), before);
+    }
+    for malformed in [
+        b"{broken".to_vec(),
+        {
+            let mut value = saved.clone();
+            value["consumer_receipts"][&acquisition_id]["owner"] =
+                json!("synthetic-secret-mismatch");
+            serde_json::to_vec(&value).unwrap()
+        },
+        b"{\"schema_version\":7,\"schema_version\":7}".to_vec(),
+    ] {
+        std::fs::write(&store_path, &malformed).unwrap();
+        let before = files(root.path());
+        assert_eq!(
+            rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+            json!({"status":"unavailable"})
+        );
+        assert_eq!(files(root.path()), before);
+    }
+    for count in [33, 129] {
+        let template = saved["acquisitions"][&acquisition_id].clone();
+        let mut value = saved.clone();
+        value["acquisitions"] = json!({});
+        value["consumer_receipts"] = json!({});
+        for index in 0..count {
+            let id = format!("00000000-0000-0000-0000-{:012x}", index + 1);
+            let mut record = template.clone();
+            record["id"] = json!(id);
+            record["demand"]["operation"] = json!(id);
+            record["workspace"]["relative_target"] = json!(format!(".s3-import-{id}"));
+            record["phase"] = json!({"state":"transferring"});
+            record["files"] = json!([]);
+            value["acquisitions"][&id] = record;
+        }
+        std::fs::write(&store_path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let before = files(root.path());
+        assert_eq!(
+            rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+            json!({"status":"incomplete"}),
+            "record cap {count}"
+        );
+        assert_eq!(files(root.path()), before);
+    }
+    std::fs::write(&store_path, vec![b' '; 1024 * 1024 + 1]).unwrap();
+    assert_eq!(
+        rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+        json!({"status":"incomplete"})
+    );
+    std::fs::write(&store_path, &original).unwrap();
+    // An unmarked lookalike is never used to synthesize a record or a phase.
+    let orphan = root
+        .path()
+        .join("launcher-data/.s3-import-aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa");
+    std::fs::create_dir(&orphan).unwrap();
+    std::fs::write(orphan.join("foreign.txt"), b"preserve").unwrap();
+    assert_eq!(
+        rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+        observed
+    );
+    assert_eq!(
+        std::fs::read(orphan.join("foreign.txt")).unwrap(),
+        b"preserve"
+    );
+    // Aggregate read and index-candidate limits refuse complete lists, not partial bindings.
+    let template = library.index().get(&model_id).unwrap().unwrap();
+    let mut other_publication: Value = serde_json::from_slice(&publication).unwrap();
+    other_publication["acquisition"]["acquisition_id"] =
+        json!("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa");
+    let mut large_receipt = serde_json::to_vec(&other_publication).unwrap();
+    large_receipt.resize(64 * 1024 - 1, b' ');
+    let mut candidates = Vec::new();
+    for index in 0..17 {
+        let mut row = template.clone();
+        row.id = format!("aaa/fixture/candidate-{index:03}");
+        row.path = library
+            .library_root()
+            .join(&row.id)
+            .to_string_lossy()
+            .into_owned();
+        let directory = library.library_root().join(&row.id);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join(receipt_path.file_name().unwrap()),
+            &large_receipt,
+        )
+        .unwrap();
+        library.index().upsert(&row).unwrap();
+        candidates.push(row.id);
+    }
+    assert_eq!(
+        rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+        json!({"status":"incomplete"})
+    );
+    assert_eq!(std::fs::read(&store_path).unwrap(), original);
+    for id in candidates {
+        library.index().delete(&id).unwrap();
+        std::fs::remove_dir_all(library.library_root().join(id)).unwrap();
+    }
+    let mut candidates = Vec::new();
+    for index in 0..128 {
+        let mut row = template.clone();
+        row.id = format!("aaa/fixture/absent-{index:03}");
+        row.path = row.id.clone();
+        library.index().upsert(&row).unwrap();
+        candidates.push(row.id);
+    }
+    assert_eq!(
+        rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+        json!({"status":"incomplete"})
+    );
+    for id in candidates {
+        library.index().delete(&id).unwrap();
+    }
+    let mut source = Source::start(2);
+    let mut request = params(&source.endpoint);
+    let next = "c3f7d104-1234-4321-abcd-bbbbbbbbbbbb";
+    request["operation_id"] = json!(next);
+    assert_eq!(
+        rpc(&server, "start_s3_model_import", request).await["result"]["status"],
+        "running"
+    );
+    tokio::time::timeout(Duration::from_secs(5), &mut source.started)
+        .await
+        .unwrap()
+        .unwrap();
+    let live_before = rpc(&server, "get_s3_model_import", json!({})).await;
+    let live_observed = rpc(&server, "inspect_persisted_s3_imports", json!({})).await;
+    assert_eq!(live_observed["result"]["status"], "complete");
+    assert!(live_observed["result"]["imports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["operation_id"] == next && row["phase"] == "transferring"));
+    assert_eq!(
+        rpc(&server, "get_s3_model_import", json!({})).await["result"]["operation_id"],
+        live_before["result"]["operation_id"]
+    );
+    assert_eq!(
+        rpc(
+            &server,
+            "cancel_s3_model_import",
+            json!({"operation_id":next})
+        )
+        .await["result"]["accepted"],
+        true
+    );
+    assert_eq!(
+        terminal_for(&server, next).await["result"]["status"],
+        "cancelled"
+    );
+    assert_eq!(source.finish().len(), 2);
+    // Retained cancellation blocks new live admission; reopening does not resume it.
+    server.shutdown().await.unwrap();
+    // This observer keeps the old physical store alive even after server shutdown.
+    drop(library);
+    drop(server);
+    let cold = reopen(root.path()).await;
+    let library = cold.model_library().clone();
+    let server = start_server(
+        cold,
+        LoopbackHost::parse("127.0.0.1").unwrap(),
+        0,
+        crate::http_transport::HttpShutdownPolicy::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        rpc(&server, "get_s3_model_import", json!({})).await["result"]["status"],
+        "idle"
+    );
+    // Two genuinely published local fixtures with a conflicting saved binding remain unresolved.
+    let source = Source::start(0);
+    let mut request = params(&source.endpoint);
+    request["operation_id"] = json!("c3f7d104-1234-4321-abcd-cccccccccccc");
+    request["family"] = json!("second-fixture");
+    request["official_name"] = json!("Second local fixture");
+    assert_eq!(
+        rpc(&server, "start_s3_model_import", request).await["result"]["status"],
+        "running"
+    );
+    let completed = terminal_for(&server, "c3f7d104-1234-4321-abcd-cccccccccccc").await;
+    assert_eq!(completed["result"]["status"], "completed", "{completed}");
+    let second_model = completed["result"]["model_id"].as_str().unwrap();
+    assert_eq!(source.finish().len(), 2);
+    let second_receipt = library
+        .library_root()
+        .join(second_model)
+        .join(receipt_path.file_name().unwrap());
+    let mut conflicting: Value =
+        serde_json::from_slice(&std::fs::read(&second_receipt).unwrap()).unwrap();
+    conflicting["acquisition"] = saved["consumer_receipts"][&acquisition_id].clone();
+    std::fs::write(&second_receipt, serde_json::to_vec(&conflicting).unwrap()).unwrap();
+    let before = files(root.path());
+    assert_eq!(
+        rpc(&server, "inspect_persisted_s3_imports", json!({})).await["result"],
+        json!({"status":"unavailable"})
+    );
+    assert_eq!(files(root.path()), before);
+    server.shutdown().await.unwrap();
 }

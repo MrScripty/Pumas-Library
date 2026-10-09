@@ -7,7 +7,7 @@ use pumas_library::intent::{
 };
 use pumas_library::models::{PackageArtifactKind, PumasModelRef};
 use pumas_library::registry::{InstanceEntry, LibraryRegistry};
-use pumas_library::{PumasApi, PumasLocalClient};
+use pumas_library::{PumasApi, PumasError, PumasLocalClient};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -21,6 +21,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 const CHILD_TEST: &str = "intent_ipc_registry_child";
 const CHILD_ROOT: &str = "PUMAS_INTENT_IPC_ROOT";
 const CHILD_READY: &str = "PUMAS_INTENT_IPC_READY";
+const CHILD_SHUTDOWN: &str = "PUMAS_INTENT_IPC_SHUTDOWN";
 const CHILD_REGISTRY: &str = "PUMAS_REGISTRY_DB_PATH";
 const AVAILABLE_MODEL_ID: &str = "llm/intent/ipc-available";
 const MAX_RESPONSE_FRAME_BYTES: usize = 8 * 1024 * 1024;
@@ -115,6 +116,7 @@ async fn intent_ipc_registry_child() {
         return;
     };
     let ready = PathBuf::from(std::env::var_os(CHILD_READY).unwrap());
+    let shutdown = PathBuf::from(std::env::var_os(CHILD_SHUTDOWN).unwrap());
     let registry_path = PathBuf::from(std::env::var_os(CHILD_REGISTRY).unwrap());
     seed_available_model(&root);
     let api = PumasApi::builder(&root)
@@ -156,12 +158,16 @@ async fn intent_ipc_registry_child() {
         .unwrap(),
     );
 
-    std::future::pending::<()>().await;
+    while !shutdown.is_file() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    api.shutdown_instance().await.unwrap();
 }
 
 struct RunningPrimary {
     child: Child,
     ready: ReadyFixture,
+    shutdown: PathBuf,
 }
 
 /// Retain the child before readiness parsing can fail or panic. The receipt is
@@ -184,7 +190,20 @@ impl Drop for StartingPrimary {
 }
 
 impl RunningPrimary {
-    fn stop(mut self) {
+    fn shutdown(mut self) {
+        write_durable(&self.shutdown, b"shutdown");
+        for _ in 0..3_000 {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                assert!(status.success(), "fixture shutdown failed: {status}");
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // Drop still kills and waits on this exact child if its drain stalled.
+        panic!("timed out waiting for fixture's composed instance shutdown");
+    }
+
+    fn hard_exit(mut self) {
         self.child.kill().unwrap();
         let status = self.child.wait().unwrap();
         assert!(
@@ -218,6 +237,7 @@ fn start_primary_observed(
     child_test: &str,
     exit_observed: Arc<AtomicBool>,
 ) -> RunningPrimary {
+    let shutdown = ready.with_extension("shutdown");
     let child = Command::new(std::env::current_exe().unwrap())
         .arg("--ignored")
         .arg("--exact")
@@ -225,6 +245,7 @@ fn start_primary_observed(
         .arg("--nocapture")
         .env(CHILD_ROOT, root)
         .env(CHILD_READY, ready)
+        .env(CHILD_SHUTDOWN, &shutdown)
         .env(CHILD_REGISTRY, registry)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -242,6 +263,7 @@ fn start_primary_observed(
             return RunningPrimary {
                 child: owner.child.take().unwrap(),
                 ready,
+                shutdown,
             };
         }
         if let Some(status) = owner.child.as_mut().unwrap().try_wait().unwrap() {
@@ -337,8 +359,140 @@ fn assert_invalid_params(response: &serde_json::Value) {
     assert!(response.get("result").is_none());
 }
 
+fn durable_declarations(root: &Path) -> Vec<serde_json::Value> {
+    let connection = rusqlite::Connection::open_with_flags(
+        root.join("shared-resources/models/models.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let mut statement = connection
+        .prepare(
+            "SELECT declaration_id, consumer_key, original_requirement_json, generation,
+                    model_id, bound_target_json, created_at, updated_at
+             FROM intent_declarations ORDER BY declaration_id",
+        )
+        .unwrap();
+    let rows = statement
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "declaration_id": row.get::<_, String>(0)?,
+                "consumer_key": row.get::<_, String>(1)?,
+                "original_requirement_json": row.get::<_, String>(2)?,
+                "generation": row.get::<_, String>(3)?,
+                "model_id": row.get::<_, Option<String>>(4)?,
+                "bound_target_json": row.get::<_, Option<String>>(5)?,
+                "created_at": row.get::<_, String>(6)?,
+                "updated_at": row.get::<_, String>(7)?,
+            }))
+        })
+        .unwrap();
+    rows.collect::<rusqlite::Result<_>>().unwrap()
+}
+
+fn durable_instance(registry: &Path, root: &Path) -> serde_json::Value {
+    let connection =
+        rusqlite::Connection::open_with_flags(registry, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+    connection
+        .query_row(
+            "SELECT library_path, pid, port, started_at, version, status, claim_token,
+                    transport_kind, endpoint, connection_token
+             FROM instances WHERE library_path = ?1",
+            [root.canonicalize().unwrap().to_string_lossy().to_string()],
+            |row| {
+                Ok(serde_json::json!({
+                    "library_path": row.get::<_, String>(0)?,
+                    "pid": row.get::<_, u32>(1)?,
+                    "port": row.get::<_, u16>(2)?,
+                    "started_at": row.get::<_, String>(3)?,
+                    "version": row.get::<_, Option<String>>(4)?,
+                    "status": row.get::<_, String>(5)?,
+                    "claim_token": row.get::<_, Option<String>>(6)?,
+                    "transport_kind": row.get::<_, String>(7)?,
+                    "endpoint": row.get::<_, Option<String>>(8)?,
+                    "connection_token": row.get::<_, Option<String>>(9)?,
+                }))
+            },
+        )
+        .unwrap()
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn native_intent_ipc_is_authenticated_and_durable_across_disconnect_and_restart() {
+async fn acknowledged_ipc_declaration_survives_hard_exit_without_licensing_primary_reopen() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("library");
+    let registry = temp.path().join("registry.db");
+    let ready = temp.path().join("ready.json");
+    let primary = start_primary(&root, &registry, &ready);
+    let client = PumasLocalClient::connect(primary.ready.entry.clone())
+        .await
+        .unwrap();
+    let request = ensure_request();
+    let declaration = match client.intent().ensure_model(&request).await.unwrap() {
+        EnsureModelOutcome::Accepted { declaration, state } => {
+            assert!(matches!(state, ObservedModelState::Missing { .. }));
+            declaration
+        }
+        other => panic!("local declaration was not acknowledged through IPC: {other:?}"),
+    };
+    let declarations = durable_declarations(&root);
+    assert_eq!(declarations.len(), 1);
+    assert_eq!(
+        declarations[0]["declaration_id"],
+        declaration.reference.declaration_id
+    );
+    assert_eq!(
+        declarations[0]["consumer_key"],
+        declaration.reference.consumer_key
+    );
+    assert_eq!(
+        declarations[0]["generation"],
+        declaration.reference.generation
+    );
+    assert_eq!(
+        serde_json::from_str::<ModelRequirement>(
+            declarations[0]["original_requirement_json"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap(),
+        request.requirement
+    );
+    let instance = durable_instance(&registry, &root);
+    let owner_pid = primary.child.id();
+    assert_eq!(instance["pid"], owner_pid);
+    assert_eq!(instance["status"], "ready");
+    assert!(!primary.shutdown.exists());
+    drop(client);
+    primary.hard_exit();
+
+    // Waiting on the exact killed child proves this fixture's exit, not global
+    // store custody. Observe persistence without reopening a mutating service.
+    assert_eq!(durable_declarations(&root), declarations);
+    assert_eq!(durable_instance(&registry, &root), instance);
+    let result = PumasApi::builder(&root)
+        .with_registry(LibraryRegistry::open_at(&registry).unwrap())
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await;
+    match result {
+        Err(PumasError::InvalidParams { message }) => {
+            assert!(message.contains("already running"), "{message}");
+            assert!(message.contains(&format!("(pid {owner_pid})")), "{message}");
+        }
+        Err(other) => panic!("reopen failed for an unexpected reason: {other}"),
+        Ok(api) => {
+            api.shutdown_instance().await.unwrap();
+            panic!("hard exit must retain unresolved registry custody");
+        }
+    }
+    assert_eq!(durable_instance(&registry, &root), instance);
+    assert_eq!(durable_declarations(&root), declarations);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn native_intent_ipc_is_authenticated_and_durable_across_disconnect_and_graceful_restart() {
     let temp = TempDir::new().unwrap();
     let root = temp.path().join("library");
     let registry = temp.path().join("registry.db");
@@ -414,7 +568,12 @@ async fn native_intent_ipc_is_authenticated_and_durable_across_disconnect_and_re
             if observed == declaration
     ));
     drop(reconnected);
-    first_primary.stop();
+    first_primary.shutdown();
+    assert!(LibraryRegistry::open_read_only_at(&registry)
+        .unwrap()
+        .get_instance(&root)
+        .unwrap()
+        .is_none());
 
     let ready_two = temp.path().join("ready-two.json");
     let second_primary = start_primary(&root, &registry, &ready_two);
@@ -443,7 +602,7 @@ async fn native_intent_ipc_is_authenticated_and_durable_across_disconnect_and_re
         GetEnsureStatusOutcome::NotFound
     ));
     drop(restarted);
-    second_primary.stop();
+    second_primary.shutdown();
 
     let ready_three = temp.path().join("ready-three.json");
     let third_primary = start_primary(&root, &registry, &ready_three);
@@ -463,7 +622,7 @@ async fn native_intent_ipc_is_authenticated_and_durable_across_disconnect_and_re
         GetEnsureStatusOutcome::NotFound
     ));
     drop(after_release);
-    third_primary.stop();
+    third_primary.shutdown();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -550,5 +709,6 @@ async fn intent_ipc_rejects_bad_auth_and_malformed_wire_requests() {
                 diagnostic.code == IntentDiagnosticCode::UnsupportedArtifactFormat
             })
     ));
-    primary.stop();
+    drop(client);
+    primary.shutdown();
 }

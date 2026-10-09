@@ -76,6 +76,18 @@ pub(super) async fn search_hf_models_with_hydration(
     hydrate_limit: usize,
 ) -> std::result::Result<Vec<models::HuggingFaceModel>, PumasError> {
     let client = require_hf_client(primary)?;
+    // Explicit local discovery through the existing search caller. Ordinary HF
+    // search and all acquisition identity checks keep their existing live path.
+    if let Some(query) = query.strip_prefix("cache:") {
+        return client
+            .search_cached_model_details(&model_library::HfSearchParams {
+                query: query.to_string(),
+                kind: kind.map(String::from),
+                limit: Some(limit),
+                ..Default::default()
+            })
+            .await;
+    }
     let params = model_library::HfSearchParams {
         query: query.to_string(),
         kind: kind.map(String::from),

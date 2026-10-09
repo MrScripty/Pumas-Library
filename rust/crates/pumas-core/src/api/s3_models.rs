@@ -35,7 +35,7 @@ pub struct S3ModelImportRequest {
     pub source: S3ReaderConfig,
     pub credentials: Option<S3Credentials>,
     pub entries: Vec<S3ManifestEntry>,
-    /// Exact logical primary GGUF path and model metadata, not a source URL.
+    /// Exact logical primary weight path and model metadata, not a source URL.
     pub import: ModelImportSpec,
     pub workspace: AcquisitionWorkspace,
     pub retry: AcquisitionRetryPolicy,
@@ -297,7 +297,7 @@ impl AcquisitionHost for Host {
 
 impl PumasApi {
     /// Resolve explicit immutable S3 pins, acquire/verify the complete set, and
-    /// publish one GGUF with optional selected data/text auxiliaries. No prefix
+    /// publish a package qualified by the shared model importer. No prefix
     /// discovery, account setup, credential storage, implicit workspace or RPC is
     /// created. Success follows the existing consumer receipt's durable settlement.
     ///
@@ -353,14 +353,11 @@ impl PumasApi {
                 .entries
                 .iter()
                 .any(|entry| entry.logical_path == request.import.path)
-                || !std::path::Path::new(&request.import.path)
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
             {
                 return Err(PumasError::Validation {
                     field: "s3.model.primary".into(),
                     message:
-                        "The import spec must name the exact selected primary GGUF logical path"
+                        "The import spec must name the exact selected primary weight logical path"
                             .into(),
                 }
                 .into());
@@ -395,7 +392,6 @@ impl PumasApi {
                     .try_fold(0_u64, |sum, file| sum.checked_add(file.expected_size()?));
             });
             control.phase(S3ModelImportPhase::Acquiring);
-            let bundle = selection.manifest().files().len() > 1;
             let spec = request.import;
             let prepared_spec = spec.clone();
             let importer = self.primary().model_importer.clone();
@@ -413,15 +409,9 @@ impl PumasApi {
                         Ok((acquired, serde_json::to_value(prepared_spec)?))
                     },
                     move |acquired, receipt| async move {
-                        if bundle {
-                            importer
-                                .import_acquired_gguf_bundle(&acquired, &receipt, &spec)
-                                .await
-                        } else {
-                            importer
-                                .import_acquired_gguf(&acquired, &receipt, &spec)
-                                .await
-                        }
+                        importer
+                            .import_acquired_model(&acquired, &receipt, &spec)
+                            .await
                     },
                 )
                 .await

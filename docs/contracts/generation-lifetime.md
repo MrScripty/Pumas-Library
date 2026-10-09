@@ -21,7 +21,7 @@ generation may legitimately remain silent until its terminal result.
 The duration-unbounded transport applies to all registered generation routes:
 
 - `POST /v1/chat/completions` (Ollama and llama.cpp through the shared
-  buffered gateway handler);
+  gateway handler, progressively forwarding SSE for `stream: true`);
 - `POST /v1/completions` (same shared handler, client seam, and response
   function as chat);
 - `POST /v1/images/generations` (Torch-only adapter through `TorchClient`);
@@ -59,6 +59,19 @@ shutdown. Those budgets must never become a maximum generation duration.
   `rust/crates/pumas-rpc/src/handlers/openai_gateway.rs` (connect-bounded,
   duration-unbounded); non-generation routes keep their bounded policy on the
   gateway client.
+- Text response ownership: `gateway_stream.rs` retains the upstream stream
+  and one of 64 active-generation permits through body completion or disposal.
+  Request-local disconnect notification opts generation into cancellation
+  while the HTTP owner continues supervising other admitted handlers. Exact
+  managed-session stop and server shutdown cancel header waiting and finite
+  buffering, and stop streaming delivery on the next body poll. An unpolled
+  or downstream-blocked body retains its transport and permit until polling
+  or disposal; HTTP shutdown also closes connections under its existing grace
+  policy. Both
+  redirect following and transport retry are disabled for this text client.
+  Non-streaming responses retain finite buffering and its 32 MiB bound;
+  streaming responses enforce that bound cumulatively. A stream fault after
+  headers terminates delivery with an error and leaves the outcome unknown.
 - Image generation: `TorchClient::image_client` in
   `rust/crates/pumas-app-manager/src/torch_client.rs` (connect-bounded,
   duration-unbounded, whole-payload bound enforced while streaming).

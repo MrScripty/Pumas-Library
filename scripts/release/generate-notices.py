@@ -43,6 +43,31 @@ def license_files(root):
     )
 
 
+def rust_license_files(package, root):
+    files = license_files(root)
+    if package == "turbojpeg-sys":
+        # The bundled native codec's LICENSE.md incorporates the IJG license
+        # from this exact README. It is legal text, not a general README scan.
+        for relative in ("libjpeg-turbo/LICENSE.md", "libjpeg-turbo/README.ijg"):
+            required = root / relative
+            if not required.is_file():
+                raise ValueError(f"Missing bundled JPEG legal text: {relative}")
+            if required not in files:
+                files.append(required)
+    return sorted(files)
+
+
+def jpeg_wrapper_license(root, sources):
+    # The sys crate archive omits the repository-level wrapper MIT text.
+    # Bind that official text to the exact published crate's VCS revision.
+    revision = json.loads((root / ".cargo_vcs_info.json").read_text())["git"]["sha1"]
+    provenance = next(source for source in sources if source["file"] == "turbojpeg-sys-LICENSE")
+    expected = f"https://raw.githubusercontent.com/honzasp/rust-turbojpeg/{revision}/LICENSE"
+    if provenance["source"] != expected:
+        raise ValueError("Upstream license revision changed: turbojpeg-sys")
+    return LICENSES / "turbojpeg-sys-LICENSE"
+
+
 def repository_file(name):
     if (
         not isinstance(name, str)
@@ -296,7 +321,7 @@ def collect(features=()):
             )
         for file in files:
             data = file.read_bytes()
-            label = str(file.relative_to(root))
+            label = str(file.relative_to(root if file.is_relative_to(root) else LICENSES))
             section.extend([f"--- {label} ---", data.decode("utf-8")])
             record["texts"].append({"path": label, "sha256": digest(data)})
         records.append(record)
@@ -306,7 +331,9 @@ def collect(features=()):
         if (package["name"], "v" + package["version"]) not in selected or package["source"] is None:
             continue
         root = Path(package["manifest_path"]).parent
-        files = license_files(root)
+        files = rust_license_files(package["name"], root)
+        if package["name"] == "turbojpeg-sys":
+            files.append(jpeg_wrapper_license(root, sources))
         if package["name"] in (
             "binrw",
             "binrw_derive",

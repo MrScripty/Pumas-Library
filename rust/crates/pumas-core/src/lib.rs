@@ -31,10 +31,12 @@
 uniffi::setup_scaffolding!();
 
 pub mod acquisition;
+pub mod build_info;
 pub mod cache;
 pub mod cancel;
 pub mod config;
 pub mod conversion;
+pub mod discovery;
 pub mod error;
 pub mod index;
 pub mod intent;
@@ -51,11 +53,16 @@ pub mod plugins;
 pub mod process;
 pub mod providers;
 pub mod registry;
+#[cfg(target_os = "linux")]
+mod runtime_native_closure;
 pub mod runtime_profiles;
+pub mod runtime_read_source;
 pub mod serving;
 pub mod system;
 
 mod api;
+
+pub use build_info::PumasBuildInfo;
 
 // Re-export commonly used types
 pub use cache::{CacheBackend, CacheConfig, CacheEntry, CacheMeta, CacheStats, SqliteCache};
@@ -108,7 +115,8 @@ pub use api::PumasApiBuilder;
 #[cfg(feature = "s3")]
 pub use api::{
     S3ModelBundleProgress, S3ModelImportControl, S3ModelImportError, S3ModelImportPhase,
-    S3ModelImportProgress, S3ModelImportRequest,
+    S3ModelImportProgress, S3ModelImportRequest, S3PersistedImport, S3PersistedImports,
+    S3PersistedPhase, S3RecordedModelBinding, S3RecordedPublicationState,
 };
 
 use std::path::PathBuf;
@@ -226,10 +234,11 @@ impl PumasApi {
         Self::builder(launcher_root).build().await
     }
 
-    /// Discover and connect to an existing pumas-core instance, or return an error
-    /// if no libraries are registered.
+    /// Open the default registered library as an owning instance, or return an
+    /// error if no libraries are registered or an owner row already exists.
     ///
-    /// Open the default registered library as an owning instance.
+    /// Prefer `discovery::LocalDiscovery` for read-only observation and
+    /// `discovery::attach_or_start` for explicit compatibility-checked bootstrap.
     ///
     /// Host applications that need to attach to an already-running owner should
     /// call `PumasLocalClient::discover_ready_instances` and then
@@ -239,9 +248,6 @@ impl PumasApi {
             tracing::warn!("Failed to open registry for discovery: {}", e);
             PumasError::NoLibrariesRegistered
         })?;
-
-        // Clean up stale entries first
-        let _ = registry.cleanup_stale();
 
         let library = registry
             .get_default()?
@@ -274,9 +280,16 @@ impl PumasApi {
 
             let mut claim = state.instance_claim.lock().await;
             if let Some(claim) = claim.take() {
-                reg.mark_instance_ready(&claim.library_path, &claim.claim_token, port)?;
+                let instance =
+                    reg.promote_instance_ready(&claim.library_path, &claim.claim_token, port)?;
+                state
+                    .ready_instance
+                    .set(instance)
+                    .map_err(|_| PumasError::Other("instance generation already set".into()))?;
             } else {
-                reg.register_instance(&self.launcher_root, std::process::id(), port)?;
+                return Err(PumasError::Other(
+                    "IPC startup requires its own claim generation".into(),
+                ));
             }
         }
 
@@ -325,11 +338,10 @@ impl Drop for PumasApi {
         self.runtime_tasks.shutdown();
         let _ = self.model_watcher.take();
         let ApiInner::Primary(ref state) = self.inner;
-        // Best-effort: unregister instance from the global registry
-        if let Some(ref reg) = state.registry {
-            let _ = reg.unregister_instance(&self.launcher_root);
-        }
-        // Server handle is dropped automatically via IpcServerHandle::drop
+        // Drop cannot establish cessation synchronously. The independently
+        // retained coordinator releases this row only after observed settlement;
+        // runtime loss or failed cleanup leaves it unresolved.
+        let _receipt = api::instance_shutdown::begin(state);
     }
 }
 

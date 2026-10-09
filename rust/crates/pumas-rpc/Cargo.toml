@@ -34,6 +34,12 @@ tower-http = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+base64 = "=0.22.1"
+crc32fast = "=1.5.0"
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+# Safe API; build the checksum-pinned bundled libjpeg-turbo statically by default.
+turbojpeg = { version = "=1.5.1", default-features = false, features = ["cmake"] }
+turbojpeg-sys = { version = "=1.2.0", default-features = false }
 schemars = { version = "=1.2.0", optional = true }
 tempfile = { workspace = true, optional = true }
 futures = { workspace = true }
@@ -72,6 +78,7 @@ inference-plugins = [
 
 [dev-dependencies]
 native-tls = "0.2"
+rusqlite = { workspace = true }
 pumas-library = { workspace = true, default-features = false, features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = { workspace = true }

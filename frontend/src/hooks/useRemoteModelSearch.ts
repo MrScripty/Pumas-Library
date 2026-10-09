@@ -7,17 +7,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
-import type { RemoteModelInfo } from '../types/apps';
+import type { RemoteModelInfo, RemoteSearchSource } from '../types/apps';
+import { effectiveSearchSource, presentSearchResults } from '../utils/hfCachedDiscovery';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 
 const logger = getLogger('useRemoteModelSearch');
 const DEFAULT_HYDRATE_LIMIT = 6;
+const EMPTY_RESULTS: RemoteModelInfo[] = [];
 
 interface UseRemoteModelSearchOptions {
   enabled: boolean;
   searchQuery: string;
   debounceMs?: number;
+  source?: RemoteSearchSource;
 }
 
 function hasExactDownloadDetails(model: RemoteModelInfo): boolean {
@@ -37,14 +40,19 @@ export function useRemoteModelSearch({
   enabled,
   searchQuery,
   debounceMs = 300,
+  source = 'huggingface',
 }: UseRemoteModelSearchOptions) {
   const [results, setResults] = useState<RemoteModelInfo[]>([]);
+  const [resultContext, setResultContext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [hydratingRepoIds, setHydratingRepoIds] = useState<Set<string>>(new Set());
   const generationRef = useRef(0);
   const resultsRef = useRef<RemoteModelInfo[]>([]);
   const inFlightHydrationsRef = useRef<Map<string, Promise<void>>>(new Map());
+  const selectedSource = effectiveSearchSource(searchQuery, source);
+  const requestContext = JSON.stringify([enabled, selectedSource, searchQuery.trim()]);
+  const visibleResults = resultContext === requestContext ? results : EMPTY_RESULTS;
 
   useEffect(() => () => {
     generationRef.current += 1;
@@ -52,31 +60,34 @@ export function useRemoteModelSearch({
   }, []);
 
   useEffect(() => {
-    resultsRef.current = results;
-  }, [results]);
+    resultsRef.current = visibleResults;
+  }, [visibleResults]);
 
   // Get unique kinds from results
   const kinds = useMemo(() => {
     const kindSet = new Set<string>();
-    results.forEach((model) => {
+    visibleResults.forEach((model) => {
       if (model.kind && model.kind !== 'unknown') {
         kindSet.add(model.kind);
       }
     });
     return ['all', ...Array.from(kindSet).sort()];
-  }, [results]);
+  }, [visibleResults]);
 
   useEffect(() => {
     generationRef.current += 1;
     inFlightHydrationsRef.current.clear();
     setHydratingRepoIds(new Set());
+    setResults([]);
+    setError(null);
+    setIsLoading(false);
 
     if (!enabled) {
       return;
     }
 
     const trimmedQuery = searchQuery.trim();
-    if (!trimmedQuery) {
+    if (!trimmedQuery && selectedSource !== 'cached') {
       setResults([]);
       setError(null);
       setIsLoading(false);
@@ -98,12 +109,16 @@ export function useRemoteModelSearch({
       setIsLoading(true);
       setError(null);
       try {
-        const result = await api.search_hf_models(trimmedQuery, null, 25, DEFAULT_HYDRATE_LIMIT);
+        const query = selectedSource === 'cached' && !trimmedQuery.startsWith('cache:')
+          ? `cache:${trimmedQuery}` : trimmedQuery;
+        const result = await api.search_hf_models(query, null, 25,
+          selectedSource === 'cached' ? 0 : DEFAULT_HYDRATE_LIMIT);
         if (!isActive || generation !== generationRef.current) {
           return;
         }
         if (result.success) {
-          setResults(result.models as RemoteModelInfo[]);
+          setResults(presentSearchResults(result.models as RemoteModelInfo[], selectedSource));
+          setResultContext(requestContext);
         } else {
           setError(result.error || 'Search failed.');
           setResults([]);
@@ -134,9 +149,10 @@ export function useRemoteModelSearch({
       isActive = false;
       clearTimeout(handle);
     };
-  }, [enabled, searchQuery, debounceMs]);
+  }, [enabled, searchQuery, debounceMs, selectedSource, requestContext]);
 
   const hydrateModelDetails = useCallback(async (model: RemoteModelInfo): Promise<void> => {
+    if (selectedSource === 'cached') return;
     if (!isAPIAvailable()) {
       return;
     }
@@ -212,10 +228,11 @@ export function useRemoteModelSearch({
 
     inFlightHydrationsRef.current.set(repoId, request);
     return request;
-  }, []);
+  }, [selectedSource]);
 
   return {
-    results,
+    results: visibleResults,
+    isCachedSearch: selectedSource === 'cached',
     kinds,
     error,
     isLoading,

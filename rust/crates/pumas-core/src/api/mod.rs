@@ -6,6 +6,7 @@
 mod builder;
 mod conversion;
 mod hf;
+pub(crate) mod instance_shutdown;
 #[cfg(test)]
 pub(crate) use hf::tests::recovery_api_fixture as intent_acquisition_test_fixture;
 pub(crate) use hf::PreparedIntentDownload;
@@ -19,7 +20,14 @@ mod resource_responses;
 mod runtime_profiles;
 mod runtime_tasks;
 #[cfg(feature = "s3")]
+mod s3_inspection;
+#[cfg(feature = "s3")]
 mod s3_models;
+#[cfg(feature = "s3")]
+pub use s3_inspection::{
+    S3PersistedImport, S3PersistedImports, S3PersistedPhase, S3RecordedModelBinding,
+    S3RecordedPublicationState,
+};
 mod serving;
 #[cfg(feature = "s3")]
 pub use s3_models::{
@@ -42,3 +50,6 @@ pub(crate) use reconciliation::{
 };
 pub(crate) use runtime_tasks::{RuntimeTaskContext, RuntimeTasks};
 pub(crate) use state::PrimaryState;
+
+#[cfg(feature = "test-support")]
+pub(crate) use reconciliation::model_library_change_callback;

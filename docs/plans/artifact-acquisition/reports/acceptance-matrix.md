@@ -10,6 +10,20 @@ providers and unsupported-by-this-run targets. It records exact external missing
 inputs. AC13/AC14, AQ-S3 and full AC17/Q4 remain pending; neither DOM tests nor
 the qualification archive advance actual-provider or shipping-platform gates.
 
+**2026-10-07 owner-lifecycle qualification update:** Orderly `PumasApi`
+restart fixtures now await successful `shutdown_instance`. Failed construction,
+failed composed shutdown and SIGKILL retain their exact registry generation and
+block another primary; process exit alone does not authorize reclaim. Native
+receipt-recovery fixtures described below use independently owned
+`AcquisitionService` compositions from initial setup. Their recovery assertions
+do not qualify primary-instance recovery after failure or crash. Historical
+passes in the execution ledger remain historical. The revised native lifecycle
+fixtures passed locally in the no-default Linux x86_64 run (18 passed; the
+SIGKILL child is invoked by its parent). The S3 acquisition integration suite
+also passed 44/44 with `s3,test-support`. These are local candidate results, not
+full workspace, other-platform or primary-crash recovery qualification. AC05
+remains pending.
+
 **Acceptance status:** [Build 37141872406](https://github.com/MrScripty/Pumas-Library/actions/runs/37141872406) passed all seven ordinary jobs on `0dd38c707125facfdaae29c82704213e85ceb155` (tree `7611df7a568d56807589bb2dca2bfbb03e484dd0`): workflow/release contracts, frontend/desktop, strict Rust quality, headless without inference, and native Linux/macOS/Windows. This is exact-head supporting AC15 evidence for the checks that ran. Release archives and native model E2E remain unqualified; AQ-HTTP, external review disposition and maintainer integration remain pending. Review repairs after this head require fresh exact-head qualification. AC03 retains its recorded Linux x86_64 source-built RPC scope. AC01–AC02, AC04–AC14, and AC16–AC18 remain pending. Earlier failures and narrower local runs below are historical; they are not the status of the qualified integration head. Deployment, real resource-bound, complete public-interface and real-cluster claims are not established.
 
 | ID | Observable claim / deciding procedure | Evidence kind | Environment | Mode | Milestone / owner | Status |
@@ -41,13 +55,49 @@ The Linux x86_64 app-manager regression `native_receiptless_using_cold_reopen_pr
 
 `server::tests::retained_paused_download_cancellation_cleans_only_target_through_http_json_rpc_and_reopens` passed 1/1 on Linux x86_64. Through the actual in-process `/rpc` listener, the test observes two retained paused records, cancels one, waits for terminal `cancelled`, verifies removal of only its partial and marker, preserves both sentinels and the keeper's full paused projection/files, checks public and active-admission inventory, and reconstructs the API/server on the same root to verify the target remains missing and the keeper remains unchanged. Bounded server shutdowns are observed before assertions. The sandbox run failed before HTTP startup with `EPERM`; the permission-enabled run first exposed a still-live server/client claim, which was corrected by dropping both after observed shutdown. The final permission-enabled run passed. This is a retained-paused Linux RPC composition only: active transfer/import cancellation, source non-replay, process-loss durability, Electron behavior, cross-platform behavior, external-client compatibility and full AC06/AC08/AC16 remain unverified. The repeat-cancel `Download not found` text is not used as evidence of disappearance. All corresponding criteria and AQ-HTTP remain pending; see the [execution ledger](../execution-ledger.md) for the exact command and review.
 
-## AC05 native post-rename receipt recovery fixture — local evidence
+## AC05 native post-rename receipt recovery fixture — service-only qualification
 
-The Linux x86_64 app-manager regression `native_receipt_post_rename_interruption_cold_reopen_refuses_changed_output_and_settles` passes locally (1/1). It injects a test-only failure after the receipt-bound native output is renamed into place and both parent directories are synced, but before native metadata publication. A fresh same-process owner refuses a changed launcher while preserving store, metadata, workspace and destination file state, including identity and nanosecond timestamps. After the fixture restores the exact launcher bytes, another cold owner reconstructs metadata from the existing receipt, settles the same acquisition to `Adopted`, and a repeated reopen remains stable. The source fixture has been closed before recovery, but the test does not directly observe zero request attempts. It is not hard-process/power-loss evidence and does not cover the other AC05 crash windows or deployment/platform qualification. AC05 remains pending; see the [execution ledger](../execution-ledger.md) for command, review and limits.
+The current Linux x86_64 app-manager regression
+`native_receipt_post_rename_interruption_service_restart_refuses_changed_output_and_settles`
+owns an isolated acquisition service and native manager from initial setup; it
+never constructs a `PumasApi` owner. It injects a test-only failure after the
+receipt-bound output rename and parent-directory syncs, before metadata
+publication. After both service owners drain, a fresh service refuses a changed
+launcher while preserving store, metadata, workspace and destination identity
+and nanosecond timestamps. Restoring the exact fixture bytes permits a fresh
+service to reconstruct metadata from the receipt, settle the same acquisition
+to `Adopted`, and remain stable on repeated reconstruction. The source fixture
+is closed before recovery, but zero request attempts are not directly observed.
+The earlier local pass of the predecessor fixture is historical, as recorded in
+the [execution ledger](../execution-ledger.md). The revised service-only fixture
+passed in the local no-default native lifecycle suite. This does not establish primary-owner release
+after failed shutdown, hard-process/power-loss recovery, the other AC05 windows,
+or deployment/platform qualification. AC05 remains pending.
 
-## AC05 native post-rename SIGKILL recovery fixture — local evidence
+## AC05 native post-rename SIGKILL retained-owner fixture — restart refusal
 
-The Linux x86_64 app-manager regression `native_receipt_post_rename_sigkill_cold_reopen_recovers_without_source_replay` passes locally (1/1). A child installer reaches a test-only marker after destination rename and both parent-directory syncs, before native metadata publication; the parent observes the marker and terminates the child with SIGKILL. The test confirms signal termination, receipt/acquisition/lease/demand/manifest/workspace/output correspondence, matching tree and launcher hashes, and absent installed metadata at the interruption boundary. A fresh owner recovers the same acquisition to `Adopted`, reconstructs metadata from its receipt, and remains stable on another cold reopen. The parent keeps a controlled loopback listener active and observes no request to that endpoint during either owner's recovery and a bounded drain. This is one hard-process interruption point on a disposable Linux x86_64 root; the test-only marker, fixture endpoint and single crash window do not prove power-loss durability, broader source non-replay, other AC05 windows, deployed migration, shutdown/resource limits, packaged behavior, Windows/macOS, or full AC05. AC05 remains pending; see the [execution ledger](../execution-ledger.md) for the exact command, source review and limits.
+The current Linux x86_64 app-manager regression
+`native_receipt_post_rename_sigkill_retains_owner_and_refuses_reopen_without_source_replay`
+keeps the actual process-loss boundary: a child reaches the post-rename marker,
+then the parent sends SIGKILL and observes and reaps its signal-9 exit. A
+fixture-local registry is shared explicitly by the child and parent. The test
+checks receipt/acquisition/lease/demand/manifest/workspace/output correspondence,
+matching tree and launcher hashes, and absent installed metadata. Repeated
+primary construction must refuse while preserving the exact ready generation,
+store bytes, workspace, output and metadata state. A live controlled loopback
+listener observes that these refused attempts issue no source request.
+
+The former fresh-primary recovery expectation is superseded by the retained
+ownership contract. The historical local pass remains in the
+[execution ledger](../execution-ledger.md); it does not qualify the current
+contract. The revised refusal fixture passed in the local no-default native
+lifecycle suite.
+Reaping the root child is not proof of ordered cessation of every admitted
+effect, so this fixture neither releases the row nor bypasses it with a mutating
+service on the same physical root. Automatic primary recovery after this crash
+remains unsupported. This single Linux fixture does not establish power-loss
+durability, other AC05 windows, deployed migration, resource bounds, packaged
+behavior, Windows/macOS, or full AC05. AC05 remains pending.
 
 ## AC05 native verified archive extraction refusal and cold recovery refusal — local evidence
 
@@ -164,19 +214,25 @@ metadata writes occur, and the same acquisition/queue state, verified model
 bytes, download marker, and authored README remain unchanged. No consumer
 receipt is fabricated.
 
-`native_receipt_publication_conflict_cold_reopen_reconciles_without_reacquiring`
-creates an output conflict after extraction and durable receipt issuance. The
+The current
+`native_receipt_publication_conflict_service_restart_reconciles_without_reacquiring`
+fixture constructs an isolated acquisition service and native manager from the
+start, without a `PumasApi` owner. It creates an output conflict after extraction
+and durable receipt issuance. The
 first install refuses publication while retaining its receipt-bearing `Using`
-record. Cold reopen refuses the conflicting output without changing the
-receipt, acquisition, staged workspace, destination, or installed metadata.
+record. After manager and acquisition drainage, fresh service construction
+refuses the conflicting output without changing the receipt, acquisition,
+staged workspace, destination, or installed metadata.
 After the test-owned conflict is removed, a fresh manager adopts the exact
 staged output, reconstructs the installation metadata once, preserves the
 receipt, and settles the existing acquisition.
 
-Both focused tests passed on disposable local roots (one HF, one native), and
-formatting passed; see commit `5a036cd6` in the execution ledger. Those two
-fixtures are same-process evidence; the separate SIGKILL fixture above adds one
-process-loss boundary. None establishes power-loss proof. AC05 remains pending
+The historical focused tests passed on disposable local roots (one HF, one
+native), and formatting passed; see commit `5a036cd6` in the execution ledger.
+The revised native service-only fixture passed in the local no-default native lifecycle suite.
+These recovery claims are same-process service evidence; the separate SIGKILL
+fixture above now qualifies retained-primary refusal, not fresh-owner recovery.
+None establishes power-loss proof. AC05 remains pending
 for the other FilesReady/domain-commit/settlement windows, importer and
 extraction failures, real-source behavior, and required platform evidence.
 

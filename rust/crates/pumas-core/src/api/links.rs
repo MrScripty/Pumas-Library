@@ -43,7 +43,11 @@ impl PumasApi {
 
         for entry in &broken {
             if path_exists(&entry.target).await? || path_is_symlink(&entry.target).await? {
-                let _ = fs::remove_file(&entry.target).await;
+                let _ = self
+                    .primary()
+                    .model_library
+                    .remove_link_file(&entry.target)
+                    .await;
             }
         }
 

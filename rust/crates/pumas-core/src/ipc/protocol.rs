@@ -32,6 +32,7 @@ const MAX_SELECTOR_LIMIT: u32 = 1_000;
 /// Closed set of operations exposed to same-device Pumas clients.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LocalIpcOperation {
+    DescribeInstance,
     ModelLibrarySelectorSnapshot,
     ResolveModelArtifactLoadTarget,
     ResolveModelPackageFacts,
@@ -51,6 +52,7 @@ pub(crate) enum LocalIpcOperation {
 impl LocalIpcOperation {
     pub(crate) fn from_wire_name(name: &str) -> Option<Self> {
         match name {
+            "describe_instance" => Some(Self::DescribeInstance),
             "model_library_selector_snapshot" => Some(Self::ModelLibrarySelectorSnapshot),
             "resolve_model_artifact_load_target" => Some(Self::ResolveModelArtifactLoadTarget),
             "resolve_model_package_facts" => Some(Self::ResolveModelPackageFacts),
@@ -77,6 +79,7 @@ impl LocalIpcOperation {
 
     pub(crate) fn wire_name(self) -> &'static str {
         match self {
+            Self::DescribeInstance => "describe_instance",
             Self::ModelLibrarySelectorSnapshot => "model_library_selector_snapshot",
             Self::ResolveModelArtifactLoadTarget => "resolve_model_artifact_load_target",
             Self::ResolveModelPackageFacts => "resolve_model_package_facts",
@@ -100,6 +103,9 @@ impl LocalIpcOperation {
 
     pub(crate) fn validate_outcome(self, value: Value) -> std::result::Result<Value, IpcError> {
         match self {
+            Self::DescribeInstance => {
+                validate_typed_outcome::<crate::discovery::InstanceDescription>(value)
+            }
             Self::ModelLibrarySelectorSnapshot => {
                 validate_typed_outcome::<ModelLibrarySelectorSnapshot>(value)
             }
@@ -170,6 +176,9 @@ where
 
 /// A fully decoded command. Its credential is intentionally not `Debug`.
 pub(crate) enum LocalIpcCommand {
+    DescribeInstance {
+        connection_token: String,
+    },
     ModelLibrarySelectorSnapshot {
         request: ModelLibrarySelectorSnapshotRequest,
         connection_token: String,
@@ -252,7 +261,9 @@ impl LocalIpcCommand {
                 LocalIpcOperation::IntentEnsureModel => &["request", "connection_token"],
                 LocalIpcOperation::IntentReleaseModel
                 | LocalIpcOperation::IntentGetEnsureStatus => &["reference", "connection_token"],
-                LocalIpcOperation::IntentListDeclarations => &["connection_token"],
+                LocalIpcOperation::IntentListDeclarations | LocalIpcOperation::DescribeInstance => {
+                    &["connection_token"]
+                }
                 LocalIpcOperation::SubscribeModelLibraryUpdateStreamSince => {
                     &["cursor", "connection_token"]
                 }
@@ -261,6 +272,7 @@ impl LocalIpcCommand {
         let connection_token = required_bounded_string(object, "connection_token")?;
 
         match operation {
+            LocalIpcOperation::DescribeInstance => Ok(Self::DescribeInstance { connection_token }),
             LocalIpcOperation::ModelLibrarySelectorSnapshot => {
                 let request_value = object.get("request").ok_or_else(IpcError::invalid_params)?;
                 validate_selector_request(request_value)?;
@@ -368,6 +380,7 @@ impl LocalIpcCommand {
 
     pub(crate) fn operation(&self) -> LocalIpcOperation {
         match self {
+            Self::DescribeInstance { .. } => LocalIpcOperation::DescribeInstance,
             Self::ModelLibrarySelectorSnapshot { .. } => {
                 LocalIpcOperation::ModelLibrarySelectorSnapshot
             }
@@ -397,6 +410,9 @@ impl LocalIpcCommand {
 
     pub(crate) fn into_dispatch_params(self) -> Value {
         match self {
+            Self::DescribeInstance { connection_token } => {
+                serde_json::json!({"connection_token": connection_token})
+            }
             Self::ModelLibrarySelectorSnapshot {
                 request,
                 connection_token,
@@ -728,9 +744,17 @@ impl IpcRequest {
 #[serde(deny_unknown_fields)]
 pub(crate) struct IpcResponse {
     pub jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present_response_field",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub result: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present_response_field",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub error: Option<IpcError>,
     pub id: Option<serde_json::Value>,
 }
@@ -756,7 +780,7 @@ impl IpcResponse {
         }
     }
 
-    pub(crate) fn into_result(self, expected_id: u64) -> Result<Value> {
+    pub(crate) fn validate_envelope(&self, expected_id: u64) -> Result<()> {
         let expected_id = Some(Value::Number(expected_id.into()));
         if self.jsonrpc != "2.0" || self.id != expected_id {
             return Err(PumasError::InvalidParams {
@@ -764,6 +788,16 @@ impl IpcResponse {
             });
         }
 
+        if self.result.is_some() == self.error.is_some() {
+            return Err(PumasError::InvalidParams {
+                message: "Invalid local IPC response outcome".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn into_result(self, expected_id: u64) -> Result<Value> {
+        self.validate_envelope(expected_id)?;
         match (self.result, self.error) {
             (Some(result), None) => Ok(result),
             (None, Some(error)) if error.code == -32602 => Err(PumasError::InvalidParams {
@@ -775,6 +809,16 @@ impl IpcResponse {
             }),
         }
     }
+}
+
+// Preserve presence: a null success is a result, while an explicit null error
+// is malformed. Otherwise Option's null-to-None decoding can hide two outcomes.
+fn present_response_field<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 /// JSON-RPC 2.0 error object.

@@ -492,6 +492,97 @@ async fn fake_backend_rejects_embedding_before_load() {
 }
 
 #[tokio::test]
+async fn builtin_onnx_not_loaded_does_not_mark_or_reset_admission() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // Empty real sessions exercise only lookup refusal, never native ORT.
+    for backend in [
+        OnnxEmbeddingBackendKind::fake(),
+        OnnxEmbeddingBackendKind::real(),
+    ] {
+        let manager = OnnxSessionManager::new(backend, 1).unwrap();
+        let marker = AtomicBool::new(false);
+        for already_admitted in [false, true] {
+            marker.store(already_admitted, Ordering::Release);
+            let error = manager
+                .embed_with_admission(
+                    OnnxEmbeddingRequest::parse("absent", vec!["hello".into()], None).unwrap(),
+                    Some(&marker),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, OnnxRuntimeErrorCode::NotLoaded);
+            assert_eq!(marker.load(Ordering::Acquire), already_admitted);
+        }
+    }
+}
+
+#[tokio::test]
+async fn custom_onnx_backend_failure_after_possible_effect_preserves_admission() {
+    use std::sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct FailingBackend {
+        marker: Arc<AtomicBool>,
+        effects: Arc<AtomicUsize>,
+    }
+
+    // This existing trait implementation intentionally has no custom admission
+    // override. Its controlled effect must inherit the conservative default.
+    #[async_trait::async_trait]
+    impl OnnxEmbeddingBackend for FailingBackend {
+        async fn load(&self, _: OnnxLoadRequest) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+            Err(OnnxRuntimeError::backend("unused fixture load"))
+        }
+
+        async fn unload(
+            &self,
+            _: &OnnxModelId,
+        ) -> Result<Option<OnnxSessionStatus>, OnnxRuntimeError> {
+            Ok(None)
+        }
+
+        async fn list(&self) -> Result<Vec<OnnxSessionStatus>, OnnxRuntimeError> {
+            Ok(Vec::new())
+        }
+
+        async fn embed(
+            &self,
+            _: OnnxEmbeddingRequest,
+        ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
+            assert!(self.marker.load(Ordering::Acquire));
+            self.effects.fetch_add(1, Ordering::Relaxed);
+            Err(OnnxRuntimeError::backend(
+                "controlled failure after possible effect",
+            ))
+        }
+    }
+
+    let marker = Arc::new(AtomicBool::new(false));
+    let effects = Arc::new(AtomicUsize::new(0));
+    let manager = OnnxSessionManager::new(
+        FailingBackend {
+            marker: marker.clone(),
+            effects: effects.clone(),
+        },
+        1,
+    )
+    .unwrap();
+    let error = manager
+        .embed_with_admission(
+            OnnxEmbeddingRequest::parse("custom", vec!["hello".into()], None).unwrap(),
+            Some(marker.as_ref()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, OnnxRuntimeErrorCode::Backend);
+    assert_eq!(effects.load(Ordering::Relaxed), 1);
+    assert!(marker.load(Ordering::Acquire));
+}
+
+#[tokio::test]
 async fn session_manager_shutdown_unloads_sessions_and_rejects_new_work() {
     let fixture = model_fixture();
     let manager = OnnxSessionManager::new(FakeOnnxEmbeddingBackend::new(), 2).unwrap();

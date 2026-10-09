@@ -66,6 +66,16 @@ export interface ModelCategory {
   models: ModelInfo[];
 }
 
+export type RemoteSearchSource = 'huggingface' | 'cached';
+
+export interface CachedDiscoveryPresentation {
+  sourceUrl: string;
+  observedAt: string;
+  freshness: 'fresh' | 'stale';
+  freshUntil: string | null;
+  revisionObserved: string | null;
+}
+
 export interface RemoteModelInfo {
   repoId: string;
   name: string;
@@ -91,6 +101,9 @@ export interface RemoteModelInfo {
   quantSizes?: Record<string, number>;
   /** Compatible inference engines based on model formats */
   compatibleEngines?: string[];
+  modelCard?: Record<string, unknown> | null;
+  /** Consumer-owned presentation, populated only for an explicit cached search. */
+  cachedDiscovery?: CachedDiscoveryPresentation | null;
 }
 
 export type RelatedModelsStatus = 'idle' | 'loading' | 'loaded' | 'error';

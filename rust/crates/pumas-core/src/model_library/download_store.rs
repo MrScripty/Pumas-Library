@@ -686,9 +686,19 @@ impl RecoveryRevocation {
 impl DownloadPersistence {
     /// Create a new persistence store at `{data_dir}/downloads.json`.
     pub fn new(data_dir: &Path) -> Self {
+        Self::new_with_store_lifetime(data_dir, Default::default())
+    }
+
+    pub(crate) fn new_with_store_lifetime(
+        data_dir: &Path,
+        store_lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Self {
         Self {
             path: data_dir.join("downloads.json"),
-            store: Arc::new(AcquisitionStore::new(data_dir)),
+            store: Arc::new(AcquisitionStore::new_with_store_lifetime(
+                data_dir,
+                store_lifetime,
+            )),
             confirmed_admissions: Arc::new(Mutex::new(HashSet::new())),
             confirmed_cleanups: Arc::new(Mutex::new(HashSet::new())),
             publisher: Arc::new(AtomicDownloadStorePublisher),

@@ -94,6 +94,7 @@ function installActualPreload(
         expect(channel).toBe('api:call');
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
+        if (method === 'get_s3_transfer_retry') return fixture['s3_retry_ready'];
         if (method === 'get_available_versions') return availableVersions();
         if (method === 'get_github_cache_status') return githubCacheStatus();
         if (method === 'get_version_status') return versionStatus();
@@ -1142,4 +1143,13 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
     await waitFor(() => expect(screen.getByText('Issues detected')).toBeVisible());
     expect(screen.queryByText('All links healthy')).not.toBeInTheDocument();
   });
+});
+
+it('preserves actual producer S3 retry availability through the bundled preload',async()=>{
+  const requests=installActualPreload();
+  const api=window.electronAPI;
+  if (!api) throw new ValidationError('Preload bridge was not installed.', 'producer-fixtures');
+  const outcome=await api.get_s3_transfer_retry('c3f7d104-1234-4321-abcd-aaaaaaaaaaaa');
+  expect(JSON.parse(JSON.stringify(outcome))).toEqual(fixture['s3_retry_ready']);
+  expect(requests.at(-1)).toEqual({method:'get_s3_transfer_retry',params:{operation_id:'c3f7d104-1234-4321-abcd-aaaaaaaaaaaa'}});
 });

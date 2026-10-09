@@ -709,6 +709,13 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             last_error,
         })?;
     }
+    fixtures["s3_retry_ready"] = serde_json::to_value(S3TransferRetryState::Ready {
+        operation_id: "c3f7d104-1234-4321-abcd-aaaaaaaaaaaa".into(),
+        authentication_required: false,
+    })?;
+    fixtures["s3_retry_cold"] = serde_json::to_value(S3TransferRetryState::Unavailable {
+        reason: S3TransferRetryReason::NoLiveCustody,
+    })?;
     fixtures["router_profile_sync_statuses"] = serde_json::json!([
         fixtures["router_sync_current"],
         fixtures["router_sync_pending"],
@@ -725,6 +732,12 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         )+ };
     }
     export!(
+        S3PersistedImportsWire,
+        S3TransferRetryParams,
+        S3TransferRetryState,
+        S3DiscoveryParams,
+        S3AuthenticatedDiscoveryParams,
+        S3DiscoveryOutcome,
         S3ImportParams,
         S3BundleImportParams,
         S3PinnedFileParams,
@@ -1273,6 +1286,10 @@ fn refine_named(name: &str, schema: &mut Value) {
                 properties["models"]["pumasCatalogMap"] = true.into();
             }
 
+            "S3ImportParams" => {
+                properties["filename"]["pumasPortablePath"] = true.into();
+                properties["filename"]["pumasUtf8Max"] = 1024.into();
+            }
             "S3BundleImportParams" => {
                 let existing = schemars::schema_for!(S3ImportParams);
                 let existing = serde_json::to_value(existing).expect("schema serialization");
@@ -1287,6 +1304,8 @@ fn refine_named(name: &str, schema: &mut Value) {
                     properties[field] = existing["properties"][field].clone();
                 }
                 properties["primary_logical_path"] = existing["properties"]["filename"].clone();
+                properties["primary_logical_path"]["pumasPortablePath"] = true.into();
+                properties["primary_logical_path"]["pumasUtf8Max"] = 1024.into();
             }
             "S3PinnedFileParams" => {
                 let existing = serde_json::to_value(schemars::schema_for!(S3ImportParams))

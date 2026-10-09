@@ -27,6 +27,27 @@ function createModel(overrides: Partial<RemoteModelInfo> = {}): RemoteModelInfo 
 }
 
 describe('RemoteModelSummary', () => {
+  it('shows stale cached source, exact time and observed revision without readiness badges', () => {
+    render(<RemoteModelSummary model={createModel({ compatibleEngines: [], cachedDiscovery: {
+      sourceUrl: 'https://huggingface.co/api/models/org/test-model', observedAt: '2026-01-01T00:00:00Z',
+      freshness: 'stale', freshUntil: '2026-01-02T00:00:00Z', revisionObserved: 'a'.repeat(40),
+    } })} quantLabels={[]} isHydratingDetails={false} />);
+    expect(screen.getByText('Cached observation · stale')).toBeInTheDocument();
+    expect(screen.getByText(/Source: https:\/\/huggingface.co\/api\/models\/org\/test-model/)).toBeInTheDocument();
+    expect(screen.getByText('2026-01-01T00:00:00Z')).toHaveAttribute('dateTime', '2026-01-01T00:00:00Z');
+    expect(screen.getByText('a'.repeat(40))).toBeInTheDocument();
+    expect(screen.queryByText('ollama')).not.toBeInTheDocument();
+  });
+
+  it('labels cache TTL at search time and missing revision without claiming current catalog data', () => {
+    render(<RemoteModelSummary model={createModel({ cachedDiscovery: {
+      sourceUrl: 'https://huggingface.co/api/models/org/test-model', observedAt: '2026-01-01T00:00:00Z',
+      freshness: 'fresh', freshUntil: null, revisionObserved: null,
+    } })} quantLabels={[]} isHydratingDetails={false} />);
+    expect(screen.getByText('Cached observation · within TTL at search')).toBeInTheDocument();
+    expect(screen.getByText('Not recorded')).toBeInTheDocument();
+    expect(screen.getByText(/does not confirm current access/)).toBeInTheDocument();
+  });
   it('renders model metadata, download details, and engine badges', () => {
     render(
       <RemoteModelSummary

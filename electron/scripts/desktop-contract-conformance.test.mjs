@@ -706,3 +706,10 @@ test('runtime cached-liveness producer booleans remain scalar and reject fabrica
     assert.equal(contract.decodeRuntimeRunningOutcome(value).status, 'invalid');
   }
 });
+
+test('S3 retry availability preserves producer identity and cold refusal',()=>{
+  for(const name of ['s3_retry_ready','s3_retry_cold']) assert.equal(contract.decodeS3TransferRetryState(fixtures[name]).status,'valid');
+  assert.equal(contract.decodeS3TransferRetryState({...fixtures.s3_retry_ready,endpoint:'https://foreign.invalid'}).status,'invalid');
+  assert.equal(contract.decodeS3TransferRetryParams({operation_id:fixtures.s3_retry_ready.operation_id,credentials:null}).status,'valid');
+  assert.equal(contract.decodeS3TransferRetryParams({operation_id:fixtures.s3_retry_ready.operation_id,credentials:null,version_id:'changed'}).status,'invalid');
+});

@@ -65,6 +65,12 @@ def source_identity(repository, runner=subprocess.run):
 
 
 def check_environment(environment):
+    # turbojpeg-sys 1.2.0 uses var_os presence, including empty values, and
+    # TARGET.upper().replace('-', '_') prefixes before global TURBOJPEG names.
+    require(
+        not any(name.startswith("TURBOJPEG_") or "_TURBOJPEG_" in name for name in environment),
+        "TurboJPEG routing/binding overrides are not qualified",
+    )
     for name in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_RUSTFLAGS"):
         require(not environment.get(name), "Rust flag overrides are not qualified")
     require(

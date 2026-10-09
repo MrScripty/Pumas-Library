@@ -1,4 +1,10 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+};
 
 use async_trait::async_trait;
 
@@ -65,6 +71,14 @@ impl OnnxEmbeddingBackend for FakeOnnxEmbeddingBackend {
         &self,
         request: OnnxEmbeddingRequest,
     ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
+        self.embed_with_admission(request, None).await
+    }
+
+    async fn embed_with_admission(
+        &self,
+        request: OnnxEmbeddingRequest,
+        admission: Option<&AtomicBool>,
+    ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
         let status = {
             let sessions = self
                 .sessions
@@ -77,6 +91,10 @@ impl OnnxEmbeddingBackend for FakeOnnxEmbeddingBackend {
         };
         let dimensions = request.dimensions.unwrap_or(status.embedding_dimensions);
         validate_dimensions(dimensions)?;
+
+        if let Some(marker) = admission {
+            marker.store(true, Ordering::Release);
+        }
 
         let mut prompt_tokens = 0usize;
         let data = request

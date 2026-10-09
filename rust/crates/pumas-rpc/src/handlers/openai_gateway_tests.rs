@@ -78,7 +78,7 @@ async fn gateway_test_state_with_clients(
         s3_imports: crate::s3_imports::S3Imports::unavailable(),
         shutdown_request: crate::server::ShutdownRequest::default(),
         catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
-        api,
+        api: api.into(),
         version_managers: Arc::new(RwLock::new(HashMap::new())),
         size_calculator: Arc::new(Mutex::new(
             SizeCalculator::new_with_cache(launcher_root.join("launcher-data/cache")).await,
@@ -154,6 +154,14 @@ async fn load_onnx_session(temp_dir: &TempDir, state: &AppState) {
 }
 
 async fn record_llama_served_model(state: &AppState, endpoint_url: &str) {
+    let mut profile = pumas_library::models::RuntimeProfileConfig::default_ollama();
+    profile.profile_id = RuntimeProfileId::parse("llama-cpu").unwrap();
+    profile.provider = RuntimeProviderId::LlamaCpp;
+    profile.provider_mode = pumas_library::models::RuntimeProviderMode::LlamaCppDedicated;
+    profile.management_mode = pumas_library::models::RuntimeManagementMode::External;
+    profile.endpoint_url = Some(RuntimeEndpointUrl::parse(endpoint_url).unwrap());
+    profile.port = None;
+    state.api.upsert_runtime_profile(profile).await.unwrap();
     state
         .api
         .record_served_model(ServedModelStatus {
@@ -298,6 +306,7 @@ async fn openai_proxy_json(state: Arc<AppState>, path: &str, body: Value) -> (St
     let response = handle_openai_proxy(
         State(state),
         OriginalUri(path.parse().unwrap()),
+        None,
         Bytes::from(body.to_string()),
     )
     .await;
@@ -308,7 +317,7 @@ async fn openai_proxy_json(state: Arc<AppState>, path: &str, body: Value) -> (St
 
 async fn openai_proxy_bytes(state: Arc<AppState>, path: &str, body: Bytes) -> (StatusCode, Value) {
     let response =
-        handle_openai_proxy(State(state), OriginalUri(path.parse().unwrap()), body).await;
+        handle_openai_proxy(State(state), OriginalUri(path.parse().unwrap()), None, body).await;
     let status = response.status();
     let bytes = to_bytes(response.into_body(), 1_048_576).await.unwrap();
     (status, serde_json::from_slice(&bytes).unwrap())
@@ -1177,6 +1186,7 @@ async fn generation_disconnect_drops_pumas_request_without_replay() {
         let request = tokio::spawn(handle_openai_proxy(
             State(state),
             OriginalUri(path.parse().unwrap()),
+            None,
             Bytes::from(body.to_string()),
         ));
         tokio::time::timeout(Duration::from_secs(5), started_rx)
@@ -1570,6 +1580,7 @@ async fn image_client_disconnect_closes_backend_request() {
     let request = tokio::spawn(handle_openai_proxy(
         State(state),
         OriginalUri("/v1/images/generations".parse().unwrap()),
+        None,
         Bytes::from(
             json!({"model": "image", "prompt": "a bird", "width": 512, "height": 512}).to_string(),
         ),
@@ -1593,3 +1604,6 @@ async fn image_client_disconnect_closes_backend_request() {
         "Gateway replayed the image request after client disconnect"
     );
 }
+
+#[path = "gateway_stream_tests.rs"]
+mod progressive;

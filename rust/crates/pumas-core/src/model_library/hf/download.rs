@@ -21957,6 +21957,8 @@ mod tests {
         assert!(notification.snapshot_required);
     }
 
+    include!("qualification_tests.rs");
+
     fn cache_pinned_repo_tree(
         client: &HuggingFaceClient,
         repo_id: &str,

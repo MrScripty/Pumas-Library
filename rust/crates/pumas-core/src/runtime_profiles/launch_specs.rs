@@ -211,7 +211,8 @@ fn profile_runtime_extra_args(
 ) -> Result<Vec<String>> {
     match launch_strategy {
         RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe) => {
-            let mut args = vec!["serve.py".to_string()];
+            // Profile arguments replace the default Torch launch arguments.
+            let mut args = vec!["-B".to_string(), "serve.py".to_string()];
             args.extend(runtime_listener_args(endpoint_url, port)?);
             Ok(args)
         }
@@ -351,7 +352,7 @@ mod torch_tests {
         let [spec] = specs.as_slice() else {
             panic!("expected one managed profile")
         };
-        assert_eq!(spec.extra_args[0], "serve.py");
+        assert_eq!(&spec.extra_args[..2], &["-B", "serve.py"]);
         assert!(spec.extra_args.contains(&"--port".into()));
         assert!(spec.health_check_url.as_str().ends_with("/health"));
         assert_eq!(
@@ -361,5 +362,44 @@ mod torch_tests {
         assert!(spec
             .pid_file
             .starts_with("/fixture/launcher-data/runtime-profiles/torch"));
+
+        // Exercise both production argument builders against real Python imports.
+        // The fixture substitutes package code, not the launch arguments.
+        let mut changed_routes = Vec::new();
+        for (route, args) in [
+            (
+                "version",
+                crate::process::BinaryLaunchConfig::torch("fixture", "/fixture").extra_args,
+            ),
+            ("profile", spec.extra_args.clone()),
+        ] {
+            let runtime = tempfile::tempdir().unwrap();
+            let packages = runtime.path().join("site-packages");
+            std::fs::create_dir(&packages).unwrap();
+            std::fs::write(packages.join("launch_dependency.py"), "VALUE = 42\n").unwrap();
+            std::fs::write(
+                runtime.path().join("serve.py"),
+                "import launch_dependency\nassert launch_dependency.VALUE == 42\n",
+            )
+            .unwrap();
+            let status =
+                std::process::Command::new(if cfg!(windows) { "python" } else { "python3" })
+                    .args(args)
+                    .envs(&spec.env_vars)
+                    .env("PYTHONPATH", &packages)
+                    .env_remove("PYTHONDONTWRITEBYTECODE")
+                    .env_remove("PYTHONPYCACHEPREFIX")
+                    .current_dir(runtime.path())
+                    .status()
+                    .expect("Torch launch regression requires Python");
+            assert!(status.success(), "{route} launch failed");
+            if packages.join("__pycache__").exists() {
+                changed_routes.push(route);
+            }
+        }
+        assert!(
+            changed_routes.is_empty(),
+            "Torch launches mutated installed package bytes: {changed_routes:?}"
+        );
     }
 }

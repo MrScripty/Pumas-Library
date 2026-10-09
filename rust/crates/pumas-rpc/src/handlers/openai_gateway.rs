@@ -1,14 +1,16 @@
 //! OpenAI-compatible gateway handlers backed by Pumas serving state.
 
+use super::gateway_stream::{self, GenerationCancellation, GenerationTransport};
 use super::openai_gateway_onnx::handle_onnx_embedding;
 use crate::contract::PublicError;
+use crate::http_transport::RequestDisconnect;
 use crate::server::AppState;
 use axum::{
     body::Bytes,
     extract::State,
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    Json,
+    Extension, Json,
 };
 use futures::StreamExt;
 use pumas_app_manager::{
@@ -22,7 +24,10 @@ use pumas_library::models::{
 use pumas_library::runtime_profiles::OwnedRuntimeProfileObservation;
 use pumas_library::{OpenAiGatewayEndpoint, ProviderRegistry};
 use serde_json::{json, Map, Value};
-use std::sync::{Arc, OnceLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, OnceLock,
+};
 use std::time::Duration;
 
 const OPENAI_CHAT_COMPLETIONS_BODY_BYTES: usize = 32 * 1024 * 1024;
@@ -48,13 +53,15 @@ fn generation_http_client() -> &'static reqwest::Client {
     GENERATION_HTTP_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .connect_timeout(GENERATION_CONNECT_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .build()
             .expect("failed to build generation HTTP client")
     })
 }
 
 #[derive(Debug)]
-enum TorchLiveCheckError {
+pub(super) enum TorchLiveCheckError {
     ProcessIdentity,
     Handshake(TorchHandshakeFailure),
     Slots,
@@ -105,7 +112,7 @@ fn torch_slot_supports_images(
 /// replacement. The process observation, protocol/capability handshake and
 /// ready-slot check remain distinct facts, but all must describe one current
 /// owned profile before admission or listing.
-async fn check_live_torch_image_runtime(
+pub(super) async fn check_live_torch_image_runtime(
     state: &AppState,
     model: &ServedModelStatus,
     endpoint: &RuntimeEndpointUrl,
@@ -209,11 +216,34 @@ fn openai_models_snapshot_response(snapshot: ServingStatusSnapshot) -> Response 
     .into_response()
 }
 
+/// Typed correlation/admission bookkeeping, without a second transport owner.
+pub(super) struct OperationAdmission<'a> {
+    pub marker: &'a AtomicBool,
+    pub expected: &'a ServedModelStatus,
+    pub cancellation: &'a Mutex<Option<GenerationCancellation>>,
+    /// Only the finite selected-model vision lane requires live image support.
+    pub vision: bool,
+}
+
 /// OpenAI-compatible proxy for served models.
 pub async fn handle_openai_proxy(
     State(state): State<Arc<AppState>>,
     path: axum::extract::OriginalUri,
+    disconnect: Option<Extension<RequestDisconnect>>,
     body_bytes: Bytes,
+) -> Response {
+    dispatch_openai(state, path, disconnect, body_bytes, None, None).await
+}
+
+/// The typed operation lane shares routing, adapters and transport custody.
+/// Its marker records possible provider execution, never idempotency.
+pub(super) async fn dispatch_openai(
+    state: Arc<AppState>,
+    path: axum::extract::OriginalUri,
+    disconnect: Option<Extension<RequestDisconnect>>,
+    body_bytes: Bytes,
+    profile: Option<&str>,
+    admission: Option<&OperationAdmission<'_>>,
 ) -> Response {
     let request_path = path.path();
     let Some(policy) = openai_gateway_policy_for_path(request_path) else {
@@ -254,7 +284,7 @@ pub async fn handle_openai_proxy(
                 );
             }
         };
-        return handle_image_generation(&state, request_path, request).await;
+        return handle_image_generation(&state, request_path, request, profile, admission).await;
     }
 
     let Some(requested_model) = body
@@ -268,7 +298,7 @@ pub async fn handle_openai_proxy(
         );
     };
 
-    let served = match find_openai_served_model(&state, requested_model.as_str()).await {
+    let served = match find_selected_served_model(&state, requested_model.as_str(), profile).await {
         Ok(OpenAiServedModelLookup::Found(model)) => model,
         Ok(OpenAiServedModelLookup::NotFound) => {
             return openai_error_response(
@@ -294,6 +324,16 @@ pub async fn handle_openai_proxy(
         }
     };
 
+    if admission.is_some_and(|context| {
+        !same_selection(&served, context.expected)
+            || (context.vision && served.loaded_at != context.expected.loaded_at)
+    }) {
+        return openai_public_error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            PublicError::unavailable(),
+        );
+    }
+
     if !provider_supports_openai_gateway_endpoint(
         served.provider,
         policy.endpoint,
@@ -316,6 +356,7 @@ pub async fn handle_openai_proxy(
             requested_model.as_str(),
             policy.endpoint,
             body,
+            admission.map(|context| context.marker),
         )
         .await;
     }
@@ -335,11 +376,91 @@ pub async fn handle_openai_proxy(
     }
 
     let target_url = format!("{}{}", endpoint.as_str().trim_end_matches('/'), path.path());
+    let mut lifetime = if policy.generation {
+        let permit = match gateway_stream::try_admit() {
+            Ok(permit) => permit,
+            Err(()) => {
+                return openai_error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Generation capacity is occupied",
+                )
+            }
+        };
+        let session_stop = match generation_session_stop(&state, &served).await {
+            Ok(stop) => stop,
+            Err(()) => {
+                return openai_public_error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    PublicError::unavailable(),
+                )
+            }
+        };
+        Some(GenerationTransport {
+            disconnect: disconnect.map(|Extension(signal)| signal),
+            shutdown: state.shutdown_request.clone(),
+            session_stop,
+            _permit: permit,
+        })
+    } else {
+        None
+    };
+    if let (Some(context), Some(lifetime)) = (admission, lifetime.as_ref()) {
+        *context
+            .cancellation
+            .lock()
+            .expect("request-local cancellation mutex") = Some(lifetime.cancellation());
+    }
+    if admission.is_some_and(|context| context.vision) {
+        let guard = async {
+            if !super::model_operations::vision::ready(&state, &served).await {
+                return false;
+            }
+            // Profile changes and fresh selection are checked after the probe,
+            // which can await a slow response. External endpoints do not confer
+            // an owned session identity or immutable artifact attestation.
+            if !super::model_operations::vision::supported_profile(&state, &served).await {
+                return false;
+            }
+            matches!(find_selected_served_model(&state, requested_model.as_str(), profile).await,
+                Ok(OpenAiServedModelLookup::Found(fresh))
+                    if same_selection(&fresh, &served) && fresh.loaded_at == served.loaded_at)
+        };
+        let Some(lifetime) = lifetime.as_mut() else {
+            return openai_public_error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                PublicError::unavailable(),
+            );
+        };
+        let ready = tokio::select! {
+            biased;
+            () = lifetime.cancelled() => false,
+            ready = guard => ready,
+        };
+        if !ready {
+            return openai_public_error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                PublicError::unavailable(),
+            );
+        }
+    }
+    let streaming = policy.generation && body.get("stream").and_then(Value::as_bool) == Some(true);
     // Generation routes use the shared duration-unbounded transport without
     // any per-request total/read/idle deadline; non-generation routes keep
     // their independently bounded budget on the gateway client.
     let send = if policy.generation {
         generation_http_client().post(target_url).json(&body).send()
+    } else if admission.is_some() {
+        // Typed operations never redirect or replay. Embeddings retain their
+        // pre-existing bounded non-generation policy on this same client.
+        generation_http_client()
+            .post(target_url)
+            .timeout(
+                policy
+                    .request_timeout
+                    .expect("non-generation policy is bounded"),
+            )
+            .json(&body)
+            .send()
     } else {
         let Some(bounded) = policy.request_timeout else {
             return openai_error_response(
@@ -354,9 +475,102 @@ pub async fn handle_openai_proxy(
             .json(&body)
             .send()
     };
-    match send.await {
-        Ok(response) => proxy_response(response).await,
+    let send = async {
+        if let Some(marker) = admission {
+            marker.marker.store(true, Ordering::Release);
+        }
+        send.await
+    };
+    let response = match lifetime.as_mut() {
+        Some(lifetime) => tokio::select! {
+            biased;
+            () = lifetime.cancelled() => return openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
+            response = send => response,
+        },
+        None => send.await,
+    };
+    match response {
+        Ok(response) if streaming && response.status().is_success() => {
+            let is_sse = response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| {
+                    value
+                        .split(';')
+                        .next()
+                        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("text/event-stream"))
+                });
+            if !is_sse {
+                return openai_public_error_response(
+                    StatusCode::BAD_GATEWAY,
+                    PublicError::unavailable(),
+                );
+            }
+            gateway_stream::progressive_response(
+                response,
+                lifetime.expect("generation owns transport"),
+                OPENAI_GATEWAY_RESPONSE_BYTES,
+            )
+        }
+        Ok(response) => match lifetime.as_mut() {
+            Some(lifetime) => tokio::select! {
+                biased;
+                () = lifetime.cancelled() => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
+                response = proxy_response(response) => response,
+            },
+            None => proxy_response(response).await,
+        },
         Err(_) => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
+    }
+}
+
+fn same_selection(actual: &ServedModelStatus, expected: &ServedModelStatus) -> bool {
+    actual.model_id == expected.model_id
+        && actual.profile_id == expected.profile_id
+        && actual.provider == expected.provider
+        && actual.endpoint_url == expected.endpoint_url
+        && actual.model_alias == expected.model_alias
+        && actual.load_state == expected.load_state
+}
+
+/// Read-only qualification used by typed discovery and the generation owner.
+pub(super) async fn generation_session_stop(
+    state: &AppState,
+    served: &ServedModelStatus,
+) -> Result<Option<tokio::sync::watch::Receiver<bool>>, ()> {
+    let endpoint = served.endpoint_url.as_ref().ok_or(())?;
+    match state
+        .api
+        .observe_owned_runtime_profile(&served.profile_id)
+        .map_err(|_| ())?
+    {
+        Some(observation) if &observation.endpoint_url == endpoint => state
+            .api
+            .bind_owned_runtime_transport_stop(&served.profile_id, &observation)
+            .map(Some)
+            .map_err(|_| ()),
+        None => {
+            let snapshot = state
+                .api
+                .get_runtime_profiles_snapshot()
+                .await
+                .map_err(|_| ())?;
+            let external = snapshot.snapshot.profiles.iter().any(|profile| {
+                profile.profile_id == served.profile_id
+                    && profile.provider == served.provider
+                    && profile.management_mode
+                        == pumas_library::models::RuntimeManagementMode::External
+                    && profile.enabled
+                    && profile.endpoint_url.as_ref() == Some(endpoint)
+            });
+            if external {
+                Ok(None)
+            } else {
+                Err(())
+            }
+        }
+        Some(_) => Err(()),
     }
 }
 
@@ -369,8 +583,10 @@ async fn handle_image_generation(
     state: &Arc<AppState>,
     request_path: &str,
     request: super::openai_gateway_images::PublicImageGenerationRequest,
+    profile: Option<&str>,
+    admission: Option<&OperationAdmission<'_>>,
 ) -> Response {
-    let served = match find_openai_served_model(state, request.model.as_str()).await {
+    let served = match find_selected_served_model(state, request.model.as_str(), profile).await {
         Ok(OpenAiServedModelLookup::Found(model)) => model,
         Ok(OpenAiServedModelLookup::NotFound) => {
             return openai_error_response(
@@ -461,9 +677,10 @@ async fn handle_image_generation(
     // Bind admission to the current process/profile identity: when serving
     // state moved to another endpoint while we handshook, the observation is
     // stale and the request is not admitted against the old process.
-    match find_openai_served_model(state, request.model.as_str()).await {
+    match find_selected_served_model(state, request.model.as_str(), profile).await {
         Ok(OpenAiServedModelLookup::Found(fresh))
-            if fresh.endpoint_url.as_ref() == Some(endpoint) => {}
+            if fresh.endpoint_url.as_ref() == Some(endpoint)
+                && admission.is_none_or(|context| same_selection(&fresh, context.expected)) => {}
         Ok(_) => {
             return openai_error_response_with_code(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -484,6 +701,9 @@ async fn handle_image_generation(
     // cancellation without proving that sidecar work stopped. A lost
     // transport before a terminal result is an unknown outcome and is never
     // replayed here.
+    if let Some(marker) = admission {
+        marker.marker.store(true, Ordering::Release);
+    }
     match torch_client
         .generate_image(
             provider_request_model_id(&served, &state.provider_registry).as_str(),
@@ -588,7 +808,7 @@ fn openai_model_id(model: &ServedModelStatus) -> &str {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum OpenAiServedModelLookup {
+pub(super) enum OpenAiServedModelLookup {
     Found(Box<ServedModelStatus>),
     NotFound,
     Unavailable,
@@ -598,11 +818,21 @@ enum OpenAiServedModelLookup {
     },
 }
 
-async fn find_openai_served_model(
+/// Profile selection narrows the same alias-first resolver used by legacy routes.
+pub(super) async fn find_selected_served_model(
     state: &AppState,
     requested_model: &str,
+    profile: Option<&str>,
 ) -> pumas_library::Result<OpenAiServedModelLookup> {
-    let snapshot = state.api.get_serving_status().await?.snapshot;
+    let mut snapshot = state.api.get_serving_status().await?.snapshot;
+    if let Some(profile) = profile {
+        snapshot
+            .served_models
+            .retain(|model| model.profile_id.as_str() == profile);
+        snapshot
+            .router_profiles
+            .retain(|item| item.profile_id.as_str() == profile);
+    }
     Ok(resolve_openai_served_model(snapshot, requested_model))
 }
 

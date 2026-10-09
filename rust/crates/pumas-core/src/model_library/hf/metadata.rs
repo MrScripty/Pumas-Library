@@ -19,6 +19,8 @@ use crate::model_library::types::{
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod model_info_cache;
+
 #[derive(serde::Deserialize)]
 struct HfModelInfoResponse {
     #[serde(flatten)]
@@ -235,13 +237,17 @@ impl HuggingFaceClient {
         evidence.captured_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
-    /// Fetch model info directly by repo_id from the HuggingFace API.
-    ///
-    /// Uses `GET /api/models/{repo_id}` which returns the exact model
-    /// without any search or cache involvement.
+    /// Obtain model details with upstream revalidation, preserving explicit refetch.
+    /// Anonymous calls reuse persisted validators; authenticated calls stay live.
     pub async fn get_model_info(&self, repo_id: &str) -> Result<HuggingFaceModel> {
-        let (model, _) = self.get_model_snapshot(repo_id).await?;
-        Ok(model)
+        self.get_model_info_observation(repo_id, true).await
+    }
+
+    /// Obtain advisory model details, reusing fresh anonymous observations.
+    /// Authenticated calls bypass this cache. This does not resolve a download
+    /// revision or authorize model execution. Use `get_model_info` to refetch.
+    pub async fn get_model_info_cached(&self, repo_id: &str) -> Result<HuggingFaceModel> {
+        self.get_model_info_observation(repo_id, false).await
     }
 
     /// Get repository file tree with LFS information.
@@ -329,7 +335,7 @@ impl HuggingFaceClient {
         };
 
         // Cache the result
-        write_repo_file_tree_cache(cache_file, &tree).await?;
+        write_repo_file_tree_cache(cache_file, &tree, self.store_lifetime.clone()).await?;
 
         Ok(tree)
     }
@@ -378,7 +384,7 @@ impl HuggingFaceClient {
                     .verify_candidate(&candidate.repo_id, filename, path, fast_hash.as_deref())
                     .await
                 {
-                    return Ok(Some(result));
+                    return Ok(Some(self.hydrate_lookup_metadata(result).await?));
                 }
             }
         }
@@ -387,7 +393,7 @@ impl HuggingFaceClient {
         let best_match = &candidates[0];
         let confidence = Self::compute_filename_confidence(&base_name, &best_match.name);
 
-        Ok(Some(HfMetadataResult {
+        let result = HfMetadataResult {
             repo_id: best_match.repo_id.clone(),
             official_name: Some(best_match.name.clone()),
             family: None, // Would need more analysis
@@ -424,7 +430,28 @@ impl HuggingFaceClient {
             pending_full_verification: true,
             fast_hash: None,
             expected_sha256: None,
-        }))
+        };
+        Ok(Some(self.hydrate_lookup_metadata(result).await?))
+    }
+
+    /// Only the selected advisory match is hydrated. The cached observation
+    /// supplies descriptive fields, never artifact hashes or revision admission.
+    async fn hydrate_lookup_metadata(
+        &self,
+        mut result: HfMetadataResult,
+    ) -> Result<HfMetadataResult> {
+        let model = self.get_model_info_cached(&result.repo_id).await?;
+        result.official_name = Some(model.name);
+        result.model_type = Some(model.kind);
+        result.release_date = model.release_date;
+        result.model_card_json = model
+            .model_card
+            .as_ref()
+            .and_then(|card| serde_json::to_string(card).ok());
+        result.license_status = model
+            .license
+            .or_else(|| Some("license_unknown".to_string()));
+        Ok(result)
     }
 
     /// Verify a candidate repository against a local file.
@@ -578,9 +605,14 @@ async fn read_repo_file_tree_cache(path: PathBuf) -> Result<Option<RepoFileTree>
         })?
 }
 
-async fn write_repo_file_tree_cache(path: PathBuf, tree: &RepoFileTree) -> Result<()> {
+async fn write_repo_file_tree_cache(
+    path: PathBuf,
+    tree: &RepoFileTree,
+    lifetime: crate::platform::store_lifetime::StoreLifetime,
+) -> Result<()> {
     let tree = tree.clone();
-    tokio::task::spawn_blocking(move || atomic_write_json(&path, &tree, false))
+    lifetime
+        .spawn_blocking(move || atomic_write_json(&path, &tree, false))
         .await
         .map_err(|err| {
             PumasError::Other(format!(

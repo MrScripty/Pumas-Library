@@ -4,7 +4,7 @@
 //! SQLite caching, result enrichment with download options, and
 //! conversion from API response types to internal model types.
 
-use super::types::{infer_pipeline_tag_from_config, HfSearchResult, HfSibling, HF_API_BASE};
+use super::types::{infer_pipeline_tag_from_config, HfSearchResult, HfSibling};
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::model_library::sharding::group_weight_files;
@@ -299,7 +299,7 @@ impl HuggingFaceClient {
         // Note: full=true gets lastModified, config=true gets architectures/model_type
         let mut url = format!(
             "{}/models?search={}&limit={}&offset={}&full=true&config=true",
-            HF_API_BASE,
+            self.api_base_url(),
             urlencoding::encode(&params.query),
             limit,
             offset

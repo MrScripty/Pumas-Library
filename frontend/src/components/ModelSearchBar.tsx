@@ -8,6 +8,7 @@
 import { useRef } from 'react';
 import { Search, Filter, Globe, Folder, Import, Key } from 'lucide-react';
 import { Popover } from './ui';
+import type { RemoteSearchSource } from '../types/apps';
 
 interface ModelSearchBarProps {
   searchQuery: string;
@@ -27,6 +28,8 @@ interface ModelSearchBarProps {
   isPickingModels?: boolean;
   onHfAuthClick?: () => void;
   showModeToggle?: boolean;
+  remoteSearchSource?: RemoteSearchSource;
+  onRemoteSearchSourceChange?: (source: RemoteSearchSource) => void;
 }
 
 export function ModelSearchBar({
@@ -47,6 +50,8 @@ export function ModelSearchBar({
   isPickingModels = false,
   onHfAuthClick,
   showModeToggle = true,
+  remoteSearchSource = 'huggingface',
+  onRemoteSearchSourceChange,
 }: ModelSearchBarProps) {
   const initialFilterFocusRef = useRef<HTMLButtonElement>(null);
   const filterLabel = isDownloadMode ? 'Filter by model kind' : 'Filter by category';
@@ -111,7 +116,7 @@ export function ModelSearchBar({
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[hsl(var(--launcher-text-muted))]" />
             <input
               type="text"
-              placeholder={isDownloadMode ? 'Search Hugging Face models' : totalModels === null ? 'Search library models' : `Search ${totalModels} models`}
+              placeholder={isDownloadMode ? remoteSearchSource === 'cached' ? 'Browse or search cached details' : 'Search Hugging Face models' : totalModels === null ? 'Search library models' : `Search ${totalModels} models`}
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
               className="w-full pl-9 pr-16 py-2 text-sm bg-[hsl(var(--launcher-bg-primary))] border border-[hsl(var(--launcher-border))] rounded text-[hsl(var(--launcher-text-primary))] placeholder:text-[hsl(var(--launcher-text-muted))] focus:outline-none focus:border-[hsl(var(--launcher-accent-primary))] transition-colors"
@@ -173,6 +178,18 @@ export function ModelSearchBar({
             </div>
           </div>
         </div>
+        {isDownloadMode && onRemoteSearchSourceChange && (
+          <fieldset className="mt-3 flex flex-wrap gap-3 text-xs text-[hsl(var(--launcher-text-secondary))]">
+            <legend className="sr-only">Model search source</legend>
+            <label className="inline-flex items-center gap-1"><input type="radio" name="model-search-source"
+              checked={remoteSearchSource === 'huggingface'} onChange={() => onRemoteSearchSourceChange('huggingface')} />Hugging Face search</label>
+            <label className="inline-flex items-center gap-1"><input type="radio" name="model-search-source"
+              checked={remoteSearchSource === 'cached'} onChange={() => onRemoteSearchSourceChange('cached')} />Cached details (offline)</label>
+          </fieldset>
+        )}
+        {isDownloadMode && remoteSearchSource === 'cached' && (
+          <p className="mt-2 text-xs text-[hsl(var(--launcher-text-secondary))]">Saved public observations. No live refresh. Current access and downloads require an online check.</p>
+        )}
       </div>
     </div>
   );

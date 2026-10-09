@@ -40,13 +40,17 @@ CONNECT proxy configured only in the child environment.
   projection remains in force. Available paths remain intentional handle data.
 - A registry-backed child primary exposes authenticated IPC. Tests compare its
   real local Available observation field-for-field with the native observation,
-  exercise missing/invalid/unsupported cases, and verify reconnect, forced-exit
-  restart, generation-aware release and release durability. No parent-global
-  registry environment is changed.
+  exercise missing/invalid/unsupported cases, and verify reconnect, orderly
+  restart after successful `shutdown_instance`, generation-aware release and
+  release durability. A separate hard-exit case preserves the real kill/wait
+  boundary, observes complete persisted declaration and registry rows read-only,
+  and proves that the retained generation refuses a new primary. No parent-global
+  registry environment is changed; forced-exit primary recovery is not qualified.
 - Actual library-only RPC processes exercise all seven HTTP and IPC facade
   methods, Available/Missing/Invalid/Unsupported results, persisted declarations
-  and restart. Unix cleanup uses the existing shutdown request plus SIGINT and
-  requires successful process exit after owner drainage.
+  and orderly restart. On every platform the existing shutdown request is followed
+  by successful exact-child exit after owner drainage. Acknowledgement alone is
+  not cessation, and forced cleanup is reserved for a failed fixture.
 - Both real acquisition gates passed against public repository
   `ggml-org/test-model-stories260K`, immutable commit
   `479896ec924af6d40fd419ab8f4d1eb2101de00d`, artifact

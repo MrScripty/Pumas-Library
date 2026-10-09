@@ -32,9 +32,22 @@ React renderer
 ## Library Ownership
 
 A launcher root has one owning `PumasApi`/`PumasLibraryInstance`. Construction
-claims the root and returns an error when another live process owns it.
+claims the root and refuses an existing owner row, including unresolved
+ownership after failed startup/shutdown or process loss. Orderly replacement
+requires successful composed `shutdown_instance()`; PID liveness and subsystem
+drains do not authorize reclaim.
 `PumasLocalClient` explicitly connects to an existing ready owner.
 `PumasReadOnlyLibrary` reads indexed state without taking lifecycle ownership.
+
+On Linux/macOS the existing owner also holds the physical launcher directory
+across independent rendezvous registries and symlink aliases. The lifetime is
+retained by escaped model/index/link and acquisition handles and their admitted
+blocking effects. After `shutdown_instance`, drop the API and those handles
+before starting a new owner. This strengthens live exclusion only: unknown or
+failed registry generations are still refused, and a free lock does not qualify
+recovery from crashed owners or external runtime children. See the
+[discovery plan](plans/local-discovery-bootstrap.md#slice-3-durable-identity-and-qualified-lifetime-custody)
+for the remaining physical-identity and child-custody gates.
 
 An embedding application or standalone RPC process constructs the owner; in
 desktop use, Electron supervises that RPC process. Renderer state is a projection of

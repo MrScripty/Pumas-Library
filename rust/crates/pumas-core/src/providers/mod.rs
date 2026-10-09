@@ -37,6 +37,7 @@ impl ExecutableArtifactFormat {
 #[serde(rename_all = "snake_case")]
 pub enum ServingTask {
     ImageGeneration,
+    ImageToText,
     Chat,
     Completion,
     Embedding,
@@ -230,6 +231,7 @@ impl ProviderBehavior {
                 ServingTask::Completion,
                 ServingTask::Embedding,
                 ServingTask::Reranking,
+                ServingTask::ImageToText,
             ],
             openai_endpoints: vec![
                 OpenAiGatewayEndpoint::Models,

@@ -72,7 +72,8 @@ impl BinaryLaunchConfig {
             version_dir: version_dir.clone(),
             binary_path,
             command: None,
-            extra_args: vec!["serve.py".to_string()],
+            // Imports must preserve the installed package byte manifest.
+            extra_args: vec!["-B".to_string(), "serve.py".to_string()],
             env_vars: HashMap::new(),
             pid_file,
             log_file: None,

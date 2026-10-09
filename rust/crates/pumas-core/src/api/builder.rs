@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::fs;
 use tokio::sync::RwLock;
 
 use crate::api::state::{ApiState, PrimaryState};
@@ -39,37 +38,16 @@ pub struct PumasApiBuilder {
     auto_create_dirs: bool,
     enable_hf_client: bool,
     enable_process_manager: bool,
+    enable_connectivity_probe: bool,
+    registry: Option<registry::LibraryRegistry>,
+    local_start_authority: Option<crate::discovery::LocalStartAuthority>,
     #[cfg(feature = "test-support")]
     hf_loopback_fixture: Option<model_library::test_support::HfLoopbackFixture>,
 }
 
-struct InstanceClaimGuard {
-    registry: registry::LibraryRegistry,
-    claim: registry::PrimaryInstanceClaim,
-    active: bool,
-}
-
-impl InstanceClaimGuard {
-    fn new(registry: registry::LibraryRegistry, claim: registry::PrimaryInstanceClaim) -> Self {
-        Self {
-            registry,
-            claim,
-            active: true,
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.active = false;
-    }
-}
-
-impl Drop for InstanceClaimGuard {
-    fn drop(&mut self) {
-        if self.active {
-            let _ = self.registry.release_instance_claim(&self.claim);
-        }
-    }
-}
+// A failed/cancelled startup retains its claiming row. Constructor blocking
+// work is not a cessation receipt; only a promoted owner's ordered coordinator
+// may release a ready generation after it has observed all owned work.
 
 async fn load_known_download_dirs(
     persistence: Option<Arc<model_library::DownloadPersistence>>,
@@ -138,18 +116,38 @@ fn start_primary_background_work(
 
     {
         let importer = primary_state.model_importer.clone();
-        runtime_tasks.spawn(async move {
-            inspect_startup_shards(importer).await;
-        });
+        // The blocking scanner must outlive cancellation of background work.
+        // Its finite receipt observes the reader before physical-owner release.
+        if let Err(error) =
+            runtime_tasks.start_owned("inspect startup shards", move |_| async move {
+                inspect_startup_shards(importer).await;
+                Ok(())
+            })
+        {
+            tracing::debug!(%error, "Startup shard inspection was not admitted");
+        }
     }
 
     {
         let ps = primary_state;
+        let importer = ps.model_importer.clone();
+        let scan = runtime_tasks.start_owned(
+            "inspect interrupted startup downloads",
+            move |context| async move {
+                context
+                    .run_blocking("read interrupted startup downloads", move || {
+                        importer.find_interrupted_downloads(&known_download_dirs)
+                    })
+                    .await
+            },
+        );
         runtime_tasks.spawn(async move {
-            let interrupted = ps
-                .model_importer
-                .find_interrupted_downloads_async(known_download_dirs)
-                .await;
+            let Ok(scan) = scan else {
+                return;
+            };
+            let Ok(Ok(interrupted)) = scan.await else {
+                return;
+            };
             if interrupted.is_empty() {
                 return;
             }
@@ -217,9 +215,34 @@ impl PumasApiBuilder {
             auto_create_dirs: false,
             enable_hf_client: true,
             enable_process_manager: cfg!(feature = "process-manager"),
+            registry: None,
+            local_start_authority: None,
+            enable_connectivity_probe: true,
             #[cfg(feature = "test-support")]
             hf_loopback_fixture: None,
         }
+    }
+
+    /// Use an explicit rendezvous registry (e.g. a host application's isolated registry).
+    /// Live Linux/macOS owners also hold the physical launcher root across registries.
+    /// An empty alternate registry is not historical-owner cessation evidence.
+    pub fn with_registry(mut self, registry: registry::LibraryRegistry) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    pub(crate) fn with_local_start_authority(
+        mut self,
+        authority: crate::discovery::LocalStartAuthority,
+    ) -> Self {
+        self.local_start_authority = Some(authority);
+        self
+    }
+
+    /// Control the optional startup upstream connectivity probe.
+    pub fn with_connectivity_probe(mut self, enable: bool) -> Self {
+        self.enable_connectivity_probe = enable;
+        self
     }
 
     /// Auto-create required directories if they don't exist.
@@ -269,7 +292,10 @@ impl PumasApiBuilder {
     }
 
     /// Create the required directory structure.
-    async fn create_directory_structure(launcher_root: &Path) -> Result<()> {
+    async fn create_directory_structure(
+        launcher_root: &Path,
+        lifetime: &crate::platform::store_lifetime::StoreLifetime,
+    ) -> Result<()> {
         let dirs = [
             launcher_root.join("launcher-data"),
             launcher_root.join("launcher-data").join("metadata"),
@@ -280,84 +306,95 @@ impl PumasApiBuilder {
             launcher_root.join("shared-resources").join("models"),
         ];
 
-        for dir in &dirs {
-            if !fs::try_exists(dir)
-                .await
-                .map_err(|e| PumasError::io_with_path(e, dir))?
-            {
-                fs::create_dir_all(dir).await.map_err(|e| PumasError::Io {
-                    message: format!("Failed to create directory: {}", dir.display()),
-                    path: Some(dir.clone()),
-                    source: Some(e),
-                })?;
-            }
-        }
-
-        Ok(())
+        lifetime
+            .spawn_blocking(move || {
+                for dir in &dirs {
+                    std::fs::create_dir_all(dir).map_err(|e| PumasError::Io {
+                        message: format!("Failed to create directory: {}", dir.display()),
+                        path: Some(dir.clone()),
+                        source: Some(e),
+                    })?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!("Directory initialization worker failed: {error}"))
+            })?
     }
 
     /// Build the PumasApi instance.
     pub async fn build(mut self) -> Result<PumasApi> {
         self.launcher_root = crate::platform::paths::absolute_launcher_root(&self.launcher_root)?;
-        // Auto-create directories if requested
-        if self.auto_create_dirs {
-            // Create launcher_root if it doesn't exist
-            if !fs::try_exists(&self.launcher_root)
-                .await
-                .map_err(|e| PumasError::io_with_path(e, &self.launcher_root))?
-            {
-                fs::create_dir_all(&self.launcher_root)
-                    .await
-                    .map_err(|e| PumasError::Io {
-                        message: format!(
-                            "Failed to create launcher root: {}",
-                            self.launcher_root.display()
-                        ),
-                        path: Some(self.launcher_root.clone()),
-                        source: Some(e),
-                    })?;
-            }
-            Self::create_directory_structure(&self.launcher_root).await?;
-        } else {
-            // Ensure the launcher root exists
-            if !fs::try_exists(&self.launcher_root)
-                .await
-                .map_err(|e| PumasError::io_with_path(e, &self.launcher_root))?
-            {
-                return Err(PumasError::Config {
-                    message: format!(
-                        "Launcher root does not exist: {}",
-                        self.launcher_root.display()
-                    ),
+        let (store_lifetime, registry, claim) = if let Some(authority) =
+            self.local_start_authority.take()
+        {
+            let (root, registry, claim, lifetime) = authority.into_parts();
+            if self.launcher_root != root {
+                return Err(PumasError::InvalidParams {
+                    message: "local start authority root changed".into(),
                 });
             }
-        }
-
-        let registry = registry::LibraryRegistry::open()?;
-        let library_name = self
-            .launcher_root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("pumas-library");
-        let _ = registry.register(&self.launcher_root, library_name)?;
-        let claim = match registry.try_claim_instance(&self.launcher_root, std::process::id())? {
-            registry::InstanceClaimResult::Claimed(claim) => claim,
-            registry::InstanceClaimResult::Occupied(instance) => {
+            lifetime.require_root(&root)?;
+            if claim.library_path != root {
                 return Err(PumasError::InvalidParams {
+                    message: "local start claim and selected root differ".into(),
+                });
+            }
+            if !registry.matches_primary_claim(&claim)? {
+                return Err(PumasError::InvalidParams {
+                    message: "local start authority claim changed".into(),
+                });
+            }
+            (lifetime, registry, claim)
+        } else {
+            // Creating the root is the only pre-lease filesystem mutation. Do it
+            // synchronously so cancellation cannot detach a constructor worker.
+            if self.auto_create_dirs {
+                std::fs::create_dir_all(&self.launcher_root)
+                    .map_err(|error| PumasError::io_with_path(error, &self.launcher_root))?;
+            }
+            let store_lifetime =
+                crate::platform::store_lifetime::StoreLifetime::acquire(&self.launcher_root)?;
+            self.launcher_root = self
+                .launcher_root
+                .canonicalize()
+                .map_err(|error| PumasError::io_with_path(error, &self.launcher_root))?;
+
+            let registry = match self.registry.take() {
+                Some(registry) => registry,
+                None => registry::LibraryRegistry::open()?,
+            };
+            let claim = match registry
+                .try_claim_instance(&self.launcher_root, std::process::id())?
+            {
+                registry::InstanceClaimResult::Claimed(claim) => claim,
+                registry::InstanceClaimResult::Occupied(instance) => {
+                    return Err(PumasError::InvalidParams {
                     message: format!(
                         "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
                         self.launcher_root.display(),
                         instance.pid
                     ),
                 });
-            }
+                }
+            };
+            (store_lifetime, registry, claim)
         };
-        let mut claim_guard = InstanceClaimGuard::new(registry.clone(), claim.clone());
+        let library_name = self
+            .launcher_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("pumas-library");
+        let _ = registry.register(&self.launcher_root, library_name)?;
+        if self.auto_create_dirs {
+            Self::create_directory_structure(&self.launcher_root, &store_lifetime).await?;
+        }
 
         let state = Arc::new(RwLock::new(ApiState {
             background_fetch_completed: false,
         }));
-        let runtime_tasks = RuntimeTasks::default();
+        let runtime_tasks = RuntimeTasks::default().with_store_lifetime(store_lifetime.clone());
 
         // Initialize network manager for connectivity checking
         let network_manager =
@@ -368,15 +405,19 @@ impl PumasApiBuilder {
             );
 
         // Check initial connectivity (non-blocking, will update state)
-        let nm_clone = network_manager.clone();
-        runtime_tasks.spawn(async move {
-            nm_clone.check_connectivity().await;
-        });
+        if self.enable_connectivity_probe {
+            let nm_clone = network_manager.clone();
+            runtime_tasks.spawn(async move {
+                nm_clone.check_connectivity().await;
+            });
+        }
 
         // Initialize process manager (if enabled)
         let process_manager = if self.enable_process_manager {
             match process::ProcessManager::new(&self.launcher_root, None) {
-                Ok(mgr) => Arc::new(RwLock::new(Some(mgr))),
+                Ok(mgr) => Arc::new(RwLock::new(Some(
+                    mgr.with_store_lifetime(store_lifetime.clone()),
+                ))),
                 Err(e) => {
                     tracing::warn!("Failed to initialize process manager: {}", e);
                     Arc::new(RwLock::new(None))
@@ -397,17 +438,22 @@ impl PumasApiBuilder {
 
         // Establish the required library before capturing download authority,
         // including when the optional launcher directory setup was disabled.
-        let model_library = model_library::ModelLibrary::new(&model_library_dir)
-            .await
-            .map_err(|e| PumasError::Config {
-                message: format!("Model library initialization failed: {}", e),
-            })?;
+        let model_library = model_library::ModelLibrary::new_with_store_lifetime(
+            &model_library_dir,
+            store_lifetime.clone(),
+        )
+        .await
+        .map_err(|e| PumasError::Config {
+            message: format!("Model library initialization failed: {}", e),
+        })?;
         let model_library = Arc::new(model_library);
 
         // Historical download custody applies even when upstream access is disabled.
-        let download_persistence = Arc::new(model_library::DownloadPersistence::new(
-            &self.launcher_root.join("launcher-data"),
-        ));
+        let download_persistence =
+            Arc::new(model_library::DownloadPersistence::new_with_store_lifetime(
+                &self.launcher_root.join("launcher-data"),
+                store_lifetime.clone(),
+            ));
         let acquisition = Arc::new(crate::acquisition::AcquisitionService::new(
             download_persistence.acquisition_store(),
         ));
@@ -430,11 +476,17 @@ impl PumasApiBuilder {
             let search_cache_dir = self.launcher_root.join("shared-resources").join("cache");
             let search_cache_db = search_cache_dir.join("search.sqlite");
             let search_cache_db_for_task = search_cache_db.clone();
-            let search_cache = match tokio::task::spawn_blocking(move || {
-                model_library::HfSearchCache::new(&search_cache_db_for_task)
+            let cache_lifetime = store_lifetime.clone();
+            let search_cache = match store_lifetime
+                .spawn_blocking(move || {
+                    model_library::HfSearchCache::with_config_and_store_lifetime(
+                        &search_cache_db_for_task,
+                        Default::default(),
+                        cache_lifetime,
+                    )
                     .map(std::sync::Arc::new)
-            })
-            .await
+                })
+                .await
             {
                 Ok(Ok(cache)) => Some(cache),
                 Ok(Err(e)) => {
@@ -454,7 +506,8 @@ impl PumasApiBuilder {
             let model_library_dir_for_task = model_library_dir.clone();
             #[cfg(feature = "test-support")]
             let fixture_source = self.hf_loopback_fixture.clone();
-            match tokio::task::spawn_blocking(move || {
+            let client_lifetime = store_lifetime.clone();
+            match store_lifetime.spawn_blocking(move || {
                 #[cfg(feature = "test-support")]
                 let mut client = match fixture_source {
                     Some(source) => model_library::HuggingFaceClient::new_with_loopback_fixture(hf_cache_dir_for_task, source)?,
@@ -462,6 +515,7 @@ impl PumasApiBuilder {
                 };
                 #[cfg(not(feature = "test-support"))]
                 let mut client = model_library::HuggingFaceClient::new(&hf_cache_dir_for_task)?;
+                client.set_store_lifetime(client_lifetime);
                 if let Err(error) = client.configure_download_destination_root(&model_library_dir_for_task) {
                     tracing::warn!(%error, "Download destination authority unavailable; HuggingFace search remains enabled");
                 }
@@ -522,8 +576,25 @@ impl PumasApiBuilder {
             let lib_clone = model_library.clone();
             let importer = model_library::ModelImporter::new(lib_clone);
             if importer.has_orphan_candidates_async().await {
+                let reader = importer.clone();
+                let scan = runtime_tasks.start_owned(
+                    "inspect startup orphans",
+                    move |context| async move {
+                        context
+                            .run_blocking("read startup orphan directories", move || {
+                                reader.orphan_candidates()
+                            })
+                            .await
+                    },
+                );
                 runtime_tasks.spawn(async move {
-                    let result = importer.adopt_orphans(false).await;
+                    let Ok(scan) = scan else {
+                        return;
+                    };
+                    let Ok(Ok(orphan_dirs)) = scan.await else {
+                        return;
+                    };
+                    let result = importer.adopt_orphan_candidates(orphan_dirs, false).await;
                     if result.orphans_found > 0 {
                         tracing::info!(
                             "Startup orphan scan: found={}, adopted={}, errors={}",
@@ -571,7 +642,7 @@ impl PumasApiBuilder {
                     &self.launcher_root,
                     provider_registry.clone(),
                     runtime_provider_adapters,
-                ),
+                ).with_store_lifetime(store_lifetime.clone()),
             ),
             serving_service: Arc::new(crate::serving::ServingService::with_provider_registry(
                 provider_registry,
@@ -585,6 +656,9 @@ impl PumasApiBuilder {
             server_handle: tokio::sync::Mutex::new(None),
             registry: Some(registry),
             instance_claim: tokio::sync::Mutex::new(Some(claim)),
+            ready_instance: std::sync::OnceLock::new(),
+            external_service_tasks: RuntimeTasks::default().with_store_lifetime(store_lifetime),
+            instance_shutdown: std::sync::OnceLock::new(),
         });
         let intent_primary = Arc::downgrade(&primary_state);
         primary_state
@@ -608,53 +682,43 @@ impl PumasApiBuilder {
             known_download_dirs,
             runtime_tasks,
         );
-        claim_guard.disarm();
 
         Ok(api)
     }
 }
 
 #[cfg(test)]
-mod claim_guard_tests {
+mod startup_claim_tests {
     use super::*;
 
-    #[test]
-    fn startup_guard_cannot_delete_a_successor_or_promoted_instance() {
-        let root = tempfile::tempdir().unwrap();
+    #[tokio::test]
+    async fn failed_construction_retains_claim_instead_of_asserting_initializer_cessation() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("shared-resources"), b"blocked fixture").unwrap();
         let registry =
-            registry::LibraryRegistry::open_at(&root.path().join("registry.db")).unwrap();
-        let library = root.path().join("library");
-        std::fs::create_dir(&library).unwrap();
-        registry.register(&library, "Library").unwrap();
-        let claim = || match registry
-            .try_claim_instance(&library, std::process::id())
-            .unwrap()
-        {
-            registry::InstanceClaimResult::Claimed(claim) => claim,
-            registry::InstanceClaimResult::Occupied(_) => {
-                panic!("test requires an empty claim slot")
-            }
-        };
-        let first = claim();
-        let stale = InstanceClaimGuard::new(registry.clone(), first);
-        registry.unregister_instance(&library).unwrap();
-        let replacement = claim();
-        drop(stale);
-        registry
-            .mark_instance_ready(&library, &replacement.claim_token, 12345)
-            .unwrap();
-        // Promoting a claim transfers its ownership: even its own old startup
-        // guard cannot unregister the ready endpoint.
-        drop(InstanceClaimGuard::new(registry.clone(), replacement));
+            registry::LibraryRegistry::open_at(&temp.path().join("registry.db")).unwrap();
+        let result = PumasApi::builder(&root)
+            .with_registry(registry.clone())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .with_connectivity_probe(false)
+            .build()
+            .await;
+        assert!(result.is_err());
+        let claim = registry.get_instance(&root).unwrap().unwrap();
+        assert_eq!(claim.status, registry::InstanceStatus::Claiming);
+        assert!(matches!(
+            registry
+                .try_claim_instance(&root, std::process::id())
+                .unwrap(),
+            registry::InstanceClaimResult::Occupied(_)
+        ));
         assert_eq!(
-            registry.get_instance(&library).unwrap().unwrap().port,
-            12345
+            std::fs::read(root.join("shared-resources")).unwrap(),
+            b"blocked fixture"
         );
-
-        registry.unregister_instance(&library).unwrap();
-        let abandoned = InstanceClaimGuard::new(registry.clone(), claim());
-        drop(abandoned);
-        assert!(registry.get_instance(&library).unwrap().is_none());
     }
 }
 

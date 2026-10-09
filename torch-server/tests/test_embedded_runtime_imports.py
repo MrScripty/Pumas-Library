@@ -73,8 +73,18 @@ class EmbeddedRuntimeImportTests(unittest.TestCase):
         self.assertIn("serve.py", actual_python)
         self.assertIn("model_manager.py", actual_python)
         self.assertIn("speech_binding.py", actual_python)
-        self.assertNotIn("speech_operations.py", actual_python)
-        self.assertNotIn("loaders/cohere_asr_loader.py", actual_python)
+        for name in (
+            "owned_worker.py",
+            "private_owned_channel.py",
+            "owned_audio.py",
+            "owned_model_operations.py",
+            "speech_operations.py",
+            "native_speech_result.py",
+            "audio_input.py",
+            "audio_contract.py",
+            "loaders/cohere_asr_loader.py",
+        ):
+            self.assertIn(name, actual_python)
         return actual_python
 
     def probe(self, root):

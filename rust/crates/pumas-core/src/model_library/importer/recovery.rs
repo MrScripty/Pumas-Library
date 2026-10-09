@@ -15,14 +15,27 @@ impl ModelImporter {
     /// Metadata is inferred from the directory path structure
     /// (`{library_root}/{model_type}/{family}/{name}/`).
     pub async fn adopt_orphans(&self, compute_hashes: bool) -> OrphanScanResult {
-        let mut result = OrphanScanResult::default();
         let importer = self.clone();
-        let orphan_dirs = tokio::task::spawn_blocking(move || {
-            importer.find_orphan_dirs(importer.library.library_root(), false)
-        })
-        .await
-        .unwrap_or_default();
-        result.orphans_found = orphan_dirs.len();
+        let orphan_dirs = tokio::task::spawn_blocking(move || importer.orphan_candidates())
+            .await
+            .unwrap_or_default();
+        self.adopt_orphan_candidates(orphan_dirs, compute_hashes)
+            .await
+    }
+
+    pub(crate) fn orphan_candidates(&self) -> Vec<PathBuf> {
+        self.find_orphan_dirs(self.library.library_root(), false)
+    }
+
+    pub(crate) async fn adopt_orphan_candidates(
+        &self,
+        orphan_dirs: Vec<PathBuf>,
+        compute_hashes: bool,
+    ) -> OrphanScanResult {
+        let mut result = OrphanScanResult {
+            orphans_found: orphan_dirs.len(),
+            ..OrphanScanResult::default()
+        };
 
         if orphan_dirs.is_empty() {
             tracing::debug!("No orphan model directories found");
@@ -114,6 +127,9 @@ impl ModelImporter {
     /// Inspect canonical model roots for shard and index evidence, without writes
     /// or network actions. Failures and ambiguous layouts remain in the report.
     pub fn discover_shard_recovery(&self) -> ShardRecoveryDiscovery {
+        #[cfg(feature = "test-support")]
+        self.library
+            .observe_blocking_read_for_test("discover shard recovery");
         shard_discovery::discover(self.library.library_root())
     }
 
@@ -155,6 +171,9 @@ impl ModelImporter {
         &self,
         known_dest_dirs: &HashSet<PathBuf>,
     ) -> Vec<InterruptedDownload> {
+        #[cfg(feature = "test-support")]
+        self.library
+            .observe_blocking_read_for_test("discover interrupted downloads");
         let library_root = self.library.library_root();
         let mut results = Vec::new();
 

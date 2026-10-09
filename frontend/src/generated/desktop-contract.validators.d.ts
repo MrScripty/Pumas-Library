@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 008855111df3d0cebd12b2876a473ead5fce2a6ca1fb3daed06e130d281b86cc. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 335d6f3ee70b06b1895de25767308de05db0959c1894fac408b31fc9d1461b49. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -49,16 +49,22 @@ export declare function validateRuntimeLaunchParams(value: unknown): boolean;
 export declare function validateRuntimeRunningOutcome(value: unknown): boolean;
 export declare function validateRuntimeStopOutcome(value: unknown): boolean;
 export declare function validateS3AuthenticatedBundleImportParams(value: unknown): boolean;
+export declare function validateS3AuthenticatedDiscoveryParams(value: unknown): boolean;
 export declare function validateS3AuthenticatedImportParams(value: unknown): boolean;
 export declare function validateS3BundleImportObservation(value: unknown): boolean;
 export declare function validateS3BundleImportParams(value: unknown): boolean;
 export declare function validateS3CredentialParams(value: unknown): boolean;
+export declare function validateS3DiscoveryOutcome(value: unknown): boolean;
+export declare function validateS3DiscoveryParams(value: unknown): boolean;
 export declare function validateS3ImportCancelOutcome(value: unknown): boolean;
 export declare function validateS3ImportCancelParams(value: unknown): boolean;
 export declare function validateS3ImportOutcome(value: unknown): boolean;
 export declare function validateS3ImportParams(value: unknown): boolean;
 export declare function validateS3ImportStatusParams(value: unknown): boolean;
+export declare function validateS3PersistedImportsWire(value: unknown): boolean;
 export declare function validateS3PinnedFileParams(value: unknown): boolean;
+export declare function validateS3TransferRetryParams(value: unknown): boolean;
+export declare function validateS3TransferRetryState(value: unknown): boolean;
 export declare function validateSearchCatalogParams(value: unknown): boolean;
 export declare function validateSelectedVersionOutcome(value: unknown): boolean;
 export declare function validateSetDefaultVersionOutcome(value: unknown): boolean;

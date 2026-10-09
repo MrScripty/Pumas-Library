@@ -1,3 +1,4 @@
+import type { S3TransferRetryParams, S3TransferRetryState, S3PersistedImportsWire, S3DiscoveryParams, S3AuthenticatedDiscoveryParams, S3DiscoveryOutcome } from '../generated/desktop-contract';
 import type { S3BundleImportParams, S3AuthenticatedBundleImportParams, S3BundleImportObservation, S3ImportParams, S3AuthenticatedImportParams, S3ImportOutcome, S3ImportCancelOutcome } from '../generated/desktop-contract';
 import type { BaseResponse } from './api-common';
 import type {
@@ -43,6 +44,13 @@ import type {
 } from './api-package-facts';
 
 export interface DesktopBridgeModelAPI {
+  get_s3_transfer_retry(operationId?: string): Promise<S3TransferRetryState>;
+  retry_s3_model_transfer(request: S3TransferRetryParams): Promise<S3ImportOutcome>;
+  inspect_persisted_s3_imports(): Promise<S3PersistedImportsWire>;
+  start_s3_prefix_discovery(request: S3DiscoveryParams): Promise<S3DiscoveryOutcome>;
+  start_authenticated_s3_prefix_discovery(request: S3AuthenticatedDiscoveryParams): Promise<S3DiscoveryOutcome>;
+  get_s3_prefix_discovery(operationId?: string): Promise<S3DiscoveryOutcome>;
+  cancel_s3_prefix_discovery(operationId: string): Promise<S3DiscoveryOutcome>;
   start_s3_model_bundle_import(request: S3BundleImportParams): Promise<S3ImportOutcome>;
   start_authenticated_s3_model_bundle_import(request: S3AuthenticatedBundleImportParams): Promise<S3ImportOutcome>;
   get_s3_model_bundle_import(operationId?: string): Promise<S3BundleImportObservation>;

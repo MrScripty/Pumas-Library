@@ -17,6 +17,20 @@ use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use walkdir::WalkDir;
 
+/// A package observation covers metadata and file stat evidence, not payload bytes.
+pub(crate) const PACKAGE_OBSERVATION_PREFIX: &str = "pumas-package-observation-v1:sha256:";
+
+pub(crate) fn is_package_observation_fingerprint(value: &str) -> bool {
+    value
+        .strip_prefix(PACKAGE_OBSERVATION_PREFIX)
+        .is_some_and(|digest| {
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PackageInspectionManifest {
     selected_files: Vec<String>,
@@ -86,7 +100,13 @@ impl PackageInspectionManifest {
     ) -> Result<String> {
         let model_dir = model_dir.to_path_buf();
         let descriptor_json = serde_json::to_string(descriptor)?;
-        let metadata_json = serde_json::to_string(metadata)?;
+        // Metadata contains unordered maps (including model_card's HashMap).
+        // Hash their recursively canonical object projection, retaining every
+        // value and array position. This deliberately invalidates fingerprints
+        // made from the old raw JSON; cached output must be re-observed through
+        // the existing owned producer, never relabelled or accepted as fresh.
+        let metadata_json =
+            super::super::download_store::canonical_json_sha256(&serde_json::to_value(metadata)?)?;
         let dependency_bindings_json = serde_json::to_string(dependency_bindings)?;
         let fingerprint_files = self
             .entries
@@ -96,6 +116,12 @@ impl PackageInspectionManifest {
 
         tokio::task::spawn_blocking(move || {
             let mut hasher = Sha256::new();
+
+            update_package_facts_hash_part(
+                &mut hasher,
+                "observation_protocol",
+                PACKAGE_OBSERVATION_PREFIX,
+            );
 
             update_package_facts_hash_part(
                 &mut hasher,
@@ -158,7 +184,10 @@ impl PackageInspectionManifest {
                 }
             }
 
-            Ok::<_, PumasError>(hex::encode(hasher.finalize()))
+            Ok::<_, PumasError>(format!(
+                "{PACKAGE_OBSERVATION_PREFIX}{}",
+                hex::encode(hasher.finalize())
+            ))
         })
         .await
         .map_err(|err| {
@@ -814,3 +843,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "fingerprint_tests.rs"]
+mod fingerprint_tests;

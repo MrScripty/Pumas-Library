@@ -10,6 +10,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
 
+/// Installation checks may import sidecar code directly or in a child process.
+/// Keep their imports from changing the runtime's retained source-byte tree.
+fn runtime_check_command(python: &Path, script: &Path) -> Command {
+    let mut command = Command::new(python);
+    command.arg(script).env("PYTHONDONTWRITEBYTECODE", "1");
+    command
+}
+
 const MAX_TORCH_ORPHAN_QUARANTINES: usize = 2;
 const MAX_TORCH_DOWNLOAD_SOURCE_BYTES: usize = 2048;
 const TORCH_DOWNLOAD_SPEED_STALE_AFTER: Duration = Duration::from_secs(2);
@@ -88,6 +96,23 @@ fn normalize_torch_lock_error(error: std::io::Error) -> std::io::Error {
 }
 
 impl TorchVersionsLock {
+    pub(crate) fn try_acquire_read(versions_dir: &Path) -> std::io::Result<Self> {
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
+        }
+        let file = options.open(versions_dir.join(".torch-versions.lock"))?;
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::other("Torch lock is not regular"));
+        }
+        FileExt::try_lock_shared(&file).map_err(normalize_torch_lock_error)?;
+        Ok(Self {
+            _file: Arc::new(file),
+        })
+    }
     pub(crate) fn try_acquire(versions_dir: &Path) -> std::io::Result<Self> {
         let file = std::fs::OpenOptions::new()
             .read(true)
@@ -1196,6 +1221,46 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
             include_str!("../../../../../../torch-server/model_manager.py"),
         ),
         (
+            "owned_worker.py",
+            include_str!("../../../../../../torch-server/owned_worker.py"),
+        ),
+        (
+            "private_owned_channel.py",
+            include_str!("../../../../../../torch-server/private_owned_channel.py"),
+        ),
+        (
+            "owned_audio.py",
+            include_str!("../../../../../../torch-server/owned_audio.py"),
+        ),
+        (
+            "owned_model_operations.py",
+            include_str!("../../../../../../torch-server/owned_model_operations.py"),
+        ),
+        (
+            "speech_operations.py",
+            include_str!("../../../../../../torch-server/speech_operations.py"),
+        ),
+        (
+            "native_speech_result.py",
+            include_str!("../../../../../../torch-server/native_speech_result.py"),
+        ),
+        (
+            "audio_input.py",
+            include_str!("../../../../../../torch-server/audio_input.py"),
+        ),
+        (
+            "audio_contract.py",
+            include_str!("../../../../../../torch-server/audio_contract.py"),
+        ),
+        (
+            "loaders/cohere_asr_loader.py",
+            include_str!("../../../../../../torch-server/loaders/cohere_asr_loader.py"),
+        ),
+        (
+            "loaders/owned_cohere_source.py",
+            include_str!("../../../../../../torch-server/loaders/owned_cohere_source.py"),
+        ),
+        (
             "speech_binding.py",
             include_str!("../../../../../../torch-server/speech_binding.py"),
         ),
@@ -1636,6 +1701,9 @@ fn validate_direct_torch_report(
             }
         }
     }
+    if adapter == "cohere-asr" {
+        super::super::cohere_asr_profile::validate(version, &resolution.artifacts)?;
+    }
     Ok(())
 }
 
@@ -1644,21 +1712,21 @@ enum DirectTorchAttempt {
     Retry,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct StagedFilesManifest {
-    files: Vec<StagedFile>,
+pub(crate) struct StagedFilesManifest {
+    pub(crate) files: Vec<StagedFile>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct StagedFile {
-    path: String,
-    sha256: String,
-    size: u64,
+pub(crate) struct StagedFile {
+    pub(crate) path: String,
+    pub(crate) sha256: String,
+    pub(crate) size: u64,
 }
 
-fn validate_staged_files(target: &Path, manifest: &StagedFilesManifest) -> Result<()> {
+pub(crate) fn validate_staged_files(target: &Path, manifest: &StagedFilesManifest) -> Result<()> {
     if manifest.files.is_empty() || manifest.files.len() > 200_000 {
         return Err(failed("Torch staged file manifest is empty or oversized"));
     }
@@ -1726,7 +1794,7 @@ fn validate_staged_files(target: &Path, manifest: &StagedFilesManifest) -> Resul
     Ok(())
 }
 
-fn move_verified_packages(target: &Path, runtime: &Path, python_minor: &str) -> Result<()> {
+fn venv_packages_dir(runtime: &Path, python_minor: &str) -> PathBuf {
     #[cfg(windows)]
     let packages = runtime.join("venv").join("Lib").join("site-packages");
     #[cfg(not(windows))]
@@ -1735,6 +1803,133 @@ fn move_verified_packages(target: &Path, runtime: &Path, python_minor: &str) -> 
         .join("lib")
         .join(format!("python{python_minor}"))
         .join("site-packages");
+    packages
+}
+
+/// Exact files produced in a fresh private venv, before dependency resolution.
+/// This is a one-install bootstrap snapshot, never an exemption in capture.
+pub(crate) struct BootstrapPackages {
+    runtime: PathBuf,
+    root: PathBuf,
+    manifest: StagedFilesManifest,
+    directories: Vec<PathBuf>,
+}
+
+impl BootstrapPackages {
+    pub(crate) fn capture(runtime: &Path, python_minor: &str) -> Result<Self> {
+        Self::capture_root(runtime, &venv_packages_dir(runtime, python_minor))
+    }
+
+    fn capture_root(runtime: &Path, root: &Path) -> Result<Self> {
+        for parent in root
+            .ancestors()
+            .take_while(|path| path.starts_with(runtime))
+        {
+            let metadata = std::fs::symlink_metadata(parent).map_err(PumasError::from)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(failed(
+                    "Venv bootstrap root contains a link or non-directory",
+                ));
+            }
+        }
+        let mut files = Vec::new();
+        let mut directories = Vec::new();
+        for entry in walkdir::WalkDir::new(root).follow_links(false) {
+            let entry = entry.map_err(|_| failed("Cannot inspect fresh venv bootstrap"))?;
+            if entry.file_type().is_symlink() {
+                return Err(failed("Venv bootstrap contains a link"));
+            }
+            if entry.path() == root {
+                if !entry.file_type().is_dir() {
+                    return Err(failed("Venv bootstrap root is not a directory"));
+                }
+                continue;
+            }
+            let relative = entry
+                .path()
+                .strip_prefix(root)
+                .map_err(|_| failed("Venv bootstrap escaped its package root"))?;
+            if entry.file_type().is_dir() {
+                directories.push(relative.to_owned());
+            } else if entry.file_type().is_file() {
+                let mut file = std::fs::File::open(entry.path()).map_err(PumasError::from)?;
+                let mut sha = Sha256::new();
+                let mut size = 0_u64;
+                let mut buffer = [0_u8; 65536];
+                loop {
+                    use std::io::Read;
+                    let count = file.read(&mut buffer).map_err(PumasError::from)?;
+                    if count == 0 {
+                        break;
+                    }
+                    sha.update(&buffer[..count]);
+                    size += count as u64;
+                }
+                files.push(StagedFile {
+                    path: relative
+                        .to_str()
+                        .ok_or_else(|| failed("Invalid bootstrap path"))?
+                        .replace(std::path::MAIN_SEPARATOR, "/"),
+                    size,
+                    sha256: format!("{:x}", sha.finalize()),
+                });
+            } else {
+                return Err(failed("Venv bootstrap contains a special file"));
+            }
+            if files.len() + directories.len() > 200_000 {
+                return Err(failed("Venv bootstrap exceeds namespace bound"));
+            }
+        }
+        files.sort_by(|left, right| left.path.cmp(&right.path));
+        directories.sort_by(|left, right| {
+            right
+                .components()
+                .count()
+                .cmp(&left.components().count())
+                .then_with(|| left.cmp(right))
+        });
+        Ok(Self {
+            runtime: runtime.to_owned(),
+            root: root.to_owned(),
+            manifest: StagedFilesManifest { files },
+            directories,
+        })
+    }
+
+    pub(crate) fn remove(&self) -> Result<()> {
+        // Check the entire bootstrap namespace before deleting any byte. New,
+        // replaced or linked members cannot become cleanup exemptions.
+        let observed = Self::capture_root(&self.runtime, &self.root)?;
+        if observed.manifest != self.manifest || observed.directories != self.directories {
+            return Err(failed(
+                "Venv bootstrap changed during dependency resolution",
+            ));
+        }
+        for item in &self.manifest.files {
+            std::fs::remove_file(self.root.join(&item.path)).map_err(PumasError::from)?;
+        }
+        for directory in &self.directories {
+            // Remove only the recorded, now-empty directories; never recurse
+            // through a package tree that may already contain selected bytes.
+            std::fs::remove_dir(self.root.join(directory)).map_err(PumasError::from)?;
+        }
+        if std::fs::read_dir(&self.root)
+            .map_err(PumasError::from)?
+            .next()
+            .is_some()
+        {
+            return Err(failed("Venv bootstrap package root is not empty"));
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn move_verified_packages(
+    target: &Path,
+    runtime: &Path,
+    python_minor: &str,
+) -> Result<()> {
+    let packages = venv_packages_dir(runtime, python_minor);
     std::fs::create_dir_all(&packages).map_err(PumasError::from)?;
     let entries = std::fs::read_dir(target)
         .map_err(PumasError::from)?
@@ -1766,12 +1961,16 @@ fn validate_and_move_direct_torch_packages(
     requirements: &str,
     selection: &DirectTorchSelection<'_>,
     target: &Path,
-    runtime: &Path,
+    bootstrap: &BootstrapPackages,
     manifest: &StagedFilesManifest,
 ) -> Result<()> {
     validate_direct_torch_report(resolution, report, requirements, selection)?;
     validate_staged_files(target, manifest)?;
-    move_verified_packages(target, runtime, selection.minor)
+    if bootstrap.root != venv_packages_dir(&bootstrap.runtime, selection.minor) {
+        return Err(failed("Venv bootstrap does not match selected Python"));
+    }
+    bootstrap.remove()?;
+    move_verified_packages(target, &bootstrap.runtime, selection.minor)
 }
 
 impl VersionInstaller {
@@ -1809,10 +2008,15 @@ impl VersionInstaller {
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<PathBuf> {
-        if selection.adapter != "none" && selection.adapter != "flux2" {
+        if !["none", "flux2", "cohere-asr"].contains(&selection.adapter.as_str()) {
             return Err(failed(
                 "This Torch dependency profile requires a resolved plan",
             ));
+        }
+        if selection.adapter == "cohere-asr" {
+            super::super::cohere_asr_profile::validate_selection(
+                selection.tag.trim_start_matches('v'),
+            )?;
         }
         let builds: Vec<String> = if selection.build == "auto" {
             automatic_torch_builds()
@@ -1926,7 +2130,9 @@ impl VersionInstaller {
         std::fs::remove_file(runtime.join("requirements.txt")).map_err(PumasError::from)?;
         std::fs::remove_file(runtime.join("validate_runtime.py")).map_err(PumasError::from)?;
         let mut venv = Command::new(&managed_python.executable);
-        venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
+        venv.args(["-I", "-B", "-m", "venv"])
+            .arg(runtime.join("venv"))
+            .env("PYTHONDONTWRITEBYTECODE", "1");
         self.run_runtime_command(
             venv,
             log_path,
@@ -1936,6 +2142,7 @@ impl VersionInstaller {
         )
         .await?;
 
+        let bootstrap = BootstrapPackages::capture(&runtime, minor)?;
         let version = selection
             .tag
             .strip_prefix('v')
@@ -1947,7 +2154,7 @@ impl VersionInstaller {
         let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
         let mut install = Command::new(&python);
         install
-            .arg("-I")
+            .args(["-I", "-B"])
             .arg(runtime.join("resolve_runtime.py"))
             .args(["--install", "--version", version, "--build", build])
             .args(["--adapter", &selection.adapter])
@@ -2013,7 +2220,7 @@ impl VersionInstaller {
                 python: &python,
             },
             &packages,
-            &runtime,
+            &bootstrap,
             &manifest,
         )?;
         for name in [
@@ -2028,7 +2235,7 @@ impl VersionInstaller {
         let recipe = serde_json::json!({
             "recipe_id": format!("upstream-install-{}-{}-{}-{}", selection.tag, build, minor, selection.adapter),
             "protocol": SUPPORTED_TORCH_PROTOCOL,
-            "capabilities": [TORCH_IMAGE_GENERATION_CAPABILITY],
+            "capabilities": if selection.adapter == "cohere-asr" { Vec::<&str>::new() } else { vec![TORCH_IMAGE_GENERATION_CAPABILITY] },
             "qualification": "not verified by Pumas",
             "build": build,
             "python": format!("python{minor}"),
@@ -2041,8 +2248,7 @@ impl VersionInstaller {
             serde_json::to_vec_pretty(&recipe).map_err(|error| failed(error.to_string()))?,
         )
         .map_err(PumasError::from)?;
-        let mut probe = Command::new(&python);
-        probe.arg(runtime.join("probe_runtime.py"));
+        let probe = runtime_check_command(&python, &runtime.join("probe_runtime.py"));
         self.run_runtime_command(
             probe,
             log_path,
@@ -2061,6 +2267,14 @@ impl VersionInstaller {
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<PathBuf> {
+        // The legacy retained-plan installer does not produce the staged RECORD
+        // manifest required by the ASR byte owner. Public Ready selections use
+        // the direct installer, which validates and publishes that manifest.
+        if plan.preview.adapter == "cohere-asr" {
+            return Err(failed(
+                "cohere-asr requires the public direct installation selection",
+            ));
+        }
         let runtime = staging.path().join("runtime");
         let runtime_for_write = runtime.clone();
         spawn_blocking_with_stage(staging.clone(), move || {
@@ -2081,7 +2295,9 @@ impl VersionInstaller {
         }
         let interpreter = &plan.interpreter_path;
         let mut venv = Command::new(interpreter);
-        venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
+        venv.args(["-I", "-B", "-m", "venv"])
+            .arg(runtime.join("venv"))
+            .env("PYTHONDONTWRITEBYTECODE", "1");
         self.run_runtime_command(
             venv,
             log_path,
@@ -2099,7 +2315,7 @@ impl VersionInstaller {
         let recipe = serde_json::json!({
             "recipe_id": format!("upstream-preview-{}-{}-{}-{}", plan.preview.tag, plan.preview.build, plan.preview.python, plan.preview.adapter),
             "protocol": SUPPORTED_TORCH_PROTOCOL,
-            "capabilities": [TORCH_IMAGE_GENERATION_CAPABILITY],
+            "capabilities": if plan.preview.adapter == "cohere-asr" { Vec::<&str>::new() } else { vec![TORCH_IMAGE_GENERATION_CAPABILITY] },
             "qualification": "not verified by Pumas",
             "build": plan.preview.build,
             "python": plan.preview.python,
@@ -2117,7 +2333,7 @@ impl VersionInstaller {
         let download_progress_path = runtime.join("download-progress.json");
         let mut install = Command::new(&python);
         install
-            .arg("-I")
+            .args(["-I", "-B"])
             .arg(runtime.join("resolve_runtime.py"))
             .arg("--_pumas-pip-progress-worker")
             .arg(&download_progress_path)
@@ -2148,8 +2364,7 @@ impl VersionInstaller {
                 "Installing resolved wheel artifacts failed; see installation log",
             ));
         }
-        let mut probe = Command::new(&python);
-        probe.arg(runtime.join("probe_runtime.py"));
+        let probe = runtime_check_command(&python, &runtime.join("probe_runtime.py"));
         self.run_runtime_command(
             probe,
             log_path,
@@ -2502,6 +2717,7 @@ impl VersionInstaller {
         let mut python_check = Command::new(interpreter);
         python_check.args([
             "-I",
+            "-B",
             "-c",
             "import sys; assert sys.version_info[:2] == (3,12)",
         ]);
@@ -2514,7 +2730,9 @@ impl VersionInstaller {
         )
         .await?;
         let mut venv = Command::new(interpreter);
-        venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
+        venv.args(["-I", "-B", "-m", "venv"])
+            .arg(runtime.join("venv"))
+            .env("PYTHONDONTWRITEBYTECODE", "1");
         self.run_runtime_command(
             venv,
             log_path,
@@ -2528,7 +2746,7 @@ impl VersionInstaller {
         let download_progress_path = runtime.join("download-progress.json");
         let mut install = Command::new(&python);
         install
-            .arg("-I")
+            .args(["-I", "-B"])
             .arg(runtime.join("resolve_runtime.py"))
             .arg("--_pumas-pip-progress-worker")
             .arg(&download_progress_path)
@@ -2558,9 +2776,8 @@ impl VersionInstaller {
                 "Installing locked runtime dependencies failed; see installation log",
             ));
         }
-        let mut validate = Command::new(&python);
+        let mut validate = runtime_check_command(&python, &runtime.join("validate_runtime.py"));
         validate
-            .arg(runtime.join("validate_runtime.py"))
             .current_dir(&runtime)
             .env("HF_HUB_OFFLINE", "1")
             .env("PYTHONNOUSERSITE", "1");
@@ -2585,8 +2802,7 @@ impl VersionInstaller {
             serde_json::to_vec_pretty(&resolution).map_err(|e| failed(e.to_string()))?,
         )
         .map_err(PumasError::from)?;
-        let mut probe = Command::new(&python);
-        probe.arg(runtime.join("probe_runtime.py"));
+        let probe = runtime_check_command(&python, &runtime.join("probe_runtime.py"));
         self.run_runtime_command(
             probe,
             log_path,
@@ -3008,6 +3224,8 @@ mod managed_python_provenance_tests {
                 size: contents.len() as u64,
             }],
         };
+        std::fs::create_dir_all(venv_packages_dir(&runtime, "3.12")).unwrap();
+        let bootstrap = BootstrapPackages::capture(&runtime, "3.12").unwrap();
         let publish = |lock: &str| {
             validate_and_move_direct_torch_packages(
                 &resolution,
@@ -3015,7 +3233,7 @@ mod managed_python_provenance_tests {
                 lock,
                 &selection,
                 &target,
-                &runtime,
+                &bootstrap,
                 &manifest,
             )
         };
@@ -3032,6 +3250,189 @@ mod managed_python_provenance_tests {
         std::fs::remove_file(target.join("unreported.pth")).unwrap();
         publish(&requirements).unwrap();
         assert!(installed.exists());
+        assert!(!target.exists());
+    }
+
+    #[tokio::test]
+    async fn cohere_asr_legacy_plan_refuses_before_staging_or_provisioning() {
+        let root = tempfile::tempdir().unwrap();
+        let metadata = Arc::new(MetadataManager::new(root.path()));
+        metadata.ensure_directories().unwrap();
+        let tracker = Arc::new(RwLock::new(InstallationProgressTracker::new(
+            root.path().join("launcher-data/cache"),
+        )));
+        let installer = VersionInstaller::new(
+            root.path().to_owned(),
+            AppId::Torch,
+            metadata,
+            tracker,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let versions = installer.versions_dir();
+        std::fs::create_dir_all(&versions).unwrap();
+        let stage = Arc::new(
+            TorchPendingStage::new(
+                &versions,
+                "v2.10.0",
+                TorchVersionsLock::try_acquire(&versions).unwrap(),
+            )
+            .unwrap(),
+        );
+        let nonexistent = root.path().join("must-not-open-or-run-python");
+        let plan=super::TorchInstallPlan {
+            preview:crate::version_manager::TorchPreview { preview_id:"legacy".into(),tag:"v2.10.0".into(),build:"cpu".into(),python:"python3.12".into(),adapter:"cohere-asr".into(),artifacts:Vec::new(),qualification:"unverified".into(),expires_in_seconds:1800 },
+            requirements:String::new(),resolution:String::new(),report:String::new(),interpreter_path:nonexistent.clone(),interpreter_hash:String::new(),
+            managed_python:crate::version_manager::managed_python::ManagedPythonIdentity { python:"python3.12".into(),version:"3.12.0".into(),catalog_key:"inert".into(),source_url:"https://github.com/astral-sh/python-build-standalone/releases/download/inert/python.tar.zst".into(),target_triple:"x86_64-unknown-linux-gnu".into(),uv_version:"0.12.19".into(),uv_archive_sha256:"a".repeat(64),executable:nonexistent.clone() },
+        };
+        let log = root.path().join("must-not-create.log");
+        let (tx, mut rx) = mpsc::channel(8);
+        let before = std::fs::read_dir(stage.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        let error = installer
+            .stage_resolved_torch_runtime(&plan, &stage, &log, &tx)
+            .await
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("public direct installation selection"));
+        let after = std::fs::read_dir(stage.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(before, after);
+        assert!(!stage.path().join("runtime").exists());
+        assert!(!log.exists());
+        assert!(!nonexistent.exists());
+        assert!(!root.path().join("launcher-data/managed-python").exists());
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cohere_asr_direct_report_refuses_bad_profile_before_staged_publication() {
+        let names = [
+            "torch",
+            "fastapi",
+            "uvicorn",
+            "psutil",
+            "pillow",
+            "safetensors",
+            "transformers",
+            "accelerate",
+            "huggingface-hub",
+            "tokenizers",
+            "librosa",
+            "soxr",
+            "soundfile",
+            "sentencepiece",
+            "protobuf",
+            "numpy",
+            "scipy",
+            "numba",
+            "llvmlite",
+        ];
+        let mut resolution = DirectTorchResolution {
+            release: "2.14.0".into(),
+            torch: "2.14.0+cpu".into(),
+            build: "cpu".into(),
+            python: "3.12".into(),
+            interpreter: "/fixture/python".into(),
+            implementation: "cpython".into(),
+            platform: "Linux-fixture".into(),
+            machine: "x86_64".into(),
+            adapter: "cohere-asr".into(),
+            artifacts: names
+                .iter()
+                .map(|name| crate::version_manager::TorchArtifact {
+                    name: (*name).into(),
+                    version: match *name {
+                        "torch" => "2.14.0+cpu",
+                        "transformers" => "5.4.0",
+                        "accelerate" => "1.12.0",
+                        "huggingface-hub" => "1.5.0",
+                        "tokenizers" => "0.22.2",
+                        _ => "1.0.0",
+                    }
+                    .into(),
+                    url: if *name == "torch" {
+                        "https://download.pytorch.org/whl/cpu/torch/torch-fixture.whl".into()
+                    } else {
+                        format!("https://files.pythonhosted.org/packages/{name}-fixture.whl")
+                    },
+                    sha256: "a".repeat(64),
+                })
+                .collect(),
+        };
+        let selection = DirectTorchSelection {
+            version: "2.14.0",
+            build: "cpu",
+            minor: "3.12",
+            adapter: "cohere-asr",
+            python: Path::new("/fixture/python"),
+        };
+        let records = |resolution: &DirectTorchResolution| {
+            let report = serde_json::json!({"install":resolution.artifacts.iter().map(|a| serde_json::json!({"metadata":{"name":a.name,"version":a.version},"download_info":{"url":a.url,"archive_info":{"hashes":{"sha256":a.sha256}}}})).collect::<Vec<_>>()});
+            let lock = resolution
+                .artifacts
+                .iter()
+                .map(|a| format!("{} @ {} --hash=sha256:{}", a.name, a.url, a.sha256))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (report, lock)
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = directory.path().join("runtime");
+        let target = runtime.join("staged-packages");
+        std::fs::create_dir_all(&target).unwrap();
+        let bytes = b"controlled inert wheel member";
+        std::fs::write(target.join("selected.py"), bytes).unwrap();
+        let manifest = StagedFilesManifest {
+            files: vec![StagedFile {
+                path: "selected.py".into(),
+                sha256: format!("{:x}", Sha256::digest(bytes)),
+                size: bytes.len() as u64,
+            }],
+        };
+        let index = resolution
+            .artifacts
+            .iter()
+            .position(|a| a.name == "transformers")
+            .unwrap();
+        std::fs::create_dir_all(venv_packages_dir(&runtime, "3.12")).unwrap();
+        let bootstrap = BootstrapPackages::capture(&runtime, "3.12").unwrap();
+        for wrong in ["4.57.6", "5.4.1"] {
+            resolution.artifacts[index].version = wrong.into();
+            let (report, lock) = records(&resolution);
+            assert!(validate_and_move_direct_torch_packages(
+                &resolution,
+                &report,
+                &lock,
+                &selection,
+                &target,
+                &bootstrap,
+                &manifest
+            )
+            .is_err());
+            assert!(target.join("selected.py").exists());
+            assert!(std::fs::read_dir(&bootstrap.root).unwrap().next().is_none());
+        }
+        resolution.artifacts[index].version = "5.4.0".into();
+        let (report, lock) = records(&resolution);
+        validate_and_move_direct_torch_packages(
+            &resolution,
+            &report,
+            &lock,
+            &selection,
+            &target,
+            &bootstrap,
+            &manifest,
+        )
+        .unwrap();
+        assert!(runtime
+            .join("venv/lib/python3.12/site-packages/selected.py")
+            .exists());
         assert!(!target.exists());
     }
 
@@ -3098,6 +3499,60 @@ mod managed_python_provenance_tests {
             "trusted staged wheel"
         );
         assert!(!target.exists());
+    }
+
+    #[test]
+    fn bootstrap_cleanup_refuses_namespace_or_byte_changes_before_removal() {
+        for mutation in ["extra", "bytecode", "changed", "missing", "directory"] {
+            let root = tempfile::tempdir().unwrap();
+            let runtime = root.path().join("runtime");
+            let packages = venv_packages_dir(&runtime, "3.12");
+            std::fs::create_dir_all(packages.join("pip")).unwrap();
+            std::fs::write(packages.join("pip/__init__.py"), b"bootstrap").unwrap();
+            std::fs::write(packages.join("pip/retained.py"), b"must survive refusal").unwrap();
+            let bootstrap = BootstrapPackages::capture(&runtime, "3.12").unwrap();
+            match mutation {
+                "extra" => std::fs::write(packages.join("unexpected.py"), b"unreported").unwrap(),
+                "bytecode" => {
+                    std::fs::write(packages.join("pip/new.pyc"), b"unreported cache").unwrap()
+                }
+                "changed" => {
+                    std::fs::write(packages.join("pip/__init__.py"), b"different").unwrap()
+                }
+                "missing" => std::fs::remove_file(packages.join("pip/__init__.py")).unwrap(),
+                _ => std::fs::create_dir(packages.join("unexpected-empty")).unwrap(),
+            }
+            assert!(bootstrap.remove().is_err(), "{mutation}");
+            assert_eq!(
+                std::fs::read(packages.join("pip/retained.py")).unwrap(),
+                b"must survive refusal"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_cleanup_refuses_linked_files_and_rebound_package_roots() {
+        for root_alias in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let runtime = root.path().join("runtime");
+            let packages = venv_packages_dir(&runtime, "3.12");
+            std::fs::create_dir_all(packages.join("pip")).unwrap();
+            std::fs::write(packages.join("pip/__init__.py"), b"bootstrap").unwrap();
+            let bootstrap = BootstrapPackages::capture(&runtime, "3.12").unwrap();
+            if root_alias {
+                let retained = root.path().join("retained-packages");
+                std::fs::rename(&packages, &retained).unwrap();
+                std::os::unix::fs::symlink(&retained, &packages).unwrap();
+            } else {
+                std::fs::write(packages.join("pip/retained.py"), b"bootstrap").unwrap();
+                std::fs::remove_file(packages.join("pip/__init__.py")).unwrap();
+                std::os::unix::fs::symlink("retained.py", packages.join("pip/__init__.py"))
+                    .unwrap();
+            }
+            assert!(bootstrap.remove().is_err());
+            assert!(packages.join("pip/__init__.py").exists());
+        }
     }
 
     #[tokio::test]

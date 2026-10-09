@@ -790,12 +790,38 @@ async fn dropping_or_timing_out_stalled_listing_drains_the_connection() {
         } else {
             Duration::from_millis(100)
         };
+        let operation_timeout = config.operation_timeout;
         let reader = S3Reader::new(config).unwrap();
+        // Establish the unfinished response before advancing the deadline.
+        // Wall-clock scheduling under a parallel suite must not consume the
+        // operation's 100 ms budget before the fixture can observe its stall.
+        tokio::time::pause();
+        let setup_started = std::time::Instant::now();
         let mut operation = Box::pin(reader.enumerate_prefix("models", limits()));
-        tokio::select! { _=&mut waiting=>{},result=&mut operation=>panic!("listing returned before the controlled stall: {result:?}") }
+        loop {
+            tokio::select! {
+                biased;
+                ready = &mut waiting => {
+                    ready.expect("source must establish the controlled stall");
+                    break;
+                }
+                result = &mut operation => {
+                    panic!("listing returned before the controlled stall: {result:?}");
+                }
+                // Keep a runnable task while real loopback I/O progresses so
+                // the paused clock cannot auto-advance to the operation timer.
+                () = tokio::task::yield_now() => {}
+            }
+            assert!(
+                setup_started.elapsed() < Duration::from_secs(5),
+                "source did not establish the controlled stall"
+            );
+        }
+        assert!(futures::poll!(&mut operation).is_pending());
         if cancel {
             drop(operation);
         } else {
+            tokio::time::advance(operation_timeout).await;
             // The existing reqwest budget can expire before the outer Tokio
             // budget. Its contained connector error is deliberately static;
             // do not invent a new provider error or retry classification.
@@ -808,6 +834,7 @@ async fn dropping_or_timing_out_stalled_listing_drains_the_connection() {
                 ))
             ));
         }
+        tokio::time::resume();
         tokio::time::timeout(Duration::from_secs(5), source)
             .await
             .unwrap()

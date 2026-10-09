@@ -15,12 +15,14 @@ use super::{
 };
 
 mod conditional;
+mod conditional_manifest;
 #[cfg(test)]
 mod conditional_tests;
 mod list_xml;
 mod manifest;
 mod prefix;
 mod sdk;
+pub use conditional_manifest::S3ConditionalManifestEntry;
 pub use manifest::{S3ManifestEntry, S3ManifestSelection};
 pub use prefix::{S3PrefixError, S3PrefixLimits, S3PrefixListing, S3PrefixObject};
 

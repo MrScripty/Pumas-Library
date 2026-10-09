@@ -1778,6 +1778,32 @@ impl AcquisitionConsumer {
         }).await
     }
 
+    /// Resolve an entire authored conditional set under one cancellable task owner.
+    /// A failed member yields no partial selection or durable transfer admission.
+    #[cfg(feature = "s3")]
+    pub(crate) async fn resolve_s3_conditional_manifest(
+        &self,
+        reader: super::S3Reader,
+        entries: Vec<super::S3ConditionalManifestEntry>,
+        demand: &AcquisitionDemand,
+        retry: &AcquisitionRetryPolicy,
+        host: Box<dyn AcquisitionHost>,
+    ) -> Result<std::result::Result<super::S3ManifestSelection, super::S3ReaderError>> {
+        self.require_s3_transfer(demand, retry)?;
+        self.scope.run_worker_invocation(move |_| async move {
+            if host.cancel_requested() {
+                return Err(PumasError::DownloadCancelled);
+            }
+            tokio::select! {
+                biased;
+                _ = host.pause_requested() => {
+                    Err(if host.cancel_requested() { PumasError::DownloadCancelled } else { PumasError::DownloadPaused })
+                }
+                selection = reader.select_conditional_manifest(entries) => Ok(selection),
+            }
+        }).await
+    }
+
     pub fn owner(&self) -> &str {
         &self.owner
     }
@@ -2044,7 +2070,7 @@ impl AcquisitionConsumer {
         .await
     }
 
-    /// Acquire a complete explicit set (version-pinned or a conditional single object) through the same store,
+    /// Acquire an exact versioned or conditional set through the same store,
     /// writer, verified-file handoff and consumer receipt/settlement protocol.
     /// Retry attempts and elapsed budgets apply per object; no complete-set
     /// hard wall-clock or atomic remote-prefix snapshot is promised.

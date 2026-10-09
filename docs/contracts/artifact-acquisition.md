@@ -110,6 +110,29 @@ RFC authority: [HTTP Semantics, RFC 9110](https://www.rfc-editor.org/rfc/rfc9110
 
 Source configuration includes endpoint, region where applicable, bucket, addressing style, TLS/approved local-development policy, and explicit credential-provider identity. Preserve object version IDs and conditional reads. Treat ETag as an opaque source validator unless its specific documented checksum semantics are established. A multipart or encrypted-object ETag must not be relabeled SHA-256/MD5 evidence.
 
+The native model facade has two explicit selection contracts. Existing
+`PumasApi::import_s3_model(S3ModelImportRequest, control)` requires VersionIds for
+every declared member. `PumasApi::import_s3_conditional_model` accepts a
+`S3ConditionalModelImportRequest` for one ordinary non-versioned object: caller
+endpoint/bucket authority, exact `source_key`, mandatory `Sha256Evidence`, the
+logical file path in `import.path`, held `AcquisitionWorkspace`, finite retry
+policy and the existing operation UUID/control. It requires HEAD size and a
+strong quoted HTTP ETag (rejecting the `W/` weak-validator prefix), and sends
+If-Match on every fresh GET. `RevisionStrength::Weak` classifies mutable source
+provenance; it does not permit HTTP weak validators. ETag and size are not content
+integrity evidence: the required whole-file SHA-256 must match before verified
+handoff or receipt issuance. Selection, cancellation, byte verification, descriptor custody and
+receipt-bound model publication use the existing owners. Downloaded bytes still
+need shared model qualification; malformed, unsafe, unknown or incomplete packages
+are refused. Qualification does not establish backend compatibility or inference.
+
+Conditional mode is single-object only. It cannot select bundles, hydrate a
+prefix, discover or substitute a VersionId, or supply missing package companions.
+Existing versioned manifests/discovery and RPC requests retain their mandatory
+VersionId contract. No conditional RPC/UI is exposed by this native API slice.
+See the [conditional-read contract](../plans/artifact-acquisition/reports/s3-conditional-read-contract-2026-10-09.md)
+for response, empty-object and recovery requirements.
+
 The optional S3 reader retains `S3ReaderConfig` and anonymous `S3Reader::new`.
 `S3Reader::new_authenticated(config, S3Credentials)` consumes explicitly supplied
 access-key ID, secret and optional session token for a bounded acquisition.

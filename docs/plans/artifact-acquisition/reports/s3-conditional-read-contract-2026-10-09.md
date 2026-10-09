@@ -3,8 +3,9 @@
 `S3Reader::select_conditional(key, logical_path, expected_sha256)` adds an opt-in
 single-object acquisition capability for ordinary general-purpose buckets.
 S3 carries arbitrary bytes. This selection establishes neither model-package
-qualification nor backend compatibility. The public VersionId model facade,
+qualification nor backend compatibility. The existing VersionId model facade,
 explicit version-pinned manifests and prefix discovery keep their existing contract.
+The additive native conditional model facade is described below.
 
 The caller supplies endpoint/bucket authority and a SHA-256 from its selected
 artifact declaration. Credentials remain request-scoped, nonserialized and
@@ -16,7 +17,10 @@ and a strong quoted ETag. Missing or weak validators, malformed metadata, and
 unexpected non-null immutable VersionId fail. An absent VersionId or `null`
 identifies the new conditional mode; neither is admitted through `select`.
 The manifest records **Weak** `s3.conditional_etag_size` revision evidence containing
-the exact observed ETag and size. ETag is opaque representation evidence, never
+the exact observed ETag and size. **Weak** describes mutable provenance, not an
+HTTP weak validator: the `W/` prefix is refused, including by the native model
+facade. A strong HTTP ETag still cannot supply content integrity. ETag is opaque
+representation evidence, never
 a digest or a claim that the source is immutable. The file requires whole-file
 SHA-256 verification through the existing descriptor-owned acquisition lifecycle.
 
@@ -63,9 +67,26 @@ precede these checks; such accounting is not a total wire-traffic proof.
 ## Integration scope
 
 Use the new selection with existing `AcquisitionS3Request` and `acquire_s3` to
-obtain digest-verified arbitrary bytes. A model consumer must subsequently qualify
-the selected format/package through the shared importer and retain existing unsafe
-format/custom-code policies. This slice exposes no non-versioned model RPC,
-conditional bundle resolver, prefix discovery or UI. Those require separate
-contract work. Existing VersionId callers need no source change. No HF, modality,
-runtime ownership, release producer or old cold-reopen fixture file is modified.
+obtain digest-verified arbitrary bytes. For model publication, call the additive
+`PumasApi::import_s3_conditional_model(S3ConditionalModelImportRequest, control)`.
+Its request supplies `source_key`, mandatory `expected_sha256`, the logical file
+path in `import.path`, explicit source/credential authority, UUID, held workspace
+and finite retry policy. It resolves HEAD under the same bounded consumer task
+scope, then uses the existing verified descriptor, receipt and shared importer
+publication path. No empty/fake VersionId or immutable revision is manufactured.
+
+Local loopback native tests qualify actual safetensors and GGUF publication,
+wrong digests, malformed safetensors, unknown bytes, a shard missing its required
+index/package companions, and cancellation before admission, during HEAD and
+after GET headers before body bytes. They establish structural import only, not
+inference. Existing unsafe format/custom-code policies continue to apply; byte transfer grants no execution.
+Publication proof checks the durable Ready index row directly. For the tiny
+safetensors fixture, on-demand public `get_model` lookup returned no row after
+Confirmed/Ready publication; the same result reproduced on exact parent
+`7f540efe65ff194057cd5582da09cd3cdbafc16d`. Its root cause remains unresolved,
+and this slice does not qualify that catalog consumer or fix its reconciliation.
+
+This slice exposes no non-versioned model RPC, conditional bundle resolver,
+prefix discovery or UI. Existing VersionId callers need no source change.
+No HF, modality, runtime ownership, release producer or old cold-reopen fixture
+file is modified.

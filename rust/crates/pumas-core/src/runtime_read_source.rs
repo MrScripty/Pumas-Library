@@ -16,6 +16,11 @@ use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+/// Source-fixed candidate bytes. Public metadata is not execution authority;
+/// actual retained byte selections must match and be revalidated independently.
+pub const AUDIO_RUNTIME_CANDIDATE_RECIPE: &str =
+    include_str!("runtime_read_source/audio_candidate_recipe.json");
+
 const MAX_MEMBERS: usize = 200_000;
 const MAX_NAME: usize = 1024;
 
@@ -419,7 +424,9 @@ fn namespace(root: &Dir, exclusions: &BTreeSet<String>) -> io::Result<Namespace>
                     Excluded {
                         identity: cap_identity(&metadata)?,
                         link: if metadata.is_symlink() {
-                            Some(directory.read_link(&name)?)
+                            // Record literal link contents without resolving an
+                            // already-excluded alias or granting target reads.
+                            Some(directory.read_link_contents(&name)?)
                         } else {
                             None
                         },
@@ -510,3 +517,76 @@ fn refusal(message: &str) -> io::Error {
 #[cfg(all(test, target_os = "linux"))]
 #[path = "runtime_read_source/tests.rs"]
 mod tests;
+
+#[cfg(all(
+    feature = "test-support",
+    target_os = "linux",
+    target_arch = "x86_64",
+    target_pointer_width = "64"
+))]
+#[path = "runtime_read_source/dependency_probe.rs"]
+mod dependency_probe;
+
+/// Explicit fixed, non-model qualification only. This cannot register an audio
+/// endpoint or alter the shipping policy. Unsupported hosts refuse before spawn.
+#[cfg(feature = "test-support")]
+pub async fn qualify_audio_dependency_reads(
+    source: Arc<RetainedRuntimeReadSource>,
+) -> io::Result<serde_json::Value> {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    {
+        dependency_probe::run(source).await
+    }
+    #[cfg(not(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    )))]
+    {
+        let _ = source;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "audio dependency qualification requires Linux x86_64",
+        ))
+    }
+}
+
+/// Read-only host preflight for the explicit dependency qualification driver.
+#[cfg(feature = "test-support")]
+pub fn audio_dependency_qualification_host_preflight() -> io::Result<()> {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    {
+        crate::platform::audio_read_boundary::AudioReadBoundary::supported_abi().map(|_| ())
+    }
+    #[cfg(not(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    )))]
+    {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "audio dependency qualification requires Linux x86_64",
+        ))
+    }
+}
+
+#[path = "runtime_read_source/candidate_recipe.rs"]
+mod candidate_recipe;
+
+/// Check one retained role against source-fixed recipe bytes. This comparison
+/// is never production admission. Relocated CPython source remains byte-held.
+pub fn validate_audio_candidate_read_role(
+    source: &RetainedRuntimeReadSource,
+    role: RuntimeReadRole,
+) -> io::Result<()> {
+    candidate_recipe::validate(source, role)
+}

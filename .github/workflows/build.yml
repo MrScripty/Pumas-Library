@@ -261,6 +261,14 @@ jobs:
           python scripts/release/headless_inference_ci.py --target linux-x86_64 --runtime-dir "${{ runner.temp }}/review-ort" --output-dir "${{ runner.temp }}/review-inference-candidate" --build-id "review-ci-${{ github.run_id }}-${{ github.run_attempt }}"
       - name: Verify required review inference archive
         run: node scripts/release/check-artifacts.mjs "${{ runner.temp }}/review-inference-candidate" headless-inference-linux
+      - name: Verify extracted Pumas with an untrained synthetic ONNX graph
+        timeout-minutes: 3
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/release/verify_synthetic_packaged_onnx.py --candidate-dir "${{ runner.temp }}/review-inference-candidate" --expected-source "$EXPECTED_SOURCE_SHA"
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: review-inference-linux-x86_64
@@ -279,6 +287,57 @@ jobs:
             ${{ runner.temp }}/review-inference-candidate/*.log
             ${{ runner.temp }}/review-inference-candidate/*.sha256
             ${{ runner.temp }}/review-native-loader.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  review-audio-dependencies:
+    name: Review confined audio dependencies
+    needs: lint-workflows
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: '1'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: review-audio-dependencies-linux
+      - name: Qualify exact frozen dependencies under required confinement
+        timeout-minutes: 50
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVIDENCE_DIR: ${{ runner.temp }}/review-audio-evidence
+          QUALIFICATION_ROOT: ${{ runner.temp }}/review-audio-runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          mkdir -p "$EVIDENCE_DIR"
+          python -c 'import json, os, subprocess; print(json.dumps({"head": os.environ["EXPECTED_SOURCE_SHA"], "tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "scope": "confined dependencies only", "pretrained_model_acceptance": False}))' > "$EVIDENCE_DIR/source.json"
+          timeout --kill-after=30s 45m cargo run --locked --manifest-path rust/Cargo.toml -p pumas-app-manager --features test-support --example qualify_audio_dependencies -- "$QUALIFICATION_ROOT" 2>&1 | tee "$EVIDENCE_DIR/probe.log"
+          test -s "$QUALIFICATION_ROOT/audio-confined-dependency-probe.json"
+          cp "$QUALIFICATION_ROOT/audio-confined-dependency-probe.json" "$EVIDENCE_DIR/"
+      - name: Preserve confined dependency evidence only
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: review-audio-dependency-evidence-linux
+          path: |
+            ${{ runner.temp }}/review-audio-evidence/source.json
+            ${{ runner.temp }}/review-audio-evidence/probe.log
+            ${{ runner.temp }}/review-audio-evidence/audio-confined-dependency-probe.json
           if-no-files-found: ignore
           retention-days: 7
 

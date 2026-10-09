@@ -336,3 +336,170 @@ fn inert_bytecode_and_site_hook_names_are_source_fixed_and_unselected() {
         .clone_member(RuntimeReadRole::Interpreter, "lib/python3.12/cached.pyc")
         .is_err());
 }
+
+#[test]
+fn only_exact_generated_entrypoints_and_records_are_inert_dependencies() {
+    assert!(inert_dependency_member("bin/torchrun"));
+    assert!(inert_dependency_member("torch-2.10.0+cpu.dist-info/RECORD"));
+    for name in [
+        "bin/custom.py",
+        "torch/bin/FileStoreTest",
+        "torch-2.10.0+cpu.dist-info/METADATA",
+        "other.dist-info/RECORD",
+        "nested/bin/torchrun",
+    ] {
+        assert!(!inert_dependency_member(name), "{name}");
+    }
+    let installed = Installed::new();
+    for name in [
+        "bin/torchrun",
+        "torch-2.10.0+cpu.dist-info/RECORD",
+        "torch-2.10.0+cpu.dist-info/METADATA",
+    ] {
+        let path = installed.packages.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"fixture metadata or entrypoint").unwrap();
+    }
+    let (files, _) = tree_manifest(&installed.packages, &[], false).unwrap();
+    let files = files.iter().map(|file| serde_json::json!({"path":file.path(), "size":file.size(), "sha256":file.sha256()})).collect::<Vec<_>>();
+    std::fs::write(
+        installed.runtime.join("installed-files.json"),
+        serde_json::to_vec(&serde_json::json!({"files":files})).unwrap(),
+    )
+    .unwrap();
+    let retained = installed.capture().unwrap();
+    assert!(retained
+        .clone_member(RuntimeReadRole::Dependencies, "bin/torchrun")
+        .is_err());
+    assert!(retained
+        .clone_member(
+            RuntimeReadRole::Dependencies,
+            "torch-2.10.0+cpu.dist-info/RECORD"
+        )
+        .is_err());
+    assert!(retained
+        .clone_member(
+            RuntimeReadRole::Dependencies,
+            "torch-2.10.0+cpu.dist-info/METADATA"
+        )
+        .is_ok());
+    let script = installed.packages.join("bin/torchrun");
+    std::fs::rename(&script, script.with_extension("old")).unwrap();
+    std::fs::write(&script, b"fixture metadata or entrypoint").unwrap();
+    assert!(retained.validate().is_err());
+}
+
+#[test]
+#[ignore = "requires two independently installed exact official managed runtimes; no execution"]
+fn independently_installed_roots_match_fixed_candidate_selections() {
+    let roots: Vec<PathBuf> = serde_json::from_str(
+        &std::env::var("PUMAS_AUDIO_RECIPE_ROOTS")
+            .expect("two explicit installation roots required"),
+    )
+    .unwrap();
+    assert_eq!(roots.len(), 2);
+    for launcher in roots {
+        let runtime = launcher.join("torch-versions/v2.10.0");
+        let recipe: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(runtime.join("runtime.json")).unwrap()).unwrap();
+        let executable = PathBuf::from(
+            recipe["managed_python"]["executable"]["path"]
+                .as_str()
+                .unwrap(),
+        );
+        let depot = executable
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        assert!(depot.starts_with(&launcher));
+        let lease = Arc::new(ManagedDepotLease::read(depot).unwrap());
+        let (files, omissions) = tree_manifest(depot, &[], true).unwrap();
+        let interpreter = RuntimeReadRoot::new(
+            RuntimeReadRole::Interpreter,
+            strict_directory(depot).unwrap(),
+            files,
+            omissions,
+            lease,
+        )
+        .unwrap();
+        let packages = runtime.join("venv/lib/python3.12/site-packages");
+        let installed: StagedFilesManifest =
+            serde_json::from_slice(&std::fs::read(runtime.join("installed-files.json")).unwrap())
+                .unwrap();
+        installer::validate_staged_files(&packages, &installed).unwrap();
+        let omissions = installed
+            .files
+            .iter()
+            .filter(|file| inert_dependency_member(&file.path))
+            .map(|file| file.path.clone())
+            .collect();
+        let files = installed
+            .files
+            .into_iter()
+            .filter(|file| !inert_dependency_member(&file.path))
+            .map(|file| RuntimeReadFile::new(file.path, file.size, file.sha256).unwrap())
+            .collect();
+        let lock =
+            Arc::new(TorchVersionsLock::try_acquire_read(runtime.parent().unwrap()).unwrap());
+        let dependencies = RuntimeReadRoot::new(
+            RuntimeReadRole::Dependencies,
+            strict_directory(&packages).unwrap(),
+            files,
+            omissions,
+            lock,
+        )
+        .unwrap();
+        let retained = RetainedRuntimeReadSource::capture(vec![interpreter, dependencies]).unwrap();
+        super::super::audio_runtime_recipe::validate(&recipe, &retained).unwrap();
+        // Parse each actual relocated field as a double-quoted JSON string,
+        // without executing sysconfig source. All 27 substitutions must occur
+        // inside those fixed string values, never Python expression positions.
+        let pin: serde_json::Value = serde_json::from_str(
+            pumas_library::runtime_read_source::AUDIO_RUNTIME_CANDIDATE_RECIPE,
+        )
+        .unwrap();
+        let relocation = &pin["interpreter_relocation"];
+        let prefix = depot
+            .join(relocation["distribution"].as_str().unwrap())
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let mut text = String::new();
+        retained
+            .clone_member(
+                RuntimeReadRole::Interpreter,
+                relocation["member"].as_str().unwrap(),
+            )
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        let mut occurrences = 0;
+        for line in text.lines().filter(|line| line.contains(&prefix)) {
+            let value = line.split_once(": ").unwrap().1.trim_end_matches(',');
+            let string: String = serde_json::from_str(value).unwrap();
+            occurrences += string.matches(&prefix).count();
+        }
+        assert_eq!(occurrences, 27);
+        assert_eq!(occurrences, text.matches(&prefix).count());
+        retained.validate().unwrap();
+    }
+}
+
+#[test]
+fn only_fixed_uv_directory_alias_is_identity_retained_without_traversal() {
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("cpython-3.12.14-linux-x86_64-gnu");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(target.join("selected.py"), b"fixed fixture").unwrap();
+    let alias = root.path().join("cpython-3.12-linux-x86_64-gnu");
+    std::os::unix::fs::symlink(&target, &alias).unwrap();
+    let (members, omitted) = tree_manifest(root.path(), &[], true).unwrap();
+    assert_eq!(members.len(), 1);
+    assert_eq!(omitted, ["cpython-3.12-linux-x86_64-gnu"]);
+    assert!(tree_manifest(root.path(), &[], false).is_err());
+    std::os::unix::fs::symlink(&target, root.path().join("caller-alias")).unwrap();
+    assert!(tree_manifest(root.path(), &[], true).is_err());
+}

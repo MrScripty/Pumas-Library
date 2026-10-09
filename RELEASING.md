@@ -151,6 +151,11 @@ Review archives and diagnostic evidence are retained for seven days under
 separate `review-inference-*` artifact names; they cannot satisfy the tag
 matrix's release-candidate inventory. This job grants neither pretrained-model
 acceptance nor Windows/macOS qualification, and publishes no tag or release.
+The Linux review job also imports, loads, executes and unloads a deterministic
+untrained ONNX graph through its own extracted Pumas binary, observes the pinned
+native runtime mapping, and requires graceful shutdown. Its separately labeled
+fixture hashes and lifecycle log are execution evidence, not pretrained Nomic
+acceptance or embedding-quality evidence. No model weights are downloaded.
 The integrated candidate identity is `0.8.0-rc.1`. This source-version preparation
 does not publish a tag or release and does not qualify native model execution.
 The producer requires source version 0.8; older 0.7 sources fail before compilation.
@@ -304,3 +309,9 @@ unsupported bundle generation, locks Cargo resolution, reads the Rust toolchain
 pin once, makes headless execution a separate gate, and rehearses installer
 assembly before tags. Release failures remain visible instead of being converted
 into partial success.
+
+The bounded PR/manual `review-audio-dependencies` job separately requires the
+frozen non-model audio dependency cohort to execute under real Linux confinement.
+Unsupported confinement or recipe mismatch fails the job. Its evidence contains
+the exact source head/tree, probe report and log; installed runtime bytes are not
+uploaded. This dependency probe does not qualify a pretrained ASR model.

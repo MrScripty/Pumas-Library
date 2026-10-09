@@ -157,6 +157,22 @@ fn inert_import_member(path: &str) -> bool {
     })
 }
 
+// Only the 42 observed generated entrypoints and their RECORDs vary with the
+// installer staging path. They are never imports or runtime program inputs.
+// Keep full installer validation and namespace identity, but grant no content
+// read for these exact source-fixed names. All other metadata remains selected.
+fn inert_dependency_member(path: &str) -> bool {
+    static NAMES: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+        let pin: serde_json::Value = serde_json::from_str(
+            pumas_library::runtime_read_source::AUDIO_RUNTIME_CANDIDATE_RECIPE,
+        )
+        .expect("source-fixed audio recipe JSON");
+        serde_json::from_value(pin["dependency_inert_members"].clone())
+            .expect("source-fixed inert dependency names")
+    });
+    inert_import_member(path) || NAMES.iter().any(|name| name == path)
+}
+
 fn tree_manifest(
     root: &Path,
     excluded: &[String],
@@ -195,7 +211,15 @@ fn tree_manifest(
         }
         if entry.file_type().is_symlink() {
             let target = std::fs::canonicalize(entry.path()).map_err(PumasError::from)?;
-            if !aliases || !target.starts_with(root) || !target.is_file() {
+            // UV creates this exact minor-version directory alias alongside
+            // the pinned full distribution. Do not follow it or select bytes
+            // through it; retain the link identity as an omission. Every other
+            // directory alias and every external alias remains refused.
+            let fixed_directory_alias = relative == "cpython-3.12-linux-x86_64-gnu"
+                && target == root.join("cpython-3.12.14-linux-x86_64-gnu")
+                && target.is_dir();
+            if !aliases || !target.starts_with(root) || !(target.is_file() || fixed_directory_alias)
+            {
                 return Err(refused("Unsupported external or directory runtime alias"));
             }
             omissions.push(relative);
@@ -297,13 +321,13 @@ fn capture_installed_with_native(
     let dependency_omissions = installed
         .files
         .iter()
-        .filter(|file| inert_import_member(&file.path))
+        .filter(|file| inert_dependency_member(&file.path))
         .map(|file| file.path.clone())
         .collect::<Vec<_>>();
     let dependencies = installed
         .files
         .into_iter()
-        .filter(|file| !inert_import_member(&file.path))
+        .filter(|file| !inert_dependency_member(&file.path))
         .map(|file| RuntimeReadFile::new(file.path, file.size, file.sha256))
         .collect::<io::Result<Vec<_>>>()
         .map_err(PumasError::from)?;

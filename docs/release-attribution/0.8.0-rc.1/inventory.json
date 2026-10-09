@@ -8278,7 +8278,7 @@
     "pnpm-lock.yaml": "78cac9b50e2f28d293420ffb8b9d57889a723669a3969b3a670dd3e6cbfdda18",
     "rust/Cargo.lock": "4fca97f542f744e2343ae96fe7ce1a3b04526367c2a4240b27f4698a34e4ef77",
     "rust/Cargo.toml": "4b30d577dea5f46bb7eb459a2b66a22b534f9671d561207a0a23749d29872fec",
-    "rust/crates/pumas-app-manager/Cargo.toml": "8d55ad10dc876828f6290f1148a72202d4428906b9705cdddba141028eb1aafe",
+    "rust/crates/pumas-app-manager/Cargo.toml": "f344b89815164c0acc2f6758ad8313a2b8cccba1004354046d542ca5a3d22a73",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "e2e79a8c63500fa060e079edc21484bdc231e1941c6a5ebf65584c3efc95be6f",
     "rust/crates/pumas-core/Cargo.toml": "d4403c6e15b9d2c3540473253835ed51bb2f0f82339141054636602450ad9c55",
     "rust/crates/pumas-rpc/Cargo.toml": "92b67b71767f6f495895c6d35a7c72107cfccc1cb60dedc400dd7f301a3a97f8",

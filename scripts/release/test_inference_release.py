@@ -12,15 +12,84 @@ import sys
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import headless_inference_ci as ci
 import onnx_runtime_stage as stage
 import onnx_runtime_probe as native_probe
 import packaged_onnx_support as support
+import synthetic_onnx_fixture as synthetic
+import verify_synthetic_packaged_onnx as synthetic_check
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_synthetic_fixture_is_deterministic_untrained_and_refuses_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "fixture"
+            record = synthetic.create_fixture(root)
+            self.assertIs(record["pretrained_model_acceptance"], False)
+            self.assertIn("untrained", record["scope"])
+            self.assertEqual(
+                record["files"]["onnx/model_fp16.onnx"]["sha256"],
+                "3639dc4b3eca8394bc178e96f322d90ca76b93999e409b9f173d6c65094791f5",
+            )
+            for name, entry in record["files"].items():
+                self.assertEqual(
+                    hashlib.sha256((root / name).read_bytes()).hexdigest(), entry["sha256"]
+                )
+                self.assertEqual((root / name).stat().st_size, entry["bytes"])
+            with self.assertRaises(FileExistsError):
+                synthetic.create_fixture(root)
+
+    def test_synthetic_receipt_binds_binary_source_and_excludes_pretrained_claims(self):
+        source = "a" * 40
+        evidence = {"source": {"head": source, "tree": "b" * 40}, "archive_sha256": "c" * 64}
+        manifest = {
+            "compatibility": {"expected": {"source_commit": source, "source_tree": "b" * 40}},
+            "files": {"pumas-rpc": {"sha256": "d" * 64}},
+        }
+        result = {
+            "binary_sha256": "d" * 64,
+            "import": "passed",
+            "load": "passed",
+            "unload": "passed",
+            "embedding_dimensions": 256,
+            "finite": True,
+            "runtime": {"mapping": "packaged-file-identity-observed"},
+        }
+        record = synthetic_check.bind_result(source, evidence, manifest, {}, result)
+        self.assertIs(record["pretrained_model_acceptance"], False)
+        self.assertEqual(record["archive_sha256"], evidence["archive_sha256"])
+        self.assertEqual(record["qualification"], "synthetic_execution_only")
+        for changed in (
+            {**result, "binary_sha256": "e" * 64},
+            {**result, "finite": False},
+            {**result, "unload": "failed"},
+            {**result, "runtime": {"mapping": "unobserved"}},
+        ):
+            with self.assertRaises(ValueError):
+                synthetic_check.bind_result(source, evidence, manifest, {}, changed)
+        with self.assertRaises(ValueError):
+            synthetic_check.bind_result("f" * 40, evidence, manifest, {}, result)
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux owned process group")
+    def test_synthetic_verifier_timeout_stops_its_process_group(self):
+        process = Mock(pid=12345)
+        process.wait.side_effect = [subprocess.TimeoutExpired("fixture", 120), -9]
+        with (
+            patch.object(synthetic_check.subprocess, "Popen", return_value=process) as spawn,
+            patch.object(synthetic_check.os, "killpg") as stop,
+        ):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                synthetic_check.run_lifecycle(["fixture"], io.BytesIO())
+            self.assertTrue(spawn.call_args.kwargs["start_new_session"])
+            stop.assert_called_once_with(12345, synthetic_check.signal.SIGKILL)
+        process = Mock()
+        process.wait.return_value = 1
+        with patch.object(synthetic_check.subprocess, "Popen", return_value=process):
+            with self.assertRaisesRegex(ValueError, "shutdown failed"):
+                synthetic_check.run_lifecycle(["fixture"], io.BytesIO())
+
     def test_combined_rpc_schemas_are_complete_and_separate_from_core(self):
         with tempfile.TemporaryDirectory() as tmp:
             repository = Path(tmp)

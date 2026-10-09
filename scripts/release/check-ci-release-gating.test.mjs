@@ -84,6 +84,9 @@ test('review inference candidate is bounded, source-pinned and never publishes a
   assert.match(review, /onnx_runtime_probe\.py --target linux-x86_64/);
   assert.match(review, /headless_inference_ci\.py --target linux-x86_64/);
   assert.match(review, /check-artifacts\.mjs .* headless-inference-linux/);
+  assert.match(review, /name: Verify extracted Pumas with an untrained synthetic ONNX graph\n        timeout-minutes: 3/);
+  assert.match(review, /verify_synthetic_packaged_onnx\.py --candidate-dir .* --expected-source "\$EXPECTED_SOURCE_SHA"/);
+  assert.ok(review.indexOf('verify_synthetic_packaged_onnx.py') < review.indexOf('uses: actions/upload-artifact@'));
   assert.match(review, /name: review-inference-linux-x86_64/);
   assert.match(review, /name: Preserve bounded review build and startup evidence\n        if: always\(\)/);
   assert.match(review, /name: review-inference-evidence-linux-x86_64/);
@@ -173,4 +176,24 @@ test('release build commands never enable test-support or all-features', () => {
   assert.match(manager, /^default = \[\]$/m);
   assert.match(rpc, /^test-support = \["pumas-app-manager\?\/test-support"\]$/m);
   assert.match(rpc, /^default = \["inference-plugins"\]$/m);
+});
+
+
+test('review audio dependency qualification requires bounded exact-source confinement', () => {
+  const audio = job('review-audio-dependencies');
+  assert.match(audio, /if: github.event_name == 'pull_request' \|\| github.event_name == 'workflow_dispatch'/);
+  assert.match(audio, /runs-on: ubuntu-24\.04/);
+  assert.match(audio, /timeout-minutes: 60/);
+  assert.match(audio, /persist-credentials: false/);
+  assert.ok(audio.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}'));
+  assert.match(audio, /CARGO_BUILD_JOBS: '1'/);
+  assert.match(audio, /CARGO_PROFILE_DEV_DEBUG: '0'/);
+  assert.match(audio, /set -euo pipefail/);
+  assert.match(audio, /timeout --kill-after=30s 45m cargo run --locked/);
+  assert.match(audio, /--features test-support --example qualify_audio_dependencies -- "\$QUALIFICATION_ROOT"/);
+  assert.match(audio, /pretrained_model_acceptance/);
+  assert.match(audio, /if: always\(\)/);
+  const upload = audio.slice(audio.indexOf('uses: actions/upload-artifact'));
+  assert.doesNotMatch(upload, /review-audio-runtime|\*|rust\/target/);
+  assert.doesNotMatch(audio, /continue-on-error|secrets\.|permissions:|pull_request_target|sudo|--privileged/);
 });

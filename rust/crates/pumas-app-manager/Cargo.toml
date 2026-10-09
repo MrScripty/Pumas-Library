@@ -73,3 +73,7 @@ windows-sys = { workspace = true }
 
 [lints]
 workspace = true
+
+[[example]]
+name = "qualify_audio_dependencies"
+required-features = ["test-support"]

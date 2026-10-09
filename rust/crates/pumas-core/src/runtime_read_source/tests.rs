@@ -231,3 +231,27 @@ fn retained_directory_capabilities_refuse_unknown_names_and_replacements() {
         .clone_directory(RuntimeReadRole::Sidecar, "package")
         .is_err());
 }
+
+#[test]
+fn omitted_absolute_link_is_literal_identity_not_target_read_authority() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("worker.py"), b"original").unwrap();
+    std::fs::write(outside.path().join("unselected"), b"outside bytes").unwrap();
+    let alias = root.path().join("omitted");
+    std::os::unix::fs::symlink(outside.path(), &alias).unwrap();
+    let retained = RetainedRuntimeReadSource::capture(vec![selection(
+        root.path(),
+        vec![manifest("worker.py", b"original")],
+        vec!["omitted".into()],
+        Arc::new(()),
+    )])
+    .unwrap();
+    retained.validate().unwrap();
+    assert!(retained
+        .clone_member(RuntimeReadRole::Sidecar, "omitted/unselected")
+        .is_err());
+    std::fs::remove_file(&alias).unwrap();
+    std::os::unix::fs::symlink(root.path(), &alias).unwrap();
+    assert!(retained.validate().is_err());
+}

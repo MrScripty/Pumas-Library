@@ -6,10 +6,11 @@
 use pumas_library::runtime_read_source::{RetainedRuntimeReadSource, RuntimeReadRole};
 use serde::Deserialize;
 use serde_json::Value;
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 use std::io;
 
-const PIN: &str = include_str!("audio_native_cohort/runtime-recipe.json");
+const PIN: &str = pumas_library::runtime_read_source::AUDIO_RUNTIME_CANDIDATE_RECIPE;
 #[derive(Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(deny_unknown_fields)]
 struct Artifact {
@@ -37,6 +38,7 @@ fn artifacts(value: &Value) -> io::Result<Vec<Artifact>> {
     }
     Ok(artifacts)
 }
+#[cfg(test)]
 fn selection_digest(mut members: Vec<(&str, u64, &str)>) -> String {
     members.sort();
     let mut digest = Sha256::new();
@@ -66,20 +68,8 @@ pub(super) fn validate(metadata: &Value, retained: &RetainedRuntimeReadSource) -
     {
         return Err(refused());
     }
-    for (role, key) in [
-        (RuntimeReadRole::Interpreter, "interpreter_selection"),
-        (RuntimeReadRole::Dependencies, "dependency_selection"),
-    ] {
-        let members = retained
-            .manifest()
-            .filter(|(selected, _)| *selected == role)
-            .map(|(_, member)| (member.path(), member.size(), member.sha256()))
-            .collect::<Vec<_>>();
-        if Some(members.len() as u64) != pin[key]["members"].as_u64()
-            || Some(selection_digest(members).as_str()) != pin[key]["sha256"].as_str()
-        {
-            return Err(refused());
-        }
+    for role in [RuntimeReadRole::Interpreter, RuntimeReadRole::Dependencies] {
+        pumas_library::runtime_read_source::validate_audio_candidate_read_role(retained, role)?;
     }
     // Re-observe the held namespaces and actual member bytes after matching.
     retained.validate()

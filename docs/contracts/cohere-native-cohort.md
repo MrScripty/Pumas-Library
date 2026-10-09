@@ -66,7 +66,7 @@ enforcement.
 ## Fixed candidate identity and owned command
 
 Native preparation is restricted to the source-pinned candidate in
-`audio_native_cohort/runtime-recipe.json`: the managed CPython identity, all 68
+`pumas-core/src/runtime_read_source/audio_candidate_recipe.json`: the managed CPython identity, all 68
 exact wheel artifacts, and framed hashes of the 3,487 interpreter and 23,630
 selected dependency members. Comparison follows actual byte capture and is
 followed by retained-source revalidation. Metadata alone cannot satisfy the
@@ -83,3 +83,57 @@ child drainage therefore retains those owners in the original custody slot.
 The control-channel/session producer must still drain diagnostics and bind its
 owning native channel before publishing an endpoint. The shipping catalog
 remains empty, so this primitive cannot admit the installed candidate today.
+
+
+## Explicit confined dependency qualification
+
+The `test-support`-only `qualify_audio_dependencies` example installs the existing
+managed CPU recipe into an explicit empty isolated root. A read-only kernel
+preflight refuses unsupported hosts before acquisition. It then retains the
+fixed CPython, dependency and native selections, rehashes each against the
+source pin, and runs only a constant probe through the owned loader and actual
+native read boundary. No caller program or model path is accepted.
+
+The probe requires denial of an unselected canary read/write and ambient socket,
+checks read confinement in a spawned thread, imports Torch, Transformers and the
+Cohere adapter classes plus native audio dependencies, and performs a CPU tensor
+operation. Output is bounded to 32 KiB per stream; the read deadline is 120 s,
+followed by bounded exit observation and child-tree drain. Success requires both
+probe success and confirmed cleanup. Cancellation retains custody for cleanup.
+
+Run on a supported Linux x86_64 host (external workflow timeout should bound the
+public dependency acquisition too):
+
+```
+cargo run --locked --manifest-path rust/Cargo.toml -p pumas-app-manager \
+  --features test-support --example qualify_audio_dependencies -- /absolute/empty/root
+```
+
+The JSON report explicitly has `production_available: false`. This gate proves
+only confined dependency startup and CPU operation, never model execution, ASR,
+full session cancellation or production catalog admission.
+
+### Installation-root reproducibility
+
+Two independent official managed installations produced the same 68 artifact
+identities. Their dependency inventories differed only in 25 generated console
+entrypoints and the 17 corresponding RECORD files. The recipe names those 42
+exact relative paths as inert dependency inputs: full installer validation and
+retained namespace identity still apply, but content reads are not granted.
+All other dependency metadata remains selected. Both installations yield the
+same 23,588-member dependency selection after this treatment.
+
+The only differing selected interpreter member was the UV-relocated
+`_sysconfigdata__linux_x86_64-linux-gnu.py`. It remains selected with its actual
+bytes and actual hash. Recipe comparison replaces exactly 27 occurrences of the
+JSON-escaped prefix derived from the held interpreter directory capability, then
+requires a fixed normalized size/hash. Prefixes are restricted to ASCII letters,
+digits, slash, dot, underscore and hyphen; quotes, backslashes, controls and
+other path characters refuse. This narrows qualification scope and rejects otherwise
+legitimate roots with spaces/non-ASCII; it is not evidence of an exploit. The
+actual two-root test parses every affected value as a double-quoted JSON string
+and accounts for all 27 substitutions without executing the source. Every byte outside those precise prefix
+positions is fixed; arbitrary code normalization, receipt-supplied prefixes and
+omitting executable source are prohibited. Both independently installed
+3,487-member interpreter cohorts satisfy this comparison. This proves portable
+recipe comparison, not successful confined execution.

@@ -20,11 +20,11 @@
   "interpreter_executable_sha256": "f7c6210eb40fadcd3c2889dddd24a15fc2c9f926aec5a03bf9da66e12d581526",
   "interpreter_selection": {
     "members": 3487,
-    "sha256": "53ba936d534c9c54f117788d8e93d7612759e2afbb25405af7670b149347e76e"
+    "sha256": "023224ec81c88133d3cf34fc3b97e2f767aefaaa3519f6d610c9112f6954bdf6"
   },
   "dependency_selection": {
-    "members": 23630,
-    "sha256": "895692983f32a25c9687cde1624dcef61a63fdc52118a2730fdfc303e6814581"
+    "members": 23588,
+    "sha256": "fe1d4a3d971a53ade1334073b64c9484c84f5f2bdbb57cd6b6fd1180a5f2b57a"
   },
   "artifacts": [
     {
@@ -435,5 +435,60 @@
       "url": "https://files.pythonhosted.org/packages/38/0c/b54a4fdd7f90a3af8b02ebc9ce6712c2c208b7926a2f7bad95c33ebbe943/uvicorn-0.54.0-py3-none-any.whl",
       "version": "0.54.0"
     }
-  ]
+  ],
+  "native_selection": {
+    "members": 339,
+    "sha256": "74e93c4d89f93834fad041e5bf8781e414f3c7a217f8650e1ad4cb024f73be97"
+  },
+  "dependency_inert_members": [
+    "accelerate-1.15.0.dist-info/RECORD",
+    "bin/accelerate",
+    "bin/accelerate-config",
+    "bin/accelerate-estimate-memory",
+    "bin/accelerate-launch",
+    "bin/accelerate-merge-weights",
+    "bin/cffi-gen-src",
+    "bin/f2py",
+    "bin/fastapi",
+    "bin/hf",
+    "bin/httpx",
+    "bin/huggingface-cli",
+    "bin/idna",
+    "bin/isympy",
+    "bin/markdown-it",
+    "bin/normalizer",
+    "bin/numba",
+    "bin/numpy-config",
+    "bin/pygmentize",
+    "bin/tiny-agents",
+    "bin/torchfrtrace",
+    "bin/torchrun",
+    "bin/tqdm",
+    "bin/transformers",
+    "bin/typer",
+    "bin/uvicorn",
+    "cffi-2.1.1.dist-info/RECORD",
+    "charset_normalizer-3.5.2.dist-info/RECORD",
+    "fastapi-0.143.0.dist-info/RECORD",
+    "httpx-0.28.1.dist-info/RECORD",
+    "huggingface_hub-1.33.0.dist-info/RECORD",
+    "idna-3.20.dist-info/RECORD",
+    "markdown_it_py-4.2.0.dist-info/RECORD",
+    "numba-0.68.0.dist-info/RECORD",
+    "numpy-2.5.3.dist-info/RECORD",
+    "pygments-2.21.0.dist-info/RECORD",
+    "sympy-1.14.0.dist-info/RECORD",
+    "torch-2.10.0+cpu.dist-info/RECORD",
+    "tqdm-4.70.1.dist-info/RECORD",
+    "transformers-5.4.0.dist-info/RECORD",
+    "typer-0.27.3.dist-info/RECORD",
+    "uvicorn-0.54.0.dist-info/RECORD"
+  ],
+  "interpreter_relocation": {
+    "member": "cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/_sysconfigdata__linux_x86_64-linux-gnu.py",
+    "distribution": "cpython-3.12.14-linux-x86_64-gnu",
+    "occurrences": 27,
+    "size": 50103,
+    "sha256": "306a9ebf67d86409db1051f07290f22fbbbbc0052512953dbea18d94d84bed96"
+  }
 }

@@ -125,6 +125,30 @@ fn official_cohort_retains_pinned_bytes_not_ambient_libraries() {
         pumas_library::runtime_read_source::RetainedRuntimeReadSource::capture(vec![selection])
             .unwrap();
     retained.validate().unwrap();
+    let pin: serde_json::Value =
+        serde_json::from_str(pumas_library::runtime_read_source::AUDIO_RUNTIME_CANDIDATE_RECIPE)
+            .unwrap();
+    let mut members = retained
+        .manifest()
+        .map(|(_, member)| (member.path(), member.size(), member.sha256()))
+        .collect::<Vec<_>>();
+    members.sort();
+    assert_eq!(
+        members.len() as u64,
+        pin["native_selection"]["members"].as_u64().unwrap()
+    );
+    let mut hash = Sha256::new();
+    hash.update(b"pumas-audio-runtime-recipe-v1\0");
+    for (name, size, sha) in members {
+        hash.update((name.len() as u64).to_be_bytes());
+        hash.update(name.as_bytes());
+        hash.update(size.to_be_bytes());
+        hash.update(sha.as_bytes());
+    }
+    assert_eq!(
+        format!("{:x}", hash.finalize()),
+        pin["native_selection"]["sha256"].as_str().unwrap()
+    );
     let loader = retained
         .clone_member(RuntimeReadRole::NativeLibraries, LOADER)
         .unwrap();

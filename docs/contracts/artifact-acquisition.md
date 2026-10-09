@@ -131,7 +131,8 @@ substitute a VersionId, or supply missing package companions.
 Existing versioned manifests/discovery retain their mandatory VersionId contract.
 The existing single-object RPC starts accept explicit `read_mode: "conditional"`
 with VersionId omitted and mandatory SHA-256. Omitted mode preserves VersionId
-requirements; conditional bundle/prefix requests fail explicitly as unsupported.
+requirements. Conditional bundles use explicit authored members as described
+below; conditional prefix discovery remains explicitly unsupported.
 The existing dialog still submits VersionId selections.
 See the [conditional-read contract](../plans/artifact-acquisition/reports/s3-conditional-read-contract-2026-10-09.md)
 for response, empty-object and recovery requirements.
@@ -158,9 +159,29 @@ byte verification, exact receipt and atomic publisher. This is an authored packa
 selection, not an atomic snapshot of the bucket or a backend/inference admission.
 Exact retained demand/manifest/workspace must still match on replay. Cancellation
 discards continuation evidence; pause can retain checked live prefix custody, and
-cold reopen restarts partial bytes at zero. RPC bundles and prefix discovery retain
-their VersionId-only contracts in this native slice. See the
+cold reopen restarts partial bytes at zero. See the
 [authored conditional manifest qualification](../plans/artifact-acquisition/reports/s3-authored-conditional-manifest-2026-10-09.md).
+
+The existing anonymous/authenticated bundle RPC starts expose this exact native
+capability with explicit `read_mode: "conditional"`. Every one of the 2–32 `files`
+members supplies `key`, `logical_path`, `sha256`, `expected_etag` and
+`expected_size`; VersionId must be omitted. Size is a canonical decimal string
+from `"0"` through `"9223372036854775807"`, preserving the SDK range across JS.
+Omitted or `version_id` mode retains the closed existing VersionId member shape;
+mixed sets and conditional facts in versioned members are invalid. Pure wire,
+shared-manifest and native-reader preflight precede job admission/reservation.
+Generated contracts project these closed alternatives for both consumers.
+
+The existing worker retains a typed complete selector, original import intent,
+exact record and held physical reservation across explicit same-process retry.
+Authenticated retry requires fresh credentials; it cannot silently fall back.
+Cancellation drains and clears continuation proof, so incomplete members restart
+at zero while complete files still require custody/full-hash reuse checks. Changed
+authored source facts refuse before GET and preserve retained work. A reopened
+process can inspect persisted custody, but cannot invent live reservation/retry
+authority or start another import over the existing demand. The existing dialog
+continues to select VersionId entries; conditional prefix discovery remains
+unsupported. See the [RPC qualification](../plans/artifact-acquisition/reports/s3-authored-conditional-rpc-2026-10-09.md).
 
 The optional S3 reader retains `S3ReaderConfig` and anonymous `S3Reader::new`.
 `S3Reader::new_authenticated(config, S3Credentials)` consumes explicitly supplied

@@ -736,7 +736,7 @@ fn source_bundle_structural_preflight_refuses_entire_set_before_admission() {
     let Job::Import(job) = receiver.try_recv().unwrap() else {
         panic!("expected import job")
     };
-    assert_eq!(job.entries.len(), 2);
+    assert!(matches!(job.entries, ImportSelection::Versioned(ref entries) if entries.len() == 2));
     client.close();
 }
 

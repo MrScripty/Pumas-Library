@@ -4,6 +4,69 @@ Initial design base: `5e114f6d8e4559e0a4d67e56000b423120a0fde0`. Scope is local
 application discovery, not a LAN/fleet daemon. This applies the intent/distribution
 and capability-discovery briefs and the namespace-instance-custody audit.
 
+## Packaged read-only library enumeration
+
+`pumas-rpc --discover-local` emits one JSON document followed by a newline and
+exits before runtime, logging, network, builder or listener initialization. It
+uses the existing platform registry path, including `PUMAS_REGISTRY_DB_PATH`.
+It requires no launcher root and conflicts with owning/describe/retention/export
+modes. No source library, model/index or registry is created or repaired; no owner or
+runtime is started.
+
+The stable CLI envelope has `cli_schema_version: 1`, the existing
+`discovery_schema_version: 1`, `observation: "unverified_registry_copy"`,
+`registry_state`, and `libraries`. Each library contains only
+`registry_library_id`, `library_root`, and nullable `owner` with `generation`,
+`status` and `transport`. Rows sort by registry ID/root. Names, metadata,
+credentials, tokens, PIDs, HTTP descriptions and unrelated transport paths are
+never selected or output. Registered roots are intended discovery output;
+there is no model/index scan and missing root paths remain registered hints.
+
+`registry_state: "missing"` with an empty list exits zero without creating the
+registry or its parent directories. An existing empty registry is `observed`.
+Invalid, unsupported, inaccessible, unstable or oversized input is `unavailable`
+with an empty list and nonzero exit; the error text contains no SQL/private path.
+Historical claiming/ready rows stay unverified and unchanged: the CLI does not
+probe PIDs, contact endpoints, clean rows, fall back to start or invoke recovery.
+
+Native qualification is Linux. Other platforms return `unavailable` until an
+identity-safe source opener is qualified. Private scratch is fixed at `/tmp`,
+ignoring `TMPDIR`/`TEMP`. The cooperating source namespace and registered libraries
+must be disjoint from that scratch (libraries rooted at `/tmp` itself or its
+ancestors are unsupported). Source-registry/scratch overlap refuses before any
+copy writes. A projected unsupported broad library root refuses after private
+copying; no universal no-mutation claim is made for that unqualified namespace.
+
+SQLite opens only a private temporary DB/WAL copy. Bounded captures must agree
+on contents and file identity/size/modification metadata before and after the
+query; integrity and projected field/row bounds are checked using the existing
+registry engine. The source SHM and model/index paths are not opened. Source
+contents, modification/change metadata and namespace are preserved; ordinary
+filesystem reads can update access accounting such as atime. Cleanup of the private copy
+and SQLite sidecars is observed before success; cleanup failure is `unavailable`.
+Forced process loss/panic can leave protected private scratch and is not qualified
+cleanup or a new recovery mechanism. This is a validated copied observation,
+not an atomic, current or exhaustive live snapshot during concurrent writes.
+DB/WAL limits are 32/64 MiB, projected rows 4096, and CLI output 4 MiB. Rollback
+journals, symlink/nonregular files and capture changes refuse without repair.
+
+A bundled consumer selects a returned root explicitly and authenticates through
+the existing live path, with the same registry environment, for example:
+
+```bash
+PUMAS_REGISTRY_DB_PATH=/selected/registry.db ./pumas-rpc --discover-local
+PUMAS_REGISTRY_DB_PATH=/selected/registry.db ./pumas-rpc \
+  --describe-local-http --launcher-root /selected/library
+PUMAS_REGISTRY_DB_PATH=/selected/registry.db ./pumas-rpc \
+  --retain-local-http-owner --launcher-root /selected/library
+```
+
+Description/fence and connection-held retention semantics remain unchanged.
+Enumeration does not grant model readiness or freshness, startup authority,
+recovery authority or inference. A compatible live owner can be borrowed without
+qualifying full operating-owner recovery; multiple roots require consumer
+selection, and unresolved historical ownership still blocks startup.
+
 ## Slice 1: local observation and explicit attach-or-start
 
 `discovery::LocalDiscovery` opens the existing platform registry read-only, without

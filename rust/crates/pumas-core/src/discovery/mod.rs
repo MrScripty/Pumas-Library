@@ -34,6 +34,24 @@ pub const DISCOVERY_SCHEMA_VERSION: u32 = 1;
 pub const LOCAL_IPC_PROTOCOL: &str = "pumas.local-ipc";
 pub const LOCAL_IPC_VERSION: u32 = 1;
 
+/// An unverified registry hint. This is not a live handshake or start authority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisteredOwnerObservation {
+    pub generation: String,
+    pub status: InstanceStatus,
+    pub transport: LocalInstanceTransportKind,
+}
+
+/// A registered root, without metadata, credentials, endpoints or model reads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisteredLibraryObservation {
+    pub registry_library_id: String,
+    pub library_root: PathBuf,
+    pub owner: Option<RegisteredOwnerObservation>,
+}
+
 // Preserve the first-slice import path while sharing the single protocol type.
 pub use crate::build_info::ProtocolAdvertisement;
 
@@ -193,6 +211,27 @@ pub struct LocalDiscovery {
 }
 
 impl LocalDiscovery {
+    /// Enumerate bounded hints from a private validated DB/WAL observation copy.
+    /// SQLite never opens the source. This is neither an atomic live snapshot
+    /// nor authentication; select a root and use the existing live attach path.
+    /// Ordinary filesystem reads may update access times. No source contents,
+    /// sidecars, schema or model/index paths are written or opened by SQLite.
+    pub fn enumerate_registered_libraries_at(
+        path: &Path,
+    ) -> Result<Vec<RegisteredLibraryObservation>> {
+        #[cfg(target_os = "linux")]
+        {
+            crate::registry::library_registry::local_enumeration::observe(path)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = path;
+            Err(PumasError::InvalidParams {
+                message: "local enumeration is qualified only on Linux".into(),
+            })
+        }
+    }
+
     pub fn open() -> Result<Self> {
         Self::open_at(&crate::platform::registry_db_path()?)
     }

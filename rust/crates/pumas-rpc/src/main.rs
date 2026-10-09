@@ -9,6 +9,7 @@ mod discovery;
 mod handlers;
 mod http_admission;
 mod http_transport;
+mod local_enumeration;
 mod owner_retention;
 #[cfg(feature = "inference-plugins")]
 mod provider_clients;
@@ -58,6 +59,10 @@ fn observe_both(first: Result<()>, signal: Result<()>) -> Result<()> {
 #[command(name = "pumas-rpc")]
 #[command(about = "JSON-RPC server for Pumas Library")]
 struct Args {
+    /// List unverified registered library roots without starting or contacting owners.
+    #[arg(long, conflicts_with_all = ["build_info", "describe_local_http", "attach_or_start_local_http", "retain_local_http_owner", "launcher_root"])]
+    #[cfg_attr(feature = "export-contract", arg(conflicts_with_all = ["export_desktop_contract", "export_desktop_fixtures"]))]
+    discover_local: bool,
     /// Print build/protocol/schema identity without starting a runtime or server.
     #[arg(long)]
     build_info: bool,
@@ -104,6 +109,9 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.discover_local {
+        return local_enumeration::write();
+    }
     if args.retain_local_http_owner {
         let runtime = Builder::new_current_thread().enable_all().build()?;
         return runtime.block_on(owner_retention::retain_from_cli(

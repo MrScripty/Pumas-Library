@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 use tracing::debug;
 
 pub(crate) mod catalog_recovery;
+#[cfg(target_os = "linux")]
+pub(crate) mod local_enumeration;
 pub(crate) mod pending_recovery;
 
 /// A registered library entry.

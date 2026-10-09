@@ -30,7 +30,24 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
-      - uses: rhysd/actionlint@v1.7.8
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - name: Run checksum-pinned actionlint with shell and Python checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install pyflakes==3.3.2
+          command -v shellcheck
+          command -v pyflakes
+          tool_dir="$(mktemp -d)"
+          trap 'rm -rf "$tool_dir"' EXIT
+          curl --fail --location --retry 3 \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.8/actionlint_1.7.8_linux_amd64.tar.gz \
+            --output "$tool_dir/actionlint.tar.gz"
+          echo "be92c2652ab7b6d08425428797ceabeb16e31a781c07bc388456b4e592f3e36a  $tool_dir/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$tool_dir/actionlint.tar.gz" -C "$tool_dir" actionlint
+          "$tool_dir/actionlint" -color
       - run: npm run check:dependency-ownership
       - run: npm run check:release-versions
       - run: node scripts/release/check-attribution.cjs

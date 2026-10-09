@@ -155,8 +155,26 @@ regular members, materializing Linux's versioned library under the loader name.
 `--download` explicitly authorizes fetching that exact pinned official archive;
 Cargo continues to use `ORT_SKIP_DOWNLOAD=1`. Pin updates require reviewing both
 upstream archive identity and actual member/notice bytes. The records cover the
-shipped CPU ORT files, not the operating system's dependency closure, signatures,
-GPU providers or a native acceptance result.
+shipped CPU ORT files and observed static direct imports. Linux ORT requires
+GLIBC 2.27, GLIBCXX 3.4.22 and CXXABI 1.3.11 (the final RPC may require newer
+versions). Windows additionally requires compatible MSVCP140/MSVCP140_1 and
+VCRUNTIME140/VCRUNTIME140_1 DLLs, which are absent from the upstream ORT archive;
+users must have a compatible Microsoft Visual C++ runtime. macOS imports system
+frameworks and libraries. These prerequisites are not redistributed or qualified
+merely by recording their names; recursive/session-dependent closure, signatures
+and GPU providers remain separate gates.
+
+Before compilation, `onnx_runtime_probe.py` runs an isolated, time-bounded native
+child, validates the exact files, loads ORT and requires version 1.24.2 and C API
+24. Every native workflow target must pass that loader gate; it detects loader
+failures that lazy RPC startup cannot. The probe runs inside Python, so libraries
+already loaded by that interpreter are part of its host context; it does not
+substitute for exercising ORT from the final extracted RPC process. Linux evidence additionally
+hashes every observed process file mapping before and after the API probe and
+checks mapped device/inode identity. These include host/Python libraries and
+are an observation of this process, not a universal redistributable closure.
+Windows/macOS mapped-file audit remains unavailable in this probe. Process exit
+ends the probe's native lifetime; no model or session is created.
 
 The CI adapter exports the actual source DTO schema separately, pins the source
 commit/tree and expected shared build advertisements, and compares the production
@@ -179,8 +197,12 @@ hostile same-user mutation, or a complete audit of every loaded system dependenc
 
 The focused Python/Node tests use synthetic native bytes, controlled subprocesses
 and controlled mapping text. Successful staging of real official Linux/Windows/
-macOS archives establishes byte identity only. This development environment has
-not executed a v0.8 release build, pretrained ONNX model, native Windows/macOS
+macOS archives establishes byte identity only. A Linux native loader/API probe
+also passed against the pinned library in this environment. A separate C harness
+executed a real CPU session using a synthetic two-element Identity graph, observed
+the pinned mapped runtime, released its native handles and exited successfully.
+That bounded untrained graph is not Pumas/Nomic or pretrained-model evidence.
+This development environment has not executed a v0.8 release build, pretrained ONNX model, native Windows/macOS
 startup, signing/notarization, final SBOM or security qualification. Preserve those
 gates before the maintainer's publication decision.
 

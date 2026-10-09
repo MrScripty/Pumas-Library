@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from unittest.mock import patch
 
 import headless_inference_ci as ci
 import onnx_runtime_stage as stage
+import onnx_runtime_probe as native_probe
 import packaged_onnx_support as support
 
 
@@ -94,6 +96,66 @@ class ReleaseTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         stage.stage("linux-x86_64", archive, destination, pins)
                     self.assertFalse(destination.exists())
+
+    def test_native_probe_refuses_bad_bytes_before_loader_effect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "libonnxruntime.so").write_bytes(b"not ORT")
+            with (
+                patch.object(native_probe.platform, "system", return_value="Linux"),
+                patch.object(native_probe.platform, "machine", return_value="x86_64"),
+                patch.object(native_probe, "probe_api") as loader,
+            ):
+                with self.assertRaisesRegex(ValueError, "checked pin"):
+                    native_probe.worker(root, "linux-x86_64")
+                loader.assert_not_called()
+
+    def test_native_probe_timeout_cannot_write_success_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "evidence.json"
+            with patch.object(
+                native_probe.subprocess, "run", side_effect=subprocess.TimeoutExpired("probe", 30)
+            ) as runner:
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    native_probe.probe(Path(tmp), "linux-x86_64", output)
+                self.assertFalse(output.exists())
+                self.assertNotIn("ORT_DYLIB_PATH", runner.call_args.kwargs["env"])
+                self.assertNotIn("LD_PRELOAD", runner.call_args.kwargs["env"])
+                self.assertIn("-I", runner.call_args.args[0])
+
+    @unittest.skipUnless(
+        sys.platform == "linux" and shutil.which("cc"), "Controlled Linux C ABI fixture"
+    )
+    def test_native_c_api_version_and_availability_refusals(self):
+        # These are compiled fake C tables, not ORT or model inference.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, version, available in (
+                ("valid", "1.24.2", True),
+                ("version", "1.24.1", True),
+                ("api", "1.24.2", False),
+            ):
+                source = root / f"{name}.c"
+                library = root / f"{name}.so"
+                source.write_text(
+                    "#include <stdint.h>\n"
+                    "static int token;\n"
+                    "static const void *api(uint32_t v) { return v == 24 && "
+                    + ("1" if available else "0")
+                    + " ? &token : 0; }\n"
+                    'static const char *version(void) { return "' + version + '"; }\n'
+                    "struct base { const void *(*api)(uint32_t); const char *(*version)(void); };\n"
+                    "static struct base table = {api,version};\n"
+                    "const struct base *OrtGetApiBase(void) { return &table; }\n"
+                )
+                subprocess.run(
+                    ["cc", "-shared", "-fPIC", str(source), "-o", str(library)], check=True
+                )
+                if name == "valid":
+                    self.assertIsNotNone(native_probe.probe_api(library))
+                else:
+                    with self.assertRaises(ValueError):
+                        native_probe.probe_api(library)
 
     def test_current_unbumped_source_cannot_be_relabelled(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -33,6 +33,34 @@
           "sha256": "0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2",
           "bytes": 325054
         }
+      },
+      "dependency_observation": {
+        "scope": "Static direct imports from the exact pinned members; not recursive or session-dependent closure qualification.",
+        "imports": {
+          "libonnxruntime.so": [
+            "libdl.so.2",
+            "librt.so.1",
+            "libpthread.so.0",
+            "libstdc++.so.6",
+            "libm.so.6",
+            "libgcc_s.so.1",
+            "libc.so.6",
+            "ld-linux-x86-64.so.2"
+          ],
+          "libonnxruntime_providers_shared.so": [
+            "libstdc++.so.6",
+            "libm.so.6",
+            "libgcc_s.so.1",
+            "libc.so.6"
+          ]
+        },
+        "native_execution": "unqualified",
+        "required_symbol_versions": {
+          "GLIBC": "2.27",
+          "GLIBCXX": "3.4.22",
+          "CXXABI": "1.3.11"
+        },
+        "system_dependencies": "Host glibc, libstdc++, libgcc and ELF loader; not redistributed in this archive."
       }
     },
     "macos-arm64": {
@@ -58,6 +86,27 @@
           "sha256": "0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2",
           "bytes": 325054
         }
+      },
+      "dependency_observation": {
+        "scope": "Static direct imports from the exact pinned members; not recursive or session-dependent closure qualification.",
+        "imports": {
+          "libonnxruntime.dylib": [
+            "/System/Library/Frameworks/CoreML.framework/Versions/A/CoreML",
+            "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa",
+            "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit",
+            "/System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore",
+            "/System/Library/Frameworks/Metal.framework/Versions/A/Metal",
+            "/System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface",
+            "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+            "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+            "/usr/lib/libiconv.2.dylib",
+            "/usr/lib/libc++.1.dylib",
+            "/usr/lib/libSystem.B.dylib",
+            "/usr/lib/libobjc.A.dylib"
+          ]
+        },
+        "native_execution": "unqualified",
+        "system_dependencies": "macOS system frameworks, libc++, libSystem, libobjc and libiconv; not redistributed in this archive."
       }
     },
     "windows-x86_64": {
@@ -88,6 +137,45 @@
           "sha256": "fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866",
           "bytes": 331175
         }
+      },
+      "dependency_observation": {
+        "scope": "Static direct imports from the exact pinned members; not recursive or session-dependent closure qualification.",
+        "imports": {
+          "onnxruntime.dll": [
+            "KERNEL32.dll",
+            "ADVAPI32.dll",
+            "MSVCP140.dll",
+            "MSVCP140_1.dll",
+            "api-ms-win-core-path-l1-1-0.dll",
+            "dbghelp.dll",
+            "SETUPAPI.dll",
+            "dxgi.dll",
+            "VCRUNTIME140_1.dll",
+            "VCRUNTIME140.dll",
+            "api-ms-win-crt-heap-l1-1-0.dll",
+            "api-ms-win-crt-runtime-l1-1-0.dll",
+            "api-ms-win-crt-convert-l1-1-0.dll",
+            "api-ms-win-crt-stdio-l1-1-0.dll",
+            "api-ms-win-crt-string-l1-1-0.dll",
+            "api-ms-win-crt-time-l1-1-0.dll",
+            "api-ms-win-crt-filesystem-l1-1-0.dll",
+            "api-ms-win-crt-locale-l1-1-0.dll",
+            "api-ms-win-crt-math-l1-1-0.dll"
+          ],
+          "onnxruntime_providers_shared.dll": [
+            "VCRUNTIME140.dll",
+            "api-ms-win-crt-runtime-l1-1-0.dll",
+            "KERNEL32.dll"
+          ]
+        },
+        "native_execution": "unqualified",
+        "external_runtime_prerequisites": [
+          "MSVCP140.dll",
+          "MSVCP140_1.dll",
+          "VCRUNTIME140.dll",
+          "VCRUNTIME140_1.dll"
+        ],
+        "system_dependencies": "Windows system DLLs/API sets plus a compatible Microsoft Visual C++ runtime. MSVC runtime DLLs are not in the upstream ORT archive and are not redistributed here."
       }
     }
   }

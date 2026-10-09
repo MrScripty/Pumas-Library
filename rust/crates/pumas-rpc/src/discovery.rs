@@ -38,6 +38,12 @@ pub(crate) fn build_info() -> PumasBuildInfo {
         name: "pumas.http-advertisement".into(),
         version: HTTP_ADVERTISEMENT_SCHEMA_VERSION,
     });
+    // Parser support is separate from per-model live readiness and qualification.
+    #[cfg(feature = "inference-plugins")]
+    info.schemas.push(SchemaAdvertisement {
+        name: "pumas.model-operations.image-to-text".into(),
+        version: 1,
+    });
     info
 }
 
@@ -102,6 +108,10 @@ mod tests {
         assert_eq!(
             info.compiled_features
                 .contains(&"pumas-rpc/inference-plugins".into()),
+            cfg!(feature = "inference-plugins")
+        );
+        assert_eq!(
+            info.supports_schema("pumas.model-operations.image-to-text", 1),
             cfg!(feature = "inference-plugins")
         );
         let json = serde_json::to_value(info).unwrap();

@@ -278,7 +278,8 @@ its existing bounds. Streaming requires an available streaming declaration.
 | Text or TextBatch → EmbeddingsFloat32 | Declared available embedding adapter |
 | Text → PngBase64 | Declared available image generation adapter, explicit size options |
 | PCM Audio → Text | Existing qualified speech owner; otherwise `capability_unavailable` |
-| Image → Text, or messages containing image/audio parts | `unsupported_modality`; no qualified vision or mixed-content adapter is declared |
+| PNG/JPEG image or image-bearing messages → Text | Dedicated llama.cpp adapter; declared image-to-text task and live vision readiness required |
+| Messages containing audio parts | `unsupported_modality`; no mixed-audio adapter is declared |
 | Any input → PCM audio output | `unsupported_modality`; no qualified audio-output adapter is declared |
 
 Image input is closed `{kind:"image", encoding:"png"|"jpeg",
@@ -289,9 +290,10 @@ Desired outputs are `text`, `embeddings_float32`, `png_base64`, `labels`,
 `pcm_s16le`, or `pcm_f32le`. The Image→Text semantic hint is `image_to_text`;
 recognizing that request does not qualify execution.
 
-All requests retain the 32 MiB transport limit. Messages and parts are each
-limited to 128 entries; image payloads receive bounded base64 transport-grammar
-validation, without claiming decoded image validation. PCM validation and owned
+All requests retain the 32 MiB transport limit. Image-bearing requests permit
+128 messages and 128 total parts, with at most four images. PNG/JPEG payloads
+receive strict base64, container and full raster validation before backend
+probes; image dimensions, pixels and compressed bytes are bounded. PCM validation and owned
 byte decoding retain their existing boundaries. Errors before admission use
 `outcome:"not_admitted"`; unsupported modality transport is HTTP 422, unavailable
 runtime/capability is HTTP 503. Typed results, correlation, cancellation,
@@ -299,7 +301,9 @@ streaming and disposal use the existing admitted operation owner.
 
 Lanternwake's Audio→Text path can use this request without naming transcription,
 but an installed speech runtime remains unavailable until its owning contract
-is qualified. Tuldok's Image→Text caption request now has a typed admission and
-explicit unsupported result; its vision execution remains an implementation and
-qualification gap. Controlled adapter tests do not qualify real model inference
+is qualified. Tuldok's Image→Text caption and annotation requests use the dedicated
+llama.cpp adapter. Its closed parser must adopt the seven capability variants and
+image formats/bounds in the [image-to-text contract](../../../docs/contracts/image-to-text-v0.8.md).
+Real matching model/projector/runtime inference and native teardown remain
+qualification gates. Controlled adapter tests do not qualify real model inference
 or packaged consumer distribution.

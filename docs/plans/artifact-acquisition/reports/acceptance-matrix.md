@@ -1,5 +1,13 @@
 # Acquisition acceptance matrix
 
+**2026-10-09 combined consumer reconciliation:** The pinned ec03 Linux
+consumer evidence and every original AC01–AC18 criterion are reconciled in
+[the bounded report](combined-ec03-acquisition-acceptance-2026-10-09.md).
+A separate tests-only checkpoint adds duplicate-ETag raw HTTP regressions;
+all 28 core HTTP module tests pass in the recorded no-default-plus-S3 run.
+The qualified consumer executable remains the ec03 producer. Full criteria,
+historical accepted scopes and external gates below are not promoted.
+
 **2026-10-05 bounded S3 update:** Explicit normal sibling composition cd9d8191
 and qualification successor 7358bd3d pass combined protocol and Linux production
 installed-backend checks, including ten independently signed TLS scenarios.

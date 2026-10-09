@@ -14,8 +14,8 @@ pub struct S3ManifestEntry {
 }
 
 /// Complete resolved set under one explicit reader authority. Public manifest
-/// resolution requires exact versions; the model facade can wrap one digest-bound
-/// conditional object without upgrading its weak revision evidence.
+/// resolution requires exact versions or caller-authored conditional facts;
+/// conditional selections retain weak mutable revision evidence and full SHA-256.
 /// The revision preserves every per-object source identity in logical-path order.
 /// This is an explicit selection, not an atomic snapshot of a remote prefix.
 #[derive(Clone)]
@@ -110,7 +110,7 @@ impl S3Reader {
         Ok(S3ManifestSelection { manifest, objects })
     }
 
-    fn explicit_scope_identity(&self) -> String {
+    pub(super) fn explicit_scope_identity(&self) -> String {
         let addressing = match self.addressing {
             S3Addressing::Path => "path",
             S3Addressing::VirtualHosted => "virtual_hosted",

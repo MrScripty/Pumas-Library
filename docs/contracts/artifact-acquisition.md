@@ -126,8 +126,8 @@ receipt-bound model publication use the existing owners. Downloaded bytes still
 need shared model qualification; malformed, unsafe, unknown or incomplete packages
 are refused. Qualification does not establish backend compatibility or inference.
 
-Conditional mode is single-object only. It cannot select bundles, hydrate a
-prefix, discover or substitute a VersionId, or supply missing package companions.
+The conditional single-object request cannot hydrate a prefix, discover or
+substitute a VersionId, or supply missing package companions.
 Existing versioned manifests/discovery retain their mandatory VersionId contract.
 The existing single-object RPC starts accept explicit `read_mode: "conditional"`
 with VersionId omitted and mandatory SHA-256. Omitted mode preserves VersionId
@@ -135,6 +135,32 @@ requirements; conditional bundle/prefix requests fail explicitly as unsupported.
 The existing dialog still submits VersionId selections.
 See the [conditional-read contract](../plans/artifact-acquisition/reports/s3-conditional-read-contract-2026-10-09.md)
 for response, empty-object and recovery requirements.
+
+The additive native `PumasApi::import_s3_conditional_bundle` accepts
+`S3ConditionalBundleModelImportRequest` with 2–32 caller-authored
+`S3ConditionalManifestEntry` members. Every member declares its exact object key,
+logical path, strong quoted HTTP ETag, SDK-representable size and mandatory
+whole-file SHA-256. Pure complete-set validation precedes HEAD: shared manifest
+rules check namespace, source size/digest consistency, aggregate size and revision
+bounds; an explicit check rejects conflicting ETags for the same raw object key.
+Importer-owned paths and exact primary membership are checked before source I/O.
+Sequential scope-owned HEAD resolution must match every authored ETag/size before
+it can return the entire unchanged authored manifest. It never returns a shortened
+selection. This records Weak `s3.explicit_conditional_objects` revision evidence;
+the declared hashes supply integrity, and a listing supplies no authority.
+
+The existing shared acquisition owner verifies every selected file before issuing
+the complete-set receipt. GET uses the exact per-object If-Match; empty members
+require an actual conditional GET as well. The shared model importer proves the
+selected package's required companion/index/shard relationships and retains unsafe
+format/custom-code policy. Publication uses its existing held descriptors, copied
+byte verification, exact receipt and atomic publisher. This is an authored package
+selection, not an atomic snapshot of the bucket or a backend/inference admission.
+Exact retained demand/manifest/workspace must still match on replay. Cancellation
+discards continuation evidence; pause can retain checked live prefix custody, and
+cold reopen restarts partial bytes at zero. RPC bundles and prefix discovery retain
+their VersionId-only contracts in this native slice. See the
+[authored conditional manifest qualification](../plans/artifact-acquisition/reports/s3-authored-conditional-manifest-2026-10-09.md).
 
 The optional S3 reader retains `S3ReaderConfig` and anonymous `S3Reader::new`.
 `S3Reader::new_authenticated(config, S3Credentials)` consumes explicitly supplied

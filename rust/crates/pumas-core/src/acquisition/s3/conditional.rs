@@ -82,7 +82,7 @@ impl S3Reader {
     }
 }
 
-fn strong_etag(tag: &str) -> bool {
+pub(super) fn strong_etag(tag: &str) -> bool {
     tag.len() >= 2
         && tag.starts_with('"')
         && tag.ends_with('"')

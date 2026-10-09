@@ -117,10 +117,10 @@ pub use api::{
 };
 #[cfg(feature = "s3")]
 pub use api::{
-    S3ConditionalModelImportRequest, S3ModelBundleProgress, S3ModelImportControl,
-    S3ModelImportError, S3ModelImportPhase, S3ModelImportProgress, S3ModelImportRequest,
-    S3PersistedImport, S3PersistedImports, S3PersistedPhase, S3RecordedModelBinding,
-    S3RecordedPublicationState,
+    S3ConditionalBundleModelImportRequest, S3ConditionalModelImportRequest, S3ModelBundleProgress,
+    S3ModelImportControl, S3ModelImportError, S3ModelImportPhase, S3ModelImportProgress,
+    S3ModelImportRequest, S3PersistedImport, S3PersistedImports, S3PersistedPhase,
+    S3RecordedModelBinding, S3RecordedPublicationState,
 };
 
 use std::path::PathBuf;

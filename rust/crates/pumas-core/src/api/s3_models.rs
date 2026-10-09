@@ -3,8 +3,8 @@
 use crate::{
     acquisition::{
         AcquisitionDemand, AcquisitionHost, AcquisitionRetryPolicy, AcquisitionS3ManifestRequest,
-        AcquisitionWorkspace, HttpAttemptHost, S3Credentials, S3ManifestEntry, S3Reader,
-        S3ReaderConfig, S3ReaderError, Sha256Evidence,
+        AcquisitionWorkspace, HttpAttemptHost, S3ConditionalManifestEntry, S3Credentials,
+        S3ManifestEntry, S3Reader, S3ReaderConfig, S3ReaderError, Sha256Evidence,
     },
     model_library::{ModelImportResult, ModelImportSpec, ModelImporter},
     PumasApi, PumasError,
@@ -58,6 +58,27 @@ pub struct S3ConditionalModelImportRequest {
     pub import: ModelImportSpec,
     pub workspace: AcquisitionWorkspace,
     pub retry: AcquisitionRetryPolicy,
+}
+
+/// Authored complete non-versioned file set. Strong per-object ETags and sizes
+/// must match HEAD; every file requires full SHA-256 before model qualification.
+/// This grants no atomic bucket snapshot or model execution authority.
+/// Credentials are ephemeral; the caller retains exact workspace/operation custody.
+pub struct S3ConditionalBundleModelImportRequest {
+    pub operation_id: uuid::Uuid,
+    pub source: S3ReaderConfig,
+    pub credentials: Option<S3Credentials>,
+    pub entries: Vec<S3ConditionalManifestEntry>,
+    /// Exact selected primary weight path plus existing import policy/metadata.
+    pub import: ModelImportSpec,
+    pub workspace: AcquisitionWorkspace,
+    pub retry: AcquisitionRetryPolicy,
+}
+
+enum SelectionMode {
+    Versioned,
+    ConditionalObject(ConditionalObject),
+    ConditionalManifest(Vec<S3ConditionalManifestEntry>),
 }
 
 struct ConditionalObject {
@@ -335,7 +356,8 @@ impl PumasApi {
         request: S3ModelImportRequest,
         control: S3ModelImportControl,
     ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
-        self.import_s3_model_mode(request, None, control).await
+        self.import_s3_model_mode(request, SelectionMode::Versioned, control)
+            .await
     }
 
     /// Acquire a digest-bound conditional single object and qualify it through
@@ -362,14 +384,39 @@ impl PumasApi {
             workspace: request.workspace,
             retry: request.retry,
         };
-        self.import_s3_model_mode(request, Some(conditional), control)
-            .await
+        self.import_s3_model_mode(
+            request,
+            SelectionMode::ConditionalObject(conditional),
+            control,
+        )
+        .await
+    }
+
+    /// Acquire every member of a caller-authored conditional manifest, then use
+    /// the existing complete-package validator, receipt and atomic copy publisher.
+    /// Any failed HEAD or inconsistent response refuses the entire selection.
+    pub async fn import_s3_conditional_bundle(
+        &self,
+        request: S3ConditionalBundleModelImportRequest,
+        control: S3ModelImportControl,
+    ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
+        let mode = SelectionMode::ConditionalManifest(request.entries);
+        let request = S3ModelImportRequest {
+            operation_id: request.operation_id,
+            source: request.source,
+            credentials: request.credentials,
+            entries: Vec::new(),
+            import: request.import,
+            workspace: request.workspace,
+            retry: request.retry,
+        };
+        self.import_s3_model_mode(request, mode, control).await
     }
 
     async fn import_s3_model_mode(
         &self,
         request: S3ModelImportRequest,
-        conditional: Option<ConditionalObject>,
+        mode: SelectionMode,
         control: S3ModelImportControl,
     ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
         match control
@@ -391,9 +438,7 @@ impl PumasApi {
             control: control.clone(),
             complete: false,
         };
-        let result = self
-            .import_s3_model_owned(request, conditional, control)
-            .await;
+        let result = self.import_s3_model_owned(request, mode, control).await;
         progress.finish(&result);
         result
     }
@@ -401,35 +446,35 @@ impl PumasApi {
     async fn import_s3_model_owned(
         &self,
         request: S3ModelImportRequest,
-        conditional: Option<ConditionalObject>,
+        mode: SelectionMode,
         control: S3ModelImportControl,
     ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
-        let paths = if conditional.is_some() {
-            vec![request.import.path.as_str()]
-        } else {
-            request
+        if let SelectionMode::ConditionalManifest(entries) = &mode {
+            S3ConditionalManifestEntry::require_bounded_set(entries.len())?;
+        }
+        let paths: Vec<_> = match &mode {
+            SelectionMode::Versioned => request
                 .entries
                 .iter()
                 .map(|entry| entry.logical_path.as_str())
-                .collect()
+                .collect(),
+            SelectionMode::ConditionalObject(_) => vec![request.import.path.as_str()],
+            SelectionMode::ConditionalManifest(entries) => entries
+                .iter()
+                .map(|entry| entry.logical_path.as_str())
+                .collect(),
         };
         ModelImporter::validate_acquired_payload_paths(&paths)?;
+        if !paths.contains(&request.import.path.as_str()) {
+            return Err(PumasError::Validation {
+                field: "s3.model.primary".into(),
+                message: "The import spec must name the exact selected primary weight logical path"
+                    .into(),
+            }
+            .into());
+        }
         let consumer = self.acquisition().open_consumer(CONSUMER)?;
         let result = async {
-            if conditional.is_none()
-                && !request
-                    .entries
-                    .iter()
-                    .any(|entry| entry.logical_path == request.import.path)
-            {
-                return Err(PumasError::Validation {
-                    field: "s3.model.primary".into(),
-                    message:
-                        "The import spec must name the exact selected primary weight logical path"
-                            .into(),
-                }
-                .into());
-            }
             let reader = match request.credentials {
                 Some(credentials) => S3Reader::new_authenticated(request.source, credentials)?,
                 None => S3Reader::new(request.source)?,
@@ -439,8 +484,8 @@ impl PumasApi {
                 operation: request.operation_id.to_string(),
             };
             control.phase(S3ModelImportPhase::Selecting);
-            let selection = match conditional {
-                Some(object) => {
+            let selection = match mode {
+                SelectionMode::ConditionalObject(object) => {
                     consumer
                         .resolve_s3_conditional(
                             reader,
@@ -455,7 +500,18 @@ impl PumasApi {
                         )
                         .await??
                 }
-                None => {
+                SelectionMode::ConditionalManifest(entries) => {
+                    consumer
+                        .resolve_s3_conditional_manifest(
+                            reader,
+                            entries,
+                            &demand,
+                            &request.retry,
+                            Box::new(Host(control.clone())),
+                        )
+                        .await??
+                }
+                SelectionMode::Versioned => {
                     consumer
                         .resolve_s3_manifest(
                             reader,

@@ -964,6 +964,9 @@ async fn dispatch_admitted_command(
             .await
             .map(Box::new)
             .map(RpcOutcome::PartialDownload),
+        RpcCommand::LookupModel { model_id } => models::lookup_model(state, &model_id)
+            .await
+            .map(RpcOutcome::ModelLookup),
         RpcCommand::GetModels => models::get_models(state)
             .await
             .map(Box::new)

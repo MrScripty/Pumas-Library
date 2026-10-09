@@ -362,6 +362,40 @@ impl PumasApi {
         primary.model_library.get_model(model_id).await
     }
 
+    /// Observe a canonical ID and report a reclassification performed by this read.
+    ///
+    /// Requires the Full instance profile; indexed CatalogQuery reads retain `get_model`.
+    /// Existing `get_model` semantics are unchanged. A replacement is an explicit
+    /// selection refresh hint, not an alias. Missing means no indexed row at this path;
+    /// earlier moves are not reconstructed. Overlapping reconciliation returns a
+    /// typed conflict rather than an ambiguous missing result.
+    pub async fn lookup_model(&self, model_id: &str) -> Result<models::ModelLookupReport> {
+        if model_id.len() > 4096 || !crate::intent::valid_relative_identity(model_id) {
+            return Err(PumasError::InvalidParams {
+                message: "model_id must be a canonical relative model path".into(),
+            });
+        }
+        let primary = self.try_primary()?;
+        let changes = super::reconciliation::reconcile_model_lookup(primary, model_id).await?;
+        let resolution = if let Some((_, replacement_model_id)) = changes
+            .into_iter()
+            .find(|(from, to)| from == model_id && from != to)
+        {
+            models::ModelLookupResolution::Reclassified {
+                replacement_model_id,
+            }
+        } else if primary.model_library.get_model(model_id).await?.is_some() {
+            models::ModelLookupResolution::Found
+        } else {
+            models::ModelLookupResolution::Missing
+        };
+        Ok(models::ModelLookupReport {
+            contract_version: models::MODEL_LOOKUP_CONTRACT_VERSION,
+            requested_model_id: model_id.to_string(),
+            resolution,
+        })
+    }
+
     /// Get inference settings schema for a model.
     ///
     /// If the model has persisted settings, returns those. Otherwise,
@@ -819,6 +853,157 @@ mod tests {
     use crate::models::ModelMetadata;
     use crate::PumasApi;
     use tempfile::TempDir;
+
+    async fn lookup_fixture(api: &PumasApi, model_id: &str) -> Vec<u8> {
+        let dir = api.primary().model_library.library_root().join(model_id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let header = br#"{"weight":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}}"#;
+        let bytes = [
+            (header.len() as u64).to_le_bytes().as_slice(),
+            header.as_slice(),
+            1.0_f32.to_le_bytes().as_slice(),
+        ]
+        .concat();
+        std::fs::write(dir.join("weights.safetensors"), &bytes).unwrap();
+        let metadata = ModelMetadata {
+            schema_version: Some(1),
+            model_id: Some(model_id.into()),
+            model_type: Some(model_id.split('/').next().unwrap().into()),
+            family: Some("fixture".into()),
+            official_name: Some("lookup".into()),
+            cleaned_name: Some("lookup".into()),
+            subtype: Some("stale-subtype".into()),
+            ..Default::default()
+        };
+        api.primary()
+            .model_library
+            .save_metadata(&dir, &metadata)
+            .await
+            .unwrap();
+        bytes
+    }
+
+    #[tokio::test]
+    async fn lookup_model_reports_actual_reclassification_and_preserves_legacy_lookup() {
+        use crate::models::ModelLookupResolution;
+        let root = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(root.path(), None).await;
+        let old = "llm/fixture/lookup";
+        let replacement = "unknown/fixture/lookup";
+        let bytes = lookup_fixture(&api, old).await;
+        let report = api.lookup_model(old).await.unwrap();
+        assert_eq!(report.contract_version, 1);
+        assert_eq!(report.requested_model_id, old);
+        assert_eq!(
+            report.resolution,
+            ModelLookupResolution::Reclassified {
+                replacement_model_id: replacement.into()
+            }
+        );
+        assert!(!api
+            .primary()
+            .model_library
+            .library_root()
+            .join(old)
+            .exists());
+        assert_eq!(
+            std::fs::read(
+                api.primary()
+                    .model_library
+                    .library_root()
+                    .join(replacement)
+                    .join("weights.safetensors")
+            )
+            .unwrap(),
+            bytes
+        );
+        assert!(api.get_model(old).await.unwrap().is_none());
+        assert!(api.get_model(replacement).await.unwrap().is_some());
+        assert_eq!(
+            api.lookup_model(old).await.unwrap().resolution,
+            ModelLookupResolution::Missing,
+            "no alias history is retained after the reporting read"
+        );
+    }
+
+    #[tokio::test]
+    async fn lookup_model_unchanged_reads_and_missing_are_explicit() {
+        use crate::models::ModelLookupResolution;
+        let root = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(root.path(), None).await;
+        let id = "unknown/fixture/lookup";
+        let bytes = lookup_fixture(&api, id).await;
+        for _ in 0..3 {
+            assert_eq!(
+                api.lookup_model(id).await.unwrap().resolution,
+                ModelLookupResolution::Found
+            );
+            assert_eq!(api.get_model(id).await.unwrap().unwrap().id, id);
+        }
+        assert_eq!(
+            std::fs::read(
+                api.primary()
+                    .model_library
+                    .library_root()
+                    .join(id)
+                    .join("weights.safetensors")
+            )
+            .unwrap(),
+            bytes
+        );
+        assert_eq!(
+            api.lookup_model("unknown/fixture/missing")
+                .await
+                .unwrap()
+                .resolution,
+            ModelLookupResolution::Missing
+        );
+        for invalid in ["", "../escape", "/absolute"] {
+            assert!(matches!(
+                api.lookup_model(invalid).await,
+                Err(PumasError::InvalidParams { .. })
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn lookup_model_in_flight_returns_conflict_instead_of_missing() {
+        let root = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(root.path(), None).await;
+        let scope = ReconcileScope::AllModels;
+        let primary = api.primary();
+        let run = match primary
+            .reconciliation
+            .try_start(&scope, ReconcileIntent::Forced)
+            .await
+        {
+            StartOutcome::Started(run) => run,
+            _ => panic!("fixture must admit reconciliation"),
+        };
+        assert!(matches!(
+            api.lookup_model("unknown/fixture/missing").await,
+            Err(PumasError::ModelIndexRefreshInProgress)
+        ));
+        run.finish_failure().await;
+    }
+
+    #[tokio::test]
+    async fn lookup_model_busy_custody_is_a_conflict_without_poisoning_shutdown() {
+        let root = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(root.path(), None).await;
+        lookup_fixture(&api, "llm/fixture/lookup").await;
+        let custody = crate::model_library::DownloadDestinationRoot::open(
+            api.primary().model_library.library_root(),
+        )
+        .unwrap();
+        let grant = custody.try_acquire_execution_grant().unwrap();
+        assert!(matches!(
+            api.lookup_model("llm/fixture/lookup").await,
+            Err(PumasError::DownloadRootBusy)
+        ));
+        drop(grant);
+        api.primary().runtime_tasks.shutdown_owned().await.unwrap();
+    }
 
     #[tokio::test]
     async fn validate_existing_local_file_path_canonicalizes_existing_file() {

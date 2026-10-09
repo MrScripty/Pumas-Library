@@ -485,6 +485,34 @@ pub(crate) async fn reconcile_on_demand(
     Ok(true)
 }
 
+/// Return only relocation facts from this admitted read, without retaining aliases.
+pub(crate) async fn reconcile_model_lookup(
+    primary: &PrimaryState,
+    model_id: &str,
+) -> Result<Vec<(String, String)>> {
+    let scope = ReconcileScope::Model(model_id.to_string());
+    let run = match primary
+        .reconciliation
+        .try_start(&scope, ReconcileIntent::Forced)
+        .await
+    {
+        StartOutcome::Started(run) => run,
+        StartOutcome::InFlight => return Err(PumasError::ModelIndexRefreshInProgress),
+        StartOutcome::Clean => {
+            return Err(PumasError::Other(
+                "Forced model lookup was not admitted".into(),
+            ))
+        }
+    };
+    await_reconciliation(start_owned_reconciliation(
+        primary,
+        scope,
+        "api-lookup-model",
+        run,
+    ))
+    .await
+}
+
 /// Run a required full-model reconciliation or return a typed conflict when
 /// another full/model reconciliation already owns the catalog.
 pub(crate) async fn reconcile_required_model_index(
@@ -506,7 +534,9 @@ pub(crate) async fn reconcile_required_model_index(
         }
     };
 
-    await_reconciliation(start_owned_reconciliation(primary, scope, reason, run)).await
+    await_reconciliation(start_owned_reconciliation(primary, scope, reason, run))
+        .await
+        .map(|_| ())
 }
 
 fn start_owned_reconciliation(
@@ -514,7 +544,7 @@ fn start_owned_reconciliation(
     scope: ReconcileScope,
     reason: &'static str,
     run: ReconciliationRunToken,
-) -> tokio::sync::oneshot::Receiver<Result<Result<()>>> {
+) -> tokio::sync::oneshot::Receiver<Result<Result<Vec<(String, String)>>>> {
     start_reconciliation_with_inputs(ReconciliationInputs::from(primary), scope, reason, run)
 }
 
@@ -523,7 +553,7 @@ fn start_reconciliation_with_inputs(
     scope: ReconcileScope,
     reason: &'static str,
     run: ReconciliationRunToken,
-) -> tokio::sync::oneshot::Receiver<Result<Result<()>>> {
+) -> tokio::sync::oneshot::Receiver<Result<Result<Vec<(String, String)>>>> {
     let runtime_tasks = inputs.runtime_tasks.clone();
     let started =
         runtime_tasks.start_owned("reconcile local model library", move |context| async move {
@@ -532,7 +562,7 @@ fn start_reconciliation_with_inputs(
                 // while the runtime owner observes a settled operation.
                 Err(error @ PumasError::DownloadRootBusy) => Ok(Err(error)),
                 Err(error) => Err(error),
-                Ok(()) => Ok(Ok(())),
+                Ok(changes) => Ok(Ok(changes)),
             }
         });
     match started {
@@ -551,12 +581,13 @@ async fn execute_reconciliation(
     reason: &'static str,
     run: ReconciliationRunToken,
     context: RuntimeTaskContext,
-) -> Result<()> {
+) -> Result<Vec<(String, String)>> {
     tracing::debug!("Running owned reconciliation: scope={scope:?} reason={reason}");
     // The token stays outside the caught future until registered effects settle.
     let outcome = AssertUnwindSafe(async {
-        run_scope(&inputs, &context, &scope).await?;
-        inputs.intent_service.reconcile(context.clone()).await
+        let changes = run_scope(&inputs, &context, &scope).await?;
+        let needs_retry = inputs.intent_service.reconcile(context.clone()).await?;
+        Ok((changes, needs_retry))
     })
     .catch_unwind()
     .await
@@ -571,11 +602,11 @@ async fn execute_reconciliation(
         Err(error) => Err(error),
     };
     match outcome {
-        Ok(needs_retry) => {
+        Ok((changes, needs_retry)) => {
             run.finish_success(chrono::Utc::now().to_rfc3339()).await;
             schedule_dirty_followup(inputs.clone());
             schedule_desired_retry(inputs, needs_retry);
-            Ok(())
+            Ok(changes)
         }
         Err(PumasError::DownloadRootBusy) if run.intent == ReconcileIntent::Opportunistic => {
             // The mutation authority refuses before acquiring a destructive
@@ -583,7 +614,7 @@ async fn execute_reconciliation(
             // observation, not an unverified mutation that poisons shutdown.
             run.finish_failure().await;
             schedule_desired_retry(inputs, true);
-            Ok(())
+            Ok(Vec::new())
         }
         Err(error) => {
             run.finish_failure().await;
@@ -614,7 +645,9 @@ pub(crate) fn start_intent_reconciliation(primary: Arc<PrimaryState>) {
                 .await
             {
                 StartOutcome::Started(run) => {
-                    execute_reconciliation(inputs, scope, "intent-startup", run, context).await
+                    execute_reconciliation(inputs, scope, "intent-startup", run, context)
+                        .await
+                        .map(|_| ())
                 }
                 StartOutcome::Clean | StartOutcome::InFlight => Ok(()),
             }
@@ -696,8 +729,8 @@ fn schedule_desired_retry(inputs: ReconciliationInputs, needs_retry: bool) {
 }
 
 async fn await_reconciliation(
-    result: tokio::sync::oneshot::Receiver<Result<Result<()>>>,
-) -> Result<()> {
+    result: tokio::sync::oneshot::Receiver<Result<Result<Vec<(String, String)>>>>,
+) -> Result<Vec<(String, String)>> {
     result.await.map_err(|_| {
         PumasError::Other("Model reconciliation ended before reporting its outcome".to_string())
     })??
@@ -1616,13 +1649,13 @@ async fn reconcile_model_scope(
     primary: &ReconciliationInputs,
     context: &RuntimeTaskContext,
     model_id: &str,
-) -> Result<()> {
+) -> Result<Vec<(String, String)>> {
     let model_dir = primary.model_library.library_root().join(model_id);
 
     if !path_exists(&model_dir).await? {
         // Remove stale DB row if the model path no longer exists.
         let _ = primary.model_library.index().delete(model_id)?;
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     if path_exists(&model_dir.join("metadata.json")).await? {
@@ -1631,7 +1664,7 @@ async fn reconcile_model_scope(
             .model_scope_is_current(&model_dir)
             .await?
         {
-            return Ok(());
+            return Ok(Vec::new());
         }
         primary.model_library.index_model_dir(&model_dir).await?;
         if primary
@@ -1648,33 +1681,40 @@ async fn reconcile_model_scope(
         {
             // Discovery can retain terminal Pending diagnostics. That is not
             // permission to edit/reclassify the producer-owned publication.
-            return Ok(());
+            return Ok(Vec::new());
         }
-        if let Err(err) = primary.model_library.reclassify_model(model_id).await {
-            let message = err.to_string();
-            if is_non_fatal_reclassify_error(&err) {
-                tracing::debug!(
-                    "Reconcile(model): skipping reclassify collision for {}: {}",
-                    model_id,
-                    message
-                );
-            } else {
-                return Err(err);
+        let replacement = match primary.model_library.reclassify_model(model_id).await {
+            Ok(replacement) => replacement,
+            Err(err) => {
+                let message = err.to_string();
+                if is_non_fatal_reclassify_error(&err) {
+                    tracing::debug!(
+                        "Reconcile(model): skipping reclassify collision for {}: {}",
+                        model_id,
+                        message
+                    );
+                } else {
+                    return Err(err);
+                }
+                None
             }
-        }
-        return Ok(());
+        };
+        return Ok(replacement
+            .into_iter()
+            .map(|id| (model_id.to_string(), id))
+            .collect());
     }
 
     if has_pending_download_artifacts(&model_dir) {
         // Partial downloads are indexed directly in SQLite as source-of-truth rows,
         // even when metadata.json is absent.
         stage_partial_download_row_for_model(primary, context, model_id, &model_dir).await?;
-        return Ok(());
+        return Ok(Vec::new());
     }
     if !has_importable_model_files(&model_dir) {
         // Empty/non-model directory under library layout; remove any stale index row.
         let _ = primary.model_library.index().delete(model_id);
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     // Directory exists but metadata is missing: attempt in-place adoption for this scope.
@@ -1686,23 +1726,25 @@ async fn reconcile_model_scope(
             .unwrap_or_else(|| "model reconcile adoption failed".to_string());
         if is_non_fatal_adoption_error(&message) {
             let _ = primary.model_library.index().delete(model_id);
-            return Ok(());
+            return Ok(Vec::new());
         }
         return Err(PumasError::Other(message));
     }
 
-    if let Some(ref adopted_id) = import_result.model_id {
-        let _ = primary.model_library.reclassify_model(adopted_id).await?;
+    let mut changes = Vec::new();
+    if let Some(adopted_id) = import_result.model_id {
+        if let Some(replacement) = primary.model_library.reclassify_model(&adopted_id).await? {
+            changes.push((adopted_id, replacement));
+        }
     }
-
-    Ok(())
+    Ok(changes)
 }
 
 async fn run_scope(
     primary: &ReconciliationInputs,
     context: &RuntimeTaskContext,
     scope: &ReconcileScope,
-) -> Result<()> {
+) -> Result<Vec<(String, String)>> {
     match scope {
         ReconcileScope::AllModels => {
             let orphan_result = primary.model_importer.adopt_orphans(false).await;
@@ -1785,7 +1827,7 @@ async fn run_scope(
 
             let _ = primary.model_library.rebuild_index().await?;
             stage_partial_download_rows(primary, context).await?;
-            Ok(())
+            Ok(reclassify.changes)
         }
         ReconcileScope::Model(model_id) => reconcile_model_scope(primary, context, model_id).await,
     }

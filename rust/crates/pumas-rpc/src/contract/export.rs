@@ -5,6 +5,10 @@
 //! It does not issue recovery authority or make cached tickets current.
 
 use super::*;
+
+// Matches the non-transforming relative identity policy in core and RPC admission.
+const MODEL_LOOKUP_ID_PATTERN: &str = r"^(?![A-Za-z]:)(?!.*(?:^|/)\.{1,2}(?:/|$))[^\\/\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+(?:/[^\\/\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+)*$";
+
 use pumas_library::models::RouterProfileSyncStatus;
 use schemars::{generate::SchemaSettings, JsonSchema};
 
@@ -389,7 +393,26 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         primary_file: None,
         component_manifest: None,
     };
+    let model_lookup_outcomes = [
+        pumas_library::models::ModelLookupResolution::Found,
+        pumas_library::models::ModelLookupResolution::Missing,
+        pumas_library::models::ModelLookupResolution::Reclassified {
+            replacement_model_id: "unknown/fixture/lookup".into(),
+        },
+    ]
+    .into_iter()
+    .map(|resolution| {
+        serde_json::to_value(ModelLookupOutcome::from(
+            pumas_library::models::ModelLookupReport {
+                contract_version: 1,
+                requested_model_id: "llm/fixture/lookup".into(),
+                resolution,
+            },
+        ))
+    })
+    .collect::<Result<Vec<_>, _>>()?;
     let mut fixtures = serde_json::json!({
+        "model_lookup_outcomes": model_lookup_outcomes,
         "library_model_metadata":LibraryModelMetadataOutcome::new("llm/Exact Model",metadata)?,
         "update_inference_settings_request_probes":update_inference_settings_request_probes,
         "update_model_notes_request_probes":update_model_notes_request_probes,
@@ -752,6 +775,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         S3ImportCancelOutcome,
         RouterProfileSyncStatus,
         ModelsOutcome,
+        ModelLookupParams,
+        ModelLookupOutcome,
         CatalogSearchOutcome,
         HfDownloadDetailsOutcome,
         InferenceSettingsOutcome,
@@ -1321,6 +1346,16 @@ fn refine_named(name: &str, schema: &mut Value) {
             "ModelsOutcome" => {
                 properties["models"]["pumasCatalogMap"] = true.into();
             }
+            "ModelLookupOutcome" => {
+                properties["contract_version"]["const"] = 1.into();
+                properties["requested_model_id"]["pattern"] = MODEL_LOOKUP_ID_PATTERN.into();
+                properties["requested_model_id"]["pumasUtf8Max"] = MAX_IDENTIFIER_BYTES.into();
+            }
+            "ModelLookupParams" => {
+                properties["model_id"]["minLength"] = 1.into();
+                properties["model_id"]["pumasUtf8Max"] = MAX_IDENTIFIER_BYTES.into();
+                properties["model_id"]["pattern"] = MODEL_LOOKUP_ID_PATTERN.into();
+            }
 
             "S3DiscoveryParams" => {
                 properties["read_mode"] = serde_json::json!({"type":"string","const":"version_id"});
@@ -1450,6 +1485,19 @@ fn refine_named(name: &str, schema: &mut Value) {
         };
         if let Some(success) = success {
             properties["success"]["const"] = success.into();
+        }
+    }
+    if name == "ModelLookupResolutionWire" {
+        if let Some(variants) = object.get_mut("oneOf").and_then(Value::as_array_mut) {
+            for variant in variants {
+                if let Some(field) = variant
+                    .get_mut("properties")
+                    .and_then(|p| p.get_mut("replacement_model_id"))
+                {
+                    field["pattern"] = MODEL_LOOKUP_ID_PATTERN.into();
+                    field["pumasUtf8Max"] = MAX_IDENTIFIER_BYTES.into();
+                }
+            }
         }
     }
     if name == "CatalogArtifactState" {

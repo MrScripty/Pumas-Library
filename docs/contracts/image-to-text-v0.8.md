@@ -211,3 +211,7 @@ distinct gates. Do not mark these gates passed from property declarations or
 synthetic text replies. Acquire and verify the exact runtime/model/projector
 cohort through the existing acquisition and runtime controls before real-model
 qualification.
+
+The next native qualification candidate, explicit two-GGUF import proposal,
+resource budget and current execution blocker are recorded in the
+[native qualification contract](image-to-text-native-qualification.md).

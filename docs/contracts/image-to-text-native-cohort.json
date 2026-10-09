@@ -1,0 +1,69 @@
+{
+  "kind": "vision_qualification_plan_not_artifact_authority",
+  "observed_date": "2026-10-09",
+  "status": "candidate_not_acquired_or_executed",
+  "runtime": {
+    "repository": "ggml-org/llama.cpp",
+    "tag": "b11429",
+    "commit": "d81235049384534c167caea52b85a694f6103d14",
+    "platform": "linux-x86_64-cpu",
+    "license": "MIT",
+    "asset_id": 613152023,
+    "filename": "llama-b11429-bin-ubuntu-x64.tar.gz",
+    "size_bytes": 17693462,
+    "publisher_sha256": "f6d25dde8f51133143d1453da4fd5f73b145127177612a283bf7995957af3392",
+    "metadata_url": "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/b11429",
+    "download_url": "https://github.com/ggml-org/llama.cpp/releases/download/b11429/llama-b11429-bin-ubuntu-x64.tar.gz",
+    "acquired_sha256": null,
+    "installed_receipt": null,
+    "native_dependencies_observed": false
+  },
+  "model": {
+    "repository": "ggml-org/SmolVLM-256M-Instruct-GGUF",
+    "revision": "b9e4379657e1450d04d02eec8e345667265b0a00",
+    "upstream_model": "HuggingFaceTB/SmolVLM-256M-Instruct",
+    "license": "Apache-2.0",
+    "public": true,
+    "gated": false,
+    "metadata_url": "https://huggingface.co/api/models/ggml-org/SmolVLM-256M-Instruct-GGUF?blobs=true",
+    "files": [
+      {
+        "role": "primary_model",
+        "path": "SmolVLM-256M-Instruct-Q8_0.gguf",
+        "size_bytes": 175054528,
+        "publisher_lfs_sha256": "2a31195d3769c0b0fd0a4906201666108834848db768af11de1d2cef7cd35e65",
+        "acquired_sha256": null
+      },
+      {
+        "role": "vision_projector",
+        "path": "mmproj-SmolVLM-256M-Instruct-f16.gguf",
+        "size_bytes": 190031616,
+        "publisher_lfs_sha256": "0802360aca1748f112ea510b8ff277c65b1361c8ef30ed89b83c9c7a60d08e96",
+        "acquired_sha256": null
+      }
+    ],
+    "selected_bytes": 365086144,
+    "import_receipt": null
+  },
+  "qualification": {
+    "device": "cpu",
+    "inference_passed": false,
+    "caption_quality_passed": false,
+    "managed_teardown_passed": false,
+    "consumer_process_passed": false
+  },
+  "resource_plan": {
+    "asset_download_bytes": 382779606,
+    "suggested_free_disk_bytes": 2147483648,
+    "suggested_free_memory_bytes": 4294967296,
+    "cpu_threads": 4,
+    "gpu_required": false,
+    "paid_service_required": false,
+    "resource_values_are_planning_budgets_not_measurements": true
+  },
+  "access": {
+    "new_gate_or_account_terms_observed": false,
+    "executor_metadata_request": "proxy CONNECT returned 403 Forbidden for huggingface.co and api.github.com; allowed escalation did not resolve HF failure",
+    "asset_download_attempted": false
+  }
+}

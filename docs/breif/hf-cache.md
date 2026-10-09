@@ -224,3 +224,10 @@ A future implementation plan should determine:
 * catalog schema/version migration;
 * snapshot distribution and incremental updates;
 * how provenance and freshness are represented in the public Pumas API.
+
+## Deferred Service Readiness
+
+The [service readiness checklist](../plans/hf-discovery-cache/readiness.md)
+records dependencies and decisions for the later discovery phase. Current work
+remains baseline repairs, S3 acquisition and restricted networking; no external
+service provisioning or search implementation is authorized by that checklist.

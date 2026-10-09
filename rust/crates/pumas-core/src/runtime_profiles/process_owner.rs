@@ -94,6 +94,8 @@ struct SessionState {
     residual_child: Option<ManagedChild>,
     custody_drain: Option<ChildDrainCompletion>,
     listener: Option<ManagedListenerCustody>,
+    #[cfg(all(test, target_os = "linux", not(target_env = "uclibc")))]
+    child_observation_failure: Option<Arc<AtomicBool>>,
 }
 
 /// A dropped launch future must not leave its admitted worker running. The
@@ -273,6 +275,8 @@ impl RuntimeProfileProcessOwner {
                         residual_child: None,
                         custody_drain: None,
                         listener: None,
+                        #[cfg(all(test, target_os = "linux", not(target_env = "uclibc")))]
+                        child_observation_failure: None,
                     }),
                     spec,
                 });
@@ -924,8 +928,13 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
             ManagedChild::spawn(&mut command, session.child_custody.clone())
                 .map_err(|e| failure(format!("Runtime spawn failed: {e}")))?,
         );
-        // Attach one composite owner before PID/readiness publication. An
-        // undrained ManagedChild parks this same lease with its exact child.
+        // Retain the physical store from the first child effect, including an
+        // audio attachment failure. The audio guard is composed with this share
+        // before PID/readiness publication and drops before the store lifetime.
+        child
+            .as_mut()
+            .expect("spawned child")
+            .attach_cleanup_lease(Arc::new(session.store_lifetime.clone()));
         session
             .audio_custody
             .attach_to_child(child.as_mut().expect("spawned child"))
@@ -938,6 +947,15 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
             state.status.pid = Some(pid);
+            #[cfg(all(test, target_os = "linux", not(target_env = "uclibc")))]
+            {
+                state.child_observation_failure = Some(
+                    child
+                        .as_ref()
+                        .expect("owned child")
+                        .test_observation_failure_control(),
+                );
+            }
             state.listener = Some(child.as_ref().expect("owned child").listener_custody());
             state.status.state = RuntimeLifecycleState::Running;
             state.launch = Some(Ok(OwnedRuntimeProfileObservation {
@@ -1198,6 +1216,107 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn failed_child_drain_retains_physical_store_after_process_owner_drop() {
+        use crate::platform::store_lifetime::{PhysicalStoreLease, StoreLeaseError, StoreLifetime};
+        use crate::registry::LibraryRegistry;
+
+        let roots = tempfile::tempdir().unwrap();
+        let store = roots.path().join("physical-store");
+        std::fs::create_dir(&store).unwrap();
+        // Independent registry rows are observations, not the physical lock.
+        let first_registry = LibraryRegistry::open_at(&roots.path().join("first.db")).unwrap();
+        let second_registry = LibraryRegistry::open_at(&roots.path().join("second.db")).unwrap();
+        first_registry
+            .register_instance(&store, std::process::id(), 39123)
+            .unwrap();
+        let original_row = first_registry.get_instance(&store).unwrap().unwrap();
+        assert!(second_registry.get_instance(&store).unwrap().is_none());
+        let fixture = Fixture {
+            owner: Arc::new(RuntimeProfileProcessOwner::with_store_lifetime(
+                StoreLifetime::acquire(&store).unwrap(),
+            )),
+            root: tempfile::tempdir().unwrap(),
+        };
+        let (config, spec, guard) = fixture.launch("sleep 30 & wait");
+        let id = spec.profile_id.clone();
+        let receipt = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap();
+        assert!(receipt.response.success);
+        let session = fixture.owner.registry.lock().unwrap().sessions[&id].clone();
+        let session_weak = Arc::downgrade(&session);
+        let failure_control = session
+            .state
+            .lock()
+            .unwrap()
+            .child_observation_failure
+            .clone()
+            .unwrap();
+        let custody = session.child_custody.clone();
+        struct FixtureCleanup {
+            failure_control: Arc<AtomicBool>,
+            custody: Arc<crate::platform::managed_child::ManagedChildCustodySlot>,
+            armed: bool,
+        }
+        impl Drop for FixtureCleanup {
+            fn drop(&mut self) {
+                if self.armed {
+                    self.failure_control.store(false, Ordering::Release);
+                    let _ = self.custody.drain(Duration::from_secs(5));
+                }
+            }
+        }
+        let mut cleanup = FixtureCleanup {
+            failure_control: failure_control.clone(),
+            custody: custody.clone(),
+            armed: true,
+        };
+        failure_control.store(true, Ordering::Release);
+        let stop_error = fixture.owner.stop(&id).await.unwrap_err().to_string();
+        assert!(stop_error.contains("Injected process observation failure"));
+        assert!(custody.is_active());
+        assert!(custody.has_parked_child());
+        drop(session);
+        drop(fixture);
+        assert!(
+            session_weak.upgrade().is_none(),
+            "fixture must release all Session lifetime shares"
+        );
+        assert!(custody.is_active());
+        assert!(custody.has_parked_child());
+
+        // One independent, nonblocking physical open. No sleep/retry, registry
+        // override, recovery action or PID-derived ownership is used.
+        let independent_open = PhysicalStoreLease::try_acquire(&store);
+        let retained = matches!(&independent_open, Err(StoreLeaseError::Busy(_)));
+        let observed = format!("{independent_open:?}");
+        drop(independent_open);
+        let surviving_row = first_registry.get_instance(&store).unwrap().unwrap();
+        let row_unchanged = original_row.started_at == surviving_row.started_at
+            && original_row.connection_token == surviving_row.connection_token;
+        let second_still_empty = second_registry.get_instance(&store).unwrap().is_none();
+
+        // Always settle the exact controlled child before a regression assertion
+        // can panic. This existing test hook resumes observed drain, not recovery.
+        failure_control.store(false, Ordering::Release);
+        cleanup.armed = false;
+        assert!(custody.drain(Duration::from_secs(5)).unwrap());
+        assert!(!custody.is_active());
+        assert!(!custody.has_parked_child());
+        let after_confirmed_drain = PhysicalStoreLease::try_acquire(&store);
+        assert!(
+            after_confirmed_drain.is_ok(),
+            "confirmed fixture drain did not release physical store: {after_confirmed_drain:?}"
+        );
+        drop(after_confirmed_drain);
+        assert!(row_unchanged);
+        assert!(second_still_empty);
+        assert!(retained, "unresolved exact child lost physical store exclusion after process/session owner drop; independent open observed {observed}");
     }
 
     #[tokio::test]

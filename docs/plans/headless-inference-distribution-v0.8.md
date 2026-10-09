@@ -317,8 +317,18 @@ Inference-enabled release acceptance requires:
 6. Complete the final release review against those exact source and artifact
    identities. Source integration alone is not release acceptance.
 
-Assembly binds explicit inputs but is not reproducible-build proof: archive
-timestamps/compression metadata are not normalized. Version manifests remain
+The existing no-inference `make-headless-archive.py` now normalizes archive
+metadata and optionally admits an exact `--binary-sha256`; its unchanged payload
+can be bundled with stable archive/executable byte pins in one Python/zlib
+environment. This is assembly reproducibility, not compilation or platform
+qualification. It preserves the actual source version and does not activate
+inference releases. Packaged `--discover-local` supplies narrow copied registry
+hints for selecting a root before existing authenticated attach and retention;
+see [local discovery](local-discovery-bootstrap.md).
+
+Inference and source-snapshot assembly bind explicit inputs but are not
+reproducible-build proof: their archive timestamps/compression metadata are not
+normalized. Version manifests remain
 consistent with the selected source version. Physical-store crash recovery
 requires separate native acceptance; historical cold-reopen observations and
 hosted CI results do not establish current deployment/platform qualification.

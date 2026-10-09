@@ -99,6 +99,28 @@ so embedders run one binary, not a core-plus-RPC pair. Verify one
 archive with `node scripts/release/check-artifacts.mjs headless-output
 headless-<linux|macos|windows>`.
 
+For a bundled executable already qualified at an immutable source revision,
+pass `--binary-sha256 EXACT_EXECUTABLE_SHA256` to the archive command. It hashes
+the private staged executable and refuses a mismatch before creating the output
+directory. The command prints both the archive and executable SHA256; keep those
+pins with the exact source/build evidence. Archives retain the same three-file
+payload and plan filenames. Assembly normalizes member ordering, ownership,
+permissions, timestamps and compression headers, so unchanged payload bytes
+produce identical archives in the same Python/zlib environment. This is archive
+assembly reproducibility, not reproducible compilation or an authenticated
+manifest. Version/target/feature acceptance still requires the existing native
+build and smoke evidence; the optional byte pin does not establish those facts.
+
+An extracted bundled backend can enumerate existing libraries with
+`pumas-rpc --discover-local`, under the selected `PUMAS_REGISTRY_DB_PATH`. Choose
+a returned root explicitly, authenticate through `--describe-local-http
+--launcher-root ROOT`, use both returned generation headers, and keep
+`--retain-local-http-owner --launcher-root ROOT` running during borrowed use.
+Enumeration is a copied registry observation and neither starts owners nor
+downloads models. Its current native qualification is Linux with private
+scratch disjoint from registered stores; see
+[local discovery](docs/plans/local-discovery-bootstrap.md).
+
 The no-inference desktop reuses the exact headless backend bytes: stage the
 extracted `pumas-rpc` into `electron/resources/bin`, package with
 `electron-builder --<platform> --publish never -c

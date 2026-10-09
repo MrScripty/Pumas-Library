@@ -774,6 +774,7 @@ async fn send_install_progress(
 }
 
 struct LlamaCppHttpAttemptHost {
+    cancelled_transfer_workspace: Option<Arc<NativeInstallWorkspace>>,
     cancel_flag: Arc<AtomicBool>,
     shutdown_flag: Arc<AtomicBool>,
     progress_tracker: Arc<RwLock<InstallationProgressTracker>>,
@@ -820,6 +821,12 @@ impl pumas_library::acquisition::HttpAttemptHost for LlamaCppHttpAttemptHost {
 
 #[async_trait::async_trait]
 impl pumas_library::acquisition::AcquisitionHost for LlamaCppHttpAttemptHost {
+    fn cancelled_transfer_cleanup(&mut self) -> Option<Box<dyn FnOnce() -> Result<()> + Send>> {
+        self.cancelled_transfer_workspace.take().map(|custody| {
+            Box::new(move || custody.revoke_and_clear()) as Box<dyn FnOnce() -> Result<()> + Send>
+        })
+    }
+
     async fn retry(
         &mut self,
         _attempt: u32,
@@ -2023,6 +2030,7 @@ impl VersionInstaller {
             )
             .await;
 
+        let cancellation_settled = Arc::new(AtomicBool::new(false));
         let result = match reconcile {
             Ok(Some(())) => {
                 drop(workspace);
@@ -2051,6 +2059,7 @@ impl VersionInstaller {
                         })?
                 };
                 let host = LlamaCppHttpAttemptHost {
+                    cancelled_transfer_workspace: Some(custody.clone()),
                     cancel_flag: self.cancel_flag.clone(),
                     shutdown_flag: self.shutdown_flag.clone(),
                     progress_tracker: self.progress_tracker.clone(),
@@ -2102,6 +2111,7 @@ impl VersionInstaller {
                 let cancel_for_prepare = self.cancel_flag.clone();
                 let control_for_prepare = self.torch_control.clone();
                 let custody_for_prepare = custody.clone();
+                let settled_for_prepare = cancellation_settled.clone();
                 let request = AcquisitionHttpRequest {
                     demand,
                     manifest,
@@ -2181,6 +2191,9 @@ impl VersionInstaller {
                                 let withdrawal = use_set.withdraw_after_cleanup(move || {
                                     custody_for_prepare.revoke_and_clear()
                                 }).await;
+                                if withdrawal.is_ok() {
+                                    settled_for_prepare.store(true, Ordering::SeqCst);
+                                }
                                 return settled_result(Err(VersionInstaller::cancellation_error()), withdrawal);
                             }
                             let prepared = PreparedLlamaCppInstall {
@@ -2248,7 +2261,15 @@ impl VersionInstaller {
             result => result,
         };
 
-        let cleanup = if result.is_ok() || custody.contents_cleared.load(Ordering::SeqCst) {
+        // The transfer hook returns the original cancellation only after its
+        // exact withdrawal is durable. Cleared bytes alone do not prove that
+        // settlement succeeded; retain the shell after withdrawal uncertainty.
+        if matches!(&result, Err(PumasError::DownloadCancelled))
+            && custody.contents_cleared.load(Ordering::SeqCst)
+        {
+            cancellation_settled.store(true, Ordering::SeqCst);
+        }
+        let cleanup = if result.is_ok() || cancellation_settled.load(Ordering::SeqCst) {
             Some(
                 consumer
                     .run_blocking("clean settled native workspace", move || {

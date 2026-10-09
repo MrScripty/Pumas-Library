@@ -1,5 +1,10 @@
 # Demand-driven Hugging Face download details
 
+This report records the feature source
+`d13a4e4209117ad7c5ed6603fc0e1a424298055e`. Its recorded qualification below
+remains historical for that source and backend binary; later composed trees
+require their own affected frontend/HTTP/consumer qualification.
+
 ## Acceptance goal and scope
 
 The [HF cache brief](../breif/hf-cache.md) separates lightweight discovery from expensive repository hydration. Ordinary interactive model search now requests `hydrate_limit = 0` through the existing search contract. Search can reuse existing local download details, and a discovery cache miss can still make its ordinary upstream search request. Opening one repository's download menu requests that repository's missing details; simply rendering a search result does not request its file tree or config.

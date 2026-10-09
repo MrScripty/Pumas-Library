@@ -1,5 +1,11 @@
 # Integrated headless source baseline
 
+This document identifies the published baseline
+`a67859e912f2456cac3ad004665efa6ba1ba7625`. A later composed source checkout
+may include additional reviewed slices; identify that checkout by its own
+qualification receipt. The exact-blob and one-commit statements below apply to
+this published baseline.
+
 This source baseline combines the producer, acquired-model import, discovery and
 Linux inference-built HTTP bootstrap through reviewed source
 `67ffdcfa5847807c1a6c70be3a45362838bf3a00`, tree

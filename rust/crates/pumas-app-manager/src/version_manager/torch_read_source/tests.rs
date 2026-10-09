@@ -300,3 +300,39 @@ manifest = namespace['installed_file_manifest'](target, [{'name': name, 'version
     std::fs::write(installed.packages.join("unreported.py"), b"unexpected").unwrap();
     assert!(installed.capture().is_err());
 }
+
+#[test]
+fn inert_bytecode_and_site_hook_names_are_source_fixed_and_unselected() {
+    for name in [
+        "a.pyc",
+        "a.pyo",
+        "a.pth",
+        "sitecustomize.py",
+        "usercustomize.py",
+        "x/__pycache__/cached.pyc",
+        "unselected.pth/nested.py",
+    ] {
+        assert!(inert_import_member(name));
+    }
+    for name in [
+        "worker.py",
+        "sitecustomize.py.extra",
+        "x/compiled.so",
+        "x/cache.py",
+    ] {
+        assert!(!inert_import_member(name));
+    }
+    let installed = Installed::new();
+    std::fs::write(
+        installed.depot.join("lib/python3.12/cached.pyc"),
+        b"inert bytecode",
+    )
+    .unwrap();
+    let owner = installed.capture().unwrap();
+    assert!(!owner
+        .manifest()
+        .any(|(_, file)| file.path().ends_with(".pyc")));
+    assert!(owner
+        .clone_member(RuntimeReadRole::Interpreter, "lib/python3.12/cached.pyc")
+        .is_err());
+}

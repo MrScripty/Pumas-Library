@@ -160,3 +160,14 @@ installed read set larger than the process descriptor limit without weakening
 selection bounds. Explicitly inherited descriptors remain owned through exec
 and must match granted inode identities. Kernel rules do not replace the
 original install/model ownership and mutation leases.
+
+The installed-owner spawn primitive now builds its command from the retained
+native loader, interpreter, dependency, copied-code and copied-model
+capabilities. It streams exact grants, revalidates current bytes before spawn,
+and attaches original runtime/model lifetime owners to the exact managed child
+before any fallible diagnostic-pipe extraction. It does not accept caller paths
+or permission receipts. Only an already-qualified `Installed` owner can reach
+this operation; the shipping policy catalog still refuses that owner. This is
+not yet a completed production control-channel/session producer or real ASR
+qualification. See [owned native cohort](cohere-native-cohort.md) for the fixed
+candidate identity and remaining gates.

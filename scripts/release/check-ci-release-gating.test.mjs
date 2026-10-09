@@ -67,6 +67,31 @@ test('shared quality jobs remain available to pull requests and ordinary pushes'
   }
 });
 
+test('review inference candidate is bounded, source-pinned and never publishes a release', () => {
+  const review = job('review-inference-linux');
+  assert.match(review, /^    if: github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch'$/m);
+  assert.match(review, /^    needs: lint-workflows$/m);
+  assert.match(review, /^    runs-on: ubuntu-24\.04$/m);
+  assert.match(review, /^    timeout-minutes: 60$/m);
+  assert.match(review, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(review, /persist-credentials: false/);
+  assert.match(review, /EXPECTED_SOURCE_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(review, /test "\$\(git rev-parse HEAD\)" = "\$EXPECTED_SOURCE_SHA"/);
+  assert.match(review, /CARGO_BUILD_JOBS: '1'/);
+  assert.match(review, /ORT_SKIP_DOWNLOAD: '1'/);
+  assert.match(review, /cargo fetch --locked --manifest-path rust\/Cargo\.toml/);
+  assert.match(review, /onnx_runtime_stage\.py --target linux-x86_64 --download/);
+  assert.match(review, /onnx_runtime_probe\.py --target linux-x86_64/);
+  assert.match(review, /headless_inference_ci\.py --target linux-x86_64/);
+  assert.match(review, /check-artifacts\.mjs .* headless-inference-linux/);
+  assert.match(review, /name: review-inference-linux-x86_64/);
+  assert.match(review, /name: Preserve bounded review build and startup evidence\n        if: always\(\)/);
+  assert.match(review, /name: review-inference-evidence-linux-x86_64/);
+  assert.equal((review.match(/retention-days: 7/g) ?? []).length, 2);
+  assert.doesNotMatch(review, /secrets\.|permissions:|pull_request_target|gh release|git push|CARGO_PROFILE_RELEASE_|RUSTFLAGS/);
+  assert.doesNotMatch(job('release-candidate'), /review-inference/);
+});
+
 test('release builds and frontend artifact upload are guarded inside shared jobs', () => {
   const headless = job('headless');
   assert.match(headless, new RegExp(`Build inference-disabled release backend\\n        if: ${escapedVersionTagGuard}`));

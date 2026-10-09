@@ -839,8 +839,21 @@ mod tests {
             -1
         );
         assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::EPERM));
+        // Probe the kernel directly: glibc rejects an empty name before making
+        // a syscall, which would test its EINVAL rather than seccomp denial.
         // SAFETY: the NUL-only name is live; O_RDONLY cannot create a queue.
-        assert_eq!(unsafe { libc::mq_open(c"".as_ptr(), libc::O_RDONLY) }, -1);
+        assert_eq!(
+            unsafe {
+                libc::syscall(
+                    libc::SYS_mq_open,
+                    c"".as_ptr(),
+                    libc::O_RDONLY,
+                    0,
+                    std::ptr::null::<libc::mq_attr>(),
+                )
+            },
+            -1
+        );
         assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::EPERM));
         let denied = root.join("denied");
         assert_eq!(

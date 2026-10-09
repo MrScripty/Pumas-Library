@@ -115,11 +115,7 @@ fn links_and_unselected_regular_files_cannot_enter_selection() {
         if case == 2 {
             std::fs::write(&other, b"unreported").unwrap();
         }
-        let exclusions = if case == 2 {
-            vec!["alias".into()]
-        } else {
-            vec![]
-        };
+        let exclusions = vec![];
         assert!(RetainedRuntimeReadSource::capture(vec![selection(
             root.path(),
             vec![manifest("worker.py", b"original")],
@@ -172,4 +168,66 @@ fn mutation_lease_lives_until_final_byte_owner_drop() {
     assert_eq!(drops.load(Ordering::SeqCst), 0);
     drop(child_guard);
     assert_eq!(drops.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn explicit_inert_regular_file_never_becomes_a_read_capability() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("worker.py"), b"original").unwrap();
+    let hook = root.path().join("ignored.pth");
+    std::fs::write(&hook, b"import arbitrary_code").unwrap();
+    let owner = RetainedRuntimeReadSource::capture(vec![selection(
+        root.path(),
+        vec![manifest("worker.py", b"original")],
+        vec!["ignored.pth".into()],
+        Arc::new(()),
+    )])
+    .unwrap();
+    assert!(owner
+        .clone_member(RuntimeReadRole::Sidecar, "ignored.pth")
+        .is_err());
+    assert!(!owner
+        .manifest()
+        .any(|(_, member)| member.path() == "ignored.pth"));
+    // Contents of an unselected inode cannot authorize any content read.
+    std::fs::write(&hook, b"different unselected bytes").unwrap();
+    owner.validate().unwrap();
+    let replacement = root.path().join("replacement");
+    std::fs::write(&replacement, b"replacement inode").unwrap();
+    std::fs::rename(replacement, hook).unwrap();
+    assert!(owner.validate().is_err());
+}
+
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+#[test]
+fn retained_directory_capabilities_refuse_unknown_names_and_replacements() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("package")).unwrap();
+    std::fs::write(root.path().join("package/worker.py"), b"original").unwrap();
+    let owner = RetainedRuntimeReadSource::capture(vec![selection(
+        root.path(),
+        vec![manifest("package/worker.py", b"original")],
+        vec![],
+        Arc::new(()),
+    )])
+    .unwrap();
+    assert_eq!(owner.directory_manifest().count(), 2);
+    assert!(owner
+        .clone_directory(RuntimeReadRole::Sidecar, "package")
+        .unwrap()
+        .metadata()
+        .unwrap()
+        .is_dir());
+    assert!(owner
+        .clone_directory(RuntimeReadRole::Sidecar, "missing")
+        .is_err());
+    std::fs::rename(
+        root.path().join("package"),
+        root.path().join("original-package"),
+    )
+    .unwrap();
+    std::fs::create_dir(root.path().join("package")).unwrap();
+    assert!(owner
+        .clone_directory(RuntimeReadRole::Sidecar, "package")
+        .is_err());
 }

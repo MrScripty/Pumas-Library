@@ -219,6 +219,69 @@ jobs:
             ${{ runner.temp }}/native-loader.json
           if-no-files-found: ignore
 
+  review-inference-linux:
+    name: Review Linux inference candidate
+    needs: lint-workflows
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: review-inference-linux-x86_64
+      - name: Prefetch locked source dependencies
+        run: cargo fetch --locked --manifest-path rust/Cargo.toml
+      - name: Provision pinned official CPU runtime
+        run: python scripts/release/onnx_runtime_stage.py --target linux-x86_64 --download --output-dir "${{ runner.temp }}/review-ort"
+      - name: Verify native ORT loader and C API before candidate compilation
+        run: python scripts/release/onnx_runtime_probe.py --target linux-x86_64 --runtime-dir "${{ runner.temp }}/review-ort" --output "${{ runner.temp }}/review-native-loader.json"
+      - name: Build, extract and authenticate exact review-head candidate
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          ORT_SKIP_DOWNLOAD: '1'
+          CARGO_BUILD_JOBS: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          unset GIT_PAGER
+          python scripts/release/headless_inference_ci.py --target linux-x86_64 --runtime-dir "${{ runner.temp }}/review-ort" --output-dir "${{ runner.temp }}/review-inference-candidate" --build-id "review-ci-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Verify required review inference archive
+        run: node scripts/release/check-artifacts.mjs "${{ runner.temp }}/review-inference-candidate" headless-inference-linux
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: review-inference-linux-x86_64
+          path: ${{ runner.temp }}/review-inference-candidate/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: Preserve bounded review build and startup evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: review-inference-evidence-linux-x86_64
+          path: |
+            ${{ runner.temp }}/review-inference-candidate/*.json
+            ${{ runner.temp }}/review-inference-candidate/*.jsonl
+            ${{ runner.temp }}/review-inference-candidate/*.log
+            ${{ runner.temp }}/review-inference-candidate/*.sha256
+            ${{ runner.temp }}/review-native-loader.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   build-frontend:
     name: Frontend and desktop contracts
     needs: lint-workflows

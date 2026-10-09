@@ -25,6 +25,8 @@ pub enum RuntimeReadRole {
     Interpreter,
     Dependencies,
     Sidecar,
+    /// Source-pinned owned system loader/libraries, never ambient host paths.
+    NativeLibraries,
 }
 
 /// A bounded expected installed member. Its actual bytes are always re-read.
@@ -59,7 +61,7 @@ impl RuntimeReadFile {
 }
 
 /// Ownership transferred by an installer, never decoded from request JSON.
-/// Exclusions record an explicitly unselected directory or alias namespace;
+/// Exclusions record explicitly unselected regular files, directories or aliases;
 /// they do not attest its contents. Selected trees remain closed otherwise.
 pub struct RuntimeReadRoot {
     role: RuntimeReadRole,
@@ -168,7 +170,7 @@ impl RetainedRuntimeReadSource {
                 "runtime byte capture supports Linux only",
             ));
         }
-        if selections.is_empty() || selections.len() > 3 {
+        if selections.is_empty() || selections.len() > 4 {
             return Err(refusal("invalid runtime root count"));
         }
         let mut roles = BTreeSet::new();
@@ -275,6 +277,46 @@ impl RetainedRuntimeReadSource {
         Ok(file)
     }
 
+    /// Enumerate only identity-retained directories. Directory capabilities
+    /// permit namespace traversal/enumeration, never recursive content reads.
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    pub(crate) fn directory_manifest(&self) -> impl Iterator<Item = (RuntimeReadRole, &str)> {
+        self.roots.iter().flat_map(|root| {
+            std::iter::once((root.role, "")).chain(
+                root.directories
+                    .keys()
+                    .map(move |name| (root.role, name.as_str())),
+            )
+        })
+    }
+
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    pub(crate) fn clone_directory(&self, role: RuntimeReadRole, path: &str) -> io::Result<File> {
+        if path.is_empty() {
+            return self.clone_root(role);
+        }
+        let root = self.root(role)?;
+        let expected = root
+            .directories
+            .get(path)
+            .ok_or_else(|| refusal("runtime directory is outside retained selection"))?;
+        let (parent, name) = open_parent(&root.directory, path)?;
+        let directory =
+            open_pinned_directory_at(&parent, std::ffi::OsStr::new(&name))?.into_std_file();
+        if file_identity(&directory)? != *expected {
+            return Err(refusal("runtime retained directory identity changed"));
+        }
+        Ok(directory)
+    }
+
     fn root(&self, role: RuntimeReadRole) -> io::Result<&Root> {
         self.roots
             .iter()
@@ -369,8 +411,8 @@ fn namespace(root: &Dir, exclusions: &BTreeSet<String>) -> io::Result<Namespace>
             valid_name(&path)?;
             let metadata = directory.symlink_metadata(&name)?;
             if exclusions.contains(&path) {
-                if !metadata.is_dir() && !metadata.is_symlink() {
-                    return Err(refusal("runtime exclusions require directory or alias"));
+                if !metadata.is_dir() && !metadata.is_symlink() && !metadata.is_file() {
+                    return Err(refusal("runtime exclusions cannot contain special files"));
                 }
                 excluded.insert(
                     path,

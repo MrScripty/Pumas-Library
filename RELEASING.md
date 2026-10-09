@@ -143,6 +143,14 @@ and macOS ARM64 archives through `headless_inference_ci.py` and the existing
 strict `headless_inference_build.py` producer. Candidate assembly requires all
 three in addition to the thirteen existing assets. A missing or failed native
 job blocks the combined candidate. No workflow step publishes a release.
+Pull requests and manual workflow runs also run the bounded Linux-only
+`review-inference-linux` job on the existing `ubuntu-24.04` runner. It checks out
+the exact PR head (or manual run SHA), uses the same strict release producer,
+extracts the archive, and compares authenticated core/RPC startup identities.
+Review archives and diagnostic evidence are retained for seven days under
+separate `review-inference-*` artifact names; they cannot satisfy the tag
+matrix's release-candidate inventory. This job grants neither pretrained-model
+acceptance nor Windows/macOS qualification, and publishes no tag or release.
 The integrated candidate identity is `0.8.0-rc.1`. This source-version preparation
 does not publish a tag or release and does not qualify native model execution.
 The producer requires source version 0.8; older 0.7 sources fail before compilation.

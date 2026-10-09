@@ -176,6 +176,19 @@ impl PreparedArtifactUse {
         Ok(self.directory.try_clone()?.into_std_file())
     }
 
+    /// Duplicate already held copied member capabilities for the confined
+    /// child. Callers validate the whole source before and after rule setup.
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    pub(crate) fn clone_read_source_members(
+        &self,
+    ) -> impl Iterator<Item = std::io::Result<File>> + '_ {
+        self.members.iter().map(|member| member.file.try_clone())
+    }
+
     pub(crate) fn manifest_sha256(&self) -> &str {
         &self.manifest_sha256
     }

@@ -10,6 +10,13 @@
 
 #[path = "audio_runtime/installed.rs"]
 pub(crate) mod installed;
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    target_pointer_width = "64"
+))]
+#[path = "audio_runtime/installed_child.rs"]
+mod installed_child;
 
 use super::audio_custody::AudioCustodyError;
 use crate::model_library::artifact_use::PreparedArtifactUse;
@@ -56,6 +63,7 @@ pub(crate) struct AudioRuntimeOwner {
     read_source: tempfile::TempDir,
     manifest_sha256: String,
     installed_bytes: Option<Arc<crate::runtime_read_source::RetainedRuntimeReadSource>>,
+    installed_interpreter: Option<String>,
 }
 
 impl std::fmt::Debug for AudioRuntimeOwner {
@@ -332,6 +340,7 @@ impl AudioRuntimeOwner {
             read_source,
             manifest_sha256: String::new(),
             installed_bytes: None,
+            installed_interpreter: None,
         };
         let mut created = BTreeSet::new();
         for path in selected {

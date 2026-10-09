@@ -2856,6 +2856,7 @@ dependencies = [
  "tracing",
  "walkdir",
  "windows-sys 0.59.0",
+ "xz2",
  "zip",
  "zstd",
 ]

@@ -37,6 +37,7 @@ fs2 = { workspace = true }
 zip = { workspace = true }
 flate2 = { workspace = true }
 tar = { workspace = true }
+xz2 = "=0.1.7"
 zstd = { workspace = true }
 
 # Time handling

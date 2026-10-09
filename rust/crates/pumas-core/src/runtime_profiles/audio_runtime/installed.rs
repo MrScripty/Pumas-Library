@@ -128,6 +128,7 @@ impl InstalledAudioRuntimeCandidate {
             model_read_set: self.selected_members,
             selected: Arc::downgrade(&self.selected),
         };
+        owner.installed_interpreter = Some(self.interpreter_member);
         owner.installed_bytes = Some(self.installed);
         owner
             .validate_source()
@@ -149,12 +150,15 @@ impl InstalledAudioRuntimeCandidate {
         installed.validate()?;
         selected.validate_read_source()?;
         let roles: BTreeSet<_> = installed.manifest().map(|(role, _)| role).collect();
-        if roles
-            != BTreeSet::from([
-                RuntimeReadRole::Interpreter,
-                RuntimeReadRole::Dependencies,
-                RuntimeReadRole::Sidecar,
-            ])
+        let required = BTreeSet::from([
+            RuntimeReadRole::Interpreter,
+            RuntimeReadRole::Dependencies,
+            RuntimeReadRole::Sidecar,
+        ]);
+        if !required.is_subset(&roles)
+            || roles
+                .iter()
+                .any(|role| !required.contains(role) && *role != RuntimeReadRole::NativeLibraries)
         {
             return Err(refusal(
                 "installed audio candidate requires all retained runtime roles",

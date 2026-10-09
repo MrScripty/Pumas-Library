@@ -585,6 +585,9 @@ async fn installed_owner_keeps_held_role_roots_when_original_locators_are_replac
                 RuntimeReadRole::Interpreter => "bin/python3.12",
                 RuntimeReadRole::Dependencies => "controlled_dependency.py",
                 RuntimeReadRole::Sidecar => "owned_worker.py",
+                RuntimeReadRole::NativeLibraries => {
+                    panic!("controlled fixture has no native cohort")
+                }
             },
         );
         let replacement_bytes = std::fs::read(&replacement).unwrap();
@@ -596,4 +599,31 @@ async fn installed_owner_keeps_held_role_roots_when_original_locators_are_replac
         assert_eq!(replacement_bytes, b"not the held runtime source");
     }
     owner.validate_source().unwrap();
+}
+
+#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+#[tokio::test]
+async fn installed_spawn_refuses_retargeting_and_fixture_without_native_cohort_before_child_effect()
+{
+    use crate::platform::managed_child::ManagedChildCustodySlot;
+    let model = ModelFixture::new().await;
+    let runtime = RuntimeFixture::new();
+    let selected = model.prepare();
+    let candidate = InstalledAudioRuntimeCandidate::capture(
+        runtime.capture(None),
+        "bin/python3.12",
+        selected.clone(),
+    )
+    .unwrap();
+    let owner = AudioRuntimeOwner::for_fixed_installed_fixture(candidate, &selected).unwrap();
+    let other = model.prepare();
+    for prepared in [other, selected] {
+        let custody = ManagedChildCustodySlot::new();
+        assert!(owner
+            .spawn_installed_child(prepared, custody.clone())
+            .is_err());
+        assert!(!custody.is_active());
+        assert!(!custody.has_parked_child());
+        assert!(!custody.is_cleanup_pending());
+    }
 }

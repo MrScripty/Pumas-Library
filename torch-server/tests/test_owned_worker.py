@@ -291,10 +291,20 @@ class OwnedWorkerTests(unittest.IsolatedAsyncioTestCase):
                 roots, "unsupported_runtime_member" if linked else "missing_bootstrap_member"
             )
 
-    async def test_automatic_site_hooks_and_bytecode_refuse_before_factory(self):
+    async def test_automatic_site_hooks_and_bytecode_are_inert_and_not_model_inputs(self):
         for name in ("evil.pth", "sitecustomize.py", "usercustomize.py", "torch.pyc"):
             roots = self.stage()
             (roots[1] / name).write_text("raise AssertionError('hook executed')")
+            process = self.launch(roots, controlled=True)
+            hello = (await self.call(process, 1, "hello", {}))["result"]
+            self.assertFalse(hello["production_available"])
+            await self.call(
+                process, 2, "close", {"runtime_instance_id": hello["runtime_instance_id"]}
+            )
+            process.stdin.close()
+            await asyncio.to_thread(process.wait, timeout=3)
+            self.assertEqual(process.returncode, 0, process.stderr.read())
+            (roots[2] / name).write_text("unselected model member")
             await self.refusal(roots, "unsupported_runtime_member", controlled=True)
 
     async def test_unknown_or_missing_model_members_refuse_before_factory(self):
@@ -315,3 +325,32 @@ class OwnedWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(process.returncode, 2)
         self.assertEqual(process.stdout.read(), b"")
         self.assertIn(b"unrecognized arguments", process.stderr.read())
+
+
+class SourceOnlyImportTests(unittest.TestCase):
+    def test_selected_source_ignores_otherwise_valid_tainted_bytecode(self):
+        import importlib.util
+        import py_compile
+        from owned_worker import _SourceOnlyLoader
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "selected.py"
+            source.write_text("VALUE = 'evil'\n")
+            py_compile.compile(
+                str(source),
+                doraise=True,
+                invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+            )
+            self.assertTrue(Path(importlib.util.cache_from_source(str(source))).is_file())
+            source.write_text("VALUE = 'good'\n")
+            code = _SourceOnlyLoader("selected", str(source)).get_code("selected")
+            namespace = {}
+            exec(code, namespace)
+            self.assertEqual(namespace["VALUE"], "good")
+
+    def test_inert_namespace_components_cannot_supply_imports(self):
+        from owned_worker import _inert_import_member
+
+        for path in ("x.pth/module.py", "__pycache__/module.py", "sitecustomize.py/nested.py"):
+            self.assertTrue(_inert_import_member(path))
+        self.assertFalse(_inert_import_member("normal/package.py"))

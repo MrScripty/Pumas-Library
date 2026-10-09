@@ -20,6 +20,7 @@ import urllib.parse
 
 MAX_DESCRIPTION = 64 * 1024
 MAX_RPC = 1024 * 1024
+MAX_OPERATION = 32 * 1024 * 1024
 DESCRIPTOR_SCHEMA_SHA256 = "eb25783123d38de5ff6aedf4cfa69de8f4f5f5c60799768b1b90da258b85f922"
 
 # Concrete representations from the pinned producer contract, not model or
@@ -427,13 +428,62 @@ class LocalHttpSession:
         if params is not None:
             message["params"] = params
         body = json.dumps(message, allow_nan=False).encode()
-        _require(len(body) <= MAX_RPC, "RPC request exceeds reference limit")
+        status, result = await self._json_http("POST", "/rpc", body, timeout=timeout)
+        _require(status == 200, "HTTP admission/transport failed; request outcome unconfirmed")
+        _require(type(result) is dict and result.get("jsonrpc") == "2.0"
+                 and type(result.get("id")) is int and result["id"] == request_id
+                 and ("result" in result) != ("error" in result), "invalid RPC response identity")
+        return result
+
+    async def capabilities(self, model, *, profile=None):
+        """Read selected-model declarations; catalog presence is not readiness."""
+        _require(isinstance(model, str) and model, "selected model required")
+        _require(profile is None or isinstance(profile, str), "profile must be a string")
+        query = {"model": model}
+        if profile is not None:
+            query["profile"] = profile
+        status, result = await self._json_http("GET", "/v1/capabilities?" + urllib.parse.urlencode(query))
+        if status == 200:
+            versions = result.get("supported_contract_versions")
+            _require(type(versions) is list and all(type(version) is int for version in versions)
+                     and 1 in versions and type(result.get("capabilities")) is list,
+                     "no common model-operation contract")
+        return {"status": status, "body": result}
+
+    async def model_operation(self, request):
+        """One finite modality-first operation; cancellation never authorizes replay."""
+        _require(type(request) is dict and "capability" not in request
+                 and type(request.get("contract_version")) is int and request["contract_version"] == 1
+                 and isinstance(request.get("request_id"), str) and request["request_id"]
+                 and type(request.get("stream", False)) is bool and not request.get("stream", False),
+                 "finite modality-first contract v1 request required")
+        request_id = request["request_id"]
+        body = json.dumps(request, allow_nan=False).encode()
+        status, result = await self._json_http("POST", "/v1/model-operations", body,
+                                               timeout=None, limit=MAX_OPERATION)
+        if result is None:
+            return {"status": status, "body": None}
+        if "contract_version" in result:
+            _require(type(result["contract_version"]) is int and result["contract_version"] == 1,
+                     "unsupported operation response contract")
+        if result.get("request_id") is not None:
+            _require(result["request_id"] == request_id, "operation response identity changed")
+        if status == 200:
+            _require(result.get("contract_version") == 1 and result.get("request_id") == request_id
+                     and type(result.get("result")) is dict and "error" not in result,
+                     "invalid operation response identity")
+        return {"status": status, "body": result}
+
+    async def _json_http(self, method, target, body=b"", *, timeout=10, limit=MAX_RPC):
+        self._check_available()
+        _require(len(body) <= limit, "HTTP request exceeds reference limit")
         writer = None
         try:
             async with asyncio.timeout(timeout):
-                reader, writer = await asyncio.open_connection(self._url.hostname, self._url.port, limit=16384)
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(self._url.hostname, self._url.port, limit=16384), 10)
                 self._check_available()
-                headers = (f"POST /rpc HTTP/1.1\r\nHost: {self._url.netloc}\r\n"
+                headers = (f"{method} {target} HTTP/1.1\r\nHost: {self._url.netloc}\r\n"
                            f"Pumas-Instance-Generation: {self._fence[0]}\r\n"
                            f"Pumas-Service-Generation: {self._fence[1]}\r\n"
                            f"Content-Type: application/json\r\nContent-Length: {len(body)}\r\n"
@@ -442,18 +492,20 @@ class LocalHttpSession:
                 await writer.drain()
                 head = await reader.readuntil(b"\r\n\r\n")
                 lines = head.decode("ascii").split("\r\n")
-                _require(lines[0].split()[:2] == ["HTTP/1.1", "200"],
-                         "HTTP admission/transport failed; request outcome unconfirmed")
+                status = lines[0].split()
+                _require(len(status) >= 2 and status[0] == "HTTP/1.1"
+                         and re.fullmatch(r"[1-5][0-9]{2}", status[1]), "invalid HTTP response status")
                 lengths = [line.split(":", 1)[1].strip() for line in lines[1:] if line.lower().startswith("content-length:")]
                 _require(len(lengths) == 1 and re.fullmatch(r"[0-9]+", lengths[0])
-                         and int(lengths[0]) <= MAX_RPC
+                         and int(lengths[0]) <= limit
                          and not any(line.lower().startswith("transfer-encoding:") for line in lines[1:]),
                          "unsupported or oversized reference response framing")
-                result = _decode(await reader.readexactly(int(lengths[0])))
-                _require(type(result) is dict and result.get("jsonrpc") == "2.0"
-                         and type(result.get("id")) is int and result["id"] == request_id
-                         and ("result" in result) != ("error" in result), "invalid RPC response identity")
-                return result
+                data = await reader.readexactly(int(lengths[0]))
+                if not data and int(status[1]) != 200:
+                    return int(status[1]), None  # Native fencing can refuse before the JSON handler.
+                result = _decode(data)
+                _require(type(result) is dict, "object HTTP response required")
+                return int(status[1]), result
         finally:
             if writer is not None:
                 writer.close()

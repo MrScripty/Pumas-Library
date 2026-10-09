@@ -41,6 +41,22 @@ pub(crate) fn build_info() -> PumasBuildInfo {
     info
 }
 
+/// Read-only CLI projection of the existing authenticated discovery owner.
+/// Missing, closing or incompatible owners remain errors, never startup authority.
+pub(crate) async fn describe_local_http(
+    root: &std::path::Path,
+) -> anyhow::Result<HttpServiceDescription> {
+    let root = root.canonicalize()?;
+    let discovery = pumas_library::discovery::LocalDiscovery::open()?;
+    let service = discovery
+        .borrow_http_service(
+            &root,
+            &pumas_library::discovery::CompatibilityRequirements::default(),
+        )
+        .await?;
+    Ok(service.description().clone())
+}
+
 /// Bind identity belongs to this router, never to a later row using the same root.
 #[derive(Clone)]
 pub(crate) struct HttpRouteIdentity {

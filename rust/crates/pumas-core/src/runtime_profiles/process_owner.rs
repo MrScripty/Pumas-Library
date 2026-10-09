@@ -51,6 +51,7 @@ pub struct OwnedRuntimeProfileLaunchReceipt {
 
 #[derive(Debug, Default)]
 pub(crate) struct RuntimeProfileProcessOwner {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     registry: Mutex<Registry>,
 }
 
@@ -65,6 +66,7 @@ struct Registry {
 
 #[derive(Debug)]
 struct Session {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     spec: RuntimeProfileLaunchSpec,
     generation: u64,
     model_path: Option<PathBuf>,
@@ -72,6 +74,7 @@ struct Session {
     router_models: Option<Arc<Mutex<RouterModelState>>>,
     stop: AtomicBool,
     child_custody: Arc<crate::platform::managed_child::ManagedChildCustodySlot>,
+    audio_custody: Arc<super::audio_custody::AudioCustodyRegistry>,
     state: Mutex<SessionState>,
     observer_stop: tokio::sync::watch::Sender<bool>,
     observer_terminal: tokio::sync::watch::Sender<Option<bool>>,
@@ -91,6 +94,8 @@ struct SessionState {
     residual_child: Option<ManagedChild>,
     custody_drain: Option<ChildDrainCompletion>,
     listener: Option<ManagedListenerCustody>,
+    #[cfg(all(test, target_os = "linux", not(target_env = "uclibc")))]
+    child_observation_failure: Option<Arc<AtomicBool>>,
 }
 
 /// A dropped launch future must not leave its admitted worker running. The
@@ -106,6 +111,7 @@ impl Drop for LaunchAdmissionCleanup {
             return;
         }
         self.session.stop.store(true, Ordering::Release);
+        self.session.audio_custody.close_admission();
         self.session.observer_stop.send_replace(true);
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let session = self.session.clone();
@@ -123,6 +129,15 @@ fn failure(message: impl Into<String>) -> PumasError {
 }
 
 impl RuntimeProfileProcessOwner {
+    pub(crate) fn with_store_lifetime(
+        store_lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Self {
+        Self {
+            store_lifetime,
+            registry: Mutex::default(),
+        }
+    }
+
     pub(crate) fn ensure_inactive(&self, profile_id: &RuntimeProfileId) -> Result<()> {
         let registry = self
             .registry
@@ -225,9 +240,14 @@ impl RuntimeProfileProcessOwner {
                     .checked_add(1)
                     .ok_or_else(|| failure("Runtime generation exhausted"))?;
                 let session = Arc::new(Session {
+                    store_lifetime: self.store_lifetime.clone(),
                     observer_stop: tokio::sync::watch::channel(false).0,
                     observer_terminal: tokio::sync::watch::channel(None).0,
                     generation: registry.generation,
+                    audio_custody: super::audio_custody::AudioCustodyRegistry::new(
+                        spec.profile_id.clone(),
+                        registry.generation,
+                    ),
                     router_models,
                     model_path,
                     context_size,
@@ -255,6 +275,8 @@ impl RuntimeProfileProcessOwner {
                         residual_child: None,
                         custody_drain: None,
                         listener: None,
+                        #[cfg(all(test, target_os = "linux", not(target_env = "uclibc")))]
+                        child_observation_failure: None,
                     }),
                     spec,
                 });
@@ -401,6 +423,15 @@ impl RuntimeProfileProcessOwner {
         Ok(self.with_listener(id, expected, |_| ())?.is_some())
     }
 
+    pub(crate) fn bind_transport_stop(
+        &self,
+        id: &RuntimeProfileId,
+        expected: &OwnedRuntimeProfileObservation,
+    ) -> Result<tokio::sync::watch::Receiver<bool>> {
+        self.with_listener(id, expected, |session| session.observer_stop.subscribe())?
+            .ok_or_else(|| failure("Runtime endpoint listener is not owned by the admitted child"))
+    }
+
     pub(crate) fn with_running_session<T>(
         &self,
         id: &RuntimeProfileId,
@@ -408,6 +439,18 @@ impl RuntimeProfileProcessOwner {
         publish: impl FnOnce() -> T,
     ) -> Result<T> {
         self.with_listener(id, expected, |_| publish())?
+            .ok_or_else(|| failure("Runtime endpoint listener is not owned by the admitted child"))
+    }
+
+    /// Retrieve retained custody only under exact-session/listener validation.
+    /// This does not qualify the runtime or admit an audio load.
+    #[allow(dead_code)] // The owning native channel is a subsequent integration seam.
+    pub(crate) fn audio_custody_for_running_session(
+        &self,
+        id: &RuntimeProfileId,
+        expected: &OwnedRuntimeProfileObservation,
+    ) -> Result<Arc<super::audio_custody::AudioCustodyRegistry>> {
+        self.with_listener(id, expected, |session| session.audio_custody.clone())?
             .ok_or_else(|| failure("Runtime endpoint listener is not owned by the admitted child"))
     }
 
@@ -580,6 +623,7 @@ impl RuntimeProfileProcessOwner {
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
             session.stop.store(true, Ordering::Release);
+            session.audio_custody.close_admission();
             session.observer_stop.send_replace(true);
             OwnedRuntimeProfileObservation {
                 generation: session.generation,
@@ -629,6 +673,7 @@ impl RuntimeProfileProcessOwner {
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
             session.stop.store(true, Ordering::Release);
+            session.audio_custody.close_admission();
             session.observer_stop.send_replace(true);
         }
         let mut results = Vec::new();
@@ -647,6 +692,7 @@ impl Drop for RuntimeProfileProcessOwner {
         if let Ok(registry) = self.registry.get_mut() {
             for session in registry.sessions.values() {
                 session.stop.store(true, Ordering::Release);
+                session.audio_custody.close_admission();
                 session.observer_stop.send_replace(true);
             }
         }
@@ -679,6 +725,7 @@ async fn drain_session(session: &Session) -> Result<bool> {
                     .map_err(|_| failure("Runtime process session poisoned"))?;
                 state.observer_error = Some(format!("Router observer failed: {error}"));
                 state.status.state = RuntimeLifecycleState::Failed;
+                session.audio_custody.close_admission();
             }
         }
         let terminal_observer = {
@@ -708,6 +755,7 @@ async fn drain_session(session: &Session) -> Result<bool> {
                     .map_err(|_| failure("Runtime process session poisoned"))?;
                 state.observer_error = Some(format!("Terminal observer failed: {error}"));
                 state.status.state = RuntimeLifecycleState::Failed;
+                session.audio_custody.close_admission();
             }
         }
         let worker = {
@@ -731,6 +779,7 @@ async fn drain_session(session: &Session) -> Result<bool> {
             if let Err(error) = outcome {
                 state.terminal = Some(Err(format!("Runtime worker failed: {error}")));
                 state.status.state = RuntimeLifecycleState::Failed;
+                session.audio_custody.close_admission();
                 session.observer_stop.send_replace(true);
                 session.observer_terminal.send_replace(Some(false));
             }
@@ -754,8 +803,9 @@ async fn drain_session(session: &Session) -> Result<bool> {
                     Some(completion.0.clone())
                 } else {
                     let custody = session.child_custody.clone();
-                    let worker =
-                        tokio::task::spawn_blocking(move || custody.drain(Duration::from_secs(5)));
+                    let worker = session
+                        .store_lifetime
+                        .spawn_blocking(move || custody.drain(Duration::from_secs(5)));
                     let completion = async move {
                         worker
                             .await
@@ -878,6 +928,17 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
             ManagedChild::spawn(&mut command, session.child_custody.clone())
                 .map_err(|e| failure(format!("Runtime spawn failed: {e}")))?,
         );
+        // Retain the physical store from the first child effect, including an
+        // audio attachment failure. The audio guard is composed with this share
+        // before PID/readiness publication and drops before the store lifetime.
+        child
+            .as_mut()
+            .expect("spawned child")
+            .attach_cleanup_lease(Arc::new(session.store_lifetime.clone()));
+        session
+            .audio_custody
+            .attach_to_child(child.as_mut().expect("spawned child"))
+            .map_err(|error| failure(format!("Audio child custody failed: {error:?}")))?;
         let pid = child.as_ref().expect("spawned child").id();
         write!(file, "{pid}").map_err(|e| PumasError::io_with_path(e, &config.pid_file))?;
         {
@@ -886,6 +947,15 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
             state.status.pid = Some(pid);
+            #[cfg(all(test, target_os = "linux", not(target_env = "uclibc")))]
+            {
+                state.child_observation_failure = Some(
+                    child
+                        .as_ref()
+                        .expect("owned child")
+                        .test_observation_failure_control(),
+                );
+            }
             state.listener = Some(child.as_ref().expect("owned child").listener_custody());
             state.status.state = RuntimeLifecycleState::Running;
             state.launch = Some(Ok(OwnedRuntimeProfileObservation {
@@ -954,6 +1024,7 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         state.status.state = RuntimeLifecycleState::Stopping;
     }
     session.observer_stop.send_replace(true);
+    session.audio_custody.close_admission();
     #[cfg(target_os = "linux")]
     if let Some(models) = &session.router_models {
         RouterModelState::reject_pending(models);
@@ -1145,6 +1216,107 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn failed_child_drain_retains_physical_store_after_process_owner_drop() {
+        use crate::platform::store_lifetime::{PhysicalStoreLease, StoreLeaseError, StoreLifetime};
+        use crate::registry::LibraryRegistry;
+
+        let roots = tempfile::tempdir().unwrap();
+        let store = roots.path().join("physical-store");
+        std::fs::create_dir(&store).unwrap();
+        // Independent registry rows are observations, not the physical lock.
+        let first_registry = LibraryRegistry::open_at(&roots.path().join("first.db")).unwrap();
+        let second_registry = LibraryRegistry::open_at(&roots.path().join("second.db")).unwrap();
+        first_registry
+            .register_instance(&store, std::process::id(), 39123)
+            .unwrap();
+        let original_row = first_registry.get_instance(&store).unwrap().unwrap();
+        assert!(second_registry.get_instance(&store).unwrap().is_none());
+        let fixture = Fixture {
+            owner: Arc::new(RuntimeProfileProcessOwner::with_store_lifetime(
+                StoreLifetime::acquire(&store).unwrap(),
+            )),
+            root: tempfile::tempdir().unwrap(),
+        };
+        let (config, spec, guard) = fixture.launch("sleep 30 & wait");
+        let id = spec.profile_id.clone();
+        let receipt = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap();
+        assert!(receipt.response.success);
+        let session = fixture.owner.registry.lock().unwrap().sessions[&id].clone();
+        let session_weak = Arc::downgrade(&session);
+        let failure_control = session
+            .state
+            .lock()
+            .unwrap()
+            .child_observation_failure
+            .clone()
+            .unwrap();
+        let custody = session.child_custody.clone();
+        struct FixtureCleanup {
+            failure_control: Arc<AtomicBool>,
+            custody: Arc<crate::platform::managed_child::ManagedChildCustodySlot>,
+            armed: bool,
+        }
+        impl Drop for FixtureCleanup {
+            fn drop(&mut self) {
+                if self.armed {
+                    self.failure_control.store(false, Ordering::Release);
+                    let _ = self.custody.drain(Duration::from_secs(5));
+                }
+            }
+        }
+        let mut cleanup = FixtureCleanup {
+            failure_control: failure_control.clone(),
+            custody: custody.clone(),
+            armed: true,
+        };
+        failure_control.store(true, Ordering::Release);
+        let stop_error = fixture.owner.stop(&id).await.unwrap_err().to_string();
+        assert!(stop_error.contains("Injected process observation failure"));
+        assert!(custody.is_active());
+        assert!(custody.has_parked_child());
+        drop(session);
+        drop(fixture);
+        assert!(
+            session_weak.upgrade().is_none(),
+            "fixture must release all Session lifetime shares"
+        );
+        assert!(custody.is_active());
+        assert!(custody.has_parked_child());
+
+        // One independent, nonblocking physical open. No sleep/retry, registry
+        // override, recovery action or PID-derived ownership is used.
+        let independent_open = PhysicalStoreLease::try_acquire(&store);
+        let retained = matches!(&independent_open, Err(StoreLeaseError::Busy(_)));
+        let observed = format!("{independent_open:?}");
+        drop(independent_open);
+        let surviving_row = first_registry.get_instance(&store).unwrap().unwrap();
+        let row_unchanged = original_row.started_at == surviving_row.started_at
+            && original_row.connection_token == surviving_row.connection_token;
+        let second_still_empty = second_registry.get_instance(&store).unwrap().is_none();
+
+        // Always settle the exact controlled child before a regression assertion
+        // can panic. This existing test hook resumes observed drain, not recovery.
+        failure_control.store(false, Ordering::Release);
+        cleanup.armed = false;
+        assert!(custody.drain(Duration::from_secs(5)).unwrap());
+        assert!(!custody.is_active());
+        assert!(!custody.has_parked_child());
+        let after_confirmed_drain = PhysicalStoreLease::try_acquire(&store);
+        assert!(
+            after_confirmed_drain.is_ok(),
+            "confirmed fixture drain did not release physical store: {after_confirmed_drain:?}"
+        );
+        drop(after_confirmed_drain);
+        assert!(row_unchanged);
+        assert!(second_still_empty);
+        assert!(retained, "unresolved exact child lost physical store exclusion after process/session owner drop; independent open observed {observed}");
     }
 
     #[tokio::test]
@@ -1625,6 +1797,49 @@ mod tests {
             drain_session(&session).await.unwrap_err().to_string(),
             first
         );
+    }
+
+    #[tokio::test]
+    async fn transport_stop_is_bound_to_exact_owned_listener_generation() {
+        let fixture = Fixture::new();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let (config, spec, guard) = listener_launch(&fixture, address);
+        let id = spec.profile_id.clone();
+        let original = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        wait_for_listener(&original).await;
+        let old_stop = fixture.owner.bind_transport_stop(&id, &original).unwrap();
+        assert!(!*old_stop.borrow());
+        let mut forged = original.clone();
+        forged.generation += 1;
+        assert!(fixture.owner.bind_transport_stop(&id, &forged).is_err());
+        fixture.owner.stop(&id).await.unwrap();
+        assert!(*old_stop.borrow());
+        let (config, spec, guard) = listener_launch(&fixture, address);
+        let replacement = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        wait_for_listener(&replacement).await;
+        let new_stop = fixture
+            .owner
+            .bind_transport_stop(&id, &replacement)
+            .unwrap();
+        assert!(!*new_stop.borrow());
+        assert!(*old_stop.borrow());
+        assert!(fixture.owner.bind_transport_stop(&id, &original).is_err());
+        fixture.owner.stop(&id).await.unwrap();
+        assert!(*new_stop.borrow());
     }
 
     #[tokio::test]

@@ -43,7 +43,7 @@ def report(
     if url is None:
         url = native_wheel()
     entries = [entry("torch", version, url, "a"), *(entry(name) for name in resolver.CORE)]
-    if adapter != "none":
+    if adapter in ("flux2", "nunchaku"):
         build = version.split("+", 1)[1]
         entries.append(
             entry(
@@ -62,6 +62,17 @@ def report(
                 "sentencepiece",
                 "protobuf",
             )
+        )
+    if adapter == "cohere-asr":
+        versions = {
+            "transformers": "5.4.0",
+            "accelerate": "1.12.0",
+            "huggingface-hub": "1.5.0",
+            "tokenizers": "0.22.2",
+        }
+        entries.extend(
+            entry(name, versions.get(name, "1.0.0"))
+            for name in sorted(resolver.COHERE_ASR_PACKAGES)
         )
     if adapter == "nunchaku":
         entries.append(entry("nunchaku", "1.2.0+torch2.9", resolver.NUNCHAKU_URL, "c"))
@@ -412,12 +423,32 @@ class ResolverTests(unittest.TestCase):
                         )
             record.write_text(good_record, encoding="utf-8")
 
+    def test_pip_worker_fallback_keeps_isolation_and_bytecode_suppression(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(resolver.sys.modules, {"pip._internal.cli.main": None}),
+            patch.object(
+                resolver.subprocess, "run", return_value=SimpleNamespace(returncode=0)
+            ) as run,
+        ):
+            self.assertEqual(
+                resolver.run_pip_progress_worker(
+                    pathlib.Path(directory) / "progress.json", ["--version"]
+                ),
+                0,
+            )
+        self.assertEqual(
+            run.call_args.args[0],
+            [resolver.sys.executable, "-I", "-B", "-m", "pip", "--version"],
+        )
+
     def test_install_mode_stages_once_and_validates_report_before_writing_lock(self):
         fixture = report()
         commands = []
 
         def fake_run(command, **_kwargs):
             commands.append(command)
+            self.assertEqual(command[1:3], ["-I", "-B"])
             self.assertIn("--target", command)
             self.assertNotIn("--dry-run", command)
             self.assertIn("--only-binary=:all:", command)
@@ -476,8 +507,9 @@ class ResolverTests(unittest.TestCase):
             ):
                 resolver.main()
             self.assertEqual(len(commands), 1)
-            self.assertEqual(commands[0][3], "--_pumas-pip-progress-worker")
-            self.assertEqual(commands[0][4], str(progress_file))
+            self.assertEqual(commands[0][1:3], ["-I", "-B"])
+            self.assertEqual(commands[0][4], "--_pumas-pip-progress-worker")
+            self.assertEqual(commands[0][5], str(progress_file))
             self.assertEqual(commands[0][commands[0].index("--target") + 1], str(target))
             self.assertTrue(target.is_dir())
             self.assertEqual(
@@ -1476,6 +1508,48 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(resolution["artifacts"][0]["sha256"], "a" * 64)
         self.assertIn("--hash=sha256:" + "a" * 64, requirements[0])
         self.assertEqual(len(requirements), len(resolution["artifacts"]))
+
+    def test_cohere_asr_exact_profile_preserves_torch_selection_and_omits_image_deps(self):
+        for version in ("2.4.0", "2.9.1", "2.10.0", "2.14.0"):
+            extras = resolver.adapter_requirements("cohere-asr", version, "cpu")
+            self.assertIn("transformers==5.4.0", extras)
+            fixture = report(
+                version=f"{version}+cpu", url=native_wheel(version), adapter="cohere-asr"
+            )
+            lines, resolution = resolver.requirements_from_report(
+                fixture, version, "cpu", "cohere-asr"
+            )
+            self.assertEqual(resolution["torch"], f"{version}+cpu")
+            self.assertEqual(resolution["adapter"], "cohere-asr")
+            self.assertTrue(all("sha256:" in line for line in lines))
+            self.assertFalse(
+                {"torchvision", "diffusers", "peft"}
+                & {item["name"] for item in resolution["artifacts"]}
+            )
+        with self.assertRaisesRegex(ValueError, "Torch >=2.4"):
+            resolver.adapter_requirements("cohere-asr", "2.3.1", "cpu")
+
+    def test_cohere_asr_report_rejects_missing_and_wrong_native_dependencies(self):
+        for name in resolver.COHERE_ASR_PACKAGES:
+            fixture = report(adapter="cohere-asr")
+            fixture["install"] = [
+                item for item in fixture["install"] if item["metadata"]["name"] != name
+            ]
+            with self.subTest(missing=name), self.assertRaises(ValueError):
+                resolver.requirements_from_report(fixture, "2.10.0", "cpu", "cohere-asr")
+        for name, wrong in (
+            ("transformers", "4.57.6"),
+            ("transformers", "5.4.1"),
+            ("accelerate", "1.0.0"),
+            ("huggingface-hub", "2.0.0"),
+            ("tokenizers", "0.23.1"),
+        ):
+            fixture = report(adapter="cohere-asr")
+            next(item for item in fixture["install"] if item["metadata"]["name"] == name)[
+                "metadata"
+            ]["version"] = wrong
+            with self.subTest(name=name, wrong=wrong), self.assertRaises(ValueError):
+                resolver.requirements_from_report(fixture, "2.10.0", "cpu", "cohere-asr")
 
     def test_adapter_artifacts_are_scoped_to_selection(self):
         _, resolution = resolver.requirements_from_report(

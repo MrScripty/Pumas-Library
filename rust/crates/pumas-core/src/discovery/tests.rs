@@ -501,6 +501,8 @@ async fn ordinary_drop_retains_owner_until_real_finite_index_mutation_and_ipc_se
     assert!(tokio::net::TcpStream::connect(&instance.endpoint)
         .await
         .is_err());
+    // This diagnostic handle still owns the mutable library after settlement.
+    drop(primary);
     let successor = attach_or_start(
         registry.clone(),
         &root,

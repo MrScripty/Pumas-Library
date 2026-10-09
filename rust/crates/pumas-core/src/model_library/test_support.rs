@@ -138,3 +138,26 @@ pub fn admit_paused_download(launcher_root: &Path, snapshot: &PersistedDownload)
         .into_result()?;
     Ok(())
 }
+
+/// Exercise the existing internal link-cleanup dispatch branch. This does not
+/// add a wire operation: the current typed local IPC allowlist excludes it.
+pub async fn clean_broken_links_dispatch(
+    api: &crate::PumasApi,
+) -> Result<crate::models::CleanBrokenLinksResponse> {
+    let value = crate::ipc::server::IpcDispatch::dispatch(
+        api.primary().as_ref(),
+        "clean_broken_links",
+        serde_json::json!({}),
+    )
+    .await?;
+    Ok(serde_json::from_value(value)?)
+}
+
+/// Build the real model-watcher callback with a caller-owned admission observer.
+/// The observer is fixture-only and grants no new mutation or recovery authority.
+pub fn watcher_callback_fixture(
+    api: &crate::PumasApi,
+    before_admission: Box<dyn Fn() + Send + Sync>,
+) -> super::ChangeCallback {
+    crate::api::model_library_change_callback(api.primary(), Some(before_admission))
+}

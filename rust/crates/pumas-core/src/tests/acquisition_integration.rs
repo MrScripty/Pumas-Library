@@ -43,14 +43,18 @@ async fn acquisition_integration_startup_refuses_legacy_store_without_rewriting_
             .with_process_manager(false)
             .build()
             .await;
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         assert!(matches!(
             retry,
             Err(PumasError::InvalidParams { message })
                 if message == format!(
-                    "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
-                    root.path().display(), std::process::id()
+                    "Pumas library instance is already running for physical store {}. Drop existing owner handles before constructing another owner.",
+                    root.path().canonicalize().unwrap().display()
                 )
         ));
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        assert!(matches!(retry, Err(PumasError::InvalidParams { message })
+            if message.contains("PumasLocalClient")));
         assert_eq!(
             serde_json::to_value(registry.get_instance(root.path()).unwrap().unwrap()).unwrap(),
             retained_claim

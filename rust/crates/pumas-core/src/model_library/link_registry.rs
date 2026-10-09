@@ -20,6 +20,7 @@ use tokio::sync::RwLock;
 /// - Cleaning up broken links
 #[derive(Debug, Clone)]
 pub struct LinkRegistry {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     /// Path to the registry JSON file
     registry_path: PathBuf,
     /// In-memory cache of links
@@ -44,7 +45,15 @@ impl LinkRegistry {
     ///
     /// * `registry_path` - Path to store the registry JSON file
     pub fn new(registry_path: impl Into<PathBuf>) -> Self {
+        Self::new_with_store_lifetime(registry_path, Default::default())
+    }
+
+    pub(crate) fn new_with_store_lifetime(
+        registry_path: impl Into<PathBuf>,
+        store_lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Self {
         Self {
+            store_lifetime,
             registry_path: registry_path.into(),
             links: Arc::new(RwLock::new(LinkData::default())),
         }
@@ -57,15 +66,13 @@ impl LinkRegistry {
         }
 
         let registry_path = self.registry_path.clone();
-        let data: Option<LinkData> =
-            tokio::task::spawn_blocking(move || atomic_read_json(&registry_path))
-                .await
-                .map_err(|err| {
-                    crate::PumasError::Other(format!(
-                        "Failed to join link registry load task: {}",
-                        err
-                    ))
-                })??;
+        let data: Option<LinkData> = self
+            .store_lifetime
+            .spawn_blocking(move || atomic_read_json(&registry_path))
+            .await
+            .map_err(|err| {
+                crate::PumasError::Other(format!("Failed to join link registry load task: {}", err))
+            })??;
         if let Some(data) = data {
             *self.links.write().await = data;
         }
@@ -77,7 +84,8 @@ impl LinkRegistry {
     pub async fn save(&self) -> Result<()> {
         let data = self.links.read().await.clone();
         let registry_path = self.registry_path.clone();
-        tokio::task::spawn_blocking(move || atomic_write_json(&registry_path, &data, false))
+        self.store_lifetime
+            .spawn_blocking(move || atomic_write_json(&registry_path, &data, false))
             .await
             .map_err(|err| {
                 crate::PumasError::Other(format!("Failed to join link registry save task: {}", err))
@@ -254,26 +262,28 @@ impl LinkRegistry {
             let data = self.links.read().await;
             data.by_target.values().cloned().collect::<Vec<_>>()
         };
-        let broken = tokio::task::spawn_blocking(move || {
-            Ok::<_, crate::PumasError>(
-                entries
-                    .into_iter()
-                    .filter(|entry| {
-                        if !entry.target.exists() {
-                            return true;
-                        }
-                        entry.target.is_symlink() && !entry.source.exists()
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .await
-        .map_err(|err| {
-            crate::PumasError::Other(format!(
-                "Failed to join link registry broken-link scan task: {}",
-                err
-            ))
-        })??;
+        let broken = self
+            .store_lifetime
+            .spawn_blocking(move || {
+                Ok::<_, crate::PumasError>(
+                    entries
+                        .into_iter()
+                        .filter(|entry| {
+                            if !entry.target.exists() {
+                                return true;
+                            }
+                            entry.target.is_symlink() && !entry.source.exists()
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .await
+            .map_err(|err| {
+                crate::PumasError::Other(format!(
+                    "Failed to join link registry broken-link scan task: {}",
+                    err
+                ))
+            })??;
 
         // Remove broken links
         for entry in &broken {

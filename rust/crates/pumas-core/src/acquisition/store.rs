@@ -203,6 +203,7 @@ fn validate_acquisition_records(acquisitions: &BTreeMap<Uuid, AcquisitionRecord>
 
 /// Source-neutral physical store authority. Construction has no I/O effects.
 pub struct AcquisitionStore {
+    store_lifetime: crate::platform::store_lifetime::StoreLifetime,
     path: PathBuf,
     mutation: Mutex<()>,
     #[cfg(test)]
@@ -301,12 +302,24 @@ impl AcquisitionStore {
     }
 
     pub fn new(data_dir: &Path) -> Self {
+        Self::new_with_store_lifetime(data_dir, Default::default())
+    }
+
+    pub(crate) fn new_with_store_lifetime(
+        data_dir: &Path,
+        store_lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Self {
         Self {
+            store_lifetime,
             path: data_dir.join("downloads.json"),
             mutation: Mutex::new(()),
             #[cfg(test)]
             publication_fault: None,
         }
+    }
+
+    pub(crate) fn store_lifetime(&self) -> crate::platform::store_lifetime::StoreLifetime {
+        self.store_lifetime.clone()
     }
 
     /// Eligibility check; does not publish or obtain workspace authority.

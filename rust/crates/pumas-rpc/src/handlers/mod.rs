@@ -1,8 +1,12 @@
 //! JSON-RPC request handlers, split by domain.
 
 mod conversion;
+#[cfg(feature = "inference-plugins")]
+mod gateway_stream;
 mod intent;
 mod links;
+#[cfg(feature = "inference-plugins")]
+mod model_operations;
 mod models;
 #[cfg(feature = "inference-plugins")]
 mod ollama;
@@ -75,6 +79,8 @@ use tracing::{debug, error, warn};
 
 const MODEL_LIBRARY_UPDATE_STREAM_LIMIT: usize = 250;
 
+#[cfg(feature = "inference-plugins")]
+pub use model_operations::{handle_capabilities, handle_model_operations};
 #[cfg(feature = "inference-plugins")]
 pub use openai_gateway::{handle_openai_models, handle_openai_proxy};
 

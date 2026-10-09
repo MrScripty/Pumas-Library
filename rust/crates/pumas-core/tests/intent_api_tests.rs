@@ -152,7 +152,15 @@ async fn exact_local_match_returns_verified_available_handle_without_reconciliat
     );
     assert!(handle.identity.model_ref.selected_artifact_path.is_none());
     assert_eq!(handle.artifact_kind, PackageArtifactKind::Safetensors);
-    assert_eq!(handle.verification.source_fingerprint.len(), 64);
+    let observation_digest = handle
+        .verification
+        .source_fingerprint
+        .strip_prefix("pumas-package-observation-v1:sha256:")
+        .expect("intent verification preserves the versioned package observation");
+    assert_eq!(observation_digest.len(), 64);
+    assert!(observation_digest
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
     assert!(Path::new(&handle.local_load_path).is_file());
 
     let after = api

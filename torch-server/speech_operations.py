@@ -21,6 +21,7 @@ from threading import Event, Thread
 import time
 from typing import Any, Callable
 from uuid import UUID, uuid4
+from native_speech_result import NativeSpeechResult
 
 from speech_binding import (
     BINDING_ERROR_CODES,
@@ -86,6 +87,7 @@ class OperationStatus:
     max_settled_receipts: int
     # Monotonic provider time, never an expiry/replay guarantee to other clocks.
     expires_at: float | None
+    finish_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,7 @@ class DrainReport:
 @dataclass
 class _Outcome:
     text: str | None = None
+    finish_reason: str | None = None
     diagnostic: Diagnostic | None = None
     cleanup_diagnostic: Diagnostic | None = None
     quarantine: SpeechCleanupUnconfirmed | None = None
@@ -115,6 +118,7 @@ class _Entry:
     state: str = "running"
     cleanup: str = "pending"
     text: str | None = None
+    finish_reason: str | None = None
     diagnostic: Diagnostic | None = None
     startup_diagnostic: Diagnostic | None = None
     owner_startup_diagnostic: Diagnostic | None = None
@@ -287,7 +291,17 @@ def _invoke(adapter: Callable, loaded: Any, audio: bytes, language: str, cancel:
     try:
         if cancel.is_set():
             raise SpeechCancelled("Speech inference cancelled before invocation")
-        text = adapter(loaded.model, loaded.tokenizer, audio, language, cancel)
+        result = adapter(loaded.model, loaded.tokenizer, audio, language, cancel)
+        finish_reason = None
+        if type(result) is NativeSpeechResult:
+            if type(result.finish_reason) is not str or result.finish_reason not in {
+                "stop",
+                "length",
+            }:
+                raise ValueError("ASR runtime returned an invalid finish reason")
+            text, finish_reason = result.text, result.finish_reason
+        else:
+            text = result  # Legacy internal primitive supplies no terminal evidence.
         if type(text) is not str or len(text) > MAX_TEXT_BYTES:
             raise ValueError("ASR runtime returned an invalid or oversized transcript")
         try:
@@ -296,7 +310,7 @@ def _invoke(adapter: Callable, loaded: Any, audio: bytes, language: str, cancel:
             valid = False
         if not valid:
             raise ValueError("ASR runtime returned an invalid or oversized transcript")
-        return _Outcome(text=text)
+        return _Outcome(text=text, finish_reason=finish_reason)
     except SpeechCleanupUnconfirmed as error:
         return _Outcome(
             diagnostic=_diagnostic(error.original_error, "inference_failed")
@@ -360,7 +374,8 @@ class SpeechOperationOwner:
         if asyncio.get_running_loop() is not self._loop:
             raise RuntimeError("Speech operations must run on their owning event loop")
 
-    def start(self, body: bytes) -> OperationStatus:
+    def start(self, body: bytes, *, admission=None) -> OperationStatus:
+        """Notify at retained-borrow claim, before cleanup, launch or status can fail."""
         self._check_loop()
         slot_ref, request_id, language, pcm, digest = _decode(body, self.runtime_instance_id)
         self._prune()
@@ -368,6 +383,10 @@ class SpeechOperationOwner:
         if existing is not None:
             if existing.digest != digest:
                 raise SpeechOperationError("request_conflict")
+            # Observation of an already-admitted request must not claim that
+            # its native effects never started if projecting its status fails.
+            if admission is not None:
+                admission()
             return self._snapshot(existing)
         if self._closed:
             raise SpeechOperationError("admission_closed")
@@ -406,6 +425,8 @@ class SpeechOperationOwner:
                 raise SpeechOperationError(code) from None
             # A transfer completed before a later binding failure. Registration
             # already owns it; release only because native non-start is known.
+            if admission is not None:
+                admission()
             outcome = _Outcome(diagnostic=_diagnostic(error, "binding_failed"))
             try:
                 entry.binding.release()
@@ -417,6 +438,10 @@ class SpeechOperationOwner:
             else:
                 self._settle(entry, outcome)
             return self._snapshot(entry)
+        # Clean refusals have passed. Retained custody already owns the borrow,
+        # so even a later synchronous startup/status error has admitted effects.
+        if admission is not None:
+            admission()
         try:
             entry.launch = self._run(entry)
             runner = self._loop.create_task(entry.launch)
@@ -532,6 +557,7 @@ class SpeechOperationOwner:
             self._ttl,
             self._max_receipts,
             None if entry.settled_at is None else entry.settled_at + self._ttl,
+            entry.finish_reason,
         )
 
     def _prune(self):
@@ -727,6 +753,7 @@ class SpeechOperationOwner:
         else:
             entry.state = "completed"
             entry.text = outcome.text
+            entry.finish_reason = outcome.finish_reason
         entry.cleanup = "confirmed"
         entry.audio = None
         entry.worker = None

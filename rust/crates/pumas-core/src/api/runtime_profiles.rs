@@ -74,6 +74,19 @@ impl Drop for OwnedRuntimeProfileCleanupTicket {
 }
 
 impl PumasApi {
+    /// Only an existing qualified owning slot can make this endpoint available.
+    /// Installed tags, decoded IDs and caller paths cannot register one.
+    pub fn owned_audio_endpoint(
+        &self,
+        profile: &RuntimeProfileId,
+        model: &str,
+    ) -> Option<crate::runtime_profiles::OwnedAudioEndpoint> {
+        self.primary()
+            .runtime_profile_service
+            .audio_endpoints
+            .selected(self.model_library(), profile, model)
+    }
+
     /// Return a cancellation guard for the exact owned profile generation.
     pub fn owned_runtime_profile_cleanup_ticket(
         &self,
@@ -125,6 +138,20 @@ impl PumasApi {
             .runtime_profile_service
             .process_owner
             .owns_current_listener(profile_id, expected)
+    }
+
+    /// Bind transport cancellation to the exact current owned process session.
+    /// The notification requests transport closure; it does not prove child or
+    /// device cessation and gives the caller no process-stop authority.
+    pub fn bind_owned_runtime_transport_stop(
+        &self,
+        profile_id: &RuntimeProfileId,
+        expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
+    ) -> Result<tokio::sync::watch::Receiver<bool>> {
+        self.primary()
+            .runtime_profile_service
+            .process_owner
+            .bind_transport_stop(profile_id, expected)
     }
 
     pub async fn get_runtime_profiles_snapshot(&self) -> Result<RuntimeProfilesSnapshotResponse> {

@@ -186,6 +186,20 @@ async fn builder_requires_download_restore_grant_but_no_client_reads_do_not() {
         .with_process_manager(false)
         .build()
         .await;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    assert!(
+        matches!(
+            &retry,
+            Err(PumasError::InvalidParams { message })
+                if message == &format!(
+                    "Pumas library instance is already running for physical store {}. Drop existing owner handles before constructing another owner.",
+                    temp.path().canonicalize().unwrap().display()
+                )
+        ),
+        "unexpected retained-owner refusal: {:?}",
+        retry.as_ref().err()
+    );
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     assert!(matches!(
         retry,
         Err(PumasError::InvalidParams { message })
@@ -472,10 +486,7 @@ async fn acquisition_integration_startup_retains_separate_pending_custody() {
         assert!(matches!(
             retry,
             Err(PumasError::InvalidParams { message })
-                if message == format!(
-                    "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
-                    temp.path().display(), std::process::id()
-                )
+                if message.contains("already running")
         ));
         assert_eq!(
             serde_json::to_value(registry.get_instance(temp.path()).unwrap().unwrap()).unwrap(),
@@ -670,6 +681,11 @@ async fn test_new_rejects_existing_primary_without_implicit_client() {
         Ok(_) => panic!("second PumasApi::new should reject an existing primary"),
         Err(err) => err,
     };
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    assert!(
+        matches!(err, PumasError::InvalidParams { message } if message.contains("physical store") && message.contains("Drop existing owner handles"))
+    );
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     assert!(
         matches!(err, PumasError::InvalidParams { message } if message.contains("PumasLocalClient"))
     );

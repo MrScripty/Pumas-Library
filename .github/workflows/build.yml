@@ -204,6 +204,9 @@ jobs:
       - run: python -m pip install -r torch-server/requirements-dev.txt
       - run: python -m ruff check torch-server scripts/release
       - run: python -m ruff format --check torch-server scripts/release
+      - name: Test native headless owner root identity
+        working-directory: scripts/release
+        run: python -m unittest -v test_headless_inference.OwnerContractTests
       # Fixtures validate tags and resolver behavior; the native tests below
       # validate host APIs without claiming GPU inference or model support.
       - run: python -m unittest discover -s torch-server/tests
@@ -278,6 +281,11 @@ jobs:
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib model_library::download_recovery::tests
       - name: Test native import metadata projection compatibility
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib model_library::library::tests
+      - name: Test native HF path identity containment
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib path_identity_tests
+      - name: Test native Windows canonical display prefixes
+        if: runner.os == 'Windows'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib display_identity_strips_drive_and_unc_verbatim_prefixes_without_io
       - name: Test native shard completeness
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::sharding::tests
       - name: Test native canonical shard discovery

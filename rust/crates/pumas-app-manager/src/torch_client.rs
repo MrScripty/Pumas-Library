@@ -693,6 +693,8 @@ impl TorchClient {
 
         let image_client = reqwest::Client::builder()
             .connect_timeout(GENERATION_CONNECT_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
             .user_agent("pumas-library")
             .build()
             .expect("failed to build reqwest image client");
@@ -1114,6 +1116,39 @@ impl TorchClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn image_generation_does_not_follow_provider_redirects() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let redirect = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let target = format!(
+            "http://{}/api/images/generate",
+            redirect.local_addr().unwrap()
+        );
+        let backend = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut bytes = [0; 1024];
+                let count = socket.read(&mut bytes).await.unwrap();
+                assert_ne!(count, 0);
+                request.extend_from_slice(&bytes[..count]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            assert!(request.starts_with(b"POST /api/images/generate "));
+            socket.write_all(format!("HTTP/1.1 307 Temporary Redirect\r\nLocation: {target}\r\nContent-Length: 0\r\n\r\n").as_bytes()).await.unwrap();
+        });
+        let result = TorchClient::new(Some(&endpoint))
+            .generate_image("fixture", "synthetic", 1, 1, None)
+            .await;
+        assert!(result.is_err());
+        backend.await.unwrap();
+        assert!(futures::poll!(Box::pin(redirect.accept())).is_pending());
+    }
 
     #[test]
     fn test_compute_device_roundtrip() {

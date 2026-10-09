@@ -17,6 +17,7 @@ impl PumasApi {
     /// becomes terminal failed progress, not an automatic retry. Direct backend
     /// calls, independent readiness probes and external tools are caller-coordinated.
     pub async fn start_conversion(&self, request: conversion::ConversionRequest) -> Result<String> {
+        self.try_primary()?;
         self.primary()
             .conversion_manager
             .start_conversion(request)
@@ -28,6 +29,7 @@ impl PumasApi {
         &self,
         conversion_id: &str,
     ) -> Option<conversion::ConversionProgress> {
+        let _ = self.primary();
         self.primary()
             .conversion_manager
             .get_progress(conversion_id)
@@ -37,6 +39,7 @@ impl PumasApi {
     /// `true` acknowledges the request, not completed cleanup. Observe conversion
     /// progress for its terminal outcome; unknown or finished workers return false.
     pub async fn cancel_conversion(&self, conversion_id: &str) -> Result<bool> {
+        self.try_primary()?;
         self.primary()
             .conversion_manager
             .cancel_conversion(conversion_id)
@@ -45,6 +48,7 @@ impl PumasApi {
 
     /// List all tracked conversions (active and recently completed).
     pub fn list_conversions(&self) -> Vec<conversion::ConversionProgress> {
+        let _ = self.primary();
         self.primary().conversion_manager.list_conversions()
     }
 
@@ -57,6 +61,7 @@ impl PumasApi {
     /// shutdown. The five-second command budget does not bound cleanup time.
     /// Reads do not install and callers must coordinate them with setup.
     pub async fn is_conversion_environment_ready(&self) -> Result<bool> {
+        self.try_primary()?;
         self.primary()
             .conversion_manager
             .is_environment_ready_async()
@@ -65,6 +70,7 @@ impl PumasApi {
 
     /// Ensure the Python conversion environment is set up.
     pub async fn ensure_conversion_environment(&self) -> Result<()> {
+        self.try_primary()?;
         self.primary().conversion_manager.ensure_environment().await
     }
 
@@ -77,6 +83,7 @@ impl PumasApi {
         &self,
         expected_previous_operation_id: Option<&str>,
     ) -> Result<conversion::ConversionSetupSnapshot> {
+        self.try_primary()?;
         self.primary()
             .conversion_manager
             .start_conversion_setup(expected_previous_operation_id)
@@ -85,6 +92,7 @@ impl PumasApi {
 
     /// Read the latest owner-local setup snapshot without starting work or disk I/O.
     pub fn get_conversion_setup(&self) -> Option<conversion::ConversionSetupSnapshot> {
+        let _ = self.primary();
         self.primary().conversion_manager.get_conversion_setup()
     }
 
@@ -105,6 +113,7 @@ impl PumasApi {
         backend: conversion::QuantBackend,
         expected_previous_operation_id: Option<&str>,
     ) -> Result<conversion::ConversionSetupSnapshot> {
+        self.try_primary()?;
         self.primary()
             .conversion_manager
             .start_backend_setup(backend, expected_previous_operation_id)
@@ -118,6 +127,7 @@ impl PumasApi {
         &self,
         backend: conversion::QuantBackend,
     ) -> Result<Option<conversion::ConversionSetupSnapshot>> {
+        self.try_primary()?;
         self.primary().conversion_manager.get_backend_setup(backend)
     }
 
@@ -126,6 +136,7 @@ impl PumasApi {
     /// Invoke before stopping the hosting runtime. Successful cancellation and
     /// cleanup return success; repeated calls preserve setup/probe failures.
     pub async fn shutdown_conversion_setup(&self) -> Result<()> {
+        self.try_primary()?;
         self.primary().conversion_manager.shutdown_setup().await
     }
 
@@ -134,11 +145,13 @@ impl PumasApi {
     /// release worker ownership; another caller can resume observing shutdown.
     /// Native process-tree cleanup remains governed by each conversion backend.
     pub async fn shutdown_conversions(&self) -> Result<()> {
+        self.try_primary()?;
         self.primary().conversion_manager.shutdown().await
     }
 
     /// Get the list of supported quantization types for conversion.
     pub async fn supported_quant_types(&self) -> Result<Vec<conversion::QuantOption>> {
+        self.try_primary()?;
         self.primary()
             .conversion_manager
             .supported_quant_types_async()
@@ -147,6 +160,7 @@ impl PumasApi {
 
     /// Get the readiness status of all quantization backends.
     pub async fn backend_status(&self) -> Result<Vec<conversion::BackendStatus>> {
+        self.try_primary()?;
         self.primary()
             .conversion_manager
             .backend_status_async()
@@ -167,6 +181,7 @@ impl PumasApi {
         &self,
         backend: conversion::QuantBackend,
     ) -> Result<()> {
+        self.try_primary()?;
         self.primary()
             .conversion_manager
             .ensure_backend_environment(backend)

@@ -157,6 +157,23 @@ separately from the controlled custody and registry-replacement fixtures.
 
 ## Slice 3: durable identity and qualified lifetime custody
 
+### Explicit restricted catalog/query operating owner (Linux)
+
+The implemented `InstanceProfile::CatalogQuery` uses the existing builder and
+local IPC admission machinery to open an existing index read-only. It supports
+strict indexed list/get and literal search, an acknowledged models-table
+checkpoint, passive retention and ordered shutdown. Its scope is committed before
+index/listener effects. Unsupported full-service operations and HTTP/initializer
+registration refuse; no writable service handles escape.
+
+`recover_catalog_owner` explicitly consumes the exact acknowledged ready
+checkpoint under the same physical lease and returns another restricted owner.
+Normal bootstrap never invokes recovery. Ordinary full/legacy/unknown owners
+remain unqualified. This does not certify model bytes, readiness, inference,
+downloads or arbitrary external writers. See
+[the current custody contract](operating-owner-custody-design.md) for the API,
+capabilities, durability bounds, native evidence and remaining full-owner gap.
+
 ### First recovery slice: qualified pending reservations (Linux)
 
 `LocalStartAuthority::checkpoint_metadata_for_pending_recovery` commits an exact
@@ -215,7 +232,7 @@ Qualify competing-owner, crash, namespace/reused-PID/inaccessible-owner, child l
 and filesystem replacement behavior natively on each supported OS. No shared-store or
 real cluster safety claim follows from local SQLite serialization.
 
-### Internal physical-root lock groundwork (recovery remains disabled)
+### Internal physical-root lock groundwork (general recovery remains disabled)
 
 `platform::store_lifetime::PhysicalStoreLease` is an internal primitive, not a
 new owner API. Its Linux/macOS implementation uses the existing `fs2` dependency to
@@ -358,8 +375,8 @@ and adds a Linux CLI acknowledgment for owned/borrowed HTTP access. The
 [inference-built control-plane bootstrap](../contracts/inference-enabled-bootstrap.md)
 uses the same authority and acknowledgment without loading a model or native SDK.
 This closes a bounded typed start-admission gap; automatic historical
-bootstrap and operating dead-owner recovery remain pending. Explicit qualified
-pending-reservation recovery is the narrower first slice above. Passive consumer retention
+bootstrap and full operating dead-owner recovery remain pending. Explicit qualified
+pending-reservation and existing-index CatalogQuery recovery are the bounded slices above. Passive consumer retention
 cannot transfer across processes. The existing
 `scripts/release/headless_inference_build.py` generator excludes the three RPC-only
 HTTP schemas from the core descriptor, with unrelated schemas retained.

@@ -1,92 +1,117 @@
-# Future operating-owner recovery: restricted cooperating custody
+# Restricted catalog/query owner and remaining full-owner custody
 
-This is a design prerequisite, not implemented recovery. The implemented first
-slice recovers only an explicitly checkpointed **unstarted** reservation.
-The source basis is immutable `a67859e912f2456cac3ad004665efa6ba1ba7625`, tree
-`86907ec2055e2c9770bee03cce791d149a166284`. Ready/legacy/unknown rows still refuse.
+## Supported operating slice
 
-## Actual effects and current custody
+`PumasApi::builder(root).with_instance_profile(InstanceProfile::CatalogQuery)`
+opens an **existing** `shared-resources/models/models.db`. `Full` remains the
+unchanged default. This is an existing API/builder/IPC profile, not a second
+ownership service or a new public owning facade. It reuses the existing instance
+row, native `StoreLifetime`, checkpoint receipt slot and finite-task coordinator.
 
-| Cooperating component | Actual lifetime and remaining gap |
+CatalogQuery permits `list_models`, `get_model`, `search_models`, typed
+`catalog_query`, `catalog_checkpoint`, authenticated instance description,
+passive local-owner retention, and ordered instance shutdown. Search is literal
+case-insensitive substring matching over indexed ID, names, model type and tags;
+it does not use forgiving FTS, refresh files, rebuild an index or reconcile.
+An empty index is distinct from an unsupported/corrupt index. Existing model
+paths and metadata are **indexed observations**, not proof that bytes are present,
+ready, fresh, or suitable for inference. No model download/execution is involved.
+
+The explicit profile branch runs before full constructors. It opens SQLite
+read-only, admits no schema creation, model-file mutation, watchers, orphan scan,
+HF/connectivity probe, acquisition, intent callbacks, process manager,
+conversion/setup, runtime-profile or launcher-update effects. `auto_create_dirs`
+is refused. Optional builder flags cannot widen this profile. It exposes no raw
+writable model library, index, acquisition service or arbitrary custody callback.
+Unsupported fallible Rust methods return an error before their effect. Legacy
+infallible full-service methods/accessors assert before service access; callers
+must check `instance_profile`/capabilities before using them. Their signatures and
+Full behavior remain unchanged. HTTP service/initializer registration is refused
+before custody/listener handoff; no HTTP capability is advertised. An arbitrary
+external HTTP host or writer is outside this profile and cannot acquire recovery
+qualification by publishing a receipt.
+
+The same existing IPC server installs the restricted dispatcher before binding.
+Only `describe_instance`, `catalog_query` and `catalog_checkpoint` are admitted,
+with the exact retained generation's connection token. The existing typed IPC
+protocol and `PumasLocalClient` carry the two new catalog methods; a language or
+CLI consumer may use the same bounded JSON/framing contract. RPC/HTTP routes and
+CLI commands were not extended in this slice. Full-owner routes continue through
+their existing dispatcher. Capabilities are exactly `catalog.indexed-query@1`,
+`catalog.literal-search@1` and `catalog.same-boot-recovery@1`; ordinary
+`model.query@1`/selector/artifact requirements do not silently negotiate here.
+
+## Durable acknowledgment and explicit cold reopen
+
+Linux, the same kernel boot, a stable cooperating root/registry/index namespace,
+regular unaliased index/WAL/SHM files, and a filesystem honoring native flock and
+SQLite durability are required. Symlinked index subtrees and hardlinked index
+files refuse. Namespace/PID identity, free locks and timeouts never authorize
+ordinary full/legacy/unknown owners. Hostile raw SQL/file writers, registry
+rollback, copied receipts, cross-boot and power-loss guarantees are outside this
+qualification.
+
+Before opening the index or exposing IPC, the existing registry commits a bounded
+versioned query-only scope under WAL/FULL. A claiming scope is **not recoverable**.
+The strict reader validates the supported nine TEXT columns and ID primary key,
+required stored JSON types, bounds (100,000 rows, 4 KiB IDs, 1 MiB per other
+field, 64 MiB raw total, serialized rows below the existing 16 MiB IPC frame
+limit with 32 KiB reserved for query/envelope overhead),
+and existing WAL index integrity. It hashes exact stored strings in primary-key
+order with unambiguous length framing in one SQLite read transaction. The digest
+covers the `models` table, including committed WAL rows, not other index tables
+or model files. It never silently defaults JSON, omits bad rows or rebuilds data.
+
+Ready promotion and its complete acknowledgment commit in a single FULL immediate
+registry transaction after the existing invalidation trigger. The private scope
+binds policy/version, boot, registry identity, physical root and database identity,
+exact instance/generation/token and library identity. Public
+`CatalogOwnerCheckpoint` is an observation, not ownership authority. Reads check
+physical identities and exact durable qualification again; changed/corrupt state
+fails closed. Constructors/read workers retain the existing native lease through
+actual SQLite work/connection lifetime. Cancellation of a read waiter does not
+abandon its finite effect. Shutdown closes admission and drains finite work,
+passive holds and IPC before releasing the exact row. The API and actual retained
+connections may continue holding physical exclusion after row release.
+
+`discovery::recover_catalog_owner(registry, root, expected).await` is explicit;
+normal builder/discovery/bootstrap never invokes it. It acquires the same native
+lease, validates the strict WAL-inclusive snapshot and complete durable receipt,
+then consumes the exact ready generation and mints a fresh claim/token in a FULL
+immediate transaction. It returns only another CatalogQuery `PumasApi`; no generic
+start authority escapes that could initialize a full owner. A second recoverer
+or stale observation refuses. Failure/cancellation before complete successor
+promotion leaves a claiming/unqualified row; it cannot replay the predecessor.
+Only an acknowledged qualified operating history is recoverable.
+
+## Remaining full-owner gap
+
+| Components | Unqualified effects/custody |
 | --- | --- |
-| `api/builder.rs`, `api/runtime_tasks.rs` | Constructor directory/index initialization, orphan/download/intent reconciliation and watcher effects retain `StoreLifetime` in their actual in-process closures. Aborting a requester does not end blocking work. Historical crash consistency of every admitted storage leaf still needs qualification. |
-| `model_library/library.rs`, model index/link stores, `acquisition/store.rs` | Escaped writable library/index/link/acquisition handles retain the native lifetime after API shutdown. A recoverable profile must account for them or withhold those writable escapes; shutdown success alone does not revoke them. |
-| `acquisition/service.rs`, `task_custody` | Generic consumer/work/cleanup closures can create children or independent supervisors. Their return or receipt cannot certify those descendants. A restricted profile must deny these callbacks, or explicitly transfer every effect into qualified custody before admission. |
-| `api/state.rs` | The builder exposes full primary IPC dispatch. `launch_runtime_profile`, `start_conversion`, `is_conversion_environment_ready` and `ensure_conversion_environment` admit managed runtimes/Python/setup effects. A Rust facade and disabled HF/process/probe flags alone do not close these transport routes. |
-| `platform/managed_child.rs`, runtime-profile sessions and conversion manager | Unix `ManagedChild` starts a private process group, retains cleanup leases and observes/drains owned groups. Custody slots and cleanup leases are parent memory. SIGKILL bypasses Drop, so exec'd descendants can outlive the owner and its native descriptor. Failed drain retains unresolved custody. |
-| `process/manager.rs`, `api/instance_shutdown.rs` | Legacy process management owns child/reaper records but is not explicitly in the current instance shutdown drain list. Pattern/PID-based orphan discovery is not exact historical ownership proof and must not authorize recovery or unrelated termination. |
-| `discovery/start.rs::LocalStartupCustody`, external HTTP owners | Initializer effects can transfer to an independent supervisor; success records settlement/transfer, not that supervisor's cessation. HTTP/initializer process lifetimes need the same enforced scope as core IPC. |
+| `api/builder.rs`, `runtime_tasks.rs`, `reconciliation.rs`, `model_library/watcher.rs` | Broad constructor, watcher, orphan/download/intent reconciliation writes and their interrupted storage states. |
+| `model_library/library.rs`, `index/model_index.rs`, link/migration/mapper stores | Writable escapes, projection/migration/report/link/copy/removal and read-side regeneration; filesystem/index consistency beyond the restricted models observation. |
+| `acquisition/store.rs`, `service.rs`, `task_custody.rs` | Persistent acquisition and arbitrary work/cleanup/transfer callbacks that can create children or independent supervisors. |
+| `api/state.rs`, external HTTP/RPC hosts | Full launch/conversion/setup/status routes and external transport owners require a separately sealed allowed scope before admission. |
+| `platform/managed_child.rs`, `linux_group.rs`, `runtime_profiles/process_owner.rs`, conversion managers/workers/setup/readiness/process owners | Parent-memory custody is lost on SIGKILL; exec'd or escaped descendants can survive the native parent descriptor. |
+| `process/manager.rs`, `api/instance_shutdown.rs` | Legacy children/reapers and explicit drainage; PID/pattern fallback is not exact historical ownership proof. |
+| `discovery/start.rs::LocalStartupCustody`, `retention.rs`, external HTTP owners | Transfer acknowledgments/passive disposal do not certify external cessation or cross-crash lease transfer. |
+| `system/utils.rs`, `launcher/updater.rs` | Ambient opening, probes, Git/build/install/restart commands and path writes. |
 
-## Smallest next operating profile
+Child-capable recovery would require a separately qualified cooperating custodian
+retaining the **same** native lease, exclusively admitting and reaping those exact
+children, surviving owner loss, closing admission on EOF, and recording complete
+terminal drainage before releasing the lease. Unknown/failed/escaped custody
+continues refusing. Process groups alone do not prevent `setsid` escape. This
+slice does not authorize killing unrelated processes or recover an inference/
+download/full owner merely because its PID died or its lease became free.
 
-A restricted **in-process-only catalog owner** is smaller than general runtime
-recovery. Its public capability surface would allow audited local catalog/query
-operations and their required crash-consistent in-process storage effects. It
-would expose no raw `PumasApi`, writable escape, arbitrary callback, runtime launch,
-conversion/setup/probe, launcher update, acquisition or external-supervisor path.
-Every admitted finite writer must retain the existing native lifetime through its
-actual completion, including SQLite close/checkpoint and queued blocking work.
+## Acceptance evidence limits
 
-This is an enforced profile, not a caller boolean. Install the restriction before
-constructor effects or the first IPC listener; apply the identical allowlist to
-IPC, HTTP, CLI and Rust entry points. Persist versioned scope, physical identity,
-exact generation and compatibility in the existing registry before the first
-qualified effect. Any unsupported admission must be denied or must durably remove
-recoverability **before** that effect. Unknown predecessors remain refused.
-Audit all transitive constructor and read-side projection/migration helpers; the
-current full builder/dispatch cannot be declared safe by wrapping its return value.
-
-Only after this closed cooperating profile is proved can native lease acquisition
-evidence cessation of its participating in-process holders after owner loss.
-Require SQLite transaction recovery and atomic/fsynced publication contracts for
-each allowed file leaf; the lock does not supply file-level crash consistency.
-`metadata/atomic.rs` already offers a held-target, parent-directory-synchronized
-publication result, including explicit ambiguous durability. Its legacy
-`atomic_write_json` convenience path is a separate file-sync/rename contract;
-do not treat both paths as equivalent or infer power-loss proof from process
-termination tests. The profile must select and qualify the needed semantics.
-Then exact-generation FULL redemption may return the existing owner authority.
-Do not infer cessation for ordinary broad owners from PID death or free locks.
-
-## If supported child effects are later admitted
-
-A restricted custodian could retain the **same** native lifetime and be the
-exclusive launcher/reaper for those exact admitted children. It must survive
-application-owner loss, close admission on owner-channel EOF, drain its actual
-owned groups through existing `ManagedChild` semantics, and persist a complete
-terminal exact-generation receipt before releasing the lifetime. Recovery still
-requires that lease and consumes the receipt atomically. Custodian death, failed
-observation, escaped/untracked descendants or unknown transfer leaves refusal.
-This extends existing custody; it does not introduce a second owner registry,
-TTL, PID-based takeover or authority to kill unrelated processes.
-
-Process groups alone are insufficient containment: group signals target a group,
-and a permitted descendant may create a new session/group. A supported child
-contract must prevent such escape or keep it explicitly unqualified. See the
-Linux [kill](https://man7.org/linux/man-pages/man2/kill.2.html) and
-[setsid](https://man7.org/linux/man-pages/man2/setsid.2.html) manuals.
-
-## Available guarantees and required native proof
-
-Linux `flock` follows the open file description and ends when its last descriptor
-closes; independent opens contend, including in one process. It is advisory
-exclusion for participating holders, not a detector of child or arbitrary writer
-cessation. Forked descriptors can extend exclusion; exec handling must be audited.
-See [flock](https://man7.org/linux/man-pages/man2/flock.2.html).
-
-SQLite permits one write transaction, and BEGIN IMMEDIATE acquires write admission
-before observation/replacement. WAL/FULL syncs committed WAL transactions; it
-does not identify filesystem/process ownership or repair arbitrary nontransactional
-payload writes. Storage must honor those syncs. See SQLite's
-[transactions](https://www.sqlite.org/lang_transaction.html),
-[WAL](https://www.sqlite.org/wal.html) and
-[synchronous](https://www.sqlite.org/pragma.html#pragma_synchronous) documentation.
-
-Before enabling any operating profile, native acceptance must cover committed
-allowed payload hashes across owner termination/cold reopen, simultaneous
-recoverers, cancellation at every admitted writer boundary, escaped handles,
-unsupported IPC/HTTP admission before effects, uncommitted/corrupt state,
-root/registry/boot mismatch and stale generations. Child-capable scope additionally
-needs actual owner/custodian loss, still-live and failed-drain descendants, and
-exact owned termination evidence. No guarantee about arbitrary unrelated
-processes is required; they receive no supported custody or recovery authority.
+Native owned-process tests commit fixture catalog state into WAL, acknowledge it
+through a real CatalogQuery owner and IPC, SIGKILL/reap that owner, cold reopen,
+and verify the exact digest/payload and fresh generation. Simultaneous owned
+recoverers admit one winner; killing that winner cannot replay the old observation.
+A killed real Full owner remains refused. Controlled corruption/schema/alias,
+queued actual SQLite read cancellation, passive-guard cancellation and abandoned
+claim/redemption cases are explicitly fixtures, not power-loss or child-custodian
+proof. Test logs/review reports and hashes are retained outside Git.

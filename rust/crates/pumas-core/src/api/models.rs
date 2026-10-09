@@ -168,8 +168,17 @@ impl PumasApi {
     // Model Library Methods
     // ========================================
 
-    /// List all models in the library.
+    /// List models. CatalogQuery reads the acknowledged index only; Full reconciles.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
+        if let crate::ApiInner::Catalog(state) = &self.inner {
+            let crate::CatalogQueryResponse::List(result) =
+                state.query(crate::CatalogQueryRequest::List).await?
+            else {
+                unreachable!()
+            };
+            return Ok(result);
+        }
+        self.try_primary()?;
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),
@@ -180,13 +189,28 @@ impl PumasApi {
         primary.model_library.list_models().await
     }
 
-    /// Search models using full-text search.
+    /// Search models. Full uses FTS; CatalogQuery uses literal case-insensitive
+    /// substring matching of indexed ID, names, type and tags, without reconciliation.
     pub async fn search_models(
         &self,
         query: &str,
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
+        if let crate::ApiInner::Catalog(state) = &self.inner {
+            let crate::CatalogQueryResponse::Search(result) = state
+                .query(crate::CatalogQueryRequest::Search {
+                    query: query.into(),
+                    limit,
+                    offset,
+                })
+                .await?
+            else {
+                unreachable!()
+            };
+            return Ok(result);
+        }
+        self.try_primary()?;
         let primary = self.primary();
 
         if query.trim().is_empty() {
@@ -240,6 +264,7 @@ impl PumasApi {
     /// source-of-truth for both metadata-backed models and metadata-less
     /// partial downloads staged from persisted/HF download data.
     pub async fn rebuild_model_index(&self) -> Result<usize> {
+        self.try_primary()?;
         let primary = self.primary();
         reconcile_required_model_index(primary.as_ref(), "api-rebuild-model-index").await?;
         load_model_count(primary.model_library.clone()).await
@@ -247,6 +272,7 @@ impl PumasApi {
 
     /// Get model-library status information for GUI polling.
     pub async fn get_library_status(&self) -> Result<models::LibraryStatusResponse> {
+        self.try_primary()?;
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),
@@ -274,6 +300,7 @@ impl PumasApi {
         &self,
         file_path: &str,
     ) -> Result<models::FileTypeValidationResponse> {
+        self.try_primary()?;
         let path = match validate_existing_local_file_path(file_path).await {
             Ok(path) => path,
             Err(err) => {
@@ -313,6 +340,18 @@ impl PumasApi {
 
     /// Get a single model by ID.
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
+        if let crate::ApiInner::Catalog(state) = &self.inner {
+            let crate::CatalogQueryResponse::Get(result) = state
+                .query(crate::CatalogQueryRequest::Get {
+                    model_id: model_id.into(),
+                })
+                .await?
+            else {
+                unreachable!()
+            };
+            return Ok(result);
+        }
+        self.try_primary()?;
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),
@@ -332,6 +371,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<Vec<models::InferenceParamSchema>> {
+        self.try_primary()?;
         load_inference_settings_for_model(
             self.primary().model_library.clone(),
             model_id.to_string(),
@@ -345,6 +385,7 @@ impl PumasApi {
         &self,
         model_ids: Vec<String>,
     ) -> Result<Vec<models::ModelInferenceSettingsBatchItem>> {
+        self.try_primary()?;
         let library = self.primary().model_library.clone();
         let mut items = Vec::with_capacity(model_ids.len());
         for model_id in model_ids {
@@ -372,6 +413,7 @@ impl PumasApi {
         model_id: &str,
         settings: Vec<models::InferenceParamSchema>,
     ) -> Result<()> {
+        self.try_primary()?;
         let library = self.primary().model_library.clone();
         let model_dir = library.library_root().join(model_id);
 
@@ -404,6 +446,7 @@ impl PumasApi {
         model_id: &str,
         notes: Option<String>,
     ) -> Result<models::UpdateModelNotesResponse> {
+        self.try_primary()?;
         let library = self.primary().model_library.clone();
         let model_dir = library.library_root().join(model_id);
 
@@ -446,6 +489,7 @@ impl PumasApi {
         platform_context: &str,
         backend_key: Option<&str>,
     ) -> Result<model_library::ModelDependencyRequirementsResolution> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_dependency_requirements(model_id, platform_context, backend_key)
@@ -457,6 +501,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::ModelExecutionDescriptor> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_execution_descriptor(model_id)
@@ -468,6 +513,7 @@ impl PumasApi {
         &self,
         request: models::ResolveModelArtifactLoadTargetRequest,
     ) -> Result<models::ResolveModelArtifactLoadTargetResponse> {
+        self.try_primary()?;
         self.try_primary()?
             .model_library
             .resolve_model_artifact_load_target(request)
@@ -479,6 +525,7 @@ impl PumasApi {
         &self,
         model_ids: Vec<String>,
     ) -> Result<Vec<models::ModelExecutionDescriptorBatchItem>> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_execution_descriptors_batch(&model_ids)
@@ -490,6 +537,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::ResolvedModelPackageFacts> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_package_facts(model_id)
@@ -502,6 +550,7 @@ impl PumasApi {
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<models::ModelLibraryUpdateFeed> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .list_model_library_updates_since(cursor, limit)
@@ -513,6 +562,7 @@ impl PumasApi {
         &self,
         cursor: &str,
     ) -> Result<models::ModelLibraryUpdateSubscription> {
+        self.try_primary()?;
         self.try_primary()?
             .model_library
             .subscribe_model_library_updates_since(cursor)
@@ -524,6 +574,7 @@ impl PumasApi {
         &self,
         cursor: &str,
     ) -> Result<model_library::ModelLibraryUpdateSubscriber> {
+        self.try_primary()?;
         self.try_primary()?
             .model_library
             .subscribe_model_library_update_stream_since(cursor)
@@ -535,6 +586,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::ModelPackageFactsSummaryResult> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_package_facts_summary(model_id)
@@ -546,6 +598,7 @@ impl PumasApi {
         &self,
         model_ids: Vec<String>,
     ) -> Result<Vec<models::ModelPackageFactsSummaryBatchItem>> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_package_facts_summaries(&model_ids)
@@ -558,6 +611,7 @@ impl PumasApi {
         limit: usize,
         offset: usize,
     ) -> Result<models::ModelPackageFactsSummarySnapshot> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .model_package_facts_summary_snapshot(limit, offset)
@@ -572,6 +626,7 @@ impl PumasApi {
         &self,
         request: models::ModelLibrarySelectorSnapshotRequest,
     ) -> Result<models::ModelLibrarySelectorSnapshot> {
+        self.try_primary()?;
         self.try_primary()?
             .model_library
             .model_library_selector_snapshot(request)
@@ -580,6 +635,7 @@ impl PumasApi {
 
     /// Resolve a canonical model id or legacy local path into a Pumas model ref.
     pub async fn resolve_pumas_model_ref(&self, input: &str) -> Result<models::PumasModelRef> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_pumas_model_ref(input)
@@ -590,6 +646,7 @@ impl PumasApi {
     pub async fn audit_dependency_pin_compliance(
         &self,
     ) -> Result<model_library::DependencyPinAuditReport> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .audit_dependency_pin_compliance()
@@ -601,6 +658,7 @@ impl PumasApi {
         &self,
         filter: Option<model_library::ModelReviewFilter>,
     ) -> Result<Vec<model_library::ModelReviewItem>> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .list_models_needing_review(filter)
@@ -615,6 +673,7 @@ impl PumasApi {
         reviewer: &str,
         reason: Option<&str>,
     ) -> Result<model_library::SubmitModelReviewResult> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .submit_model_review(model_id, patch, reviewer, reason)
@@ -628,6 +687,7 @@ impl PumasApi {
         reviewer: &str,
         reason: Option<&str>,
     ) -> Result<bool> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .reset_model_review(model_id, reviewer, reason)
@@ -639,6 +699,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<Option<models::ModelMetadata>> {
+        self.try_primary()?;
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),
@@ -654,6 +715,7 @@ impl PumasApi {
         &self,
         spec: &model_library::ModelImportSpec,
     ) -> Result<model_library::ModelImportResult> {
+        self.try_primary()?;
         self.primary().model_importer.import(spec).await
     }
 
@@ -662,6 +724,7 @@ impl PumasApi {
         &self,
         specs: Vec<model_library::ModelImportSpec>,
     ) -> Vec<model_library::ModelImportResult> {
+        let _ = self.primary();
         self.primary()
             .model_importer
             .batch_import(specs, None)
@@ -673,6 +736,7 @@ impl PumasApi {
         &self,
         spec: &model_library::ExternalDiffusersImportSpec,
     ) -> Result<model_library::ModelImportResult> {
+        self.try_primary()?;
         self.primary()
             .model_importer
             .import_external_diffusers_directory(spec)
@@ -684,6 +748,7 @@ impl PumasApi {
         &self,
         paths: &[String],
     ) -> Result<Vec<model_library::ImportPathClassification>> {
+        self.try_primary()?;
         let paths = paths.to_vec();
         tokio::task::spawn_blocking(move || {
             Ok(paths
@@ -707,6 +772,7 @@ impl PumasApi {
         &self,
         spec: &model_library::InPlaceImportSpec,
     ) -> Result<model_library::ModelImportResult> {
+        self.try_primary()?;
         let mut validated_spec = spec.clone();
         validated_spec.model_dir =
             validate_existing_local_directory_path(spec.model_dir.to_string_lossy().as_ref())
@@ -724,11 +790,13 @@ impl PumasApi {
     /// creates metadata from directory structure and file type detection, and
     /// indexes the models.
     pub async fn adopt_orphan_models(&self) -> Result<model_library::OrphanScanResult> {
+        self.try_primary()?;
         Ok(self.primary().model_importer.adopt_orphans(false).await)
     }
 
     /// Reclassify a single model (re-detect type and relocate directory if needed).
     pub async fn reclassify_model(&self, model_id: &str) -> Result<Option<String>> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .reclassify_model(model_id)
@@ -737,6 +805,7 @@ impl PumasApi {
 
     /// Reclassify all models in the library (re-detect types and relocate directories).
     pub async fn reclassify_all_models(&self) -> Result<model_library::ReclassifyResult> {
+        self.try_primary()?;
         self.primary().model_library.reclassify_all_models().await
     }
 }

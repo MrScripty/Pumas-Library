@@ -48,7 +48,7 @@ fn path_text(path: &Path) -> Result<&str> {
         .ok_or_else(|| invalid("non-UTF-8 root is not qualified"))
 }
 
-fn boot_id() -> Result<String> {
+pub(super) fn boot_id() -> Result<String> {
     if !cfg!(target_os = "linux") {
         return Err(invalid("Linux same-boot qualification required"));
     }
@@ -113,7 +113,7 @@ fn exact_pending(
     .ok_or_else(|| invalid("exact unstarted claim or custody scope changed"))
 }
 
-fn registry_identity(conn: &Connection) -> Result<String> {
+pub(super) fn registry_identity(conn: &Connection) -> Result<String> {
     let value: Option<Option<String>> = conn
         .query_row(
             "SELECT CASE WHEN length(CAST(value AS BLOB)) BETWEEN 1 AND ?2

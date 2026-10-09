@@ -19,6 +19,7 @@ impl PumasApi {
 
     /// Check if Ollama is currently running.
     pub async fn is_ollama_running(&self) -> bool {
+        let _ = self.primary();
         let process_manager = {
             let mgr_lock = self.primary().process_manager.read().await;
             mgr_lock.clone()
@@ -35,6 +36,7 @@ impl PumasApi {
 
     /// Stop Ollama processes.
     pub async fn stop_ollama(&self) -> Result<bool> {
+        self.try_primary()?;
         let process_manager = {
             let mgr_lock = self.primary().process_manager.read().await;
             mgr_lock.clone()
@@ -58,6 +60,7 @@ impl PumasApi {
         tag: &str,
         version_dir: &std::path::Path,
     ) -> Result<models::LaunchResponse> {
+        self.try_primary()?;
         if !path_exists(version_dir).await? {
             return Ok(models::LaunchResponse {
                 success: false,
@@ -104,6 +107,7 @@ impl PumasApi {
 
     /// Check if the Torch inference server is currently running.
     pub async fn is_torch_running(&self) -> bool {
+        let _ = self.primary();
         let process_manager = {
             let mgr_lock = self.primary().process_manager.read().await;
             mgr_lock.clone()
@@ -120,6 +124,7 @@ impl PumasApi {
 
     /// Stop the Torch inference server.
     pub async fn stop_torch(&self) -> Result<bool> {
+        self.try_primary()?;
         let process_manager = {
             let mgr_lock = self.primary().process_manager.read().await;
             mgr_lock.clone()
@@ -143,6 +148,7 @@ impl PumasApi {
         tag: &str,
         version_dir: &std::path::Path,
     ) -> Result<models::LaunchResponse> {
+        self.try_primary()?;
         if !path_exists(version_dir).await? {
             return Ok(models::LaunchResponse {
                 success: false,
@@ -189,6 +195,7 @@ impl PumasApi {
 
     /// Get the last launch log path.
     pub async fn get_last_launch_log(&self) -> Option<String> {
+        let _ = self.primary();
         let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.last_launch_log()
@@ -200,6 +207,7 @@ impl PumasApi {
 
     /// Get the last launch error.
     pub async fn get_last_launch_error(&self) -> Option<String> {
+        let _ = self.primary();
         let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.last_launch_error()

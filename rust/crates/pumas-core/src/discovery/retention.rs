@@ -58,20 +58,18 @@ impl PumasApi {
         if description != *expected {
             return Err(invalid("local retention owner identity changed"));
         }
-        let primary = self.primary();
-        primary
-            .external_service_tasks
-            .require_store_root(&description.library_root)?;
+        let tasks = match &self.inner {
+            crate::ApiInner::Primary(primary) => primary.external_service_tasks.clone(),
+            crate::ApiInner::Catalog(state) => state.tasks.clone(),
+        };
+        tasks.require_store_root(&description.library_root)?;
         let (release, released) = oneshot::channel();
         // start_owned's synchronous close gate linearizes admission with begin().
         // Its actual task retains StoreLifetime independently of this observer.
-        let observed = primary.external_service_tasks.start_owned(
-            "local-owner-passive-retention",
-            move |_| async move {
-                let _ = released.await;
-                Ok(())
-            },
-        )?;
+        let observed = tasks.start_owned("local-owner-passive-retention", move |_| async move {
+            let _ = released.await;
+            Ok(())
+        })?;
         let retention = LocalOwnerRetention {
             description,
             release: Some(release),

@@ -1,5 +1,6 @@
 //! SQLite model index for storing and querying model metadata.
 
+mod catalog_snapshot;
 mod dependency_profiles;
 mod publication_projection;
 pub(crate) use publication_projection::ProjectionCommit;

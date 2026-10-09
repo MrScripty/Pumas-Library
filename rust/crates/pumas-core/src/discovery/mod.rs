@@ -2,8 +2,9 @@
 //!
 //! Registry IDs identify cache entries, not physical libraries. Advertisements
 //! are hints until an authenticated live handshake succeeds. This module does
-//! not reclaim operating historical owners. Explicit pending-reservation recovery
-//! uses the same native store lifetime and requires a durable bounded checkpoint.
+//! not automatically reclaim historical owners. Explicit pending-reservation and
+//! restricted CatalogQuery recovery use the same native store lifetime and require
+//! complete bounded checkpoints; full operating owners remain unqualified.
 
 use crate::models::{
     ModelLibrarySelectorSnapshot, ModelLibrarySelectorSnapshotRequest,
@@ -16,6 +17,9 @@ use crate::{PumasApi, PumasError, PumasLocalClient, PumasReadOnlyLibrary, Result
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod catalog;
+pub use crate::CatalogOwnerCheckpoint;
+pub use catalog::recover_catalog_owner;
 mod http;
 pub use http::*;
 mod start;
@@ -52,10 +56,13 @@ pub struct InstanceDescription {
 
 impl InstanceDescription {
     pub(crate) fn local(library: &LibraryEntry, instance: &InstanceEntry) -> Self {
+        Self::local_with_id(&library.id, instance)
+    }
+    pub(crate) fn local_with_id(library_id: &str, instance: &InstanceEntry) -> Self {
         Self {
             discovery_schema_version: DISCOVERY_SCHEMA_VERSION,
             build_info: Some(Box::new(crate::PumasBuildInfo::library())),
-            registry_library_id: library.id.clone(),
+            registry_library_id: library_id.into(),
             library_root: instance.library_path.clone(),
             generation: instance.started_at.clone(),
             pumas_version: env!("CARGO_PKG_VERSION").into(),

@@ -4,6 +4,10 @@
 //! with domain-specific methods. The struct definitions remain in `lib.rs`.
 
 mod builder;
+pub(crate) mod catalog;
+pub use catalog::{
+    CatalogOwnerCheckpoint, CatalogQueryRequest, CatalogQueryResponse, InstanceProfile,
+};
 mod conversion;
 mod hf;
 pub(crate) mod instance_shutdown;

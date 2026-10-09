@@ -70,6 +70,11 @@ impl DependencyManager {
 
     /// Check dependencies for a version.
     pub async fn check_dependencies(&self, tag: &str) -> Result<DependencyStatus> {
+        if self.app_id == AppId::Torch {
+            pumas_library::platform::paths::refuse_unregistered_component_runtime(
+                &self.version_path(tag),
+            )?;
+        }
         let version_path = self.version_path(tag);
         if !path_exists(&version_path).await? {
             return Err(PumasError::VersionNotFound {
@@ -422,6 +427,11 @@ impl DependencyManager {
 
     /// Get the Python version for a venv.
     pub async fn get_python_version(&self, tag: &str) -> Result<Option<String>> {
+        if self.app_id == AppId::Torch {
+            pumas_library::platform::paths::refuse_unregistered_component_runtime(
+                &self.version_path(tag),
+            )?;
+        }
         let venv_python = self.venv_python(tag);
         if !path_exists(&venv_python).await? {
             return Ok(None);

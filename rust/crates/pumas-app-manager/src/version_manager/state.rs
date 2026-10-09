@@ -1043,6 +1043,19 @@ impl VersionState {
                 }
                 return Self::contains_llama_cpp_server_binary(version_path).await;
             }
+            AppId::Torch
+                if version_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(super::torch_component::component_revision) =>
+            {
+                vec![
+                    version_path.join("runtime.json"),
+                    version_path.join("component-manifest.json"),
+                    version_path.join("installed-files.json"),
+                    version_path.join("venv/lib/python3.12/site-packages"),
+                ]
+            }
             AppId::Torch => vec![
                 version_path.join("runtime.json"),
                 version_path.join("serve.py"),

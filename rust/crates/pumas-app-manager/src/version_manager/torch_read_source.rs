@@ -128,7 +128,7 @@ fn tree_manifest(
                     .iter()
                     .any(|name| entry.path().starts_with(root.join(name)))
         });
-    let mut entries_seen = 0usize;
+    let mut entries_seen = excluded.len();
     for entry in walker {
         let entry = entry.map_err(|error| refused(error.to_string()))?;
         if entry.path() == root {
@@ -167,6 +167,11 @@ fn tree_manifest(
         }
     }
     Ok((members, omissions))
+}
+
+/// Reuse retained sidecar namespace limits before atomic component publication.
+pub(super) fn validate_component_stage_namespace(runtime: &Path) -> Result<()> {
+    tree_manifest(runtime, &["venv".into()], false).map(|_| ())
 }
 
 fn capture_installed(
@@ -215,10 +220,55 @@ fn capture_installed(
     let depot = depot_parent.join(depot_name);
     let depot_lease = Arc::new(ManagedDepotLease::read(&depot).map_err(PumasError::from)?);
     let interpreter_dir = strict_directory(&depot).map_err(PumasError::from)?;
+    let tag = runtime
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| refused("Missing runtime registration identity"))?;
+    let assembly = super::torch_component::component_revision(tag);
+    if assembly {
+        let manifest = bounded_json(&runtime.join("component-manifest.json"), 64 * 1024 * 1024)?;
+        let digest = format!("{:x}", Sha256::digest(&manifest));
+        let identity: serde_json::Value = serde_json::from_slice(&manifest)
+            .map_err(|_| refused("Invalid component assembly manifest"))?;
+        if recipe["assembly_only"] != true
+            || recipe["recipe_id"] != "pumas-component-assembly-v1"
+            || recipe["component_revision"] != tag
+            || recipe["component_manifest_sha256"] != digest
+            || tag != format!("torch-component-{digest}")
+            || identity["domain"] != "pumas.torch.component-assembly.v1"
+            || identity["policy_version"] != 1
+            || identity["qualification"] != "assembled_unqualified"
+            || identity["launch_restrictions"]
+                != serde_json::json!([
+                    "no_runnable_interpreter_entry",
+                    "no_initialized_import_provenance"
+                ])
+        {
+            return Err(refused(
+                "Component assembly identity or non-executable topology changed",
+            ));
+        }
+        for path in [runtime.join("venv/bin"), runtime.join("venv/pyvenv.cfg")] {
+            match std::fs::symlink_metadata(&path) {
+                Ok(_) => {
+                    return Err(refused(
+                        "Component assembly acquired executable venv topology",
+                    ))
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(PumasError::from(error)),
+            }
+        }
+    } else if recipe["assembly_only"] == true {
+        return Err(refused(
+            "Component assembly uses an unsupported registration identity",
+        ));
+    }
     if std::fs::canonicalize(&executable).map_err(PumasError::from)? != executable
         || !executable.is_file()
-        || std::fs::canonicalize(runtime.join("venv/bin/python")).map_err(PumasError::from)?
-            != executable
+        || (!assembly
+            && std::fs::canonicalize(runtime.join("venv/bin/python")).map_err(PumasError::from)?
+                != executable)
     {
         return Err(refused(
             "Installed venv does not select the owned interpreter",
@@ -239,6 +289,20 @@ fn capture_installed(
     )?)
     .map_err(|error| refused(error.to_string()))?;
     installer::validate_staged_files(&packages, &installed)?;
+    if assembly {
+        let identity: serde_json::Value = serde_json::from_slice(&bounded_json(
+            &runtime.join("component-manifest.json"),
+            64 * 1024 * 1024,
+        )?)
+        .map_err(|_| refused("Invalid retained component closure"))?;
+        let expected: StagedFilesManifest = serde_json::from_value(
+            serde_json::json!({"files":identity["component"]["final_dependency_files"]}),
+        )
+        .map_err(|_| refused("Component manifest omitted final dependency closure"))?;
+        if expected != installed {
+            return Err(refused("Component dependency closure changed"));
+        }
+    }
     if installed.files.iter().any(|file| {
         file.path.ends_with(".pyc")
             || file.path.ends_with(".pyo")
@@ -323,7 +387,22 @@ fn capture_installed(
     .into_iter()
     .collect::<io::Result<Vec<_>>>()
     .map_err(PumasError::from)?;
-    RetainedRuntimeReadSource::capture(selections).map_err(PumasError::from)
+    let source = RetainedRuntimeReadSource::capture(selections).map_err(PumasError::from)?;
+    if assembly {
+        let identity: serde_json::Value = serde_json::from_slice(&bounded_json(
+            &runtime.join("component-manifest.json"),
+            64 * 1024 * 1024,
+        )?)
+        .map_err(|_| refused("Invalid component interpreter association"))?;
+        if identity["interpreter_depot_manifest_sha256"].as_str()
+            != Some(
+                super::torch_component::torch_interpreter_depot_manifest_sha256(&source)?.as_str(),
+            )
+        {
+            return Err(refused("Component interpreter depot byte manifest changed"));
+        }
+    }
+    Ok(source)
 }
 
 #[cfg(all(test, target_os = "linux"))]

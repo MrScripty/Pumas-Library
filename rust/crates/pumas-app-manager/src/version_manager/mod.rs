@@ -55,6 +55,7 @@ mod progress;
 pub mod size_calculator;
 mod state;
 mod torch_alternatives;
+mod torch_component;
 mod torch_preview;
 mod torch_read_source;
 mod torch_workspace;
@@ -71,6 +72,11 @@ pub use torch_alternatives::{
     TorchAlternativeDiscovery, TorchAlternativeMatch, TorchReleaseCombination,
     TorchReleaseDriverAvailability, TorchReleaseDriverStatus, TorchReleaseOptionsDiscovery,
     TorchReleaseOptionsStatus, TorchReleaseRecommendation,
+};
+pub use torch_component::{
+    torch_interpreter_depot_manifest_sha256, torch_runtime_byte_manifest_sha256,
+    TorchComponentAssembly, TorchComponentAssemblyRequest, TorchComponentFile,
+    TorchComponentManifest, TorchComponentSelection,
 };
 pub use torch_preview::{
     TorchArtifact, TorchPreview, TorchPreviewOutcome, TorchPreviewRejectionReason,
@@ -464,7 +470,7 @@ impl VersionManager {
         Ok(manager)
     }
 
-    /// Construct the llama.cpp manager with the application's existing shared
+    /// Construct a llama.cpp or Torch manager with the application's shared
     /// acquisition owner. A second service/store is never created here.
     pub async fn new_with_acquisition(
         launcher_root: impl Into<PathBuf>,
@@ -480,15 +486,22 @@ impl VersionManager {
         acquisition: Arc<AcquisitionService>,
         configured_client: Option<Arc<GitHubClient>>,
     ) -> Result<Self> {
-        if app_id != AppId::LlamaCpp {
+        if !matches!(app_id, AppId::LlamaCpp | AppId::Torch) {
             return Err(PumasError::Config {
-                message: "Shared artifact acquisition is currently required for llama.cpp".into(),
+                message: "Shared artifact acquisition supports llama.cpp and Torch".into(),
             });
         }
         let mut manager =
             Self::new_with_github_client(launcher_root, app_id, configured_client).await?;
-        let consumer = Arc::new(acquisition.open_consumer("runtime.llama.cpp")?);
+        let consumer = Arc::new(acquisition.open_consumer(if app_id == AppId::Torch {
+            "runtime.torch.components"
+        } else {
+            "runtime.llama.cpp"
+        })?);
         manager.acquisition_consumer = Some(consumer.clone());
+        if app_id == AppId::Torch {
+            return Ok(manager);
+        }
         let store = acquisition.store().clone();
         let records = consumer
             .run_blocking("look up retained native acquisitions", move || {

@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "component_tests.rs"]
+mod component_tests;
+
 struct Installed {
     launcher: tempfile::TempDir,
     runtime: PathBuf,

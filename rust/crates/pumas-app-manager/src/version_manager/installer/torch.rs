@@ -1,6 +1,7 @@
 //! Managed upstream PyTorch installation; lifecycle and state remain in VersionManager.
 
 use super::*;
+mod component;
 use crate::torch_client::{SUPPORTED_TORCH_PROTOCOL, TORCH_IMAGE_GENERATION_CAPABILITY};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -368,6 +369,9 @@ pub(super) fn write_pending_publish_marker(path: &Path, runtime: &Path) -> std::
 pub(super) struct TorchPendingStage {
     directory: tempfile::TempDir,
     marker: PathBuf,
+    _component_base: std::sync::Mutex<
+        Option<Arc<pumas_library::runtime_read_source::RetainedRuntimeReadSource>>,
+    >,
     _revision: TorchRevisionLease,
     // Drop last, after stage and marker cleanup (including TempDir's Drop).
     _lock: TorchVersionsLock,
@@ -406,6 +410,7 @@ impl TorchPendingStage {
         Ok(Self {
             directory,
             marker,
+            _component_base: std::sync::Mutex::new(None),
             _revision: revision,
             _lock: lock,
         })
@@ -507,7 +512,7 @@ fn retry_pending_torch_cleanup_locked(
         else {
             continue;
         };
-        if stable_torch_tag(&tag).is_none() || !entry.file_type()?.is_file() {
+        if !owned_torch_registration(&tag) || !entry.file_type()?.is_file() {
             continue;
         }
         let Some(_revision) = try_revision_cleanup(versions_dir, &tag, lock)? else {
@@ -610,7 +615,7 @@ fn retry_pending_torch_cleanup_locked(
             continue;
         }
         let tag = std::fs::read_to_string(&marker)?;
-        if stable_torch_tag(&tag).is_none() {
+        if !owned_torch_registration(&tag) {
             continue;
         }
         let Some(_revision) = try_revision_cleanup(versions_dir, &tag, lock)? else {
@@ -1189,6 +1194,10 @@ fn stable_torch_tag(tag: &str) -> Option<&str> {
     .then_some(version)
 }
 
+fn owned_torch_registration(tag: &str) -> bool {
+    stable_torch_tag(tag).is_some() || super::super::torch_component::component_revision(tag)
+}
+
 fn list_owned_torch_orphan_quarantines(
     versions_dir: &Path,
 ) -> std::io::Result<Vec<TorchOrphanQuarantine>> {
@@ -1210,9 +1219,12 @@ fn list_owned_torch_orphan_quarantines(
         let Some((tag, timestamp)) = suffix.rsplit_once('-') else {
             continue;
         };
-        let (Some(_), Ok(timestamp_ms)) = (stable_torch_tag(tag), timestamp.parse::<u64>()) else {
+        let Ok(timestamp_ms) = timestamp.parse::<u64>() else {
             continue;
         };
+        if !owned_torch_registration(tag) {
+            continue;
+        }
         if !entry.file_type()?.is_dir() {
             continue;
         }
@@ -2564,7 +2576,15 @@ impl VersionInstaller {
         )) {
             return Err(failed("Managed Torch is unsupported on this platform"));
         }
-        if tag != release.tag_name || !is_torch_runtime_release(release) {
+        let component = match input.as_ref() {
+            Some(TorchInstallInput::Component(plan)) => Some(plan.as_ref()),
+            _ => None,
+        };
+        if !is_torch_runtime_release(release)
+            || component.map_or(tag != release.tag_name, |plan| {
+                tag != plan.revision_tag || plan.base_tag != release.tag_name
+            })
+        {
             return Err(failed(
                 "Unsupported upstream PyTorch release or mismatched tag",
             ));
@@ -2578,6 +2598,7 @@ impl VersionInstaller {
             _ => None,
         };
         let recipe = if selection.is_none()
+            && component.is_none()
             && cfg!(all(target_os = "linux", target_arch = "x86_64"))
             && plan.is_none_or(|p| p.preview.qualification == "qualified")
         {
@@ -2604,6 +2625,15 @@ impl VersionInstaller {
         let versions_lock = TorchVersionsLock::acquire_for_mutation(&versions_dir)
             .await
             .map_err(PumasError::from)?;
+        if let Some(component) = component {
+            if self
+                .metadata_manager
+                .get_installed_version(&component.base_tag, Some(AppId::Torch))?
+                .is_none()
+            {
+                return Err(failed("Selected component base is no longer registered"));
+            }
+        }
         retry_pending_torch_cleanup_locked(&versions_dir, &self.metadata_manager, &versions_lock)
             .map_err(PumasError::from)?;
         let destination_revision = TorchRevisionLease::mutation(&versions_dir, tag, &versions_lock)
@@ -2689,9 +2719,12 @@ impl VersionInstaller {
             None,
             Some(log_path.to_string_lossy().as_ref()),
         );
-        let result = self
-            .stage_torch_runtime(recipe, plan, selection, &staging, &log_path, &progress_tx)
-            .await;
+        let result = if let Some(component) = component {
+            self.stage_component_runtime(component, &staging).await
+        } else {
+            self.stage_torch_runtime(recipe, plan, selection, &staging, &log_path, &progress_tx)
+                .await
+        };
         #[cfg(test)]
         if result.is_ok() && self.torch_stage_override.is_some() {
             if let Some(pause) = &self.torch_stage_pause {

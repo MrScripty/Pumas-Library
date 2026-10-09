@@ -1548,6 +1548,9 @@ impl VersionManager {
     }
 
     async fn expected_torch_version(&self, tag: &str) -> Result<String> {
+        pumas_library::platform::paths::refuse_unregistered_component_runtime(
+            &self.versions_dir().join(tag),
+        )?;
         let runtime = self.versions_dir().join(tag);
         let legacy_version = tag
             .strip_prefix("torch-runtime-")
@@ -1657,12 +1660,14 @@ impl VersionManager {
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
                 .unwrap_or(serde_json::Value::Null);
-            let preset = recipe["recipe_id"] == "torch-upstream-2.9.1-r1";
+            let assembly =
+                super::torch_component::component_revision(&tag) || recipe["assembly_only"] == true;
+            let preset = !assembly && recipe["recipe_id"] == "torch-upstream-2.9.1-r1";
             installed.push(serde_json::json!({"tag":tag,
                 "build": if preset { Some("cu130") } else { recipe["build"].as_str() },
                 "python": if preset { Some("python3.12") } else { recipe["python"].as_str() },
                 "adapter": if preset { Some("bundled") } else { recipe["adapter"].as_str() },
-                "qualification": if preset { "qualified" } else { "unverified" } }));
+                "qualification": if assembly { "assembled_unqualified" } else if preset { "qualified" } else { "unverified" } }));
         }
         Ok(
             serde_json::json!({"builds": builds, "defaultBuild":"auto", "pythons": [{"id":"auto", "label":"Select automatically"}], "adapters": adapters,
@@ -2320,6 +2325,9 @@ impl VersionManager {
     }
 
     pub async fn torch_installed_probe_report(&self, tag: &str) -> Result<serde_json::Value> {
+        pumas_library::platform::paths::refuse_unregistered_component_runtime(
+            &self.versions_dir().join(tag),
+        )?;
         if self.app_id != AppId::Torch
             || !safe_torch_tag(tag)
             || !self.state.read().await.is_installed(tag)

@@ -38,6 +38,28 @@ pub fn venv_python(base: &Path) -> PathBuf {
     }
 }
 
+/// Component assemblies carry bytes only; the owner startup broker is absent.
+/// Refuse before executable inspection or process effects, even with overrides.
+pub fn refuse_unregistered_component_runtime(base: &Path) -> Result<()> {
+    let reserved = base
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("torch-component-"));
+    let marker = base.join("component-manifest.json");
+    let marked = match std::fs::symlink_metadata(&marker) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(PumasError::io_with_path(error, &marker)),
+    };
+    if reserved || marked {
+        return Err(PumasError::Validation {
+            field: "runtime.component_start_unregistered".into(),
+            message: "Component byte assembly requires owner registration before interpreter initialization/import".into(),
+        });
+    }
+    Ok(())
+}
+
 /// Get the path to pip within a virtual environment.
 ///
 /// # Platform Behavior

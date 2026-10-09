@@ -25,6 +25,7 @@ pub(crate) struct TorchInstallPlan {
 pub(crate) enum TorchInstallInput {
     Selection(super::torch_preview::TorchInstallSelection),
     Resolved(Box<TorchInstallPlan>),
+    Component(Box<super::torch_component::TorchComponentPlan>),
 }
 #[cfg(test)]
 pub(crate) use torch::TorchPublicationPause;
@@ -3577,7 +3578,7 @@ impl VersionInstaller {
                 release.total_size
             },
             requirements_hash: None, // Could compute if needed
-            dependencies_installed: Some(true),
+            dependencies_installed: Some(!super::torch_component::component_revision(tag)),
         };
 
         // Persist outside the async executor; publication is not complete until

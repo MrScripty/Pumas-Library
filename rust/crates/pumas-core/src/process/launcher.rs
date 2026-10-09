@@ -440,6 +440,7 @@ impl ProcessLauncher {
 
     /// Launch a binary application (like Ollama) with the given configuration.
     pub fn launch_binary(config: &BinaryLaunchConfig) -> Result<LaunchResult> {
+        crate::platform::paths::refuse_unregistered_component_runtime(&config.version_dir)?;
         // Validate prerequisites
         if !config.binary_path.exists() {
             return Ok(LaunchResult {

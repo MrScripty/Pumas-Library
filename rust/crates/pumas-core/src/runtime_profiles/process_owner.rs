@@ -868,6 +868,7 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
     let execution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
         use std::io::Write;
         use std::process::{Command, Stdio};
+        crate::platform::paths::refuse_unregistered_component_runtime(&config.version_dir)?;
         #[cfg(target_os = "linux")]
         if let Some(models) = &session.router_models {
             RouterModelState::capture(models)?;
@@ -1317,6 +1318,38 @@ mod tests {
         assert!(row_unchanged);
         assert!(second_still_empty);
         assert!(retained, "unresolved exact child lost physical store exclusion after process/session owner drop; independent open observed {observed}");
+    }
+
+    #[tokio::test]
+    async fn component_assembly_refuses_owned_launch_before_pid_log_or_child_effects() {
+        let fixture = Fixture::new();
+        std::fs::write(
+            fixture.root.path().join("component-manifest.json"),
+            b"inert assembly marker",
+        )
+        .unwrap();
+        let (config, mut spec, guard) = fixture.launch("touch should-never-run");
+        spec.provider = RuntimeProviderId::Torch;
+        spec.provider_mode = RuntimeProviderMode::TorchServe;
+        spec.launch_strategy =
+            RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe);
+        let receipt = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap();
+        assert!(!receipt.response.success);
+        assert!(receipt
+            .response
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("runtime.component_start_unregistered"));
+        assert!(receipt.observation.is_none());
+        assert!(!fixture.root.path().join("should-never-run").exists());
+        assert!(!fixture.root.path().join("runtime.pid").exists());
+        assert!(!fixture.root.path().join("runtime.log").exists());
+        assert!(fixture.owner.close_and_drain().await.is_ok());
     }
 
     #[tokio::test]

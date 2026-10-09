@@ -48,6 +48,7 @@ function job(name) {
 test('release-producing jobs run only for version tags', () => {
   for (const name of [
     'headless-rpc',
+    'headless-inference',
     'build-rust',
     'build-electron',
     'build-electron-no-inference',

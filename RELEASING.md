@@ -20,11 +20,12 @@ its candidate artifacts.
    against the manifests automatically.
 4. Complete local QA below, push the candidate commit, and create its version
    tag. Inspect every platform result produced for that exact tag.
-5. Review the `release-candidate` workflow artifact. It contains all thirteen
+5. Review the `release-candidate` workflow artifact. It contains all sixteen
    required files selected by [the artifact plan](scripts/release/artifact-plan.json):
    five full desktop installers (GUI with inference plugins), five
    no-inference desktop installers (GUI with an inference-disabled backend),
-   and three headless no-inference RPC archives for embedding. It also carries
+   three headless no-inference RPC archives, and three inference headless RPC
+   archives for embedding. It also carries
    checksums over those final bytes.
 
 The workflow deliberately assembles **candidates**, with read-only repository
@@ -135,6 +136,54 @@ unload. Generate per-installer SPDX, local provenance and final checksums with
 `write-linux-metadata.py`; see its attribution report for scope and limitations.
 CI-built releases must use the CI build identity and actual final files.
 
+## Inference headless candidates
+
+The tag-only `headless-inference` matrix produces Linux x86_64, Windows x86_64
+and macOS ARM64 archives through `headless_inference_ci.py` and the existing
+strict `headless_inference_build.py` producer. Candidate assembly requires all
+three in addition to the thirteen existing assets. A missing or failed native
+job blocks the combined candidate. No workflow step publishes a release.
+The producer requires source version 0.8; an unbumped 0.7 source fails before
+compilation. The integration owner must perform the coordinated version change.
+
+`onnx-runtime-pins.json` records the official CPU 1.24.2 GitHub release archive
+digests and the hashes/sizes of selected native members and license/notice bytes.
+Those archive digests were checked against upstream release metadata and the
+actual downloaded archives. `onnx_runtime_stage.py --target TARGET --archive FILE
+--output-dir FRESH_DIRECTORY` verifies a private snapshot and writes only named
+regular members, materializing Linux's versioned library under the loader name.
+`--download` explicitly authorizes fetching that exact pinned official archive;
+Cargo continues to use `ORT_SKIP_DOWNLOAD=1`. Pin updates require reviewing both
+upstream archive identity and actual member/notice bytes. The records cover the
+shipped CPU ORT files, not the operating system's dependency closure, signatures,
+GPU providers or a native acceptance result.
+
+The CI adapter exports the actual source DTO schema separately, pins the source
+commit/tree and expected shared build advertisements, and compares the production
+executable's actual `--build-info` against those expectations. It builds locked,
+offline, native release with exactly `s3,inference-plugins`, embeds the checked
+S3 notices plus exact upstream native notices, verifies/extracts the resulting
+archive, and runs authenticated owner startup/graceful shutdown. Archive artifacts
+and diagnostic evidence are uploaded separately. These remain unsigned,
+`unverified_candidate` outputs; startup never qualifies model execution.
+
+For Linux real-model acceptance, `verify-packaged-onnx.py RPC NOMIC_DIRECTORY`
+now requires the pinned CPU ORT files beside RPC. The child receives an allowlist
+environment and isolated home/config/cache/registry/current directory, with no
+ambient ORT, loader, Pumas, Python or proxy overrides. After finite embedding
+inference, `/proc/PID/maps` must identify the packaged loader by path, device and
+inode, and current bytes must still match the reviewed pin. Missing runtime,
+ambient mappings, model errors and forced shutdown fail acceptance. This observes
+the mapped ORT file; it is not a filesystem sandbox, protection against concurrent
+hostile same-user mutation, or a complete audit of every loaded system dependency.
+
+The focused Python/Node tests use synthetic native bytes, controlled subprocesses
+and controlled mapping text. Successful staging of real official Linux/Windows/
+macOS archives establishes byte identity only. This development environment has
+not executed a v0.8 release build, pretrained ONNX model, native Windows/macOS
+startup, signing/notarization, final SBOM or security qualification. Preserve those
+gates before the maintainer's publication decision.
+
 ## macOS candidate verification
 
 The macOS ARM64 job mounts the DMG read-only, copies the application with `ditto`,
@@ -182,9 +231,9 @@ Windows is a required native target. Its CI job runs the build, release tests,
 staged RPC startup, launcher/Electron tests, and packaging. The installer check
 silently installs the NSIS candidate, compares installed resources with the build
 inputs, starts the installed RPC and desktop, and starts the portable executable.
-The combined candidate requires all thirteen files: both Windows installer
+The combined candidate requires all sixteen files: both Windows installer
 pairs (full and no-inference) alongside the Linux and macOS pairs and the
-three headless archives. Each no-inference desktop additionally asserts
+six headless archives. Each no-inference desktop additionally asserts
 inference-route absence from its packaged backend.
 
 Windows download authority uses held directory handles and physical file identity,

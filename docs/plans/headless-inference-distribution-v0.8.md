@@ -1,3 +1,10 @@
+> Current packaging engineering: the release workflow now requires three additional
+> inference headless candidates and uses checked official CPU ORT member pins.
+> See [Releasing](../../RELEASING.md#inference-headless-candidates) for the current
+> workflow and acceptance boundaries. The historical local-only scope below
+> predates this wiring; native inference and signing are still unqualified, and
+> the source remains 0.7 until the integration owner's version change.
+
 # Draft v0.8 inference headless distribution
 
 The stable integrated review base is PR59 source

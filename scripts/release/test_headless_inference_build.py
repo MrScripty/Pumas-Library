@@ -107,7 +107,7 @@ class BuildCandidateTests(unittest.TestCase):
             stdout = ""
         return SimpleNamespace(stdout=stdout, returncode=0)
 
-    def produce(self, environment=None, real_configuration=False):
+    def produce(self, environment=None, real_configuration=False, runtime_notices=()):
         with (
             patch.object(
                 subject.provenance,
@@ -132,6 +132,7 @@ class BuildCandidateTests(unittest.TestCase):
                 self.inputs["THIRD-PARTY-NOTICES.txt"],
                 self.output,
                 runner=self.runner,
+                runtime_notices=runtime_notices,
                 environment=environment
                 if environment is not None
                 else {"CARGO_HOME": str(self.root / "cargo")},
@@ -155,6 +156,17 @@ class BuildCandidateTests(unittest.TestCase):
         )
         self.assertEqual(manifest["qualification"], "unverified_candidate")
         self.assertTrue((self.output / "build-evidence.json").exists())
+
+    def test_native_notices_are_embedded_with_source_notices(self):
+        result = self.produce(
+            runtime_notices=(b"synthetic ORT license", b"synthetic native notices")
+        )
+        destination = self.root / "extract-notices"
+        package.extract_verified(result["archive"], result["archive_sha256"], destination)
+        notices = (destination / "THIRD-PARTY-NOTICES.txt").read_bytes()
+        self.assertIn(self.inputs["THIRD-PARTY-NOTICES.txt"].read_bytes(), notices)
+        self.assertIn(b"synthetic ORT license", notices)
+        self.assertIn(b"synthetic native notices", notices)
 
     def test_current_07_version_refuses_before_any_build(self):
         self.contract["expected"]["version"] = "0.7.0"

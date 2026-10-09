@@ -147,6 +147,7 @@ def produce(
     output,
     runner=subprocess.run,
     environment=None,
+    runtime_notices=(),
 ):
     """Build one native source-bound candidate; supplied records must be pinned first."""
     repository, output = Path(repository).resolve(), Path(output).resolve()
@@ -307,6 +308,14 @@ def produce(
         "rustc": rustc_version,
     }
     package.validate_build_record(build, target, expected)
+    if runtime_notices:
+        combined = output / "THIRD-PARTY-NOTICES.txt"
+        combined.write_bytes(
+            Path(notices_file).read_bytes()
+            + b"\n\nONNX Runtime native distribution notices\n\n"
+            + b"\n\n".join(runtime_notices)
+        )
+        notices_file = combined
     inputs = {
         target["binary"]: binary,
         "LICENSE.txt": license_file,

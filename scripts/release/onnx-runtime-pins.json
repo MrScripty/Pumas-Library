@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "version": "1.24.2",
+  "authority": "https://api.github.com/repos/microsoft/onnxruntime/releases/tags/v1.24.2",
+  "observed": "2026-10-09",
+  "scope": "Official CPU archive and selected native member identities; system dependencies, signing, native loading and inference remain unqualified.",
+  "targets": {
+    "linux-x86_64": {
+      "target": "x86_64-unknown-linux-gnu",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-linux-x64-1.24.2.tgz",
+      "archive_sha256": "43725474ba5663642e17684717946693850e2005efbd724ac72da278fead25e6",
+      "archive_bytes": 8123282,
+      "files": {
+        "libonnxruntime.so": {
+          "member": "onnxruntime-linux-x64-1.24.2/lib/libonnxruntime.so.1.24.2",
+          "sha256": "ffc84d48e845cf0b562ba4ea5ca32aaafc0d4069019fef4f63095b307d0270ad",
+          "bytes": 22065056
+        },
+        "libonnxruntime_providers_shared.so": {
+          "member": "onnxruntime-linux-x64-1.24.2/lib/libonnxruntime_providers_shared.so",
+          "sha256": "086ec1d5388f64153d9c63470d126693db9a182c8ce236d3a1119068471b8a0d",
+          "bytes": 14632
+        }
+      },
+      "notices": {
+        "ONNX-LICENSE.txt": {
+          "member": "onnxruntime-linux-x64-1.24.2/LICENSE",
+          "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+          "bytes": 1073
+        },
+        "ONNX-NOTICES.txt": {
+          "member": "onnxruntime-linux-x64-1.24.2/ThirdPartyNotices.txt",
+          "sha256": "0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2",
+          "bytes": 325054
+        }
+      }
+    },
+    "macos-arm64": {
+      "target": "aarch64-apple-darwin",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-osx-arm64-1.24.2.tgz",
+      "archive_sha256": "0af4fa503e8ea285245b47ee42d0a7461b8156a81270857da0c1d4ecf858abde",
+      "archive_bytes": 31604221,
+      "files": {
+        "libonnxruntime.dylib": {
+          "member": "onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.dylib",
+          "sha256": "87df6f94dd559ea958748adc80fd4c46d91c52bc025771f513291d155539590a",
+          "bytes": 35361512
+        }
+      },
+      "notices": {
+        "ONNX-LICENSE.txt": {
+          "member": "onnxruntime-osx-arm64-1.24.2/LICENSE",
+          "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+          "bytes": 1073
+        },
+        "ONNX-NOTICES.txt": {
+          "member": "onnxruntime-osx-arm64-1.24.2/ThirdPartyNotices.txt",
+          "sha256": "0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2",
+          "bytes": 325054
+        }
+      }
+    },
+    "windows-x86_64": {
+      "target": "x86_64-pc-windows-msvc",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-win-x64-1.24.2.zip",
+      "archive_sha256": "8e3e9c826375352e29cb2614fe44f3d7a4b0ff7b8028ad7a456af9d949a7e8b0",
+      "archive_bytes": 74075355,
+      "files": {
+        "onnxruntime.dll": {
+          "member": "onnxruntime-win-x64-1.24.2/lib/onnxruntime.dll",
+          "sha256": "114947d633e6844ce3c4b51ef6678f776628571d08a5763859c61642c8dcca9c",
+          "bytes": 14148680
+        },
+        "onnxruntime_providers_shared.dll": {
+          "member": "onnxruntime-win-x64-1.24.2/lib/onnxruntime_providers_shared.dll",
+          "sha256": "c10763a3764f5c292072533560c341565be64f38fd2807ed5035cd177d3bbb26",
+          "bytes": 22048
+        }
+      },
+      "notices": {
+        "ONNX-LICENSE.txt": {
+          "member": "onnxruntime-win-x64-1.24.2/LICENSE",
+          "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+          "bytes": 1094
+        },
+        "ONNX-NOTICES.txt": {
+          "member": "onnxruntime-win-x64-1.24.2/ThirdPartyNotices.txt",
+          "sha256": "fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866",
+          "bytes": 331175
+        }
+      }
+    }
+  }
+}

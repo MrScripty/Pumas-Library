@@ -98,7 +98,7 @@
       "os": "macos",
       "architecture": "arm64",
       "rust_target": "aarch64-apple-darwin",
-      "runner": "macos-14",
+      "runner": "macos-15",
       "artifacts": [
         "desktop-macos-dmg"
       ],
@@ -147,7 +147,7 @@
       "os": "macos",
       "architecture": "arm64",
       "rust_target": "aarch64-apple-darwin",
-      "runner": "macos-14",
+      "runner": "macos-15",
       "backend_features": "--no-default-features",
       "artifacts": [
         "headless-macos-archive"
@@ -155,6 +155,60 @@
       "required_real_evidence": [
         "headless-rpc-start",
         "inference-route-absence"
+      ]
+    },
+    {
+      "id": "headless-inference-linux-x86_64",
+      "os": "linux",
+      "architecture": "x86_64",
+      "rust_target": "x86_64-unknown-linux-gnu",
+      "runner": "ubuntu-24.04",
+      "backend_features": "--no-default-features --features s3,inference-plugins",
+      "artifacts": [
+        "headless-inference-linux-x86_64-archive"
+      ],
+      "required_real_evidence": [
+        "headless-rpc-start",
+        "authenticated-owner-handshake",
+        "packaged-native-runtime-identity",
+        "real-model-inference",
+        "graceful-shutdown"
+      ]
+    },
+    {
+      "id": "headless-inference-windows-x86_64",
+      "os": "windows",
+      "architecture": "x86_64",
+      "rust_target": "x86_64-pc-windows-msvc",
+      "runner": "windows-2025",
+      "backend_features": "--no-default-features --features s3,inference-plugins",
+      "artifacts": [
+        "headless-inference-windows-x86_64-archive"
+      ],
+      "required_real_evidence": [
+        "headless-rpc-start",
+        "authenticated-owner-handshake",
+        "packaged-native-runtime-identity",
+        "real-model-inference",
+        "graceful-shutdown"
+      ]
+    },
+    {
+      "id": "headless-inference-macos-arm64",
+      "os": "macos",
+      "architecture": "arm64",
+      "rust_target": "aarch64-apple-darwin",
+      "runner": "macos-15",
+      "backend_features": "--no-default-features --features s3,inference-plugins",
+      "artifacts": [
+        "headless-inference-macos-arm64-archive"
+      ],
+      "required_real_evidence": [
+        "headless-rpc-start",
+        "authenticated-owner-handshake",
+        "packaged-native-runtime-identity",
+        "real-model-inference",
+        "graceful-shutdown"
       ]
     }
   ],
@@ -360,6 +414,63 @@
         "LICENSE.txt",
         "THIRD-PARTY-NOTICES.txt"
       ]
+    },
+    {
+      "id": "headless-inference-linux-x86_64-archive",
+      "role": "headless_service",
+      "variant": "headless-inference",
+      "target": "headless-inference-linux-x86_64",
+      "format": "targz",
+      "filename": "pumas-rpc-inference-{version}-linux-x86_64.tar.gz",
+      "consumer_install": "verify pinned archive, extract and run with an explicit launcher root",
+      "required_contents": [
+        "pumas-rpc",
+        "libonnxruntime.so",
+        "LICENSE.txt",
+        "THIRD-PARTY-NOTICES.txt",
+        "protocol-schema.json",
+        "build-record.json",
+        "manifest.json",
+        "SHA256SUMS"
+      ]
+    },
+    {
+      "id": "headless-inference-windows-x86_64-archive",
+      "role": "headless_service",
+      "variant": "headless-inference",
+      "target": "headless-inference-windows-x86_64",
+      "format": "zip",
+      "filename": "pumas-rpc-inference-{version}-windows-x86_64.zip",
+      "consumer_install": "verify pinned archive, extract and run with an explicit launcher root",
+      "required_contents": [
+        "pumas-rpc.exe",
+        "onnxruntime.dll",
+        "LICENSE.txt",
+        "THIRD-PARTY-NOTICES.txt",
+        "protocol-schema.json",
+        "build-record.json",
+        "manifest.json",
+        "SHA256SUMS"
+      ]
+    },
+    {
+      "id": "headless-inference-macos-arm64-archive",
+      "role": "headless_service",
+      "variant": "headless-inference",
+      "target": "headless-inference-macos-arm64",
+      "format": "targz",
+      "filename": "pumas-rpc-inference-{version}-macos-arm64.tar.gz",
+      "consumer_install": "verify pinned archive, extract and run with an explicit launcher root",
+      "required_contents": [
+        "pumas-rpc",
+        "libonnxruntime.dylib",
+        "LICENSE.txt",
+        "THIRD-PARTY-NOTICES.txt",
+        "protocol-schema.json",
+        "build-record.json",
+        "manifest.json",
+        "SHA256SUMS"
+      ]
     }
   ],
   "release_metadata": {
@@ -399,7 +510,8 @@
     "dependency_authorities": [
       "pnpm-lock.yaml",
       "rust/Cargo.lock",
-      "final-artifact inspection"
+      "final-artifact inspection",
+      "scripts/release/onnx-runtime-pins.json"
     ],
     "required_reviews": [
       "current-vulnerability-results",

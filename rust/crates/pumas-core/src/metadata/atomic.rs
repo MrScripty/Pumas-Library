@@ -401,6 +401,49 @@ impl AtomicJsonTarget {
         read_downloads_json_file(&mut file, &self.display_path).map(Some)
     }
 
+    /// A bounded, noncreating observation of one canonical atomic image.
+    /// No OS lock is created and no publication capability escapes this owner.
+    #[cfg(feature = "s3")]
+    pub(crate) fn read_downloads_observation(
+        &self,
+        max_bytes: u64,
+    ) -> Result<Option<(Vec<u8>, serde_json::Value)>> {
+        let mut options = CapOpenOptions::new();
+        options
+            .read(true)
+            ._cap_fs_ext_follow(cap_primitives::fs::FollowSymlinks::No);
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let file = match self.parent.open_with(&self.name, &options) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        if !file.metadata()?.is_file() {
+            return Err(PumasError::Other(
+                "Observation target is not a regular file".into(),
+            ));
+        }
+        let mut bytes = Vec::new();
+        file.take(max_bytes + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > max_bytes {
+            return Err(PumasError::Validation {
+                field: "s3.inspection.capacity".into(),
+                message: "Persisted observation exceeds its capacity".into(),
+            });
+        }
+        if !self.configured_parent_still_matches()? {
+            return Err(PumasError::Other("Observation parent changed".into()));
+        }
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|_| PumasError::Other("Observation is not UTF-8".into()))?;
+        let value = parse_downloads_json(text, &self.display_path)?;
+        Ok(Some((bytes, value)))
+    }
+
     pub(crate) fn open_lock_file(&self, name: &str) -> Result<File> {
         let mut options = CapOpenOptions::new();
         options.read(true).write(true).create(true);

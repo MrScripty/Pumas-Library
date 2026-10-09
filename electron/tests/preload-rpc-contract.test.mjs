@@ -8,8 +8,35 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
+import { validateApiCallPayload } from '../dist/ipc-validation.js';
+import { decodeS3ImportRpcResult } from '../dist/s3-import-rpc.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
+
+test('compiled preload traverses actual retry and inspection receiving boundaries', async () => {
+  const harness=loadCompiledPreload();
+  const id='c3f7d104-1234-4321-abcd-aaaaaaaaaaaa';
+  const seen=[];
+  harness.respondWith((channel,method,params)=>{
+    assert.equal(channel,'api:call');
+    const payload=validateApiCallPayload(method,params);
+    seen.push(toPlainValue(payload));
+    const response=method==='get_s3_transfer_retry'
+      ? {status:'ready',operation_id:id,authentication_required:true}
+      : method==='inspect_persisted_s3_imports' ? {status:'complete',imports:[]}
+        : {status:'running',operation_id:id,progress:{phase:'pending',downloaded_for_current_file:'0'}};
+    return decodeS3ImportRpcResult(method,response);
+  });
+  assert.equal((await harness.api.get_s3_transfer_retry(id)).status,'ready');
+  const credentials={access_key_id:'fixture-fresh-key',secret_access_key:'fixture-fresh-secret',session_token:null};
+  assert.equal((await harness.api.retry_s3_model_transfer({operation_id:id,credentials})).status,'running');
+  assert.equal((await harness.api.inspect_persisted_s3_imports()).status,'complete');
+  assert.deepEqual(seen,[{method:'get_s3_transfer_retry',params:{operation_id:id}},
+    {method:'retry_s3_model_transfer',params:{operation_id:id,credentials}},
+    {method:'inspect_persisted_s3_imports',params:{}}]);
+  assert.throws(()=>harness.api.retry_s3_model_transfer({operation_id:id,credentials,endpoint:'https://replacement.invalid'}));
+  assert.equal(seen.length,3);
+});
 
 test('compiled preload uses the distinct one-request authenticated S3 command with optional token', async () => {
   const harness = loadCompiledPreload();
@@ -1373,7 +1400,7 @@ function processGroupExists(processGroupId) {
 function preloadRpcMethodNames() {
   return [
     ...new Set(
-      [...PRELOAD_SOURCE.matchAll(/apiCall\('([^']+)'/g)]
+      [...PRELOAD_SOURCE.matchAll(/(?:apiCall|validatedApiCall)\('([^']+)'/g)]
         .map((match) => match[1])
         .filter((methodName) => methodName !== undefined)
     ),

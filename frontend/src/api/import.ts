@@ -1,3 +1,4 @@
+import type { S3TransferRetryParams, S3TransferRetryState, S3PersistedImportsWire, S3DiscoveryParams, S3AuthenticatedDiscoveryParams, S3DiscoveryOutcome } from '../generated/desktop-contract';
 /**
  * Model Import API
  *
@@ -26,6 +27,14 @@ import type {
 } from '../types/api';
 
 class ImportAPI {
+  async getS3TransferRetry(operationId?: string): Promise<S3TransferRetryState> { return this.getAPI().get_s3_transfer_retry(operationId); }
+  async retryS3ModelTransfer(request: S3TransferRetryParams): Promise<S3ImportOutcome> { return this.getAPI().retry_s3_model_transfer(request); }
+  async inspectPersistedS3Imports(): Promise<S3PersistedImportsWire> { return this.getAPI().inspect_persisted_s3_imports(); }
+  async startS3PrefixDiscovery(request: S3DiscoveryParams): Promise<S3DiscoveryOutcome> { return this.getAPI().start_s3_prefix_discovery(request); }
+  async startAuthenticatedS3PrefixDiscovery(request: S3AuthenticatedDiscoveryParams): Promise<S3DiscoveryOutcome> { return this.getAPI().start_authenticated_s3_prefix_discovery(request); }
+  async getS3PrefixDiscovery(operationId?: string): Promise<S3DiscoveryOutcome> { return this.getAPI().get_s3_prefix_discovery(operationId); }
+  async cancelS3PrefixDiscovery(operationId: string): Promise<S3DiscoveryOutcome> { return this.getAPI().cancel_s3_prefix_discovery(operationId); }
+
   async startS3ModelBundleImport(request: S3BundleImportParams): Promise<S3ImportOutcome> {
     return this.getAPI().start_s3_model_bundle_import(request);
   }

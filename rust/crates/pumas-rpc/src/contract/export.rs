@@ -709,6 +709,13 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             last_error,
         })?;
     }
+    fixtures["s3_retry_ready"] = serde_json::to_value(S3TransferRetryState::Ready {
+        operation_id: "c3f7d104-1234-4321-abcd-aaaaaaaaaaaa".into(),
+        authentication_required: false,
+    })?;
+    fixtures["s3_retry_cold"] = serde_json::to_value(S3TransferRetryState::Unavailable {
+        reason: S3TransferRetryReason::NoLiveCustody,
+    })?;
     fixtures["router_profile_sync_statuses"] = serde_json::json!([
         fixtures["router_sync_current"],
         fixtures["router_sync_pending"],
@@ -725,6 +732,12 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         )+ };
     }
     export!(
+        S3PersistedImportsWire,
+        S3TransferRetryParams,
+        S3TransferRetryState,
+        S3DiscoveryParams,
+        S3AuthenticatedDiscoveryParams,
+        S3DiscoveryOutcome,
         S3ImportParams,
         S3BundleImportParams,
         S3PinnedFileParams,

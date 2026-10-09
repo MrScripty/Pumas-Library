@@ -87,7 +87,10 @@ impl S3Reader {
                 let file = &object.manifest.files()[0];
                 Ok(ArtifactFile::new(
                     file.logical_path(),
-                    versioned_source_key(file.source_key(), &object.version)?,
+                    versioned_source_key(
+                        file.source_key(),
+                        object.version.as_deref().ok_or(S3ReaderError::Changed)?,
+                    )?,
                     file.expected_size(),
                     file.expected_sha256().cloned(),
                     file.verification(),
@@ -110,11 +113,15 @@ impl S3Reader {
         )
     }
 
-    pub(super) fn validated_object(
-        &self,
-        source_key: &str,
-        version: &str,
-    ) -> Result<(Path, ArtifactSourceIdentity), S3ReaderError> {
+    pub(super) fn object_scope_identity(&self, source_key: &str) -> String {
+        format!(
+            "{}:{}",
+            self.explicit_scope_identity(),
+            hex::encode(source_key)
+        )
+    }
+
+    pub(super) fn validated_key(&self, source_key: &str) -> Result<Path, S3ReaderError> {
         let key = Path::parse(source_key)
             .map_err(|_| S3ReaderError::Configuration("unsupported object key"))?;
         if key.as_ref() != source_key || source_key.is_empty() || source_key.len() > 1024 {
@@ -122,6 +129,15 @@ impl S3Reader {
                 "object key must preserve its exact identity",
             ));
         }
+        Ok(key)
+    }
+
+    pub(super) fn validated_object(
+        &self,
+        source_key: &str,
+        version: &str,
+    ) -> Result<(Path, ArtifactSourceIdentity), S3ReaderError> {
+        let key = self.validated_key(source_key)?;
         if version.is_empty() || version == "null" || version.chars().any(char::is_control) {
             return Err(S3ReaderError::Configuration(
                 "an immutable VersionId is required",
@@ -129,11 +145,7 @@ impl S3Reader {
         }
         let source = ArtifactSourceIdentity::new(
             "s3",
-            format!(
-                "{}:{}",
-                self.explicit_scope_identity(),
-                hex::encode(source_key)
-            ),
+            self.object_scope_identity(source_key),
             ArtifactRevisionEvidence::new("s3.version_id", version, RevisionStrength::Immutable)?,
         )?;
         Ok((key, source))

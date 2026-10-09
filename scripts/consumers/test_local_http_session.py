@@ -235,7 +235,7 @@ class NativeConsumerTests(unittest.IsolatedAsyncioTestCase):
                 reply = await held.model_operation({"contract_version": 1, "request_id": "stale-generic-1",
                     "model": "operator-missing-model", "input": {"kind": "text", "text": "hello"},
                     "output": "text"})
-                self.assertEqual(reply["status"], 409)
+                self.assertEqual(reply["status"], 412)
                 self.assertIsNone(reply["body"], "pre-handler fencing supplies no operation envelope")
                 self.records.append({"event": "actual-native-refuses-controlled-stale-fence", "reply": reply})
             finally:

@@ -761,8 +761,11 @@ fn source_bundle_transport_admission_preserves_unqualified_custom_code_selection
     let Job::Import(job) = receiver.try_recv().unwrap() else {
         panic!("expected unqualified import job")
     };
-    assert_eq!(job.entries.len(), expected_entries.len());
-    for (actual, expected) in job.entries.iter().zip(&expected_entries) {
+    let ImportSelection::Versioned(entries) = job.entries else {
+        panic!("expected the unchanged VersionId selection")
+    };
+    assert_eq!(entries.len(), expected_entries.len());
+    for (actual, expected) in entries.iter().zip(&expected_entries) {
         assert_eq!(actual.source_key, expected.source_key);
         assert_eq!(actual.version, expected.version);
         assert_eq!(actual.logical_path, expected.logical_path);

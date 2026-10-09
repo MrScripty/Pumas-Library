@@ -179,6 +179,9 @@ impl Drop for HttpServiceRegistration {
 
 impl PumasApi {
     pub fn instance_description(&self) -> Result<InstanceDescription> {
+        if let crate::ApiInner::Catalog(state) = &self.inner {
+            return state.description();
+        }
         let primary = self.primary();
         if primary.instance_shutdown.get().is_some() {
             return Err(invalid("local owner is closing"));
@@ -206,6 +209,7 @@ impl PumasApi {
         endpoint: LoopbackHttpEndpoint,
         build_info: PumasBuildInfo,
     ) -> Result<HttpServiceRegistration> {
+        self.try_primary()?;
         if !build_info.supports_schema(
             "pumas.http-advertisement",
             HTTP_ADVERTISEMENT_SCHEMA_VERSION,
@@ -245,6 +249,10 @@ impl PumasApi {
 
     /// Read-only HTTP handler observation. Closing/changed owners are unavailable.
     pub fn advertised_http_service(&self) -> Result<Option<HttpServiceDescription>> {
+        if let crate::ApiInner::Catalog(state) = &self.inner {
+            state.description()?;
+            return Ok(None);
+        }
         self.instance_description()?;
         let primary = self.primary();
         primary

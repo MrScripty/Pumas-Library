@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::debug;
 
+pub(crate) mod catalog_recovery;
 pub(crate) mod pending_recovery;
 
 /// A registered library entry.
@@ -567,6 +568,21 @@ impl LibraryRegistry {
     /// Crash recovery requires independently qualified lifetime custody; this
     /// registry is a rendezvous cache, not a physical-store lease.
     pub fn try_claim_instance(&self, path: &Path, pid: u32) -> Result<InstanceClaimResult> {
+        self.try_claim_instance_checked(path, pid, false)
+    }
+    pub(crate) fn try_claim_catalog_instance(
+        &self,
+        path: &Path,
+        pid: u32,
+    ) -> Result<InstanceClaimResult> {
+        self.try_claim_instance_checked(path, pid, true)
+    }
+    fn try_claim_instance_checked(
+        &self,
+        path: &Path,
+        pid: u32,
+        catalog: bool,
+    ) -> Result<InstanceClaimResult> {
         let canonical = Self::canonicalize_library_path(path)?;
         let path_str = canonical.to_string_lossy().to_string();
         let now = Utc::now().to_rfc3339();
@@ -577,7 +593,12 @@ impl LibraryRegistry {
         let transaction =
             conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
-        if let Some(existing) = Self::read_instance_entry(&transaction, &path_str)? {
+        let existing = if catalog {
+            catalog_recovery::bounded_instance(&transaction, &canonical)?
+        } else {
+            Self::read_instance_entry(&transaction, &path_str)?
+        };
+        if let Some(existing) = existing {
             return Ok(InstanceClaimResult::Occupied(existing));
         }
 

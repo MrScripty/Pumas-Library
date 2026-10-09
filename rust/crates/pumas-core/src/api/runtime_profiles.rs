@@ -81,6 +81,7 @@ impl PumasApi {
         profile: &RuntimeProfileId,
         model: &str,
     ) -> Option<crate::runtime_profiles::OwnedAudioEndpoint> {
+        let _ = self.primary();
         self.primary()
             .runtime_profile_service
             .audio_endpoints
@@ -93,6 +94,7 @@ impl PumasApi {
         profile_id: RuntimeProfileId,
         generation: u64,
     ) -> OwnedRuntimeProfileCleanupTicket {
+        let _ = self.primary();
         OwnedRuntimeProfileCleanupTicket {
             owner: self.primary().runtime_profile_service.process_owner.clone(),
             serving: self.primary().serving_service.clone(),
@@ -111,6 +113,7 @@ impl PumasApi {
         profile_id: &RuntimeProfileId,
         expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
     ) -> Result<crate::runtime_profiles::OwnedRouterModelOperation> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .process_owner
@@ -122,6 +125,7 @@ impl PumasApi {
         &self,
         profile_id: &RuntimeProfileId,
     ) -> Result<Option<crate::runtime_profiles::OwnedRuntimeProfileObservation>> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .process_owner
@@ -134,6 +138,7 @@ impl PumasApi {
         profile_id: &RuntimeProfileId,
         expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
     ) -> Result<bool> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .process_owner
@@ -148,6 +153,7 @@ impl PumasApi {
         profile_id: &RuntimeProfileId,
         expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
     ) -> Result<tokio::sync::watch::Receiver<bool>> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .process_owner
@@ -155,6 +161,7 @@ impl PumasApi {
     }
 
     pub async fn get_runtime_profiles_snapshot(&self) -> Result<RuntimeProfilesSnapshotResponse> {
+        self.try_primary()?;
         self.primary().runtime_profile_service.snapshot().await
     }
 
@@ -162,6 +169,7 @@ impl PumasApi {
         &self,
         cursor: Option<&str>,
     ) -> Result<RuntimeProfileUpdateFeedResponse> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .list_updates_since(cursor)
@@ -171,6 +179,7 @@ impl PumasApi {
     pub fn subscribe_runtime_profile_updates(
         &self,
     ) -> tokio::sync::broadcast::Receiver<RuntimeProfileUpdateFeed> {
+        let _ = self.primary();
         self.primary().runtime_profile_service.subscribe_updates()
     }
 
@@ -178,6 +187,7 @@ impl PumasApi {
         &self,
         profile: RuntimeProfileConfig,
     ) -> Result<RuntimeProfileMutationResponse> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .upsert_profile(profile)
@@ -188,6 +198,7 @@ impl PumasApi {
         &self,
         profile_id: RuntimeProfileId,
     ) -> Result<RuntimeProfileMutationResponse> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .delete_profile(profile_id)
@@ -198,6 +209,7 @@ impl PumasApi {
         &self,
         route: ModelRuntimeRoute,
     ) -> Result<RuntimeProfileMutationResponse> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .set_model_route(route)
@@ -209,6 +221,7 @@ impl PumasApi {
         provider: RuntimeProviderId,
         model_id: String,
     ) -> Result<RuntimeProfileMutationResponse> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .clear_model_route(provider, model_id)
@@ -220,6 +233,7 @@ impl PumasApi {
         provider: RuntimeProviderId,
         profile_id: Option<RuntimeProfileId>,
     ) -> Result<RuntimeEndpointUrl> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .resolve_profile_endpoint(provider, profile_id)
@@ -231,6 +245,7 @@ impl PumasApi {
         provider: RuntimeProviderId,
         profile_id: Option<RuntimeProfileId>,
     ) -> Result<RuntimeEndpointUrl> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .resolve_profile_endpoint_for_operation(provider, profile_id)
@@ -243,6 +258,7 @@ impl PumasApi {
         model_id: &str,
         profile_id: Option<RuntimeProfileId>,
     ) -> Result<RuntimeEndpointUrl> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .resolve_model_endpoint(provider, model_id, profile_id)
@@ -255,6 +271,7 @@ impl PumasApi {
         model_id: &str,
         profile_id: Option<RuntimeProfileId>,
     ) -> Result<RuntimeEndpointUrl> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .resolve_model_endpoint_for_operation(provider, model_id, profile_id)
@@ -266,6 +283,7 @@ impl PumasApi {
         provider: RuntimeProviderId,
         model_id: &str,
     ) -> Result<Option<bool>> {
+        self.try_primary()?;
         self.primary()
             .runtime_profile_service
             .model_route_auto_load(provider, model_id)
@@ -278,6 +296,7 @@ impl PumasApi {
         tag: &str,
         version_dir: &Path,
     ) -> Result<LaunchResponse> {
+        self.try_primary()?;
         self.launch_runtime_profile_for_model(profile_id, tag, version_dir, None)
             .await
     }
@@ -289,6 +308,7 @@ impl PumasApi {
         version_dir: &Path,
         model_id: Option<&str>,
     ) -> Result<LaunchResponse> {
+        self.try_primary()?;
         self.launch_runtime_profile_for_model_with_overrides(
             profile_id,
             tag,
@@ -307,6 +327,7 @@ impl PumasApi {
         model_id: Option<&str>,
         overrides: Option<RuntimeProfileLaunchOverrides>,
     ) -> Result<LaunchResponse> {
+        self.try_primary()?;
         super::state_runtime_profiles::launch_runtime_profile(
             self.primary(),
             profile_id,
@@ -327,6 +348,7 @@ impl PumasApi {
         model_id: Option<&str>,
         overrides: Option<RuntimeProfileLaunchOverrides>,
     ) -> Result<crate::runtime_profiles::OwnedRuntimeProfileLaunchReceipt> {
+        self.try_primary()?;
         super::state_runtime_profiles::launch_runtime_profile_with_receipt(
             self.primary(),
             profile_id,
@@ -339,6 +361,7 @@ impl PumasApi {
     }
 
     pub async fn stop_runtime_profile(&self, profile_id: RuntimeProfileId) -> Result<bool> {
+        self.try_primary()?;
         super::state_runtime_profiles::stop_runtime_profile(self.primary(), profile_id).await
     }
 
@@ -349,6 +372,7 @@ impl PumasApi {
         profile_id: RuntimeProfileId,
         generation: u64,
     ) -> Result<bool> {
+        self.try_primary()?;
         super::state_runtime_profiles::stop_runtime_profile_if_generation(
             self.primary(),
             profile_id,
@@ -358,10 +382,12 @@ impl PumasApi {
     }
 
     pub async fn stop_all_managed_runtime_profiles(&self) -> Result<ManagedRuntimeShutdownSummary> {
+        self.try_primary()?;
         super::state_runtime_profiles::stop_all_managed_runtime_profiles(self.primary()).await
     }
 
     pub async fn refresh_default_ollama_profile_status(&self) -> Result<()> {
+        self.try_primary()?;
         let is_running = self.is_ollama_running().await;
         self.primary()
             .runtime_profile_service

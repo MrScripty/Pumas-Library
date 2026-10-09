@@ -80,6 +80,17 @@ pub(crate) struct RuntimeTaskContext {
 }
 
 impl RuntimeTasks {
+    #[cfg(test)]
+    pub(crate) fn owned_task_count_for_catalog_test(&self) -> usize {
+        self.inner
+            .lock()
+            .unwrap()
+            .operations
+            .values()
+            .filter(|entry| entry.nested_active > 0)
+            .count()
+    }
+
     pub(crate) fn new() -> Self {
         let (drain_tx, _) = watch::channel(None);
         let (progress_tx, _) = watch::channel(0);

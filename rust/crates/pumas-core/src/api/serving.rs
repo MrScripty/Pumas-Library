@@ -11,6 +11,7 @@ use crate::{PumasApi, Result};
 
 impl PumasApi {
     pub async fn get_serving_status(&self) -> Result<ServingStatusResponse> {
+        self.try_primary()?;
         Ok(self.primary().serving_service.status().await)
     }
 
@@ -18,6 +19,7 @@ impl PumasApi {
         &self,
         cursor: Option<&str>,
     ) -> Result<ServingStatusUpdateFeedResponse> {
+        self.try_primary()?;
         Ok(self
             .primary()
             .serving_service
@@ -28,6 +30,7 @@ impl PumasApi {
     pub fn subscribe_serving_status_updates(
         &self,
     ) -> tokio::sync::broadcast::Receiver<ServingStatusUpdateFeed> {
+        let _ = self.primary();
         self.primary().serving_service.subscribe_updates()
     }
 
@@ -35,6 +38,7 @@ impl PumasApi {
         &self,
         request: ServeModelRequest,
     ) -> Result<ModelServeValidationResponse> {
+        self.try_primary()?;
         let primary = self.primary();
         let model_id = request.model_id.trim();
         let model = if model_id.is_empty() {
@@ -94,6 +98,7 @@ impl PumasApi {
         &self,
         request: &ServeModelRequest,
     ) -> std::result::Result<crate::serving::ServingLoadOperation, ModelServeError> {
+        let _ = self.primary();
         self.primary().serving_service.begin_load(request)
     }
 
@@ -102,6 +107,7 @@ impl PumasApi {
         operation: &crate::serving::ServingLoadOperation,
         status: ServedModelStatus,
     ) -> Result<ServingStatusSnapshot> {
+        self.try_primary()?;
         self.primary()
             .serving_service
             .record_loaded_model_for_operation(operation, status, None)
@@ -113,6 +119,7 @@ impl PumasApi {
         status: ServedModelStatus,
         expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
     ) -> Result<ServingStatusSnapshot> {
+        self.try_primary()?;
         let primary = self.primary();
         primary.serving_service.record_loaded_model_for_operation(
             operation,
@@ -125,6 +132,7 @@ impl PumasApi {
         &self,
         status: ServedModelStatus,
     ) -> Result<ServingStatusSnapshot> {
+        self.try_primary()?;
         Ok(self
             .primary()
             .serving_service
@@ -138,6 +146,7 @@ impl PumasApi {
         status: ServedModelStatus,
         expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
     ) -> Result<ServingStatusSnapshot> {
+        self.try_primary()?;
         let primary = self.primary();
         primary
             .serving_service
@@ -153,6 +162,7 @@ impl PumasApi {
         &self,
         error: ModelServeError,
     ) -> Result<ServingStatusSnapshot> {
+        self.try_primary()?;
         Ok(self
             .primary()
             .serving_service
@@ -167,6 +177,7 @@ impl PumasApi {
         profile_id: Option<&RuntimeProfileId>,
         model_alias: Option<&str>,
     ) -> Result<ServingStatusSnapshot> {
+        self.try_primary()?;
         Ok(self
             .primary()
             .serving_service
@@ -183,6 +194,7 @@ impl PumasApi {
         model_alias: &str,
         expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
     ) -> Result<ServingStatusSnapshot> {
+        self.try_primary()?;
         let primary = self.primary();
         primary
             .serving_service
@@ -200,6 +212,7 @@ impl PumasApi {
         provider: Option<crate::models::RuntimeProviderId>,
         profile_id: Option<&RuntimeProfileId>,
     ) -> Result<Option<ServedModelStatus>> {
+        self.try_primary()?;
         Ok(self
             .primary()
             .serving_service

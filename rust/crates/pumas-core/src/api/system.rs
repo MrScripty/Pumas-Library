@@ -43,6 +43,7 @@ impl PumasApi {
     ///
     /// Runtime version state is obtained through pumas-app-manager in the RPC layer.
     pub async fn get_status(&self) -> Result<models::StatusResponse> {
+        self.try_primary()?;
         // Get actual running status
         let ollama_running = self.is_ollama_running().await;
         let torch_running = self.is_torch_running().await;
@@ -111,6 +112,7 @@ impl PumasApi {
 
     /// Get disk space information.
     pub async fn get_disk_space(&self) -> Result<models::DiskSpaceResponse> {
+        self.try_primary()?;
         let launcher_root = self.launcher_root.clone();
         tokio::task::spawn_blocking(move || {
             use sysinfo::Disks;
@@ -172,6 +174,7 @@ impl PumasApi {
 
     /// Get system resources (CPU, GPU, RAM, disk).
     pub async fn get_system_resources(&self) -> Result<models::SystemResourcesResponse> {
+        self.try_primary()?;
         let tracker = self.primary().resource_tracker.clone();
         let snapshot = tokio::task::spawn_blocking(move || tracker.get_system_resources())
             .await
@@ -188,6 +191,7 @@ impl PumasApi {
 
     /// Open a path in the file manager.
     pub async fn open_path(&self, path: &str) -> Result<()> {
+        self.try_primary()?;
         let system_utils = self.primary().system_utils.clone();
         let path = validate_existing_local_open_path(path).await?;
         let path = path.to_string_lossy().to_string();
@@ -198,6 +202,7 @@ impl PumasApi {
 
     /// Open a URL in the default browser.
     pub async fn open_url(&self, url: &str) -> Result<()> {
+        self.try_primary()?;
         let system_utils = self.primary().system_utils.clone();
         let url = url.to_string();
         tokio::task::spawn_blocking(move || system_utils.open_url(&url))
@@ -210,6 +215,7 @@ impl PumasApi {
     /// The caller (RPC layer) can use this with a version directory path
     /// obtained from pumas-app-manager's VersionManager.
     pub async fn open_directory(&self, dir: &std::path::Path) -> Result<()> {
+        self.try_primary()?;
         if !path_exists(dir).await? {
             return Err(PumasError::NotFound {
                 resource: format!("Directory: {}", dir.display()),
@@ -229,6 +235,7 @@ impl PumasApi {
 
     /// Check if background fetch has completed.
     pub async fn has_background_fetch_completed(&self) -> bool {
+        let _ = self.primary();
         self.primary()
             ._state
             .read()
@@ -238,6 +245,7 @@ impl PumasApi {
 
     /// Reset the background fetch flag.
     pub async fn reset_background_fetch_flag(&self) {
+        let _ = self.primary();
         self.primary()
             ._state
             .write()
@@ -251,6 +259,7 @@ impl PumasApi {
 
     /// Get launcher version information.
     pub async fn get_launcher_version(&self) -> serde_json::Value {
+        let _ = self.primary();
         let launcher_root = self.launcher_root.clone();
         match tokio::task::spawn_blocking(move || {
             let updater = launcher::LauncherUpdater::new(&launcher_root);
@@ -268,18 +277,21 @@ impl PumasApi {
 
     /// Check for launcher updates via GitHub.
     pub async fn check_launcher_updates(&self, force_refresh: bool) -> launcher::UpdateCheckResult {
+        let _ = self.primary();
         let updater = launcher::LauncherUpdater::new(&self.launcher_root);
         updater.check_for_updates(force_refresh).await
     }
 
     /// Apply launcher update by pulling latest changes and rebuilding.
     pub async fn apply_launcher_update(&self) -> launcher::UpdateApplyResult {
+        let _ = self.primary();
         let updater = launcher::LauncherUpdater::new(&self.launcher_root);
         updater.apply_update().await
     }
 
     /// Restart the launcher by spawning a new process.
     pub async fn restart_launcher(&self) -> Result<bool> {
+        self.try_primary()?;
         let launcher_root = self.launcher_root.clone();
         tokio::task::spawn_blocking(move || {
             let updater = launcher::LauncherUpdater::new(&launcher_root);
@@ -295,6 +307,7 @@ impl PumasApi {
 
     /// Check if git is available on the system.
     pub async fn check_git(&self) -> system::SystemCheckResult {
+        let _ = self.primary();
         tokio::task::spawn_blocking(system::check_git)
             .await
             .unwrap_or_else(|_| system::SystemCheckResult {

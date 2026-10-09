@@ -36,6 +36,7 @@ impl PumasApi {
     /// An abandoned or failed receipt makes core cessation fail closed. The
     /// selected server must settle/transfer it before awaiting core shutdown.
     pub fn prepare_local_startup_custody(&self) -> Result<LocalStartupCustody> {
+        self.try_primary()?;
         self.instance_description()?;
         let (settlement, observer) = tokio::sync::oneshot::channel();
         let _result = self.primary().external_service_tasks.start_owned(

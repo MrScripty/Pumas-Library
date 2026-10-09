@@ -111,7 +111,10 @@ pub use system::{
 };
 
 // Re-export builder from api module
-pub use api::PumasApiBuilder;
+pub use api::{
+    CatalogOwnerCheckpoint, CatalogQueryRequest, CatalogQueryResponse, InstanceProfile,
+    PumasApiBuilder,
+};
 #[cfg(feature = "s3")]
 pub use api::{
     S3ModelBundleProgress, S3ModelImportControl, S3ModelImportError, S3ModelImportPhase,
@@ -150,6 +153,7 @@ pub type PumasLibraryInstance = PumasApi;
 /// is exposed through `PumasLocalClient`.
 enum ApiInner {
     Primary(Arc<PrimaryState>),
+    Catalog(Arc<api::catalog::CatalogState>),
 }
 
 impl PumasApi {
@@ -165,6 +169,7 @@ impl PumasApi {
 
     /// Close the shared acquisition supervisor after consumer-specific shutdown.
     pub async fn shutdown_acquisition(&self) -> Result<()> {
+        self.try_primary()?;
         self.primary().acquisition.shutdown().await
     }
 
@@ -173,6 +178,7 @@ impl PumasApi {
     /// Dropping this waiter does not cancel admitted work. Repeated calls observe
     /// the same owner settlement. This does not stop inference runtimes.
     pub async fn shutdown_intent(&self) -> Result<()> {
+        self.try_primary()?;
         let client = self.primary().hf_client.clone();
         self.runtime_tasks.close();
         self.runtime_tasks
@@ -187,18 +193,20 @@ impl PumasApi {
 
     /// Get a reference to the primary state, or error if in client mode.
     fn try_primary(&self) -> Result<&Arc<PrimaryState>> {
-        let ApiInner::Primary(state) = &self.inner;
-        Ok(state)
+        match &self.inner {
+            ApiInner::Primary(state) => Ok(state),
+            ApiInner::Catalog(_) => Err(api::catalog::denied_full_operation()),
+        }
     }
 
     /// Get a reference to the primary state. Panics if in client mode.
     /// Use only for methods that are guaranteed primary-only.
     fn primary(&self) -> &Arc<PrimaryState> {
-        let ApiInner::Primary(state) = &self.inner;
-        state
+        self.try_primary().expect("operation requires the full instance profile; inspect instance_profile/capabilities before using infallible full-only accessors")
     }
 
-    /// Returns true if this instance is the primary (owns full state).
+    /// Returns true for an owning instance in either profile. Use
+    /// `instance_profile` or capabilities to select supported operations.
     pub fn is_primary(&self) -> bool {
         true
     }
@@ -261,6 +269,10 @@ impl PumasApi {
     /// Primary construction already calls this. Repeated calls are idempotent and
     /// return the existing port.
     pub async fn start_ipc_server(&self) -> Result<u16> {
+        if let ApiInner::Catalog(state) = &self.inner {
+            state.description()?;
+            return Ok(state.ready.get().unwrap().port);
+        }
         let state = self.try_primary()?;
         let mut server_handle = state.server_handle.lock().await;
         if let Some(existing) = server_handle.as_ref() {
@@ -337,7 +349,12 @@ impl Drop for PumasApi {
     fn drop(&mut self) {
         self.runtime_tasks.shutdown();
         let _ = self.model_watcher.take();
-        let ApiInner::Primary(ref state) = self.inner;
+        let ApiInner::Primary(ref state) = self.inner else {
+            if let ApiInner::Catalog(ref state) = self.inner {
+                let _receipt = state.begin_shutdown();
+            }
+            return;
+        };
         // Drop cannot establish cessation synchronously. The independently
         // retained coordinator releases this row only after observed settlement;
         // runtime loss or failed cleanup leaves it unresolved.

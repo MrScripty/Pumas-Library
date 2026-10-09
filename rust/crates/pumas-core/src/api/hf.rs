@@ -177,6 +177,7 @@ impl PumasApi {
     /// Import work owned by managed downloads is included in their drain.
     /// An API without an HF client has no download work to drain.
     pub async fn shutdown_downloads(&self) -> Result<()> {
+        self.try_primary()?;
         match &self.primary().hf_client {
             Some(client) => client.shutdown_downloads().await,
             None => Ok(()),
@@ -195,6 +196,7 @@ impl PumasApi {
         kind: Option<&str>,
         limit: usize,
     ) -> Result<Vec<models::HuggingFaceModel>> {
+        self.try_primary()?;
         self.search_hf_models_with_hydration(query, kind, limit, limit)
             .await
     }
@@ -207,6 +209,7 @@ impl PumasApi {
         limit: usize,
         hydrate_limit: usize,
     ) -> Result<Vec<models::HuggingFaceModel>> {
+        self.try_primary()?;
         super::state_hf::search_hf_models_with_hydration(
             self.primary(),
             query,
@@ -223,6 +226,7 @@ impl PumasApi {
         repo_id: &str,
         quants: &[String],
     ) -> Result<models::HfDownloadDetails> {
+        self.try_primary()?;
         if let Some(ref client) = self.primary().hf_client {
             client.get_download_details(repo_id, quants).await
         } else {
@@ -237,6 +241,7 @@ impl PumasApi {
         &self,
         request: &model_library::DownloadRequest,
     ) -> Result<String> {
+        self.try_primary()?;
         let primary = self.primary().clone();
         let client = primary
             .hf_client
@@ -586,31 +591,37 @@ impl PumasApi {
         &self,
         download_id: &str,
     ) -> Result<Option<models::ModelDownloadProgress>> {
+        self.try_primary()?;
         super::state_hf::get_hf_download_progress(self.primary(), download_id).await
     }
 
     /// Cancel a HuggingFace download.
     pub async fn cancel_hf_download(&self, download_id: &str) -> Result<bool> {
+        self.try_primary()?;
         super::state_hf::cancel_hf_download(self.primary(), download_id).await
     }
 
     /// Pause a HuggingFace download, preserving the `.part` file for later resume.
     pub async fn pause_hf_download(&self, download_id: &str) -> Result<bool> {
+        self.try_primary()?;
         super::state_hf::pause_hf_download(self.primary(), download_id).await
     }
 
     /// Resume a paused or errored HuggingFace download.
     pub async fn resume_hf_download(&self, download_id: &str) -> Result<bool> {
+        self.try_primary()?;
         super::state_hf::resume_hf_download(self.primary(), download_id).await
     }
 
     /// List all HuggingFace downloads (active, paused, completed, etc.).
     pub async fn list_hf_downloads(&self) -> Result<Vec<models::ModelDownloadProgress>> {
+        self.try_primary()?;
         super::state_hf::list_hf_downloads(self.primary()).await
     }
 
     /// Snapshot all HuggingFace downloads with a monotonic cursor.
     pub async fn get_hf_download_snapshot(&self) -> models::ModelDownloadSnapshot {
+        let _ = self.primary();
         if let Some(ref client) = self.primary().hf_client {
             client.download_snapshot().await
         } else {
@@ -626,6 +637,7 @@ impl PumasApi {
     pub fn subscribe_hf_download_updates(
         &self,
     ) -> Option<tokio::sync::broadcast::Receiver<models::ModelDownloadUpdateNotification>> {
+        let _ = self.primary();
         self.primary()
             .hf_client
             .as_ref()
@@ -637,6 +649,7 @@ impl PumasApi {
         &self,
         cursor: Option<&str>,
     ) -> models::ModelDownloadUpdateNotification {
+        let _ = self.primary();
         let snapshot = self.get_hf_download_snapshot().await;
         if let Some(ref client) = self.primary().hf_client {
             client
@@ -665,6 +678,7 @@ impl PumasApi {
     pub async fn list_interrupted_downloads(
         &self,
     ) -> Result<Vec<model_library::InterruptedDownload>> {
+        self.try_primary()?;
         super::state_hf::list_interrupted_downloads(self.primary()).await
     }
 
@@ -675,6 +689,7 @@ impl PumasApi {
     /// download system handles `.part` file resume via HTTP Range headers and
     /// skips files that are already complete.
     pub async fn recover_download(&self, repo_id: &str, dest_dir: &str) -> Result<String> {
+        self.try_primary()?;
         let primary = self.primary().clone();
         let client = primary
             .hf_client
@@ -775,6 +790,7 @@ impl PumasApi {
         model_id: &model_library::DownloadRecoveryModelId,
         recovery_token: &model_library::DownloadRecoveryToken,
     ) -> Result<models::PartialDownloadAction> {
+        self.try_primary()?;
         let primary = self.primary().clone();
         let client = match primary.hf_client.clone() {
             Some(client) => client,
@@ -946,6 +962,7 @@ impl PumasApi {
         repo_id: &str,
         dest_dir: &str,
     ) -> Result<models::PartialDownloadAction> {
+        self.try_primary()?;
         let primary = self.primary().clone();
         let client = match primary.hf_client.clone() {
             Some(client) => client,
@@ -1108,6 +1125,7 @@ impl PumasApi {
     /// filename-based lookup via `lookup_metadata()`. Returns the updated
     /// metadata on success.
     pub async fn refetch_metadata_from_hf(&self, model_id: &str) -> Result<models::ModelMetadata> {
+        self.try_primary()?;
         let primary = self.primary();
         let hf_client = primary
             .hf_client
@@ -1224,6 +1242,7 @@ impl PumasApi {
         &self,
         file_path: &str,
     ) -> Result<Option<model_library::HfMetadataResult>> {
+        self.try_primary()?;
         if let Some(ref client) = self.primary().hf_client {
             let path = validate_existing_local_file_lookup_path(file_path, "file_path").await?;
             let filename = path
@@ -1241,6 +1260,7 @@ impl PumasApi {
         &self,
         dir_path: &str,
     ) -> Result<Option<model_library::HfMetadataResult>> {
+        self.try_primary()?;
         let primary = self.primary();
         let Some(client) = primary.hf_client.as_ref() else {
             return Ok(None);
@@ -1359,6 +1379,7 @@ impl PumasApi {
     ///
     /// Persists to disk and updates the in-memory token for immediate use.
     pub async fn set_hf_token(&self, token: &str) -> Result<()> {
+        self.try_primary()?;
         if let Some(ref client) = self.primary().hf_client {
             client.set_auth_token(token).await
         } else {
@@ -1372,6 +1393,7 @@ impl PumasApi {
     ///
     /// Removes the persisted token file and clears the in-memory value.
     pub async fn clear_hf_token(&self) -> Result<()> {
+        self.try_primary()?;
         if let Some(ref client) = self.primary().hf_client {
             client.clear_auth_token().await
         } else {
@@ -1386,6 +1408,7 @@ impl PumasApi {
     /// Makes a lightweight API call to validate the token and retrieve
     /// the associated username.
     pub async fn get_hf_auth_status(&self) -> Result<model_library::HfAuthStatus> {
+        self.try_primary()?;
         if let Some(ref client) = self.primary().hf_client {
             client.get_auth_status().await
         } else {
@@ -1399,6 +1422,7 @@ impl PumasApi {
 
     /// Get repository file tree from HuggingFace.
     pub async fn get_hf_repo_files(&self, repo_id: &str) -> Result<model_library::RepoFileTree> {
+        self.try_primary()?;
         if let Some(ref client) = self.primary().hf_client {
             client.get_repo_files(repo_id).await
         } else {
@@ -1825,7 +1849,9 @@ pub(super) mod tests {
     async fn shutdown_without_hf_client_is_repeatable() {
         let root = tempfile::TempDir::new().unwrap();
         let mut api = recovery_api_fixture(root.path(), None).await;
-        let crate::ApiInner::Primary(primary) = &mut api.inner;
+        let crate::ApiInner::Primary(primary) = &mut api.inner else {
+            panic!("full fixture")
+        };
         let client = Arc::get_mut(primary).unwrap().hf_client.take().unwrap();
         client.shutdown_downloads().await.unwrap();
 

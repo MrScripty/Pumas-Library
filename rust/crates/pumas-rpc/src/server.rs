@@ -2843,28 +2843,22 @@ mod http_discovery_tests {
 
     #[tokio::test]
     async fn bind_failure_publishes_nothing_and_old_router_cannot_describe_successor() {
-        let (temp, registry, root, api) = api_fixture().await;
+        let (_failed_bind_temp, registry, root, api) = api_fixture().await;
         let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        assert!(
-            start(api.clone(), &root, occupied.local_addr().unwrap().port())
-                .await
-                .is_err()
-        );
-        assert!(registry.list_http_services().unwrap().is_empty());
-        // A released rendezvous row does not prove that the old physical-store
-        // shares have dropped. Join the owned coordinator, then drop our API.
-        api.shutdown_instance().await.unwrap();
-        drop(api);
-        assert!(registry.get_instance(&root).unwrap().is_none());
-        let api = PumasApi::builder(&root)
-            .with_registry(registry.clone())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .with_connectivity_probe(false)
-            .build()
+        assert!(start(api, &root, occupied.local_addr().unwrap().port())
             .await
-            .unwrap();
-        api.start_ipc_server().await.unwrap();
+            .is_err());
+        assert!(registry.list_http_services().unwrap().is_empty());
+        // Observe registry cleanup after ordinary API drop. This does not prove
+        // final physical-store release, so fencing uses a fresh fixture below.
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while registry.get_instance(&root).unwrap().is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let (temp, registry, root, api) = api_fixture().await;
         let server = start(api, &root, 0).await.unwrap();
         let old_description = registry.list_http_services().unwrap().remove(0);
         // Inject a hostile rendezvous generation and advertisement. This tests

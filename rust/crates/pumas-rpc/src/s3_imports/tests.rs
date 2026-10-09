@@ -698,7 +698,8 @@ fn source_bundle_structural_preflight_refuses_entire_set_before_admission() {
         ("sha256", json!("bad")),
     ] {
         let mut input = bundle_params("https://source.invalid");
-        input["files"][1][field] = value.clone();
+        let diagnostic = format!("{field}={value}");
+        input["files"][1][field] = value;
         assert!(
             matches!(
                 client
@@ -706,7 +707,7 @@ fn source_bundle_structural_preflight_refuses_entire_set_before_admission() {
                     .unwrap(),
                 S3ImportOutcome::Rejected { .. }
             ),
-            "field={field}; value={value}"
+            "structural preflight admitted {diagnostic}"
         );
         assert!(matches!(
             client.snapshot(None).unwrap(),
@@ -777,6 +778,42 @@ fn source_bundle_transport_admission_preserves_unqualified_custom_code_selection
     ));
     assert!(receiver.try_recv().is_err());
     client.close();
+}
+
+#[test]
+fn source_bundle_admission_preserves_file_types_for_shared_import_qualification() {
+    // S3 selection grants byte-transfer authority. The shared importer decides
+    // whether the verified set is a supported model package and never executes
+    // selected custom code (covered by the production-process qualification).
+    for path in [
+        "run.py",
+        "config/run.py",
+        "model-00002.safetensors",
+        "unknown.data",
+    ] {
+        let (client, mut receiver) = S3Imports::channel();
+        let mut input = bundle_params("https://source.invalid");
+        input["files"][1]["logical_path"] = json!(path);
+        assert!(
+            matches!(
+                client
+                    .admit_bundle(serde_json::from_value(input).unwrap(), None)
+                    .unwrap(),
+                S3ImportOutcome::Running { .. }
+            ),
+            "byte selection refused {path}"
+        );
+        let Job::Import(job) = receiver.try_recv().unwrap() else {
+            panic!("expected selected-byte import job")
+        };
+        assert!(
+            matches!(job.entries, ImportSelection::Versioned(ref entries)
+            if entries.len() == 2 && entries.iter().any(|entry| entry.logical_path == path)),
+            "selected member was dropped or relabelled: {path}"
+        );
+        assert!(receiver.try_recv().is_err());
+        client.close();
+    }
 }
 
 #[cfg(all(target_os = "linux", not(feature = "inference-plugins")))]
@@ -989,7 +1026,10 @@ async fn source_bundle_rpc_https_complete_pins_totals_cancellation_and_redaction
             let mut bad = input.clone();
             bad["files"][1]["logical_path"] = json!(path);
             let denied = rpc(&server, "start_s3_model_bundle_import", bad).await;
-            assert_eq!(denied["error"]["code"], -32602, "path={path}");
+            assert_eq!(
+                denied["error"]["code"], -32602,
+                "structural preflight admitted {path}"
+            );
             assert_eq!(
                 rpc(&server, "get_s3_model_import", json!({})).await["result"]["status"],
                 "idle"

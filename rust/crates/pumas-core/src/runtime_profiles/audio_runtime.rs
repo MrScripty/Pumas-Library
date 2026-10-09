@@ -8,6 +8,9 @@
 
 #![allow(dead_code)] // The private channel consumes this opaque owner next.
 
+#[path = "audio_runtime/installed.rs"]
+pub(crate) mod installed;
+
 use super::audio_custody::AudioCustodyError;
 use crate::model_library::artifact_use::PreparedArtifactUse;
 use crate::platform::capability_fs::{open_pinned_directory, open_pinned_directory_at};

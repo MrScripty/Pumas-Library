@@ -237,3 +237,69 @@ The same domain types are available through native Rust and existing authenticat
 IPC. Operational RPC methods and desktop allowlists retain their existing
 contracts. This adds no production listener, node, fleet, discovery, or remote
 control feature.
+
+## Selected-model modality-first operations
+
+`POST /v1/model-operations` accepts a strict modality-first request when the
+`capability` field is absent. Legacy requests with an explicit `capability`
+retain their closed request and adapter contracts. A malformed legacy request
+never falls back to modality resolution.
+
+```json
+{
+  "contract_version": 1,
+  "request_id": "caption-or-answer-17",
+  "model": "selected-model",
+  "input": {"kind": "text", "text": "Hello"},
+  "output": "text",
+  "semantic_task": "chat_generation"
+}
+```
+
+The facade resolves the selected model/profile's declared input formats, output
+formats and available semantic tasks from `GET /v1/capabilities`. It does not
+infer an executable operation from model modality labels alone. If plain Text
+can select both chat and text generation, the response is HTTP 409 with
+`ambiguous_operation`; choose `semantic_task` from the selected model's
+capability descriptors. `options.kind` does not choose a semantic task. A Text
+prompt selected for chat becomes one user message; messages preserve their
+roles and cannot be flattened into a plain completion. Text-only message parts
+are concatenated in order within their original message.
+
+`profile`, `semantic_task`, `options`, and `stream` are optional. Generation,
+embedding, and audio options use the existing named adapter defaults when
+omitted. Image generation requires explicit `image_generation` options with
+`width` and `height`. Specified options must match the resolved adapter and pass
+its existing bounds. Streaming requires an available streaming declaration.
+
+| Input and desired output | Current executable adapter or refusal |
+| --- | --- |
+| Text or text messages → Text | Declared available chat/text adapter; explicit disambiguation where needed |
+| Text or TextBatch → EmbeddingsFloat32 | Declared available embedding adapter |
+| Text → PngBase64 | Declared available image generation adapter, explicit size options |
+| PCM Audio → Text | Existing qualified speech owner; otherwise `capability_unavailable` |
+| Image → Text, or messages containing image/audio parts | `unsupported_modality`; no qualified vision or mixed-content adapter is declared |
+| Any input → PCM audio output | `unsupported_modality`; no qualified audio-output adapter is declared |
+
+Image input is closed `{kind:"image", encoding:"png"|"jpeg",
+data_base64:"..."}`. Messages accept string `content` or an ordered array of
+closed `text`, `image`, and `audio` parts. Audio input/parts retain the existing
+PCM encoding, sample-rate, channel, sample-count and base64 envelope fields.
+Desired outputs are `text`, `embeddings_float32`, `png_base64`, `labels`,
+`pcm_s16le`, or `pcm_f32le`. The Image→Text semantic hint is `image_to_text`;
+recognizing that request does not qualify execution.
+
+All requests retain the 32 MiB transport limit. Messages and parts are each
+limited to 128 entries; image payloads receive bounded base64 transport-grammar
+validation, without claiming decoded image validation. PCM validation and owned
+byte decoding retain their existing boundaries. Errors before admission use
+`outcome:"not_admitted"`; unsupported modality transport is HTTP 422, unavailable
+runtime/capability is HTTP 503. Typed results, correlation, cancellation,
+streaming and disposal use the existing admitted operation owner.
+
+Lanternwake's Audio→Text path can use this request without naming transcription,
+but an installed speech runtime remains unavailable until its owning contract
+is qualified. Tuldok's Image→Text caption request now has a typed admission and
+explicit unsupported result; its vision execution remains an implementation and
+qualification gap. Controlled adapter tests do not qualify real model inference
+or packaged consumer distribution.

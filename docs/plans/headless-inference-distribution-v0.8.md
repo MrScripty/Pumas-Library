@@ -1,12 +1,28 @@
 # Draft v0.8 inference headless distribution
 
-This slice prepares local candidate assembly and consumer admission. It does not
-authorize a release/tag, change the existing thirteen-asset release inventory,
-or qualify any actual Pumas/ORT inference distribution. The bounded integration source uses public discovery/physical-owner commit
-`c85803fa2caa1609a437474c4b8e8a161205663d` (tree
-`e99a9a5a3f016567a636be261207e41a6b9949d0`) plus the six packaging files from
-`60a1ac46884db0db4025332dfbf3f7c5892932f9`. It is not a merge of the modality,
-audio or S3 discovery feature stacks and is not the final v0.8 consumer cohort.
+The stable integrated review base is PR59 source
+`c1208926afea88c382dd25036735f900c074e9a0`, tree
+`e2b9826426df4079e62f0d76ee07c5e6aa3fc640`. It includes the public discovery,
+physical-store, S3, modality and packaging candidates. This distribution slice
+adds an opt-in local producer on a separate branch; it does not edit PR59,
+authorize release/tag publication, or change the thirteen-asset release inventory.
+Actual inference-enabled archives and consumer acceptance remain unqualified.
+The package version is still 0.7.0, so the strict v0.8 candidate gate currently
+refuses production before Cargo. An authorized integrated version change is a
+separate prerequisite; this slice neither bumps nor relabels the version.
+
+The separately reviewed successors are preserved as bounded commits:
+
+| Slice | Source commit | Observed scope |
+| --- | --- | --- |
+| HF external-directory refusal | `8e11fb8c91335f6223ea9d0fa02387ea615ba639` | Synthetic package/cache regressions; no invented external root or content digest |
+| Modality-first facade | `7f2d5478dbe3df9378e66f9f0d51dbfaed94cf27` | Controlled selected-model HTTP/owned-adapter contracts and legacy compatibility |
+| Installed-audio candidate custody | `4737f0b68f75ceda9118a5bddfd418a498a6bdba` | Actual held runtime/model capabilities and controlled drift/lifetime tests; no production admission grant |
+| Local inference candidate producer | `de62f8a1e05e5e71ebe4214cb43c95d458a6aa58` | Controlled build/archive contracts and actual Git-root regressions; current 0.7 source refused before Cargo |
+
+The final integration evidence records its own exact head/tree and included
+commits. These successors do not change PR59's source or establish native model,
+consumer-production-pin, archive or release acceptance.
 
 ## Audited targets and acceptance boundary
 
@@ -26,9 +42,13 @@ no-inference desktop, and three **no-inference** headless outputs. Those headles
 outputs cannot satisfy the requested inference distribution. RPC defaults enable
 `inference-plugins` but omit S3; the intended combined build must explicitly use
 `--no-default-features --features s3,inference-plugins`, `--locked`, the exact
-native `--target`, and the production release profile. This tool never builds it.
+native `--target`, and the production release profile. The new opt-in local
+`headless_inference_build.py` producer runs that exact command and invokes the
+existing assembler. Active `build.yml` tag jobs still produce only the three
+no-inference headless archives. Automatic inference release workflow wiring and
+activation are separate work; this local producer adds no remote asset upload.
 
-On main, `/health` only reports status. Runtime loading is lazy, so startup does
+In the pinned cohort, `/health` only reports status. Runtime loading is lazy, so startup does
 not prove ONNX loading. `get_status` has a semver and `get_launcher_version` reads
 a short launcher-root Git identity: neither binds the compiled full source tree,
 protocol/schema, modalities, or shipped native closure.
@@ -41,6 +61,8 @@ discovery, advertisement and bootstrap. Packaging reserves only:
 - `scripts/release/headless-inference-plan.json`
 - `scripts/release/headless_inference.py`
 - `scripts/release/headless_discovery.py`
+- `scripts/release/headless_inference_build.py`
+- `scripts/release/test_headless_inference_build.py`
 - `scripts/release/test_headless_inference.py`
 - `scripts/release/headless-inference.test.mjs`
 - `scripts/release/fixtures/headless-rpc-fixture.c`
@@ -89,16 +111,44 @@ inside Pumas and query/reuse existing local libraries before considering a
 separately authorized acquisition. These checks do not implement a competing
 model cache, downloader or owner reclamation rule.
 
-Lanternwake and Tuldok can consume the existing HTTP interface after archive SHA256
-and live owner-contract validation; this does not require a new SDK. Pantograph
-and Eidetic need one immutable Rust source/schema cohort. The reviewed Pantograph
-revision `038dacaaa98ebd007c32e13d4608726ca5ccf63a` pins Pumas
-`26a84e323cae566a46a8f76bef48fa1010aed48b`. Reviewed Eidetic main
+The five-consumer cohort is **Lanternwake, Tuldok, Pantograph, Eidetic and
+Chrema**. Lanternwake requires Audio→Text; Tuldok requires Image→Text captioning.
+Archive and HTTP identity checks alone do not implement or qualify those
+operations. The reviewed facade now accepts a selected model, typed input and
+desired output without a named capability, using the existing
+`POST /v1/model-operations` route. It matches declared available adapters and
+requires `semantic_task` when multiple operations fit the same modalities;
+option shape cannot select a task. Legacy named-capability requests keep their
+strict parsing and existing admission/cancellation paths. See the
+[RPC request contract](../../rust/crates/pumas-rpc/README.md).
+
+Text→Text, Text→Embeddings and Text→Image use existing adapters when declared
+available. Audio→Text resolves only to the existing qualified owned endpoint;
+the current installed runtime remains unavailable. Typed Image→Text, mixed
+image/audio message parts and PCM audio output are recognized but explicitly
+refused because no qualified executable adapter is declared. Image decoding,
+vision transport and installed audio admission remain separate implementation
+and qualification gates. This is not arbitrary modality-pair execution.
+
+Pantograph and Eidetic need one immutable Rust source/schema cohort. Reviewed
+Pantograph source `9fae65abe41ad91434b984f95f95dee94438dda2` still pins production
+Pumas `26a84e323cae566a46a8f76bef48fa1010aed48b`; the earlier controlled contract
+slice is `038dacaaa98ebd007c32e13d4608726ca5ccf63a`. That older Pumas pin predates
+current HF directory/observation fixes. Reviewed Eidetic main
 `c4587c11911af355c2446d0befa5ac1cbde8f3e3` uses a sibling path and prepares
-`a94fd92021f27fdeedb6e2de6e01c41c250ef576`. Choose a new integrated immutable
-cohort only after the feature lanes are integrated; update manifest, lockfile,
-preparation/CI pins and exact consumer tests together. Exported source also needs
-explicit identity evidence rather than skipping verification when `.git` is absent.
+`a94fd92021f27fdeedb6e2de6e01c41c250ef576`. Neither consumer is source-pinned to
+PR59 merely because the combined source exists. Update manifests, lockfiles,
+preparation/CI pins and exact consumer tests together after the accepted final
+integration. Chrema's exact transport, source/archive pin and native modality
+acceptance must come from its owner; this slice does not invent that contract.
+Exported source also needs explicit identity evidence rather than skipping
+verification when `.git` is absent.
+
+PR59's controlled contracts and Pantograph's tiny committed untrained BERT CPU
+forwards are useful bounded evidence. They do not qualify a pretrained model,
+Lanternwake transcription, Tuldok captions, Chrema, packaged ORT, or any native
+Windows/macOS distribution. Each final consumer record must identify its exact
+source or archive hash, schema and actual model/runtime bytes.
 
 ## Explicit local input and package contract
 
@@ -108,13 +158,61 @@ bytes and an output path outside the checkout. It performs no downloads, Cargo
 builds, model discovery/inference or publication. Inputs must be regular,
 nonempty files; no directory scan copies ambient files or credentials.
 
-The build-record adapter currently requires `version`, `target`, `host`, `profile`,
+The build-record adapter requires `version`, `target`, `host`, `profile`,
 `features`, `source: {head, tree}`, `build_id`, `inference_enabled`, `binary_sha256`,
 `command` and `rustc`. Target and host must match the native tuple; profile must
-be release. A later trusted build producer must bind these assertions to observed
-Cargo artifacts/features, actual compiler/runner, and immutable source. This
-structural adapter is not a replacement for `s3_build_provenance.py` or independent
-production-build evidence.
+be release. `headless_inference_build.py` now produces that record from observed
+Cargo artifacts rather than asking a caller to assert that Cargo ran. Before and
+after Cargo, Git's `--show-toplevel` must identify the actual build directory by
+native `samefile` directory identity. A redirected `core.worktree`, unavailable
+root or changed root is refused; valid linked worktrees and symlink aliases of
+the same directory remain usable. Git/compiler observations use the explicit
+build environment, with Git routing/config and compiler/wrapper overrides
+refused. These are unsigned before/after observations under trusted local
+custody, not proof that compilation inputs were immutable during a build.
+It also checks a clean source head/tree, actual native compiler host, checked release
+profile, forbidden flag/config overrides, current S3 attribution, and exact
+core/RPC features. It forces `ORT_SKIP_DOWNLOAD=1`, offline/locked compilation,
+and one Cargo build job. An uncached official dependency or missing native tool
+is an explicit prerequisite; no automatic download or fallback is attempted.
+
+The compiled executable's existing `--build-info` output must exactly match the
+pinned shared RPC `PumasBuildInfo`. The core projection removes only RPC's
+`discovery.rs` additions (component, RPC feature names, local HTTP protocol and
+HTTP advertisement schema); it must also match the pinned core object. This is
+an adapter of the shared struct, not a parallel identity definition. It does
+not substitute for authenticating the running core/HTTP owner during native
+acceptance. Full source tree and exact schema-byte digest remain separate package
+bindings, as they are absent from the live shared struct.
+
+Compatibility/runtime records and the explicit runtime filename-to-local-path
+map require caller-reviewed SHA256 pins. Runtime target/version/loader/member
+hashes and sizes are checked before Cargo and again before assembly. License and
+notice bytes must match the source's checked license/S3 attribution. Source and
+attribution are checked again after Cargo. Failure retains Cargo JSON/stderr;
+only success writes the archive, adjacent checksum, build record and evidence.
+Output must be fresh and outside the checkout. The producer obtains no runtime,
+model, credentials or external account, and publishes nothing. A supplied record
+hash proves bytes, not authenticity or completeness of the native runtime closure.
+
+Opt-in native production, after an authorized v0.8 source and reviewed inputs:
+
+```bash
+python3 scripts/release/headless_inference_build.py \
+  --target linux-x86_64 \
+  --contract /tmp/owner-contract.json --contract-sha256 "$OWNER_CONTRACT_SHA" \
+  --runtime-record /tmp/runtime-record.json --runtime-record-sha256 "$RUNTIME_RECORD_SHA" \
+  --runtime-inputs /tmp/runtime-inputs.json --runtime-inputs-sha256 "$RUNTIME_INPUTS_SHA" \
+  --schema /tmp/owner-protocol-schema.json \
+  --license LICENSE --notices docs/release-attribution/0.7.0-s3/THIRD-PARTY-NOTICES.txt \
+  --output-dir /tmp/pumas-inference-candidate
+```
+
+`runtime-inputs.json` contains exactly the runtime record's native-library names
+mapped to explicit local regular files. The resulting archive and evidence stay
+`unverified_candidate`; the command does not start a service, load ORT or run a
+model. Review/rebuild target notices for the final authorized version before
+acceptance; the current path reflects the unchanged source inventory.
 
 Metadata admission rejects unknown fields in every generated manifest, build,
 source, runtime, compatibility, build-info advertisements and file-item object before
@@ -231,15 +329,15 @@ Linux-only results cannot establish that native Windows check. The Node wrapper
 is discovered by the existing source release test glob:
 
 ```bash
-python3 -m unittest discover -s scripts/release -p test_headless_inference.py -v
+python3 -m unittest discover -s scripts/release -p 'test_headless_inference*.py' -v
 node --test scripts/release/*.test.mjs
 ```
 
 Before changing release inventory/workflow or publishing, complete:
 
-1. Assemble the accepted immutable S3/modalities/discovery/distribution cohort.
-   The discovery/packaging source contract binding in this slice does not combine
-   or qualify the other feature stacks.
+1. Review PR59 and its separately preserved HF, modality facade, installed-runtime
+   and distribution successors; select one accepted immutable final source cohort.
+   Integration and controlled contracts do not qualify model inference.
 2. Produce exact production-build and trusted native-runtime closure records
    for each actual native runner, with no implicit ORT/model downloads.
 3. Exercise exact consumer extraction/start/owner handshake/clean shutdown on
@@ -253,9 +351,11 @@ Before changing release inventory/workflow or publishing, complete:
    runtime substitution in the eventual acceptance harness before claiming closure.
 5. Review current target notices/SBOM, complete dependency/security and platform
    signing/notarization requirements, and assemble final-file checksums/provenance.
-   The adjacent archive hash is not a complete release metadata inventory.
+   The adjacent archive hash is not a complete release metadata inventory. Wire
+   inference-enabled archives into an explicitly authorized release workflow only
+   after the source/version/native acceptance gates; current tag jobs remain no-inference.
 6. Obtain the parent/owner's release decision. This slice changes no tag, release,
-   existing artifact plan, modality-owned gateway file, PR46 or main merge.
+   existing artifact plan, root-owned candidate PRs or main merge.
 
 Assembly binds explicit inputs but is not reproducible-build proof: archive
 timestamps/compression metadata are not normalized. Version manifests remain
@@ -266,3 +366,27 @@ unresolved. This packaging slice does not alter physical root ownership or erase
 that evidence. Existing public hosted CI results are not substituted for native
 per-platform qualification. No release versions, tags, release inventory, audio
 admission or `for_installed_runtime` behavior change here.
+
+## Concrete remaining implementation and qualification gaps
+
+- `AudioRuntimeOwner::for_installed_runtime` is unconditionally
+  `UnqualifiedRuntime` in PR59 and the reviewed successor. The new non-admitting
+  candidate retains actual interpreter/dependency/sidecar capabilities and the
+  exact prepared-model allocation, validates bytes and selected worker code,
+  and preserves their leases. It has no production admission conversion.
+  The trusted recipe, complete native loader/model read containment and actual
+  pinned execution/lifecycle contract remain unimplemented or unqualified,
+  not merely awaiting a test. The facade keeps installed Audio→Text unavailable.
+- Qualified Image→Text vision input/provider declarations and native caption
+  inference remain prerequisites. Text→Text, Text→Embeddings and Text→Image
+  adapters do not establish vision or arbitrary modality-pair execution.
+- The current official managed-uv acquisition route is blocked by a proxy tunnel
+  403 in this Cloud environment. It is not evidence of an upstream release HTTP
+  status, and no alternate host or security bypass is authorized.
+- Public S3 model import requires a `.gguf` primary, including bundles. Generic
+  byte acquisition does not qualify arbitrary ONNX/Safetensors/Diffusers import.
+  Exact AWS, independent-provider and MinIO acceptance remain unrun.
+- Native inference-enabled distribution assembly/checksums, actual loaded runtime
+  closure, per-platform model inference/disposal, final consumer pins and release
+  workflow activation remain unqualified. The local producer is implemented;
+  controlled subprocess/fixture tests are not a native build or model acceptance.

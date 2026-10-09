@@ -172,6 +172,55 @@ check. No new model-list transport, operation result decoder, image codec or
 inference dispatch is implemented in this descriptor slice. Complete producer
 composition, live catalog and external consumer acceptance remain separate gates.
 
+## Finite generic model HTTP calls
+
+The same reference session also offers `capabilities(model, profile=None)` and
+`model_operation(request)` over the existing `/v1/capabilities` and
+`/v1/model-operations` routes. Both use the authenticated selected endpoint and
+paired generation fences. They return `{"status": HTTP_STATUS, "body": JSON_OBJECT}`,
+preserving producer errors, outcomes and typed result fields. Capability replies
+advertise `supported_contract_versions`; they do not contain an operation's
+`contract_version` field. The reference requires a common version 1 and leaves
+capability selection to the existing descriptor helper and server admission.
+
+```python
+# selected_model is an explicitly chosen existing served model, not an inferred
+# readiness claim from get_models or build features.
+declarations = await session.capabilities(selected_model)
+if declarations["status"] == 200:
+    reply = await session.model_operation({
+        "contract_version": 1,
+        "request_id": "consumer-embedding-17",
+        "model": selected_model,
+        "input": {"kind": "text_batch", "texts": ["first", "second"]},
+        "output": "embeddings_float32",
+    })
+    # Interpret reply["status"] and reply["body"] using the producer contract.
+    # A 200 result requires the declared available pair; failures never replay.
+```
+
+The request remains the producer's modality-first JSON object. No named
+`capability` field is admitted by this method. Use the selected declarations'
+`semantic_task` when the server reports ambiguity; options do not choose a task.
+Input, model/profile identity, adapter selection and option semantics remain
+producer-owned. The reference validates response correlation and retains
+pre-handler fencing errors even when they have no operation request ID.
+
+Model operations support finite JSON responses with the existing 32 MiB transport
+bound. Connection establishment has a ten-second limit; after connection there
+is no elapsed model-response deadline. Cancellation closes the consumer socket
+and establishes no remote cessation or replay permission. `stream:true` refuses
+locally because SSE is outside this reference. Capability reads and `rpc` retain
+their bounded ten-second delivery behavior and 1 MiB response policy. All three
+use the same finite HTTP/1.1 Content-Length framing and socket cleanup.
+
+This remains a source-exported CLI reference, not a supported Python SDK or
+native binding tuple. It does not load an unserved model, acquire bytes, infer
+readiness from catalog records, add a transcription API, or qualify an external
+application. Positive response fixtures are controlled HTTP peers. Native tests
+exercise actual selected-owner reuse, generic Text/PCM missing-model refusal,
+paired-fence refusal and owned/borrowed cleanup without model inference.
+
 ## Exact external integration contract
 
 1. Select/authenticate via the pinned binary's `--describe-local-http`, or opt in

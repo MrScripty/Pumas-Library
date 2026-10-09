@@ -200,6 +200,49 @@ class NativeConsumerTests(unittest.IsolatedAsyncioTestCase):
             await self.assert_models(restarted)
         self.assertEqual(self.rows(), [])
 
+    async def test_generic_modality_http_uses_actual_owned_and_borrowed_selection(self):
+        async with self.context(allow_start=True) as owned:
+            self.remember(owned, "generic-http-actual-owned-selection")
+            async with self.context() as borrowed:
+                self.remember(borrowed, "generic-http-actual-borrowed-selection")
+                capabilities = await borrowed.capabilities("operator-missing-model")
+                self.assertEqual(capabilities["status"], 404)
+                self.assertEqual(capabilities["body"]["error"],
+                                 {"code": "model_not_found", "outcome": "not_admitted"})
+                for kind, source in (("text", {"kind": "text", "text": "hello"}),
+                                     ("audio", {"kind": "audio", "encoding": "pcm_s16le",
+                                                "sample_rate_hz": 16000, "channels": 1,
+                                                "sample_count": 1, "data_base64": "AAA="})):
+                    value = {"contract_version": 1, "request_id": f"actual-generic-{kind}",
+                             "model": "operator-missing-model", "input": source, "output": "text"}
+                    reply = await borrowed.model_operation(value)
+                    self.assertEqual(reply["status"], 404)
+                    self.assertEqual(reply["body"], {"contract_version": 1,
+                        "request_id": value["request_id"],
+                        "error": {"code": "model_not_found", "outcome": "not_admitted"}})
+                    self.records.append({"event": "actual-generic-modality-refused", "request": value,
+                                         "reply": reply, "runtime_or_model_loaded": False})
+            self.assertIsNone(owned._bootstrap.process.returncode)
+            await self.assert_models(owned)
+        self.assertEqual(self.rows(), [])
+
+    async def test_generic_http_stale_fence_is_refused_by_actual_native_owner(self):
+        async with self.context(allow_start=True) as held:
+            self.remember(held, "generic-http-actual-fenced-owner")
+            original = held._fence
+            try:
+                held._fence = ("controlled-stale-instance", original[1])
+                reply = await held.model_operation({"contract_version": 1, "request_id": "stale-generic-1",
+                    "model": "operator-missing-model", "input": {"kind": "text", "text": "hello"},
+                    "output": "text"})
+                self.assertEqual(reply["status"], 409)
+                self.assertEqual(reply["body"]["error"]["outcome"], "not_admitted")
+                self.records.append({"event": "actual-native-refuses-controlled-stale-fence", "reply": reply})
+            finally:
+                held._fence = original
+            await self.assert_models(held)
+        self.assertEqual(self.rows(), [])
+
     async def test_native_selection_contracts_and_controlled_compatibility_refusals(self):
         owner, observed = await self.external_owner()
         async with self.context() as held:

@@ -12,10 +12,13 @@
   ],
   "filename": "pumas-rpc-inference-{version}-{target}.{format}",
   "required_acceptance": ["trusted-source-build-record", "trusted-target-runtime-closure", "exact-archive-extraction", "same-native-host-start-stop", "live-schema-build-feature-modality-handshake", "ambient-runtime-paths-removed", "real-explicitly-provided-model-inference", "current-notice-and-dependency-review"],
-  "http_consumers": ["Lantern", "Tuldok"],
+  "consumer_cohort": ["Lanternwake", "Tuldok", "Pantograph", "Eidetic", "Chrema"],
+  "http_consumers": ["Lanternwake", "Tuldok"],
   "http_consumer_strategy": "pinned archive SHA256 plus live compatibility contract; no new SDK",
   "rust_consumers": ["Pantograph", "Eidetic"],
   "rust_consumer_strategy": "one exact immutable Pumas Git revision and protocol schema cohort; consumer manifest, lockfile and real consumer tests must agree",
+  "consumer_contract_prerequisites": {"Chrema": "exact transport, source/archive pin and native modality acceptance must be provided by the consumer owner"},
+  "candidate_producer": "scripts/release/headless_inference_build.py; explicit local native build and assembly, unverified_candidate only",
   "downloads": "never implicit; native runtime and models require separately authorized provision",
   "publication": "no release/tag publication in this slice"
 }

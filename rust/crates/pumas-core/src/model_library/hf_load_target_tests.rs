@@ -701,6 +701,121 @@ async fn hf_indexed_refuses_storage_relabeling_in_summary_and_detail() {
 }
 
 #[tokio::test]
+async fn hf_indexed_refuses_unqualified_external_weight_entry_in_summary_and_detail() {
+    for scope in [
+        ModelPackageFactsCacheScope::Summary,
+        ModelPackageFactsCacheScope::Detail,
+    ] {
+        let (_temp, library, model_dir) = synthetic_cohere_library().await;
+        ready_target(&library, PumasArtifactLoadTargetResolutionMode::OwnerFresh).await;
+        let weight_path = model_dir.join("model.safetensors").display().to_string();
+        // Matching metadata/cache labels do not establish an external HF
+        // directory root. The current producer observes managed packages only.
+        let mut record = library.index.get(MODEL_ID).unwrap().unwrap();
+        record.metadata["storage_kind"] = serde_json::json!("external_reference");
+        library.index.upsert(&record).unwrap();
+        let mut row = cached(&library, scope);
+        if scope == ModelPackageFactsCacheScope::Summary {
+            let mut facts: ResolvedModelPackageFactsSummary =
+                serde_json::from_str(&row.facts_json).unwrap();
+            facts.storage_kind = StorageKind::ExternalReference;
+            facts.entry_path = weight_path.clone();
+            facts.model_ref.selected_artifact_path = Some(weight_path.clone());
+            row.facts_json = serde_json::to_string(&facts).unwrap();
+        } else {
+            remove_summary(&library);
+            let mut facts: ResolvedModelPackageFacts =
+                serde_json::from_str(&row.facts_json).unwrap();
+            facts.artifact.storage_kind = StorageKind::ExternalReference;
+            facts.artifact.entry_path = weight_path.clone();
+            facts.model_ref.selected_artifact_path = Some(weight_path.clone());
+            row.facts_json = serde_json::to_string(&facts).unwrap();
+        }
+        library
+            .index
+            .upsert_model_package_facts_cache(&row)
+            .unwrap();
+        let record_before = library.index.get(MODEL_ID).unwrap();
+        let cursor_before = library.index.current_model_library_update_cursor().unwrap();
+        let response = library
+            .resolve_model_artifact_load_target(hf_request(
+                PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            ))
+            .await
+            .unwrap();
+        assert!(
+            !response.is_ready(),
+            "{scope:?} advertised a weights file as an external HF directory: {response:?}"
+        );
+        assert!(response.target.is_none());
+        assert_eq!(response.artifact_state, ModelArtifactState::Invalid);
+        assert_eq!(response.entry_path_state, ModelEntryPathState::Invalid);
+        assert_eq!(
+            response.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::InvalidArtifact
+        );
+        assert_eq!(
+            response.diagnostics[0].field_path.as_deref(),
+            Some("target.storage_kind")
+        );
+        assert_eq!(cached(&library, scope), row);
+        assert_eq!(
+            serde_json::to_value(library.index.get(MODEL_ID).unwrap()).unwrap(),
+            serde_json::to_value(record_before).unwrap()
+        );
+        assert_eq!(
+            library.index.current_model_library_update_cursor().unwrap(),
+            cursor_before
+        );
+    }
+}
+
+#[tokio::test]
+async fn hf_producer_refuses_unqualified_external_directory_claims() {
+    let (_temp, library, model_dir) = synthetic_cohere_library().await;
+    let mut metadata: ModelMetadata =
+        serde_json::from_slice(&std::fs::read(model_dir.join("metadata.json")).unwrap()).unwrap();
+    metadata.storage_kind = Some(StorageKind::ExternalReference);
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+    library.index_model_dir(&model_dir).await.unwrap();
+    // Exercise the actual public producer, not a hand-written target/cache row.
+    let facts = library.resolve_model_package_facts(MODEL_ID).await.unwrap();
+    assert_eq!(
+        facts.artifact.artifact_kind,
+        PackageArtifactKind::HfCompatibleDirectory
+    );
+    assert_eq!(facts.artifact.storage_kind, StorageKind::ExternalReference);
+    let expected_entry_path = crate::platform::platform_display_path(
+        &model_dir.join("model.safetensors").canonicalize().unwrap(),
+    );
+    assert_eq!(facts.artifact.entry_path, expected_entry_path);
+    for mode in [
+        PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+        PumasArtifactLoadTargetResolutionMode::OwnerFresh,
+    ] {
+        let response = library
+            .resolve_model_artifact_load_target(hf_request(mode))
+            .await
+            .unwrap();
+        assert!(
+            !response.is_ready(),
+            "{mode:?} approved the producer's weight entry as an HF directory: {response:?}"
+        );
+        assert!(response.target.is_none());
+        assert_eq!(response.artifact_state, ModelArtifactState::Invalid);
+        assert_eq!(response.entry_path_state, ModelEntryPathState::Invalid);
+        assert_eq!(
+            response.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::InvalidArtifact
+        );
+        assert_eq!(
+            response.diagnostics[0].field_path.as_deref(),
+            Some("target.storage_kind")
+        );
+    }
+}
+
+#[tokio::test]
 async fn hf_legacy_weight_shaped_facts_are_refused_then_owner_reobserves() {
     let (_temp, library, model_dir) = synthetic_cohere_library().await;
     let original = ready_target(&library, PumasArtifactLoadTargetResolutionMode::OwnerFresh).await;

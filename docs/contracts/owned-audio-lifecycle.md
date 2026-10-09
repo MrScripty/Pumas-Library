@@ -44,6 +44,28 @@ reuse the child. An RPC error alone does not establish that cleanup.
 Dropping an admitted handle preserves uncertainty. The child cleanup guard
 survives failed process-tree drainage with `ManagedChild`'s parked custody.
 
+`audio_runtime::installed::InstalledAudioRuntimeCandidate` now provides
+non-admitting ownership preparation. It requires actual retained interpreter,
+dependency and sidecar role capabilities, retains their cooperative mutation
+leases, and owns the exact `PreparedArtifactUse` allocation and its selected
+member set. It refuses a missing retained interpreter member, missing or changed
+required worker code, import hooks and bytecode, and revalidates actual runtime
+and copied model bytes before any later provider effect. Worker code identity is
+checked against bytes embedded in this source build; equality does not establish
+a complete executable read closure. Equal model manifests cannot retarget the
+candidate to another prepared allocation. Dropping the candidate releases its
+last custody references only when no other owner remains.
+
+This candidate has no qualification flag, deserialization or conversion into an
+admitted runtime. The shipping `AudioRuntimeOwner::for_installed_runtime`
+constructor remains unimplemented and refuses. The fixed remaining requirements
+are a trusted interpreter/dependency recipe, complete native loader read closure,
+complete model read containment, and pinned native execution/lifecycle
+acceptance. Captured selected trees and sidecar equality discharge none of these
+requirements. Controlled candidate tests use dummy interpreter/dependency bytes
+and synthetic unparsed weights; they establish custody and refusal behavior,
+not an installed Cohere runtime or real transcription.
+
 `owned_audio.OwnedAudioActor` owns native load and unload independently of caller
 tasks. Its unavailable default gate performs no model load. Controlled gates
 test pre-start custody, exact loaded-slot authority, cancellation, device

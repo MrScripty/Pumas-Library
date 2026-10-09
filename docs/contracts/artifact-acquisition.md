@@ -128,8 +128,11 @@ are refused. Qualification does not establish backend compatibility or inference
 
 Conditional mode is single-object only. It cannot select bundles, hydrate a
 prefix, discover or substitute a VersionId, or supply missing package companions.
-Existing versioned manifests/discovery and RPC requests retain their mandatory
-VersionId contract. No conditional RPC/UI is exposed by this native API slice.
+Existing versioned manifests/discovery retain their mandatory VersionId contract.
+The existing single-object RPC starts accept explicit `read_mode: "conditional"`
+with VersionId omitted and mandatory SHA-256. Omitted mode preserves VersionId
+requirements; conditional bundle/prefix requests fail explicitly as unsupported.
+The existing dialog still submits VersionId selections.
 See the [conditional-read contract](../plans/artifact-acquisition/reports/s3-conditional-read-contract-2026-10-09.md)
 for response, empty-object and recovery requirements.
 
@@ -179,12 +182,13 @@ be reconciled under the same operation identity, never implicitly replayed with
 new demand identity. Desktop/RPC composition and live-provider acceptance remain
 unqualified by this native entry point.
 
-The optional RPC/desktop composition admits one explicit GGUF through that
-facade. The anonymous `start_s3_model_import` stays unchanged; the distinct
+The optional RPC/desktop composition delegates selected bytes to the shared
+model facade. The anonymous `start_s3_model_import` retains its existing method; the distinct
 `start_authenticated_s3_model_import` takes the same source facts plus explicitly
 supplied request-scoped access key, secret and optional session token. Both
 require caller-supplied HTTPS origin, bucket, region, addressing, exact key,
-immutable VersionId and SHA-256; neither accepts HTTP opt-outs. The closed
+SHA-256 and either an immutable VersionId or explicit conditional mode with
+VersionId omitted; neither accepts HTTP opt-outs. The closed
 credential DTO is Deserialize-only and bounds each value to 4096 printable ASCII
 characters without whitespace, with the native access-key delimiter restrictions.
 The actual authenticated constructor validates before job/workspace admission.

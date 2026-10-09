@@ -86,7 +86,21 @@ Confirmed/Ready publication; the same result reproduced on exact parent
 `7f540efe65ff194057cd5582da09cd3cdbafc16d`. Its root cause remains unresolved,
 and this slice does not qualify that catalog consumer or fix its reconciliation.
 
-This slice exposes no non-versioned model RPC, conditional bundle resolver,
-prefix discovery or UI. Existing VersionId callers need no source change.
+The existing anonymous and authenticated single-object RPC starts now expose
+explicit `read_mode: "conditional"` with VersionId omitted. Omitted mode requires
+the existing VersionId pin. Generated desktop contracts represent these as closed
+alternatives; conditional bundle and prefix modes fail explicitly as unsupported.
+There is no conditional bundle resolver, prefix discovery or UI mode. Existing
+VersionId callers need no source change.
+
+Owned HTTPS fixtures launch the production RPC process and qualify genuine
+safetensors, anonymous/explicit authentication, legacy VersionId admission, weak
+validator/missing-size/changed-response/range/digest refusals, malformed/unsafe/
+incomplete model refusal, held HEAD/GET cancellation and shutdown drainage.
+Partial retry preserves the acquisition identity and exact final receipt; a
+re-reserved RPC workspace safely restarts at byte zero without matching live
+prefix custody. Changed ETag or size selection fails before GET/publication. Authenticated
+retry requires fresh explicit credentials. These controlled fixtures perform no
+provider campaign or inference and exclude the catalog visibility baseline.
 No HF, modality, runtime ownership, release producer or old cold-reopen fixture
 file is modified.

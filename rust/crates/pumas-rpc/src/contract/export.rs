@@ -739,6 +739,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         S3AuthenticatedDiscoveryParams,
         S3DiscoveryOutcome,
         S3ImportParams,
+        S3ReadMode,
         S3BundleImportParams,
         S3PinnedFileParams,
         S3AuthenticatedBundleImportParams,
@@ -876,6 +877,41 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
 // These named wire refinements project existing constructor invariants, not
 // authorization. The generator owns their executable TypeScript projection.
 fn refine_named(name: &str, schema: &mut Value) {
+    if name == "S3ImportParams" {
+        let definitions = schema.get("definitions").cloned();
+        let mut versioned = schema.clone();
+        let object = versioned.as_object_mut().expect("S3 request schema");
+        for key in ["$schema", "title", "definitions"] {
+            object.remove(key);
+        }
+        object["properties"]["filename"]["pumasPortablePath"] = true.into();
+        object["properties"]["filename"]["pumasUtf8Max"] = 1024.into();
+        object["properties"]["read_mode"] =
+            serde_json::json!({"type":"string","const":"version_id"});
+        object["properties"]["version_id"]
+            .as_object_mut()
+            .unwrap()
+            .remove("default");
+        object["required"]
+            .as_array_mut()
+            .unwrap()
+            .push("version_id".into());
+        let mut conditional = versioned.clone();
+        conditional["properties"]
+            .as_object_mut()
+            .unwrap()
+            .remove("version_id");
+        conditional["properties"]["read_mode"] =
+            serde_json::json!({"type":"string","const":"conditional"});
+        let required = conditional["required"].as_array_mut().unwrap();
+        required.retain(|field| field != "version_id");
+        required.push("read_mode".into());
+        *schema = serde_json::json!({"oneOf":[versioned,conditional]});
+        if let Some(definitions) = definitions {
+            schema["definitions"] = definitions;
+        }
+        return;
+    }
     if name == "RouterProfileSyncStatus" {
         let definitions = schema.get("definitions").cloned();
         let mut available = schema.clone();
@@ -1286,11 +1322,11 @@ fn refine_named(name: &str, schema: &mut Value) {
                 properties["models"]["pumasCatalogMap"] = true.into();
             }
 
-            "S3ImportParams" => {
-                properties["filename"]["pumasPortablePath"] = true.into();
-                properties["filename"]["pumasUtf8Max"] = 1024.into();
+            "S3DiscoveryParams" => {
+                properties["read_mode"] = serde_json::json!({"type":"string","const":"version_id"});
             }
             "S3BundleImportParams" => {
+                properties["read_mode"] = serde_json::json!({"type":"string","const":"version_id"});
                 let existing = schemars::schema_for!(S3ImportParams);
                 let existing = serde_json::to_value(existing).expect("schema serialization");
                 for field in [
@@ -1313,6 +1349,10 @@ fn refine_named(name: &str, schema: &mut Value) {
                 for field in ["key", "version_id", "sha256"] {
                     properties[field] = existing["properties"][field].clone();
                 }
+                properties["version_id"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("default");
                 properties["logical_path"]["minLength"] = 1.into();
                 properties["logical_path"]["pumasUtf8Max"] = 1024.into();
                 properties["logical_path"]["pumasPortablePath"] = true.into();

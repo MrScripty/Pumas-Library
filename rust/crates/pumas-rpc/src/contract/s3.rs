@@ -88,6 +88,39 @@ impl S3AuthenticatedImportParams {
     }
 }
 
+/// Opt-in acquisition contract; omission preserves mandatory VersionId pins.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum S3ReadMode {
+    #[default]
+    VersionId,
+    Conditional,
+}
+
+pub(crate) fn require_versioned_set(mode: S3ReadMode) -> Result<(), PublicError> {
+    if mode == S3ReadMode::Conditional {
+        return Err(PublicError {
+            code: -32000,
+            class: PublicErrorClass::Unavailable,
+            message: "Conditional S3 mode is unsupported for bundles and prefix discovery.",
+        });
+    }
+    Ok(())
+}
+
+// Only omission produces the private empty default. A supplied empty value is
+// refused, so conditional mode must omit VersionId rather than invent a pin.
+fn supplied_version_id<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<String, D::Error> {
+    let value = String::deserialize(decoder)?;
+    if value.is_empty() {
+        return Err(serde::de::Error::custom(
+            "Supplied VersionId must be nonempty",
+        ));
+    }
+    Ok(value)
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -119,6 +152,9 @@ pub(crate) struct S3ImportParams {
         )
     )]
     pub key: String,
+    #[serde(default)]
+    pub read_mode: S3ReadMode,
+    #[serde(default, deserialize_with = "supplied_version_id")]
     #[cfg_attr(
         feature = "export-contract",
         schemars(
@@ -158,6 +194,8 @@ pub(crate) enum S3AddressingWire {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct S3BundleImportParams {
+    #[serde(default)]
+    pub read_mode: S3ReadMode,
     pub operation_id: String,
     pub endpoint: String,
     pub region: String,
@@ -206,6 +244,7 @@ impl S3BundleImportParams {
             addressing: self.addressing,
             key: primary.key.clone(),
             version_id: primary.version_id.clone(),
+            read_mode: S3ReadMode::VersionId,
             filename: self.primary_logical_path.clone(),
             sha256: primary.sha256.clone(),
             family: self.family.clone(),
@@ -213,6 +252,7 @@ impl S3BundleImportParams {
         })
     }
     pub(crate) fn validate(&self) -> Result<(), PublicError> {
+        require_versioned_set(self.read_mode)?;
         if !(2..=32).contains(&self.files.len()) {
             return Err(PublicError::invalid_params());
         }
@@ -430,7 +470,6 @@ impl S3ImportParams {
             (&self.region, 255),
             (&self.bucket, 255),
             (&self.key, 1024),
-            (&self.version_id, 4096),
             (&self.filename, 1024),
             (&self.family, 255),
             (&self.official_name, 255),
@@ -439,15 +478,28 @@ impl S3ImportParams {
                 return Err(PublicError::invalid_params());
             }
         }
+        match self.read_mode {
+            S3ReadMode::VersionId
+                if self.version_id.trim().is_empty()
+                    || self.version_id == "null"
+                    || self.version_id.len() > 4096
+                    || self.version_id.chars().any(char::is_control) =>
+            {
+                return Err(PublicError::invalid_params());
+            }
+            S3ReadMode::Conditional if !self.version_id.is_empty() => {
+                return Err(PublicError::invalid_params());
+            }
+            _ => {}
+        }
         // The frozen reader's validated_object uses object_store::Path::parse
         // and requires exact preservation: no empty, dot or parent segments,
         // including leading/trailing delimiters. Reject the same structural
         // pins before admitting a job or allocating its reservation.
-        if self.version_id == "null"
-            || self
-                .key
-                .split('/')
-                .any(|part| matches!(part, "" | "." | ".."))
+        if self
+            .key
+            .split('/')
+            .any(|part| matches!(part, "" | "." | ".."))
         {
             return Err(PublicError::invalid_params());
         }

@@ -3,18 +3,29 @@
 ## Explicit S3 model import
 
 The optional `s3` Cargo feature composes the existing native
-`PumasApi::import_s3_model` operation. It imports one GGUF with an
-explicit caller pin, using the existing transfer, verification, model importer,
+VersionId and conditional single-object operations. Selected bytes pass
+the shared model importer, which supports genuine single-file GGUF/safetensors
+and bounded complete supported packages. It uses the existing transfer, verification,
 registration and receipt owners. Default feature selection remains unchanged.
 Without `s3`, these commands return the closed `unavailable` outcome.
 
 `start_s3_model_import` accepts only `operation_id` (canonical lowercase UUID),
 `endpoint` (HTTPS origin without userinfo, path, query or fragment), `region`,
-`bucket`, `addressing` (`path` or `virtual_hosted`), `key`, `version_id`,
-`filename` (ASCII GGUF basename), `sha256` (64 hex digits), `family` and
-`official_name`. VersionId and digest are required; neither is discovered or
-substituted. Unknown fields, credentials and HTTP opt-outs are rejected before
-I/O. This anonymous command remains source compatible.
+`bucket`, `addressing` (`path` or `virtual_hosted`), `key`, `filename` (safe ASCII
+relative logical path), `sha256` (64 hex digits), `family`, `official_name` and
+optional `read_mode`. Omission or `"version_id"` requires a nonempty immutable
+`version_id`. Existing callers remain compatible. Explicit `"conditional"`
+requires omission of `version_id`; supplied empty, null or fake pins fail before
+I/O. Full SHA-256 is mandatory in both modes. Unknown fields, credentials and HTTP
+opt-outs are rejected before I/O.
+
+Conditional mode accepts one ordinary non-versioned object. HEAD must return a
+known size and strong quoted HTTP ETag; `W/` validators fail. Every GET uses
+exact If-Match; nonempty reads use the selected range. Returned metadata/bytes
+must match. ETag and size
+remain Weak source revision evidence, never a content digest or immutable pin.
+Bundles and prefix discovery explicitly reject conditional mode as unsupported.
+The existing dialog still submits VersionId selections; no new UI mode is added.
 
 `start_authenticated_s3_model_import` is a distinct additive command. Its closed
 params are `{source: <the existing start params>, credentials: {access_key_id,
@@ -46,9 +57,10 @@ reaches renderer diagnostics. No listener, TLS trust or security settings change
 `operation_id`, `endpoint`, `region`, `bucket`, `addressing`, `family`,
 `official_name`, `primary_logical_path` and `files`. The set has 2–32 members,
 each exactly `{key, version_id, logical_path, sha256}`. The primary must be a
-selected ASCII GGUF basename; other paths must be portable relative paths with
-extensions `json`, `txt`, `md`, `model`, `tiktoken`, `vocab` or `merges`, matching
-the existing native bundle importer. One key may select different versions;
+selected safe ASCII relative weight path; other paths must be portable relative
+paths. All selected bytes undergo shared format/package qualification, including
+required config, tokenizer/processor, indexes and referenced shards. GGUF retains
+its existing inert auxiliary policy. Extensions alone grant no model authority. One key may select different versions;
 conflicting evidence for the same key/version, duplicate/colliding paths,
 staging aliases and prefix collisions are refused by shared manifest validation.
 The actual reader's pure preflight also enforces exact object-key semantics and
@@ -61,7 +73,9 @@ This is an explicit set, without prefix enumeration or atomic snapshot claims.
 A pinned HEAD with an explicit zero length supports empty auxiliary members
 without GET or a byte-range request. The shared writer and SHA-256 verifier
 produce the empty file and exact receipt; missing/unknown length is not empty.
-The primary still must pass existing GGUF format validation.
+The complete selection must pass the shared importer’s supported package validation.
+Unsafe formats/custom code retain existing policy; transfer grants no execution.
+Structural publication does not establish backend compatibility or inference.
 
 `start_authenticated_s3_model_bundle_import` takes
 `{source: <bundle start params>, credentials: <the same credential params>}`.
@@ -303,3 +317,12 @@ is qualified. Tuldok's Image→Text caption request now has a typed admission an
 explicit unsupported result; its vision execution remains an implementation and
 qualification gap. Controlled adapter tests do not qualify real model inference
 or packaged consumer distribution.
+
+Conditional RPC qualification uses the actual production process and owned HTTPS
+fixtures (`scripts/tests/qualify-s3-conditional-rpc.py`). It checks exact verified
+receipts, copied bytes, Confirmed publication and Ready metadata. Catalog lookup
+visibility remains an independently reproduced baseline issue, excluded from
+this qualification. Retried partial transfers retain the same acquisition, but a
+re-reserved RPC workspace restarts at byte zero unless the core has matching live
+prefix custody. Changed conditional ETag or size fails before appending or publishing.
+Authenticated retry requires fresh credentials; saved work never stores them.

@@ -785,10 +785,10 @@ async fn hf_producer_refuses_unqualified_external_directory_claims() {
         PackageArtifactKind::HfCompatibleDirectory
     );
     assert_eq!(facts.artifact.storage_kind, StorageKind::ExternalReference);
-    assert_eq!(
-        facts.artifact.entry_path,
-        model_dir.join("model.safetensors").display().to_string()
+    let expected_entry_path = crate::platform::platform_display_path(
+        &model_dir.join("model.safetensors").canonicalize().unwrap(),
     );
+    assert_eq!(facts.artifact.entry_path, expected_entry_path);
     for mode in [
         PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
         PumasArtifactLoadTargetResolutionMode::OwnerFresh,

@@ -2,7 +2,8 @@
 //!
 //! Registry IDs identify cache entries, not physical libraries. Advertisements
 //! are hints until an authenticated live handshake succeeds. This module does
-//! not reclaim historical owners or claim a cross-registry/store lifetime lease.
+//! not reclaim operating historical owners. Explicit pending-reservation recovery
+//! uses the same native store lifetime and requires a durable bounded checkpoint.
 
 use crate::models::{
     ModelLibrarySelectorSnapshot, ModelLibrarySelectorSnapshotRequest,
@@ -19,7 +20,8 @@ mod http;
 pub use http::*;
 mod start;
 pub use start::{
-    prepare_local_access, LocalStartAuthority, LocalStartupCustody, PreparedLocalAccess,
+    prepare_local_access, recover_pending_reservation, LocalStartAuthority, LocalStartupCustody,
+    PendingReservationCheckpoint, PreparedLocalAccess,
 };
 mod retention;
 pub use retention::LocalOwnerRetention;

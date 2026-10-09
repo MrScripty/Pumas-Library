@@ -158,6 +158,21 @@ mod tests;
 pub(crate) struct StoreLifetime(Option<PhysicalStoreLease>);
 
 impl StoreLifetime {
+    /// Identity of the currently held directory; never a stand-alone authority.
+    pub(crate) fn physical_identity(&self) -> crate::Result<(u64, u64)> {
+        self.require_current()?;
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            Ok(self.0.as_ref().expect("checked physical lease").0.identity)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            Err(crate::PumasError::InvalidParams {
+                message: "physical identity unavailable".into(),
+            })
+        }
+    }
+
     pub(crate) fn require_root(&self, root: &Path) -> crate::Result<()> {
         let lease = self
             .0

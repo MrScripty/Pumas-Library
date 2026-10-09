@@ -2845,18 +2845,15 @@ mod http_discovery_tests {
     async fn bind_failure_publishes_nothing_and_old_router_cannot_describe_successor() {
         let (temp, registry, root, api) = api_fixture().await;
         let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        assert!(start(api, &root, occupied.local_addr().unwrap().port())
+        assert!(start(api.clone(), &root, occupied.local_addr().unwrap().port())
             .await
             .is_err());
         assert!(registry.list_http_services().unwrap().is_empty());
-        // Wait for ordinary API drop's ordered coordinator, without PID inference.
-        tokio::time::timeout(std::time::Duration::from_secs(3), async {
-            while registry.get_instance(&root).unwrap().is_some() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
+        // A released rendezvous row does not prove that the old physical-store
+        // shares have dropped. Join the owned coordinator, then drop our API.
+        api.shutdown_instance().await.unwrap();
+        drop(api);
+        assert!(registry.get_instance(&root).unwrap().is_none());
         let api = PumasApi::builder(&root)
             .with_registry(registry.clone())
             .with_hf_client(false)

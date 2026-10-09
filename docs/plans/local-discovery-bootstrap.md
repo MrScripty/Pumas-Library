@@ -157,6 +157,57 @@ separately from the controlled custody and registry-replacement fixtures.
 
 ## Slice 3: durable identity and qualified lifetime custody
 
+### First recovery slice: qualified pending reservations (Linux)
+
+`LocalStartAuthority::checkpoint_metadata_for_pending_recovery` commits an exact
+JSON-object payload (at most 64 KiB) into the existing `libraries.metadata_json`
+and a complete pending-only qualification in one verified WAL/FULL immediate
+transaction. The opaque authority has admitted no constructor, listener, model,
+runtime or child effects. Existing library identity and other metadata columns
+are preserved; the explicit call replaces only the requested metadata payload.
+Its serializable `PendingReservationCheckpoint` is an observation, not authority.
+The selecting caller must retain that exact returned observation for explicit
+redemption; losing it does not authorize choosing a newer checkpoint or takeover.
+
+`recover_pending_reservation` is an explicit producer operation. It preflights
+compatibility, acquires the existing physical-root lifetime lease, then validates
+the exact checkpoint/generation/private claim, library and registry identities,
+payload SHA-256, canonical root device/inode and Linux kernel boot identity in
+one immediate transaction. Only that qualified pending predecessor is replaced
+with a fresh pending generation/token and current PID. The returned authority
+retains the same lease. The successor is not automatically qualified, so killing
+it cannot replay its predecessor's receipt. Existing HTTP service custody or any
+ready/legacy/unqualified/changed/missing/corrupt evidence refuses replacement.
+
+Starting consumes the checkpoint with a synchronous FULL commit inside the
+fallible authority handoff, before registry registration, directory creation,
+spawn or await effects. Later constructor failure/cancellation never restores
+it. Dropping an unpolled start future leaves its unstarted checkpoint valid;
+explicit cancellation durably withdraws only the exact still-unstarted claim.
+Instance INSERT/UPDATE/DELETE triggers invalidate receipts even through legacy
+registry transitions. Ordinary prepare/start/borrow never invokes recovery.
+
+Qualification is bounded to the same selected existing registry, same Linux
+boot and stable local root namespace, with cooperating Pumas APIs and a local
+filesystem honoring native advisory locks and SQLite WAL/sync. Copy/rollback of
+the registry, malicious raw writers, arbitrary namespace/inode replacement or
+cross-boot identity are outside this contract. Hashes compare payload integrity;
+they are not authentication against a writer able to forge the database.
+This is registry-metadata durability, not model-index/model-byte recovery.
+
+`tests/pending_reservation_recovery.rs` uses owned disposable processes for
+acknowledged SQLite writes, SIGKILL/reap, a new cold recoverer, simultaneous
+recoverers, cancelled pending authority and a killed operating owner with an
+owned unknown writer still alive. SQL corruption/root replacement and queued
+constructor cancellation are explicitly controlled fixtures. An actual killed
+uncommitted transaction is a rollback fixture, not an acknowledged checkpoint.
+No model/runtime download or inference is needed. Hardware power-loss durability
+and additional operating systems are not qualified by those tests.
+
+The distinct future operating-owner contract is described in
+[operating-owner-custody-design.md](operating-owner-custody-design.md). Current
+operating rows remain unresolved after process loss.
+
 Define one on-disk library identity/migration and a physical-store primary lifetime
 lease, distinct from finite mutation grants. Preserve explicit legacy-unknown outcomes;
 never manufacture historical exit receipts. Generation-fence recovery transitions.
@@ -259,7 +310,7 @@ inventory and remaining authority gates are:
    replacement and reject legacy, unknown and unqualified ownership. Add full
    constructor failure/cancellation, admitted-effect, real process-loss, stale
    generation and child-custody integration fixtures before enabling recovery.
-   This is still pending: an alternate empty registry has no historical-owner
+   General operating-owner recovery is still pending: an alternate empty registry has no historical-owner
    evidence. A free native lock after process loss is never sufficient to infer
    whether an old owner left a surviving external writer. No PID-based or
    lock-only registry replacement has been added.
@@ -307,7 +358,8 @@ and adds a Linux CLI acknowledgment for owned/borrowed HTTP access. The
 [inference-built control-plane bootstrap](../contracts/inference-enabled-bootstrap.md)
 uses the same authority and acknowledgment without loading a model or native SDK.
 This closes a bounded typed start-admission gap; automatic historical
-bootstrap and dead-owner recovery remain pending. Passive consumer retention
+bootstrap and operating dead-owner recovery remain pending. Explicit qualified
+pending-reservation recovery is the narrower first slice above. Passive consumer retention
 cannot transfer across processes. The existing
 `scripts/release/headless_inference_build.py` generator excludes the three RPC-only
 HTTP schemas from the core descriptor, with unrelated schemas retained.

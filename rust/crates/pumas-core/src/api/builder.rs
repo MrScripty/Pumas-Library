@@ -329,7 +329,7 @@ impl PumasApiBuilder {
         let (store_lifetime, registry, claim) = if let Some(authority) =
             self.local_start_authority.take()
         {
-            let (root, registry, claim, lifetime) = authority.into_parts();
+            let (root, registry, claim, lifetime) = authority.into_parts()?;
             if self.launcher_root != root {
                 return Err(PumasError::InvalidParams {
                     message: "local start authority root changed".into(),

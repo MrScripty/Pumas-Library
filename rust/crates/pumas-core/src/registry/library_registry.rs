@@ -10,6 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::debug;
 
+pub(crate) mod pending_recovery;
+
 /// A registered library entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryEntry {
@@ -263,7 +265,23 @@ impl LibraryRegistry {
             CREATE TABLE IF NOT EXISTS registry_config (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
-            );",
+            );
+            CREATE TABLE IF NOT EXISTS pending_reservation_checkpoints (
+                library_path TEXT PRIMARY KEY,
+                qualification_json TEXT NOT NULL
+            );
+            CREATE TRIGGER IF NOT EXISTS invalidate_pending_checkpoint_update
+            BEFORE UPDATE ON instances BEGIN
+                DELETE FROM pending_reservation_checkpoints WHERE library_path=OLD.library_path;
+            END;
+            CREATE TRIGGER IF NOT EXISTS invalidate_pending_checkpoint_delete
+            BEFORE DELETE ON instances BEGIN
+                DELETE FROM pending_reservation_checkpoints WHERE library_path=OLD.library_path;
+            END;
+            CREATE TRIGGER IF NOT EXISTS invalidate_pending_checkpoint_insert
+            BEFORE INSERT ON instances BEGIN
+                DELETE FROM pending_reservation_checkpoints WHERE library_path=NEW.library_path;
+            END;",
         )?;
         Self::ensure_instances_columns(conn)?;
         Ok(())
@@ -612,10 +630,15 @@ impl LibraryRegistry {
     /// Called only by an opaque unstarted reservation that still holds its
     /// physical lease. Constructor cancellation cannot call this operation.
     pub(crate) fn release_unstarted_claim(&self, claim: &PrimaryInstanceClaim) -> Result<bool> {
-        let removed = self.lock_conn()?.execute(
+        let mut conn = self.lock_conn()?;
+        pending_recovery::require_full_durability(&conn)?;
+        let transaction =
+            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let removed = transaction.execute(
             "DELETE FROM instances WHERE library_path=?1 AND pid=?2 AND claim_token=?3 AND status='claiming'",
             params![claim.library_path.to_string_lossy(), claim.pid, claim.claim_token],
         )?;
+        transaction.commit()?;
         Ok(removed == 1)
     }
 

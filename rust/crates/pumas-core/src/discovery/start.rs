@@ -5,6 +5,8 @@ use crate::registry::{InstanceClaimResult, LibraryRegistry, PrimaryInstanceClaim
 use crate::{PumasApi, PumasError, Result};
 use std::path::{Path, PathBuf};
 
+pub use crate::registry::library_registry::pending_recovery::PendingReservationCheckpoint;
+
 /// A successful authenticated borrow or a held start reservation. An unresolved
 /// owner is an error, never permission to start another process.
 pub enum PreparedLocalAccess {
@@ -65,9 +67,22 @@ impl LocalStartAuthority {
         &self.root
     }
 
+    /// Durably checkpoint at most 64 KiB of exact JSON-object metadata in this
+    /// registry. Only an unstarted reservation can issue this qualification.
+    /// The returned observation is not authority; recovery verifies the durable
+    /// checkpoint under the native lease. No model/runtime effects are admitted.
+    pub fn checkpoint_metadata_for_pending_recovery(
+        &self,
+        metadata_json: &str,
+    ) -> Result<PendingReservationCheckpoint> {
+        self.registry
+            .checkpoint_pending_reservation(&self.claim, &self.lifetime, metadata_json)
+    }
+
     /// Withdraw only this unstarted claim, while still holding its physical lease.
     /// No constructor effects have been admitted through this opaque authority.
     pub fn cancel(self) -> Result<()> {
+        self.lifetime.require_root(&self.root)?;
         if !self.registry.release_unstarted_claim(&self.claim)? {
             return Err(invalid("local start claim changed before cancellation"));
         }
@@ -98,14 +113,49 @@ impl LocalStartAuthority {
 
     pub(crate) fn into_parts(
         self,
-    ) -> (
+    ) -> Result<(
         PathBuf,
         LibraryRegistry,
         PrimaryInstanceClaim,
         StoreLifetime,
-    ) {
-        (self.root, self.registry, self.claim, self.lifetime)
+    )> {
+        // Synchronous FULL commit must precede register, mkdir, spawn or await.
+        // Later constructor failure/cancellation cannot resurrect qualification.
+        self.registry
+            .consume_pending_checkpoint(&self.claim, &self.lifetime)?;
+        Ok((self.root, self.registry, self.claim, self.lifetime))
     }
+}
+
+/// Explicit recovery of an exact durably qualified UNSTARTED reservation only.
+/// Linux, same boot, same stable root/registry and cooperating Pumas APIs are
+/// required. Normal attach/start never calls this or reclaims unresolved rows.
+pub fn recover_pending_reservation(
+    registry: LibraryRegistry,
+    root: &Path,
+    expected: &PendingReservationCheckpoint,
+    requirements: &CompatibilityRequirements,
+) -> Result<LocalStartAuthority> {
+    if !cfg!(target_os = "linux") {
+        return Err(invalid(
+            "pending reservation recovery is qualified only on Linux",
+        ));
+    }
+    let root = root
+        .canonicalize()
+        .map_err(|error| PumasError::io_with_path(error, root))?;
+    let protocol_version = preflight_start(&root, requirements)?;
+    let lifetime = StoreLifetime::acquire(&root)?;
+    lifetime.require_root(&root)?;
+    let claim = registry.recover_pending_claim(&root, expected, &lifetime)?;
+    lifetime.require_root(&root)?;
+    Ok(LocalStartAuthority {
+        root,
+        registry,
+        claim,
+        lifetime,
+        protocol_version,
+    })
 }
 
 /// Explicit local preparation. A registered/unreachable/claiming/legacy owner

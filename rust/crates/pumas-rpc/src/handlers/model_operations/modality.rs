@@ -228,7 +228,13 @@ impl ModalityRequest {
                         .semantic_task
                         .is_none_or(|task| task == descriptor.semantic_task)
                     && accepts(descriptor, &input)
-                    && (!self.stream || descriptor.streaming)
+                    // streaming includes readiness, so false alone cannot
+                    // erase a declared but unavailable text-stream operation.
+                    // Nontext adapters still have no structural stream contract.
+                    && (!self.stream
+                        || descriptor.streaming
+                        || (descriptor.capability.text_generation()
+                            && !descriptor.availability.available()))
             })
             .collect();
         let available: Vec<_> = candidates

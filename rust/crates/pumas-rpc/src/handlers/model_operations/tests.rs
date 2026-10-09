@@ -1568,3 +1568,163 @@ async fn modality_facade_and_legacy_reject_raw_duplicate_fields_before_provider_
     );
     assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
 }
+
+async fn unavailable_streaming_descriptor_http_case(task: Option<&str>, reason: &str) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (_root, state) = fixture(&endpoint, task).await;
+    if reason == "runtime_unavailable" {
+        // Real readiness refusal: an external profile was selectable; changing
+        // it to managed leaves no exact owned session transport/stop custody.
+        let mut profile = state
+            .api
+            .get_runtime_profiles_snapshot()
+            .await
+            .unwrap()
+            .snapshot
+            .profiles
+            .into_iter()
+            .find(|profile| profile.profile_id.as_str() == "llama-cpu")
+            .unwrap();
+        profile.management_mode = RuntimeManagementMode::Managed;
+        state.api.upsert_runtime_profile(profile).await.unwrap();
+    }
+    let (public, owner) = public_server(state.clone()).await;
+    let client = reqwest::Client::new();
+    // Use the real descriptor producer through the public capabilities route.
+    // Hand-authored descriptors must not hide readiness's streaming=false.
+    let response = client
+        .get(format!("{public}/v1/capabilities?model=llama"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let capabilities: Value = response.json().await.unwrap();
+    for capability in ["chat_generation", "text_generation"] {
+        let descriptor = capabilities["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|descriptor| descriptor["capability"] == capability)
+            .unwrap();
+        assert_eq!(descriptor["availability"]["state"], "unavailable");
+        assert_eq!(descriptor["availability"]["reason"], reason);
+        assert_eq!(descriptor["streaming"], false);
+    }
+    for named in [true, false] {
+        for capability in ["chat_generation", "text_generation"] {
+            for streaming in [false, true] {
+                let mut value = modality_request();
+                value["stream"] = json!(streaming);
+                if named {
+                    value["capability"] = json!(capability);
+                    value["options"] = json!({"kind":"text_generation"});
+                    if capability == "chat_generation" {
+                        value["input"] = json!({"kind":"messages","messages":[{"role":"user","content":"hello"}]});
+                    }
+                } else {
+                    value["semantic_task"] = json!(capability);
+                }
+                let response = client
+                    .post(format!("{public}/v1/model-operations"))
+                    .json(&value)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    response.status(),
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "{reason}: named={named}, {capability}, streaming={streaming}"
+                );
+                let response: Value = response.json().await.unwrap();
+                assert_eq!(response["error"]["code"], "capability_unavailable");
+                assert_eq!(response["error"]["outcome"], "not_admitted");
+                assert_eq!(response["request_id"], "modality-17");
+            }
+        }
+    }
+    // A semantic hint is unnecessary when all possible text tasks are
+    // unavailable: this is availability refusal, never successful admission.
+    let mut value = modality_request();
+    value["stream"] = json!(true);
+    let response = client
+        .post(format!("{public}/v1/model-operations"))
+        .json(&value)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let response: Value = response.json().await.unwrap();
+    assert_eq!(response["error"]["code"], "capability_unavailable");
+    assert_eq!(response["error"]["outcome"], "not_admitted");
+    assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
+    state.shutdown_request.request();
+    owner.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn unavailable_streaming_unknown_model_task_keeps_declared_text_unavailable() {
+    unavailable_streaming_descriptor_http_case(None, "unknown_model_task").await;
+}
+
+#[tokio::test]
+async fn unavailable_streaming_missing_managed_runtime_keeps_declared_text_unavailable() {
+    unavailable_streaming_descriptor_http_case(Some("text-generation"), "runtime_unavailable")
+        .await;
+}
+
+#[tokio::test]
+async fn unavailable_streaming_preserves_nontext_refusal_and_available_text_ambiguity() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (_root, state) = fixture(&endpoint, Some("text-generation")).await;
+    let served = selected(&state, "llama", None).await.unwrap();
+    let declarations = descriptors(&state, &served).await;
+    for capability in [Capability::ChatGeneration, Capability::TextGeneration] {
+        let descriptor = declarations
+            .iter()
+            .find(|item| item.capability == capability)
+            .unwrap();
+        assert!(descriptor.availability.available());
+        assert!(descriptor.streaming);
+    }
+    for (output, options) in [
+        ("embeddings_float32", json!({"kind":"embeddings"})),
+        (
+            "png_base64",
+            json!({"kind":"image_generation","width":512,"height":512}),
+        ),
+        ("labels", json!({"kind":"audio"})),
+    ] {
+        let mut value = modality_request();
+        value["stream"] = json!(true);
+        value["output"] = json!(output);
+        value["options"] = options;
+        let response = operation(state.clone(), value).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{output}"
+        );
+        let response = json_body(response).await;
+        assert_eq!(response["error"]["code"], "unsupported_modality");
+        assert_eq!(response["error"]["outcome"], "not_admitted");
+    }
+    let mut value = modality_request();
+    value["stream"] = json!(true);
+    let response = operation(state.clone(), value).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let response = json_body(response).await;
+    assert_eq!(response["error"]["code"], "ambiguous_operation");
+    assert_eq!(response["error"]["outcome"], "not_admitted");
+    let mut value = modality_request();
+    value["stream"] = json!(true);
+    value["semantic_task"] = json!("text_embedding");
+    let response = operation(state, value).await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        json_body(response).await["error"]["code"],
+        "unsupported_modality"
+    );
+    assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
+}

@@ -174,6 +174,12 @@ def produce(
     require(version == expected["version"], "source package version mismatch")
     environment = dict(os.environ if environment is None else environment)
     check_environment(environment, target["rust_target"])
+    cargo_home = Path(environment.get("CARGO_HOME", Path.home() / ".cargo"))
+    if not cargo_home.is_absolute():
+        cargo_home = repository / cargo_home
+    # Cargo executes in repository, whereas this producer can be launched from
+    # elsewhere. Freeze one absolute home for both config observations and children.
+    environment["CARGO_HOME"] = str(cargo_home.resolve())
     environment.update(ORT_SKIP_DOWNLOAD="1", CARGO_BUILD_JOBS="1", CARGO_INCREMENTAL="0")
 
     def tool_runner(command, **options):

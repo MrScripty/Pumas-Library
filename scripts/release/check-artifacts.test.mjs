@@ -27,6 +27,11 @@ const headlessNames = [
   `pumas-rpc-no-inference-${version}-macos-arm64.tar.gz`,
   `pumas-rpc-no-inference-${version}-windows-x86_64.zip`,
 ];
+const inferenceNames = [
+  `pumas-rpc-inference-${version}-linux-x86_64.tar.gz`,
+  `pumas-rpc-inference-${version}-macos-arm64.tar.gz`,
+  `pumas-rpc-inference-${version}-windows-x86_64.zip`,
+];
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pumas-artifacts-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -53,10 +58,10 @@ test('installer inventory rejects missing, extra, empty and duplicate outputs', 
   for (const name of [`Pumas.Library.Setup.${version}.exe`, `Pumas.Library.${version}.exe`, `Pumas.Library-${version}-arm64.dmg`]) {
     fs.writeFileSync(path.join(directory, name), 'installer fixture');
   }
-  for (const name of [...noInferenceNames, ...headlessNames]) {
+  for (const name of [...noInferenceNames, ...headlessNames, ...inferenceNames]) {
     fs.writeFileSync(path.join(directory, name), 'variant fixture');
   }
-  assert.equal(checkArtifacts(directory, 'all').length, 13);
+  assert.equal(checkArtifacts(directory, 'all').length, 16);
   fs.mkdirSync(path.join(directory, 'duplicate'));
   fs.copyFileSync(path.join(directory, deb), path.join(directory, 'duplicate', deb));
   assert.throws(() => checkArtifacts(directory, 'all'), /Invalid installer set/);
@@ -74,11 +79,11 @@ test('required candidates include both Windows installers', t => {
   assert.throws(() => checkArtifacts(directory, 'all'), /Invalid installer set/);
   assert.throws(() => checkArtifacts(directory, 'win'), /Invalid installer set/);
   fs.writeFileSync(path.join(directory, `Pumas.Library.${version}.exe`), 'portable fixture');
-  for (const name of [...noInferenceNames, ...headlessNames]) {
+  for (const name of [...noInferenceNames, ...headlessNames, ...inferenceNames]) {
     fs.writeFileSync(path.join(directory, name), 'variant fixture');
   }
-  assert.equal(checkArtifacts(directory, 'required').length, 13);
-  assert.equal(checkArtifacts(directory, 'all').length, 13);
+  assert.equal(checkArtifacts(directory, 'required').length, 16);
+  assert.equal(checkArtifacts(directory, 'all').length, 16);
 });
 
 test('variant inventories isolate full, no-inference, and headless cohorts', t => {
@@ -109,9 +114,17 @@ test('variant inventories isolate full, no-inference, and headless cohorts', t =
   for (const entry of fs.readdirSync(directory)) {
     fs.rmSync(path.join(directory, entry), { recursive: true });
   }
-  for (const file of [...fullNames, ...noInferenceNames, ...headlessNames]) {
+  for (const file of [...fullNames, ...noInferenceNames, ...headlessNames, ...inferenceNames]) {
     fs.writeFileSync(path.join(directory, file), 'installer fixture');
   }
-  assert.equal(checkArtifacts(directory, 'all').length, 13);
-  assert.equal(checkArtifacts(directory, 'required').length, 13);
+  assert.equal(checkArtifacts(directory, 'all').length, 16);
+  assert.equal(checkArtifacts(directory, 'required').length, 16);
+});
+
+test('inference inventory is mandatory and separately selectable', t => {
+ const directory = fixture(t);
+ fs.rmSync(path.join(directory, appImage)); fs.rmSync(path.join(directory, deb));
+ assert.throws(() => checkArtifacts(directory, 'headless-inference-linux'));
+ fs.writeFileSync(path.join(directory, inferenceNames[0]), 'archive fixture');
+ assert.equal(checkArtifacts(directory, 'headless-inference-linux').length, 1);
 });

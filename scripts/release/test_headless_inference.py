@@ -56,7 +56,10 @@ def fixture(root, target="linux-x86_64"):
     rpc["component"] = "pumas-rpc"
     rpc["compiled_features"] += ["pumas-rpc/inference-plugins", "pumas-rpc/s3"]
     rpc["protocols"].append({"name": "pumas.local-http", "versions": [1]})
-    rpc["schemas"].append({"name": "pumas.http-advertisement", "version": 1})
+    rpc["schemas"].extend(
+        {"name": name, "version": version}
+        for name, version in package.discovery.rpc_schemas(core["target"]).items()
+    )
     expected.update(build_info=rpc, core_build_info=core)
     contract = {"schema_version": 2, "expected": expected}
     binary = root / "binary"

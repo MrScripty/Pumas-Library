@@ -83,6 +83,8 @@ jobs:
       # Separate package invocations prevent workspace feature unification from
       # silently enabling the features this gate is supposed to exclude.
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
+      - name: Require actual Linux audio read-confinement proof
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features platform::audio_read_boundary::tests::kernel_exec_denies_unselected_reads_and_ambient_descriptors -- --ignored --exact --nocapture
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features hf-client
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
       - name: Build inference-disabled release backend
@@ -131,6 +133,74 @@ jobs:
           name: headless-${{ matrix.headless_os }}
           path: headless-output/
           if-no-files-found: error
+
+  headless-inference:
+    name: Inference headless candidate (${{ matrix.target }})
+    needs: lint-workflows
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x86_64
+            check: linux
+          - os: windows-2025
+            target: windows-x86_64
+            check: windows
+          - os: macos-15
+            target: macos-arm64
+            check: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: headless-inference-${{ matrix.target }}
+      - name: Prefetch locked source dependencies
+        run: cargo fetch --locked --manifest-path rust/Cargo.toml
+      - name: Provision pinned official CPU runtime
+        run: python scripts/release/onnx_runtime_stage.py --target ${{ matrix.target }} --download --output-dir "${{ runner.temp }}/pumas-ort"
+      - name: Verify native ORT loader and C API before candidate compilation
+        run: python scripts/release/onnx_runtime_probe.py --target ${{ matrix.target }} --runtime-dir "${{ runner.temp }}/pumas-ort" --output "${{ runner.temp }}/native-loader.json"
+      - name: Build, extract and authenticate native inference candidate
+        env:
+          ORT_SKIP_DOWNLOAD: '1'
+          CARGO_BUILD_JOBS: '1'
+        run: python scripts/release/headless_inference_ci.py --target ${{ matrix.target }} --runtime-dir "${{ runner.temp }}/pumas-ort" --output-dir "${{ runner.temp }}/inference-candidate" --build-id "ci-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Verify required inference archive
+        run: node scripts/release/check-artifacts.mjs "${{ runner.temp }}/inference-candidate" headless-inference-${{ matrix.check }}
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: headless-inference-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/inference-candidate/*.tar.gz
+            ${{ runner.temp }}/inference-candidate/*.zip
+          if-no-files-found: error
+      - name: Preserve bounded build and startup evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: inference-evidence-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/inference-candidate/*.json
+            ${{ runner.temp }}/inference-candidate/*.jsonl
+            ${{ runner.temp }}/inference-candidate/*.log
+            ${{ runner.temp }}/inference-candidate/*.sha256
+            ${{ runner.temp }}/native-loader.json
+          if-no-files-found: ignore
 
   build-frontend:
     name: Frontend and desktop contracts
@@ -703,7 +773,7 @@ jobs:
 
   release-candidate:
     name: Assemble release candidate
-    needs: [rust-quality, headless, headless-rpc, torch-quality, build-electron, build-electron-no-inference, windows-release, windows-no-inference, verify-launcher]
+    needs: [rust-quality, headless, headless-rpc, headless-inference, torch-quality, build-electron, build-electron-no-inference, windows-release, windows-no-inference, verify-launcher]
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10

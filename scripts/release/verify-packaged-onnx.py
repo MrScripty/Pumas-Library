@@ -7,7 +7,6 @@ The fixture is copied into an isolated library and is never modified.
 
 import json
 import math
-import os
 import re
 import signal
 import subprocess
@@ -17,11 +16,17 @@ import time
 import urllib.request
 from pathlib import Path
 
+from packaged_onnx_support import child_environment, loaded_runtime, verify_runtime
+from headless_inference import require, sha256
+
 binary = Path(sys.argv[1]).resolve()
 fixture = Path(sys.argv[2]).resolve()
+verify_runtime(binary.parent)
 http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 with tempfile.TemporaryDirectory(prefix="pumas-packaged-inference-") as tmp:
     root = Path(tmp)
+    for name in ("home", "tmp", "config", "data", "cache", "state", "run"):
+        (root / name).mkdir(mode=0o700)
     model = root / "shared-resources/models/embedding/fixture/nomic"
     model.mkdir(parents=True)
     for name in [
@@ -43,11 +48,8 @@ with tempfile.TemporaryDirectory(prefix="pumas-packaged-inference-") as tmp:
         [str(binary), "--launcher-root", str(root), "--port", "0"],
         stdout=log,
         stderr=subprocess.STDOUT,
-        env={
-            **os.environ,
-            "XDG_CONFIG_HOME": str(root / "config"),
-            "PUMAS_REGISTRY_DB_PATH": str(root / "registry.db"),
-        },
+        cwd=root,
+        env=child_environment(root),
     )
     try:
         for _ in range(450):
@@ -89,7 +91,7 @@ with tempfile.TemporaryDirectory(prefix="pumas-packaged-inference-") as tmp:
             },
         )
         print("import", json.dumps(result)[:1000], flush=True)
-        assert result.get("success"), result
+        require(result.get("success") is True, f"Import failed: {result}")
         model_id = result["model_id"]
         profile = "onnx-verification"
         print(
@@ -124,7 +126,7 @@ with tempfile.TemporaryDirectory(prefix="pumas-packaged-inference-") as tmp:
                 }
             },
         )
-        assert loaded.get("loaded"), loaded
+        require(loaded.get("loaded") is True, f"Load failed: {loaded}")
         embedding = post(
             "/v1/embeddings",
             {
@@ -134,7 +136,12 @@ with tempfile.TemporaryDirectory(prefix="pumas-packaged-inference-") as tmp:
             },
         )
         vector = embedding["data"][0]["embedding"]
-        assert len(vector) == 256 and all(math.isfinite(x) for x in vector)
+        require(
+            len(vector) == 256
+            and all(type(x) in (int, float) and math.isfinite(x) for x in vector),
+            "Embedding must contain 256 finite numeric values",
+        )
+        runtime_evidence = loaded_runtime(p.pid, binary.parent)
         unloaded = rpc(
             "unserve_model",
             {
@@ -146,11 +153,13 @@ with tempfile.TemporaryDirectory(prefix="pumas-packaged-inference-") as tmp:
                 }
             },
         )
-        assert unloaded.get("unloaded"), unloaded
+        require(unloaded.get("unloaded") is True, f"Unload failed: {unloaded}")
         print(
             json.dumps(
                 {
                     "binary": str(binary),
+                    "binary_sha256": sha256(binary),
+                    "runtime": runtime_evidence,
                     "import": "passed",
                     "load": "passed",
                     "embedding_dimensions": len(vector),
@@ -170,4 +179,4 @@ with tempfile.TemporaryDirectory(prefix="pumas-packaged-inference-") as tmp:
                 p.wait(timeout=10)
                 raise RuntimeError("Packaged backend required forced shutdown")
         log.close()
-        assert p.returncode == 0, p.returncode
+        require(p.returncode == 0, f"Packaged backend exited with {p.returncode}")

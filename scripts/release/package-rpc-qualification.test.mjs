@@ -10,7 +10,9 @@ import { packageQualification } from './package-rpc-qualification.mjs';
 test('qualification archive contains only binary, pinned provenance and notice inputs', () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'qualification-test-'));
   try {
-    const notices = path.join(temp, 'docs/release-attribution/0.7.0');
+    const version = '0.8.0-rc.1';
+    fs.writeFileSync(path.join(temp, 'package.json'), JSON.stringify({ version }));
+    const notices = path.join(temp, `docs/release-attribution/${version}`);
     fs.mkdirSync(notices, { recursive: true });
     fs.writeFileSync(path.join(temp, 'LICENSE'), 'synthetic project license');
     for (const name of ['THIRD-PARTY-NOTICES.txt', 'README.md', 'inventory.json']) fs.writeFileSync(path.join(notices, name), `synthetic ${name}`);
@@ -28,6 +30,7 @@ test('qualification archive contains only binary, pinned provenance and notice i
     assert.deepEqual(members, ['ATTRIBUTION-README.md', 'ATTRIBUTION-inventory.json', 'LICENSE.txt', 'SHA256SUMS', 'THIRD-PARTY-NOTICES.txt', 'pumas-rpc', 'qualification.json']);
     const manifest = JSON.parse(execFileSync('tar', ['-xOzf', result.output, 'qualification.json'], { encoding: 'utf8' }));
     assert.equal(manifest.source_head, provenance.source_head);
+    assert.equal(manifest.files['THIRD-PARTY-NOTICES.txt'].source, `docs/release-attribution/${version}/THIRD-PARTY-NOTICES.txt`);
     assert.equal(manifest.binary_sha256, createHash('sha256').update(fs.readFileSync(binary)).digest('hex'));
     assert.match(manifest.purpose, /unreleased/);
     assert.match(manifest.attribution_scope, /no Python runtime/);

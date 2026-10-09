@@ -401,3 +401,18 @@ def create_private_owned_channel(manager):
     from owned_audio import OwnedAudioActor
 
     return PrivateOwnedChannel(OwnedAudioActor(manager))
+
+
+def _create_installed_private_owned_channel(manager, source_owner):
+    """Conditional private source plumbing, not an enabled installed factory.
+
+    The source-owned policy catalog is empty in shipping code. Source capability
+    retention is supplied by the original owner, never by load JSON; even a
+    controlled policy leaves hello production_available=false. The existing
+    shipping factory above retains its unavailable gate and public API unchanged.
+    """
+    from owned_audio import OwnedAudioActor, _InstalledOwnedNativeGate
+
+    gate = _InstalledOwnedNativeGate._from_source_owner(source_owner)
+    actor = OwnedAudioActor(manager, native_gate=gate)
+    return PrivateOwnedChannel(actor, native_gate=gate)

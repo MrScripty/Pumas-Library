@@ -17,6 +17,38 @@
 //! - **Windows**: Native filesystem authority, durable publication, and desktop support
 //! - **macOS**: Native filesystem authority, durable publication, and desktop support
 
+// No shipping audio policy is enabled; retained for the qualified child owner.
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    target_pointer_width = "64"
+))]
+#[allow(dead_code)]
+pub(crate) mod audio_read_boundary;
+/// A read-only capability query. Never enables Landlock or changes host policy.
+/// Complete enforcement is mandatory for installed production audio.
+pub(crate) fn require_audio_read_confinement() -> std::io::Result<()> {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    {
+        audio_read_boundary::AudioReadBoundary::supported_abi().map(|_| ())
+    }
+    #[cfg(not(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    )))]
+    {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "installed audio read confinement supports Linux x86_64 only",
+        ))
+    }
+}
+
 pub(crate) mod capability_fs;
 pub mod filesystem;
 #[cfg(target_os = "linux")]
@@ -73,6 +105,19 @@ pub fn is_supported_platform() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(not(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    )))]
+    fn audio_read_confinement_refuses_unsupported_targets() {
+        assert_eq!(
+            require_audio_read_confinement().unwrap_err().kind(),
+            std::io::ErrorKind::Unsupported
+        );
+    }
 
     #[test]
     fn test_current_platform() {

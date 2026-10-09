@@ -219,6 +219,10 @@ mod tests {
                 .contains(&"pumas-rpc/inference-plugins".into()),
             cfg!(feature = "inference-plugins")
         );
+        assert_eq!(
+            info.supports_schema("pumas.model-operations.image-to-text", 1),
+            cfg!(feature = "inference-plugins")
+        );
         let json = serde_json::to_value(info).unwrap();
         assert!(json.get("capabilities").is_none());
         assert!(json.get("models").is_none());

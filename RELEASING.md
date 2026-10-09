@@ -20,11 +20,12 @@ its candidate artifacts.
    against the manifests automatically.
 4. Complete local QA below, push the candidate commit, and create its version
    tag. Inspect every platform result produced for that exact tag.
-5. Review the `release-candidate` workflow artifact. It contains all thirteen
+5. Review the `release-candidate` workflow artifact. It contains all sixteen
    required files selected by [the artifact plan](scripts/release/artifact-plan.json):
    five full desktop installers (GUI with inference plugins), five
    no-inference desktop installers (GUI with an inference-disabled backend),
-   and three headless no-inference RPC archives for embedding. It also carries
+   three headless no-inference RPC archives, and three inference headless RPC
+   archives for embedding. It also carries
    checksums over those final bytes.
 
 The workflow deliberately assembles **candidates**, with read-only repository
@@ -41,7 +42,7 @@ failures.
 ```bash
 pnpm install --frozen-lockfile
 npm run check:dependency-ownership
-npm run check:release-versions -- v0.7.0
+npm run check:release-versions -- v0.8.0-rc.1
 node --test scripts/release/*.test.mjs
 ./scripts/rust/check.sh
 cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --profile ci-test
@@ -122,7 +123,7 @@ crate archives and host-binding bundles are not release assets.
 
 ## Attribution and artifact metadata
 
-The checked-in [attribution collection](docs/release-attribution/0.7.0/README.md)
+The checked-in [attribution collection](docs/release-attribution/0.8.0-rc.1/README.md)
 is embedded in desktop packages. After dependency or manifest changes, run
 `python3 scripts/release/generate-notices.py` and review the source-text inventory.
 CI and Electron beforePack reject missing or stale attribution. Preserve
@@ -134,6 +135,81 @@ and a real local Nomic fixture to verify import, load, gateway embeddings and
 unload. Generate per-installer SPDX, local provenance and final checksums with
 `write-linux-metadata.py`; see its attribution report for scope and limitations.
 CI-built releases must use the CI build identity and actual final files.
+
+## Inference headless candidates
+
+The tag-only `headless-inference` matrix produces Linux x86_64, Windows x86_64
+and macOS ARM64 archives through `headless_inference_ci.py` and the existing
+strict `headless_inference_build.py` producer. Candidate assembly requires all
+three in addition to the thirteen existing assets. A missing or failed native
+job blocks the combined candidate. No workflow step publishes a release.
+The integrated candidate identity is `0.8.0-rc.1`. This source-version preparation
+does not publish a tag or release and does not qualify native model execution.
+The producer requires source version 0.8; older 0.7 sources fail before compilation.
+After manifest or dependency changes, regenerate/review the matching `<version>`
+and `<version>-s3` attribution directories. The generator and inference producer
+select those source-version paths without retaining a hard-coded 0.7 directory.
+
+`onnx-runtime-pins.json` records the official CPU 1.24.2 GitHub release archive
+digests and the hashes/sizes of selected native members and license/notice bytes.
+Those archive digests were checked against upstream release metadata and the
+actual downloaded archives. `onnx_runtime_stage.py --target TARGET --archive FILE
+--output-dir FRESH_DIRECTORY` verifies a private snapshot and writes only named
+regular members, materializing Linux's versioned library under the loader name.
+`--download` explicitly authorizes fetching that exact pinned official archive;
+Cargo continues to use `ORT_SKIP_DOWNLOAD=1`. Pin updates require reviewing both
+upstream archive identity and actual member/notice bytes. The records cover the
+shipped CPU ORT files and observed static direct imports. Linux ORT requires
+GLIBC 2.27, GLIBCXX 3.4.22 and CXXABI 1.3.11 (the final RPC may require newer
+versions). Windows additionally requires compatible MSVCP140/MSVCP140_1 and
+VCRUNTIME140/VCRUNTIME140_1 DLLs, which are absent from the upstream ORT archive;
+users must have a compatible Microsoft Visual C++ runtime. The pinned macOS
+library declares minimum macOS 14.0 in its Mach-O build command and imports
+system frameworks and libraries. These prerequisites are not redistributed or qualified
+merely by recording their names; recursive/session-dependent closure, signatures
+and GPU providers remain separate gates.
+
+Before compilation, `onnx_runtime_probe.py` runs an isolated, time-bounded native
+child, validates the exact files, loads ORT and requires version 1.24.2 and C API
+24. Every native workflow target must pass that loader gate; it detects loader
+failures that lazy RPC startup cannot. The probe runs inside Python, so libraries
+already loaded by that interpreter are part of its host context; it does not
+substitute for exercising ORT from the final extracted RPC process. Linux evidence additionally
+hashes every observed process file mapping before and after the API probe and
+checks mapped device/inode identity. These include host/Python libraries and
+are an observation of this process, not a universal redistributable closure.
+Windows/macOS mapped-file audit remains unavailable in this probe. Process exit
+ends the probe's native lifetime; no model or session is created.
+
+The CI adapter exports the actual source DTO schema separately, pins the source
+commit/tree and expected shared build advertisements, and compares the production
+executable's actual `--build-info` against those expectations. It builds locked,
+offline, native release with exactly `s3,inference-plugins`, embeds the checked
+S3 notices plus exact upstream native notices, verifies/extracts the resulting
+archive, and runs authenticated owner startup/graceful shutdown. Archive artifacts
+and diagnostic evidence are uploaded separately. These remain unsigned,
+`unverified_candidate` outputs; startup never qualifies model execution.
+
+For Linux real-model acceptance, `verify-packaged-onnx.py RPC NOMIC_DIRECTORY`
+now requires the pinned CPU ORT files beside RPC. The child receives an allowlist
+environment and isolated home/config/cache/registry/current directory, with no
+ambient ORT, loader, Pumas, Python or proxy overrides. After finite embedding
+inference, `/proc/PID/maps` must identify the packaged loader by path, device and
+inode, and current bytes must still match the reviewed pin. Missing runtime,
+ambient mappings, model errors and forced shutdown fail acceptance. This observes
+the mapped ORT file; it is not a filesystem sandbox, protection against concurrent
+hostile same-user mutation, or a complete audit of every loaded system dependency.
+
+The focused Python/Node tests use synthetic native bytes, controlled subprocesses
+and controlled mapping text. Successful staging of real official Linux/Windows/
+macOS archives establishes byte identity only. A Linux native loader/API probe
+also passed against the pinned library in this environment. A separate C harness
+executed a real CPU session using a synthetic two-element Identity graph, observed
+the pinned mapped runtime, released its native handles and exited successfully.
+That bounded untrained graph is not Pumas/Nomic or pretrained-model evidence.
+This development environment has not executed a v0.8 release build, pretrained ONNX model, native Windows/macOS
+startup, signing/notarization, final SBOM or security qualification. Preserve those
+gates before the maintainer's publication decision.
 
 ## macOS candidate verification
 
@@ -182,9 +258,9 @@ Windows is a required native target. Its CI job runs the build, release tests,
 staged RPC startup, launcher/Electron tests, and packaging. The installer check
 silently installs the NSIS candidate, compares installed resources with the build
 inputs, starts the installed RPC and desktop, and starts the portable executable.
-The combined candidate requires all thirteen files: both Windows installer
+The combined candidate requires all sixteen files: both Windows installer
 pairs (full and no-inference) alongside the Linux and macOS pairs and the
-three headless archives. Each no-inference desktop additionally asserts
+six headless archives. Each no-inference desktop additionally asserts
 inference-route absence from its packaged backend.
 
 Windows download authority uses held directory handles and physical file identity,

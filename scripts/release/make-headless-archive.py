@@ -40,6 +40,9 @@ def main() -> None:
         "--version", default=json.loads((ROOT / "package.json").read_text())["version"]
     )
     args = parser.parse_args()
+    source_version = json.loads((ROOT / "package.json").read_text())["version"]
+    if args.version != source_version:
+        raise SystemExit("Archive version must match the source manifest")
 
     binary = args.binary
     if binary.is_dir():
@@ -53,7 +56,7 @@ def main() -> None:
         "windows": "headless-windows-archive",
     }[args.os]
     filename = plan_filename(artifact_id, args.version)
-    notices = ROOT / "docs/release-attribution/0.7.0/THIRD-PARTY-NOTICES.txt"
+    notices = ROOT / f"docs/release-attribution/{source_version}/THIRD-PARTY-NOTICES.txt"
     license_file = ROOT / "LICENSE"
     for required in (notices, license_file):
         if not required.is_file() or required.stat().st_size == 0:

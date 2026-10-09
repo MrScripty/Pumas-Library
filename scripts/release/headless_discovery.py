@@ -53,6 +53,18 @@ CORE_SCHEMAS = {
 }
 
 
+def rpc_schemas(target):
+    """RPC-only schemas in discovery.rs order for inference-enabled builds."""
+    schemas = {
+        "pumas.http-advertisement": 1,
+        "pumas.model-operations.image-to-text": 1,
+        "pumas.http-admission-fence": 1,
+    }
+    if target == "x86_64-unknown-linux-gnu":
+        schemas["pumas.http-owner-retention"] = 1
+    return schemas
+
+
 def require(condition, message):
     if not condition:
         raise ValueError(message)
@@ -120,7 +132,7 @@ def validate_build_info(info, component):
     required = dict(CORE_SCHEMAS)
     require(1 in protocols.get("pumas.local-ipc", []), "incompatible local IPC protocol")
     if component == "pumas-rpc":
-        required["pumas.http-advertisement"] = 1
+        required.update(rpc_schemas(info["target"]))
         require(1 in protocols.get("pumas.local-http", []), "incompatible local HTTP protocol")
         require(
             {"pumas-rpc/s3", "pumas-rpc/inference-plugins"} <= set(info["compiled_features"]),
@@ -144,6 +156,13 @@ def validate_pins(expected, target=None):
     for name, component in (("build_info", "pumas-rpc"), ("core_build_info", "pumas-library")):
         info = expected[name]
         validate_build_info(info, component)
+        schemas = dict(CORE_SCHEMAS)
+        if component == "pumas-rpc":
+            schemas.update(rpc_schemas(info["target"]))
+        require(
+            advertisements(info["schemas"], False) == schemas,
+            "pinned component schema set differs from the reviewed source contract",
+        )
         require(
             info["package_version"] == expected["version"]
             and info["build_id"] == expected["build_id"]

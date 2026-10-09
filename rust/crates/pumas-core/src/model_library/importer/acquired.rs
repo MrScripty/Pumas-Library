@@ -228,7 +228,7 @@ impl ModelImporter {
             .await
     }
 
-    async fn observe_acquired_output(
+    pub(super) async fn observe_acquired_output(
         &self,
         acquired: &AcquiredArtifactUse,
         receipt: &AcquisitionConsumerReceipt,

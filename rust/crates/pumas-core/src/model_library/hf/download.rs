@@ -8254,7 +8254,10 @@ mod tests {
             return;
         }
         assert!(client.pause_download(&id).await.unwrap());
-        let paused = tokio::time::timeout(Duration::from_millis(500), async {
+        // The peer remains explicitly gated until after this observation, so
+        // settlement proves independence from stalled network work. A generous
+        // watchdog avoids turning shared CI scheduling latency into the oracle.
+        let paused = tokio::time::timeout(Duration::from_secs(3), async {
             while client.get_download_status(&id).await != Some(DownloadStatus::Paused) {
                 tokio::task::yield_now().await;
             }

@@ -569,6 +569,13 @@ pub(super) fn reconcile_acquired_output(
             "Acquired model output does not prove this exact confirmed consumer generation",
         ));
     }
+    if acquisition.payload.get("primary_model").is_some()
+        && acquired_primary_model_file(library, &library.library_root().join(model_id))?.is_none()
+    {
+        return Err(recovery_required(
+            "Acquired vision publication lost its selected primary",
+        ));
+    }
     Ok(ModelImportResult {
         path: spec.path.clone(),
         success: true,
@@ -589,4 +596,126 @@ pub(super) fn require_durable_document(outcome: AtomicPublication, document: &st
             ),
         }),
     }
+}
+
+/// Recover the primary role from confirmed acquired publication, never file
+/// size or mutable overlays. A claimed but invalid receipt fails closed.
+pub(crate) fn acquired_primary_model_file(
+    library: &ModelLibrary,
+    model_dir: &Path,
+) -> Result<Option<PathBuf>> {
+    let library_root = library.library_root();
+    if !receipt_path_claimed(model_dir) {
+        let indexed_claim = library
+            .get_model_id(model_dir)
+            .map(|id| library.index().get(&id))
+            .transpose()?
+            .flatten()
+            .is_some_and(|record| {
+                record
+                    .metadata
+                    .get("import_publication")
+                    .is_some_and(|value| !value.is_null())
+            });
+        let canonical_claim = read_canonical_import_metadata(library_root, model_dir)?
+            .is_some_and(|metadata| metadata.import_publication.is_some());
+        if indexed_claim || canonical_claim {
+            return Err(super::acquired::recovery_required(
+                "Claimed acquired primary has no publication receipt",
+            ));
+        }
+        return Ok(None);
+    }
+    let root = crate::model_library::DownloadDestinationRoot::open_import_read_only(library_root)?;
+    let destination = root.resolve(model_dir)?;
+    let receipt = read_receipt(&destination)?;
+    let Some(acquisition) = receipt.acquisition.as_ref() else {
+        if receipt.version != 1 {
+            return Err(super::acquired::recovery_required(
+                "Acquired publication lost its issued receipt binding",
+            ));
+        }
+        return Ok(None);
+    };
+    if receipt.version != 2 {
+        return Err(super::acquired::recovery_required(
+            "Unknown acquired publication receipt version",
+        ));
+    }
+    let is_vision = acquisition.payload.get("primary_model").is_some();
+    let spec = if is_vision {
+        let vision: AcquiredGgufVisionSpec = serde_json::from_value(acquisition.payload.clone())?;
+        vision.validate_paths()?;
+        if acquisition.verified_files.len() != 2
+            || !acquisition
+                .verified_files
+                .iter()
+                .any(|file| file.path == vision.vision_projector)
+        {
+            return Err(super::acquired::recovery_required(
+                "Vision receipt lost its exact projector role",
+            ));
+        }
+        vision.primary_model
+    } else {
+        serde_json::from_value::<ModelImportSpec>(acquisition.payload.clone())?
+    };
+    if !Path::new(&spec.path)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
+    {
+        return Ok(None);
+    }
+    let metadata = read_held_canonical_import_metadata(&destination)?.ok_or_else(|| {
+        super::acquired::recovery_required("Acquired primary has no canonical metadata")
+    })?;
+    // Old generic imports without a selected entry retain their historical
+    // compatibility behavior. New explicit vision selections cannot use it.
+    if !is_vision && metadata.entry_path.is_none() {
+        return Ok(None);
+    }
+    let primary = acquisition
+        .verified_files
+        .iter()
+        .find(|file| file.path == spec.path)
+        .ok_or_else(|| {
+            super::acquired::recovery_required("Acquired primary is absent from issued receipt")
+        })?;
+    let relative = super::staging::normalized_acquired_payload_path(
+        &spec.path,
+        acquisition.verified_files.len() > 1,
+    )?;
+    let selected = model_dir.join(relative);
+    let model_id = destination.library_model_id();
+    let indexed = library.index().get(&model_id)?.ok_or_else(|| {
+        super::acquired::recovery_required("Acquired primary has no acknowledged index record")
+    })?;
+    let identity = metadata.import_publication.as_ref().ok_or_else(|| {
+        super::acquired::recovery_required("Acquired primary has no canonical publication identity")
+    })?;
+    if receipt.version != 2
+        || receipt.model_id != model_id
+        || metadata.model_id.as_deref() != Some(model_id.as_str())
+        || !metadata.copied_import_ready()
+        || !crate::models::copied_import_ready_value(&indexed.metadata)
+        || indexed.metadata.get("import_publication") != Some(&serde_json::to_value(identity)?)
+        || metadata.entry_path.as_deref().map(Path::new) != Some(selected.as_path())
+        || metadata
+            .hashes
+            .as_ref()
+            .and_then(|hashes| hashes.sha256.as_deref())
+            != Some(primary.sha256.as_str())
+        || !receipt.payload.matches_file_set(
+            acquisition
+                .verified_files
+                .iter()
+                .map(|file| (file.path.as_str(), file.bytes, file.sha256.as_str())),
+        ) && acquisition.verified_files.len() > 1
+        || !held_confirmed_receipt_matches(&destination, &metadata, true)?
+    {
+        return Err(super::acquired::recovery_required(
+            "Acquired primary selection no longer matches its confirmed bytes and metadata",
+        ));
+    }
+    Ok(Some(selected))
 }

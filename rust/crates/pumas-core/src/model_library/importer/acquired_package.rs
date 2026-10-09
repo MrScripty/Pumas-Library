@@ -31,6 +31,40 @@ pub(super) struct Qualification {
 
 /// No logical path is interpreted as ambient filesystem authority.
 pub(super) fn qualify(inputs: &mut [VerifiedCopyInput], primary: usize) -> Result<Qualification> {
+    qualify_inner(inputs, primary, None)
+}
+
+pub(super) fn qualify_vision(
+    inputs: &mut [VerifiedCopyInput],
+    primary: usize,
+    projector: &str,
+) -> Result<Qualification> {
+    // Roles come from the issued selection; GGUF metadata supplies only a
+    // structural cross-check, never a compatibility or inference attestation.
+    if inputs.len() != 2 {
+        return Err(invalid("Vision import requires exactly two files"));
+    }
+    for (index, input) in inputs.iter_mut().enumerate() {
+        input.file.seek(SeekFrom::Start(0))?;
+        let architecture = super::acquired_vision_gguf::architecture(&mut input.file)?;
+        let arch = architecture.as_str();
+        let role_ok = if index == primary {
+            !arch.is_empty() && arch != "clip"
+        } else {
+            input.receipt.path == projector && arch == "clip"
+        };
+        if !role_ok {
+            return Err(invalid("Vision roles require GGUF v3 with a declared primary architecture and clip projector structure"));
+        }
+    }
+    qualify_inner(inputs, primary, Some(projector))
+}
+
+fn qualify_inner(
+    inputs: &mut [VerifiedCopyInput],
+    primary: usize,
+    projector: Option<&str>,
+) -> Result<Qualification> {
     let paths: Vec<String> = inputs
         .iter()
         .map(|input| input.receipt.path.clone())
@@ -65,7 +99,11 @@ pub(super) fn qualify(inputs: &mut [VerifiedCopyInput], primary: usize) -> Resul
             .to_ascii_lowercase();
         input.file.seek(SeekFrom::Start(0))?;
         match ext.as_str() {
-            "gguf" if extension == "gguf" && input.receipt.path == paths[primary] => {
+            "gguf"
+                if extension == "gguf"
+                    && (input.receipt.path == paths[primary]
+                        || projector == Some(input.receipt.path.as_str())) =>
+            {
                 let mut magic = [0; 4];
                 input.file.read_exact(&mut magic)?;
                 if magic != *b"GGUF" {

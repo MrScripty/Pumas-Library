@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AudioCustodyError {
     UnqualifiedRuntime,
+    ReadConfinementUnavailable,
     Unavailable,
     StaleIdentity,
     Busy,

@@ -43,6 +43,7 @@ pub(super) struct VerifiedCopyInput {
 struct AcquiredCopyInput {
     files: Vec<VerifiedCopyInput>,
     primary: usize,
+    vision: Option<AcquiredGgufVisionSpec>,
     consumer_receipt: crate::acquisition::AcquisitionConsumerReceipt,
 }
 
@@ -63,6 +64,17 @@ impl ModelImporter {
         acquired: &crate::acquisition::AcquiredArtifactUse,
         consumer_receipt: &crate::acquisition::AcquisitionConsumerReceipt,
         spec: &ModelImportSpec,
+    ) -> Result<ModelImportResult> {
+        self.import_acquired_owned_with_vision(acquired, consumer_receipt, spec, None)
+            .await
+    }
+
+    pub(super) async fn import_acquired_owned_with_vision(
+        &self,
+        acquired: &crate::acquisition::AcquiredArtifactUse,
+        consumer_receipt: &crate::acquisition::AcquisitionConsumerReceipt,
+        spec: &ModelImportSpec,
+        vision: Option<AcquiredGgufVisionSpec>,
     ) -> Result<ModelImportResult> {
         let authority = self.library.mutation_authority()?;
         let consumer_receipt = consumer_receipt.clone();
@@ -92,6 +104,7 @@ impl ModelImporter {
                     Some(AcquiredCopyInput {
                         files,
                         primary,
+                        vision,
                         consumer_receipt,
                     }),
                 )
@@ -139,6 +152,16 @@ impl ModelImporter {
         progress: Option<&mpsc::Sender<ImportProgress>>,
         acquired: Option<AcquiredCopyInput>,
     ) -> Result<ModelImportResult> {
+        let selected_primary = acquired
+            .as_ref()
+            .map(|input| {
+                normalized_acquired_payload_path(
+                    &input.files[input.primary].receipt.path,
+                    input.files.len() > 1,
+                )
+            })
+            .transpose()?;
+        let vision = acquired.as_ref().and_then(|input| input.vision.clone());
         let acquisition = acquired
             .as_ref()
             .map(|input| input.consumer_receipt.clone());
@@ -160,19 +183,26 @@ impl ModelImporter {
                 }
             })?
         };
-        let (type_info, acquired, acquired_diffusers, acquired_directory) = if let Some(mut input) =
-            acquired
-        {
-            let qualification = super::acquired_package::qualify(&mut input.files, input.primary)?;
-            (
-                qualification.info,
-                Some(input),
-                qualification.diffusers,
-                qualification.directory,
-            )
-        } else {
-            (self.detect_type(&source_path)?, None, false, false)
-        };
+        let (type_info, acquired, acquired_diffusers, acquired_directory) =
+            if let Some(mut input) = acquired {
+                let qualification = if let Some(vision) = &input.vision {
+                    super::acquired_package::qualify_vision(
+                        &mut input.files,
+                        input.primary,
+                        &vision.vision_projector,
+                    )?
+                } else {
+                    super::acquired_package::qualify(&mut input.files, input.primary)?
+                };
+                (
+                    qualification.info,
+                    Some(input),
+                    qualification.diffusers,
+                    qualification.directory,
+                )
+            } else {
+                (self.detect_type(&source_path)?, None, false, false)
+            };
         let security_tier = type_info.format.security_tier();
         if security_tier == SecurityTier::Pickle && !spec.security_acknowledged.unwrap_or(false) {
             return Ok(refused(
@@ -295,10 +325,14 @@ impl ModelImporter {
                 metadata.size_bytes = Some(files.iter().filter_map(|file| file.size).sum());
                 metadata
             } else {
-                let primary = files
-                    .iter()
-                    .filter(|file| is_model_file(&file.name))
-                    .max_by_key(|file| file.size);
+                let primary = if let Some(selected) = &selected_primary {
+                    files.iter().find(|file| &file.name == selected)
+                } else {
+                    files
+                        .iter()
+                        .filter(|file| is_model_file(&file.name))
+                        .max_by_key(|file| file.size)
+                };
                 let hashes = primary.map(|file| DualHash {
                     sha256: file.sha256.clone().expect("copy-time SHA256"),
                     blake3: file.blake3.clone().expect("copy-time BLAKE3"),
@@ -310,6 +344,27 @@ impl ModelImporter {
                 metadata.expected_files =
                     Some(files.iter().map(|file| file.name.clone()).collect());
                 metadata.storage_kind = Some(crate::models::StorageKind::LibraryOwned);
+            }
+            if let Some(primary) = &selected_primary {
+                if type_info.format == crate::model_library::FileFormat::Gguf {
+                    metadata.entry_path = Some(target_path.join(primary).display().to_string());
+                    metadata.expected_files =
+                        Some(files.iter().map(|file| file.name.clone()).collect());
+                    metadata.selected_artifact_files = metadata.expected_files.clone();
+                    metadata.storage_kind = Some(crate::models::StorageKind::LibraryOwned);
+                }
+            }
+            if vision.is_some() {
+                // This is caller-declared semantic intent, not Hugging Face
+                // pipeline evidence; leave pipeline_tag absent.
+                metadata.task_type_primary = Some("image-to-text".into());
+                metadata.input_modalities = Some(vec!["image".into(), "text".into()]);
+                metadata.output_modalities = Some(vec!["text".into()]);
+                metadata.task_classification_source =
+                    Some("explicit-acquired-vision-selection".into());
+                metadata.task_classification_confidence = Some(0.0);
+                metadata.metadata_needs_review = Some(true);
+                metadata.review_reasons = Some(vec!["native-vision-qualification-required".into()]);
             }
             // save_metadata would derive the ID from the stage pathname. Keep
             // the intended final ID and publish through held directory authority.
@@ -611,7 +666,10 @@ enum CopySource {
     Verified(BTreeMap<String, VerifiedCopyInput>),
 }
 
-fn normalized_acquired_payload_path(original: &str, preserve_layout: bool) -> Result<String> {
+pub(super) fn normalized_acquired_payload_path(
+    original: &str,
+    preserve_layout: bool,
+) -> Result<String> {
     let normalized = if preserve_layout {
         original.to_owned()
     } else {

@@ -34,6 +34,7 @@ const CODE: &[&str] = &[
     "audio_input.py",
     "audio_contract.py",
     "loaders/cohere_asr_loader.py",
+    "loaders/owned_cohere_source.py",
     "loaders/__init__.py",
     "tests/owned_channel_fixture.py",
     "owned_worker.py",

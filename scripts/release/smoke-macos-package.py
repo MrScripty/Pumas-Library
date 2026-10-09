@@ -66,7 +66,7 @@ def verify(package, variant="full"):
             ("LICENSE.txt", ROOT / "LICENSE"),
             (
                 "THIRD-PARTY-NOTICES.txt",
-                ROOT / "docs/release-attribution/0.7.0/THIRD-PARTY-NOTICES.txt",
+                ROOT / f"docs/release-attribution/{version}/THIRD-PARTY-NOTICES.txt",
             ),
             ("frontend/index.html", ROOT / "frontend/dist/index.html"),
         ]:

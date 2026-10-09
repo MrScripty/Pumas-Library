@@ -2015,7 +2015,7 @@ impl ModelLibrary {
             }
             // Optionally verify hashes
             if verify_hashes {
-                match verify_model_hash(model_dir, &metadata) {
+                match verify_model_hash(self, model_dir, &metadata) {
                     Ok(true) => {
                         result.hash_verified += 1;
                     }
@@ -2992,10 +2992,12 @@ impl ModelLibrary {
         let current_review_status = metadata.review_status.clone();
 
         // Keep file-signature detection independent from resolver rules and use it as fallback.
-        let model_dir_for_type = model_dir.clone();
+        let library_for_type = self.clone();
+        let model_id_for_type = model_id.to_owned();
         let type_info = self
             .run_import_blocking("classify imported model", move || {
-                find_primary_model_file(&model_dir_for_type)
+                library_for_type
+                    .get_primary_model_file(&model_id_for_type)
                     .as_ref()
                     .and_then(|f| identify_model_type(f).ok())
             })
@@ -3132,10 +3134,15 @@ impl ModelLibrary {
 
     /// Get the primary model file path for a model.
     ///
-    /// Returns the largest model file in the model directory.
+    /// Uses an acquired publication's exact primary role when present; legacy
+    /// unselected models retain their largest-file compatibility behavior.
     pub fn get_primary_model_file(&self, model_id: &str) -> Option<PathBuf> {
         let model_dir = self.library_root.join(model_id);
-        find_primary_model_file(&model_dir)
+        match super::importer::publication::acquired_primary_model_file(self, &model_dir) {
+            Ok(Some(primary)) => Some(primary),
+            Ok(None) => find_primary_model_file(&model_dir),
+            Err(_) => None,
+        }
     }
 
     /// Resolve a versioned execution descriptor for a model.
@@ -3219,7 +3226,22 @@ impl ModelLibrary {
         {
             validation_state = AssetValidationState::Degraded;
         }
-        let entry_path = if artifact_kind == PackageArtifactKind::HfCompatibleDirectory
+        let acquired_primary = self
+            .store_lifetime
+            .spawn_blocking({
+                let library = self.clone();
+                let model_dir = model_dir.clone();
+                move || {
+                    super::importer::publication::acquired_primary_model_file(&library, &model_dir)
+                }
+            })
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!("Failed acquired primary observation: {error}"))
+            })??;
+        let entry_path = if let Some(primary) = acquired_primary {
+            primary.display().to_string()
+        } else if artifact_kind == PackageArtifactKind::HfCompatibleDirectory
             && storage_kind == StorageKind::LibraryOwned
         {
             model_dir.display().to_string()
@@ -4325,11 +4347,13 @@ impl ModelLibrary {
         let current_review_status = metadata.review_status.clone();
 
         // Keep family detection from file metadata (independent from model_type resolver).
-        let model_dir_for_type = model_dir.clone();
+        let library_for_type = self.clone();
+        let model_id_for_type = model_id.to_owned();
         let file_type_info = self
             .store_lifetime
             .spawn_blocking(move || {
-                find_primary_model_file(&model_dir_for_type)
+                library_for_type
+                    .get_primary_model_file(&model_id_for_type)
                     .as_ref()
                     .and_then(|f| identify_model_type(f).ok())
             })
@@ -7643,11 +7667,14 @@ fn detect_model_type_from_name_tokens(model_dir: &Path, library_root: &Path) -> 
 /// Returns Ok(true) if hash matches or no hash stored, Ok(false) if mismatch,
 /// or Err if verification failed due to I/O error.
 fn verify_model_hash(
+    library: &ModelLibrary,
     model_dir: &Path,
     metadata: &ModelMetadata,
 ) -> std::result::Result<bool, String> {
     // Find the primary model file
-    let primary_file = match find_primary_model_file(model_dir) {
+    let selected = super::importer::publication::acquired_primary_model_file(library, model_dir)
+        .map_err(|error| error.to_string())?;
+    let primary_file = match selected.or_else(|| find_primary_model_file(model_dir)) {
         Some(path) => path,
         None => return Ok(true), // No model file found, nothing to verify
     };

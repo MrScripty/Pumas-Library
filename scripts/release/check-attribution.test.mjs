@@ -17,6 +17,13 @@ const mappingPath = 'scripts/release/torch-managed-python-acceptance.py';
 const directory = 'docs/release-attribution/0.7.0';
 const hash = data => createHash('sha256').update(data).digest('hex');
 
+test('bundled JPEG attribution retains IJG terms and exact wrapper provenance', () => {
+  const result = spawnSync(process.env.PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3'),
+    ['-m', 'unittest', '-v', 'test_jpeg_attribution'],
+    { cwd: path.join(source, 'scripts/release'), encoding: 'utf8', timeout: 30_000 });
+  assert.equal(result.status, 0, result.stderr || String(result.error));
+});
+
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pumas-attribution-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

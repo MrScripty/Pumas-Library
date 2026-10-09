@@ -233,7 +233,21 @@ pub struct AcquisitionS3ManifestRequest {
     pub retry: AcquisitionRetryPolicy,
 }
 
+/// Request for exact digest-pinned owner-materialized files. This neither
+/// installs a runtime nor permits interpreter initialization or native import.
+pub struct AcquisitionLocalRequest {
+    pub demand: AcquisitionDemand,
+    pub manifest: ArtifactManifest,
+    pub workspace: AcquisitionWorkspace,
+    pub sources: Vec<super::AcquisitionLocalSource>,
+    pub retry: AcquisitionRetryPolicy,
+}
+
 enum AcquisitionSource {
+    Local {
+        source: super::AcquisitionLocalSource,
+        deadline: tokio::time::Instant,
+    },
     Http {
         client: super::AcquisitionHttpClient,
         source: AcquisitionHttpSource,
@@ -243,8 +257,15 @@ enum AcquisitionSource {
 }
 
 impl AcquisitionSource {
-    fn request_identity(&self) -> String {
+    fn request_identity(&self, selected: &super::ArtifactFile) -> String {
         match self {
+            Self::Local { .. } => format!(
+                "local-sha256:{}",
+                selected
+                    .expected_sha256()
+                    .map(|hash| hash.value())
+                    .unwrap_or("missing")
+            ),
             Self::Http { source, .. } => source.url.clone(),
             #[cfg(feature = "s3")]
             Self::S3(selection) => selection.acquisition_identity(),
@@ -256,6 +277,7 @@ impl AcquisitionSource {
         _retry: &AcquisitionRetryPolicy,
     ) -> Result<Option<tokio::time::Instant>> {
         match self {
+            Self::Local { deadline, .. } => Ok(Some(*deadline)),
             Self::Http { .. } => http_transfer_deadline(_retry.elapsed),
             #[cfg(feature = "s3")]
             Self::S3(_) => tokio::time::Instant::now()
@@ -267,6 +289,7 @@ impl AcquisitionSource {
 
     async fn open(
         &self,
+        context: &TaskContext,
         manifest: &ArtifactManifest,
         file_index: usize,
         resume: u64,
@@ -274,6 +297,13 @@ impl AcquisitionSource {
         _deadline: Option<tokio::time::Instant>,
     ) -> Result<super::http::HttpArtifactResponse> {
         match self {
+            Self::Local { source, deadline } => {
+                tokio::select! {
+                    biased;
+                    _ = http_budget_elapsed(*deadline) => Err(invalid("Local acquisition elapsed budget exhausted")),
+                    response = source.open(context, &manifest.files()[file_index], *deadline) => response,
+                }
+            }
             Self::Http { client, source } => {
                 let request = open_http_artifact(
                     client,
@@ -347,7 +377,7 @@ struct AcquisitionRequest {
     retry: AcquisitionRetryPolicy,
 }
 
-fn invalid(message: &str) -> PumasError {
+pub(super) fn invalid(message: &str) -> PumasError {
     PumasError::Validation {
         field: "acquisition.custody".into(),
         message: message.into(),
@@ -1164,7 +1194,6 @@ impl AcquisitionService {
         retry: &AcquisitionRetryPolicy,
         host: &mut dyn AcquisitionHost,
     ) -> Result<u64> {
-        let url = source.request_identity();
         let transfer_deadline = source.transfer_deadline(retry)?;
         if &operation.record.workspace != workspace.identity() {
             return Err(invalid("Workspace grant does not match acquisition"));
@@ -1176,6 +1205,7 @@ impl AcquisitionService {
             .get(file_index)
             .ok_or_else(|| invalid("Selected file is unavailable"))?
             .clone();
+        let url = source.request_identity(&file);
         let prepare = workspace.clone();
         let selected = file.clone();
         owned(context, "prepare acquisition file parent", move || {
@@ -1239,6 +1269,9 @@ impl AcquisitionService {
         loop {
             if transfer_deadline.is_some_and(|deadline| deadline <= tokio::time::Instant::now()) {
                 return Err(match source {
+                    AcquisitionSource::Local { .. } => {
+                        invalid("Local acquisition elapsed retry budget exhausted")
+                    }
                     AcquisitionSource::Http { .. } => {
                         if host.cancel_requested() {
                             self.forget_checkpoint(key)?;
@@ -1350,7 +1383,7 @@ impl AcquisitionService {
                 } else {
                     PumasError::DownloadPaused
                 }),
-                response = source.open(&operation.record.manifest, file_index, resume, continuation.as_ref(), transfer_deadline) => response,
+                response = source.open(context, &operation.record.manifest, file_index, resume, continuation.as_ref(), transfer_deadline) => response,
             };
             let outcome = match response {
                 Ok(mut response) => {
@@ -1385,7 +1418,10 @@ impl AcquisitionService {
                     };
                     let stream = stream_http_artifact(response, resume, &mut sink, host);
                     let outcome = match (source, transfer_deadline) {
-                        (AcquisitionSource::Http { .. }, Some(deadline)) => {
+                        (
+                            AcquisitionSource::Http { .. } | AcquisitionSource::Local { .. },
+                            Some(deadline),
+                        ) => {
                             // Tokio timeout_at polls the wrapped future first.
                             // Check expiry before polling any new byte effect.
                             let outcome = tokio::select! {
@@ -1397,7 +1433,12 @@ impl AcquisitionService {
                                 Some(outcome) => outcome,
                                 None if host.cancel_requested() => Ok(HttpBodyOutcome::Cancelled),
                                 None if host.pause_requested_now() => Ok(HttpBodyOutcome::Paused),
-                                None => Err(http_budget_timeout()),
+                                None => Err(match source {
+                                    AcquisitionSource::Local { .. } => {
+                                        invalid("Local acquisition elapsed retry budget exhausted")
+                                    }
+                                    _ => http_budget_timeout(),
+                                }),
                             }
                         }
                         _ => stream.await,
@@ -1798,6 +1839,62 @@ impl AcquisitionConsumer {
         }).await
     }
 
+    /// Resolve one digest-bound non-versioned object under this consumer's
+    /// bounded task custody. Cancellation drains selection before returning.
+    /// The one-file selection preserves Weak mutable provenance evidence while
+    /// requiring a strong HTTP ETag (W/ refused), size and whole-file SHA-256.
+    #[cfg(feature = "s3")]
+    pub(crate) async fn resolve_s3_conditional(
+        &self,
+        reader: super::S3Reader,
+        object: (String, String, super::Sha256Evidence),
+        demand: &AcquisitionDemand,
+        retry: &AcquisitionRetryPolicy,
+        host: Box<dyn AcquisitionHost>,
+    ) -> Result<std::result::Result<super::S3ManifestSelection, super::S3ReaderError>> {
+        self.require_s3_transfer(demand, retry)?;
+        self.scope.run_worker_invocation(move |_| async move {
+            if host.cancel_requested() {
+                return Err(PumasError::DownloadCancelled);
+            }
+            tokio::select! {
+                biased;
+                _ = host.pause_requested() => {
+                    Err(if host.cancel_requested() { PumasError::DownloadCancelled } else { PumasError::DownloadPaused })
+                }
+                selection = reader.select_conditional(&object.0, &object.1, object.2) => {
+                    Ok(selection.map(super::S3ManifestSelection::from_single_object))
+                },
+            }
+        }).await
+    }
+
+    /// Resolve an entire authored conditional set under one cancellable task owner.
+    /// A failed member yields no partial selection or durable transfer admission.
+    #[cfg(feature = "s3")]
+    pub(crate) async fn resolve_s3_conditional_manifest(
+        &self,
+        reader: super::S3Reader,
+        entries: Vec<super::S3ConditionalManifestEntry>,
+        demand: &AcquisitionDemand,
+        retry: &AcquisitionRetryPolicy,
+        host: Box<dyn AcquisitionHost>,
+    ) -> Result<std::result::Result<super::S3ManifestSelection, super::S3ReaderError>> {
+        self.require_s3_transfer(demand, retry)?;
+        self.scope.run_worker_invocation(move |_| async move {
+            if host.cancel_requested() {
+                return Err(PumasError::DownloadCancelled);
+            }
+            tokio::select! {
+                biased;
+                _ = host.pause_requested() => {
+                    Err(if host.cancel_requested() { PumasError::DownloadCancelled } else { PumasError::DownloadPaused })
+                }
+                selection = reader.select_conditional_manifest(entries) => Ok(selection),
+            }
+        }).await
+    }
+
     pub fn owner(&self) -> &str {
         &self.owner
     }
@@ -2028,7 +2125,64 @@ impl AcquisitionConsumer {
         .await
     }
 
-    /// Acquire one versioned S3 object under this consumer's existing durable
+    /// Ingest held local inputs through the existing store, registered reads and
+    /// writes, verified-file use, and consumer publication/settlement protocol.
+    /// Exact size and SHA256 are mandatory; requests grant no execution authority.
+    /// One request-anchored deadline gates local preverification/copy/retries;
+    /// registered reads already running retain custody through actual drainage.
+    /// An error reply can precede that drainage; retain the consumer/service and
+    /// await their shutdown before owner teardown.
+    pub async fn acquire_local<Staged, Output, F, Fut, Publish, PublishFut>(
+        &self,
+        request: AcquisitionLocalRequest,
+        host: Box<dyn AcquisitionHost>,
+        prepare: F,
+        publish: Publish,
+    ) -> Result<Output>
+    where
+        Staged: Send + 'static,
+        Output: Send + 'static,
+        F: FnOnce(AcquiredArtifactUse) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(Staged, Value)>> + Send + 'static,
+        Publish: FnOnce(Staged, AcquisitionConsumerReceipt) -> PublishFut + Send + 'static,
+        PublishFut: Future<Output = Result<Output>> + Send + 'static,
+    {
+        if request.demand.consumer != self.owner
+            || request.sources.len() != request.manifest.files().len()
+            || request
+                .manifest
+                .files()
+                .iter()
+                .any(|file| file.expected_size().is_none() || file.expected_sha256().is_none())
+            || request.retry.attempts.is_none_or(|limit| limit == 0)
+            || request.retry.elapsed.is_zero()
+        {
+            return Err(invalid(
+                "Local input requires exact owner, file set, size, SHA256 and finite retry budgets",
+            ));
+        }
+        let deadline = http_transfer_deadline(request.retry.elapsed)?
+            .ok_or_else(|| invalid("Local acquisition requires a positive deadline"))?;
+        self.acquire(
+            AcquisitionRequest {
+                demand: request.demand,
+                manifest: request.manifest,
+                workspace: request.workspace,
+                sources: request
+                    .sources
+                    .into_iter()
+                    .map(|source| AcquisitionSource::Local { source, deadline })
+                    .collect(),
+                retry: request.retry,
+            },
+            host,
+            prepare,
+            publish,
+        )
+        .await
+    }
+
+    /// Acquire one explicitly selected S3 object under this consumer's existing durable
     /// lifecycle, then hold its verified use through consumer publication.
     /// Caller-supplied positive finite attempt and elapsed limits bound transfer
     /// retries; registered writes are drained before retry or terminal release.
@@ -2064,7 +2218,7 @@ impl AcquisitionConsumer {
         .await
     }
 
-    /// Acquire the complete explicit version-pinned set through the same store,
+    /// Acquire an exact versioned or conditional set through the same store,
     /// writer, verified-file handoff and consumer receipt/settlement protocol.
     /// Retry attempts and elapsed budgets apply per object; no complete-set
     /// hard wall-clock or atomic remote-prefix snapshot is promised.
@@ -2146,6 +2300,21 @@ impl AcquisitionConsumer {
                     Ok(request)
                 })
                 .await?;
+                // Verify actual local bytes under the original request deadline
+                // before any durable store admission. One registered read may
+                // remain drain-owned after its async waiter is interrupted.
+                for (source, selected) in request.sources.iter().zip(request.manifest.files()) {
+                    if let AcquisitionSource::Local { source, deadline } = source {
+                        if host.cancel_requested() { return Err(PumasError::DownloadCancelled); }
+                        if host.pause_requested_now() { return Err(PumasError::DownloadPaused); }
+                        tokio::select! {
+                            biased;
+                            _ = host.pause_requested() => return Err(if host.cancel_requested() { PumasError::DownloadCancelled } else { PumasError::DownloadPaused }),
+                            _ = http_budget_elapsed(*deadline) => return Err(invalid("Local acquisition elapsed budget exhausted")),
+                            result = source.verify(&context, selected, *deadline) => result?,
+                        }
+                    }
+                }
                 service.require_schema(&context).await?;
                 let operation = service
                     .begin(
@@ -2252,7 +2421,7 @@ impl AcquisitionConsumer {
     }
 }
 
-async fn owned<T: Send + 'static>(
+pub(super) async fn owned<T: Send + 'static>(
     context: &TaskContext,
     name: &'static str,
     work: impl FnOnce() -> Result<T> + Send + 'static,
@@ -2359,6 +2528,10 @@ pub(super) mod uuid_map {
             .collect()
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "local_tests.rs"]
+mod local_tests;
 
 #[cfg(test)]
 mod tests {

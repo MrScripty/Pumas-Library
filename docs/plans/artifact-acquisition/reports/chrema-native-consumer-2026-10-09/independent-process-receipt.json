@@ -1,0 +1,75 @@
+{
+  "status": "passed",
+  "started_utc": "2026-10-09T11:19:20.730878+00:00",
+  "command": [
+    "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+    "/workspace/pumas-v08-chrema-native-evidence/qualify_chrema_native.py",
+    "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+    "--binary-sha256",
+    "61c20bd24bd179fbc14538183c6898c14e677d84209413de69e1d797584a0a47",
+    "--chrema-source",
+    "/tmp/Chrema-pumas-supported-consumer-20261009",
+    "--pumas-source",
+    "/workspace/Pumas-v08-http-etag-ambiguity",
+    "--work-dir",
+    "/tmp/pumas-chrema-actual-native-independent-20261009"
+  ],
+  "pre_pins": [
+    {
+      "path": "/workspace/pumas-v08-chrema-native-evidence/qualify_chrema_native.py",
+      "bytes": 13898,
+      "sha256": "1dbf226fab291d50858f97b0811cbc078e8acf3f59c0a8eaf6740b5af70177ab"
+    },
+    {
+      "path": "/workspace/pumas-v08-chrema-native-evidence/chrema_native_probe.mjs",
+      "bytes": 9422,
+      "sha256": "3013f08cea338460fb9558c946339fe7f395b20590ae21fec8ac90a14c25e4bd"
+    },
+    {
+      "path": "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+      "bytes": 203722168,
+      "sha256": "61c20bd24bd179fbc14538183c6898c14e677d84209413de69e1d797584a0a47"
+    }
+  ],
+  "timeout_seconds": 180,
+  "timeout_behavior": "record unresolved owned qualifier PID; no force kill/retry",
+  "pid": 260300,
+  "exit_code": 0,
+  "elapsed_seconds": 6.9552638070017565,
+  "finished_utc": "2026-10-09T11:19:27.686704+00:00",
+  "post_pins": [
+    {
+      "path": "/workspace/pumas-v08-chrema-native-evidence/qualify_chrema_native.py",
+      "bytes": 13898,
+      "sha256": "1dbf226fab291d50858f97b0811cbc078e8acf3f59c0a8eaf6740b5af70177ab"
+    },
+    {
+      "path": "/workspace/pumas-v08-chrema-native-evidence/chrema_native_probe.mjs",
+      "bytes": 9422,
+      "sha256": "3013f08cea338460fb9558c946339fe7f395b20590ae21fec8ac90a14c25e4bd"
+    },
+    {
+      "path": "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+      "bytes": 203722168,
+      "sha256": "61c20bd24bd179fbc14538183c6898c14e677d84209413de69e1d797584a0a47"
+    }
+  ],
+  "pins_unchanged": true,
+  "qualifier_pid_absent": true,
+  "qualifier_reaped": true,
+  "stdout": {
+    "path": "/workspace/pumas-v08-chrema-native-evidence/independent-actual-native.stdout.json",
+    "bytes": 70585,
+    "sha256": "58cc5a31c748141e55dc8aaf8aa0f33956c052f77667af28880896a4baf21f8a"
+  },
+  "stderr": {
+    "path": "/workspace/pumas-v08-chrema-native-evidence/independent-actual-native.stderr.txt",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "qualification": {
+    "path": "/tmp/pumas-chrema-actual-native-independent-20261009/qualification.json",
+    "bytes": 70585,
+    "sha256": "58cc5a31c748141e55dc8aaf8aa0f33956c052f77667af28880896a4baf21f8a"
+  }
+}

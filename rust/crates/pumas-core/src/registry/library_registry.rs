@@ -10,6 +10,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::debug;
 
+pub(crate) mod catalog_recovery;
+#[cfg(target_os = "linux")]
+pub(crate) mod local_enumeration;
+pub(crate) mod pending_recovery;
+
 /// A registered library entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryEntry {
@@ -263,7 +268,23 @@ impl LibraryRegistry {
             CREATE TABLE IF NOT EXISTS registry_config (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
-            );",
+            );
+            CREATE TABLE IF NOT EXISTS pending_reservation_checkpoints (
+                library_path TEXT PRIMARY KEY,
+                qualification_json TEXT NOT NULL
+            );
+            CREATE TRIGGER IF NOT EXISTS invalidate_pending_checkpoint_update
+            BEFORE UPDATE ON instances BEGIN
+                DELETE FROM pending_reservation_checkpoints WHERE library_path=OLD.library_path;
+            END;
+            CREATE TRIGGER IF NOT EXISTS invalidate_pending_checkpoint_delete
+            BEFORE DELETE ON instances BEGIN
+                DELETE FROM pending_reservation_checkpoints WHERE library_path=OLD.library_path;
+            END;
+            CREATE TRIGGER IF NOT EXISTS invalidate_pending_checkpoint_insert
+            BEFORE INSERT ON instances BEGIN
+                DELETE FROM pending_reservation_checkpoints WHERE library_path=NEW.library_path;
+            END;",
         )?;
         Self::ensure_instances_columns(conn)?;
         Ok(())
@@ -549,6 +570,21 @@ impl LibraryRegistry {
     /// Crash recovery requires independently qualified lifetime custody; this
     /// registry is a rendezvous cache, not a physical-store lease.
     pub fn try_claim_instance(&self, path: &Path, pid: u32) -> Result<InstanceClaimResult> {
+        self.try_claim_instance_checked(path, pid, false)
+    }
+    pub(crate) fn try_claim_catalog_instance(
+        &self,
+        path: &Path,
+        pid: u32,
+    ) -> Result<InstanceClaimResult> {
+        self.try_claim_instance_checked(path, pid, true)
+    }
+    fn try_claim_instance_checked(
+        &self,
+        path: &Path,
+        pid: u32,
+        catalog: bool,
+    ) -> Result<InstanceClaimResult> {
         let canonical = Self::canonicalize_library_path(path)?;
         let path_str = canonical.to_string_lossy().to_string();
         let now = Utc::now().to_rfc3339();
@@ -559,7 +595,12 @@ impl LibraryRegistry {
         let transaction =
             conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
-        if let Some(existing) = Self::read_instance_entry(&transaction, &path_str)? {
+        let existing = if catalog {
+            catalog_recovery::bounded_instance(&transaction, &canonical)?
+        } else {
+            Self::read_instance_entry(&transaction, &path_str)?
+        };
+        if let Some(existing) = existing {
             return Ok(InstanceClaimResult::Occupied(existing));
         }
 
@@ -598,6 +639,30 @@ impl LibraryRegistry {
             pid,
             claim_token,
         }))
+    }
+
+    /// Check an exact captured claim before admitting reserved constructor effects.
+    pub(crate) fn matches_primary_claim(&self, claim: &PrimaryInstanceClaim) -> Result<bool> {
+        self.lock_conn()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM instances WHERE library_path=?1 AND pid=?2 AND claim_token=?3 AND status='claiming')",
+            params![claim.library_path.to_string_lossy(), claim.pid, claim.claim_token],
+            |row| row.get(0),
+        ).map_err(Into::into)
+    }
+
+    /// Called only by an opaque unstarted reservation that still holds its
+    /// physical lease. Constructor cancellation cannot call this operation.
+    pub(crate) fn release_unstarted_claim(&self, claim: &PrimaryInstanceClaim) -> Result<bool> {
+        let mut conn = self.lock_conn()?;
+        pending_recovery::require_full_durability(&conn)?;
+        let transaction =
+            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let removed = transaction.execute(
+            "DELETE FROM instances WHERE library_path=?1 AND pid=?2 AND claim_token=?3 AND status='claiming'",
+            params![claim.library_path.to_string_lossy(), claim.pid, claim.claim_token],
+        )?;
+        transaction.commit()?;
+        Ok(removed == 1)
     }
 
     /// Mark a previously claimed instance row as ready for client attachment.

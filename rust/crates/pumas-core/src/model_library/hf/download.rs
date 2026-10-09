@@ -9717,7 +9717,7 @@ mod tests {
         assert_eq!(std::fs::read(destination).unwrap(), b"occupied");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_same_destination_starts_commit_one_owner_and_one_id() {
         let temp = TempDir::new().unwrap();
         let client = Arc::new(configured_download_client(temp.path().join("cache")).unwrap());
@@ -9756,11 +9756,10 @@ mod tests {
         let start = |client: Arc<HuggingFaceClient>| {
             let request = request.clone();
             let destination = destination.clone();
+            // Keep both admitted workers on the same live runtime after callers return.
+            let runtime = tokio::runtime::Handle::current();
             std::thread::spawn(move || {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap()
+                runtime
                     .block_on(client.start_download(&request, &destination, None))
                     .unwrap()
             })

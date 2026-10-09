@@ -1,8 +1,71 @@
 # Local discovery and bootstrap — v0.8 incremental slices
 
-Base: main `5e114f6d8e4559e0a4d67e56000b423120a0fde0`. Scope is local
+Initial design base: `5e114f6d8e4559e0a4d67e56000b423120a0fde0`. Scope is local
 application discovery, not a LAN/fleet daemon. This applies the intent/distribution
 and capability-discovery briefs and the namespace-instance-custody audit.
+
+## Packaged read-only library enumeration
+
+`pumas-rpc --discover-local` emits one JSON document followed by a newline and
+exits before runtime, logging, network, builder or listener initialization. It
+uses the existing platform registry path, including `PUMAS_REGISTRY_DB_PATH`.
+It requires no launcher root and conflicts with owning/describe/retention/export
+modes. No source library, model/index or registry is created or repaired; no owner or
+runtime is started.
+
+The stable CLI envelope has `cli_schema_version: 1`, the existing
+`discovery_schema_version: 1`, `observation: "unverified_registry_copy"`,
+`registry_state`, and `libraries`. Each library contains only
+`registry_library_id`, `library_root`, and nullable `owner` with `generation`,
+`status` and `transport`. Rows sort by registry ID/root. Names, metadata,
+credentials, tokens, PIDs, HTTP descriptions and unrelated transport paths are
+never selected or output. Registered roots are intended discovery output;
+there is no model/index scan and missing root paths remain registered hints.
+
+`registry_state: "missing"` with an empty list exits zero without creating the
+registry or its parent directories. An existing empty registry is `observed`.
+Invalid, unsupported, inaccessible, unstable or oversized input is `unavailable`
+with an empty list and nonzero exit; the error text contains no SQL/private path.
+Historical claiming/ready rows stay unverified and unchanged: the CLI does not
+probe PIDs, contact endpoints, clean rows, fall back to start or invoke recovery.
+
+Native qualification is Linux. Other platforms return `unavailable` until an
+identity-safe source opener is qualified. Private scratch is fixed at `/tmp`,
+ignoring `TMPDIR`/`TEMP`. The cooperating source namespace and registered libraries
+must be disjoint from that scratch (libraries rooted at `/tmp` itself or its
+ancestors are unsupported). Source-registry/scratch overlap refuses before any
+copy writes. A projected unsupported broad library root refuses after private
+copying; no universal no-mutation claim is made for that unqualified namespace.
+
+SQLite opens only a private temporary DB/WAL copy. Bounded captures must agree
+on contents and file identity/size/modification metadata before and after the
+query; integrity and projected field/row bounds are checked using the existing
+registry engine. The source SHM and model/index paths are not opened. Source
+contents, modification/change metadata and namespace are preserved; ordinary
+filesystem reads can update access accounting such as atime. Cleanup of the private copy
+and SQLite sidecars is observed before success; cleanup failure is `unavailable`.
+Forced process loss/panic can leave protected private scratch and is not qualified
+cleanup or a new recovery mechanism. This is a validated copied observation,
+not an atomic, current or exhaustive live snapshot during concurrent writes.
+DB/WAL limits are 32/64 MiB, projected rows 4096, and CLI output 4 MiB. Rollback
+journals, symlink/nonregular files and capture changes refuse without repair.
+
+A bundled consumer selects a returned root explicitly and authenticates through
+the existing live path, with the same registry environment, for example:
+
+```bash
+PUMAS_REGISTRY_DB_PATH=/selected/registry.db ./pumas-rpc --discover-local
+PUMAS_REGISTRY_DB_PATH=/selected/registry.db ./pumas-rpc \
+  --describe-local-http --launcher-root /selected/library
+PUMAS_REGISTRY_DB_PATH=/selected/registry.db ./pumas-rpc \
+  --retain-local-http-owner --launcher-root /selected/library
+```
+
+Description/fence and connection-held retention semantics remain unchanged.
+Enumeration does not grant model readiness or freshness, startup authority,
+recovery authority or inference. A compatible live owner can be borrowed without
+qualifying full operating-owner recovery; multiple roots require consumer
+selection, and unresolved historical ownership still blocks startup.
 
 ## Slice 1: local observation and explicit attach-or-start
 
@@ -100,8 +163,8 @@ The first-slice `ProtocolAdvertisement` import remains available, and
 `pumas-rpc --build-info` prints this typed producer identity without constructing a
 runtime, opening a library or starting a listener. The RPC producer includes actual
 RPC and linked core features. Release strings do not substitute for negotiation.
-The modality lane owns inference request/result/capability types, and packaging owns
-assets/manifests; neither needs to create a competing build schema.
+Model-operation contracts define inference request/result/capability types.
+Distribution assets and manifests use this shared build schema.
 
 A prepared `HttpServiceRegistration` is invisible until the listener/router owner
 explicitly publishes it. RPC binds the actual loopback listener and polls its accept
@@ -117,7 +180,8 @@ producer build descriptor. The router retains its bind generation; an old listen
 cannot describe a successor. The existing Host/Origin admission and shutdown gate
 apply. Responses use `Cache-Control: no-store`. Core IPC is never presented as HTTP.
 The `pumas.local-http` protocol version 1 identifies this local rendezvous contract;
-HTTP inference capabilities/model readiness must come from the modality lane.
+HTTP inference capabilities and model readiness come from the existing modality
+capability contract.
 
 `LocalDiscovery::borrow_http_service` authenticates compatible core IPC first, then
 fetches the advertised description with no proxy/redirect, a bounded body and timeout.
@@ -139,7 +203,90 @@ Completion is terminal even for a never-published registration; publishing anoth
 requires a fresh registration and its own unsettled custody receipt.
 The same-registry support boundary and physical-store/namespace limitations remain.
 
+### Request admission follow-up to slice 2
+
+The additive [HTTP admission fence](../contracts/local-http-admission-fence.md)
+binds opted-in requests to the already authenticated core and HTTP service
+generations. RPC advertises schema `pumas.http-admission-fence@1` through the
+existing shared build descriptor. Older peers remain observable, but the typed
+fence helper refuses them. Header-boundary admission checks the retained
+listener identity and existing registry/token fence before any route handler.
+This closes stale URL reuse for fenced requests while leaving startup authority,
+physical lifetime custody and crash reclamation at their existing boundaries.
+Distribution's existing RPC-to-core descriptor projection now removes both
+RPC-only HTTP schemas while preserving unrelated core schemas. Native process
+evidence is recorded
+separately from the controlled custody and registry-replacement fixtures.
+
 ## Slice 3: durable identity and qualified lifetime custody
+
+### Explicit restricted catalog/query operating owner (Linux)
+
+The implemented `InstanceProfile::CatalogQuery` uses the existing builder and
+local IPC admission machinery to open an existing index read-only. It supports
+strict indexed list/get and literal search, an acknowledged models-table
+checkpoint, passive retention and ordered shutdown. Its scope is committed before
+index/listener effects. Unsupported full-service operations and HTTP/initializer
+registration refuse; no writable service handles escape.
+
+`recover_catalog_owner` explicitly consumes the exact acknowledged ready
+checkpoint under the same physical lease and returns another restricted owner.
+Normal bootstrap never invokes recovery. Ordinary full/legacy/unknown owners
+remain unqualified. This does not certify model bytes, readiness, inference,
+downloads or arbitrary external writers. See
+[the current custody contract](operating-owner-custody-design.md) for the API,
+capabilities, durability bounds, native evidence and remaining full-owner gap.
+
+### First recovery slice: qualified pending reservations (Linux)
+
+`LocalStartAuthority::checkpoint_metadata_for_pending_recovery` commits an exact
+JSON-object payload (at most 64 KiB) into the existing `libraries.metadata_json`
+and a complete pending-only qualification in one verified WAL/FULL immediate
+transaction. The opaque authority has admitted no constructor, listener, model,
+runtime or child effects. Existing library identity and other metadata columns
+are preserved; the explicit call replaces only the requested metadata payload.
+Its serializable `PendingReservationCheckpoint` is an observation, not authority.
+The selecting caller must retain that exact returned observation for explicit
+redemption; losing it does not authorize choosing a newer checkpoint or takeover.
+
+`recover_pending_reservation` is an explicit producer operation. It preflights
+compatibility, acquires the existing physical-root lifetime lease, then validates
+the exact checkpoint/generation/private claim, library and registry identities,
+payload SHA-256, canonical root device/inode and Linux kernel boot identity in
+one immediate transaction. Only that qualified pending predecessor is replaced
+with a fresh pending generation/token and current PID. The returned authority
+retains the same lease. The successor is not automatically qualified, so killing
+it cannot replay its predecessor's receipt. Existing HTTP service custody or any
+ready/legacy/unqualified/changed/missing/corrupt evidence refuses replacement.
+
+Starting consumes the checkpoint with a synchronous FULL commit inside the
+fallible authority handoff, before registry registration, directory creation,
+spawn or await effects. Later constructor failure/cancellation never restores
+it. Dropping an unpolled start future leaves its unstarted checkpoint valid;
+explicit cancellation durably withdraws only the exact still-unstarted claim.
+Instance INSERT/UPDATE/DELETE triggers invalidate receipts even through legacy
+registry transitions. Ordinary prepare/start/borrow never invokes recovery.
+
+Qualification is bounded to the same selected existing registry, same Linux
+boot and stable local root namespace, with cooperating Pumas APIs and a local
+filesystem honoring native advisory locks and SQLite WAL/sync. Copy/rollback of
+the registry, malicious raw writers, arbitrary namespace/inode replacement or
+cross-boot identity are outside this contract. Hashes compare payload integrity;
+they are not authentication against a writer able to forge the database.
+This is registry-metadata durability, not model-index/model-byte recovery.
+
+`tests/pending_reservation_recovery.rs` uses owned disposable processes for
+acknowledged SQLite writes, SIGKILL/reap, a new cold recoverer, simultaneous
+recoverers, cancelled pending authority and a killed operating owner with an
+owned unknown writer still alive. SQL corruption/root replacement and queued
+constructor cancellation are explicitly controlled fixtures. An actual killed
+uncommitted transaction is a rollback fixture, not an acknowledged checkpoint.
+No model/runtime download or inference is needed. Hardware power-loss durability
+and additional operating systems are not qualified by those tests.
+
+The distinct future operating-owner contract is described in
+[operating-owner-custody-design.md](operating-owner-custody-design.md). Current
+operating rows remain unresolved after process loss.
 
 Define one on-disk library identity/migration and a physical-store primary lifetime
 lease, distinct from finite mutation grants. Preserve explicit legacy-unknown outcomes;
@@ -148,7 +295,7 @@ Qualify competing-owner, crash, namespace/reused-PID/inaccessible-owner, child l
 and filesystem replacement behavior natively on each supported OS. No shared-store or
 real cluster safety claim follows from local SQLite serialization.
 
-### Internal physical-root lock groundwork (recovery remains disabled)
+### Internal physical-root lock groundwork (general recovery remains disabled)
 
 `platform::store_lifetime::PhysicalStoreLease` is an internal primitive, not a
 new owner API. Its Linux/macOS implementation uses the existing `fs2` dependency to
@@ -243,7 +390,7 @@ inventory and remaining authority gates are:
    replacement and reject legacy, unknown and unqualified ownership. Add full
    constructor failure/cancellation, admitted-effect, real process-loss, stale
    generation and child-custody integration fixtures before enabling recovery.
-   This is still pending: an alternate empty registry has no historical-owner
+   General operating-owner recovery is still pending: an alternate empty registry has no historical-owner
    evidence. A free native lock after process loss is never sufficient to infer
    whether an old owner left a surviving external writer. No PID-based or
    lock-only registry replacement has been added.
@@ -269,12 +416,31 @@ qualification. macOS native
 behavior, Windows implementation, full shared-store identity and full-owner
 process-loss recovery remain pending.
 
-## Reserved paths and integration dependencies
+### Passive consumer retention follow-up
 
-This slice owns `pumas-core/src/discovery/`, `src/registry/library_registry.rs`,
-`src/ipc/{local_client,protocol}.rs`, `src/api/{builder,state}.rs`, `src/lib.rs`,
-`examples/local_discovery.rs`, and this plan. `src/api/hf.rs` has one test fixture field.
-No inference gateway, HTTP server, contract exports, dependency manifests/locks,
-packaging scripts, release assets or generated reports are changed. Test logs live
-outside Git. The next HTTP slice needs narrow coordination on RPC server/startup
-files and the assigned shared build/protocol descriptor.
+[`local-owner-retention.md`](../contracts/local-owner-retention.md) defines an
+opaque generation-bound passive guard using existing external-service tasks and
+physical lifetime shares. Mandatory-fenced HTTP streaming and a read-only CLI
+holder make it usable by external consumers. Exact row release waits for guards;
+operator HTTP shutdown revokes bodies before core drain. Availability after
+shutdown, external-effect cessation and crash/exec transfer are not promised.
+The optional RPC-only schema uses the existing build descriptor and distribution
+projection. Native process tests and controlled
+fixtures qualify different behavior; neither establishes runtime model readiness
+or a release qualification.
+
+## Explicit startup and distribution projection
+
+The follow-on explicit selected-root reservation is documented in
+[`local-start-authority.md`](../contracts/local-start-authority.md). It transfers
+the existing held native lease and exact pending claim into the current builder,
+and adds a Linux CLI acknowledgment for owned/borrowed HTTP access. The
+[inference-built control-plane bootstrap](../contracts/inference-enabled-bootstrap.md)
+uses the same authority and acknowledgment without loading a model or native SDK.
+This closes a bounded typed start-admission gap; automatic historical
+bootstrap and full operating dead-owner recovery remain pending. Explicit qualified
+pending-reservation and existing-index CatalogQuery recovery are the bounded slices above. Passive consumer retention
+cannot transfer across processes. The existing
+`scripts/release/headless_inference_build.py` generator excludes the three RPC-only
+HTTP schemas from the core descriptor, with unrelated schemas retained.
+The actual RPC descriptor remains complete. Desktop/schema exporters are unchanged.

@@ -214,12 +214,12 @@ fn retained_admission_fixture(root: &Path) -> RetainedTransfer {
         files: vec![],
     };
     RetainedTransfer {
-        entries: vec![S3ManifestEntry {
+        entries: ImportSelection::Versioned(vec![S3ManifestEntry {
             source_key: request.key.clone(),
             version: request.version_id.clone(),
             logical_path: request.filename.clone(),
             expected_sha256: digest,
-        }],
+        }]),
         request,
         reservation,
         record,

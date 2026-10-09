@@ -54,6 +54,8 @@ const GATEWAY_PROXY_TIMEOUT: Duration = Duration::from_secs(120);
 const PROVIDER_HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(feature = "inference-plugins")]
 const ONNX_MAX_CONCURRENT_OPERATIONS: usize = 4;
+#[cfg(feature = "inference-plugins")]
+const ONNX_SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 
 /// A validated desktop RPC bind host.
 ///
@@ -121,7 +123,7 @@ pub struct AppState {
     pub(crate) shutdown_request: ShutdownRequest,
     pub(crate) catalog_projection: CatalogProjection,
     /// Core API (model library, system utilities)
-    pub api: PumasApi,
+    pub api: Arc<PumasApi>,
     /// Version managers for compiled-in inference plugins.
     #[cfg(feature = "inference-plugins")]
     pub version_managers: Arc<RwLock<HashMap<String, VersionManager>>>,
@@ -265,12 +267,29 @@ async fn drain_server_owners(
     }
 }
 
+async fn drain_runtime_owners(
+    profiles: impl Future<Output = anyhow::Result<()>>,
+    onnx: impl Future<Output = anyhow::Result<()>>,
+) -> anyhow::Result<()> {
+    let (profiles, onnx) = tokio::join!(profiles, onnx);
+    let errors = [profiles.err(), onnx.err()]
+        .into_iter()
+        .flatten()
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(errors.join("; ")))
+    }
+}
+
 /// Start the JSON-RPC HTTP server.
 ///
 /// Returns an owned handle that exposes the actual bound address and server task.
 #[allow(clippy::too_many_arguments)]
 pub async fn start_server(
-    api: PumasApi,
+    api: impl Into<Arc<PumasApi>>,
     #[cfg(feature = "inference-plugins")] version_managers: HashMap<String, VersionManager>,
     #[cfg(feature = "inference-plugins")] size_calculator: SizeCalculator,
     #[cfg(feature = "inference-plugins")] plugin_loader: PluginLoader,
@@ -278,6 +297,49 @@ pub async fn start_server(
     port: u16,
     http_policy: crate::http_transport::HttpShutdownPolicy,
 ) -> anyhow::Result<ServerHandle> {
+    start_server_with_startup(
+        api.into(),
+        #[cfg(feature = "inference-plugins")]
+        version_managers,
+        #[cfg(feature = "inference-plugins")]
+        size_calculator,
+        #[cfg(feature = "inference-plugins")]
+        plugin_loader,
+        ServerStartup {
+            host,
+            port,
+            http_policy,
+            custody: None,
+            stop: ShutdownRequest::default(),
+        },
+    )
+    .await
+}
+
+/// Transfer constructor custody to this same HTTP supervisor, with the process's
+/// continuously latched stop request. Neither field grants model readiness.
+pub(crate) struct ServerStartup {
+    pub host: LoopbackHost,
+    pub port: u16,
+    pub http_policy: crate::http_transport::HttpShutdownPolicy,
+    pub custody: Option<pumas_library::discovery::LocalStartupCustody>,
+    pub stop: ShutdownRequest,
+}
+
+pub(crate) async fn start_server_with_startup(
+    api: Arc<PumasApi>,
+    #[cfg(feature = "inference-plugins")] version_managers: HashMap<String, VersionManager>,
+    #[cfg(feature = "inference-plugins")] size_calculator: SizeCalculator,
+    #[cfg(feature = "inference-plugins")] plugin_loader: PluginLoader,
+    startup: ServerStartup,
+) -> anyhow::Result<ServerHandle> {
+    let ServerStartup {
+        host,
+        port,
+        http_policy,
+        custody,
+        stop,
+    } = startup;
     #[cfg(feature = "inference-plugins")]
     let gateway_http_client = build_gateway_http_client()?;
     #[cfg(feature = "inference-plugins")]
@@ -304,9 +366,10 @@ pub async fn start_server(
         pumas_library::discovery::LoopbackHttpEndpoint::parse(format!("http://{actual_addr}"))?,
         crate::discovery::build_info(),
     )?;
-    let route_identity = crate::discovery::HttpRouteIdentity::from(advertisement.description());
+    let route_identity =
+        crate::discovery::HttpRouteIdentity::try_from(advertisement.description())?;
     let (catalog_projection, catalog_worker) = CatalogProjection::start(MAX_IN_FLIGHT_RPC_REQUESTS);
-    let shutdown_request = ShutdownRequest::default();
+    let shutdown_request = stop;
     let shutdown_signal = shutdown_request.signal.clone();
     #[cfg(feature = "s3")]
     let (s3_imports, s3_jobs) = crate::s3_imports::S3Imports::channel();
@@ -345,7 +408,15 @@ pub async fn start_server(
             is_allowed_origin(origin)
         }))
         .allow_methods([Method::GET, Method::POST])
-        .allow_headers([header::CONTENT_TYPE]);
+        .allow_headers([
+            header::CONTENT_TYPE,
+            axum::http::HeaderName::from_static(
+                pumas_library::discovery::HTTP_INSTANCE_GENERATION_HEADER,
+            ),
+            axum::http::HeaderName::from_static(
+                pumas_library::discovery::HTTP_SERVICE_GENERATION_HEADER,
+            ),
+        ]);
 
     // Build the router
     let app = Router::new()
@@ -354,7 +425,14 @@ pub async fn start_server(
             pumas_library::discovery::HTTP_DISCOVERY_PATH,
             get(crate::discovery::handle_description),
         )
-        .layer(axum::Extension(route_identity))
+        .route(
+            pumas_library::discovery::HTTP_OWNER_RETENTION_PATH,
+            get(crate::owner_retention::handle),
+        )
+        .layer(axum::Extension(
+            crate::owner_retention::RetentionAdmission::default(),
+        ))
+        .layer(axum::Extension(route_identity.clone()))
         .route(
             "/events/model-library-updates",
             get(handle_model_library_update_events),
@@ -390,11 +468,15 @@ pub async fn start_server(
     let app = app
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))
-        .layer(cors)
+        .layer(axum::middleware::from_fn_with_state(
+            (state.clone(), route_identity),
+            crate::discovery::enforce_generation_fence,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             shutdown_request.clone(),
             reject_during_shutdown,
         ))
+        .layer(cors)
         .layer(middleware::from_fn(enforce_local_request))
         .with_state(state.clone());
 
@@ -426,12 +508,19 @@ pub async fn start_server(
         // guess or externally supplied port is used.
         let first_poll =
             futures::future::poll_fn(|cx| std::task::Poll::Ready(serving.as_mut().poll(cx))).await;
-        let startup = match &first_poll {
-            std::task::Poll::Ready(_) => Err("HTTP listener exited before readiness".to_owned()),
-            std::task::Poll::Pending if shutdown_request.is_requested() => {
-                Err("HTTP startup cancelled".to_owned())
+        // The supervisor now owns AppState and actual listener effects. Settle
+        // initializer handoff BEFORE publication or any core drain wait, which
+        // itself observes this receipt. Pre-supervisor errors abandon it instead.
+        let handoff = custody.map(|receipt| receipt.complete(Ok(()))).transpose();
+        let startup = match (&first_poll, handoff) {
+            (_, Err(error)) => Err(format!("initializer custody handoff failed: {error}")),
+            (_, _) if shutdown_request.is_requested() => Err("HTTP startup cancelled".to_owned()),
+            (std::task::Poll::Ready(_), _) => {
+                Err("HTTP listener exited before readiness".to_owned())
             }
-            std::task::Poll::Pending => advertisement.publish().map_err(|error| error.to_string()),
+            (std::task::Poll::Pending, _) => {
+                advertisement.publish().map_err(|error| error.to_string())
+            }
         };
         if startup.is_err() {
             shutdown_request.request();
@@ -511,16 +600,27 @@ pub async fn start_server(
                 state.api.shutdown_conversion_setup(),
                 state.api.shutdown_conversions(),
             ),
-            state.api.stop_all_managed_runtime_profiles(),
+            drain_runtime_owners(
+                async {
+                    let summary = state.api.stop_all_managed_runtime_profiles().await?;
+                    if summary.errors.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!(summary.errors.join("; ")))
+                    }
+                },
+                async {
+                    #[cfg(feature = "inference-plugins")]
+                    state
+                        .onnx_session_manager
+                        .shutdown(ONNX_SHUTDOWN_GRACE)
+                        .await
+                        .map_err(|error| anyhow::anyhow!("ONNX shutdown: {error}"))?;
+                    Ok(())
+                },
+            ),
             installation_cleanup,
         );
-        let runtimes = runtimes.map_err(anyhow::Error::from).and_then(|summary| {
-            if summary.errors.is_empty() {
-                Ok(())
-            } else {
-                Err(anyhow::anyhow!(summary.errors.join("; ")))
-            }
-        });
         // Consumer owners must finish draining before the shared supervisor
         // closes admission. Always observe its settlement, including failures.
         let acquisition_cleanup = state.api.shutdown_acquisition().await;
@@ -2616,6 +2716,120 @@ mod http_discovery_tests {
             crate::http_transport::HttpShutdownPolicy::default(),
         )
         .await
+    }
+
+    async fn start_custodied(
+        api: Arc<PumasApi>,
+        root: &std::path::Path,
+        port: u16,
+        stop: ShutdownRequest,
+    ) -> anyhow::Result<ServerHandle> {
+        #[cfg(not(feature = "inference-plugins"))]
+        let _ = root;
+        let custody = api.prepare_local_startup_custody()?;
+        start_server_with_startup(
+            api,
+            #[cfg(feature = "inference-plugins")]
+            HashMap::new(),
+            #[cfg(feature = "inference-plugins")]
+            SizeCalculator::new_with_cache(root.join("launcher-data/cache")).await,
+            #[cfg(feature = "inference-plugins")]
+            PluginLoader::new_async(root.join("launcher-data/plugins")).await?,
+            ServerStartup {
+                host: LoopbackHost::parse("127.0.0.1")?,
+                port,
+                http_policy: crate::http_transport::HttpShutdownPolicy::default(),
+                custody: Some(custody),
+                stop,
+            },
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn latched_stop_before_publication_settles_constructor_without_deadlock() {
+        let (_temp, registry, root, api) = api_fixture().await;
+        let api = Arc::new(api);
+        let stop = ShutdownRequest::default();
+        stop.request();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            start_custodied(api.clone(), &root, 0, stop),
+        )
+        .await
+        .unwrap();
+        assert!(result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("startup cancelled"));
+        assert!(registry.list_http_services().unwrap().is_empty());
+        assert!(registry.list_instances().unwrap().is_empty());
+        api.shutdown_instance().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn occupied_port_before_handoff_retains_failed_initializer_custody() {
+        let (_temp, registry, root, api) = api_fixture().await;
+        let api = Arc::new(api);
+        let generation = api.instance_description().unwrap().generation;
+        let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        assert!(start_custodied(
+            api.clone(),
+            &root,
+            occupied.local_addr().unwrap().port(),
+            ShutdownRequest::default()
+        )
+        .await
+        .is_err());
+        assert!(api.shutdown_instance().await.is_err());
+        assert!(registry.list_http_services().unwrap().is_empty());
+        assert_eq!(registry.list_instances().unwrap()[0].started_at, generation);
+    }
+
+    #[cfg(feature = "inference-plugins")]
+    #[tokio::test]
+    async fn failed_profile_drain_still_closes_actual_empty_onnx_manager() {
+        let manager = OnnxSessionManager::new(OnnxEmbeddingBackendKind::real(), 1).unwrap();
+        let error = drain_runtime_owners(
+            async { Err(anyhow::anyhow!("profile drain sentinel")) },
+            async {
+                manager
+                    .shutdown(Duration::from_millis(50))
+                    .await
+                    .map(|_| ())
+                    .map_err(anyhow::Error::from)
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("profile drain sentinel"));
+        assert!(manager
+            .list()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("closed"));
+    }
+
+    #[cfg(all(feature = "inference-plugins", feature = "test-support"))]
+    #[tokio::test]
+    async fn controlled_onnx_permit_timeout_is_a_failed_runtime_cessation() {
+        let manager = OnnxSessionManager::new(OnnxEmbeddingBackendKind::real(), 1).unwrap();
+        let permit = manager.acquire_all_operation_permits_for_test().await;
+        let error = drain_runtime_owners(async { Ok(()) }, async {
+            manager
+                .shutdown(Duration::from_millis(10))
+                .await
+                .map(|_| ())
+                .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("shutdown timed out"));
+        assert!(manager.list().await.is_err());
+        drop(permit);
+        manager.shutdown(Duration::from_millis(50)).await.unwrap();
     }
     #[tokio::test]
     async fn real_http_advertisement_borrowing_and_ordered_shutdown() {

@@ -12,6 +12,88 @@ pub(super) fn recovery_required(message: &str) -> PumasError {
 }
 
 impl ModelImporter {
+    fn validate_acquired_model_intent(
+        acquired: &AcquiredArtifactUse,
+        receipt: &AcquisitionConsumerReceipt,
+        spec: &ModelImportSpec,
+    ) -> Result<()> {
+        let record = acquired.record();
+        if record.files.is_empty()
+            || record.files.len() != record.manifest.files().len()
+            || !record
+                .manifest
+                .files()
+                .iter()
+                .any(|file| file.logical_path() == spec.path)
+            || record
+                .manifest
+                .files()
+                .iter()
+                .any(|file| file.expected_sha256().is_none())
+            || receipt.payload != serde_json::to_value(spec)?
+        {
+            return Err(PumasError::Validation {
+                field: "import.acquired".into(),
+                message: "Acquired model publication requires the exact selected primary, a fully digest-verified set and its receipt-bound import specification".into(),
+            });
+        }
+        Self::validate_acquired_payload_paths(
+            &record
+                .files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+        )?;
+        Ok(())
+    }
+
+    /// Qualify and atomically publish a supported safe model representation from
+    /// held acquisition descriptors. `spec.path` identifies the selected primary
+    /// weight file; complete package layout is preserved. Transfer success alone
+    /// grants neither model qualification nor permission to execute custom code.
+    /// Uses the existing issued receipt, copied-byte verifier and publisher.
+    pub async fn import_acquired_model(
+        &self,
+        acquired: &AcquiredArtifactUse,
+        receipt: &AcquisitionConsumerReceipt,
+        spec: &ModelImportSpec,
+    ) -> Result<ModelImportResult> {
+        Self::validate_acquired_model_intent(acquired, receipt, spec)?;
+        if !matches!(
+            acquired.record().phase,
+            crate::acquisition::AcquisitionPhase::Using { .. }
+        ) {
+            return Err(recovery_required(
+                "An adopted model operation cannot be imported again",
+            ));
+        }
+        acquired.require_issued_receipt(receipt).await?;
+        let result = self.import_acquired_owned(acquired, receipt, spec).await?;
+        if result.success {
+            Ok(result)
+        } else {
+            Err(PumasError::ImportFailed {
+                message: result
+                    .error
+                    .unwrap_or_else(|| "Acquired model import was refused".into()),
+            })
+        }
+    }
+
+    /// Read-only proof of the existing exact receipt-bound publication. Use as
+    /// the consumer reconciliation callback; this never replays import or transfer.
+    pub async fn reconcile_acquired_model(
+        &self,
+        acquired: &AcquiredArtifactUse,
+        receipt: &AcquisitionConsumerReceipt,
+        spec: &ModelImportSpec,
+        model_id: &str,
+    ) -> Result<ModelImportResult> {
+        Self::validate_acquired_model_intent(acquired, receipt, spec)?;
+        self.observe_acquired_output(acquired, receipt, spec, model_id)
+            .await
+    }
+
     fn validate_acquired_gguf_bundle_intent(
         acquired: &AcquiredArtifactUse,
         receipt: &AcquisitionConsumerReceipt,

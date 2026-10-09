@@ -68,6 +68,22 @@ impl PumasLocalClient {
             .await
     }
 
+    pub async fn catalog_query(
+        &self,
+        request: crate::CatalogQueryRequest,
+    ) -> Result<crate::CatalogQueryResponse> {
+        request.validate()?;
+        self.call_owner_method(
+            LocalIpcOperation::CatalogQuery,
+            serde_json::json!({"request":request}),
+        )
+        .await
+    }
+    pub async fn catalog_checkpoint(&self) -> Result<crate::CatalogOwnerCheckpoint> {
+        self.call_owner_method(LocalIpcOperation::CatalogCheckpoint, serde_json::json!({}))
+            .await
+    }
+
     pub fn instance(&self) -> &InstanceEntry {
         &self.instance
     }

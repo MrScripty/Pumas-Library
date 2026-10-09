@@ -33,6 +33,8 @@ const MAX_SELECTOR_LIMIT: u32 = 1_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LocalIpcOperation {
     DescribeInstance,
+    CatalogQuery,
+    CatalogCheckpoint,
     ModelLibrarySelectorSnapshot,
     ResolveModelArtifactLoadTarget,
     ResolveModelPackageFacts,
@@ -53,6 +55,8 @@ impl LocalIpcOperation {
     pub(crate) fn from_wire_name(name: &str) -> Option<Self> {
         match name {
             "describe_instance" => Some(Self::DescribeInstance),
+            "catalog_query" => Some(Self::CatalogQuery),
+            "catalog_checkpoint" => Some(Self::CatalogCheckpoint),
             "model_library_selector_snapshot" => Some(Self::ModelLibrarySelectorSnapshot),
             "resolve_model_artifact_load_target" => Some(Self::ResolveModelArtifactLoadTarget),
             "resolve_model_package_facts" => Some(Self::ResolveModelPackageFacts),
@@ -80,6 +84,8 @@ impl LocalIpcOperation {
     pub(crate) fn wire_name(self) -> &'static str {
         match self {
             Self::DescribeInstance => "describe_instance",
+            Self::CatalogQuery => "catalog_query",
+            Self::CatalogCheckpoint => "catalog_checkpoint",
             Self::ModelLibrarySelectorSnapshot => "model_library_selector_snapshot",
             Self::ResolveModelArtifactLoadTarget => "resolve_model_artifact_load_target",
             Self::ResolveModelPackageFacts => "resolve_model_package_facts",
@@ -103,6 +109,10 @@ impl LocalIpcOperation {
 
     pub(crate) fn validate_outcome(self, value: Value) -> std::result::Result<Value, IpcError> {
         match self {
+            Self::CatalogQuery => validate_typed_outcome::<crate::CatalogQueryResponse>(value),
+            Self::CatalogCheckpoint => {
+                validate_typed_outcome::<crate::CatalogOwnerCheckpoint>(value)
+            }
             Self::DescribeInstance => {
                 validate_typed_outcome::<crate::discovery::InstanceDescription>(value)
             }
@@ -176,6 +186,13 @@ where
 
 /// A fully decoded command. Its credential is intentionally not `Debug`.
 pub(crate) enum LocalIpcCommand {
+    CatalogQuery {
+        request: crate::CatalogQueryRequest,
+        connection_token: String,
+    },
+    CatalogCheckpoint {
+        connection_token: String,
+    },
     DescribeInstance {
         connection_token: String,
     },
@@ -245,6 +262,8 @@ impl LocalIpcCommand {
         let object = exact_object(
             &params,
             match operation {
+                LocalIpcOperation::CatalogQuery => &["request", "connection_token"],
+                LocalIpcOperation::CatalogCheckpoint => &["connection_token"],
                 LocalIpcOperation::ModelLibrarySelectorSnapshot
                 | LocalIpcOperation::ResolveModelArtifactLoadTarget => {
                     &["request", "connection_token"]
@@ -272,6 +291,23 @@ impl LocalIpcCommand {
         let connection_token = required_bounded_string(object, "connection_token")?;
 
         match operation {
+            LocalIpcOperation::CatalogCheckpoint => {
+                Ok(Self::CatalogCheckpoint { connection_token })
+            }
+            LocalIpcOperation::CatalogQuery => {
+                let request: crate::CatalogQueryRequest = serde_json::from_value(
+                    object
+                        .get("request")
+                        .ok_or_else(IpcError::invalid_params)?
+                        .clone(),
+                )
+                .map_err(|_| IpcError::invalid_params())?;
+                request.validate().map_err(|_| IpcError::invalid_params())?;
+                Ok(Self::CatalogQuery {
+                    request,
+                    connection_token,
+                })
+            }
             LocalIpcOperation::DescribeInstance => Ok(Self::DescribeInstance { connection_token }),
             LocalIpcOperation::ModelLibrarySelectorSnapshot => {
                 let request_value = object.get("request").ok_or_else(IpcError::invalid_params)?;
@@ -380,6 +416,8 @@ impl LocalIpcCommand {
 
     pub(crate) fn operation(&self) -> LocalIpcOperation {
         match self {
+            Self::CatalogQuery { .. } => LocalIpcOperation::CatalogQuery,
+            Self::CatalogCheckpoint { .. } => LocalIpcOperation::CatalogCheckpoint,
             Self::DescribeInstance { .. } => LocalIpcOperation::DescribeInstance,
             Self::ModelLibrarySelectorSnapshot { .. } => {
                 LocalIpcOperation::ModelLibrarySelectorSnapshot
@@ -410,6 +448,13 @@ impl LocalIpcCommand {
 
     pub(crate) fn into_dispatch_params(self) -> Value {
         match self {
+            Self::CatalogQuery {
+                request,
+                connection_token,
+            } => serde_json::json!({"request":request,"connection_token":connection_token}),
+            Self::CatalogCheckpoint { connection_token } => {
+                serde_json::json!({"connection_token":connection_token})
+            }
             Self::DescribeInstance { connection_token } => {
                 serde_json::json!({"connection_token": connection_token})
             }

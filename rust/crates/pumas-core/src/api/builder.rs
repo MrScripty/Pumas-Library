@@ -35,11 +35,18 @@ use super::{
 /// ```
 pub struct PumasApiBuilder {
     launcher_root: PathBuf,
+    instance_profile: crate::InstanceProfile,
+    catalog_reservation: Option<(
+        registry::LibraryRegistry,
+        registry::PrimaryInstanceClaim,
+        crate::platform::store_lifetime::StoreLifetime,
+    )>,
     auto_create_dirs: bool,
     enable_hf_client: bool,
     enable_process_manager: bool,
     enable_connectivity_probe: bool,
     registry: Option<registry::LibraryRegistry>,
+    local_start_authority: Option<crate::discovery::LocalStartAuthority>,
     #[cfg(feature = "test-support")]
     hf_loopback_fixture: Option<model_library::test_support::HfLoopbackFixture>,
 }
@@ -211,14 +218,35 @@ impl PumasApiBuilder {
     pub fn new(launcher_root: impl Into<PathBuf>) -> Self {
         Self {
             launcher_root: launcher_root.into(),
+            instance_profile: crate::InstanceProfile::Full,
+            catalog_reservation: None,
             auto_create_dirs: false,
             enable_hf_client: true,
             enable_process_manager: cfg!(feature = "process-manager"),
             registry: None,
+            local_start_authority: None,
             enable_connectivity_probe: true,
             #[cfg(feature = "test-support")]
             hf_loopback_fixture: None,
         }
+    }
+
+    /// Select the explicit existing-index query-only profile. Optional client,
+    /// process/probe flags do not enable services in this profile. Directory/schema
+    /// creation is refused; an existing models.db and Linux native lease are required.
+    pub fn with_instance_profile(mut self, profile: crate::InstanceProfile) -> Self {
+        self.instance_profile = profile;
+        self
+    }
+    pub(crate) fn with_catalog_reservation(
+        mut self,
+        registry: registry::LibraryRegistry,
+        claim: registry::PrimaryInstanceClaim,
+        lifetime: crate::platform::store_lifetime::StoreLifetime,
+    ) -> Self {
+        self.instance_profile = crate::InstanceProfile::CatalogQuery;
+        self.catalog_reservation = Some((registry, claim, lifetime));
+        self
     }
 
     /// Use an explicit rendezvous registry (e.g. a host application's isolated registry).
@@ -226,6 +254,14 @@ impl PumasApiBuilder {
     /// An empty alternate registry is not historical-owner cessation evidence.
     pub fn with_registry(mut self, registry: registry::LibraryRegistry) -> Self {
         self.registry = Some(registry);
+        self
+    }
+
+    pub(crate) fn with_local_start_authority(
+        mut self,
+        authority: crate::discovery::LocalStartAuthority,
+    ) -> Self {
+        self.local_start_authority = Some(authority);
         self
     }
 
@@ -315,42 +351,95 @@ impl PumasApiBuilder {
 
     /// Build the PumasApi instance.
     pub async fn build(mut self) -> Result<PumasApi> {
-        self.launcher_root = crate::platform::paths::absolute_launcher_root(&self.launcher_root)?;
-        // Creating the root is the only pre-lease filesystem mutation. Do it
-        // synchronously so cancellation cannot detach a constructor worker.
-        if self.auto_create_dirs {
-            std::fs::create_dir_all(&self.launcher_root)
-                .map_err(|error| PumasError::io_with_path(error, &self.launcher_root))?;
+        if self.instance_profile == crate::InstanceProfile::CatalogQuery
+            && (self.auto_create_dirs || !cfg!(target_os = "linux"))
+        {
+            return Err(super::catalog::denied_full_operation());
         }
-        let store_lifetime =
-            crate::platform::store_lifetime::StoreLifetime::acquire(&self.launcher_root)?;
-        self.launcher_root = self
-            .launcher_root
-            .canonicalize()
-            .map_err(|error| PumasError::io_with_path(error, &self.launcher_root))?;
-
-        let registry = match self.registry.take() {
-            Some(registry) => registry,
-            None => registry::LibraryRegistry::open()?,
-        };
-        let library_name = self
-            .launcher_root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("pumas-library");
-        let claim = match registry.try_claim_instance(&self.launcher_root, std::process::id())? {
-            registry::InstanceClaimResult::Claimed(claim) => claim,
-            registry::InstanceClaimResult::Occupied(instance) => {
+        self.launcher_root = crate::platform::paths::absolute_launcher_root(&self.launcher_root)?;
+        let (store_lifetime, registry, claim) = if let Some((registry, claim, lifetime)) =
+            self.catalog_reservation.take()
+        {
+            lifetime.require_root(&self.launcher_root)?;
+            if !registry.matches_primary_claim(&claim)? {
+                return Err(super::catalog::denied_full_operation());
+            }
+            (lifetime, registry, claim)
+        } else if let Some(authority) = self.local_start_authority.take() {
+            let (root, registry, claim, lifetime) = authority.into_parts()?;
+            if self.launcher_root != root {
                 return Err(PumasError::InvalidParams {
+                    message: "local start authority root changed".into(),
+                });
+            }
+            lifetime.require_root(&root)?;
+            if claim.library_path != root {
+                return Err(PumasError::InvalidParams {
+                    message: "local start claim and selected root differ".into(),
+                });
+            }
+            if !registry.matches_primary_claim(&claim)? {
+                return Err(PumasError::InvalidParams {
+                    message: "local start authority claim changed".into(),
+                });
+            }
+            (lifetime, registry, claim)
+        } else {
+            // Creating the root is the only pre-lease filesystem mutation. Do it
+            // synchronously so cancellation cannot detach a constructor worker.
+            if self.auto_create_dirs {
+                std::fs::create_dir_all(&self.launcher_root)
+                    .map_err(|error| PumasError::io_with_path(error, &self.launcher_root))?;
+            }
+            let store_lifetime =
+                crate::platform::store_lifetime::StoreLifetime::acquire(&self.launcher_root)?;
+            self.launcher_root = self
+                .launcher_root
+                .canonicalize()
+                .map_err(|error| PumasError::io_with_path(error, &self.launcher_root))?;
+
+            let registry = match self.registry.take() {
+                Some(registry) => registry,
+                None => registry::LibraryRegistry::open()?,
+            };
+            let admission = if self.instance_profile == crate::InstanceProfile::CatalogQuery {
+                registry.try_claim_catalog_instance(&self.launcher_root, std::process::id())
+            } else {
+                registry.try_claim_instance(&self.launcher_root, std::process::id())
+            };
+            let claim = match admission? {
+                registry::InstanceClaimResult::Claimed(claim) => claim,
+                registry::InstanceClaimResult::Occupied(instance) => {
+                    return Err(PumasError::InvalidParams {
                     message: format!(
                         "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
                         self.launcher_root.display(),
                         instance.pid
                     ),
                 });
-            }
+                }
+            };
+            (store_lifetime, registry, claim)
         };
-        let _ = registry.register(&self.launcher_root, library_name)?;
+        let library_name = self
+            .launcher_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("pumas-library");
+        if self.instance_profile == crate::InstanceProfile::CatalogQuery {
+            registry.register_catalog_library(&self.launcher_root)?;
+        } else {
+            let _ = registry.register(&self.launcher_root, library_name)?;
+        }
+        if self.instance_profile == crate::InstanceProfile::CatalogQuery {
+            return super::catalog::CatalogState::build(
+                self.launcher_root,
+                registry,
+                claim,
+                store_lifetime,
+            )
+            .await;
+        }
         if self.auto_create_dirs {
             Self::create_directory_structure(&self.launcher_root, &store_lifetime).await?;
         }

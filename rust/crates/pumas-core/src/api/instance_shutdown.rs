@@ -104,6 +104,12 @@ impl PumasApi {
     /// continues until this API and all escaped lifetime-retaining handles/effects
     /// are dropped. This receipt does not authorize crash recovery.
     pub async fn shutdown_instance(&self) -> Result<()> {
+        if let crate::ApiInner::Catalog(state) = &self.inner {
+            return state
+                .begin_shutdown()
+                .await
+                .map_err(|e| PumasError::Other((*e).clone()));
+        }
         begin(self.primary())
             .await
             .map_err(|error| PumasError::Other((*error).clone()))

@@ -10,6 +10,28 @@ pub const HTTP_ADVERTISEMENT_SCHEMA_VERSION: u32 = 1;
 pub const LOCAL_HTTP_PROTOCOL: &str = "pumas.local-http";
 pub const LOCAL_HTTP_VERSION: u32 = 1;
 pub const HTTP_DISCOVERY_PATH: &str = "/.well-known/pumas";
+pub const HTTP_ADMISSION_FENCE_SCHEMA_VERSION: u32 = 1;
+pub const HTTP_INSTANCE_GENERATION_HEADER: &str = "pumas-instance-generation";
+pub const HTTP_SERVICE_GENERATION_HEADER: &str = "pumas-service-generation";
+pub const HTTP_OWNER_RETENTION_SCHEMA_VERSION: u32 = 1;
+pub const HTTP_OWNER_RETENTION_PATH: &str = "/.well-known/pumas/retention";
+
+/// A request precondition obtained from an authenticated HTTP description.
+/// This is neither authentication nor ownership/startup authority. Both header
+/// values must be sent together; a rejected request has not entered its handler.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HttpAdmissionFence {
+    pub instance_generation: String,
+    pub service_generation: String,
+}
+
+impl HttpAdmissionFence {
+    pub fn matches(&self, description: &HttpServiceDescription) -> bool {
+        self.instance_generation == description.instance.generation
+            && self.service_generation == description.service_generation
+    }
+}
 
 /// Numeric loopback HTTP only. No redirects, credentials, proxy hostnames,
 /// query strings or remote URL interpretation belongs to local rendezvous.
@@ -64,6 +86,22 @@ pub struct HttpServiceDescription {
     pub endpoint: LoopbackHttpEndpoint,
     /// HTTP producer identity; the instance separately describes its core build.
     pub build_info: PumasBuildInfo,
+}
+
+impl HttpServiceDescription {
+    /// Preserve the exact generations; do not interpret PIDs or infer safe start.
+    pub fn admission_fence(&self) -> Result<HttpAdmissionFence> {
+        if !self.build_info.supports_schema(
+            "pumas.http-admission-fence",
+            HTTP_ADMISSION_FENCE_SCHEMA_VERSION,
+        ) {
+            return Err(invalid("HTTP producer does not support admission fencing"));
+        }
+        Ok(HttpAdmissionFence {
+            instance_generation: self.instance.generation.clone(),
+            service_generation: self.service_generation.clone(),
+        })
+    }
 }
 
 /// Prepared registration is invisible until the listener/router owner publishes
@@ -141,6 +179,9 @@ impl Drop for HttpServiceRegistration {
 
 impl PumasApi {
     pub fn instance_description(&self) -> Result<InstanceDescription> {
+        if let crate::ApiInner::Catalog(state) = &self.inner {
+            return state.description();
+        }
         let primary = self.primary();
         if primary.instance_shutdown.get().is_some() {
             return Err(invalid("local owner is closing"));
@@ -168,6 +209,7 @@ impl PumasApi {
         endpoint: LoopbackHttpEndpoint,
         build_info: PumasBuildInfo,
     ) -> Result<HttpServiceRegistration> {
+        self.try_primary()?;
         if !build_info.supports_schema(
             "pumas.http-advertisement",
             HTTP_ADVERTISEMENT_SCHEMA_VERSION,
@@ -207,6 +249,10 @@ impl PumasApi {
 
     /// Read-only HTTP handler observation. Closing/changed owners are unavailable.
     pub fn advertised_http_service(&self) -> Result<Option<HttpServiceDescription>> {
+        if let crate::ApiInner::Catalog(state) = &self.inner {
+            state.description()?;
+            return Ok(None);
+        }
         self.instance_description()?;
         let primary = self.primary();
         primary

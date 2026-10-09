@@ -657,6 +657,22 @@ mod tests {
         )
     }
 
+    fn response_with_etags(status: &str, etags: &[&str]) -> String {
+        let headers = etags
+            .iter()
+            .map(|etag| format!("ETag: {etag}\r\n"))
+            .collect::<String>();
+        let (range, body) = if status == "206 Partial Content" {
+            ("Content-Range: bytes 3-5/6\r\n", "def")
+        } else {
+            ("", "abcdef")
+        };
+        format!(
+            "HTTP/1.1 {status}\r\n{headers}{range}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
     #[derive(Default)]
     struct TestSink {
         bytes: Vec<u8>,
@@ -1458,6 +1474,130 @@ mod tests {
                     .to_ascii_lowercase()
                     .contains("if-match: \"fixture-v1\""));
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn duplicate_etags_allow_complete_fresh_body_without_resume_validator() {
+        for etags in [
+            ["\"fixture-v1\"", "\"changed-v2\""],
+            ["\"changed-v2\"", "\"fixture-v1\""],
+            ["\"fixture-v1\"", "\"fixture-v1\""],
+        ] {
+            let (url, server) = serve_once(response_with_etags("200 OK", &etags)).await;
+            let opened = open_http_artifact(
+                &reqwest::Client::new(),
+                url.as_str(),
+                &manifest(weak_file(6), RevisionStrength::Weak),
+                0,
+                0,
+                None,
+            )
+            .await
+            .unwrap();
+            assert_eq!(opened.strong_etag, None, "ambiguous validators: {etags:?}");
+            assert!(!opened.resumed);
+            assert_eq!(opened.total_size, Some(6));
+            let mut sink = TestSink::default();
+            let mut host = TestHost {
+                pause: false,
+                cancel: false,
+                progress: Vec::new(),
+            };
+            assert_eq!(
+                stream_http_artifact(opened, 0, &mut sink, &mut host)
+                    .await
+                    .unwrap(),
+                HttpBodyOutcome::Complete { downloaded: 6 }
+            );
+            assert_eq!(sink.bytes, b"abcdef");
+            assert!(sink.flushed);
+            assert_eq!(host.progress.last(), Some(&6));
+            let request = server.await.unwrap().to_ascii_lowercase();
+            assert!(!request.contains("\r\nrange:"));
+            assert!(!request.contains("\r\nif-match:"));
+        }
+    }
+
+    #[tokio::test]
+    async fn duplicate_etags_refuse_full_and_partial_continuation_before_body_admission() {
+        for status in ["200 OK", "206 Partial Content"] {
+            for etags in [
+                ["\"fixture-v1\"", "\"changed-v2\""],
+                ["\"changed-v2\"", "\"fixture-v1\""],
+                ["\"fixture-v1\"", "\"fixture-v1\""],
+            ] {
+                let (url, server) = serve_once(response_with_etags(status, &etags)).await;
+                // No checked response is returned, so the acquisition owner's
+                // Ok(response) branch cannot open or write a partial-file sink.
+                let error = open_http_artifact(
+                    &reqwest::Client::new(),
+                    url.as_str(),
+                    &manifest(selected_file(6), RevisionStrength::Immutable),
+                    0,
+                    3,
+                    None,
+                )
+                .await
+                .unwrap_err();
+                assert!(matches!(
+                    error,
+                    PumasError::Validation { field, message }
+                        if field == "artifact.http.response"
+                            && message == "HTTP continuation representation or resource changed"
+                ));
+                let request = server.await.unwrap().to_ascii_lowercase();
+                assert!(request.contains("\r\nrange: bytes=3-\r\n"));
+                assert!(request.contains("\r\nif-match: \"fixture-v1\"\r\n"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn single_strong_etag_preserves_fresh_and_continuation_admission() {
+        for (status, offset) in [("200 OK", 0), ("200 OK", 3), ("206 Partial Content", 3)] {
+            let (url, server) = serve_once(response_with_etags(status, &["\"fixture-v1\""])).await;
+            let opened = open_http_artifact(
+                &reqwest::Client::new(),
+                url.as_str(),
+                &manifest(selected_file(6), RevisionStrength::Immutable),
+                0,
+                offset,
+                None,
+            )
+            .await
+            .unwrap();
+            assert_eq!(opened.strong_etag.as_deref(), Some("\"fixture-v1\""));
+            assert_eq!(opened.resumed, status == "206 Partial Content");
+            assert_eq!(opened.total_size, Some(6));
+            let mut sink = TestSink::default();
+            let mut host = TestHost {
+                pause: false,
+                cancel: false,
+                progress: Vec::new(),
+            };
+            assert_eq!(
+                stream_http_artifact(opened, offset, &mut sink, &mut host)
+                    .await
+                    .unwrap(),
+                HttpBodyOutcome::Complete { downloaded: 6 }
+            );
+            assert_eq!(
+                sink.bytes,
+                if offset > 0 && status == "206 Partial Content" {
+                    b"def".as_slice()
+                } else {
+                    b"abcdef".as_slice()
+                }
+            );
+            assert!(sink.flushed);
+            assert_eq!(host.progress.last(), Some(&6));
+            let request = server.await.unwrap().to_ascii_lowercase();
+            assert_eq!(request.contains("\r\nrange: bytes=3-\r\n"), offset > 0);
+            assert_eq!(
+                request.contains("\r\nif-match: \"fixture-v1\"\r\n"),
+                offset > 0
+            );
         }
     }
 

@@ -440,6 +440,9 @@ pub(crate) enum RpcCommand {
         recovery_token: DownloadRecoveryToken,
     },
     GetModels,
+    LookupModel {
+        model_id: String,
+    },
     GetHfDownloadDetails {
         repo_id: String,
         quants: Vec<String>,
@@ -596,6 +599,7 @@ impl RpcCommand {
             Self::ListModelDownloads => "list_model_downloads",
             Self::ResumePartialDownload { .. } => "resume_partial_download",
             Self::GetModels => "get_models",
+            Self::LookupModel { .. } => "lookup_model",
             Self::SearchCatalog { .. } => "search_models_fts",
             Self::GetHfDownloadDetails { .. } => "get_hf_download_details",
             Self::UpdateInferenceSettings { .. } => "update_inference_settings",
@@ -730,6 +734,7 @@ pub(crate) enum RpcOutcome {
     DownloadList(Box<DownloadListOutcome>),
     PartialDownload(Box<PartialDownloadOutcome>),
     Models(Box<ModelsOutcome>),
+    ModelLookup(ModelLookupOutcome),
     CatalogSearch(Box<CatalogSearchOutcome>),
     HfDownloadDetails(Box<HfDownloadDetailsOutcome>),
     InferenceSettings(Box<InferenceSettingsOutcome>),
@@ -854,6 +859,7 @@ impl RpcOutcome {
             Self::DownloadList(value) => serde_json::to_value(value),
             Self::PartialDownload(value) => serde_json::to_value(value),
             Self::Models(value) => serde_json::to_value(value),
+            Self::ModelLookup(value) => serde_json::to_value(value),
             Self::CatalogSearch(value) => serde_json::to_value(value),
             Self::HfDownloadDetails(value) => serde_json::to_value(value),
             Self::InferenceSettings(value) => serde_json::to_value(value),
@@ -1419,11 +1425,18 @@ pub(crate) enum DownloadStatusOutcome {
 }
 
 impl DownloadStatusOutcome {
+    #[cfg(any(feature = "export-contract", test))]
     pub(crate) fn new(progress: Option<ModelDownloadProgress>) -> Result<Self, PumasError> {
+        Self::new_diagnosed(progress).map_err(DownloadProgressFailure::into_domain)
+    }
+
+    pub(crate) fn new_diagnosed(
+        progress: Option<ModelDownloadProgress>,
+    ) -> Result<Self, DownloadProgressFailure> {
         Ok(match progress {
             Some(progress) => Self::Found(Box::new(DownloadStatusFoundOutcome {
                 success: true,
-                progress: DownloadProgressOutcome::try_from(progress)?,
+                progress: DownloadProgressOutcome::try_diagnosed(progress)?,
             })),
             None => Self::Missing(DownloadStatusMissingOutcome {
                 success: false,
@@ -1471,16 +1484,36 @@ struct DownloadProgressOutcome {
     error: Option<&'static str>,
 }
 
-impl TryFrom<ModelDownloadProgress> for DownloadProgressOutcome {
-    type Error = PumasError;
+/// Private, closed diagnostics; no domain values or messages reach logs or wire.
+pub(crate) enum DownloadProgressFailure {
+    LibraryModelId,
+    NumericEvidence,
+}
 
-    fn try_from(progress: ModelDownloadProgress) -> Result<Self, Self::Error> {
+impl DownloadProgressFailure {
+    pub(crate) const fn category(&self) -> &'static str {
+        match self {
+            Self::LibraryModelId => "library_model_id",
+            Self::NumericEvidence => "numeric_evidence",
+        }
+    }
+
+    pub(crate) fn into_domain(self) -> PumasError {
+        invalid_domain_outcome(match self {
+            Self::LibraryModelId => "download library model ID",
+            Self::NumericEvidence => "download progress numeric evidence",
+        })
+    }
+}
+
+impl DownloadProgressOutcome {
+    fn try_diagnosed(progress: ModelDownloadProgress) -> Result<Self, DownloadProgressFailure> {
         if progress
             .library_model_id
             .as_deref()
             .is_some_and(|model_id| DownloadRecoveryModelId::parse(model_id).is_none())
         {
-            return Err(invalid_domain_outcome("download library model ID"));
+            return Err(DownloadProgressFailure::LibraryModelId);
         }
         if [progress.downloaded_bytes, progress.total_bytes]
             .into_iter()
@@ -1498,7 +1531,7 @@ impl TryFrom<ModelDownloadProgress> for DownloadProgressOutcome {
             .flatten()
             .any(|value| !value.is_finite() || value < 0.0)
         {
-            return Err(invalid_domain_outcome("download progress numeric evidence"));
+            return Err(DownloadProgressFailure::NumericEvidence);
         }
         Ok(Self {
             download_id: progress.download_id,
@@ -1521,6 +1554,14 @@ impl TryFrom<ModelDownloadProgress> for DownloadProgressOutcome {
                 .error
                 .map(|_| "The model download did not complete successfully."),
         })
+    }
+}
+
+impl TryFrom<ModelDownloadProgress> for DownloadProgressOutcome {
+    type Error = PumasError;
+
+    fn try_from(progress: ModelDownloadProgress) -> Result<Self, Self::Error> {
+        Self::try_diagnosed(progress).map_err(DownloadProgressFailure::into_domain)
     }
 }
 
@@ -1579,6 +1620,51 @@ impl DownloadListOutcome {
                 .map(DownloadProgressOutcome::try_from)
                 .collect::<Result<_, _>>()?,
         })
+    }
+}
+
+/// Additive Full-profile lookup. Migration is only an observation from this read.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct ModelLookupParams {
+    model_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum ModelLookupResolutionWire {
+    Found,
+    Reclassified { replacement_model_id: String },
+    Missing,
+}
+
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct ModelLookupOutcome {
+    contract_version: u32,
+    requested_model_id: String,
+    resolution: ModelLookupResolutionWire,
+}
+
+impl From<pumas_library::models::ModelLookupReport> for ModelLookupOutcome {
+    fn from(report: pumas_library::models::ModelLookupReport) -> Self {
+        use pumas_library::models::ModelLookupResolution;
+        Self {
+            contract_version: report.contract_version,
+            requested_model_id: report.requested_model_id,
+            resolution: match report.resolution {
+                ModelLookupResolution::Found => ModelLookupResolutionWire::Found,
+                ModelLookupResolution::Missing => ModelLookupResolutionWire::Missing,
+                ModelLookupResolution::Reclassified {
+                    replacement_model_id,
+                } => ModelLookupResolutionWire::Reclassified {
+                    replacement_model_id,
+                },
+            },
+        }
     }
 }
 
@@ -6496,6 +6582,10 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         }
         #[cfg(not(feature = "inference-plugins"))]
         "launch_ollama" | "launch_torch" | "switch_version" => Err(PublicError::method_not_found()),
+        "lookup_model" => parse_params::<ModelLookupParams>(params).and_then(|params| {
+            validate_lookup_model_id(params.model_id)
+                .map(|model_id| RpcCommand::LookupModel { model_id })
+        }),
         "get_models" => empty().map(|()| RpcCommand::GetModels),
         #[cfg(feature = "inference-plugins")]
         "check_version_dependencies" => {
@@ -6813,6 +6903,23 @@ where
     serde_json::from_value(value).map_err(|_| PublicError::invalid_params())
 }
 
+fn validate_lookup_model_id(value: String) -> Result<String, PublicError> {
+    let bytes = value.as_bytes();
+    if value.len() > MAX_IDENTIFIER_BYTES
+        || value.contains('\\')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        || value.split('/').any(|part| {
+            part.is_empty()
+                || part == "."
+                || part == ".."
+                || part.chars().any(|ch| ch.is_whitespace() || ch.is_control())
+        })
+    {
+        return Err(PublicError::invalid_params());
+    }
+    Ok(value)
+}
+
 fn validate_bounded_non_empty(value: String, max_bytes: usize) -> Result<String, PublicError> {
     let trimmed = value.trim();
     if trimmed.is_empty() || trimmed.len() > max_bytes {
@@ -6926,6 +7033,58 @@ mod tests {
             },
             -32003,
         );
+    }
+
+    #[test]
+    fn lookup_model_contract_is_additive_strict_and_reports_exact_replacement() {
+        let admitted = AdmittedRpcRequest::decode(&request(
+            "lookup_model",
+            Some(serde_json::json!({"model_id":"llm/fixture/lookup"})),
+        ))
+        .unwrap();
+        assert!(matches!(admitted.command, RpcCommand::LookupModel { .. }));
+        assert_eq!(admitted.command.method(), "lookup_model");
+        for params in [
+            serde_json::json!({}),
+            serde_json::json!({"model_id":""}),
+            serde_json::json!({"model_id":"x","unexpected":true}),
+            serde_json::json!({"modelId":"x"}),
+        ] {
+            assert!(AdmittedRpcRequest::decode(&request("lookup_model", Some(params))).is_err());
+        }
+        for model_id in [
+            " llm/x/y", "llm/x/y ", "llm/x y", "C:/x/y", "a/../b", "a/./b", "a//b", "a/b/", "a\\b",
+            "a\nb",
+        ] {
+            assert!(AdmittedRpcRequest::decode(&request(
+                "lookup_model",
+                Some(json!({"model_id":model_id}))
+            ))
+            .is_err());
+        }
+        assert!(AdmittedRpcRequest::decode(&request(
+            "lookup_model",
+            Some(json!({"model_id":"x".repeat(MAX_IDENTIFIER_BYTES + 1)}))
+        ))
+        .is_err());
+        for resolution in [
+            pumas_library::models::ModelLookupResolution::Found,
+            pumas_library::models::ModelLookupResolution::Missing,
+            pumas_library::models::ModelLookupResolution::Reclassified {
+                replacement_model_id: "unknown/fixture/lookup".into(),
+            },
+        ] {
+            let report = pumas_library::models::ModelLookupReport {
+                contract_version: 1,
+                requested_model_id: "llm/fixture/lookup".into(),
+                resolution,
+            };
+            let expected = serde_json::to_value(&report).unwrap();
+            assert_eq!(
+                RpcOutcome::ModelLookup(report.into()).into_value().unwrap(),
+                expected
+            );
+        }
     }
 
     #[test]

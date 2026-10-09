@@ -4,6 +4,10 @@
 //! with domain-specific methods. The struct definitions remain in `lib.rs`.
 
 mod builder;
+pub(crate) mod catalog;
+pub use catalog::{
+    CatalogOwnerCheckpoint, CatalogQueryRequest, CatalogQueryResponse, InstanceProfile,
+};
 mod conversion;
 mod hf;
 pub(crate) mod instance_shutdown;
@@ -31,8 +35,9 @@ pub use s3_inspection::{
 mod serving;
 #[cfg(feature = "s3")]
 pub use s3_models::{
-    S3ModelBundleProgress, S3ModelImportControl, S3ModelImportError, S3ModelImportPhase,
-    S3ModelImportProgress, S3ModelImportRequest,
+    S3ConditionalBundleModelImportRequest, S3ConditionalModelImportRequest, S3ModelBundleProgress,
+    S3ModelImportControl, S3ModelImportError, S3ModelImportPhase, S3ModelImportProgress,
+    S3ModelImportRequest,
 };
 mod state;
 mod state_hf;

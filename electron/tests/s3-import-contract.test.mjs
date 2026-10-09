@@ -9,6 +9,25 @@ const request = { operation_id: id, endpoint: 'https://source.invalid', region: 
   version_id: 'exact+version/id', filename: 'weights.gguf', sha256: 'a'.repeat(64),
   family: 'fixture', official_name: 'Fixture GGUF' };
 
+test('S3 IPC transports qualified model selections without assigning semantics to extensions', () => {
+  for (const filename of ['weights.gguf', 'model.safetensors', 'model.onnx', 'unknown.data']) {
+    const input = { ...request, filename };
+    assert.deepEqual(JSON.parse(JSON.stringify(validateApiCallPayload('start_s3_model_import', input).params)), input);
+  }
+  const {key,version_id,filename,sha256,...source}=request;
+  for (const primary of ['model-00001.safetensors', 'unet/model.safetensors']) {
+    const input = { ...source, primary_logical_path: primary, files: [
+      {key,version_id,logical_path:primary,sha256},
+      {key:'models/second',version_id:'v2',logical_path:'model-00002.safetensors',sha256:'b'.repeat(64)},
+      {key:'models/index',version_id:'v3',logical_path:'model.safetensors.index.json',sha256:'c'.repeat(64)},
+    ]};
+    assert.deepEqual(JSON.parse(JSON.stringify(validateApiCallPayload('start_s3_model_bundle_import', input).params)), input);
+  }
+  for (const filename of ['../model.safetensors', 'unet//model.safetensors', 'unet/CON.safetensors', 'unet/model.safetensors.', 'x'.repeat(1025)]) {
+    assert.throws(() => validateApiCallPayload('start_s3_model_import', {...request,filename}));
+  }
+});
+
 test('authenticated S3 IPC admits only an explicit closed bounded credential object', () => {
   const credentials = { access_key_id: 'synthetic-ipc-key', secret_access_key: 'synthetic-ipc-secret', session_token: 'synthetic-ipc-token' };
   for (const session_token of [undefined, null, credentials.session_token]) {

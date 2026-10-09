@@ -35,9 +35,9 @@ pub(super) enum ImportBoundary {
 pub(super) type ImportHook =
     Arc<dyn Fn(ImportBoundary, &DownloadRecoveryDestination) -> Result<()> + Send + Sync>;
 
-struct VerifiedCopyInput {
-    file: std::fs::File,
-    receipt: crate::acquisition::VerifiedFile,
+pub(super) struct VerifiedCopyInput {
+    pub file: std::fs::File,
+    pub receipt: crate::acquisition::VerifiedFile,
 }
 
 struct AcquiredCopyInput {
@@ -72,7 +72,7 @@ impl ModelImporter {
             .iter()
             .position(|file| file.path == spec.path)
             .ok_or_else(|| {
-                super::acquired::recovery_required("Selected primary GGUF input is unavailable")
+                super::acquired::recovery_required("Selected primary model input is unavailable")
             })?;
         let mut files = Vec::with_capacity(acquired.record().files.len());
         for (index, receipt) in acquired.record().files.iter().enumerate() {
@@ -84,7 +84,7 @@ impl ModelImporter {
         let importer = self.clone();
         let spec = spec.clone();
         acquired
-            .run_blocking("copy and settle acquired GGUF model", move || {
+            .run_blocking("copy and settle acquired model", move || {
                 importer.import_staged(
                     &spec,
                     &authority,
@@ -160,23 +160,18 @@ impl ModelImporter {
                 }
             })?
         };
-        let (type_info, acquired) = if let Some(mut input) = acquired {
-            use std::io::{Read, Seek, SeekFrom};
-            let file = &mut input.files[input.primary].file;
-            let mut magic = [0; 4];
-            file.read_exact(&mut magic)?;
-            if magic != *b"GGUF" {
-                return Err(PumasError::Validation {
-                    field: "import.acquired".into(),
-                    message: "Acquired model import currently supports GGUF content only".into(),
-                });
-            }
-            file.seek(SeekFrom::Start(0))?;
-            let info = crate::model_library::identifier::identify_model_reader(file, &source_path)?;
-            file.seek(SeekFrom::Start(0))?;
-            (info, Some(input))
+        let (type_info, acquired, acquired_diffusers, acquired_directory) = if let Some(mut input) =
+            acquired
+        {
+            let qualification = super::acquired_package::qualify(&mut input.files, input.primary)?;
+            (
+                qualification.info,
+                Some(input),
+                qualification.diffusers,
+                qualification.directory,
+            )
         } else {
-            (self.detect_type(&source_path)?, None)
+            (self.detect_type(&source_path)?, None, false, false)
         };
         let security_tier = type_info.format.security_tier();
         if security_tier == SecurityTier::Pickle && !spec.security_acknowledged.unwrap_or(false) {
@@ -190,7 +185,8 @@ impl ModelImporter {
             .is_dir()
             .then(|| validate_diffusers_directory_for_import(&source_path))
             .filter(|value| value.validation_state == crate::models::AssetValidationState::Valid);
-        let model_type = if validation.is_some() {
+        let diffusers = acquired_diffusers || validation.is_some();
+        let model_type = if diffusers {
             "diffusion".to_string()
         } else if let Some(hint) = spec.model_type.as_deref() {
             self.library
@@ -200,7 +196,7 @@ impl ModelImporter {
         } else {
             type_info.model_type.as_str().to_string()
         };
-        let family = if validation.is_some() {
+        let family = if diffusers {
             spec.family.clone()
         } else {
             type_info
@@ -218,7 +214,7 @@ impl ModelImporter {
         let plan = match if let Some(input) = acquired {
             CopyPlan::verified_set(input.files)
         } else {
-            CopyPlan::open(&source_path, validation.is_some())
+            CopyPlan::open(&source_path, diffusers)
         } {
             Err(PumasError::Validation { message, .. }) => {
                 return Ok(refused(spec, &message, security_tier))
@@ -259,7 +255,7 @@ impl ModelImporter {
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforeHash, &stage)?;
             let mut bundle_index_bytes = None;
-            let mut metadata = if validation.is_some() {
+            let mut metadata = if diffusers {
                 let (staged_validation, index_bytes) =
                     crate::model_library::external_assets::validate_staged_diffusers_directory(
                         &stage,
@@ -309,6 +305,12 @@ impl ModelImporter {
                 });
                 self.create_metadata(spec, &type_info, &files, hashes)?
             };
+            if acquired_directory && !diffusers {
+                metadata.entry_path = Some(target_path.display().to_string());
+                metadata.expected_files =
+                    Some(files.iter().map(|file| file.name.clone()).collect());
+                metadata.storage_kind = Some(crate::models::StorageKind::LibraryOwned);
+            }
             // save_metadata would derive the ID from the stage pathname. Keep
             // the intended final ID and publish through held directory authority.
             metadata.model_id = Some(model_id.clone());

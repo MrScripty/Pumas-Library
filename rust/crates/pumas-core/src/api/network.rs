@@ -14,26 +14,31 @@ impl PumasApi {
 
     /// Check if network is currently online.
     pub fn is_online(&self) -> bool {
+        let _ = self.primary();
         self.primary().network_manager.is_online()
     }
 
     /// Get current network connectivity state.
     pub fn connectivity_state(&self) -> network::ConnectivityState {
+        let _ = self.primary();
         self.primary().network_manager.connectivity()
     }
 
     /// Check network connectivity (performs actual probe).
     pub async fn check_connectivity(&self) -> network::ConnectivityState {
+        let _ = self.primary();
         self.primary().network_manager.check_connectivity().await
     }
 
     /// Get detailed network status including circuit breaker states.
     pub async fn network_status(&self) -> network::NetworkStatus {
+        let _ = self.primary();
         self.primary().network_manager.status().await
     }
 
     /// Get frontend-facing network status counters and circuit states.
     pub async fn get_network_status_response(&self) -> models::NetworkStatusResponse {
+        let _ = self.primary();
         let status = self.network_status().await;
 
         let mut total_successful_requests: u64 = 0;
@@ -77,11 +82,13 @@ impl PumasApi {
 
     /// Get the network manager for advanced operations.
     pub fn network_manager(&self) -> &Arc<network::NetworkManager> {
+        let _ = self.primary();
         &self.primary().network_manager
     }
 
     /// Get the model library for direct access.
     pub fn model_library(&self) -> &Arc<model_library::ModelLibrary> {
+        let _ = self.primary();
         &self.primary().model_library
     }
 }

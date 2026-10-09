@@ -1,11 +1,16 @@
 //! Complete discovery observations only; none carry import or acquisition authority.
-use super::{validate_s3_id, PublicError, S3AddressingWire, S3CredentialParams};
+use super::{
+    require_versioned_set, validate_s3_id, PublicError, S3AddressingWire, S3CredentialParams,
+    S3ReadMode,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct S3DiscoveryParams {
+    #[serde(default)]
+    pub read_mode: S3ReadMode,
     #[cfg_attr(
         feature = "export-contract",
         schemars(regex(
@@ -36,6 +41,7 @@ pub(crate) struct S3DiscoveryParams {
 }
 impl S3DiscoveryParams {
     pub(crate) fn validate(&self) -> Result<(), PublicError> {
+        require_versioned_set(self.read_mode)?;
         validate_s3_id(&self.operation_id)?;
         for (v, max) in [
             (&self.endpoint, 4096),

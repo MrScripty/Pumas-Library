@@ -3,7 +3,7 @@ import { importAPI } from '../api/import';
 import { decodeS3TransferRetryParams, decodeS3BundleImportParams, decodeS3AuthenticatedBundleImportParams, type S3PinnedFileParams, type S3BundleProgressWire, decodeS3ImportParams, decodeS3AuthenticatedImportParams, type S3CredentialParams, type S3ImportOutcome, type S3ImportParams } from '../generated/desktop-contract';
 
 type Observation = { id?: string; token: object };
-export type S3ImportDraft = Record<keyof Omit<S3ImportParams, 'operation_id'>, string>;
+export type S3ImportDraft = Record<keyof Omit<Extract<S3ImportParams, {version_id: string}>, 'operation_id' | 'read_mode'>, string>;
 
 /** One dialog observes a pull-style, process-owned RPC job. Closing only ends
  * observation; a new dialog queries the existing job, never resubmits its facts. */
@@ -86,8 +86,8 @@ export function useS3ModelImport(onImported?: () => void, bundleObservation = fa
     }
     const id = crypto.randomUUID();
     const decoded = decodeS3ImportParams({ ...draft, operation_id: id });
-    if (decoded.status !== 'valid') {
-      setError('Check all required source fields, the HTTPS origin, GGUF filename and 64-digit SHA-256.');
+    if (decoded.status !== 'valid' || decoded.value.read_mode === 'conditional') {
+      setError('Check all required source fields, the HTTPS origin, safe primary weight path and 64-digit SHA-256.');
       return;
     }
     const authenticated = credentials === undefined ? null : decodeS3AuthenticatedImportParams({ source: decoded.value, credentials });

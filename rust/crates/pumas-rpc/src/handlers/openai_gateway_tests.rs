@@ -78,7 +78,7 @@ async fn gateway_test_state_with_clients(
         s3_imports: crate::s3_imports::S3Imports::unavailable(),
         shutdown_request: crate::server::ShutdownRequest::default(),
         catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
-        api,
+        api: api.into(),
         version_managers: Arc::new(RwLock::new(HashMap::new())),
         size_calculator: Arc::new(Mutex::new(
             SizeCalculator::new_with_cache(launcher_root.join("launcher-data/cache")).await,

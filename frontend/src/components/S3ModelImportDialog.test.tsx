@@ -77,9 +77,9 @@ describe('S3 explicit bundle inputs (DOM fixture)', () => {
   it('forwards exact per-file pins without row bookkeeping and clears bundle credentials before the wait', () => {
     hook.snapshot = {status:'idle'}; hook.startBundle.mockReturnValueOnce(new Promise(() => {}));
     render(<S3ModelImportDialog onClose={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', {name:'Add auxiliary file'}));
+    fireEvent.click(screen.getByRole('button', {name:'Add package file'}));
     for (const [label,value] of [['exact object key','models/shared'],['immutable VersionId','data-v2'],['logical output path','config/data.json'],['expected SHA-256','b'.repeat(64)]]) {
-      fireEvent.change(screen.getByLabelText(`Auxiliary 1 ${label}`),{target:{value}});
+      fireEvent.change(screen.getByLabelText(`Package file 1 ${label}`),{target:{value}});
     }
     fireEvent.click(screen.getByLabelText('Use one-use credentials'));
     const secret=screen.getByLabelText('Secret access key');fireEvent.change(secret,{target:{value:'synthetic-bundle-secret'}});
@@ -88,7 +88,7 @@ describe('S3 explicit bundle inputs (DOM fixture)', () => {
     expect(hook.startBundle).toHaveBeenCalledWith(expect.anything(),[{key:'models/shared',version_id:'data-v2',logical_path:'config/data.json',sha256:'b'.repeat(64)}],
       {access_key_id:'synthetic-bundle-key',secret_access_key:'synthetic-bundle-secret',session_token:null});
     expect(secret).toHaveValue('');
-    fireEvent.click(screen.getByRole('button',{name:'Remove auxiliary 1'}));expect(screen.queryByLabelText('Auxiliary 1 logical output path')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Remove package file 1'}));expect(screen.queryByLabelText('Package file 1 logical output path')).not.toBeInTheDocument();
   });
   it('shows aggregate staging evidence separately from publication and preserves a possible publication result', () => {
     hook.snapshot={status:'running',operation_id:'fixture-id',progress:{phase:'acquiring',downloaded_for_current_file:'1'}};
@@ -97,7 +97,7 @@ describe('S3 explicit bundle inputs (DOM fixture)', () => {
     expect(screen.getByText(/9007199254740994 of 18446744073709551615/)).toHaveTextContent('do not prove publication');
     expect(screen.getByText(/1 of 2 selected files/)).toHaveTextContent('registration follow separately');
     expect(screen.getByRole('button',{name:'Cancel import'})).toBeEnabled();
-    expect(screen.getByRole('button',{name:'Add auxiliary file'})).toBeDisabled();
+    expect(screen.getByRole('button',{name:'Add package file'})).toBeDisabled();
     hook.snapshot={status:'finished',operation_id:'fixture-id',result:{status:'failed',retained_work:true,published_model_id:'fixture/possible-model',error:{code:-32603,class:'internal',message:'Import failed'}}};
     view.rerender(<S3ModelImportDialog onClose={vi.fn()} />);
     expect(screen.getByText(/Publication may exist for fixture\/possible-model/)).toBeInTheDocument();

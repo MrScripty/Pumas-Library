@@ -1,0 +1,177 @@
+{
+  "verdict": "CLEAR_BOUNDED_ACTUAL_CHREMA_NATIVE_CONTROL_PLANE",
+  "blocking_findings": [],
+  "chrema_head": "d9f660beb8273aac16e62fae3902b9f5e4d1559b",
+  "chrema_tree": "cc755424881f3c53b20b626ca7b44f14fb5f2cb8",
+  "Pumas_public_source": "fe3c9f04c243f436a393ae47e16f616244a85cee",
+  "Pumas_normal_executable_source": "ec03d0a6d4d0572674b4cb4269da5cabbe4f9d7d",
+  "cohorts": [
+    {
+      "label": "root",
+      "receipt": {
+        "path": "/tmp/pumas-chrema-actual-native-20261009/qualification.json",
+        "bytes": 70249,
+        "sha256": "2852f623dab7907be2153ce1df666fb351c3c17f8bfec90c07f56acd18299fd3"
+      },
+      "started_utc": "2026-10-09T11:17:18.393668+00:00",
+      "finished_utc": "2026-10-09T11:17:25.755136+00:00",
+      "cases": [
+        {
+          "mode": "normal-release",
+          "consumer_native_RPC": 3,
+          "fixture_control_RPC": 4,
+          "Node_describe_children_exit0_closed_absent": 2,
+          "Python_fixture_helper_children_exit0_absent": 2,
+          "Node_caller_exit0_reaped_absent": 1,
+          "native_retention_states": [
+            "retained"
+          ],
+          "empty_registry_verified_directly": true,
+          "sentinel_verified_directly": true,
+          "same_description_and_generations": true
+        },
+        {
+          "mode": "caller-cancel",
+          "consumer_native_RPC": 3,
+          "fixture_control_RPC": 4,
+          "Node_describe_children_exit0_closed_absent": 2,
+          "Python_fixture_helper_children_exit0_absent": 2,
+          "Node_caller_exit0_reaped_absent": 1,
+          "native_retention_states": [
+            "retained"
+          ],
+          "empty_registry_verified_directly": true,
+          "sentinel_verified_directly": true,
+          "same_description_and_generations": true
+        },
+        {
+          "mode": "owner-revocation",
+          "consumer_native_RPC": 3,
+          "fixture_control_RPC": 2,
+          "Node_describe_children_exit0_closed_absent": 2,
+          "Python_fixture_helper_children_exit0_absent": 2,
+          "Node_caller_exit0_reaped_absent": 1,
+          "native_retention_states": [
+            "retained",
+            "revoked"
+          ],
+          "empty_registry_verified_directly": true,
+          "sentinel_verified_directly": true,
+          "same_description_and_generations": true
+        }
+      ],
+      "native_consumer_RPC": 9,
+      "native_fixture_control_RPC": 10,
+      "native_RPC_total": 19,
+      "recorded_native_lifecycle_children": 12,
+      "Node_caller_processes": 3,
+      "all_15_recorded_pids_independently_absent": true,
+      "retained_frames": 3,
+      "revoked_frames": 1,
+      "configured_proxy_requests": 0
+    },
+    {
+      "label": "independent",
+      "receipt": {
+        "path": "/tmp/pumas-chrema-actual-native-independent-20261009/qualification.json",
+        "bytes": 70585,
+        "sha256": "58cc5a31c748141e55dc8aaf8aa0f33956c052f77667af28880896a4baf21f8a"
+      },
+      "started_utc": "2026-10-09T11:19:21.051805+00:00",
+      "finished_utc": "2026-10-09T11:19:27.659792+00:00",
+      "cases": [
+        {
+          "mode": "normal-release",
+          "consumer_native_RPC": 3,
+          "fixture_control_RPC": 4,
+          "Node_describe_children_exit0_closed_absent": 2,
+          "Python_fixture_helper_children_exit0_absent": 2,
+          "Node_caller_exit0_reaped_absent": 1,
+          "native_retention_states": [
+            "retained"
+          ],
+          "empty_registry_verified_directly": true,
+          "sentinel_verified_directly": true,
+          "same_description_and_generations": true
+        },
+        {
+          "mode": "caller-cancel",
+          "consumer_native_RPC": 3,
+          "fixture_control_RPC": 4,
+          "Node_describe_children_exit0_closed_absent": 2,
+          "Python_fixture_helper_children_exit0_absent": 2,
+          "Node_caller_exit0_reaped_absent": 1,
+          "native_retention_states": [
+            "retained"
+          ],
+          "empty_registry_verified_directly": true,
+          "sentinel_verified_directly": true,
+          "same_description_and_generations": true
+        },
+        {
+          "mode": "owner-revocation",
+          "consumer_native_RPC": 3,
+          "fixture_control_RPC": 2,
+          "Node_describe_children_exit0_closed_absent": 2,
+          "Python_fixture_helper_children_exit0_absent": 2,
+          "Node_caller_exit0_reaped_absent": 1,
+          "native_retention_states": [
+            "retained",
+            "revoked"
+          ],
+          "empty_registry_verified_directly": true,
+          "sentinel_verified_directly": true,
+          "same_description_and_generations": true
+        }
+      ],
+      "native_consumer_RPC": 9,
+      "native_fixture_control_RPC": 10,
+      "native_RPC_total": 19,
+      "recorded_native_lifecycle_children": 12,
+      "Node_caller_processes": 3,
+      "all_15_recorded_pids_independently_absent": true,
+      "retained_frames": 3,
+      "revoked_frames": 1,
+      "configured_proxy_requests": 0
+    }
+  ],
+  "independent_process_receipt": {
+    "path": "/workspace/pumas-v08-chrema-native-evidence/independent-actual-native-process-receipt.json",
+    "bytes": 2856,
+    "sha256": "14cee645a45d7384d3f25efeaf85c36b954abcc7802caf4c0793864ba4a09667"
+  },
+  "independent_stdout_receipt": {
+    "path": "/workspace/pumas-v08-chrema-native-evidence/independent-actual-native.stdout.json",
+    "bytes": 70585,
+    "sha256": "58cc5a31c748141e55dc8aaf8aa0f33956c052f77667af28880896a4baf21f8a"
+  },
+  "independent_stderr_receipt": {
+    "path": "/workspace/pumas-v08-chrema-native-evidence/independent-actual-native.stderr.txt",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "counts_across_both_runs": {
+    "native_RPC": 38,
+    "recorded_native_lifecycle_children": 24,
+    "Node_caller_processes": 6,
+    "Chrema_native_retained_frames": 6,
+    "Chrema_native_revoked_frames": 2,
+    "empty_registries": 6,
+    "intact_sentinels": 6
+  },
+  "scope": [
+    "Exact published Chrema generic consumer with actual pinned normal Pumas executable and unchanged Python fixture helper; host callbacks are explicitly authorized qualification policy.",
+    "Empty catalog, canonical absent model Missing, local invalid-ID TypeError, predispatch host denial and renewed allowed catalog, exact borrowed description/fences, healthy owner during retention and after ordinary/caller release.",
+    "Normal release, caller cancellation after completed reads, graceful fixture-owned native SIGTERM producing actual revoked frame; idempotent local release/drain and closed admission refusal."
+  ],
+  "limits": [
+    "Actual Node APIs are transparently instrumented; no fake Pumas CLI/HTTP/SSE peer or replacement outcome.",
+    "Recorded twelve native lifecycle children per run excludes three Python helper temporary describe children internally awaited but not exposed in helper cleanup_results.",
+    "Normal native executable has inference-plugins compiled; no model inference, model installation/download, live provider, SDK/runtime trust expansion, Nearwork UI/domain authorization/workflow, crash/cold recovery or release acceptance.",
+    "No native -32602 invalid lookup assertion through Chrema; invalid ID is locally rejected. No in-flight reconciliation cancellation, remote guard/effect cessation, or same-URL successor campaign accepted.",
+    "Configured proxy zero requests/zero forwards is observed; no OS-wide network enforcement claim.",
+    "Previous additional Pumas sample remains held and is not included in this actual Chrema qualification cohort."
+  ],
+  "source_edits_or_builds_performed": false,
+  "native_replays_performed_by_reviewer": 1
+}

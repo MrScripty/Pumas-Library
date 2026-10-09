@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RemoteModelInfo } from '../types/apps';
+import type { RemoteModelInfo, RemoteSearchSource } from '../types/apps';
 
 const {
   getHfDownloadDetailsMock,
@@ -38,6 +38,14 @@ const baseRemoteModel = (overrides: Partial<RemoteModelInfo> = {}): RemoteModelI
   url: 'https://huggingface.co/acme/model-a',
   ...overrides,
 });
+
+function cachedModel(): RemoteModelInfo {
+  return baseRemoteModel({ modelCard: { pumas_discovery: {
+    source: 'anonymous-hf-detail-cache', source_url: 'https://huggingface.co/api/models/acme/model-a',
+    observed_at: '2026-01-01T00:00:00Z', freshness: 'stale', fresh_until: '2026-01-02T00:00:00Z',
+    revision_observed: 'a'.repeat(40), discovery_only: true, visibility_observed: 'public-ungated',
+  } } });
+}
 
 describe('useRemoteModelSearch', () => {
   beforeEach(() => {
@@ -99,7 +107,7 @@ describe('useRemoteModelSearch', () => {
       await Promise.resolve();
     });
 
-    expect(searchHfModelsMock).toHaveBeenCalledWith('mistral', null, 25, 6);
+    expect(searchHfModelsMock).toHaveBeenCalledWith('mistral', null, 25, 0);
     expect(result.current.results).toHaveLength(3);
     expect(result.current.kinds).toEqual(['all', 'text-generation', 'vision']);
     expect(result.current.error).toBeNull();
@@ -151,6 +159,68 @@ describe('useRemoteModelSearch', () => {
     expect(result.current.error).toBe('Hugging Face search is unavailable.');
     expect(result.current.results).toEqual([]);
     expect(searchHfModelsMock).not.toHaveBeenCalled();
+  });
+
+  it('browses with explicit cached mode, zero hydration and no tree lookup', async () => {
+    searchHfModelsMock.mockResolvedValue({ success: true, models: [cachedModel()] });
+    const { result } = renderHook(() => useRemoteModelSearch({ enabled: true, searchQuery: '', source: 'cached' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(searchHfModelsMock).toHaveBeenCalledWith('cache:', null, 25, 0);
+    expect(result.current.results[0]?.cachedDiscovery?.freshness).toBe('stale');
+    await act(async () => { await result.current.hydrateModelDetails(cachedModel()); });
+    expect(getHfDownloadDetailsMock).not.toHaveBeenCalled();
+  });
+
+  it('cancels queued searches and hides results immediately when the source switches', async () => {
+    searchHfModelsMock.mockResolvedValue({ success: true, models: [cachedModel()] });
+    const { result, rerender } = renderHook((props: { source: RemoteSearchSource; searchQuery: string }) =>
+      useRemoteModelSearch({ enabled: true, ...props }), { initialProps: { source: 'cached', searchQuery: 'first' } });
+    rerender({ source: 'cached', searchQuery: 'second' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(searchHfModelsMock).toHaveBeenCalledTimes(1);
+    expect(searchHfModelsMock).toHaveBeenCalledWith('cache:second', null, 25, 0);
+    expect(result.current.results).toHaveLength(1);
+    rerender({ source: 'huggingface', searchQuery: 'second' });
+    expect(result.current.results).toEqual([]);
+    expect(result.current.isCachedSearch).toBe(false);
+  });
+
+  it('ignores a late cached reply after switching to ordinary search', async () => {
+    let release!: (value: unknown) => void;
+    searchHfModelsMock.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    const { result, rerender } = renderHook((props: { source: RemoteSearchSource }) =>
+      useRemoteModelSearch({ enabled: true, searchQuery: 'same', ...props }), { initialProps: { source: 'cached' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    rerender({ source: 'huggingface' });
+    searchHfModelsMock.mockResolvedValue({ success: true, models: [baseRemoteModel({ name: 'Ordinary result' })] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    await act(async () => { release({ success: true, models: [cachedModel()] }); });
+    expect(result.current.results[0]?.name).toBe('Ordinary result');
+    expect(result.current.results[0]?.cachedDiscovery).toBeUndefined();
+  });
+
+  it('rejects missing cached provenance and strips spoofed annotations from ordinary results', async () => {
+    searchHfModelsMock.mockResolvedValue({ success: true, models: [baseRemoteModel()] });
+    const { result, rerender } = renderHook((props: { source: RemoteSearchSource }) =>
+      useRemoteModelSearch({ enabled: true, searchQuery: 'same', ...props }), { initialProps: { source: 'cached' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(result.current.error).toBe('Cached search returned incomplete provenance.');
+    expect(result.current.results).toEqual([]);
+    searchHfModelsMock.mockResolvedValue({ success: true, models: [cachedModel()] });
+    rerender({ source: 'huggingface' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(result.current.results[0]?.cachedDiscovery).toBeUndefined();
+  });
+
+  it('recognizes the preserved explicit cache prefix and ignores completion after unmount', async () => {
+    let release!: (value: unknown) => void;
+    searchHfModelsMock.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    const { result, unmount } = renderHook(() => useRemoteModelSearch({ enabled: true, searchQuery: 'cache:alpha' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(result.current.isCachedSearch).toBe(true);
+    expect(searchHfModelsMock).toHaveBeenCalledWith('cache:alpha', null, 25, 0);
+    unmount();
+    await act(async () => { release({ success: true, models: [cachedModel()] }); });
   });
 
 });

@@ -24,10 +24,10 @@ describe('explicit prefix selection in the existing import dialog',()=>{
     fireEvent.click(screen.getByRole('button',{name:'Use models/weights.gguf as primary'}));
     expect(screen.getByLabelText('Exact object key')).toHaveValue('models/weights.gguf');
     expect(screen.getByLabelText('Immutable VersionId')).toHaveValue('weights-v1');
-    expect(screen.getByLabelText('Library GGUF filename')).toHaveValue('');expect(screen.getByLabelText('Expected SHA-256')).toHaveValue('');
-    fireEvent.click(screen.getByRole('button',{name:'Add models/config.json as auxiliary'}));
-    expect(screen.getByLabelText('Auxiliary 1 logical output path')).toHaveValue('');expect(screen.getByLabelText('Auxiliary 1 expected SHA-256')).toHaveValue('');
-    for(const [label,value] of [['Library GGUF filename','weights.gguf'],['Expected SHA-256','a'.repeat(64)],['Auxiliary 1 logical output path','config/data.json'],['Auxiliary 1 expected SHA-256','b'.repeat(64)]] as const)
+    expect(screen.getByLabelText('Primary weight logical path')).toHaveValue('');expect(screen.getByLabelText('Expected SHA-256')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button',{name:'Add models/config.json as package file'}));
+    expect(screen.getByLabelText('Package file 1 logical output path')).toHaveValue('');expect(screen.getByLabelText('Package file 1 expected SHA-256')).toHaveValue('');
+    for(const [label,value] of [['Primary weight logical path','weights.gguf'],['Expected SHA-256','a'.repeat(64)],['Package file 1 logical output path','config/data.json'],['Package file 1 expected SHA-256','b'.repeat(64)]] as const)
       fireEvent.change(screen.getByLabelText(label),{target:{value}});
     const form=screen.getByRole('button',{name:'Import pinned object'}).closest('form');
     expect(form).not.toBeNull();if(form) fireEvent.submit(form);
@@ -37,9 +37,9 @@ describe('explicit prefix selection in the existing import dialog',()=>{
   it('revokes discovery-derived pins when the source changes',()=>{
     render(<S3ModelImportDialog onClose={vi.fn()}/>);
     fireEvent.click(screen.getByRole('button',{name:'Use models/weights.gguf as primary'}));
-    fireEvent.click(screen.getByRole('button',{name:'Add models/config.json as auxiliary'}));
+    fireEvent.click(screen.getByRole('button',{name:'Add models/config.json as package file'}));
     fireEvent.change(screen.getByLabelText('Bucket'),{target:{value:'different-bucket'}});
-    expect(screen.getByLabelText('Exact object key')).toHaveValue('');expect(screen.queryByLabelText('Auxiliary 1 logical output path')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Exact object key')).toHaveValue('');expect(screen.queryByLabelText('Package file 1 logical output path')).not.toBeInTheDocument();
     expect(discovery.reset).toHaveBeenCalled();
   });
   it('clears one-use discovery credentials before waiting and closing cancels only discovery',()=>{

@@ -3,13 +3,13 @@ use crate::{contract::*, server::AppState};
 use pumas_library::{
     acquisition::{
         AcquisitionConsumer, AcquisitionPhase, AcquisitionRecord, AcquisitionRetryPolicy,
-        AcquisitionService, ReservedDirectory, S3Addressing, S3ManifestEntry, S3ReaderConfig,
-        Sha256Evidence,
+        AcquisitionService, ReservedDirectory, S3Addressing, S3ConditionalManifestEntry,
+        S3ManifestEntry, S3ReaderConfig, Sha256Evidence,
     },
     models::ModelImportSpec,
     network::RetryConfig,
-    PumasError, Result, S3ModelImportControl, S3ModelImportError, S3ModelImportPhase,
-    S3ModelImportRequest,
+    PumasError, Result, S3ConditionalBundleModelImportRequest, S3ConditionalModelImportRequest,
+    S3ModelImportControl, S3ModelImportError, S3ModelImportPhase, S3ModelImportRequest,
 };
 use std::{
     path::{Path, PathBuf},
@@ -22,16 +22,23 @@ use tokio::{
 };
 pub(crate) struct ImportJob {
     request: S3ImportParams,
-    entries: Vec<S3ManifestEntry>,
+    entries: ImportSelection,
     credentials: Option<pumas_library::acquisition::S3Credentials>,
     control: S3ModelImportControl,
     retry: Option<Box<RetainedTransfer>>,
     attempt: Arc<()>,
 }
+/// Retain exact selection facts through retries; credentials remain separate.
+#[derive(Clone)]
+enum ImportSelection {
+    Versioned(Vec<S3ManifestEntry>),
+    ConditionalObject,
+    ConditionalManifest(Vec<S3ConditionalManifestEntry>),
+}
 #[derive(Clone)]
 struct RetainedTransfer {
     request: S3ImportParams,
-    entries: Vec<S3ManifestEntry>,
+    entries: ImportSelection,
     reservation: ReservedDirectory,
     record: AcquisitionRecord,
     authenticated: bool,
@@ -141,7 +148,6 @@ impl S3Imports {
         let preflight = || -> std::result::Result<_, PublicError> {
             request.validate()?;
             let primary = request.primary()?;
-            let entries = request.native_entries()?;
             // Construction is in-memory; both anonymous and authenticated paths
             // validate the exact native reader and complete set before admission.
             let native_credentials = credentials
@@ -153,9 +159,22 @@ impl S3Imports {
             // remains separate to avoid sharing or cloning its capability.
             let reader = pumas_library::acquisition::S3Reader::new(config)
                 .map_err(|_| PublicError::invalid_params())?;
-            reader
-                .validate_manifest_entries(&entries)
-                .map_err(|_| PublicError::invalid_params())?;
+            let entries = match request.read_mode {
+                S3ReadMode::VersionId => {
+                    let entries = request.native_entries()?;
+                    reader
+                        .validate_manifest_entries(&entries)
+                        .map_err(|_| PublicError::invalid_params())?;
+                    ImportSelection::Versioned(entries)
+                }
+                S3ReadMode::Conditional => {
+                    let entries = request.native_conditional_entries()?;
+                    reader
+                        .validate_conditional_manifest_entries(&entries)
+                        .map_err(|_| PublicError::invalid_params())?;
+                    ImportSelection::ConditionalManifest(entries)
+                }
+            };
             Ok((primary, entries, native_credentials))
         };
         match preflight() {
@@ -195,8 +214,23 @@ impl S3Imports {
         &self,
         request: S3ImportParams,
         credentials: Option<pumas_library::acquisition::S3Credentials>,
-        entries: Option<Vec<S3ManifestEntry>>,
+        entries: Option<ImportSelection>,
     ) -> Result<S3ImportOutcome> {
+        if matches!(
+            (&entries, request.read_mode),
+            (Some(ImportSelection::Versioned(_)), S3ReadMode::Conditional)
+                | (
+                    Some(
+                        ImportSelection::ConditionalObject
+                            | ImportSelection::ConditionalManifest(_)
+                    ),
+                    S3ReadMode::VersionId
+                )
+        ) {
+            return Ok(S3ImportOutcome::Rejected {
+                error: PublicError::invalid_params(),
+            });
+        }
         let mut state = self.0.lock().map_err(|_| unavailable())?;
         let Some(sender) = state.sender.as_ref() else {
             return Ok(S3ImportOutcome::Unavailable);
@@ -225,13 +259,16 @@ impl S3Imports {
         }
         let entries = match entries {
             Some(entries) => entries,
-            None => vec![S3ManifestEntry {
+            None if request.read_mode == S3ReadMode::Conditional => {
+                ImportSelection::ConditionalObject
+            }
+            None => ImportSelection::Versioned(vec![S3ManifestEntry {
                 source_key: request.key.clone(),
                 version: request.version_id.clone(),
                 logical_path: request.filename.clone(),
                 expected_sha256: Sha256Evidence::new("caller.sha256", request.sha256.clone())
                     .map_err(|_| unavailable())?,
-            }],
+            }]),
         };
         let control = S3ModelImportControl::new();
         let attempt = Arc::new(());
@@ -633,7 +670,7 @@ async fn run(state: &AppState, job: ImportJob) -> (S3ImportResultWire, Option<Re
         .and_then(|workspace| make_request(request, workspace, credentials, entries))
     {
         Err(error) => failure(PublicError::from_pumas(&error), true, None),
-        Ok(request) => match state.api.import_s3_model(request, control).await {
+        Ok(request) => match request.run(&state.api, control).await {
             Ok(result) => {
                 let model_id = result.model_id;
                 let cleanup = consumer
@@ -743,12 +780,34 @@ async fn run(state: &AppState, job: ImportJob) -> (S3ImportResultWire, Option<Re
     )
 }
 
+enum NativeImportRequest {
+    Versioned(S3ModelImportRequest),
+    Conditional(S3ConditionalModelImportRequest),
+    ConditionalManifest(S3ConditionalBundleModelImportRequest),
+}
+impl NativeImportRequest {
+    async fn run(
+        self,
+        api: &pumas_library::PumasApi,
+        control: S3ModelImportControl,
+    ) -> std::result::Result<pumas_library::model_library::ModelImportResult, S3ModelImportError>
+    {
+        match self {
+            Self::Versioned(request) => api.import_s3_model(request, control).await,
+            Self::Conditional(request) => api.import_s3_conditional_model(request, control).await,
+            Self::ConditionalManifest(request) => {
+                api.import_s3_conditional_bundle(request, control).await
+            }
+        }
+    }
+}
+
 fn make_request(
     request: S3ImportParams,
     workspace: pumas_library::acquisition::AcquisitionWorkspace,
     credentials: Option<pumas_library::acquisition::S3Credentials>,
-    entries: Vec<S3ManifestEntry>,
-) -> Result<S3ModelImportRequest> {
+    entries: ImportSelection,
+) -> Result<NativeImportRequest> {
     let operation_id = request
         .operation_id
         .parse()
@@ -756,11 +815,13 @@ fn make_request(
             field: "s3.operation_id".into(),
             message: "Invalid S3 operation identity".into(),
         })?;
-    Ok(S3ModelImportRequest {
+    let key = request.key.clone();
+    let sha256 = request.sha256.clone();
+    let mut native = S3ModelImportRequest {
         operation_id,
         source: source_config(&request),
         credentials,
-        entries,
+        entries: Vec::new(),
         import: ModelImportSpec {
             path: request.filename,
             family: request.family,
@@ -777,8 +838,43 @@ fn make_request(
             elapsed: Duration::from_secs(600),
             backoff: RetryConfig::default(),
         },
-    })
+    };
+    match entries {
+        ImportSelection::Versioned(entries) => {
+            native.entries = entries;
+            Ok(NativeImportRequest::Versioned(native))
+        }
+        ImportSelection::ConditionalObject => Ok(NativeImportRequest::Conditional(
+            S3ConditionalModelImportRequest {
+                operation_id: native.operation_id,
+                source: native.source,
+                credentials: native.credentials,
+                source_key: key,
+                expected_sha256: Sha256Evidence::new("caller.sha256", sha256).map_err(|_| {
+                    PumasError::Validation {
+                        field: "s3.sha256".into(),
+                        message: "A whole-file SHA-256 declaration is required".into(),
+                    }
+                })?,
+                import: native.import,
+                workspace: native.workspace,
+                retry: native.retry,
+            },
+        )),
+        ImportSelection::ConditionalManifest(entries) => Ok(
+            NativeImportRequest::ConditionalManifest(S3ConditionalBundleModelImportRequest {
+                operation_id: native.operation_id,
+                source: native.source,
+                credentials: native.credentials,
+                entries,
+                import: native.import,
+                workspace: native.workspace,
+                retry: native.retry,
+            }),
+        ),
+    }
 }
+
 fn reserve(root: PathBuf, id: &str) -> Result<ReservedDirectory> {
     use cap_std::fs::Dir;
     // All creation is relative to held parent authority, with no recursive

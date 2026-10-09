@@ -1,0 +1,2071 @@
+{
+  "status": "passed",
+  "started_utc": "2026-10-09T11:19:21.051805+00:00",
+  "Chrema_head": "d9f660beb8273aac16e62fae3902b9f5e4d1559b",
+  "Chrema_tree": "cc755424881f3c53b20b626ca7b44f14fb5f2cb8",
+  "Chrema_source_files": [
+    {
+      "path": "/tmp/Chrema-pumas-supported-consumer-20261009/agent-platform-pumas-local-session.mjs",
+      "bytes": 13182,
+      "sha256": "e636de5ab82428a5c2c5ec91abf2a8f8537193aa07f7c16b8c57f2157f592fef"
+    },
+    {
+      "path": "/tmp/Chrema-pumas-supported-consumer-20261009/agent-platform-pumas-local-owner.mjs",
+      "bytes": 15173,
+      "sha256": "864b44796fb3a77beed96b8a479b7d93c6e31e2e5968d55fc5d426798cc15cad"
+    },
+    {
+      "path": "/tmp/Chrema-pumas-supported-consumer-20261009/agent-platform-pumas-model-catalog.mjs",
+      "bytes": 12823,
+      "sha256": "eb4be35854706ad3a79df798c1de12764bcd4cb3a30ffcd7ec1c8e2cbba796ca"
+    },
+    {
+      "path": "/tmp/Chrema-pumas-supported-consumer-20261009/agent-platform-pumas-finite-provider.mjs",
+      "bytes": 25654,
+      "sha256": "f16597ae8a13d1763fd2469c3910408c9cb009b83c9e919c33e7d191a2085714"
+    },
+    {
+      "path": "/tmp/Chrema-pumas-supported-consumer-20261009/agent-platform-pumas-capabilities.mjs",
+      "bytes": 12107,
+      "sha256": "47bac25605d258fd3d3814e8a3f818d1c119f51e27d55b9ee14ad0da201e10b8"
+    }
+  ],
+  "Pumas_contract_source": "fe3c9f04c243f436a393ae47e16f616244a85cee",
+  "Pumas_executable": {
+    "path": "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+    "bytes": 203722168,
+    "sha256": "61c20bd24bd179fbc14538183c6898c14e677d84209413de69e1d797584a0a47"
+  },
+  "Pumas_fixture_helper": {
+    "path": "/workspace/Pumas-v08-http-etag-ambiguity/scripts/consumers/local_http_session.py",
+    "bytes": 27998,
+    "sha256": "ee267a62f2a688edfb3e9bbe79c704c7f69ed754be32bd66fa6f1e8e7b8ea6b9"
+  },
+  "node_executable": {
+    "path": "/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "bytes": 125989464,
+    "sha256": "bc17c508ffeed0ec622934f9b7fa72f8e78da65350e63c3eceb56fa688aa5e12"
+  },
+  "driver_sources": [
+    {
+      "path": "/workspace/pumas-v08-chrema-native-evidence/qualify_chrema_native.py",
+      "bytes": 13898,
+      "sha256": "1dbf226fab291d50858f97b0811cbc078e8acf3f59c0a8eaf6740b5af70177ab"
+    },
+    {
+      "path": "/workspace/pumas-v08-chrema-native-evidence/chrema_native_probe.mjs",
+      "bytes": 9422,
+      "sha256": "3013f08cea338460fb9558c946339fe7f395b20590ae21fec8ac90a14c25e4bd"
+    }
+  ],
+  "node_version": "v24.19.0",
+  "work_dir": "/tmp/pumas-chrema-actual-native-independent-20261009",
+  "cases": [
+    {
+      "mode": "normal-release",
+      "root": "/tmp/pumas-chrema-actual-native-independent-20261009/normal-release/library",
+      "registry": "/tmp/pumas-chrema-actual-native-independent-20261009/normal-release/registry.db",
+      "phase": "passed",
+      "owner_description": {
+        "advertisement_schema_version": 1,
+        "service_generation": "dd255002-3f73-4f1c-bd6a-c0045bf83ffe",
+        "instance": {
+          "discovery_schema_version": 1,
+          "build_info": {
+            "build_info_schema_version": 1,
+            "component": "pumas-library",
+            "package_version": "0.7.0",
+            "compiled_features": [
+              "pumas-library/hf-client",
+              "pumas-library/process-manager",
+              "pumas-library/gpu-monitor",
+              "pumas-library/onnx-runtime",
+              "pumas-library/s3",
+              "pumas-library/contract-schema",
+              "pumas-library/test-support"
+            ],
+            "protocols": [
+              {
+                "name": "pumas.local-ipc",
+                "versions": [
+                  1
+                ]
+              }
+            ],
+            "schemas": [
+              {
+                "name": "pumas.build-info",
+                "version": 1
+              },
+              {
+                "name": "pumas.discovery",
+                "version": 1
+              },
+              {
+                "name": "pumas.model-ref",
+                "version": 1
+              },
+              {
+                "name": "pumas.model-selector",
+                "version": 1
+              }
+            ]
+          },
+          "registry_library_id": "a1feec9b-becd-43e9-8e15-29460681d6f0",
+          "library_root": "/tmp/pumas-chrema-actual-native-independent-20261009/normal-release/library",
+          "generation": "2026-10-09T11:19:21.361927081+00:00",
+          "pumas_version": "0.7.0",
+          "protocols": [
+            {
+              "name": "pumas.local-ipc",
+              "versions": [
+                1
+              ]
+            }
+          ],
+          "capabilities": [
+            "model.query@1",
+            "model.get.local@1",
+            "model.selector@1",
+            "artifact.resolve@1"
+          ],
+          "model_ref_schema_version": 1,
+          "selector_schema_version": 1
+        },
+        "endpoint": "http://127.0.0.1:34159",
+        "build_info": {
+          "build_info_schema_version": 1,
+          "component": "pumas-rpc",
+          "package_version": "0.7.0",
+          "compiled_features": [
+            "pumas-library/hf-client",
+            "pumas-library/process-manager",
+            "pumas-library/gpu-monitor",
+            "pumas-library/onnx-runtime",
+            "pumas-library/s3",
+            "pumas-library/contract-schema",
+            "pumas-library/test-support",
+            "pumas-rpc/inference-plugins",
+            "pumas-rpc/s3",
+            "pumas-rpc/export-contract",
+            "pumas-rpc/test-support"
+          ],
+          "protocols": [
+            {
+              "name": "pumas.local-ipc",
+              "versions": [
+                1
+              ]
+            },
+            {
+              "name": "pumas.local-http",
+              "versions": [
+                1
+              ]
+            }
+          ],
+          "schemas": [
+            {
+              "name": "pumas.build-info",
+              "version": 1
+            },
+            {
+              "name": "pumas.discovery",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-ref",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-selector",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-advertisement",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-operations.image-to-text",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-admission-fence",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-owner-retention",
+              "version": 1
+            }
+          ]
+        }
+      },
+      "owned_fixture_child_pids": [
+        260310,
+        260326
+      ],
+      "caller_pid": 260327,
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "/workspace/pumas-v08-chrema-native-evidence/chrema_native_probe.mjs",
+        "/tmp/Chrema-pumas-supported-consumer-20261009",
+        "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+        "61c20bd24bd179fbc14538183c6898c14e677d84209413de69e1d797584a0a47",
+        "/tmp/pumas-chrema-actual-native-independent-20261009/normal-release/library",
+        "/tmp/pumas-chrema-actual-native-independent-20261009/normal-release/owner-description.json",
+        "normal-release"
+      ],
+      "first_caller_observation": {
+        "phase": "ready",
+        "ownership": "borrowed",
+        "admission_fence": {
+          "instanceGeneration": "2026-10-09T11:19:21.361927081+00:00",
+          "serviceGeneration": "dd255002-3f73-4f1c-bd6a-c0045bf83ffe"
+        }
+      },
+      "ready": {
+        "phase": "ready",
+        "ownership": "borrowed",
+        "admission_fence": {
+          "instanceGeneration": "2026-10-09T11:19:21.361927081+00:00",
+          "serviceGeneration": "dd255002-3f73-4f1c-bd6a-c0045bf83ffe"
+        }
+      },
+      "owner_health_while_Chrema_retained": {
+        "catalog": {
+          "jsonrpc": "2.0",
+          "result": {
+            "models": {},
+            "success": true
+          },
+          "id": 1
+        },
+        "lookup": {
+          "jsonrpc": "2.0",
+          "result": {
+            "contract_version": 1,
+            "requested_model_id": "unknown/fixture/absent",
+            "resolution": {
+              "status": "missing"
+            }
+          },
+          "id": 2
+        }
+      },
+      "owner_health_after_Chrema_close": {
+        "catalog": {
+          "jsonrpc": "2.0",
+          "result": {
+            "models": {},
+            "success": true
+          },
+          "id": 3
+        },
+        "lookup": {
+          "jsonrpc": "2.0",
+          "result": {
+            "contract_version": 1,
+            "requested_model_id": "unknown/fixture/absent",
+            "resolution": {
+              "status": "missing"
+            }
+          },
+          "id": 4
+        }
+      },
+      "fixture_cleanup": {
+        "child_pids": [
+          260310,
+          260326
+        ],
+        "cleanup_results": [
+          {
+            "pid": 260326,
+            "exit_code": 0
+          },
+          {
+            "pid": 260310,
+            "exit_code": 0
+          }
+        ],
+        "all_child_pids_absent": true,
+        "registry_instance_rows": [],
+        "sentinel_unchanged": true
+      },
+      "Chrema": {
+        "mode": "normal-release",
+        "node_version": "v24.19.0",
+        "caller_pid": 260327,
+        "observer_children": [
+          {
+            "binary": "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+            "arguments": [
+              "--describe-local-http",
+              "--launcher-root",
+              "/tmp/pumas-chrema-actual-native-independent-20261009/normal-release/library"
+            ],
+            "pid": 260339,
+            "closed": true,
+            "exit_code": 0,
+            "signal": null,
+            "stdout_bytes": 3102,
+            "stdout_sha256": "b30e5736044ec1c59267f490235d5f77f7b0ccc687847aa2ad224d3d810d8015",
+            "description": {
+              "advertisement_schema_version": 1,
+              "service_generation": "dd255002-3f73-4f1c-bd6a-c0045bf83ffe",
+              "instance": {
+                "discovery_schema_version": 1,
+                "build_info": {
+                  "build_info_schema_version": 1,
+                  "component": "pumas-library",
+                  "package_version": "0.7.0",
+                  "compiled_features": [
+                    "pumas-library/hf-client",
+                    "pumas-library/process-manager",
+                    "pumas-library/gpu-monitor",
+                    "pumas-library/onnx-runtime",
+                    "pumas-library/s3",
+                    "pumas-library/contract-schema",
+                    "pumas-library/test-support"
+                  ],
+                  "protocols": [
+                    {
+                      "name": "pumas.local-ipc",
+                      "versions": [
+                        1
+                      ]
+                    }
+                  ],
+                  "schemas": [
+                    {
+                      "name": "pumas.build-info",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.discovery",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-ref",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-selector",
+                      "version": 1
+                    }
+                  ]
+                },
+                "registry_library_id": "a1feec9b-becd-43e9-8e15-29460681d6f0",
+                "library_root": "/tmp/pumas-chrema-actual-native-independent-20261009/normal-release/library",
+                "generation": "2026-10-09T11:19:21.361927081+00:00",
+                "pumas_version": "0.7.0",
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "capabilities": [
+                  "model.query@1",
+                  "model.get.local@1",
+                  "model.selector@1",
+                  "artifact.resolve@1"
+                ],
+                "model_ref_schema_version": 1,
+                "selector_schema_version": 1
+              },
+              "endpoint": "http://127.0.0.1:34159",
+              "build_info": {
+                "build_info_schema_version": 1,
+                "component": "pumas-rpc",
+                "package_version": "0.7.0",
+                "compiled_features": [
+                  "pumas-library/hf-client",
+                  "pumas-library/process-manager",
+                  "pumas-library/gpu-monitor",
+                  "pumas-library/onnx-runtime",
+                  "pumas-library/s3",
+                  "pumas-library/contract-schema",
+                  "pumas-library/test-support",
+                  "pumas-rpc/inference-plugins",
+                  "pumas-rpc/s3",
+                  "pumas-rpc/export-contract",
+                  "pumas-rpc/test-support"
+                ],
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  },
+                  {
+                    "name": "pumas.local-http",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "schemas": [
+                  {
+                    "name": "pumas.build-info",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.discovery",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-ref",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-selector",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-advertisement",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-operations.image-to-text",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-admission-fence",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-owner-retention",
+                    "version": 1
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "binary": "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+            "arguments": [
+              "--describe-local-http",
+              "--launcher-root",
+              "/tmp/pumas-chrema-actual-native-independent-20261009/normal-release/library"
+            ],
+            "pid": 260340,
+            "closed": true,
+            "exit_code": 0,
+            "signal": null,
+            "stdout_bytes": 3102,
+            "stdout_sha256": "b30e5736044ec1c59267f490235d5f77f7b0ccc687847aa2ad224d3d810d8015",
+            "description": {
+              "advertisement_schema_version": 1,
+              "service_generation": "dd255002-3f73-4f1c-bd6a-c0045bf83ffe",
+              "instance": {
+                "discovery_schema_version": 1,
+                "build_info": {
+                  "build_info_schema_version": 1,
+                  "component": "pumas-library",
+                  "package_version": "0.7.0",
+                  "compiled_features": [
+                    "pumas-library/hf-client",
+                    "pumas-library/process-manager",
+                    "pumas-library/gpu-monitor",
+                    "pumas-library/onnx-runtime",
+                    "pumas-library/s3",
+                    "pumas-library/contract-schema",
+                    "pumas-library/test-support"
+                  ],
+                  "protocols": [
+                    {
+                      "name": "pumas.local-ipc",
+                      "versions": [
+                        1
+                      ]
+                    }
+                  ],
+                  "schemas": [
+                    {
+                      "name": "pumas.build-info",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.discovery",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-ref",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-selector",
+                      "version": 1
+                    }
+                  ]
+                },
+                "registry_library_id": "a1feec9b-becd-43e9-8e15-29460681d6f0",
+                "library_root": "/tmp/pumas-chrema-actual-native-independent-20261009/normal-release/library",
+                "generation": "2026-10-09T11:19:21.361927081+00:00",
+                "pumas_version": "0.7.0",
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "capabilities": [
+                  "model.query@1",
+                  "model.get.local@1",
+                  "model.selector@1",
+                  "artifact.resolve@1"
+                ],
+                "model_ref_schema_version": 1,
+                "selector_schema_version": 1
+              },
+              "endpoint": "http://127.0.0.1:34159",
+              "build_info": {
+                "build_info_schema_version": 1,
+                "component": "pumas-rpc",
+                "package_version": "0.7.0",
+                "compiled_features": [
+                  "pumas-library/hf-client",
+                  "pumas-library/process-manager",
+                  "pumas-library/gpu-monitor",
+                  "pumas-library/onnx-runtime",
+                  "pumas-library/s3",
+                  "pumas-library/contract-schema",
+                  "pumas-library/test-support",
+                  "pumas-rpc/inference-plugins",
+                  "pumas-rpc/s3",
+                  "pumas-rpc/export-contract",
+                  "pumas-rpc/test-support"
+                ],
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  },
+                  {
+                    "name": "pumas.local-http",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "schemas": [
+                  {
+                    "name": "pumas.build-info",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.discovery",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-ref",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-selector",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-advertisement",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-operations.image-to-text",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-admission-fence",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-owner-retention",
+                    "version": 1
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "actual_http_requests": [
+          {
+            "method": "GET",
+            "path": "/.well-known/pumas/retention",
+            "instance_generation": "2026-10-09T11:19:21.361927081+00:00",
+            "service_generation": "dd255002-3f73-4f1c-bd6a-c0045bf83ffe",
+            "closed": true,
+            "status": 200,
+            "content_type": "text/event-stream",
+            "response_bytes": 206,
+            "response_body": "event: pumas-owner-retention\ndata: {\"instance_generation\":\"2026-10-09T11:19:21.361927081+00:00\",\"retention_schema_version\":1,\"service_generation\":\"dd255002-3f73-4f1c-bd6a-c0045bf83ffe\",\"state\":\"retained\"}\n\n",
+            "response_closed": true
+          },
+          {
+            "method": "POST",
+            "path": "/rpc",
+            "instance_generation": "2026-10-09T11:19:21.361927081+00:00",
+            "service_generation": "dd255002-3f73-4f1c-bd6a-c0045bf83ffe",
+            "closed": true,
+            "request_body": {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "method": "get_models"
+            },
+            "status": 200,
+            "content_type": "application/json",
+            "response_bytes": 62,
+            "response_body": "{\"jsonrpc\":\"2.0\",\"result\":{\"models\":{},\"success\":true},\"id\":1}",
+            "response_closed": true
+          },
+          {
+            "method": "POST",
+            "path": "/rpc",
+            "instance_generation": "2026-10-09T11:19:21.361927081+00:00",
+            "service_generation": "dd255002-3f73-4f1c-bd6a-c0045bf83ffe",
+            "closed": true,
+            "request_body": {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "method": "lookup_model",
+              "params": {
+                "model_id": "unknown/fixture/absent"
+              }
+            },
+            "status": 200,
+            "content_type": "application/json",
+            "response_bytes": 136,
+            "response_body": "{\"jsonrpc\":\"2.0\",\"result\":{\"contract_version\":1,\"requested_model_id\":\"unknown/fixture/absent\",\"resolution\":{\"status\":\"missing\"}},\"id\":2}",
+            "response_closed": true
+          },
+          {
+            "method": "POST",
+            "path": "/rpc",
+            "instance_generation": "2026-10-09T11:19:21.361927081+00:00",
+            "service_generation": "dd255002-3f73-4f1c-bd6a-c0045bf83ffe",
+            "closed": true,
+            "request_body": {
+              "jsonrpc": "2.0",
+              "id": 3,
+              "method": "get_models"
+            },
+            "status": 200,
+            "content_type": "application/json",
+            "response_bytes": 62,
+            "response_body": "{\"jsonrpc\":\"2.0\",\"result\":{\"models\":{},\"success\":true},\"id\":3}",
+            "response_closed": true
+          }
+        ],
+        "observation_instrumentation": "Wrappers log real spawn/request/close/data; original functions, arguments, bytes and outcomes unchanged.",
+        "catalog": {
+          "modelIds": []
+        },
+        "lookup": {
+          "contract_version": 1,
+          "requested_model_id": "unknown/fixture/absent",
+          "resolution": {
+            "status": "missing"
+          }
+        },
+        "catalog_after_denial": {
+          "modelIds": []
+        },
+        "host_grants": [
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "lookup_model",
+            "model_id": "unknown/fixture/absent",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "lookup_model",
+            "model_id": "unknown/fixture/absent",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "get_models",
+            "allowed": false,
+            "signal_supplied": false
+          },
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          }
+        ],
+        "ownership": "borrowed",
+        "endpoint": "http://127.0.0.1:34159",
+        "admission_fence": {
+          "instanceGeneration": "2026-10-09T11:19:21.361927081+00:00",
+          "serviceGeneration": "dd255002-3f73-4f1c-bd6a-c0045bf83ffe"
+        },
+        "status": "passed",
+        "caller_signal_aborted": false,
+        "consumer_signal_aborted": true,
+        "retention_signal_aborted": true,
+        "release_settled": true,
+        "closed_consumer_refused_without_transport_or_observer": true
+      },
+      "caller_exit_code": 0,
+      "caller_stderr": "",
+      "caller_and_observer_pids_absent": true
+    },
+    {
+      "mode": "caller-cancel",
+      "root": "/tmp/pumas-chrema-actual-native-independent-20261009/caller-cancel/library",
+      "registry": "/tmp/pumas-chrema-actual-native-independent-20261009/caller-cancel/registry.db",
+      "phase": "passed",
+      "owner_description": {
+        "advertisement_schema_version": 1,
+        "service_generation": "4154e51b-36e7-4521-aff4-6265614cb991",
+        "instance": {
+          "discovery_schema_version": 1,
+          "build_info": {
+            "build_info_schema_version": 1,
+            "component": "pumas-library",
+            "package_version": "0.7.0",
+            "compiled_features": [
+              "pumas-library/hf-client",
+              "pumas-library/process-manager",
+              "pumas-library/gpu-monitor",
+              "pumas-library/onnx-runtime",
+              "pumas-library/s3",
+              "pumas-library/contract-schema",
+              "pumas-library/test-support"
+            ],
+            "protocols": [
+              {
+                "name": "pumas.local-ipc",
+                "versions": [
+                  1
+                ]
+              }
+            ],
+            "schemas": [
+              {
+                "name": "pumas.build-info",
+                "version": 1
+              },
+              {
+                "name": "pumas.discovery",
+                "version": 1
+              },
+              {
+                "name": "pumas.model-ref",
+                "version": 1
+              },
+              {
+                "name": "pumas.model-selector",
+                "version": 1
+              }
+            ]
+          },
+          "registry_library_id": "81e0dcca-aca3-43bb-9e72-466e4f50e8b0",
+          "library_root": "/tmp/pumas-chrema-actual-native-independent-20261009/caller-cancel/library",
+          "generation": "2026-10-09T11:19:23.436901091+00:00",
+          "pumas_version": "0.7.0",
+          "protocols": [
+            {
+              "name": "pumas.local-ipc",
+              "versions": [
+                1
+              ]
+            }
+          ],
+          "capabilities": [
+            "model.query@1",
+            "model.get.local@1",
+            "model.selector@1",
+            "artifact.resolve@1"
+          ],
+          "model_ref_schema_version": 1,
+          "selector_schema_version": 1
+        },
+        "endpoint": "http://127.0.0.1:39141",
+        "build_info": {
+          "build_info_schema_version": 1,
+          "component": "pumas-rpc",
+          "package_version": "0.7.0",
+          "compiled_features": [
+            "pumas-library/hf-client",
+            "pumas-library/process-manager",
+            "pumas-library/gpu-monitor",
+            "pumas-library/onnx-runtime",
+            "pumas-library/s3",
+            "pumas-library/contract-schema",
+            "pumas-library/test-support",
+            "pumas-rpc/inference-plugins",
+            "pumas-rpc/s3",
+            "pumas-rpc/export-contract",
+            "pumas-rpc/test-support"
+          ],
+          "protocols": [
+            {
+              "name": "pumas.local-ipc",
+              "versions": [
+                1
+              ]
+            },
+            {
+              "name": "pumas.local-http",
+              "versions": [
+                1
+              ]
+            }
+          ],
+          "schemas": [
+            {
+              "name": "pumas.build-info",
+              "version": 1
+            },
+            {
+              "name": "pumas.discovery",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-ref",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-selector",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-advertisement",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-operations.image-to-text",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-admission-fence",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-owner-retention",
+              "version": 1
+            }
+          ]
+        }
+      },
+      "owned_fixture_child_pids": [
+        260358,
+        260384
+      ],
+      "caller_pid": 260385,
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "/workspace/pumas-v08-chrema-native-evidence/chrema_native_probe.mjs",
+        "/tmp/Chrema-pumas-supported-consumer-20261009",
+        "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+        "61c20bd24bd179fbc14538183c6898c14e677d84209413de69e1d797584a0a47",
+        "/tmp/pumas-chrema-actual-native-independent-20261009/caller-cancel/library",
+        "/tmp/pumas-chrema-actual-native-independent-20261009/caller-cancel/owner-description.json",
+        "caller-cancel"
+      ],
+      "first_caller_observation": {
+        "phase": "ready",
+        "ownership": "borrowed",
+        "admission_fence": {
+          "instanceGeneration": "2026-10-09T11:19:23.436901091+00:00",
+          "serviceGeneration": "4154e51b-36e7-4521-aff4-6265614cb991"
+        }
+      },
+      "ready": {
+        "phase": "ready",
+        "ownership": "borrowed",
+        "admission_fence": {
+          "instanceGeneration": "2026-10-09T11:19:23.436901091+00:00",
+          "serviceGeneration": "4154e51b-36e7-4521-aff4-6265614cb991"
+        }
+      },
+      "owner_health_while_Chrema_retained": {
+        "catalog": {
+          "jsonrpc": "2.0",
+          "result": {
+            "models": {},
+            "success": true
+          },
+          "id": 1
+        },
+        "lookup": {
+          "jsonrpc": "2.0",
+          "result": {
+            "contract_version": 1,
+            "requested_model_id": "unknown/fixture/absent",
+            "resolution": {
+              "status": "missing"
+            }
+          },
+          "id": 2
+        }
+      },
+      "owner_health_after_Chrema_close": {
+        "catalog": {
+          "jsonrpc": "2.0",
+          "result": {
+            "models": {},
+            "success": true
+          },
+          "id": 3
+        },
+        "lookup": {
+          "jsonrpc": "2.0",
+          "result": {
+            "contract_version": 1,
+            "requested_model_id": "unknown/fixture/absent",
+            "resolution": {
+              "status": "missing"
+            }
+          },
+          "id": 4
+        }
+      },
+      "fixture_cleanup": {
+        "child_pids": [
+          260358,
+          260384
+        ],
+        "cleanup_results": [
+          {
+            "pid": 260384,
+            "exit_code": 0
+          },
+          {
+            "pid": 260358,
+            "exit_code": 0
+          }
+        ],
+        "all_child_pids_absent": true,
+        "registry_instance_rows": [],
+        "sentinel_unchanged": true
+      },
+      "Chrema": {
+        "mode": "caller-cancel",
+        "node_version": "v24.19.0",
+        "caller_pid": 260385,
+        "observer_children": [
+          {
+            "binary": "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+            "arguments": [
+              "--describe-local-http",
+              "--launcher-root",
+              "/tmp/pumas-chrema-actual-native-independent-20261009/caller-cancel/library"
+            ],
+            "pid": 260397,
+            "closed": true,
+            "exit_code": 0,
+            "signal": null,
+            "stdout_bytes": 3101,
+            "stdout_sha256": "29e6d96ab1428918c544e22a5ab5104e8a3d6e19655a40627415319757a8a3f9",
+            "description": {
+              "advertisement_schema_version": 1,
+              "service_generation": "4154e51b-36e7-4521-aff4-6265614cb991",
+              "instance": {
+                "discovery_schema_version": 1,
+                "build_info": {
+                  "build_info_schema_version": 1,
+                  "component": "pumas-library",
+                  "package_version": "0.7.0",
+                  "compiled_features": [
+                    "pumas-library/hf-client",
+                    "pumas-library/process-manager",
+                    "pumas-library/gpu-monitor",
+                    "pumas-library/onnx-runtime",
+                    "pumas-library/s3",
+                    "pumas-library/contract-schema",
+                    "pumas-library/test-support"
+                  ],
+                  "protocols": [
+                    {
+                      "name": "pumas.local-ipc",
+                      "versions": [
+                        1
+                      ]
+                    }
+                  ],
+                  "schemas": [
+                    {
+                      "name": "pumas.build-info",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.discovery",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-ref",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-selector",
+                      "version": 1
+                    }
+                  ]
+                },
+                "registry_library_id": "81e0dcca-aca3-43bb-9e72-466e4f50e8b0",
+                "library_root": "/tmp/pumas-chrema-actual-native-independent-20261009/caller-cancel/library",
+                "generation": "2026-10-09T11:19:23.436901091+00:00",
+                "pumas_version": "0.7.0",
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "capabilities": [
+                  "model.query@1",
+                  "model.get.local@1",
+                  "model.selector@1",
+                  "artifact.resolve@1"
+                ],
+                "model_ref_schema_version": 1,
+                "selector_schema_version": 1
+              },
+              "endpoint": "http://127.0.0.1:39141",
+              "build_info": {
+                "build_info_schema_version": 1,
+                "component": "pumas-rpc",
+                "package_version": "0.7.0",
+                "compiled_features": [
+                  "pumas-library/hf-client",
+                  "pumas-library/process-manager",
+                  "pumas-library/gpu-monitor",
+                  "pumas-library/onnx-runtime",
+                  "pumas-library/s3",
+                  "pumas-library/contract-schema",
+                  "pumas-library/test-support",
+                  "pumas-rpc/inference-plugins",
+                  "pumas-rpc/s3",
+                  "pumas-rpc/export-contract",
+                  "pumas-rpc/test-support"
+                ],
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  },
+                  {
+                    "name": "pumas.local-http",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "schemas": [
+                  {
+                    "name": "pumas.build-info",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.discovery",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-ref",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-selector",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-advertisement",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-operations.image-to-text",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-admission-fence",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-owner-retention",
+                    "version": 1
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "binary": "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+            "arguments": [
+              "--describe-local-http",
+              "--launcher-root",
+              "/tmp/pumas-chrema-actual-native-independent-20261009/caller-cancel/library"
+            ],
+            "pid": 260398,
+            "closed": true,
+            "exit_code": 0,
+            "signal": null,
+            "stdout_bytes": 3101,
+            "stdout_sha256": "29e6d96ab1428918c544e22a5ab5104e8a3d6e19655a40627415319757a8a3f9",
+            "description": {
+              "advertisement_schema_version": 1,
+              "service_generation": "4154e51b-36e7-4521-aff4-6265614cb991",
+              "instance": {
+                "discovery_schema_version": 1,
+                "build_info": {
+                  "build_info_schema_version": 1,
+                  "component": "pumas-library",
+                  "package_version": "0.7.0",
+                  "compiled_features": [
+                    "pumas-library/hf-client",
+                    "pumas-library/process-manager",
+                    "pumas-library/gpu-monitor",
+                    "pumas-library/onnx-runtime",
+                    "pumas-library/s3",
+                    "pumas-library/contract-schema",
+                    "pumas-library/test-support"
+                  ],
+                  "protocols": [
+                    {
+                      "name": "pumas.local-ipc",
+                      "versions": [
+                        1
+                      ]
+                    }
+                  ],
+                  "schemas": [
+                    {
+                      "name": "pumas.build-info",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.discovery",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-ref",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-selector",
+                      "version": 1
+                    }
+                  ]
+                },
+                "registry_library_id": "81e0dcca-aca3-43bb-9e72-466e4f50e8b0",
+                "library_root": "/tmp/pumas-chrema-actual-native-independent-20261009/caller-cancel/library",
+                "generation": "2026-10-09T11:19:23.436901091+00:00",
+                "pumas_version": "0.7.0",
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "capabilities": [
+                  "model.query@1",
+                  "model.get.local@1",
+                  "model.selector@1",
+                  "artifact.resolve@1"
+                ],
+                "model_ref_schema_version": 1,
+                "selector_schema_version": 1
+              },
+              "endpoint": "http://127.0.0.1:39141",
+              "build_info": {
+                "build_info_schema_version": 1,
+                "component": "pumas-rpc",
+                "package_version": "0.7.0",
+                "compiled_features": [
+                  "pumas-library/hf-client",
+                  "pumas-library/process-manager",
+                  "pumas-library/gpu-monitor",
+                  "pumas-library/onnx-runtime",
+                  "pumas-library/s3",
+                  "pumas-library/contract-schema",
+                  "pumas-library/test-support",
+                  "pumas-rpc/inference-plugins",
+                  "pumas-rpc/s3",
+                  "pumas-rpc/export-contract",
+                  "pumas-rpc/test-support"
+                ],
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  },
+                  {
+                    "name": "pumas.local-http",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "schemas": [
+                  {
+                    "name": "pumas.build-info",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.discovery",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-ref",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-selector",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-advertisement",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-operations.image-to-text",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-admission-fence",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-owner-retention",
+                    "version": 1
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "actual_http_requests": [
+          {
+            "method": "GET",
+            "path": "/.well-known/pumas/retention",
+            "instance_generation": "2026-10-09T11:19:23.436901091+00:00",
+            "service_generation": "4154e51b-36e7-4521-aff4-6265614cb991",
+            "closed": true,
+            "status": 200,
+            "content_type": "text/event-stream",
+            "response_bytes": 206,
+            "response_body": "event: pumas-owner-retention\ndata: {\"instance_generation\":\"2026-10-09T11:19:23.436901091+00:00\",\"retention_schema_version\":1,\"service_generation\":\"4154e51b-36e7-4521-aff4-6265614cb991\",\"state\":\"retained\"}\n\n",
+            "response_closed": true
+          },
+          {
+            "method": "POST",
+            "path": "/rpc",
+            "instance_generation": "2026-10-09T11:19:23.436901091+00:00",
+            "service_generation": "4154e51b-36e7-4521-aff4-6265614cb991",
+            "closed": true,
+            "request_body": {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "method": "get_models"
+            },
+            "status": 200,
+            "content_type": "application/json",
+            "response_bytes": 62,
+            "response_body": "{\"jsonrpc\":\"2.0\",\"result\":{\"models\":{},\"success\":true},\"id\":1}",
+            "response_closed": true
+          },
+          {
+            "method": "POST",
+            "path": "/rpc",
+            "instance_generation": "2026-10-09T11:19:23.436901091+00:00",
+            "service_generation": "4154e51b-36e7-4521-aff4-6265614cb991",
+            "closed": true,
+            "request_body": {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "method": "lookup_model",
+              "params": {
+                "model_id": "unknown/fixture/absent"
+              }
+            },
+            "status": 200,
+            "content_type": "application/json",
+            "response_bytes": 136,
+            "response_body": "{\"jsonrpc\":\"2.0\",\"result\":{\"contract_version\":1,\"requested_model_id\":\"unknown/fixture/absent\",\"resolution\":{\"status\":\"missing\"}},\"id\":2}",
+            "response_closed": true
+          },
+          {
+            "method": "POST",
+            "path": "/rpc",
+            "instance_generation": "2026-10-09T11:19:23.436901091+00:00",
+            "service_generation": "4154e51b-36e7-4521-aff4-6265614cb991",
+            "closed": true,
+            "request_body": {
+              "jsonrpc": "2.0",
+              "id": 3,
+              "method": "get_models"
+            },
+            "status": 200,
+            "content_type": "application/json",
+            "response_bytes": 62,
+            "response_body": "{\"jsonrpc\":\"2.0\",\"result\":{\"models\":{},\"success\":true},\"id\":3}",
+            "response_closed": true
+          }
+        ],
+        "observation_instrumentation": "Wrappers log real spawn/request/close/data; original functions, arguments, bytes and outcomes unchanged.",
+        "catalog": {
+          "modelIds": []
+        },
+        "lookup": {
+          "contract_version": 1,
+          "requested_model_id": "unknown/fixture/absent",
+          "resolution": {
+            "status": "missing"
+          }
+        },
+        "catalog_after_denial": {
+          "modelIds": []
+        },
+        "host_grants": [
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "lookup_model",
+            "model_id": "unknown/fixture/absent",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "lookup_model",
+            "model_id": "unknown/fixture/absent",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "get_models",
+            "allowed": false,
+            "signal_supplied": false
+          },
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          }
+        ],
+        "ownership": "borrowed",
+        "endpoint": "http://127.0.0.1:39141",
+        "admission_fence": {
+          "instanceGeneration": "2026-10-09T11:19:23.436901091+00:00",
+          "serviceGeneration": "4154e51b-36e7-4521-aff4-6265614cb991"
+        },
+        "status": "passed",
+        "caller_signal_aborted": true,
+        "consumer_signal_aborted": true,
+        "retention_signal_aborted": true,
+        "release_settled": true,
+        "closed_consumer_refused_without_transport_or_observer": true
+      },
+      "caller_exit_code": 0,
+      "caller_stderr": "",
+      "caller_and_observer_pids_absent": true
+    },
+    {
+      "mode": "owner-revocation",
+      "root": "/tmp/pumas-chrema-actual-native-independent-20261009/owner-revocation/library",
+      "registry": "/tmp/pumas-chrema-actual-native-independent-20261009/owner-revocation/registry.db",
+      "phase": "passed",
+      "owner_description": {
+        "advertisement_schema_version": 1,
+        "service_generation": "1058e1ea-d51a-4e67-994b-9cda8e22ac44",
+        "instance": {
+          "discovery_schema_version": 1,
+          "build_info": {
+            "build_info_schema_version": 1,
+            "component": "pumas-library",
+            "package_version": "0.7.0",
+            "compiled_features": [
+              "pumas-library/hf-client",
+              "pumas-library/process-manager",
+              "pumas-library/gpu-monitor",
+              "pumas-library/onnx-runtime",
+              "pumas-library/s3",
+              "pumas-library/contract-schema",
+              "pumas-library/test-support"
+            ],
+            "protocols": [
+              {
+                "name": "pumas.local-ipc",
+                "versions": [
+                  1
+                ]
+              }
+            ],
+            "schemas": [
+              {
+                "name": "pumas.build-info",
+                "version": 1
+              },
+              {
+                "name": "pumas.discovery",
+                "version": 1
+              },
+              {
+                "name": "pumas.model-ref",
+                "version": 1
+              },
+              {
+                "name": "pumas.model-selector",
+                "version": 1
+              }
+            ]
+          },
+          "registry_library_id": "2eece0d9-c9d8-46e9-b76c-860fa9d8cc70",
+          "library_root": "/tmp/pumas-chrema-actual-native-independent-20261009/owner-revocation/library",
+          "generation": "2026-10-09T11:19:25.335045544+00:00",
+          "pumas_version": "0.7.0",
+          "protocols": [
+            {
+              "name": "pumas.local-ipc",
+              "versions": [
+                1
+              ]
+            }
+          ],
+          "capabilities": [
+            "model.query@1",
+            "model.get.local@1",
+            "model.selector@1",
+            "artifact.resolve@1"
+          ],
+          "model_ref_schema_version": 1,
+          "selector_schema_version": 1
+        },
+        "endpoint": "http://127.0.0.1:35979",
+        "build_info": {
+          "build_info_schema_version": 1,
+          "component": "pumas-rpc",
+          "package_version": "0.7.0",
+          "compiled_features": [
+            "pumas-library/hf-client",
+            "pumas-library/process-manager",
+            "pumas-library/gpu-monitor",
+            "pumas-library/onnx-runtime",
+            "pumas-library/s3",
+            "pumas-library/contract-schema",
+            "pumas-library/test-support",
+            "pumas-rpc/inference-plugins",
+            "pumas-rpc/s3",
+            "pumas-rpc/export-contract",
+            "pumas-rpc/test-support"
+          ],
+          "protocols": [
+            {
+              "name": "pumas.local-ipc",
+              "versions": [
+                1
+              ]
+            },
+            {
+              "name": "pumas.local-http",
+              "versions": [
+                1
+              ]
+            }
+          ],
+          "schemas": [
+            {
+              "name": "pumas.build-info",
+              "version": 1
+            },
+            {
+              "name": "pumas.discovery",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-ref",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-selector",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-advertisement",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-operations.image-to-text",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-admission-fence",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-owner-retention",
+              "version": 1
+            }
+          ]
+        }
+      },
+      "owned_fixture_child_pids": [
+        260399,
+        260415
+      ],
+      "caller_pid": 260416,
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "/workspace/pumas-v08-chrema-native-evidence/chrema_native_probe.mjs",
+        "/tmp/Chrema-pumas-supported-consumer-20261009",
+        "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+        "61c20bd24bd179fbc14538183c6898c14e677d84209413de69e1d797584a0a47",
+        "/tmp/pumas-chrema-actual-native-independent-20261009/owner-revocation/library",
+        "/tmp/pumas-chrema-actual-native-independent-20261009/owner-revocation/owner-description.json",
+        "owner-revocation"
+      ],
+      "first_caller_observation": {
+        "phase": "ready",
+        "ownership": "borrowed",
+        "admission_fence": {
+          "instanceGeneration": "2026-10-09T11:19:25.335045544+00:00",
+          "serviceGeneration": "1058e1ea-d51a-4e67-994b-9cda8e22ac44"
+        }
+      },
+      "ready": {
+        "phase": "ready",
+        "ownership": "borrowed",
+        "admission_fence": {
+          "instanceGeneration": "2026-10-09T11:19:25.335045544+00:00",
+          "serviceGeneration": "1058e1ea-d51a-4e67-994b-9cda8e22ac44"
+        }
+      },
+      "owner_health_while_Chrema_retained": {
+        "catalog": {
+          "jsonrpc": "2.0",
+          "result": {
+            "models": {},
+            "success": true
+          },
+          "id": 1
+        },
+        "lookup": {
+          "jsonrpc": "2.0",
+          "result": {
+            "contract_version": 1,
+            "requested_model_id": "unknown/fixture/absent",
+            "resolution": {
+              "status": "missing"
+            }
+          },
+          "id": 2
+        }
+      },
+      "fixture_cleanup": {
+        "child_pids": [
+          260399,
+          260415
+        ],
+        "cleanup_results": [
+          {
+            "pid": 260415,
+            "exit_code": 0
+          },
+          {
+            "pid": 260399,
+            "exit_code": 0
+          }
+        ],
+        "all_child_pids_absent": true,
+        "registry_instance_rows": [],
+        "sentinel_unchanged": true
+      },
+      "Chrema": {
+        "mode": "owner-revocation",
+        "node_version": "v24.19.0",
+        "caller_pid": 260416,
+        "observer_children": [
+          {
+            "binary": "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+            "arguments": [
+              "--describe-local-http",
+              "--launcher-root",
+              "/tmp/pumas-chrema-actual-native-independent-20261009/owner-revocation/library"
+            ],
+            "pid": 260428,
+            "closed": true,
+            "exit_code": 0,
+            "signal": null,
+            "stdout_bytes": 3104,
+            "stdout_sha256": "e278a56793852dfb5a1411855d25f8501ffc364b3ee83a0eb48044ad179aa7f1",
+            "description": {
+              "advertisement_schema_version": 1,
+              "service_generation": "1058e1ea-d51a-4e67-994b-9cda8e22ac44",
+              "instance": {
+                "discovery_schema_version": 1,
+                "build_info": {
+                  "build_info_schema_version": 1,
+                  "component": "pumas-library",
+                  "package_version": "0.7.0",
+                  "compiled_features": [
+                    "pumas-library/hf-client",
+                    "pumas-library/process-manager",
+                    "pumas-library/gpu-monitor",
+                    "pumas-library/onnx-runtime",
+                    "pumas-library/s3",
+                    "pumas-library/contract-schema",
+                    "pumas-library/test-support"
+                  ],
+                  "protocols": [
+                    {
+                      "name": "pumas.local-ipc",
+                      "versions": [
+                        1
+                      ]
+                    }
+                  ],
+                  "schemas": [
+                    {
+                      "name": "pumas.build-info",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.discovery",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-ref",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-selector",
+                      "version": 1
+                    }
+                  ]
+                },
+                "registry_library_id": "2eece0d9-c9d8-46e9-b76c-860fa9d8cc70",
+                "library_root": "/tmp/pumas-chrema-actual-native-independent-20261009/owner-revocation/library",
+                "generation": "2026-10-09T11:19:25.335045544+00:00",
+                "pumas_version": "0.7.0",
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "capabilities": [
+                  "model.query@1",
+                  "model.get.local@1",
+                  "model.selector@1",
+                  "artifact.resolve@1"
+                ],
+                "model_ref_schema_version": 1,
+                "selector_schema_version": 1
+              },
+              "endpoint": "http://127.0.0.1:35979",
+              "build_info": {
+                "build_info_schema_version": 1,
+                "component": "pumas-rpc",
+                "package_version": "0.7.0",
+                "compiled_features": [
+                  "pumas-library/hf-client",
+                  "pumas-library/process-manager",
+                  "pumas-library/gpu-monitor",
+                  "pumas-library/onnx-runtime",
+                  "pumas-library/s3",
+                  "pumas-library/contract-schema",
+                  "pumas-library/test-support",
+                  "pumas-rpc/inference-plugins",
+                  "pumas-rpc/s3",
+                  "pumas-rpc/export-contract",
+                  "pumas-rpc/test-support"
+                ],
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  },
+                  {
+                    "name": "pumas.local-http",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "schemas": [
+                  {
+                    "name": "pumas.build-info",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.discovery",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-ref",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-selector",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-advertisement",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-operations.image-to-text",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-admission-fence",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-owner-retention",
+                    "version": 1
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "binary": "/tmp/pumas-preflight-consumer-qualified-20261009/pumas-rpc",
+            "arguments": [
+              "--describe-local-http",
+              "--launcher-root",
+              "/tmp/pumas-chrema-actual-native-independent-20261009/owner-revocation/library"
+            ],
+            "pid": 260429,
+            "closed": true,
+            "exit_code": 0,
+            "signal": null,
+            "stdout_bytes": 3104,
+            "stdout_sha256": "e278a56793852dfb5a1411855d25f8501ffc364b3ee83a0eb48044ad179aa7f1",
+            "description": {
+              "advertisement_schema_version": 1,
+              "service_generation": "1058e1ea-d51a-4e67-994b-9cda8e22ac44",
+              "instance": {
+                "discovery_schema_version": 1,
+                "build_info": {
+                  "build_info_schema_version": 1,
+                  "component": "pumas-library",
+                  "package_version": "0.7.0",
+                  "compiled_features": [
+                    "pumas-library/hf-client",
+                    "pumas-library/process-manager",
+                    "pumas-library/gpu-monitor",
+                    "pumas-library/onnx-runtime",
+                    "pumas-library/s3",
+                    "pumas-library/contract-schema",
+                    "pumas-library/test-support"
+                  ],
+                  "protocols": [
+                    {
+                      "name": "pumas.local-ipc",
+                      "versions": [
+                        1
+                      ]
+                    }
+                  ],
+                  "schemas": [
+                    {
+                      "name": "pumas.build-info",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.discovery",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-ref",
+                      "version": 1
+                    },
+                    {
+                      "name": "pumas.model-selector",
+                      "version": 1
+                    }
+                  ]
+                },
+                "registry_library_id": "2eece0d9-c9d8-46e9-b76c-860fa9d8cc70",
+                "library_root": "/tmp/pumas-chrema-actual-native-independent-20261009/owner-revocation/library",
+                "generation": "2026-10-09T11:19:25.335045544+00:00",
+                "pumas_version": "0.7.0",
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "capabilities": [
+                  "model.query@1",
+                  "model.get.local@1",
+                  "model.selector@1",
+                  "artifact.resolve@1"
+                ],
+                "model_ref_schema_version": 1,
+                "selector_schema_version": 1
+              },
+              "endpoint": "http://127.0.0.1:35979",
+              "build_info": {
+                "build_info_schema_version": 1,
+                "component": "pumas-rpc",
+                "package_version": "0.7.0",
+                "compiled_features": [
+                  "pumas-library/hf-client",
+                  "pumas-library/process-manager",
+                  "pumas-library/gpu-monitor",
+                  "pumas-library/onnx-runtime",
+                  "pumas-library/s3",
+                  "pumas-library/contract-schema",
+                  "pumas-library/test-support",
+                  "pumas-rpc/inference-plugins",
+                  "pumas-rpc/s3",
+                  "pumas-rpc/export-contract",
+                  "pumas-rpc/test-support"
+                ],
+                "protocols": [
+                  {
+                    "name": "pumas.local-ipc",
+                    "versions": [
+                      1
+                    ]
+                  },
+                  {
+                    "name": "pumas.local-http",
+                    "versions": [
+                      1
+                    ]
+                  }
+                ],
+                "schemas": [
+                  {
+                    "name": "pumas.build-info",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.discovery",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-ref",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-selector",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-advertisement",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.model-operations.image-to-text",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-admission-fence",
+                    "version": 1
+                  },
+                  {
+                    "name": "pumas.http-owner-retention",
+                    "version": 1
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "actual_http_requests": [
+          {
+            "method": "GET",
+            "path": "/.well-known/pumas/retention",
+            "instance_generation": "2026-10-09T11:19:25.335045544+00:00",
+            "service_generation": "1058e1ea-d51a-4e67-994b-9cda8e22ac44",
+            "closed": true,
+            "status": 200,
+            "content_type": "text/event-stream",
+            "response_bytes": 411,
+            "response_body": "event: pumas-owner-retention\ndata: {\"instance_generation\":\"2026-10-09T11:19:25.335045544+00:00\",\"retention_schema_version\":1,\"service_generation\":\"1058e1ea-d51a-4e67-994b-9cda8e22ac44\",\"state\":\"retained\"}\n\nevent: pumas-owner-retention\ndata: {\"instance_generation\":\"2026-10-09T11:19:25.335045544+00:00\",\"retention_schema_version\":1,\"service_generation\":\"1058e1ea-d51a-4e67-994b-9cda8e22ac44\",\"state\":\"revoked\"}\n\n",
+            "response_closed": true
+          },
+          {
+            "method": "POST",
+            "path": "/rpc",
+            "instance_generation": "2026-10-09T11:19:25.335045544+00:00",
+            "service_generation": "1058e1ea-d51a-4e67-994b-9cda8e22ac44",
+            "closed": true,
+            "request_body": {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "method": "get_models"
+            },
+            "status": 200,
+            "content_type": "application/json",
+            "response_bytes": 62,
+            "response_body": "{\"jsonrpc\":\"2.0\",\"result\":{\"models\":{},\"success\":true},\"id\":1}",
+            "response_closed": true
+          },
+          {
+            "method": "POST",
+            "path": "/rpc",
+            "instance_generation": "2026-10-09T11:19:25.335045544+00:00",
+            "service_generation": "1058e1ea-d51a-4e67-994b-9cda8e22ac44",
+            "closed": true,
+            "request_body": {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "method": "lookup_model",
+              "params": {
+                "model_id": "unknown/fixture/absent"
+              }
+            },
+            "status": 200,
+            "content_type": "application/json",
+            "response_bytes": 136,
+            "response_body": "{\"jsonrpc\":\"2.0\",\"result\":{\"contract_version\":1,\"requested_model_id\":\"unknown/fixture/absent\",\"resolution\":{\"status\":\"missing\"}},\"id\":2}",
+            "response_closed": true
+          },
+          {
+            "method": "POST",
+            "path": "/rpc",
+            "instance_generation": "2026-10-09T11:19:25.335045544+00:00",
+            "service_generation": "1058e1ea-d51a-4e67-994b-9cda8e22ac44",
+            "closed": true,
+            "request_body": {
+              "jsonrpc": "2.0",
+              "id": 3,
+              "method": "get_models"
+            },
+            "status": 200,
+            "content_type": "application/json",
+            "response_bytes": 62,
+            "response_body": "{\"jsonrpc\":\"2.0\",\"result\":{\"models\":{},\"success\":true},\"id\":3}",
+            "response_closed": true
+          }
+        ],
+        "observation_instrumentation": "Wrappers log real spawn/request/close/data; original functions, arguments, bytes and outcomes unchanged.",
+        "catalog": {
+          "modelIds": []
+        },
+        "lookup": {
+          "contract_version": 1,
+          "requested_model_id": "unknown/fixture/absent",
+          "resolution": {
+            "status": "missing"
+          }
+        },
+        "catalog_after_denial": {
+          "modelIds": []
+        },
+        "host_grants": [
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "lookup_model",
+            "model_id": "unknown/fixture/absent",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "lookup_model",
+            "model_id": "unknown/fixture/absent",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "get_models",
+            "allowed": false,
+            "signal_supplied": false
+          },
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          },
+          {
+            "method": "get_models",
+            "allowed": true,
+            "signal_supplied": true
+          }
+        ],
+        "ownership": "borrowed",
+        "endpoint": "http://127.0.0.1:35979",
+        "admission_fence": {
+          "instanceGeneration": "2026-10-09T11:19:25.335045544+00:00",
+          "serviceGeneration": "1058e1ea-d51a-4e67-994b-9cda8e22ac44"
+        },
+        "native_owner_revocation_observed": true,
+        "status": "passed",
+        "caller_signal_aborted": false,
+        "consumer_signal_aborted": true,
+        "retention_signal_aborted": true,
+        "release_settled": true,
+        "closed_consumer_refused_without_transport_or_observer": true
+      },
+      "caller_exit_code": 0,
+      "caller_stderr": "",
+      "caller_and_observer_pids_absent": true
+    }
+  ],
+  "real_model_inference": false,
+  "model_or_SDK_download": false,
+  "live_provider_qualified": false,
+  "external_application_scope": "Actual Chrema generic consumer modules; no Nearwork UI or workflow.",
+  "checkpoint_utc": "2026-10-09T11:19:27.659812+00:00",
+  "deny_proxy": {
+    "request_count": 0,
+    "requests": [],
+    "forwarded_requests": 0,
+    "thread_joined": true,
+    "scope": "configured deny proxy; not OS-wide network enforcement"
+  },
+  "finished_utc": "2026-10-09T11:19:27.659792+00:00"
+}

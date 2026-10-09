@@ -144,7 +144,10 @@ strict `headless_inference_build.py` producer. Candidate assembly requires all
 three in addition to the thirteen existing assets. A missing or failed native
 job blocks the combined candidate. No workflow step publishes a release.
 The producer requires source version 0.8; an unbumped 0.7 source fails before
-compilation. The integration owner must perform the coordinated version change.
+compilation. The integration owner must perform the coordinated version change
+and regenerate/review the matching `<version>` and `<version>-s3` attribution
+directories; the generator and inference producer select those source-version
+paths without retaining a hard-coded 0.7 directory.
 
 `onnx-runtime-pins.json` records the official CPU 1.24.2 GitHub release archive
 digests and the hashes/sizes of selected native members and license/notice bytes.
@@ -159,8 +162,9 @@ shipped CPU ORT files and observed static direct imports. Linux ORT requires
 GLIBC 2.27, GLIBCXX 3.4.22 and CXXABI 1.3.11 (the final RPC may require newer
 versions). Windows additionally requires compatible MSVCP140/MSVCP140_1 and
 VCRUNTIME140/VCRUNTIME140_1 DLLs, which are absent from the upstream ORT archive;
-users must have a compatible Microsoft Visual C++ runtime. macOS imports system
-frameworks and libraries. These prerequisites are not redistributed or qualified
+users must have a compatible Microsoft Visual C++ runtime. The pinned macOS
+library declares minimum macOS 14.0 in its Mach-O build command and imports
+system frameworks and libraries. These prerequisites are not redistributed or qualified
 merely by recording their names; recursive/session-dependent closure, signatures
 and GPU providers remain separate gates.
 

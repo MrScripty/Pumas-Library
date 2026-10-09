@@ -129,7 +129,7 @@ def main():
         {name: runtime_dir / name for name in runtime["files"]},
         schema,
         repository / "LICENSE",
-        repository / build.provenance.ATTRIBUTION / "THIRD-PARTY-NOTICES.txt",
+        repository / build.attribution_directory(repository) / "THIRD-PARTY-NOTICES.txt",
         args.output_dir,
         runtime_notices=notices,
     )

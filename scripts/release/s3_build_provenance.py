@@ -108,8 +108,8 @@ def check_release_manifest(repository):
     return release
 
 
-def attribution_binding(repository):
-    directory = repository / ATTRIBUTION
+def attribution_binding(repository, directory=None):
+    directory = repository / (ATTRIBUTION if directory is None else directory)
     inventory = json.loads((directory / "inventory.json").read_text())
     require(
         inventory.get("rust_profile")
@@ -126,7 +126,7 @@ def attribution_binding(repository):
         "S3 attribution text mismatch",
     )
     return {
-        "directory": ATTRIBUTION,
+        "directory": str(directory.relative_to(repository)).replace("\\", "/"),
         "sha256": {name: digest(directory / name) for name in ATTRIBUTION_FILES},
     }
 

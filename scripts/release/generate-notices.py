@@ -11,7 +11,8 @@ from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[2]
 LICENSES = ROOT / "scripts/release/licenses"
-OUTPUT = ROOT / "docs/release-attribution/0.7.0"
+RELEASE_VERSION = json.loads((ROOT / "package.json").read_text())["version"]
+OUTPUT = ROOT / "docs/release-attribution" / RELEASE_VERSION
 MANAGED_PYTHON_CATALOG = "scripts/release/licenses/managed-python-sources.json"
 ARTIFACT_PLAN = "scripts/release/artifact-plan.json"
 MANAGED_PYTHON_PINS = "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs"
@@ -436,7 +437,7 @@ console.log(JSON.stringify([...seen.values()]));
         "Desktop runtime; bundled Chromium notices remain adjacent to executable",
     )
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    header = """Pumas Library 0.7.0 — Third-party notices
+    header = f"""Pumas Library {RELEASE_VERSION} — Third-party notices
 
 Texts below are reproduced from the resolved packages or pinned upstream sources.
 Rust normal/build dependencies across desktop targets and the JavaScript production

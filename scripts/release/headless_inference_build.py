@@ -135,6 +135,13 @@ def core_projection(rpc):
     return core
 
 
+def attribution_directory(repository):
+    with (Path(repository) / "rust/Cargo.toml").open("rb") as stream:
+        version = tomllib.load(stream)["workspace"]["package"]["version"]
+    require(package.matches(version, package.VERSION, 96), "v0.8 attribution version required")
+    return Path("docs/release-attribution") / f"{version}-s3"
+
+
 def produce(
     repository,
     target_id,
@@ -204,7 +211,8 @@ def produce(
     )
     # Same dependency closure as the existing default+S3 inventory, checked below
     # against actual core/RPC artifacts without the default feature marker.
-    attribution = provenance.attribution_binding(repository)
+    notices_directory = attribution_directory(repository)
+    attribution = provenance.attribution_binding(repository, notices_directory)
     provenance.capture(
         ["node", "scripts/release/check-attribution.cjs", "--features", "s3"],
         repository,
@@ -218,7 +226,7 @@ def produce(
         )
     require(
         package.sha256(notices_file)
-        == package.sha256(repository / provenance.ATTRIBUTION / "THIRD-PARTY-NOTICES.txt"),
+        == package.sha256(repository / notices_directory / "THIRD-PARTY-NOTICES.txt"),
         "supplied notices differ from checked S3 attribution",
     )
     require(
@@ -281,12 +289,12 @@ def produce(
     require(source_identity(repository, tool_runner) == before, "source changed during build")
     provenance.check_configuration(repository, environment)
     require(
-        provenance.attribution_binding(repository) == attribution,
+        provenance.attribution_binding(repository, notices_directory) == attribution,
         "attribution changed during build",
     )
     require(
         package.sha256(notices_file)
-        == package.sha256(repository / provenance.ATTRIBUTION / "THIRD-PARTY-NOTICES.txt"),
+        == package.sha256(repository / notices_directory / "THIRD-PARTY-NOTICES.txt"),
         "supplied notices changed during build",
     )
     require(

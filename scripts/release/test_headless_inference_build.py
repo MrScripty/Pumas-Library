@@ -32,7 +32,7 @@ class BuildCandidateTests(unittest.TestCase):
         binary = self.root / "pumas-rpc"
         binary.write_bytes(self.inputs["pumas-rpc"].read_bytes())
         self.inputs["pumas-rpc"] = binary
-        notices = self.repository / subject.provenance.ATTRIBUTION
+        notices = self.repository / subject.attribution_directory(self.repository)
         notices.mkdir(parents=True)
         (notices / "THIRD-PARTY-NOTICES.txt").write_bytes(
             self.inputs["THIRD-PARTY-NOTICES.txt"].read_bytes()

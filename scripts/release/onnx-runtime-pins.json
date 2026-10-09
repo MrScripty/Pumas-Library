@@ -106,7 +106,9 @@
           ]
         },
         "native_execution": "unqualified",
-        "system_dependencies": "macOS system frameworks, libc++, libSystem, libobjc and libiconv; not redistributed in this archive."
+        "system_dependencies": "macOS system frameworks, libc++, libSystem, libobjc and libiconv; not redistributed in this archive.",
+        "mach_o_minimum_os": "14.0.0",
+        "mach_o_sdk": "15.5.0"
       }
     },
     "windows-x86_64": {

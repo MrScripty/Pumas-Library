@@ -26,6 +26,49 @@ use tracing::instrument::WithSubscriber;
 
 use super::{S3Addressing, S3ReaderConfig, S3ReaderError};
 
+/// Private per-request authority for a zero-body conditional GET. This is an
+/// SDK extension, never a wire header or permission for general whole-object GET.
+#[derive(Clone, Debug)]
+pub(super) struct ConditionalEmptyRead;
+
+pub(super) fn check_empty_response(
+    status: http::StatusCode,
+    headers: &http::HeaderMap,
+) -> Result<(), ConnectorError> {
+    if status.is_success()
+        && (status != http::StatusCode::OK
+            || headers
+                .get(http::header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                != Some("0")
+            || headers.contains_key(http::header::CONTENT_RANGE))
+    {
+        return Err(transport_error(
+            "empty conditional response must be OK and empty",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn check_read_response(
+    status: http::StatusCode,
+    headers: &http::HeaderMap,
+    range: bool,
+    listing: bool,
+    empty: bool,
+) -> Result<(), ConnectorError> {
+    if empty {
+        check_empty_response(status, headers)?;
+    }
+    if listing && status.is_success() && status != http::StatusCode::OK {
+        return Err(transport_error("listing response must be OK"));
+    }
+    if range && status.is_success() && status != http::StatusCode::PARTIAL_CONTENT {
+        return Err(transport_error("range response must be partial"));
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 struct ExplicitProvider(Credentials);
 impl fmt::Debug for ExplicitProvider {
@@ -106,8 +149,19 @@ impl HttpConnector for ScopedTransport {
                 .map(|budget| budget.0);
             let range_request = parts.method == http::Method::GET
                 && parts.headers.contains_key(http::header::RANGE);
+            let empty_read = parts.extensions.get::<ConditionalEmptyRead>().is_some();
+            if empty_read
+                && (parts.method != http::Method::GET
+                    || range_request
+                    || listing_budget.is_some()
+                    || !parts.headers.contains_key(http::header::IF_MATCH)
+                    || url.query_pairs().any(|(key, _)| key == "versionId"))
+            {
+                return Err(transport_error("invalid empty conditional read authority"));
+            }
             if parts.method == http::Method::GET
                 && !range_request
+                && !empty_read
                 && (listing_budget.is_none()
                     || !url
                         .query_pairs()
@@ -125,18 +179,20 @@ impl HttpConnector for ScopedTransport {
                 .await
                 .map_err(|_| transport_error("scoped HTTP request failed"))?;
             let status = response.status();
-            if listing_budget.is_some() && status.is_success() && status != http::StatusCode::OK {
-                return Err(transport_error("listing response must be OK"));
-            }
-            // A successful whole-object GET cannot satisfy an explicit range.
-            if range_request && status.is_success() && status != http::StatusCode::PARTIAL_CONTENT {
-                return Err(transport_error("range response must be partial"));
-            }
+            check_read_response(
+                status,
+                response.headers(),
+                range_request,
+                listing_budget.is_some(),
+                empty_read,
+            )?;
             let headers = response.headers().clone();
             // SDK error XML is untrusted diagnostic input, never artifact data.
             // Bound it without interpreting or logging provider messages.
             let limit = if let Some(limit) = listing_budget {
                 Some(limit)
+            } else if empty_read && status.is_success() {
+                Some(0)
             } else if status.is_success() {
                 None
             } else {

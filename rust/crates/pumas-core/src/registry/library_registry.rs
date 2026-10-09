@@ -10,6 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::debug;
 
+#[cfg(target_os = "linux")]
+pub(crate) mod local_enumeration;
 pub(crate) mod pending_recovery;
 
 /// A registered library entry.

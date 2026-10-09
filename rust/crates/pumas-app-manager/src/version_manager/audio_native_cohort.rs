@@ -178,6 +178,14 @@ fn data_archive(bytes: &[u8]) -> io::Result<&[u8]> {
 }
 
 fn closed_path(path: &Path) -> io::Result<String> {
+    // Archive names use POSIX separators. Check their original spelling before
+    // host Path parsing can normalize a backslash into a Windows separator.
+    let original = path
+        .to_str()
+        .ok_or_else(|| refuse("non-UTF8 native member"))?;
+    if original.len() > 1024 || original.contains('\\') || original.contains('\0') {
+        return Err(refuse("native member name exceeds bound"));
+    }
     let mut parts = Vec::new();
     for component in path.components() {
         match component {

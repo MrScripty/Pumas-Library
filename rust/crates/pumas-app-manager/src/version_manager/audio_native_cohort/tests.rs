@@ -86,7 +86,7 @@ fn names_refuse_absolute_and_parent_traversal() {
         "usr\\evil",
         "usr/evil\0",
     ] {
-        assert!(closed_path(Path::new(name)).is_err());
+        assert!(closed_path(Path::new(name)).is_err(), "accepted {name:?}");
     }
     assert_eq!(
         closed_path(Path::new("./usr/lib/test.so")).unwrap(),

@@ -616,7 +616,8 @@ async fn installed_spawn_refuses_retargeting_and_fixture_without_native_cohort_b
     )
     .unwrap();
     let owner = AudioRuntimeOwner::for_fixed_installed_fixture(candidate, &selected).unwrap();
-    let other = model.prepare();
+    let other_model = ModelFixture::new().await;
+    let other = other_model.prepare();
     for prepared in [other, selected] {
         let custody = ManagedChildCustodySlot::new();
         assert!(owner

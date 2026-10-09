@@ -2845,9 +2845,11 @@ mod http_discovery_tests {
     async fn bind_failure_publishes_nothing_and_old_router_cannot_describe_successor() {
         let (temp, registry, root, api) = api_fixture().await;
         let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        assert!(start(api.clone(), &root, occupied.local_addr().unwrap().port())
-            .await
-            .is_err());
+        assert!(
+            start(api.clone(), &root, occupied.local_addr().unwrap().port())
+                .await
+                .is_err()
+        );
         assert!(registry.list_http_services().unwrap().is_empty());
         // A released rendezvous row does not prove that the old physical-store
         // shares have dropped. Join the owned coordinator, then drop our API.

@@ -1748,6 +1748,36 @@ impl AcquisitionConsumer {
         }).await
     }
 
+    /// Resolve one digest-bound non-versioned object under this consumer's
+    /// bounded task custody. Cancellation drains selection before returning.
+    /// The one-file selection preserves Weak mutable provenance evidence while
+    /// requiring a strong HTTP ETag (W/ refused), size and whole-file SHA-256.
+    #[cfg(feature = "s3")]
+    pub(crate) async fn resolve_s3_conditional(
+        &self,
+        reader: super::S3Reader,
+        object: (String, String, super::Sha256Evidence),
+        demand: &AcquisitionDemand,
+        retry: &AcquisitionRetryPolicy,
+        host: Box<dyn AcquisitionHost>,
+    ) -> Result<std::result::Result<super::S3ManifestSelection, super::S3ReaderError>> {
+        self.require_s3_transfer(demand, retry)?;
+        self.scope.run_worker_invocation(move |_| async move {
+            if host.cancel_requested() {
+                return Err(PumasError::DownloadCancelled);
+            }
+            tokio::select! {
+                biased;
+                _ = host.pause_requested() => {
+                    Err(if host.cancel_requested() { PumasError::DownloadCancelled } else { PumasError::DownloadPaused })
+                }
+                selection = reader.select_conditional(&object.0, &object.1, object.2) => {
+                    Ok(selection.map(super::S3ManifestSelection::from_single_object))
+                },
+            }
+        }).await
+    }
+
     pub fn owner(&self) -> &str {
         &self.owner
     }
@@ -1978,7 +2008,7 @@ impl AcquisitionConsumer {
         .await
     }
 
-    /// Acquire one versioned S3 object under this consumer's existing durable
+    /// Acquire one explicitly selected S3 object under this consumer's existing durable
     /// lifecycle, then hold its verified use through consumer publication.
     /// Caller-supplied positive finite attempt and elapsed limits bound transfer
     /// retries; registered writes are drained before retry or terminal release.
@@ -2014,7 +2044,7 @@ impl AcquisitionConsumer {
         .await
     }
 
-    /// Acquire the complete explicit version-pinned set through the same store,
+    /// Acquire a complete explicit set (version-pinned or a conditional single object) through the same store,
     /// writer, verified-file handoff and consumer receipt/settlement protocol.
     /// Retry attempts and elapsed budgets apply per object; no complete-set
     /// hard wall-clock or atomic remote-prefix snapshot is promised.

@@ -13,7 +13,9 @@ pub struct S3ManifestEntry {
     pub expected_sha256: Sha256Evidence,
 }
 
-/// Complete resolved set of exact versions under one explicit reader authority.
+/// Complete resolved set under one explicit reader authority. Public manifest
+/// resolution requires exact versions; the model facade can wrap one digest-bound
+/// conditional object without upgrading its weak revision evidence.
 /// The revision preserves every per-object source identity in logical-path order.
 /// This is an explicit selection, not an atomic snapshot of a remote prefix.
 #[derive(Clone)]
@@ -25,6 +27,13 @@ pub struct S3ManifestSelection {
 impl S3ManifestSelection {
     pub fn manifest(&self) -> &ArtifactManifest {
         &self.manifest
+    }
+
+    pub(crate) fn from_single_object(object: S3ObjectSelection) -> Self {
+        Self {
+            manifest: object.manifest().clone(),
+            objects: vec![object],
+        }
     }
 
     pub(crate) fn into_parts(self) -> (ArtifactManifest, Vec<S3ObjectSelection>) {

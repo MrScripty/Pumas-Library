@@ -4,7 +4,7 @@ use crate::{
     acquisition::{
         AcquisitionDemand, AcquisitionHost, AcquisitionRetryPolicy, AcquisitionS3ManifestRequest,
         AcquisitionWorkspace, HttpAttemptHost, S3Credentials, S3ManifestEntry, S3Reader,
-        S3ReaderConfig, S3ReaderError,
+        S3ReaderConfig, S3ReaderError, Sha256Evidence,
     },
     model_library::{ModelImportResult, ModelImportSpec, ModelImporter},
     PumasApi, PumasError,
@@ -39,6 +39,30 @@ pub struct S3ModelImportRequest {
     pub import: ModelImportSpec,
     pub workspace: AcquisitionWorkspace,
     pub retry: AcquisitionRetryPolicy,
+}
+
+/// Opt-in single-object request for a non-versioned general-purpose bucket.
+/// The exact object requires HEAD size, a strong quoted HTTP ETag (W/ is
+/// refused), and whole-file SHA-256. Weak revision strength classifies mutable
+/// provenance, not the HTTP validator; ETag/size alone never prove integrity.
+/// These authorize byte acquisition, not model execution or package completeness.
+/// This does not admit conditional bundles or prefix discovery. Like the versioned
+/// request, credentials are ephemeral and the caller holds workspace custody.
+pub struct S3ConditionalModelImportRequest {
+    pub operation_id: uuid::Uuid,
+    pub source: S3ReaderConfig,
+    pub credentials: Option<S3Credentials>,
+    pub source_key: String,
+    pub expected_sha256: Sha256Evidence,
+    /// Exact logical path of the single selected model file and model metadata.
+    pub import: ModelImportSpec,
+    pub workspace: AcquisitionWorkspace,
+    pub retry: AcquisitionRetryPolicy,
+}
+
+struct ConditionalObject {
+    source_key: String,
+    expected_sha256: Sha256Evidence,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -311,6 +335,43 @@ impl PumasApi {
         request: S3ModelImportRequest,
         control: S3ModelImportControl,
     ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
+        self.import_s3_model_mode(request, None, control).await
+    }
+
+    /// Acquire a digest-bound conditional single object and qualify it through
+    /// the same shared importer, cancellation gate and durable publication path.
+    /// Missing or HTTP weak (W/) validators and incomplete model packages fail.
+    /// Mutable provenance remains Weak despite a strong HTTP ETag; the mandatory
+    /// whole-file digest supplies content integrity. VersionId
+    /// callers retain their immutable selection contract.
+    pub async fn import_s3_conditional_model(
+        &self,
+        request: S3ConditionalModelImportRequest,
+        control: S3ModelImportControl,
+    ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
+        let conditional = ConditionalObject {
+            source_key: request.source_key,
+            expected_sha256: request.expected_sha256,
+        };
+        let request = S3ModelImportRequest {
+            operation_id: request.operation_id,
+            source: request.source,
+            credentials: request.credentials,
+            entries: Vec::new(),
+            import: request.import,
+            workspace: request.workspace,
+            retry: request.retry,
+        };
+        self.import_s3_model_mode(request, Some(conditional), control)
+            .await
+    }
+
+    async fn import_s3_model_mode(
+        &self,
+        request: S3ModelImportRequest,
+        conditional: Option<ConditionalObject>,
+        control: S3ModelImportControl,
+    ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
         match control
             .0
             .gate
@@ -330,7 +391,9 @@ impl PumasApi {
             control: control.clone(),
             complete: false,
         };
-        let result = self.import_s3_model_owned(request, control).await;
+        let result = self
+            .import_s3_model_owned(request, conditional, control)
+            .await;
         progress.finish(&result);
         result
     }
@@ -338,21 +401,26 @@ impl PumasApi {
     async fn import_s3_model_owned(
         &self,
         request: S3ModelImportRequest,
+        conditional: Option<ConditionalObject>,
         control: S3ModelImportControl,
     ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
-        ModelImporter::validate_acquired_payload_paths(
-            &request
+        let paths = if conditional.is_some() {
+            vec![request.import.path.as_str()]
+        } else {
+            request
                 .entries
                 .iter()
                 .map(|entry| entry.logical_path.as_str())
-                .collect::<Vec<_>>(),
-        )?;
+                .collect()
+        };
+        ModelImporter::validate_acquired_payload_paths(&paths)?;
         let consumer = self.acquisition().open_consumer(CONSUMER)?;
         let result = async {
-            if !request
-                .entries
-                .iter()
-                .any(|entry| entry.logical_path == request.import.path)
+            if conditional.is_none()
+                && !request
+                    .entries
+                    .iter()
+                    .any(|entry| entry.logical_path == request.import.path)
             {
                 return Err(PumasError::Validation {
                     field: "s3.model.primary".into(),
@@ -371,15 +439,34 @@ impl PumasApi {
                 operation: request.operation_id.to_string(),
             };
             control.phase(S3ModelImportPhase::Selecting);
-            let selection = consumer
-                .resolve_s3_manifest(
-                    reader,
-                    request.entries,
-                    &demand,
-                    &request.retry,
-                    Box::new(Host(control.clone())),
-                )
-                .await??;
+            let selection = match conditional {
+                Some(object) => {
+                    consumer
+                        .resolve_s3_conditional(
+                            reader,
+                            (
+                                object.source_key,
+                                request.import.path.clone(),
+                                object.expected_sha256,
+                            ),
+                            &demand,
+                            &request.retry,
+                            Box::new(Host(control.clone())),
+                        )
+                        .await??
+                }
+                None => {
+                    consumer
+                        .resolve_s3_manifest(
+                            reader,
+                            request.entries,
+                            &demand,
+                            &request.retry,
+                            Box::new(Host(control.clone())),
+                        )
+                        .await??
+                }
+            };
             if control.is_cancelled() {
                 return Err(PumasError::DownloadCancelled.into());
             }

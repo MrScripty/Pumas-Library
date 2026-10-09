@@ -342,8 +342,10 @@ async fn sealed_constructor_rust_ipc_http_and_honest_discovery() {
         ]
     );
     let observed = LocalDiscovery::open_at(&t.path().join("registry.db")).unwrap();
-    let mut requirements = CompatibilityRequirements::default();
-    requirements.required_capabilities = vec!["catalog.indexed-query@1".into()];
+    let requirements = CompatibilityRequirements {
+        required_capabilities: vec!["catalog.indexed-query@1".into()],
+        ..CompatibilityRequirements::default()
+    };
     assert!(matches!(
         observed.probe(&requirements).await.unwrap()[0],
         pumas_library::discovery::LiveInstanceObservation::Verified { .. }

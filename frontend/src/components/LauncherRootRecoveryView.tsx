@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { HeaderWindowControls } from './HeaderControls';
 import { IconButton } from './ui';
 
 interface RecoveryAction {
   label: string;
+  disabled?: boolean;
   onAction: () => void;
 }
 
@@ -13,6 +14,7 @@ export interface LauncherRootRecoveryViewProps {
   message: string;
   primaryAction?: RecoveryAction;
   secondaryAction?: RecoveryAction;
+  children?: ReactNode;
   onClose: () => void;
   onMinimize?: () => void;
 }
@@ -22,6 +24,7 @@ export function LauncherRootRecoveryView({
   message,
   primaryAction,
   secondaryAction,
+  children,
   onClose,
   onMinimize,
 }: LauncherRootRecoveryViewProps) {
@@ -32,7 +35,7 @@ export function LauncherRootRecoveryView({
   }, [title]);
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden bg-[hsl(var(--surface-base))] text-[hsl(var(--text-primary))]">
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-[hsl(var(--surface-lowest))] text-[hsl(var(--text-primary))]">
       <header className="app-region-drag flex h-10 flex-shrink-0 items-center justify-end px-2">
         {onMinimize ? (
           <HeaderWindowControls onClose={onClose} onMinimize={onMinimize} />
@@ -49,7 +52,7 @@ export function LauncherRootRecoveryView({
       <main className="flex flex-1 items-center justify-center p-6">
         <section
           aria-labelledby="launcher-root-recovery-title"
-          className="w-full max-w-md rounded-lg border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-raised))] p-6 shadow-lg"
+          className="w-full max-w-md rounded-lg border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-low))] p-6 shadow-lg"
         >
           <h1
             ref={headingRef}
@@ -67,13 +70,15 @@ export function LauncherRootRecoveryView({
           >
             {message}
           </p>
+          {children}
           {(primaryAction || secondaryAction) && (
             <div className="mt-5 flex flex-wrap gap-3">
               {primaryAction && (
                 <button
                   type="button"
                   onClick={primaryAction.onAction}
-                  className="app-region-no-drag rounded bg-[hsl(var(--accent-primary))] px-4 py-2 text-sm font-medium text-black"
+                  disabled={primaryAction.disabled}
+                  className="app-region-no-drag rounded bg-[hsl(var(--accent-primary))] px-4 py-2 text-sm font-medium text-black disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {primaryAction.label}
                 </button>

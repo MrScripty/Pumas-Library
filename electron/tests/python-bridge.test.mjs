@@ -459,32 +459,23 @@ test('a new owner replaces the prior failure receipt without accepting stale chi
 });
 
 for (const stopIntervenes of [false, true]) {
-  test(`restart after pending readiness settles re-evaluates ownership (stop=${stopIntervenes})`, async () => {
+  test(`startup refusal never schedules a replacement (stop=${stopIntervenes})`, async () => {
     const { bridge, children, timers } = stopFixture();
     bridge.process = null;
     const ready = deferred();
     bridge.waitForReady = () => ready.promise;
     const starting = bridge.start();
     const startupFailed = assert.rejects(starting, /stopped during startup/);
-    const oldChild = children[0];
-    oldChild.exit(9);
-    await timers.runNext();
-    assert.equal(children.length, 1, 'restart waits until the predecessor startup settles');
+    children[0].exit(9);
+    assert.equal(timers.pendingCount(), 0);
     const stopped = stopIntervenes ? bridge.stop() : null;
     const stopFailed = stopped ? assert.rejects(stopped, /code=9.*cleanup failed/i) : null;
     ready.resolve();
     await startupFailed;
     await flushMicrotasks();
-    if (stopIntervenes) {
-      await stopFailed;
-      assert.equal(children.length, 1);
-    } else {
-      assert.equal(children.length, 2, 'one replacement starts after the failed predecessor');
-      assert.equal(bridge.isRunning(), true);
-      const finalStop = bridge.stop();
-      children[1].exit();
-      await finalStop;
-    }
+    assert.equal(children.length, 1, 'startup failure requires user recovery, not a retry');
+    if (stopFailed) await stopFailed;
+    else await assert.rejects(bridge.stop(), /code=9.*cleanup failed/i);
     assert.equal(timers.pendingCount(), 0);
   });
 }

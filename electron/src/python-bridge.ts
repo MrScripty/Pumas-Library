@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as net from 'net';
 import log from 'electron-log';
+import { BackendStartupError, BackendStartupFailureReader } from './backend-startup';
 import { decodeS3ImportRpcResult, isS3ImportMethod, S3_RPC_FAILURE, S3_RPC_RESPONSE_LIMIT } from './s3-import-rpc';
 
 type BridgeTimer = ReturnType<typeof setTimeout>;
@@ -533,9 +534,18 @@ export class PythonBridge {
     this.stopOperation = null;
 
     const backendLabel = 'Rust';
+    const startupFailure = new BackendStartupFailureReader();
+    // close follows stdout drain; exit can arrive before the diagnostic frame.
+    let startupClosed!: () => void;
+    const closedBeforeReady = new Promise<never>((_resolve, reject) => {
+      startupClosed = () => reject(new BackendStartupError(startupFailure.reason));
+      child.once('close', startupClosed);
+    });
+    void closedBeforeReady.catch(() => {});
 
     // Handle stdout
     child.stdout?.on('data', (data: Buffer) => {
+      if (!this.serverReady) startupFailure.push(data.toString());
       const output = data.toString().trim();
       if (output) {
         log.info(`[${backendLabel}] ${output}`);
@@ -553,6 +563,7 @@ export class PythonBridge {
     // Exit and failed-spawn close share one terminal receipt owner.
     const completeExit = (code: number | null, signal: NodeJS.Signals | null, startupError?: Error): void => {
       if (this.process !== child) return;
+      const wasReady = this.serverReady;
       log.info(`${backendLabel} process exited: code=${code}, signal=${signal}`);
       this.serverReady = false;
       this.terminalExit = { child, outcome: { code, signal, startupError } };
@@ -560,10 +571,14 @@ export class PythonBridge {
       this.clearHealthCheckTimer();
       this.closeAllUpdateStreams();
       this.clearAllUpdateStreamReconnectTimers();
+      if (!wasReady) {
+        for (const cancel of [...this.pendingRpcCalls]) cancel();
+      }
 
       // Auto-restart if enabled and not shutting down
       if (
         !this.isShuttingDown &&
+        wasReady &&
         this.options.autoRestart &&
         this.restartCount < this.options.maxRestarts
       ) {
@@ -585,7 +600,11 @@ export class PythonBridge {
     });
 
     // Wait for the server to be ready
-    await this.waitForReady();
+    try {
+      await this.waitForReady(closedBeforeReady);
+    } finally {
+      child.removeListener('close', startupClosed);
+    }
     if (this.isShuttingDown || this.process !== child) {
       throw new Error('Backend bridge stopped during startup');
     }
@@ -606,21 +625,23 @@ export class PythonBridge {
   /**
    * Wait for the RPC server to be ready
    */
-  private async waitForReady(timeout: number = 30000): Promise<void> {
+  private async waitForReady(closedBeforeReady: Promise<never>, timeout: number = 30000): Promise<void> {
     const startTime = Date.now();
 
     while (Date.now() - startTime < timeout) {
       if (this.isShuttingDown || !this.process) {
+        if (!this.isShuttingDown) await closedBeforeReady;
         throw new Error('Backend bridge stopped during startup');
       }
       try {
-        const healthy = await this.healthCheck();
+        const healthy = await Promise.race([this.healthCheck(), closedBeforeReady]);
         if (healthy) {
           return;
         }
-      } catch {
-        await this.delay(100);
+      } catch (error) {
+        if (error instanceof BackendStartupError) throw error;
       }
+      await this.delay(100, closedBeforeReady);
     }
 
     throw new Error('RPC server failed to start within timeout');
@@ -924,10 +945,15 @@ export class PythonBridge {
     }, 1000 * this.restartCount);
   }
 
-  private async delay(delayMs: number): Promise<void> {
-    await new Promise<void>((resolve) => {
-      this.timerController.setTimeout(resolve, delayMs);
-    });
+  private async delay(delayMs: number, closedBeforeReady: Promise<never>): Promise<void> {
+    let timer: BridgeTimer | undefined;
+    try {
+      await Promise.race([new Promise<void>((resolve) => {
+        timer = this.timerController.setTimeout(resolve, delayMs);
+      }), closedBeforeReady]);
+    } finally {
+      if (timer !== undefined) this.timerController.clearTimeout(timer);
+    }
   }
 
   /**

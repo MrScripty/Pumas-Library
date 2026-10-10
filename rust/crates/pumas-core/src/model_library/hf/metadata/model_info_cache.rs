@@ -1321,6 +1321,7 @@ mod tests {
                 Fixture::new(vec![("429 Too Many Requests", headers, String::new())]).await;
             let root = tempfile::tempdir().unwrap();
             let client = fixture.client(root.path()).await;
+            let started_at = Utc::now();
             assert!(matches!(
                 client.get_model_info_cached("acme/model").await,
                 Err(PumasError::RateLimited {
@@ -1330,12 +1331,18 @@ mod tests {
             ));
             drop(client);
             let reopened = fixture.client(root.path()).await;
+            let result = reopened.get_model_info("acme/model").await;
+            let elapsed = Utc::now()
+                .signed_duration_since(started_at)
+                .num_seconds()
+                .max(0) as u64;
+            let minimum_remaining = MAX_COOLDOWN.saturating_sub(elapsed.saturating_add(1));
             assert!(matches!(
-                reopened.get_model_info("acme/model").await,
+                result,
                 Err(PumasError::RateLimited {
-                    retry_after_secs: Some(86399..=86400),
+                    retry_after_secs: Some(seconds),
                     ..
-                })
+                }) if (minimum_remaining..=MAX_COOLDOWN).contains(&seconds)
             ));
             assert_eq!(fixture.count(), 1);
         }

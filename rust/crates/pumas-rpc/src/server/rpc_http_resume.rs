@@ -196,6 +196,11 @@ async fn exercise_resume() {
     let (range_requested, range_seen) = tokio::sync::oneshot::channel();
     let (finish_range, range_held) = tokio::sync::oneshot::channel::<()>();
     let source_bytes = bytes.clone();
+    // Start the source watchdog only after RPC startup and paused-state recovery.
+    let api = build_test_api_with_hf_fixture(root, source.clone()).await;
+    let server = start_test_server(api, root).await.unwrap();
+    let mut rpc = Rpc::new(server.addr());
+    rpc.status("paused", Some(8)).await;
     let source_server = tokio::spawn(async move {
         let mut requests = Vec::new();
         let (mut first, _) = tokio::time::timeout(WATCHDOG, listener.accept())
@@ -284,10 +289,6 @@ async fn exercise_resume() {
         requests
     });
 
-    let api = build_test_api_with_hf_fixture(root, source.clone()).await;
-    let server = start_test_server(api, root).await.unwrap();
-    let mut rpc = Rpc::new(server.addr());
-    rpc.status("paused", Some(8)).await;
     assert_eq!(rpc.call("resume_model_download").await["success"], true);
     tokio::time::timeout(WATCHDOG, first_seen)
         .await

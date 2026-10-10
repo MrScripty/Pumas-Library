@@ -11,7 +11,7 @@ const versionTagGuard = "github.ref_type == 'tag' && startsWith(github.ref_name,
 const escapedVersionTagGuard = versionTagGuard.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 test('ONNX graph gate rejects transitive download unification and linked runtime mode', () => {
-  const check = spawnSync('python', ['-c', String.raw`
+  const check = spawnSync(process.env.PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3'), ['-c', String.raw`
 import importlib.util
 spec = importlib.util.spec_from_file_location('features', 'scripts/release/check-dependency-features.py')
 module = importlib.util.module_from_spec(spec)

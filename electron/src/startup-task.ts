@@ -1,4 +1,5 @@
 import type { LauncherRootResolution } from './launcher-root';
+import { BackendStartupError } from './backend-startup';
 import {
   projectLauncherRootStartupState,
   type LauncherRootStartupState,
@@ -47,6 +48,22 @@ export class LauncherRootRecoveryRequiredError extends Error {
   }
 }
 
+export class BackendInitializationRecoveryRequiredError extends Error {
+  readonly recoveryState: Extract<LauncherRootStartupState, { status: 'recovery-required' }>;
+
+  constructor(resolution: Extract<LauncherRootResolution, { status: 'resolved' }>, cause: unknown) {
+    super('Library backend startup requires recovery', { cause });
+    this.name = 'BackendInitializationRecoveryRequiredError';
+    const explicit = resolution.source === 'environment' || resolution.source === 'argument';
+    this.recoveryState = {
+      status: 'recovery-required',
+      reason: cause instanceof BackendStartupError ? cause.reason : 'backend-unavailable',
+      authoritySource: explicit ? resolution.source : resolution.source === 'persisted' ? 'persisted' : 'default',
+      action: explicit ? 'correct-launch-input' : 'select-library',
+    };
+  }
+}
+
 export function isLauncherRootRecoveryRequiredError(
   error: unknown
 ): error is LauncherRootRecoveryRequiredError {
@@ -78,7 +95,8 @@ export function classifyBackendInitializationOutcome(
     return { status: 'ready' };
   }
 
-  if (mode === 'desktop' && isLauncherRootRecoveryRequiredError(outcome.error)) {
+  if (mode === 'desktop' && (isLauncherRootRecoveryRequiredError(outcome.error) ||
+      outcome.error instanceof BackendInitializationRecoveryRequiredError)) {
     return {
       status: 'recovery-required',
       recoveryState: outcome.error.recoveryState,

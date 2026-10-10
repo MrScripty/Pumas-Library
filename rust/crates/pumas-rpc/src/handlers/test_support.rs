@@ -46,6 +46,7 @@ async fn build_test_api_with_services(
     std::env::set_var("PUMAS_REGISTRY_DB_PATH", &registry_path);
     let mut builder = PumasApi::builder(launcher_root)
         .auto_create_dirs(true)
+        .with_connectivity_probe(false)
         .with_hf_client(with_hf_client)
         .with_process_manager(with_process_manager);
     if let Some(source) = fixture {

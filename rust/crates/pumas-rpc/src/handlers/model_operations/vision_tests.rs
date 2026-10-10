@@ -196,7 +196,11 @@ async fn finite_named_and_facade_image_and_mixed_http_preserve_canonical_project
             );
             {
                 let calls = calls.lock().unwrap();
-                assert_eq!(calls.len(), if named { 3 } else { 4 });
+                assert_eq!(
+                    calls.len(),
+                    3,
+                    "one declaration probe plus final gateway probe"
+                );
                 for call in &calls[..calls.len() - 1] {
                     assert_props(call);
                 }
@@ -422,10 +426,9 @@ async fn final_props_guard_rejects_false_oversize_redirect_and_slow_body_without
             let endpoint = format!("http://{}", listener.local_addr().unwrap());
             let (_root, state) = fixture(&endpoint, Some("image-to-text")).await;
             let backend = tokio::spawn(async move {
-                for _ in 0..if named { 1 } else { 2 } {
-                    let mut socket = accept_props(&listener).await;
-                    send_json(&mut socket, &props()).await;
-                }
+                let mut socket = accept_props(&listener).await;
+                send_json(&mut socket, &props()).await;
+                drop(socket);
                 let mut socket = accept_props(&listener).await;
                 match case {
                     "oversize"=> socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 65537\r\nConnection: close\r\n\r\n").await.unwrap(),
@@ -466,10 +469,9 @@ async fn external_profile_change_during_final_props_body_refuses_before_post() {
             let (started, started_rx) = oneshot::channel();
             let (release, release_rx) = oneshot::channel();
             let backend = tokio::spawn(async move {
-                for _ in 0..if named { 1 } else { 2 } {
-                    let mut socket = accept_props(&listener).await;
-                    send_json(&mut socket, &props()).await;
-                }
+                let mut socket = accept_props(&listener).await;
+                send_json(&mut socket, &props()).await;
+                drop(socket);
                 let mut socket = accept_props(&listener).await;
                 let body = props().to_string();
                 socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{{",body.len()).as_bytes()).await.unwrap();
@@ -549,7 +551,7 @@ async fn actual_http_disconnect_and_shutdown_close_held_probe_or_post_without_re
                 let (_root, state) = fixture(&endpoint, Some("image-to-text")).await;
                 let (started, started_rx) = oneshot::channel();
                 let backend = tokio::spawn(async move {
-                    let probes = if named { 2 } else { 3 };
+                    let probes = 2;
                     for index in 0..probes {
                         let mut socket = accept_props(&listener).await;
                         if !after_post && index == probes - 1 {

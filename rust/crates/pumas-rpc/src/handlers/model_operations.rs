@@ -158,7 +158,7 @@ pub async fn handle_model_operations(
             )
         }
     };
-    let (request, served, body) = if capability_present {
+    let (request, served, body, declarations) = if capability_present {
         let request: OperationRequest = match serde_json::from_slice(&bytes) {
             Ok(request) => request,
             Err(_) => {
@@ -179,7 +179,7 @@ pub async fn handle_model_operations(
             Ok(model) => model,
             Err(code) => return error(status_for(code), id, code, false),
         };
-        (request, served, body)
+        (request, served, body, None)
     } else {
         let request: modality::ModalityRequest = match serde_json::from_slice(&bytes) {
             Ok(request) => request,
@@ -227,7 +227,7 @@ pub async fn handle_model_operations(
                 Err(code) => return error(status_for(code), id, code, false),
             },
         };
-        (request, served, body)
+        (request, served, body, Some(declarations))
     };
     let id = Some(request.request_id.clone());
     let available = if request.capability == Capability::AudioTranscription {
@@ -237,9 +237,14 @@ pub async fn handle_model_operations(
                 .owned_audio_endpoint(&served.profile_id, &served.model_id)
                 .is_some()
     } else {
-        match operation_descriptors(&state, &served, disconnect.as_ref()).await {
-            Ok(declarations) => declarations,
-            Err(code) => return error(status_for(code), id, code, false),
+        // Modality resolution already observed these declarations. Reuse that
+        // observation here; the gateway still performs its final live guard.
+        match declarations {
+            Some(declarations) => declarations,
+            None => match operation_descriptors(&state, &served, disconnect.as_ref()).await {
+                Ok(declarations) => declarations,
+                Err(code) => return error(status_for(code), id, code, false),
+            },
         }
         .into_iter()
         .any(|d| d.capability == request.capability && d.availability.available())

@@ -149,12 +149,13 @@ support diagnosis, but does not prove the normal interactive runtime.
    unverified, files stay in place and no model backup/download is performed.
    Before the first upgrade, it also warns explicitly that older direct-library
    applications cannot read the new HF format until their Pumas dependency is
-   updated. Cancel and observe unchanged metadata/format. Confirm once and observe
-   the format change; test the direct-consumer and upgraded-RPC-server paths
-   separately using the exact pinned versions from the C5 inventory.
+   updated. Cancel and observe unchanged metadata/format, then reopen the dialog.
+   Test the direct-consumer and upgraded-RPC-server paths separately using the
+   exact pinned versions from the C5 inventory.
 3. Confirm the explicit action once. Observe the resolved attempt and unchanged
    local artifact in the same window without manually closing Pumas or editing
-   JSON/SQL. Refresh and verify there is no duplicate transfer/network traffic.
+   JSON/SQL; observe the first HF-format upgrade. Refresh and verify there is no
+   duplicate transfer/network traffic.
 4. Close normally; confirm child/tasks drain. Reopen the same fixture and verify
    the same resolved disposition and healthy UI. Inspect raw fixture metadata
    for preserved original Error and no fabricated completion receipt.

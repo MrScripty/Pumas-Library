@@ -355,6 +355,19 @@ jobs:
           )"
           export PUMAS_AUDIO_SESSION_PYTHON
           timeout --kill-after=30s 20m cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features test-support runtime_profiles::audio_session::protocol_tests -- --nocapture 2>&1 | tee "$EVIDENCE_DIR/controlled-session-protocol.log"
+      - name: Preserve installed audio selection for recipe diagnosis
+        if: always()
+        env:
+          QUALIFICATION_ROOT: ${{ runner.temp }}/review-audio-runtime
+          EVIDENCE_DIR: ${{ runner.temp }}/review-audio-evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          selection="$QUALIFICATION_ROOT/torch-versions/v2.10.0/runtime.json"
+          if test -f "$selection"; then
+            mkdir -p "$EVIDENCE_DIR"
+            cp "$selection" "$EVIDENCE_DIR/installed-runtime.json"
+          fi
       - name: Preserve confined dependency evidence only
         if: always()
         uses: actions/upload-artifact@v7.0.1
@@ -363,6 +376,7 @@ jobs:
           path: |
             ${{ runner.temp }}/review-audio-evidence/source.json
             ${{ runner.temp }}/review-audio-evidence/probe.log
+            ${{ runner.temp }}/review-audio-evidence/installed-runtime.json
             ${{ runner.temp }}/review-audio-evidence/audio-confined-dependency-probe.json
             ${{ runner.temp }}/review-audio-evidence/controlled-session-protocol.log
           if-no-files-found: ignore

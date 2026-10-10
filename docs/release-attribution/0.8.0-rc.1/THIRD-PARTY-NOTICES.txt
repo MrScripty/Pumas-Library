@@ -38547,8 +38547,8 @@ SUCH DAMAGE.
 
 ==============================================================================
 
-openssl 0.10.75 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/openssl/0.10.75/download
+openssl 0.10.81 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/openssl/0.10.81/download
 Declared license: Apache-2.0
 --- LICENSE ---
 Copyright 2011-2017 Google Inc.
@@ -39241,8 +39241,8 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 
-openssl-sys 0.9.111 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/openssl-sys/0.9.111/download
+openssl-sys 0.9.117 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/openssl-sys/0.9.117/download
 Declared license: MIT
 --- LICENSE-MIT ---
 Copyright (c) 2014 Alex Crichton
@@ -53380,8 +53380,8 @@ SOFTWARE.
 
 ==============================================================================
 
-tar 0.4.45 (Rust normal/build dependency, all desktop targets; conservative superset)
-Source: https://crates.io/api/v1/crates/tar/0.4.45/download
+tar 0.4.46 (Rust normal/build dependency, all desktop targets; conservative superset)
+Source: https://crates.io/api/v1/crates/tar/0.4.46/download
 Declared license: MIT OR Apache-2.0
 --- LICENSE-APACHE ---
                               Apache License

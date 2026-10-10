@@ -935,7 +935,7 @@
     },
     {
       "name": "openssl",
-      "version": "0.10.75"
+      "version": "0.10.81"
     },
     {
       "name": "openssl-macros",
@@ -947,7 +947,7 @@
     },
     {
       "name": "openssl-sys",
-      "version": "0.9.111"
+      "version": "0.9.117"
     },
     {
       "name": "option-ext",
@@ -1267,7 +1267,7 @@
     },
     {
       "name": "tar",
-      "version": "0.4.45"
+      "version": "0.4.46"
     },
     {
       "name": "tempfile",
@@ -5395,9 +5395,9 @@
     },
     {
       "name": "openssl",
-      "version": "0.10.75",
+      "version": "0.10.81",
       "license_declared": "Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/openssl/0.10.75/download",
+      "source": "https://crates.io/api/v1/crates/openssl/0.10.81/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -5446,9 +5446,9 @@
     },
     {
       "name": "openssl-sys",
-      "version": "0.9.111",
+      "version": "0.9.117",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/openssl-sys/0.9.111/download",
+      "source": "https://crates.io/api/v1/crates/openssl-sys/0.9.117/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -6786,9 +6786,9 @@
     },
     {
       "name": "tar",
-      "version": "0.4.45",
+      "version": "0.4.46",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/tar/0.4.45/download",
+      "source": "https://crates.io/api/v1/crates/tar/0.4.46/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -9236,7 +9236,7 @@
     "electron/package.json": "2f635cf017e26ee7c0af5a7f5215319ce325e5d6cd806c0d0f1c6bc912a635ba",
     "frontend/package.json": "8e24aa7eceed7cdb9279a77d42a18e7183abefae32586ea4cdcac48a042729ae",
     "pnpm-lock.yaml": "78cac9b50e2f28d293420ffb8b9d57889a723669a3969b3a670dd3e6cbfdda18",
-    "rust/Cargo.lock": "4fca97f542f744e2343ae96fe7ce1a3b04526367c2a4240b27f4698a34e4ef77",
+    "rust/Cargo.lock": "91fb9823de2f0346211b4f68ca400f03a628890e55dca90e0803e2dd7ad47e42",
     "rust/Cargo.toml": "4b30d577dea5f46bb7eb459a2b66a22b534f9671d561207a0a23749d29872fec",
     "rust/crates/pumas-app-manager/Cargo.toml": "f344b89815164c0acc2f6758ad8313a2b8cccba1004354046d542ca5a3d22a73",
     "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "e2e79a8c63500fa060e079edc21484bdc231e1941c6a5ebf65584c3efc95be6f",
@@ -9246,5 +9246,5 @@
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
     "scripts/release/torch-managed-python-acceptance.py": "b0486387627d6ae98b4b6533adcceed93e93ebf868385626f3b13f1fb949893b"
   },
-  "notices_sha256": "6cc6069dc0779189acd14248de5273e78737e5fa09a26467e934839608b7830e"
+  "notices_sha256": "abf171b832a35b70752979877aaab3b9ad3fdbf2e9cb2a034e2bce3a832134df"
 }

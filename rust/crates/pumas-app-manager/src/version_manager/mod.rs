@@ -1629,6 +1629,11 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    // Fixture startup includes real filesystem and HTTP work under parallel load.
+    // Keep its bound separate from cancellation and shutdown assertions.
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    const FIXTURE_READINESS_TIMEOUT: Duration = Duration::from_secs(10);
+
     async fn create_test_manager() -> (VersionManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
 
@@ -1984,7 +1989,7 @@ mod tests {
                 .await
                 .unwrap();
             let mut updates = manager.install_version("v0.1.2").await.unwrap();
-            tokio::time::timeout(Duration::from_secs(2), entered_rx)
+            tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, entered_rx)
                 .await
                 .unwrap()
                 .unwrap();
@@ -2299,7 +2304,7 @@ mod tests {
                 .unwrap(),
             );
             let mut updates = manager.install_version("b1234+cpu").await.unwrap();
-            tokio::time::timeout(Duration::from_secs(2), observed)
+            tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, observed)
                 .await
                 .unwrap()
                 .unwrap();
@@ -2430,7 +2435,7 @@ mod tests {
         let pause = Arc::new(installer::TorchPublicationPause::new());
         manager.native_receipt_pause = Some(pause.clone());
         let mut updates = manager.install_version("b1234+cpu").await.unwrap();
-        tokio::time::timeout(Duration::from_secs(2), observed)
+        tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, observed)
             .await
             .unwrap()
             .unwrap();
@@ -2525,7 +2530,7 @@ mod tests {
         let pause = Arc::new(installer::TorchPublicationPause::new());
         manager.native_receipt_pause = Some(pause.clone());
         let mut updates = manager.install_version("b1234+cpu").await.unwrap();
-        tokio::time::timeout(Duration::from_secs(2), observed)
+        tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, observed)
             .await
             .unwrap()
             .unwrap();
@@ -2729,7 +2734,7 @@ mod tests {
         let pause = Arc::new(installer::TorchPublicationPause::new());
         manager.native_receipt_pause = Some(pause.clone());
         let mut updates = manager.install_version("b1234+cpu").await.unwrap();
-        tokio::time::timeout(Duration::from_secs(2), observed)
+        tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, observed)
             .await
             .unwrap()
             .unwrap();
@@ -3554,7 +3559,7 @@ mod tests {
         let once = Arc::new(AtomicBool::new(true));
         manager.interrupt_after_native_rename = Some(once.clone());
         let mut updates = manager.install_version("b1234+cpu").await.unwrap();
-        tokio::time::timeout(Duration::from_secs(2), observed)
+        tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, observed)
             .await
             .unwrap()
             .unwrap();
@@ -4161,7 +4166,7 @@ mod tests {
         let pause = Arc::new(installer::TorchPublicationPause::new());
         manager.native_receipt_pause = Some(pause.clone());
         let mut updates = manager.install_version("b1234+cpu").await.unwrap();
-        tokio::time::timeout(Duration::from_secs(2), observed)
+        tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, observed)
             .await
             .unwrap()
             .unwrap();
@@ -4528,7 +4533,7 @@ mod tests {
             .unwrap(),
         );
         let mut updates = manager.install_version("b1234+cpu").await.unwrap();
-        tokio::time::timeout(Duration::from_secs(2), observed)
+        tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, observed)
             .await
             .unwrap()
             .unwrap();
@@ -4703,7 +4708,7 @@ mod tests {
             .unwrap(),
         );
         let mut updates = reinstall.install_version("b1234+cpu").await.unwrap();
-        tokio::time::timeout(Duration::from_secs(2), observed)
+        tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, observed)
             .await
             .unwrap()
             .unwrap();
@@ -5204,7 +5209,7 @@ mod tests {
             .unwrap(),
         );
         let _updates = manager.install_version("b1234+cpu").await.unwrap();
-        tokio::time::timeout(Duration::from_secs(2), observed)
+        tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, observed)
             .await
             .unwrap()
             .unwrap();
@@ -5482,7 +5487,7 @@ mod tests {
         waiter.abort();
         assert!(waiter.await.unwrap_err().is_cancelled());
         drop(tracker);
-        tokio::time::timeout(Duration::from_secs(2), observed)
+        tokio::time::timeout(FIXTURE_READINESS_TIMEOUT, observed)
             .await
             .unwrap()
             .unwrap();

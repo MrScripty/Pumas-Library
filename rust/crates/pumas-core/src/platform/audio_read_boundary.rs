@@ -60,6 +60,54 @@ pub(crate) struct AudioReadGrant {
 }
 
 impl AudioReadGrant {
+    /// The one non-content input required by libstdc++/Torch: kernel entropy.
+    /// No caller path, descriptor or device type can broaden this grant.
+    pub(crate) fn kernel_entropy() -> io::Result<Self> {
+        // SAFETY: fixed NUL-terminated paths and ordinary read-only opens. Both
+        // components refuse symlinks; each successful descriptor is owned once.
+        let directory = unsafe {
+            libc::open(
+                c"/dev".as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if directory < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: successful open returned a new owned directory descriptor.
+        let directory = unsafe { File::from_raw_fd(directory) };
+        // SAFETY: directory is live and the fixed leaf cannot escape it.
+        let fd = unsafe {
+            libc::openat(
+                directory.as_raw_fd(),
+                c"urandom".as_ptr(),
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: successful openat returned a new owned descriptor.
+        Self::checked_entropy(unsafe { File::from_raw_fd(fd) })
+    }
+
+    fn checked_entropy(file: File) -> io::Result<Self> {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        let metadata = file.metadata()?;
+        if !metadata.file_type().is_char_device()
+            || metadata.rdev() != libc::makedev(1, 9)
+            || !readonly(&file)?
+        {
+            return Err(refusal(
+                "audio entropy requires the read-only Linux urandom device",
+            ));
+        }
+        Ok(Self {
+            file,
+            access: READ_FILE,
+        })
+    }
+
     pub(crate) fn file(file: File, executable: bool) -> io::Result<Self> {
         if !file.metadata()?.is_file() || !readonly(&file)? {
             return Err(refusal(
@@ -699,6 +747,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn entropy_grant_is_typed_read_only_and_not_a_regular_content_exception() {
+        use std::io::Read;
+        let mut grant = AudioReadGrant::kernel_entropy().unwrap();
+        assert_eq!(grant.access, READ_FILE);
+        let mut bytes = [0; 16];
+        grant.file.read_exact(&mut bytes).unwrap();
+        assert!(AudioReadGrant::file(grant.file, false).is_err());
+        assert!(AudioReadGrant::checked_entropy(File::open("/dev/null").unwrap()).is_err());
+        let regular = tempfile::NamedTempFile::new().unwrap();
+        assert!(AudioReadGrant::checked_entropy(File::open(regular.path()).unwrap()).is_err());
+    }
+
     /// Opt-in mechanism acceptance on a supported host. Mapped libraries below
     /// are a test selection, NEVER a production recipe or discovered allowlist.
     #[test]
@@ -728,6 +789,7 @@ mod tests {
             .into_iter()
             .map(|path| AudioReadGrant::file(File::open(path).unwrap(), true).unwrap())
             .collect();
+        grants.push(AudioReadGrant::kernel_entropy().unwrap());
         grants.push(AudioReadGrant::file(File::open(&selected).unwrap(), false).unwrap());
         // Enumeration must not recursively grant the sibling's file contents.
         grants.push(AudioReadGrant::directory(File::open(root.path()).unwrap()).unwrap());
@@ -814,8 +876,26 @@ mod tests {
         }
         assert!(socket < 0, "network creation escaped seccomp");
         assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::EPERM));
-        // The useful asyncio wakeup primitive remains available after exec.
+        // The entropy exception is one typed read-only inode, never /dev.
         use std::io::{Read, Write};
+        let mut entropy = [0; 32];
+        File::open("/dev/urandom")
+            .unwrap()
+            .read_exact(&mut entropy)
+            .unwrap();
+        assert_eq!(
+            File::open("/dev/null").unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        assert_eq!(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/urandom")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        // The useful asyncio wakeup primitive remains available after exec.
         let (mut sender, mut receiver) = std::os::unix::net::UnixStream::pair().unwrap();
         sender.write_all(b"wake").unwrap();
         let mut wake = [0; 4];

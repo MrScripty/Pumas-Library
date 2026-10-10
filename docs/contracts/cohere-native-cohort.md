@@ -137,3 +137,16 @@ positions is fixed; arbitrary code normalization, receipt-supplied prefixes and
 omitting executable source are prohibited. Both independently installed
 3,487-member interpreter cohorts satisfy this comparison. This proves portable
 recipe comparison, not successful confined execution.
+
+
+### Kernel entropy input
+
+The qualified dependency driver and conditional installed child permit one
+non-content kernel input: `/dev/urandom`, opened read-only with no-follow checks
+on both `/dev` and its fixed leaf, then verified as Linux character device 1:9.
+Only that held inode receives READ_FILE. It is not an immutable recipe file and
+is never accepted through the regular-file constructor or caller path. No `/dev`
+directory content grant, write, ioctl, execute permission or inherited entropy
+descriptor is added. The hosted kernel fixture requires entropy reads to work
+while `/dev/null` reads and urandom write opens remain denied. This changes only
+the child's source-owned ruleset, not host settings or device permissions.

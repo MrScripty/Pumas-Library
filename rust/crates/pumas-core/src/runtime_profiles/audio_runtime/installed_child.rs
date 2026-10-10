@@ -132,7 +132,8 @@ impl AudioRuntimeOwner {
                 .chain(code_directories)
                 .chain(code_files)
                 .chain(model_directory)
-                .chain(model_files),
+                .chain(model_files)
+                .chain(std::iter::once(AudioReadGrant::kernel_entropy())),
             vec![interpreter, loader, native, packages, code, model],
         )?;
         // Rule setup can take time for a large installed tree. Re-check actual

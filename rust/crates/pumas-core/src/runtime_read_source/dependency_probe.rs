@@ -129,7 +129,9 @@ fn spawn(source: Arc<RetainedRuntimeReadSource>) -> io::Result<ProbeGuard> {
             })
         });
     let boundary = AudioReadBoundary::prepare(
-        directories.chain(files),
+        directories
+            .chain(files)
+            .chain(std::iter::once(AudioReadGrant::kernel_entropy())),
         vec![interpreter, loader, native, packages],
     )?;
     validate(&source)?;

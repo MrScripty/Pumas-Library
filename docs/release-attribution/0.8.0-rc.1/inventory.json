@@ -8273,7 +8273,7 @@
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-restart-acceptance/runtime.json": "d8b9826efc0aa5fedd0353f5227b1001cfe6bda96287ff3136b81b513c71e104",
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-macos-cpu-rpc-restart-acceptance/runtime.json": "a280a955f040983398474af0c34f92e9172fc3c69ef22f7422ac990ed0554e26",
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-windows-cpu-rpc-restart-acceptance/runtime.json": "3e2f6e67e3a4492c01232778191871e9f39543f02996349f055272f2d19fbb89",
-    "electron/package.json": "2f635cf017e26ee7c0af5a7f5215319ce325e5d6cd806c0d0f1c6bc912a635ba",
+    "electron/package.json": "b5b510c5d32948485b1e2ef616b11e707e462f58ec83d2776a5428725c102b65",
     "frontend/package.json": "8e24aa7eceed7cdb9279a77d42a18e7183abefae32586ea4cdcac48a042729ae",
     "pnpm-lock.yaml": "78cac9b50e2f28d293420ffb8b9d57889a723669a3969b3a670dd3e6cbfdda18",
     "rust/Cargo.lock": "91fb9823de2f0346211b4f68ca400f03a628890e55dca90e0803e2dd7ad47e42",

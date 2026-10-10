@@ -88,7 +88,7 @@
         "to": "LICENSE.txt"
       },
       {
-        "from": "../docs/release-attribution/0.7.0/THIRD-PARTY-NOTICES.txt",
+        "from": "../docs/release-attribution/0.8.0-rc.1/THIRD-PARTY-NOTICES.txt",
         "to": "THIRD-PARTY-NOTICES.txt"
       }
     ],

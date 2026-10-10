@@ -189,6 +189,16 @@ impl PreparedArtifactUse {
         self.members.iter().map(|member| member.file.try_clone())
     }
 
+    /// Confirm that the session's retained library owns the original physical
+    /// root. Equal model labels in another library cannot retarget an endpoint.
+    pub(crate) fn validate_library_owner(&self, library: &ModelLibrary) -> Result<()> {
+        let authority = library.mutation_authority()?;
+        if !self.root.same_physical_root(authority.root()) {
+            return Err(refusal("selected source belongs to another library"));
+        }
+        self.grant.validate_root(&self.root)
+    }
+
     pub(crate) fn manifest_sha256(&self) -> &str {
         &self.manifest_sha256
     }
@@ -972,6 +982,16 @@ mod tests {
         std::fs::write(fixture.package.join("config.json"), br#"{"model_type":"cohere_asr","architectures":["CohereAsrForConditionalGeneration"],"auto_map":{"AutoConfig":"configuration_cohere_asr.CohereAsrConfig"}}"#).unwrap();
         drop(fixture.prepare().unwrap());
         fixture.assert_root_available();
+    }
+
+    #[tokio::test]
+    async fn session_library_must_own_original_prepared_root() {
+        let original = Fixture::new().await;
+        let other = Fixture::new().await;
+        let prepared = original.prepare().unwrap();
+        prepared.validate_library_owner(&original.library).unwrap();
+        assert!(prepared.validate_library_owner(&other.library).is_err());
+        prepared.validate_library_owner(&original.library).unwrap();
     }
 
     #[tokio::test]

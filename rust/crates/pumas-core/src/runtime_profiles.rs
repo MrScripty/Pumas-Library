@@ -10,6 +10,13 @@ pub(crate) mod audio_custody;
 mod audio_endpoint;
 #[path = "runtime_profiles/audio_runtime.rs"]
 pub(crate) mod audio_runtime;
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    target_pointer_width = "64"
+))]
+#[path = "runtime_profiles/audio_session.rs"]
+mod audio_session;
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 pub use audio_endpoint::ControlledAudioEndpointFixture;
 pub use audio_endpoint::{OwnedAudioEndpoint, OwnedAudioEndpointError, OwnedAudioEndpointResult};

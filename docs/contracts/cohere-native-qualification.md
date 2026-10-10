@@ -1,10 +1,39 @@
 # Cohere native audio qualification requirements
 
-This records the next acceptance requirements after the frozen private candidates
-`9da3f906aaebe2bfc8e790abaf1e600903b9531b` and
-`0f778688ee12a274e42fe8391b08c51208f49cf0`. Production audio remains
-unavailable. Public metadata and controlled fixtures do not establish a real
-model load, transcription quality, or a complete native runtime closure.
+This records the acceptance requirements originally inspected after private
+candidates `9da3f906aaebe2bfc8e790abaf1e600903b9531b` and
+`0f778688ee12a274e42fe8391b08c51208f49cf0`, with the current evidence below.
+Production audio remains unavailable. Dependency and controlled protocol evidence
+do not establish a real model load, transcription quality, or model-specific
+native disposal.
+
+## Verified progress, 2026-10-10
+
+The source-pinned managed CPython 3.12.14, Torch 2.10.0+cpu and Transformers 5.4.0
+cohort has been installed through the existing owner and compared across two
+independent installation roots. The retained native loader/library cohort and
+selected Python bytes are bound by the source recipe.
+
+At commit `444b668ec52844f6f800d3203d8fcd8934db13e1`, the
+[hosted confined dependency probe](https://github.com/MrScripty/Pumas-Library/actions/runs/38008799725/job/114083904836)
+passed Dynamo/Cohere class imports and a CPU operation under the required
+Landlock/seccomp boundary. Its report at 00:36:11Z records
+`child_tree_drained=true` and `production_available=false`; read/write, socket,
+thread and cache-write refusal assertions passed. This proves that bounded
+probe's dependency read closure, not every late read during real model inference.
+
+At commit `3696fb8b3b57bed939d2febc4c3c62cba1da34a9`, the
+[managed-interpreter lifecycle job](https://github.com/MrScripty/Pumas-Library/actions/runs/38010737841/job/114090075943)
+passed the dependency probe again and executed three private-session tests:
+hello cancellation, held-load source retention through uncertain-drain retries,
+and endpoint-clone closure before drainage. The session tests use a controlled
+backend without claiming native ASR or fixture-child confinement.
+
+The conditional RPC/profile producer is published. It reserves the original
+profile/generation before runtime/model preparation and joins the original
+preparation and child owners through stop/shutdown. Shipping qualification
+catalogs remain empty. Real pinned-model transcription and disposal are still
+required before production admission.
 
 ## Selected model and access
 
@@ -24,12 +53,13 @@ advertised license is Apache-2.0. The exact access form must be reviewed by the
 user in their own account; this audit neither accepted terms nor inspected
 credentials. Public visibility does not grant gated file access.
 
-The user has authorized acquisition of the pinned revision and reports having
-accepted access. Authenticated access is not currently available to this task;
-no account status was independently verified. The remaining external prerequisite
-is a supported authenticated owning HF connection or an already authorized,
-Pumas-indexed local package. No credential should be placed in a chat, fixture,
-or handoff. Acquisition approval does not clear the engineering requirements below.
+No verified account access or accepted access form is recorded by this audit.
+Development authorization does not establish gated-file access or acceptance of
+contact-information sharing. The remaining external prerequisite is a supported
+authenticated owning HF connection with the required access, or an already
+authorized, Pumas-indexed local package. No credential should be placed in a
+chat, fixture, or handoff. Acquisition approval does not clear the engineering
+requirements below.
 
 ## Artifact verification
 
@@ -93,7 +123,8 @@ it cannot attest this ASR baseline. Do not overwrite that image preset.
 
 A minimal initial Linux CPU candidate avoids a CUDA driver qualification:
 managed CPython 3.12, Torch 2.10.0+cpu and Transformers 5.4.0. This is a proposed
-cohort, not a tested installation. Official CPU binaries are listed in
+cohort from the original inspection; the exact CPU cohort is now covered by the
+verified dependency evidence above. Official CPU binaries are listed in
 [PyTorch's version instructions](https://pytorch.org/get-started/previous-versions/).
 Public distribution metadata records these two exact wheel identities:
 
@@ -104,7 +135,9 @@ Public distribution metadata records these two exact wheel identities:
 
 Sources: [official CPU wheel index](https://download.pytorch.org/whl/cpu/torch/)
 and [PyPI release metadata](https://pypi.org/pypi/transformers/5.4.0/json).
-No wheels were downloaded. These identities do not pin the transitive closure.
+No wheels were downloaded during the original metadata inspection. Subsequent
+installation and retained transitive-byte evidence is recorded above; these two
+wheel identities alone do not pin that closure.
 The ordinary Linux Torch wheel on PyPI is a different build with CUDA
 dependencies; its metadata must not be substituted for the CPU index recipe.
 Resolve and retain exact wheel versions, hashes, licenses and installed-file
@@ -120,11 +153,12 @@ The older retained resolved-plan installer does not produce this installed-file
 custody manifest and refuses ASR before filesystem or process effects. ASR callers
 must consume the public Ready selection through the direct staged installer.
 
-The inspected host is Linux x86_64, glibc 2.41, Python 3.12.14, with no exposed
+The earlier inspected host was Linux x86_64, glibc 2.41, Python 3.12.14, with no exposed
 CUDA/ROCm GPU device. At inspection it had 4,056,281,088 bytes free in the
 workspace, less than the public repository's 4,132,801,897-byte storage count.
-That count is not an exact download budget, but this workspace cannot presently
-accommodate the full package, installed runtime and retained copied model bytes.
+That count was not an exact download budget. Those capacity observations are
+historical and do not describe the current executor. Recheck capacity for the
+full package, installed runtime and retained copied model bytes before acquisition.
 Provision adequate space or use an authorized local installation elsewhere
 before acquisition. No minimum execution-memory claim is made without loading.
 
@@ -196,5 +230,6 @@ implies BF16 execution.
 Hung native work can retain custody indefinitely. No new timeout is implied by
 this report. Recovery requires observed exact-child drain; failed or poisoned
 cleanup retains custody as documented in [the lifecycle contract](owned-audio-lifecycle.md).
-No main merge, release, public write, gated acquisition or real inference occurs
-in this qualification slice.
+Source increments and qualification evidence are published in the draft
+integration PR. No main merge, release or real-model acceptance is established
+by this document.

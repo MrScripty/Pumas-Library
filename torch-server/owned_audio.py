@@ -148,6 +148,60 @@ class _InstalledAudioCustody:
         self.acquisition = RetainedSpeechAcquisition()
         self.loaded = None
         self.cleaned = False
+        self.disposal = None
+
+
+class _InstalledNativeDisposal:
+    """One retained reference handoff; only the fixed policy can observe disposal."""
+
+    def __init__(self, acquisition, loaded):
+        reader = acquisition.objects.get("model_read_source")
+        if (
+            type(loaded) is not LoadedModel
+            or loaded.model is None
+            or loaded.tokenizer is None
+            or reader is None
+            or acquisition.unknown_allocations
+            or acquisition.in_flight is not None
+        ):
+            raise OwnedAudioError("native_cleanup_unconfirmed")
+        self.acquisition = acquisition
+        self._reader = reader
+        # Capture every wrapper alias before clearing the actor/slot wrapper.
+        self._loaded_aliases = (loaded.model, loaded.tokenizer)
+        self._references_released = False
+        self._finished = False
+        loaded.model = None
+        loaded.tokenizer = None
+
+    def release_native_references(self):
+        acquisition = self.acquisition
+        if (
+            self._references_released
+            or self._finished
+            or acquisition.unknown_allocations
+            or acquisition.in_flight is not None
+            or acquisition.objects.get("model_read_source") is not self._reader
+            or self._reader._closed
+        ):
+            raise OwnedAudioError("native_cleanup_unconfirmed")
+        # Includes constructor tuples, eval aliases, weights and intermediates.
+        # The original reader stays alive throughout native destruction.
+        acquisition.objects.clear()
+        acquisition.objects["model_read_source"] = self._reader
+        self._loaded_aliases = ()
+        self._references_released = True
+
+    def finish_after_observation(self):
+        if (
+            not self._references_released
+            or self._finished
+            or self.acquisition.objects != {"model_read_source": self._reader}
+            or self._reader._closed
+        ):
+            raise OwnedAudioError("native_cleanup_unconfirmed")
+        self.acquisition.clear_after_cleanup()
+        self._finished = True
 
 
 class _InstalledOwnedNativeGate:
@@ -303,8 +357,19 @@ class _InstalledOwnedNativeGate:
             # Dropping known Python objects cannot prove constructor-failure
             # native cessation. Keep every stage and original source in custody.
             raise OwnedAudioError("native_cleanup_unconfirmed")
-        self._proof._policy.dispose_native(acquisition, device)
-        acquisition.clear_after_cleanup()
+        if loaded is None and not (acquisition.objects.keys() - {"model_read_source"}):
+            # Refusal before the first native acquisition has nothing native to
+            # dispose. A retained load traceback with native stages is different.
+            acquisition.clear_after_cleanup()
+            custody.cleaned = True
+            return
+        if custody.disposal is not None:
+            raise OwnedAudioError("native_cleanup_unconfirmed")
+        # Failed loads can retain native aliases in traceback frames even when
+        # every constructor returned. Do not trim errors or claim their disposal.
+        custody.disposal = _InstalledNativeDisposal(acquisition, loaded)
+        self._proof._policy.dispose_native(custody.disposal, device)
+        custody.disposal.finish_after_observation()
         custody.cleaned = True
 
     def release_custody(self, plan):
@@ -313,6 +378,7 @@ class _InstalledOwnedNativeGate:
         acquisition = custody.acquisition
         if (
             acquisition.objects
+            or (custody.disposal is not None and not custody.disposal._finished)
             or acquisition.unknown_allocations
             or acquisition.in_flight is not None
             or (

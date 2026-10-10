@@ -656,11 +656,17 @@ class FixedInstalledFixturePolicy:
             },
         )
 
-    def dispose_native(self, acquisition, device):
+    def dispose_native(self, disposal, device):
+        acquisition = disposal.acquisition
         assert device.type == "cpu" and not acquisition.unknown_allocations
         self.source.disposals.append(tuple(acquisition.objects))
         if self.source.fail_stage == "dispose":
             raise RuntimeError("controlled disposal uncertainty")
+        if self.source.fail_stage == "dispose_without_release":
+            return
+        disposal.release_native_references()
+        if self.source.fail_stage == "dispose_after_release":
+            raise RuntimeError("controlled post-release uncertainty")
 
     def release_source(self, source):
         assert source is self.source
@@ -1054,18 +1060,73 @@ class InstalledConditionalPlumbingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(reader.source_owner)
         self.assertEqual(source.releases, 1)
 
-    async def test_incomplete_weights_disposes_returned_model_before_source_release(self):
+    async def test_disposal_observes_destruction_before_reader_and_source_release(self):
+        if "--installed-disposal-order" not in sys.argv:
+            # Callback failures deliberately quarantine. Keep that behavior in a
+            # child so a broken ordering assertion cannot hang test shutdown.
+            result = subprocess.run(
+                [sys.executable, __file__, "--installed-disposal-order"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return
+        import gc
+        import weakref
+
         source, policy, gate, actor, manager = self.fixture()
-        source.incomplete_weights = True
         plan = gate.prepare_from_parent(installed_payload(manager), manager)
-        failed = await actor.load(plan)
-        self.assertEqual((failed.state, failed.cleanup), ("failed", "confirmed"))
-        self.assertIn("model", source.disposals[0])
-        self.assertIn("weights", source.disposals[0])
-        self.assertIn("model_read_source", source.disposals[0])
-        self.assertNotIn("model_eval", source.native_calls)
+        ready = await actor.load(plan)
+        loaded = plan._custody.loaded
+        acquisition = plan._custody.acquisition
+        reader = acquisition.objects["model_read_source"]
+        references = (
+            weakref.ref(loaded.model),
+            weakref.ref(loaded.tokenizer),
+            weakref.ref(acquisition.objects["weights"]["owned_fixture_weight"]),
+        )
+        events = []
+        for reference in references:
+            weakref.finalize(reference(), lambda: events.append(("destroyed", reader._closed)))
+
+        def observe(disposal, device):
+            self.assertIs(disposal, plan._custody.disposal)
+            self.assertEqual(device.type, "cpu")
+            self.assertIsNone(loaded.model)
+            self.assertIsNone(loaded.tokenizer)
+            self.assertTrue(all(reference() is not None for reference in references))
+            self.assertFalse(reader._closed)
+            disposal.release_native_references()
+            gc.collect()
+            self.assertTrue(all(reference() is None for reference in references))
+            self.assertEqual(acquisition.objects, {"model_read_source": reader})
+            self.assertFalse(reader._closed)
+            self.assertFalse(source.released)
+            with self.assertRaisesRegex(OwnedAudioError, "native_cleanup_unconfirmed"):
+                disposal.release_native_references()
+            events.append(("observed", reader._closed))
+
+        close = reader.close
+
+        def close_reader():
+            self.assertTrue(all(reference() is None for reference in references))
+            self.assertEqual(events[-1], ("observed", False))
+            events.append(("reader_close", reader._closed))
+            close()
+
+        with (
+            patch.object(policy, "dispose_native", observe),
+            patch.object(reader, "close", close_reader),
+        ):
+            retired = await actor.unload(ready.slot_ref)
+        self.assertEqual((retired.state, retired.cleanup), ("retired", "confirmed"))
+        self.assertEqual(events.count(("destroyed", False)), 3)
+        self.assertEqual(events[-1], ("reader_close", False))
+        self.assertTrue(plan._custody.disposal._finished)
+        self.assertTrue(reader._closed)
         self.assertEqual(source.releases, 1)
-        self.assertFalse(plan._custody.acquisition.objects)
 
     async def test_lost_constructor_caller_retains_each_completed_stage_until_actual_return(self):
         source, policy, gate, actor, manager = self.fixture()
@@ -1100,6 +1161,7 @@ async def installed_quarantine_fixture(stage):
         manager = _TestModelManager(Devices())
         source = HeldInstalledFixtureSource(Path(folder).resolve(), manager)
         source.fail_stage = stage
+        source.incomplete_weights = stage == "incomplete_weights"
         policy = FixedInstalledFixturePolicy()
         policy.source = source
         with (
@@ -1123,7 +1185,7 @@ async def installed_quarantine_fixture(stage):
                     status = await actor.load(plan)
             else:
                 status = await actor.load(plan)
-            if stage == "dispose":
+            if stage.startswith("dispose"):
                 status = await actor.unload(status.slot_ref)
             assert (status.state, status.cleanup) == ("cleanup_unconfirmed", "unconfirmed")
             assert actor in _CUSTODIANS and not source.released and source.releases == 0
@@ -1138,13 +1200,32 @@ async def installed_quarantine_fixture(stage):
             )
             with open(reader.weights_filename(), "rb") as weights:
                 assert weights.read() == source.members["model.safetensors"][2]
-            expected = (
-                set(_INSTALLED_STAGES)
-                if stage == "dispose"
-                else set(_INSTALLED_STAGES[: _INSTALLED_STAGES.index(stage)])
-            )
+            if stage == "dispose_after_release":
+                expected = {"model_read_source"}
+            elif stage.startswith("dispose"):
+                expected = set(_INSTALLED_STAGES)
+            elif stage == "incomplete_weights":
+                expected = set(_INSTALLED_STAGES[:-1])
+                assert actor._active.retained_error is not None
+                assert plan._custody.loaded is None and plan._custody.disposal is None
+            else:
+                expected = set(_INSTALLED_STAGES[: _INSTALLED_STAGES.index(stage)])
             assert set(plan._custody.acquisition.objects) == expected
-            assert plan._custody.acquisition.unknown_allocations is (stage != "dispose")
+            assert plan._custody.acquisition.unknown_allocations is (
+                not stage.startswith("dispose") and stage != "incomplete_weights"
+            )
+            if stage.startswith("dispose"):
+                disposal = plan._custody.disposal
+                assert disposal is not None and not disposal._finished
+                assert plan._custody.loaded.model is None
+                assert plan._custody.loaded.tokenizer is None
+                try:
+                    gate.cleanup(plan, plan._custody.loaded, actor._active.device)
+                except OwnedAudioError as error:
+                    assert error.code == "native_cleanup_unconfirmed"
+                else:
+                    raise AssertionError("disposal replay accepted")
+                assert plan._custody.disposal is disposal
             actor.close_admission()
             print("installed conditional custody retained: " + stage, flush=True)
             # Stay within the source policy's retained lifetime during the
@@ -1155,7 +1236,13 @@ async def installed_quarantine_fixture(stage):
 @unittest.skipUnless(sys.platform == "linux", "Installed held-source fixture requires Linux seals")
 class InstalledQuarantinePlumbingTests(unittest.TestCase):
     def test_every_uncertain_native_stage_and_disposal_retains_original_source(self):
-        for stage in (*_INSTALLED_STAGES[1:], "dispose"):
+        for stage in (
+            *_INSTALLED_STAGES[1:],
+            "dispose",
+            "dispose_without_release",
+            "dispose_after_release",
+            "incomplete_weights",
+        ):
             with self.subTest(stage=stage):
                 child = subprocess.Popen(
                     [sys.executable, __file__, "--installed-quarantine", stage],
@@ -1174,7 +1261,15 @@ class InstalledQuarantinePlumbingTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--installed-quarantine":
+    if sys.argv[1:] == ["--installed-disposal-order"]:
+        unittest.main(
+            argv=[
+                __file__,
+                "InstalledConditionalPlumbingTests."
+                "test_disposal_observes_destruction_before_reader_and_source_release",
+            ]
+        )
+    elif len(sys.argv) == 3 and sys.argv[1] == "--installed-quarantine":
         asyncio.run(installed_quarantine_fixture(sys.argv[2]))
     elif len(sys.argv) == 3 and sys.argv[1] == "--quarantine":
         asyncio.run(quarantine_fixture(sys.argv[2]))

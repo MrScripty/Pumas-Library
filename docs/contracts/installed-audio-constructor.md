@@ -37,6 +37,19 @@ child-tree drainage behavior remains the recovery boundary. Successful
 controlled loads exercise normal actor cleanup; they do not establish the real
 installed loader's native disposal behavior.
 
+Normal loaded-state cleanup now transfers all retained acquisition aliases and
+both `LoadedModel` native fields into one private disposal handoff before the
+policy runs. The policy must explicitly release those references, observe the
+qualified native disposal condition, and return successfully before the original
+reader closes. Reference release alone is not disposal evidence. Missing release,
+a callback error or an observation failure retains the same handoff and original
+source for exact child drainage; cleanup cannot replay that handoff. Failed loads
+with native stages remain quarantined, including post-constructor validation
+failures whose retained tracebacks may still own native objects. Errors are not
+trimmed to make an observation pass. A refusal before any native acquisition may
+close its reader normally. Controlled finalizer/order tests establish this
+handoff protocol only; the shipping policy catalog remains empty.
+
 ## Held selected model reads
 
 The private installed gate now requests `model_source` from the original

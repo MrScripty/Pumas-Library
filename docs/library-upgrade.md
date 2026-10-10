@@ -29,6 +29,15 @@ to reopen. Library selection cannot change the target during an upgrade.
 Environment/argument-selected libraries can upgrade their current root while
 retaining their explicit selection authority.
 
+A successful desktop upgrade opens the library in the same window; restarting
+the app is not part of that success path. If the backend cannot start afterward,
+the screen distinguishes successful metadata conversion from failed opening.
+Check the recorded startup error before retrying. Retained downloads whose
+destination folders are absent remain in their prior paused/error state;
+startup does not recreate those folders or attempt to finalize nonexistent
+outputs. Their download records and queue custody remain available for an
+explicit user action.
+
 ## Upgrade from the terminal on Linux
 
 1. Close Pumas Library and every other reader/writer using this library,

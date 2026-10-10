@@ -163,6 +163,7 @@ describe('LauncherRootRecoveryProvider', () => {
     for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box);
     fireEvent.click(screen.getByRole('button', { name: 'Upgrade Metadata and Open Library' }));
     expect(await screen.findByRole('heading', { name: stage === 'open' ? 'Library metadata upgraded' : 'Library upgrade needs attention' })).toBeVisible();
+    if (stage === 'open') expect(screen.getByText(/library backend could not start/)).toBeVisible();
     expect(screen.queryByText('Library content')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Upgrade Library' })).not.toBeInTheDocument();
     expect(bridge.upgrade_launcher_library).toHaveBeenCalledTimes(1);

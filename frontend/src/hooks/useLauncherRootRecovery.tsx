@@ -424,7 +424,9 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
           message={confirming
             ? 'Only launcher-data/downloads.json is backed up and updated. Model files are not copied or rewritten. The metadata backup is saved beside downloads.json as downloads.pre-schema7-<id>.json.'
             : running ? 'Backing up download metadata, upgrading it, and opening this library. Closing the app will wait for this operation to finish.'
-              : upgradePhase === 'upgraded' || upgradeFailureStage === 'open'
+              : upgradeFailureStage === 'open'
+                ? 'The metadata upgrade completed, but the library backend could not start. Your metadata backup has been kept. Check the startup error in the app\'s main log and close other apps using this library before reopening.'
+                : upgradePhase === 'upgraded'
                 ? 'The metadata upgrade completed. Close and reopen Pumas Library to open this library. Your metadata backup has been kept.'
                 : 'The upgrade could not be confirmed. Any metadata backup has been kept. Check library permissions and free space, then close and reopen Pumas Library before trying again.'}
           primaryAction={confirming ? {

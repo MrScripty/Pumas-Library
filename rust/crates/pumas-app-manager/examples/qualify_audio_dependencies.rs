@@ -42,7 +42,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !success {
         return Err("managed runtime acquisition failed; see progress".into());
     }
-    let source = manager.prepare_torch_audio_runtime_bytes("v2.10.0").await?;
+    // Installation shutdown is terminal admission closure. Use a fresh owner
+    // for byte preparation, with no second installation, then join it even when
+    // capture refuses. Retained source custody outlives this manager phase.
+    let preparation = VersionManager::new(&root, AppId::Torch).await?;
+    let prepared = preparation
+        .prepare_torch_audio_runtime_bytes("v2.10.0")
+        .await;
+    let settled = preparation.shutdown_installations().await;
+    let source = prepared?;
+    settled?;
     let report = pumas_library::runtime_read_source::qualify_audio_dependency_reads(source).await?;
     std::fs::write(
         root.join("audio-confined-dependency-probe.json"),

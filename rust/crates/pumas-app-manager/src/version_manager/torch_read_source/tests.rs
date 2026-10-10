@@ -503,3 +503,86 @@ fn only_fixed_uv_directory_alias_is_identity_retained_without_traversal() {
     std::os::unix::fs::symlink(&target, root.path().join("caller-alias")).unwrap();
     assert!(tree_manifest(root.path(), &[], true).is_err());
 }
+
+#[tokio::test]
+async fn cancelled_preparation_waiter_keeps_lifecycle_and_shutdown_joins_nested_work() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = VersionManager::new(root.path(), AppId::Torch)
+        .await
+        .unwrap();
+    let (entered_send, entered) = tokio::sync::oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let preparing = manager.clone();
+    let waiter = tokio::spawn(async move {
+        preparing
+            .owned_runtime_preparation(move |_owner| async move {
+                tokio::task::spawn_blocking(move || {
+                    entered_send.send(()).unwrap();
+                    released.recv().unwrap();
+                })
+                .await
+                .map_err(|error| refused(error.to_string()))?;
+                Ok(())
+            })
+            .await
+    });
+    entered.await.unwrap();
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    assert!(manager.lifecycle_lock.try_lock().is_err());
+    let shutting = manager.clone();
+    let shutdown_waiter = tokio::spawn(async move { shutting.shutdown_installations().await });
+    while !manager.torch_shutting_down.load(Ordering::SeqCst) {
+        tokio::task::yield_now().await;
+    }
+    shutdown_waiter.abort();
+    assert!(shutdown_waiter.await.unwrap_err().is_cancelled());
+    assert!(manager
+        .owned_runtime_preparation(|_| async { Ok(()) })
+        .await
+        .is_err());
+    let joined = manager.shutdown_installations();
+    tokio::pin!(joined);
+    assert!(tokio::time::timeout(Duration::from_millis(20), &mut joined)
+        .await
+        .is_err());
+    assert!(manager.lifecycle_lock.try_lock().is_err());
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), &mut joined)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(manager.lifecycle_lock.try_lock().is_ok());
+    manager.shutdown_installations().await.unwrap();
+}
+
+#[tokio::test]
+async fn ordinary_preparation_refusal_is_not_shutdown_cleanup_failure() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = VersionManager::new(root.path(), AppId::Torch)
+        .await
+        .unwrap();
+    let result: Result<()> = manager
+        .owned_runtime_preparation(|_| async { Err(refused("controlled source refusal")) })
+        .await;
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("controlled source refusal"));
+    manager.shutdown_installations().await.unwrap();
+}
+
+#[tokio::test]
+async fn active_preparation_refuses_missing_or_changed_selection_before_capture() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = VersionManager::new(root.path(), AppId::Torch)
+        .await
+        .unwrap();
+    let error = manager
+        .prepare_active_torch_audio_runtime_bytes("unselected-tag")
+        .await
+        .expect_err("stale active selection must refuse")
+        .to_string();
+    assert!(error.contains("Active Torch runtime selection changed"));
+    manager.shutdown_installations().await.unwrap();
+}

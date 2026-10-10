@@ -18,16 +18,42 @@ impl VersionManager {
     /// Prepare a source-pinned native cohort and retain all selected runtime
     /// bytes. This does not grant audio admission or qualify native execution.
     /// The owned native directory disappears only after its final custody owner.
+    /// The manager owns preparation through nested stages and joins it at shutdown.
+    /// Do not hold a caller-side Torch lifecycle lease while awaiting this method.
     pub async fn prepare_torch_audio_runtime_bytes(
         &self,
         tag: &str,
     ) -> Result<Arc<RetainedRuntimeReadSource>> {
-        if self.app_id != AppId::Torch {
-            return Err(refused("Audio native bytes require the Torch manager"));
-        }
+        let tag = tag.to_owned();
+        self.owned_runtime_preparation(move |manager| async move {
+            manager.prepare_torch_audio_runtime_bytes_owned(&tag).await
+        })
+        .await
+    }
+
+    /// Prepare the exact active tag observed by a serving request. A changed
+    /// selection refuses under the owned lifecycle lock; it never retargets.
+    pub async fn prepare_active_torch_audio_runtime_bytes(
+        &self,
+        expected_tag: &str,
+    ) -> Result<Arc<RetainedRuntimeReadSource>> {
+        let tag = expected_tag.to_owned();
+        self.owned_runtime_preparation(move |manager| async move {
+            if manager.get_active_version().await?.as_deref() != Some(tag.as_str()) {
+                return Err(refused("Active Torch runtime selection changed"));
+            }
+            manager.prepare_torch_audio_runtime_bytes_owned(&tag).await
+        })
+        .await
+    }
+
+    async fn prepare_torch_audio_runtime_bytes_owned(
+        &self,
+        tag: &str,
+    ) -> Result<Arc<RetainedRuntimeReadSource>> {
         // Validate the existing selection before downloading any additional
         // public artifact. Its read leases remain held until recapture finishes.
-        let existing = self.retain_torch_runtime_bytes(tag).await?;
+        let existing = self.retain_torch_runtime_bytes_owned(tag).await?;
         let recipe_source = existing.clone();
         let recipe_path = self.versions_dir().join(tag).join("runtime.json");
         tokio::task::spawn_blocking(move || -> Result<()> {
@@ -55,7 +81,62 @@ impl VersionManager {
     }
     /// Retain actual interpreter, dependency and embedded sidecar selections.
     /// This does not grant serving availability or complete execution proof.
+    /// Manager-owned lifecycle custody survives cancellation of the result waiter.
+    /// Do not hold a caller-side Torch lifecycle lease while awaiting this method.
     pub async fn retain_torch_runtime_bytes(
+        &self,
+        tag: &str,
+    ) -> Result<Arc<RetainedRuntimeReadSource>> {
+        let tag = tag.to_owned();
+        self.owned_runtime_preparation(move |manager| async move {
+            manager.retain_torch_runtime_bytes_owned(&tag).await
+        })
+        .await
+    }
+
+    // Registered under the same admission lock as manager shutdown. A caller
+    // owns only its result waiter; the manager owns every nested blocking stage.
+    async fn owned_runtime_preparation<T, F, Fut>(&self, operation: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(VersionManager) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<T>> + Send + 'static,
+    {
+        if self.app_id != AppId::Torch {
+            return Err(refused(
+                "Runtime byte preparation requires the Torch manager",
+            ));
+        }
+        let receive = {
+            let _admission = self.installing_tag.lock().await;
+            let mut registered = self
+                .installation_tasks
+                .lock()
+                .map_err(|_| refused("Installation task registry poisoned"))?;
+            if self.torch_shutting_down.load(Ordering::SeqCst) {
+                return Err(refused("Version manager is shutting down"));
+            }
+            registered.harvest_finished();
+            let manager = self.clone();
+            let (send, receive) = tokio::sync::oneshot::channel();
+            registered.tasks.push(tokio::spawn(async move {
+                let _lifecycle = manager.lifecycle_lock.clone().lock_owned().await;
+                // Keep the manager's original state/root owners through the
+                // result handoff, even if the preparation future consumes a clone.
+                let result = operation(manager.clone()).await;
+                let _ = send.send(result);
+                // Ordinary source refusal is returned to the caller, not a
+                // cleanup failure. A panic stays in the registered JoinHandle.
+                Ok(())
+            }));
+            receive
+        };
+        receive
+            .await
+            .map_err(|_| refused("Runtime byte preparation worker lost"))?
+    }
+
+    async fn retain_torch_runtime_bytes_owned(
         &self,
         tag: &str,
     ) -> Result<Arc<RetainedRuntimeReadSource>> {

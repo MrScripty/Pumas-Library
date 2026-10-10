@@ -40,7 +40,17 @@ def in_thread():
 thread = threading.Thread(target=in_thread)
 thread.start(); thread.join()
 assert not thread_errors, thread_errors
-import torch, transformers, numpy, scipy, librosa, soundfile, soxr
+cache_root = '/proc/self/fd/' + sys.argv[1]
+assert os.environ['TORCHINDUCTOR_CACHE_DIR'] == cache_root
+try:
+    with open(cache_root + '/pumas-forbidden-cache-write', 'xb') as target: target.write(b'x')
+except PermissionError: pass
+else: raise RuntimeError('compiler cache write was not denied')
+import torch
+# Import first so a failed initial Dynamo import is not masked by a later
+# duplicate cache-artifact registration during Transformers lazy imports.
+import torch._dynamo
+import transformers, numpy, scipy, librosa, soundfile, soxr
 from transformers import CohereAsrConfig, CohereAsrProcessor, CohereAsrForConditionalGeneration
 assert torch.__version__ == '2.10.0+cpu'
 assert transformers.__version__ == '5.4.0'
@@ -99,6 +109,7 @@ fn spawn(source: Arc<RetainedRuntimeReadSource>) -> io::Result<ProbeGuard> {
     let loader = source.clone_member(RuntimeReadRole::NativeLibraries, LOADER)?;
     let native = source.clone_root(RuntimeReadRole::NativeLibraries)?;
     let packages = source.clone_root(RuntimeReadRole::Dependencies)?;
+    let cache_root = path(&packages);
     let mut command = Command::new(path(&loader));
     command
         .args(["--inhibit-cache", "--library-path"])
@@ -136,6 +147,10 @@ fn spawn(source: Arc<RetainedRuntimeReadSource>) -> io::Result<ProbeGuard> {
     )?;
     validate(&source)?;
     boundary.confine_command(&mut command);
+    // Import-time Dynamo cache discovery requires an existing directory. Bind
+    // its documented setting to a held read-only capability; all cache writes
+    // remain denied, and no ambient temporary-directory discovery is needed.
+    command.env("TORCHINDUCTOR_CACHE_DIR", cache_root);
     let custody = ManagedChildCustodySlot::new();
     let lease = Arc::new(Lease {
         _source: source,

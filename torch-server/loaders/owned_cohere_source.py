@@ -176,7 +176,7 @@ class HeldCohereReadSource:
         raise TypeError("Owned Cohere readers come from the original source policy")
 
     @classmethod
-    def _from_members(cls, source_owner, members):
+    def _from_members(cls, source_owner, members, *, expected):
         if (
             sys.platform != "linux"
             or source_owner is None
@@ -185,6 +185,23 @@ class HeldCohereReadSource:
             or not set(members).issubset(REQUIRED | OPTIONAL)
         ):
             raise ValueError("Unsupported owned Cohere selected read set")
+        if (
+            type(expected) is not dict
+            or set(expected) != set(members)
+            or any(
+                type(value) is not tuple
+                or len(value) != 2
+                or type(value[0]) is not int
+                or value[0] < 0
+                or type(value[1]) is not bytes
+                or len(value[1]) != 32
+                for value in expected.values()
+            )
+        ):
+            raise ValueError("Owned Cohere requires original selected size/digest expectations")
+        # Copy the expectation mapping before any descriptor/capture work.
+        # Values are immutable; a later original mutation cannot redefine them.
+        expected = expected.copy()
         import fcntl
 
         reader = object.__new__(cls)
@@ -200,6 +217,8 @@ class HeldCohereReadSource:
                 if fcntl.fcntl(original, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDONLY:
                     raise ValueError("Owned Cohere requires read-only file descriptors")
                 identities[name] = _identity(original)
+                if identities[name][2] != expected[name][0]:
+                    raise ValueError("Owned Cohere selected member size changed")
                 os.pread(original, 1, 0)
             for name, original in members.items():
                 fd = os.dup(original)
@@ -208,13 +227,13 @@ class HeldCohereReadSource:
                     if identity != identities[name]:
                         raise ValueError("Owned Cohere member changed during capture")
                     digest = _digest(fd, identity[2])
-                    if _identity(fd) != identity:
-                        raise ValueError("Owned Cohere member changed during reading")
+                    if _identity(fd) != identity or digest != expected[name][1]:
+                        raise ValueError("Owned Cohere member differs from original selected bytes")
                 except BaseException:
                     os.close(fd)
                     raise
                 reader._members[name] = (fd, identity, digest)
-                reader._sealed[name] = _sealed_copy(fd, identity, digest)
+                reader._sealed[name] = _sealed_copy(fd, identity, expected[name][1])
             reader.validate()
             return reader
         except BaseException:

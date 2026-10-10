@@ -80,7 +80,14 @@ impl AudioRuntimeOwner {
             .arg("--packages-root-fd")
             .arg(packages.as_raw_fd().to_string())
             .arg("--model-root-fd")
-            .arg(model.as_raw_fd().to_string());
+            .arg(model.as_raw_fd().to_string())
+            // Labels are derived only from the original prepared allocation.
+            // The child re-hashes held bytes for correlation, never admission.
+            .arg(format!("--model-id={}", selected.model_id()))
+            .arg(format!(
+                "--selected-artifact-id={}",
+                selected.selected_artifact_id()
+            ));
         // Sidecar originals are not execution inputs: only their independently
         // copied and revalidated code snapshot below gets content grants.
         let directories = installed

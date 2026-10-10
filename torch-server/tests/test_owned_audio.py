@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import copy
+import hashlib
 import json
 import pickle
 from pathlib import Path
@@ -647,7 +648,12 @@ class FixedInstalledFixturePolicy:
         from loaders.owned_cohere_source import HeldCohereReadSource
 
         return HeldCohereReadSource._from_members(
-            source, {name: member[0] for name, member in source.members.items()}
+            source,
+            {name: member[0] for name, member in source.members.items()},
+            expected={
+                name: (len(member[2]), hashlib.sha256(member[2]).digest())
+                for name, member in source.members.items()
+            },
         )
 
     def dispose_native(self, acquisition, device):
@@ -1032,7 +1038,12 @@ class InstalledConditionalPlumbingTests(unittest.IsolatedAsyncioTestCase):
 
         source, policy, gate, actor, manager = self.fixture()
         reader = HeldCohereReadSource._from_members(
-            object(), {name: value[0] for name, value in source.members.items()}
+            object(),
+            {name: value[0] for name, value in source.members.items()},
+            expected={
+                name: (len(value[2]), hashlib.sha256(value[2]).digest())
+                for name, value in source.members.items()
+            },
         )
         self.addCleanup(reader.close)
         plan = gate.prepare_from_parent(installed_payload(manager), manager)

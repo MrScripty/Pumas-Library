@@ -24,6 +24,7 @@ const MEMBERS: &[&str] = &[
 ];
 const CODE: &[&str] = &[
     "owned_audio.py",
+    "installed_cohere_source.py",
     "model_manager.py",
     "device_manager.py",
     "private_owned_channel.py",

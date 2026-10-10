@@ -416,3 +416,30 @@ def _create_installed_private_owned_channel(manager, source_owner):
     gate = _InstalledOwnedNativeGate._from_source_owner(source_owner)
     actor = OwnedAudioActor(manager, native_gate=gate)
     return PrivateOwnedChannel(actor, native_gate=gate)
+
+
+def _create_bootstrap_private_owned_channel(manager, model_root_fd, model_id, selected_artifact_id):
+    """Connect original bootstrap capabilities only after a source policy exists.
+
+    Model/artifact labels are correlation, never permission. Empty shipping
+    policy retains the existing unavailable handshake without opening members.
+    """
+    from owned_audio import _INSTALLED_AUDIO_POLICIES, OwnedAudioError
+
+    if not _INSTALLED_AUDIO_POLICIES:
+        return create_private_owned_channel(manager)
+    if len(_INSTALLED_AUDIO_POLICIES) != 1:
+        raise OwnedAudioError("native_runtime_unqualified")
+    from installed_cohere_source import _InstalledCohereSourceOwner
+
+    source = _InstalledCohereSourceOwner._capture(
+        manager, model_root_fd, model_id, selected_artifact_id
+    )
+    try:
+        return _create_installed_private_owned_channel(manager, source)
+    except BaseException:
+        # A retained proof owns uncertainty. Never close its descriptors on an
+        # ambiguous policy failure; exact process exit remains the final owner.
+        if source._proof is None:
+            source.close_unclaimed()
+        raise

@@ -45,7 +45,8 @@ source-owned policy, rather than a model directory. It requires a
 source before and after capture, and puts the reader in load custody before
 native construction. The reader retains original read-only regular member
 descriptors and observes their inode, size and streamed SHA-256. Each selected member is copied from its
-held descriptor to a Linux memfd, checked against that observation, and sealed
+held descriptor to a Linux memfd, checked against the original owner's captured
+size and SHA-256 (never a rebased observation during capture), and sealed
 against writes, growth, shrinkage and seal removal before a read-only descriptor
 escapes. The original source is revalidated after capture. There is no mutable
 file fallback if memfd creation or sealing is unavailable. Its hashes observe
@@ -58,7 +59,9 @@ does not permit replacing the original allocation or ignoring source mutation.
 Capture failure closes partial copies; successful copies remain under native
 load custody until confirmed disposal. Kernel-backed regression tests exercise
 actual read mappings, denied writes/resizes/shared writable mappings, source
-mutation and partial-copy cleanup with synthetic bytes. They do not run ASR.
+mutation and partial-copy cleanup with synthetic bytes. A deterministic
+mutate-before-copy/restore-after-copy regression verifies that the original
+proof digest cannot be replaced during reader capture. They do not run ASR.
 
 Sealed snapshots add up to one full selected-model copy in shmem in addition to
 the existing prepared copies and native allocations. Capacity, memory pressure
@@ -171,3 +174,27 @@ this operation; the shipping policy catalog still refuses that owner. This is
 not yet a completed production control-channel/session producer or real ASR
 qualification. See [owned native cohort](cohere-native-cohort.md) for the fixed
 candidate identity and remaining gates.
+
+### Installed bootstrap source correlation
+
+The owned launcher supplies the original prepared allocation's model and artifact
+labels alongside its inherited model directory. These labels grant no authority.
+The Python source owner opens only the closed Cohere read set as read-only,
+non-link regular files, retains directory/file identities, and rehashes actual
+held bytes. Directory enumeration is bounded by the nine supported member names.
+
+Its correlation identifier is `pumas-cohere-owned-v1:` followed by the existing
+Rust prepared-manifest SHA-256: domain `pumas-selected-artifact-bytes-v1\0`, each
+UTF-8 model/artifact label framed by its u64 big-endian byte length, then sorted
+members framed by UTF-8 name length/name, u64 big-endian size and ASCII SHA-256.
+The parent sends its independently owned identifier on load; the private gate
+compares it with the original source proof. Neither this ID nor CLI labels can
+satisfy qualification or substitute another prepared allocation.
+
+The conditional bootstrap factory checks the source-owned policy catalog before
+opening model members. The shipping catalog is still empty, preserving the
+unavailable handshake. A registered source policy may retain exactly one proof,
+obtain the source-bound sealed reader, and release descriptors only after its
+native disposal contract is satisfied. Unexpected proof/owner loss leaves
+potentially admitted inputs for exact child-tree teardown. Fixtures exercise
+these ownership/correlation steps without qualifying real inference or disposal.

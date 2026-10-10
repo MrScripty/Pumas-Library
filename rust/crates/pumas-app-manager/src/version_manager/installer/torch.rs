@@ -1221,6 +1221,10 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
             include_str!("../../../../../../torch-server/model_manager.py"),
         ),
         (
+            "installed_cohere_source.py",
+            include_str!("../../../../../../torch-server/installed_cohere_source.py"),
+        ),
+        (
             "owned_worker.py",
             include_str!("../../../../../../torch-server/owned_worker.py"),
         ),

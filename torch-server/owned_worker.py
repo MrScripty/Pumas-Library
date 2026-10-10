@@ -18,6 +18,7 @@ import sysconfig
 REQUIRED_CODE = (
     "owned_worker.py",
     "owned_audio.py",
+    "installed_cohere_source.py",
     "model_manager.py",
     "device_manager.py",
     "private_owned_channel.py",
@@ -165,6 +166,8 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Private inherited owned worker")
     for root in ("code", "packages", "model"):
         parser.add_argument(f"--{root}-root-fd", required=True, type=int)
+    parser.add_argument("--model-id")
+    parser.add_argument("--selected-artifact-id")
     return parser.parse_args(argv)
 
 
@@ -235,9 +238,17 @@ async def bootstrap(args, *, channel_factory=None):
         if channel_factory is None:
             from device_manager import DeviceManager
             from model_manager import ModelManager
-            from private_owned_channel import create_private_owned_channel
+            from private_owned_channel import _create_bootstrap_private_owned_channel
 
-            channel = create_private_owned_channel(ModelManager(DeviceManager()))
+            try:
+                channel = _create_bootstrap_private_owned_channel(
+                    ModelManager(DeviceManager()),
+                    model,
+                    args.model_id,
+                    args.selected_artifact_id,
+                )
+            except (ValueError, OSError) as error:
+                raise StartupRefusal("installed_runtime_unready") from error
         else:
             channel = channel_factory(model)
         await channel.serve_stdio(output=output)

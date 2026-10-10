@@ -1,6 +1,7 @@
 """Actual held-file reads and synthetic constructors; no real Cohere execution."""
 
 import copy
+import hashlib
 import json
 import mmap
 import os
@@ -40,7 +41,9 @@ class UnsupportedHeldSourceTests(unittest.TestCase):
                 patch("loaders.owned_cohere_source._sealed_copy") as sealed_copy,
             ):
                 with self.assertRaisesRegex(ValueError, "Unsupported owned Cohere"):
-                    HeldCohereReadSource._from_members(object(), {name: 123 for name in REQUIRED})
+                    HeldCohereReadSource._from_members(
+                        object(), {name: 123 for name in REQUIRED}, expected={}
+                    )
                 identity.assert_not_called()
                 sealed_copy.assert_not_called()
 
@@ -63,11 +66,16 @@ class HeldSourceTests(unittest.TestCase):
             os.close(fd)
         self.originals.clear()
 
+    def expected(self):
+        return {name: (len(raw), hashlib.sha256(raw).digest()) for name, raw in self.bodies.items()}
+
     def select(self):
         for name, body in self.bodies.items():
             (self.root / name).write_bytes(body)
             self.originals[name] = os.open(self.root / name, os.O_RDONLY | os.O_NOFOLLOW)
-        reader = HeldCohereReadSource._from_members(self.owner, self.originals)
+        reader = HeldCohereReadSource._from_members(
+            self.owner, self.originals, expected=self.expected()
+        )
         self.addCleanup(reader.close)
         return reader
 
@@ -231,10 +239,26 @@ class HeldSourceTests(unittest.TestCase):
 
         with patch.object(fcntl, "fcntl", side_effect=refuse):
             with self.assertRaisesRegex(PermissionError, "sealing denied"):
-                HeldCohereReadSource._from_members(self.owner, self.originals)
+                HeldCohereReadSource._from_members(
+                    self.owner, self.originals, expected=self.expected()
+                )
         self.assertEqual(set(os.listdir("/proc/self/fd")), before)
         for name, fd in self.originals.items():
             self.assertEqual(os.pread(fd, len(self.bodies[name]), 0), self.bodies[name])
+
+    def test_original_expectations_are_required_and_cannot_be_rebased(self):
+        self.select().close()
+        for expected in (
+            None,
+            {},
+            {name: (len(raw), b"x" * 32) for name, raw in self.bodies.items()},
+        ):
+            with patch.object(source_api, "_sealed_copy") as sealed:
+                with self.assertRaises(ValueError):
+                    HeldCohereReadSource._from_members(
+                        self.owner, self.originals, expected=expected
+                    )
+                sealed.assert_not_called()
 
     def test_missing_memfd_support_refuses_before_allocating_copies(self):
         reader = self.select()
@@ -243,7 +267,9 @@ class HeldSourceTests(unittest.TestCase):
         with patch.dict(os.__dict__):
             del os.memfd_create
             with self.assertRaisesRegex(ValueError, "immutable read source unavailable"):
-                HeldCohereReadSource._from_members(self.owner, self.originals)
+                HeldCohereReadSource._from_members(
+                    self.owner, self.originals, expected=self.expected()
+                )
         self.assertEqual(set(os.listdir("/proc/self/fd")), before)
 
     def test_missing_python_seal_exports_still_requires_real_kernel_seals(self):
@@ -273,7 +299,9 @@ class HeldSourceTests(unittest.TestCase):
         before = set(os.listdir("/proc/self/fd"))
         with patch.object(fcntl, "F_GET_SEALS", 1, create=True):
             with self.assertRaisesRegex(ValueError, "immutable read source unavailable"):
-                HeldCohereReadSource._from_members(self.owner, self.originals)
+                HeldCohereReadSource._from_members(
+                    self.owner, self.originals, expected=self.expected()
+                )
         self.assertEqual(set(os.listdir("/proc/self/fd")), before)
 
     def test_short_copy_writes_preserve_exact_selected_bytes(self):
@@ -304,7 +332,9 @@ class HeldSourceTests(unittest.TestCase):
 
         with patch.object(owned_cohere_source, "_sealed_copy", side_effect=mutate):
             with self.assertRaisesRegex(ValueError, "changed"):
-                HeldCohereReadSource._from_members(self.owner, self.originals)
+                HeldCohereReadSource._from_members(
+                    self.owner, self.originals, expected=self.expected()
+                )
         self.assertEqual(set(os.listdir("/proc/self/fd")), before)
 
     def test_changed_held_bytes_size_and_closed_reader_refuse(self):
@@ -328,14 +358,16 @@ class HeldSourceTests(unittest.TestCase):
             {name: fd for name, fd in self.originals.items() if name != "model.safetensors"},
         ):
             with self.subTest(bad=type(bad)), self.assertRaises(ValueError):
-                HeldCohereReadSource._from_members(self.owner, bad)
+                HeldCohereReadSource._from_members(self.owner, bad, expected=self.expected())
         writable = os.open(self.root / "model.safetensors", os.O_RDWR)
         directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
         try:
             for fd in (writable, directory, -1, "file:///weights"):
                 with self.subTest(fd=fd), self.assertRaises(ValueError):
                     HeldCohereReadSource._from_members(
-                        self.owner, {**self.originals, "model.safetensors": fd}
+                        self.owner,
+                        {**self.originals, "model.safetensors": fd},
+                        expected=self.expected(),
                     )
         finally:
             os.close(writable)
@@ -363,7 +395,9 @@ class HeldSourceTests(unittest.TestCase):
         os.close(closed)
         with self.assertRaises(OSError):
             HeldCohereReadSource._from_members(
-                self.owner, {**self.originals, "model.safetensors": closed}
+                self.owner,
+                {**self.originals, "model.safetensors": closed},
+                expected=self.expected(),
             )
 
     def test_consumed_loader_uses_held_bytes_and_semantic_optional_descriptors(self):

@@ -31,6 +31,7 @@ macro_rules! code {
 const REQUIRED_CODE: &[(&str, &[u8])] = &[
     code!("owned_worker.py"),
     code!("owned_audio.py"),
+    code!("installed_cohere_source.py"),
     code!("model_manager.py"),
     code!("device_manager.py"),
     code!("private_owned_channel.py"),

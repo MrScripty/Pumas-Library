@@ -73,6 +73,7 @@ async fn api(root: &Path) -> PumasApi {
         )
         .auto_create_dirs(true)
         .with_hf_client(false)
+        .with_connectivity_probe(false)
         .with_process_manager(false)
         .build()
         .await
@@ -359,13 +360,15 @@ async fn acquire(
                 metadata.hashes.as_ref().unwrap().sha256.as_deref(),
                 Some(hex::encode(Sha256::digest(primary_bytes)).as_str())
             );
-            assert_eq!(metadata.metadata_needs_review, Some(true));
-            assert_eq!(
-                metadata.task_classification_source.as_deref(),
-                Some("explicit-acquired-vision-selection")
-            );
-            assert_eq!(metadata.task_classification_confidence, Some(0.0));
-            assert_eq!(metadata.task_type_primary.as_deref(), Some("image-to-text"));
+            if !matches!(fault, Fault::Generic) {
+                assert_eq!(metadata.metadata_needs_review, Some(true));
+                assert_eq!(
+                    metadata.task_classification_source.as_deref(),
+                    Some("explicit-acquired-vision-selection")
+                );
+                assert_eq!(metadata.task_classification_confidence, Some(0.0));
+                assert_eq!(metadata.task_type_primary.as_deref(), Some("image-to-text"));
+            }
             assert_eq!(
                 api.model_library().get_primary_model_file(id),
                 Some(target.join(primary))
@@ -470,9 +473,25 @@ async fn acquire(
                     )
                     .unwrap(),
                     move |receipt, acquired| async move {
-                        importer
-                            .reconcile_acquired_gguf_vision(&acquired, &receipt, &spec, &checked_id)
-                            .await
+                        if matches!(fault, Fault::Generic) {
+                            importer
+                                .reconcile_acquired_model(
+                                    &acquired,
+                                    &receipt,
+                                    &spec.primary_model,
+                                    &checked_id,
+                                )
+                                .await
+                        } else {
+                            importer
+                                .reconcile_acquired_gguf_vision(
+                                    &acquired,
+                                    &receipt,
+                                    &spec,
+                                    &checked_id,
+                                )
+                                .await
+                        }
                     },
                 )
                 .await;
@@ -631,4 +650,294 @@ async fn canonical_publication_identity_is_required_for_primary_selection() {
 #[tokio::test]
 async fn deep_hash_scan_and_redetection_preserve_explicit_primary() {
     assert!(import(pair(), PRIMARY, Fault::Maintenance).await.0);
+}
+
+async fn assert_current_primary(api: &PumasApi, id: &str, primary: &str, bytes: &[u8]) {
+    let library = api.model_library();
+    let target = library.library_root().join(id);
+    let expected_entry = target.join(primary);
+    let metadata: pumas_library::models::ModelMetadata =
+        serde_json::from_slice(&std::fs::read(target.join("metadata.json")).unwrap()).unwrap();
+    assert_eq!(metadata.import_state, Some(ImportState::Ready));
+    assert_eq!(
+        metadata.validation_state,
+        Some(pumas_library::models::AssetValidationState::Valid)
+    );
+    assert!(metadata.import_publication.as_ref().unwrap().confirmed);
+    assert_eq!(metadata.model_id.as_deref(), Some(id));
+    assert_eq!(
+        metadata.entry_path.as_deref().map(Path::new),
+        Some(expected_entry.as_path())
+    );
+    assert_eq!(
+        metadata.hashes.unwrap().sha256.as_deref(),
+        Some(hex::encode(Sha256::digest(bytes)).as_str())
+    );
+    let effective = library.get_effective_metadata(id).unwrap().unwrap();
+    assert_eq!(effective.import_state, Some(ImportState::Ready));
+    assert_eq!(
+        effective.validation_state,
+        Some(pumas_library::models::AssetValidationState::Valid)
+    );
+    assert!(effective.import_publication.as_ref().unwrap().confirmed);
+    let indexed = library.index().get(id).unwrap().unwrap();
+    assert_eq!(indexed.id, id);
+    assert_eq!(Path::new(&indexed.path), target);
+    assert_eq!(
+        indexed.metadata["entry_path"].as_str().map(Path::new),
+        Some(expected_entry.as_path())
+    );
+    assert_eq!(indexed.metadata["import_state"], "ready");
+    assert_eq!(
+        library.get_primary_model_file(id),
+        Some(expected_entry.clone())
+    );
+    let descriptor = library
+        .resolve_model_execution_descriptor(id)
+        .await
+        .unwrap();
+    assert_eq!(Path::new(&descriptor.entry_path), expected_entry);
+    let migration = library.generate_migration_dry_run_report().unwrap();
+    let item = migration
+        .items
+        .iter()
+        .find(|item| item.model_id == id)
+        .unwrap();
+    assert_ne!(item.action, "split_artifact_directory");
+    assert!(!item
+        .findings
+        .iter()
+        .any(|finding| finding == "mixed_gguf_artifact_files"));
+}
+
+async fn assert_primary_refused(api: &PumasApi, id: &str) {
+    assert!(
+        api.model_library().get_primary_model_file(id).is_none(),
+        "invalid acquired proof selected a fallback primary"
+    );
+    assert!(api
+        .model_library()
+        .resolve_model_execution_descriptor(id)
+        .await
+        .is_err());
+}
+
+async fn migrate_model(api: &PumasApi, old_id: &str, new_id: &str) {
+    let library = api.model_library();
+    let old_dir = library.library_root().join(old_id);
+    let new_dir = library.library_root().join(new_id);
+    // Exercise the retained move-plan execution path without manufacturing a
+    // publication or changing the payload to make type detection disagree.
+    std::fs::write(library.library_root().join(".metadata_v2_migration_checkpoint.json"), serde_json::to_vec(&serde_json::json!({
+        "created_at": "2026-10-10T00:00:00Z", "updated_at": "2026-10-10T00:00:00Z",
+        "pending_moves": [{"model_id": old_id, "target_model_id": new_id, "current_path": old_dir, "target_path": new_dir}],
+        "completed_results": []
+    })).unwrap()).unwrap();
+    let report = library.execute_migration_with_checkpoint().await.unwrap();
+    assert!(report.resumed_from_checkpoint);
+    assert_eq!(report.completed_move_count, 1, "{report:?}");
+    assert_eq!(report.error_count, 0, "{report:?}");
+    assert!(!old_dir.exists());
+    assert!(library.index().get(old_id).unwrap().is_none());
+}
+
+#[tokio::test]
+async fn owned_reclassification_and_migration_keep_selected_primary_and_original_receipt() {
+    for generic in [false, true] {
+        let root = tempfile::TempDir::new().unwrap();
+        let staging = tempfile::TempDir::new().unwrap();
+        let api = api(root.path()).await;
+        let mut files = pair();
+        if generic {
+            files.retain(|(path, _)| path == PRIMARY);
+        } else {
+            assert!(files[1].1.len() > files[0].1.len());
+        }
+        let primary_bytes = files[0].1.clone();
+        let imported = acquire(
+            &api,
+            staging.path(),
+            files,
+            PRIMARY,
+            if generic { Fault::Generic } else { Fault::None },
+        )
+        .await
+        .unwrap();
+        let old_id = imported.model_id.unwrap();
+        let library = api.model_library();
+        let old_dir = library.library_root().join(&old_id);
+        let receipt = std::fs::read(old_dir.join(".pumas_import_publication.json")).unwrap();
+        let migrated_id = "vision/migrated/moved-primary".to_string();
+        migrate_model(&api, &old_id, &migrated_id).await;
+        let migrated_dir = library.library_root().join(&migrated_id);
+        assert_current_primary(&api, &migrated_id, PRIMARY, &primary_bytes).await;
+        assert_eq!(
+            std::fs::read(migrated_dir.join(".pumas_import_publication.json")).unwrap(),
+            receipt
+        );
+
+        // The second move must acknowledge its former indexed identity, which
+        // already differs from the original receipt's immutable provenance.
+        let reclassified_id = library
+            .reclassify_model(&migrated_id)
+            .await
+            .unwrap()
+            .expect("detected llama family changes the migrated directory");
+        assert_ne!(migrated_id, reclassified_id);
+        assert_ne!(old_id, reclassified_id);
+        assert!(!migrated_dir.exists());
+        assert!(library.index().get(&migrated_id).unwrap().is_none());
+        assert_current_primary(&api, &reclassified_id, PRIMARY, &primary_bytes).await;
+        let reclassified_dir = library.library_root().join(&reclassified_id);
+        assert_eq!(
+            std::fs::read(reclassified_dir.join(".pumas_import_publication.json")).unwrap(),
+            receipt
+        );
+        let original_receipt: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+        assert_eq!(original_receipt["model_id"], old_id);
+        api.shutdown_instance().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn externally_retargeted_publication_cannot_acknowledge_its_own_move() {
+    let root = tempfile::TempDir::new().unwrap();
+    let staging = tempfile::TempDir::new().unwrap();
+    let api = api(root.path()).await;
+    let old_id = acquire(&api, staging.path(), pair(), PRIMARY, Fault::None)
+        .await
+        .unwrap()
+        .model_id
+        .unwrap();
+    let library = api.model_library();
+    let old_dir = library.library_root().join(&old_id);
+    let new_id = "vision/unauthorized/retarget";
+    let new_dir = library.library_root().join(new_id);
+    std::fs::create_dir_all(new_dir.parent().unwrap()).unwrap();
+    std::fs::rename(&old_dir, &new_dir).unwrap();
+    let path = new_dir.join("metadata.json");
+    let mut metadata: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    metadata["model_id"] = serde_json::json!(new_id);
+    metadata["entry_path"] = serde_json::json!(new_dir.join(PRIMARY));
+    std::fs::write(path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+    assert!(library.index().get(new_id).unwrap().is_none());
+    assert_primary_refused(&api, new_id).await;
+    assert!(library.index_model_dir(&new_dir).await.is_err());
+    assert!(library.index().get(new_id).unwrap().is_none());
+    assert_primary_refused(&api, new_id).await;
+    assert!(library.index().get(&old_id).unwrap().is_some());
+    api.shutdown_instance().await.unwrap();
+}
+
+#[tokio::test]
+async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_payload() {
+    // Fresh publications isolate each refusal: a watcher may legitimately mark
+    // tampered evidence unavailable, and restoring bytes must not promote it.
+    for fault in [
+        "missing_index",
+        "old_index_entry",
+        "projector_index_entry",
+        "old_index_path",
+        "old_entry",
+        "projector_entry",
+        "traversal_entry",
+        "external_entry",
+        "primary_bytes",
+        "projector_bytes",
+        "pending_receipt",
+        "physical_replacement",
+    ] {
+        let root = tempfile::TempDir::new().unwrap();
+        let staging = tempfile::TempDir::new().unwrap();
+        let api = api(root.path()).await;
+        let old_id = acquire(&api, staging.path(), pair(), PRIMARY, Fault::None)
+            .await
+            .unwrap()
+            .model_id
+            .unwrap();
+        let library = api.model_library();
+        let old_dir = library.library_root().join(&old_id);
+        let id = "vision/migrated/acknowledged";
+        migrate_model(&api, &old_id, id).await;
+        assert_current_primary(&api, id, PRIMARY, &pair()[0].1).await;
+        let target = library.library_root().join(id);
+        let metadata_path = target.join("metadata.json");
+        let mut metadata: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
+        let mut indexed = library.index().get(id).unwrap().unwrap();
+        match fault {
+            "missing_index" => {
+                library.index().delete(id).unwrap();
+            }
+            "old_index_entry" | "projector_index_entry" | "old_index_path" => {
+                match fault {
+                    "old_index_entry" => {
+                        indexed.metadata["entry_path"] = serde_json::json!(old_dir.join(PRIMARY))
+                    }
+                    "projector_index_entry" => {
+                        indexed.metadata["entry_path"] = serde_json::json!(target.join(PROJECTOR))
+                    }
+                    _ => indexed.path = old_dir.display().to_string(),
+                }
+                library.index().upsert(&indexed).unwrap();
+            }
+            "old_entry" | "projector_entry" | "traversal_entry" | "external_entry" => {
+                let entry = match fault {
+                    "old_entry" => old_dir.join(PRIMARY),
+                    "projector_entry" => target.join(PROJECTOR),
+                    "traversal_entry" => target.join("../model.gguf"),
+                    _ => root.path().join(PRIMARY),
+                };
+                metadata["entry_path"] = serde_json::json!(entry);
+                std::fs::write(&metadata_path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+            }
+            "primary_bytes" | "projector_bytes" => {
+                let path = target.join(if fault == "primary_bytes" {
+                    PRIMARY
+                } else {
+                    PROJECTOR
+                });
+                let mut bytes = std::fs::read(&path).unwrap();
+                *bytes.last_mut().unwrap() ^= 1;
+                std::fs::write(path, bytes).unwrap();
+            }
+            "pending_receipt" => {
+                let path = target.join(".pumas_import_publication.json");
+                let mut receipt: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                receipt["state"] = serde_json::json!("pending");
+                std::fs::write(path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+            }
+            "physical_replacement" => {
+                // Byte-for-byte replacement is a different physical publication.
+                let held = target.with_extension("held");
+                std::fs::rename(&target, &held).unwrap();
+                std::fs::create_dir(&target).unwrap();
+                for filename in [
+                    PRIMARY,
+                    PROJECTOR,
+                    "metadata.json",
+                    ".pumas_import_publication.json",
+                ] {
+                    std::fs::copy(held.join(filename), target.join(filename)).unwrap();
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert_primary_refused(&api, id).await;
+        if matches!(fault, "primary_bytes" | "projector_bytes") {
+            let migration = library.generate_migration_dry_run_report().unwrap();
+            let item = migration
+                .items
+                .iter()
+                .find(|item| item.model_id == id)
+                .unwrap();
+            assert!(item
+                .findings
+                .iter()
+                .any(|finding| finding == "mixed_gguf_artifact_files"));
+        }
+        api.shutdown_instance().await.unwrap();
+    }
 }

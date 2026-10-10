@@ -1187,8 +1187,12 @@ impl ModelLibrary {
             .and_then(|value| value.expected_files.clone())
             .or_else(|| string_array_field(metadata_json, "expected_files"))
             .unwrap_or_default();
-        let artifact_findings =
-            artifact_directory_findings(&model_dir, &selected_artifact_files, &expected_files);
+        let artifact_findings = artifact_directory_findings(
+            self,
+            &model_dir,
+            &selected_artifact_files,
+            &expected_files,
+        );
         let needs_split = artifact_findings
             .iter()
             .any(|finding| finding == "mixed_gguf_artifact_files");
@@ -1673,7 +1677,7 @@ impl ModelLibrary {
                 }
                 mutation.mark_started();
                 source.rename_model_directory_noreplace(&target)?;
-                migration_library.normalize_owned_move_metadata(&target_for_record, &mut metadata)?;
+                migration_library.normalize_owned_move_metadata(&source_dir, &target, &mut metadata)?;
                 target.write_model_metadata(&metadata)?;
                 let record = metadata_to_record(&target_model_id, &target_for_record, &metadata);
                 if let Some(expected) = expected_publication {
@@ -1869,6 +1873,7 @@ impl ModelLibrary {
                             metadata.selected_artifact_files.clone().unwrap_or_default();
                         let expected_files = metadata.expected_files.clone().unwrap_or_default();
                         let artifact_findings = artifact_directory_findings(
+                            self,
                             &model_dir,
                             &selected_artifact_files,
                             &expected_files,
@@ -1988,6 +1993,7 @@ fn string_array_field(metadata: &Value, key: &str) -> Option<Vec<String>> {
 }
 
 fn artifact_directory_findings(
+    library: &ModelLibrary,
     model_dir: &Path,
     selected_artifact_files: &[String],
     expected_files: &[String],
@@ -2037,7 +2043,15 @@ fn artifact_directory_findings(
         }
     }
 
-    if !selected_artifact_files.is_empty() && gguf_payloads.len() > 1 {
+    if !selected_artifact_files.is_empty()
+        && gguf_payloads.len() > 1
+        && !matches!(
+            crate::model_library::importer::publication::acquired_gguf_vision_pair(
+                library, model_dir
+            ),
+            Ok(true)
+        )
+    {
         findings.push("mixed_gguf_artifact_files".to_string());
     }
     if !selected_artifact_files.is_empty() && gguf_payloads.len() > selected_artifact_files.len() {

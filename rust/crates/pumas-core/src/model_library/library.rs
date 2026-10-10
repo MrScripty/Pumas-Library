@@ -731,7 +731,7 @@ impl ModelLibrary {
             metadata.architecture_family = Some(normalize_name(family));
             metadata.cleaned_name = Some(normalize_artifact_path_slug(artifact_id));
             metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
-            self.normalize_owned_move_metadata(&target_dir, &mut metadata)?;
+            self.normalize_owned_move_metadata(&source_dir, &target_destination, &mut metadata)?;
             self.notify_metadata_projection_write(&target_dir.join(METADATA_FILENAME));
             target_destination.write_model_metadata(&metadata)?;
 
@@ -1368,9 +1368,17 @@ impl ModelLibrary {
 
     pub(crate) fn normalize_owned_move_metadata(
         &self,
-        target: &Path,
+        source: &Path,
+        destination: &crate::model_library::DownloadRecoveryDestination,
         metadata: &mut ModelMetadata,
     ) -> Result<()> {
+        super::importer::publication::normalize_owned_acquired_primary_entry(
+            self,
+            source,
+            destination,
+            metadata,
+        )?;
+        let target = destination.display_path();
         metadata.model_id = self.get_model_id(target);
         normalize_library_owned_bundle_paths(target, metadata);
         self.normalize_metadata_projection(metadata)
@@ -4703,7 +4711,7 @@ impl ModelLibrary {
         metadata.model_type = Some(normalize_name(&new_type));
         metadata.family = Some(normalize_name(&new_family));
         metadata.architecture_family = Some(normalize_name(&new_family));
-        self.normalize_owned_move_metadata(&new_dir, &mut metadata)?;
+        self.normalize_owned_move_metadata(&old_dir, &target_destination, &mut metadata)?;
         let moved_metadata = metadata.clone();
         let moved_destination = target_destination.clone();
         self.notify_metadata_projection_write(&new_dir.join(METADATA_FILENAME));

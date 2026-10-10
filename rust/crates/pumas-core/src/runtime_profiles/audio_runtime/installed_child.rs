@@ -66,6 +66,7 @@ impl AudioRuntimeOwner {
         let packages = installed.clone_root(RuntimeReadRole::Dependencies)?;
         let code = self.clone_read_source_directory()?.into_std_file();
         let model = selected.clone_read_source_directory()?;
+        let cache_root = capability(&packages);
         let mut command = Command::new(capability(&loader));
         command
             .args(["--inhibit-cache", "--library-path"])
@@ -141,6 +142,9 @@ impl AudioRuntimeOwner {
         self.validate_source().map_err(io::Error::other)?;
         selected.validate_read_source().map_err(io::Error::other)?;
         boundary.confine_command(&mut command);
+        // Eager inference does not get a writable compiler cache. The held
+        // directory satisfies import-time discovery while writes stay denied.
+        command.env("TORCHINDUCTOR_CACHE_DIR", cache_root);
         let lease = Arc::new(SelectedChildLease {
             _runtime: self.clone(),
             _model: selected,

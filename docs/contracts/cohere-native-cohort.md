@@ -150,3 +150,14 @@ directory content grant, write, ioctl, execute permission or inherited entropy
 descriptor is added. The hosted kernel fixture requires entropy reads to work
 while `/dev/null` reads and urandom write opens remain denied. This changes only
 the child's source-owned ruleset, not host settings or device permissions.
+
+### Import-time compiler cache discovery
+
+Torch 2.10 imports Dynamo while loading the Cohere classes. Its default cache
+discovery probes ambient temporary directories for writable storage. The owned
+launcher instead binds `TORCHINDUCTOR_CACHE_DIR` to the existing held dependency
+directory capability. This is a read-only import-time location: the boundary
+grants no cache writes, new files, or directory creation. Eager inference remains
+the supported candidate; compiler/cache execution is not qualified. The hosted
+probe imports Dynamo first to preserve its initial failure and explicitly checks
+that a cache write is denied before testing the full Cohere imports.

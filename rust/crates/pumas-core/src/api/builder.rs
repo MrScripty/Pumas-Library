@@ -405,7 +405,6 @@ impl PumasApiBuilder {
             let data_dir = self.launcher_root.join("launcher-data");
             if self.instance_profile != crate::InstanceProfile::CatalogQuery
                 && self.enable_hf_client
-                && cfg!(feature = "hf-client")
                 && data_dir
                     .try_exists()
                     .map_err(|error| PumasError::io_with_path(error, &data_dir))?

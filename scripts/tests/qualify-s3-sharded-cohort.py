@@ -202,6 +202,7 @@ def main():
         subprocess.run(["openssl", "pkcs12", "-in", str(ca.with_suffix(".p12")), "-passin", "pass:fixture", "-nocerts", "-nodes", "-out", str(key)], check=True, capture_output=True)
         server = Source(objects)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain(ca, key)
         server.socket = context.wrap_socket(server.socket, server_side=True)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

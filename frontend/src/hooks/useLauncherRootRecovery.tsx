@@ -84,6 +84,12 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
         : { kind: 'content' }
   );
   const [startupState, setStartupState] = useState<LauncherRootStartupState | null>(bootstrap);
+  const [upgradePhase, setUpgradePhase] = useState<'idle' | 'confirm' | 'running' | 'failed' | 'upgraded'>('idle');
+  const [oldWritersStopped, setOldWritersStopped] = useState(false);
+  const [noDowngradeAccepted, setNoDowngradeAccepted] = useState(false);
+  const upgradeAttemptRef = useRef<Promise<void> | null>(null);
+  const [upgradeFailureStage, setUpgradeFailureStage] = useState<'upgrade' | 'open' | 'unknown'>('unknown');
+
 
   useEffect(() => {
     mountedRef.current = true;
@@ -259,6 +265,41 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
     return attempt;
   }, [bridge, presentation, startupState]);
 
+  const upgradeLibrary = useCallback((): Promise<void> => {
+    if (upgradeAttemptRef.current) return upgradeAttemptRef.current;
+    if (!bridge || !oldWritersStopped || !noDowngradeAccepted ||
+        startupState?.status !== 'recovery-required' || startupState.reason !== 'migration-required') {
+      return Promise.resolve();
+    }
+    setUpgradePhase('running');
+    const attempt = (async () => {
+      try {
+        const result = await bridge.upgrade_launcher_library({ oldWritersStopped: true, noDowngradeAccepted: true });
+        if (!mountedRef.current) return;
+        if (result.status === 'ready') {
+          setStartupState(result.state);
+          setPresentation({ kind: 'content' });
+          setUpgradePhase('idle');
+        } else if (result.status === 'upgraded') {
+          setUpgradePhase('upgraded');
+        } else {
+          setUpgradeFailureStage(result.status === 'failed' ? result.stage : 'unknown');
+          setUpgradePhase('failed');
+        }
+      } catch {
+        if (mountedRef.current) {
+          setUpgradeFailureStage('unknown');
+          setUpgradePhase('failed');
+        }
+      }
+    })();
+    upgradeAttemptRef.current = attempt;
+    void attempt.finally(() => {
+      if (upgradeAttemptRef.current === attempt) upgradeAttemptRef.current = null;
+    });
+    return attempt;
+  }, [bridge, oldWritersStopped, noDowngradeAccepted, startupState]);
+
   const actions = useMemo<LauncherRootRecoveryActions>(() => ({
     chooseLibraryRoot,
   }), [chooseLibraryRoot]);
@@ -362,7 +403,7 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
       : reason === 'backend-unavailable' ? 'Library could not start'
       : canSelectLibrary ? 'Library needs attention' : 'Correct launcher input';
     const message = reason === 'migration-required'
-      ? 'This library uses an older download database. Close every app using it and follow the offline library upgrade procedure before reopening. Your library has not been upgraded automatically.'
+      ? 'This library uses an older download database. Choose Upgrade Library to back up and upgrade its metadata, then open it. Model files stay in place.'
       : reason === 'backend-unavailable'
         ? 'Pumas Library could not open this library. Another app may already be using it. ' +
           (canSelectLibrary
@@ -373,13 +414,55 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
             ? 'The saved Pumas library is not valid. Select an existing library to continue.'
             : 'The saved Pumas library is unavailable. Restore access or select another library.'
           : `The ${presentation.state.authoritySource} launcher input controls this library. Correct that launch input and reopen Pumas Library.`;
-    content = (
+    if (reason === 'migration-required' && upgradePhase !== 'idle') {
+      const confirming = upgradePhase === 'confirm';
+      const running = upgradePhase === 'running';
+      content = (
+        <LauncherRootRecoveryView
+          title={confirming ? 'Upgrade library metadata' : running ? 'Upgrading library metadata'
+            : upgradePhase === 'upgraded' || upgradeFailureStage === 'open' ? 'Library metadata upgraded' : 'Library upgrade needs attention'}
+          message={confirming
+            ? 'Only launcher-data/downloads.json is backed up and updated. Model files are not copied or rewritten. The metadata backup is saved beside downloads.json as downloads.pre-schema7-<id>.json.'
+            : running ? 'Backing up download metadata, upgrading it, and opening this library. Closing the app will wait for this operation to finish.'
+              : upgradePhase === 'upgraded' || upgradeFailureStage === 'open'
+                ? 'The metadata upgrade completed. Close and reopen Pumas Library to open this library. Your metadata backup has been kept.'
+                : 'The upgrade could not be confirmed. Any metadata backup has been kept. Check library permissions and free space, then close and reopen Pumas Library before trying again.'}
+          primaryAction={confirming ? {
+            label: 'Upgrade Metadata and Open Library',
+            disabled: !oldWritersStopped || !noDowngradeAccepted,
+            onAction: () => { void upgradeLibrary(); },
+          } : undefined}
+          secondaryAction={confirming ? { label: 'Cancel', onAction: () => {
+            setUpgradePhase('idle'); setOldWritersStopped(false); setNoDowngradeAccepted(false);
+          } } : undefined}
+          onClose={close}
+          onMinimize={minimize}
+        >
+          {confirming && (
+            <div className="mt-5 flex flex-col gap-3 text-sm">
+              <label className="flex items-start gap-2">
+                <input type="checkbox" checked={oldWritersStopped} onChange={(event) => setOldWritersStopped(event.target.checked)} />
+                I have closed every other app, backend process, and tool using this library.
+              </label>
+              <label className="flex items-start gap-2">
+                <input type="checkbox" checked={noDowngradeAccepted} onChange={(event) => setNoDowngradeAccepted(event.target.checked)} />
+                I understand that older app versions cannot use the upgraded metadata. There is no automatic downgrade.
+              </label>
+            </div>
+          )}
+        </LauncherRootRecoveryView>
+      );
+    } else content = (
       <LauncherRootRecoveryView
         title={title}
         message={message}
-        primaryAction={canSelectLibrary
+        primaryAction={reason === 'migration-required'
+          ? { label: 'Upgrade Library', onAction: () => { setUpgradePhase('confirm'); } }
+          : canSelectLibrary
           ? { label: 'Select Library', onAction: () => { void chooseLibraryRoot(); } }
           : undefined}
+        secondaryAction={reason === 'migration-required' && canSelectLibrary
+          ? { label: 'Select Library', onAction: () => { void chooseLibraryRoot(); } } : undefined}
         onClose={close}
         onMinimize={minimize}
       />

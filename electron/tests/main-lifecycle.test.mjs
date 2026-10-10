@@ -11,8 +11,10 @@ import { setImmediate } from 'node:timers/promises';
 
 const mainUrl = new URL('../dist/main.js', import.meta.url);
 const requireMain = createRequire(mainUrl);
+const { LibraryUpgradeCoordinator } = requireMain('./library-upgrade.js');
+const { BackendStartupError } = requireMain('./backend-startup.js');
 
-function createMainHarness({ root, bridgeRuntime } = {}) {
+function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
   const app = new EventEmitter();
   const ipcMain = new EventEmitter();
   const handlers = new Map();
@@ -78,6 +80,7 @@ function createMainHarness({ root, bridgeRuntime } = {}) {
       };
       if (specifier === 'electron-log') return logger;
       if (specifier === './python-bridge' && bridgeRuntime) return bridgeRuntime.module;
+      if (specifier === './library-upgrade' && upgradeRuntime) return upgradeRuntime;
       if (specifier === './launcher-root' && root) {
         const exports = {};
         runInNewContext(readFileSync(new URL('../dist/launcher-root.js', import.meta.url), 'utf8'), {
@@ -245,6 +248,86 @@ test('a migration refusal drained after exit reaches recovery instead of crashin
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const closeDuringUpgrade of [false, true]) {
+  test(`main owns confirmed metadata upgrade through ${closeDuringUpgrade ? 'application close' : 'backend readiness'}`, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'pumas-main-upgrade-'));
+    mkdirSync(join(root, 'shared-resources', 'models'), { recursive: true });
+    let completeUpgrade;
+    const pending = new Promise(resolve => { completeUpgrade = resolve; });
+    const targets = [];
+    let starts = 0;
+    let stops = 0;
+    let running = false;
+    class FixtureBridge {
+      isRunning() { return running; }
+      async start() {
+        if (++starts === 1) throw new BackendStartupError('migration-required');
+        running = true;
+      }
+      async stop() {
+        stops++; running = false;
+        if (stops === 1) throw new Error('Retained nonzero startup exit');
+      }
+      startModelLibraryUpdateStream() {}
+      startModelDownloadUpdateStream() {}
+      startRuntimeProfileUpdateStream() {}
+      startServingStatusUpdateStream() {}
+      startStatusTelemetryUpdateStream() {}
+      stopModelLibraryUpdateStream() {}
+      stopModelDownloadUpdateStream() {}
+      stopRuntimeProfileUpdateStream() {}
+      stopServingStatusUpdateStream() {}
+      stopStatusTelemetryUpdateStream() {}
+    }
+    const harness = createMainHarness({ root,
+      bridgeRuntime: { module: { PythonBridge: FixtureBridge } },
+      upgradeRuntime: { LibraryUpgradeCoordinator,
+        runLibraryMetadataUpgrade: target => { targets.push(target); return pending; } },
+    });
+    try {
+      harness.ready(); await setImmediate();
+      assert.equal(harness.handlers.get('launcher:getRootState')().reason, 'migration-required');
+      const contents = harness.windows[0].webContents;
+      const invoke = harness.handlers.get('launcher:upgradeLibrary');
+      const confirmation = { oldWritersStopped: true, noDowngradeAccepted: true };
+      const sender = { sender: contents, senderFrame: contents.mainFrame };
+      for (const denied of [{ ...sender, sender: {} }, { ...sender, senderFrame: {} }]) {
+        assert.equal((await invoke(denied, confirmation)).status, 'unavailable');
+      }
+      assert.throws(() => invoke(sender, { ...confirmation, launcherRoot: '/renderer-selected' }), /both confirmations/);
+      assert.equal(targets.length, 0);
+      const attempt = invoke(sender, confirmation);
+      assert.equal(invoke(sender, confirmation), attempt);
+      assert.deepEqual(JSON.parse(JSON.stringify(targets)), [{ launcherRoot: root, rustBinaryPath: process.execPath }]);
+      assert.equal((await harness.handlers.get('launcher:chooseLibraryRoot')()).reason, 'chooser-unavailable');
+      assert.equal(starts, 1, 'backend must not open before metadata work settles');
+      if (closeDuringUpgrade) {
+        harness.app.quit(); await setImmediate();
+        assert.equal(harness.exits.length, 0);
+        assert.equal(stops, 1, 'cleanup retains the upgrade operation after initial failed startup');
+      }
+      completeUpgrade();
+      const result = await attempt;
+      assert.equal(result.status, closeDuringUpgrade ? 'upgraded' : 'ready');
+      if (!closeDuringUpgrade) {
+        assert.equal(harness.handlers.get('launcher:getRootState')().status, 'ready');
+        assert.equal(starts, 2);
+        assert.equal((await invoke(sender, confirmation)).status, 'ready');
+        assert.equal(targets.length, 1);
+        harness.app.quit();
+      } else assert.equal(starts, 1, 'closing after conversion must not open another backend');
+      await setImmediate();
+      assert.equal(stops, 2);
+      assert.equal(harness.exits.length, 1);
+    } finally {
+      completeUpgrade();
+      for (const window of harness.windows) if (!window.destroyed) window.destroy();
+      harness.timers.clear();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
 
 test('actual main liveness IPC validates requests and scalar results without retries', async () => {
   const root = mkdtempSync(join(tmpdir(), 'pumas-main-liveness-'));

@@ -3,13 +3,33 @@
 If the desktop app shows **Library upgrade required**, the selected library's
 download database needs an explicit offline upgrade. Opening or selecting a
 library never performs this upgrade automatically. The app stays open so you
-can select another library or close it.
+can explicitly upgrade its metadata, select another library, or close it.
 
 If it shows **Library could not start**, first close other apps using that
 library and reopen Pumas Library. The app's main log retains the startup failure;
 an unavailable backend never becomes an empty or ready library.
 
-## Upgrade on Linux
+## Upgrade from the desktop
+
+1. Choose **Upgrade Library** on the recovery screen. The confirmation explains
+   that only `launcher-data/downloads.json` is backed up and upgraded. Model
+   weights and folders are not copied, hashed, scanned or rewritten by migration.
+2. Close every other app, backend process and tool reading or writing this
+   library. Confirm they are stopped and acknowledge that older app versions
+   cannot use the upgraded metadata; there is no automatic downgrade.
+3. Choose **Upgrade Metadata and Open Library**. Pumas saves a private exact
+   metadata backup next to `downloads.json`, performs the canonical conversion,
+   and opens the selected library after the backend is healthy. Opening the
+   library afterward follows its ordinary startup behavior.
+
+Cancelling confirmation makes no changes. Closing during the operation waits for
+its owned migration/open attempt to settle. A failed or uncertain attempt is not
+silently repeated; any metadata backup is retained and the screen explains how
+to reopen. Library selection cannot change the target during an upgrade.
+Environment/argument-selected libraries can upgrade their current root while
+retaining their explicit selection authority.
+
+## Upgrade from the terminal on Linux
 
 1. Close Pumas Library and every other reader/writer using this library,
    including older backend processes, developer instances and library consumers.
@@ -17,8 +37,8 @@ an unavailable backend never becomes an empty or ready library.
    cannot prove that historical processes have stopped.
 2. Decide to move this library to the new application version. Schema 7 does
    **not** support automatic downgrade or old-binary rollback. Do not reopen
-   this upgraded library in older apps. Back up the complete library separately
-   if you need to retain a separate old-version installation.
+   this upgraded library in older apps. The upgrade backs up only download
+   metadata; it never duplicates the model library.
 3. Run the installed backend's explicit upgrade command, replacing the quoted
    example root with the library root you selected:
 

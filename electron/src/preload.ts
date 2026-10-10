@@ -12,6 +12,7 @@ import type {
   LauncherRootStartupState,
 } from './launcher-root-recovery';
 import type { LauncherRootCommittedPresentation } from './window-presentation';
+import type { LibraryUpgradeConfirmation, LibraryUpgradeResult } from './library-upgrade-contract';
 import {
   decodeS3TransferRetryParams, decodeS3TransferRetryState, type S3TransferRetryParams,
   decodeS3PersistedImportsWire,
@@ -164,6 +165,20 @@ function decodeLauncherRootStartupState(value: unknown): LauncherRootStartupStat
   }
 
   throw new LauncherRootRecoveryContractError('Invalid launcher-root startup state.');
+}
+
+function decodeLibraryUpgradeResult(value: unknown): LibraryUpgradeResult {
+  if (hasExactShape(value, ['status']) &&
+      (value['status'] === 'upgraded' || value['status'] === 'unavailable')) return { status: value['status'] };
+  if (hasExactShape(value, ['status', 'stage']) && value['status'] === 'failed' &&
+      (value['stage'] === 'upgrade' || value['stage'] === 'open')) {
+    return { status: 'failed', stage: value['stage'] };
+  }
+  if (hasExactShape(value, ['status', 'state']) && value['status'] === 'ready') {
+    const state = decodeLauncherRootStartupState(value['state']);
+    if (state.status === 'ready') return { status: 'ready', state };
+  }
+  throw new LauncherRootRecoveryContractError('Invalid library upgrade result.');
 }
 
 function decodeLauncherRootSelectionResult(
@@ -1212,6 +1227,16 @@ const electronAPI = {
     return () => {
       launcherRootPresentationTimeoutListeners.delete(callback);
     };
+  },
+
+  upgrade_launcher_library: async (confirmation: LibraryUpgradeConfirmation) => {
+    if (!hasExactShape(confirmation, ['oldWritersStopped', 'noDowngradeAccepted']) ||
+        confirmation.oldWritersStopped !== true || confirmation.noDowngradeAccepted !== true) {
+      throw new LauncherRootRecoveryContractError('Library upgrade requires both confirmations.');
+    }
+    return decodeLibraryUpgradeResult(await ipcRenderer.invoke('launcher:upgradeLibrary', {
+      oldWritersStopped: true, noDowngradeAccepted: true,
+    }));
   },
 
   select_launcher_root: async () => {

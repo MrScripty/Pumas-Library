@@ -1,3 +1,4 @@
+import type { LibraryUpgradeConfirmation, LibraryUpgradeResult } from '../../../electron/src/library-upgrade-contract';
 import type { BaseResponse } from './api-common';
 import type { ModelImportSelection } from '../../../electron/src/model-import-picker';
 import type {
@@ -62,6 +63,7 @@ export interface DesktopBridgeUtilityAPI {
   get_launcher_root_state: () => Promise<LauncherRootStartupState>;
   get_launcher_root_bootstrap: () => LauncherRootStartupState;
   select_launcher_root: () => Promise<LauncherRootSelectionResult>;
+  upgrade_launcher_library: (confirmation: LibraryUpgradeConfirmation) => Promise<LibraryUpgradeResult>;
   notify_launcher_root_presentation_committed: (
     presentation: LauncherRootCommittedPresentation
   ) => Promise<void>;

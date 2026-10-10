@@ -34,6 +34,7 @@ import {
 } from './ipc-validation';
 import { resolveBackendBinaryPath } from './backend-path';
 import { PythonBridge } from './python-bridge';
+import { LibraryUpgradeCoordinator, runLibraryMetadataUpgrade } from './library-upgrade';
 import { isS3ImportMethod, receiveS3ImportRpc } from './s3-import-rpc';
 import { decodeRuntimeRunningOutcome } from './generated/desktop-contract';
 import {
@@ -87,6 +88,48 @@ let mainWindow: BrowserWindow | null = null;
 let windowPresentationOwner: WindowPresentationOwner | null = null;
 let backendInitializationPromise: Promise<void> | null = null;
 let launcherRootStartupState: LauncherRootStartupState = { status: 'initializing' };
+let libraryStartupSession: {
+  resolution: Extract<ReturnType<typeof resolveLauncherRoot>, { status: 'resolved' }>;
+  bridge: PythonBridge;
+  rustBinaryPath: string;
+} | null = null;
+const libraryUpgrade = new LibraryUpgradeCoordinator({
+  getTarget: () => {
+    if (backendInitializationPromise || !libraryStartupSession ||
+        pythonBridge !== libraryStartupSession.bridge || pythonBridge.isRunning() ||
+        launcherRootStartupState.status !== 'recovery-required' ||
+        launcherRootStartupState.reason !== 'migration-required') return null;
+    return {
+      launcherRoot: libraryStartupSession.resolution.launcherRoot,
+      rustBinaryPath: libraryStartupSession.rustBinaryPath,
+    };
+  },
+  upgrade: runLibraryMetadataUpgrade,
+  open: async (target) => {
+    const session = libraryStartupSession;
+    if (!session || session.resolution.launcherRoot !== target.launcherRoot ||
+        session.bridge !== pythonBridge) throw new Error('Selected library changed during upgrade.');
+    launcherRootStartupState = { status: 'initializing' };
+    try { await session.bridge.start(); }
+    catch (cause) {
+      launcherRootStartupState = new BackendInitializationRecoveryRequiredError(session.resolution, cause).recoveryState;
+      throw cause;
+    }
+    const state = projectLauncherRootStartupState(session.resolution,
+      readLibraryDisplayScope(target.launcherRoot));
+    if (state.status !== 'ready') throw new Error('Library readiness unavailable.');
+    launcherRootStartupState = state;
+    startModelLibraryUpdateForwarder();
+    startModelDownloadUpdateForwarder();
+    startRuntimeProfileUpdateForwarder();
+    startServingStatusUpdateForwarder();
+    startStatusTelemetryUpdateForwarder();
+    return state;
+  },
+  isClosing: () => applicationCleanupStarted,
+  reportFailure: (stage, error) => logBackendInitializationFailure(`Library metadata upgrade ${stage} failed`, error),
+});
+
 const selectLauncherRoot = createLauncherRootSelectionHandler({
   chooseLibraryRoot: async () => {
     const targetWindow = mainWindow;
@@ -558,7 +601,17 @@ function registerIPCHandlers(): void {
     }
   );
 
+  ipcMain.handle('launcher:upgradeLibrary', (event, confirmation: unknown) => {
+    const window = mainWindow;
+    if (!window || window.isDestroyed() || event.sender !== window.webContents ||
+        event.senderFrame !== window.webContents.mainFrame) return { status: 'unavailable' };
+    return libraryUpgrade.run(confirmation);
+  });
+
   ipcMain.handle('launcher:chooseLibraryRoot', async () => {
+    if (libraryUpgrade.active || applicationCleanupStarted) {
+      return { status: 'recovery-required', reason: 'chooser-unavailable', authorityState: 'unchanged' };
+    }
     const result = await selectLauncherRoot(launcherRootStartupState);
     if (result.status === 'restarting') {
       log.info('Persisted launcher root override');
@@ -771,6 +824,7 @@ async function initializeBackend(): Promise<void> {
       launcherRoot,
     });
 
+    libraryStartupSession = { resolution: launcherRootResolution, bridge: pythonBridge, rustBinaryPath };
     try {
       await pythonBridge.start();
     } catch (cause) {
@@ -816,6 +870,7 @@ async function initializeBackend(): Promise<void> {
  */
 async function cleanup(): Promise<void> {
   log.info('Cleaning up...');
+  await libraryUpgrade.settle();
 
   if (pythonBridge) {
     await pythonBridge.stop();

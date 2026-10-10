@@ -1623,3 +1623,25 @@ test('compiled bundle preload forwards complete anonymous/authenticated pins and
   harness.respondWith({...observation,bundle_progress:{...observation.bundle_progress,secret:'synthetic-bundle-preload-secret'}});
   await assert.rejects(()=>harness.api.get_s3_model_bundle_import(id),error=>!String(error).includes('synthetic-bundle-preload-secret'));
 });
+
+
+test('library upgrade requires both confirmations and sends no renderer-supplied root', async () => {
+  const harness = loadCompiledPreload();
+  const confirmation = { oldWritersStopped: true, noDowngradeAccepted: true };
+  for (const value of [null, {}, { ...confirmation, oldWritersStopped: false }, { ...confirmation, root: '/private/root' }]) {
+    const before = harness.invocations.length;
+    await assert.rejects(harness.api.upgrade_launcher_library(value), /both confirmations/);
+    assert.equal(harness.invocations.length, before);
+  }
+  for (const result of [{ status: 'unavailable' }, { status: 'upgraded' }, { status: 'failed', stage: 'upgrade' },
+    { status: 'failed', stage: 'open' }, { status: 'ready', state: { status: 'ready', selectionAction: 'select-library', libraryScopeId: null } }]) {
+    harness.respondWith(result);
+    assert.deepEqual(toPlainValue(await harness.api.upgrade_launcher_library(confirmation)), result);
+    assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['launcher:upgradeLibrary', confirmation]);
+  }
+  for (const result of [{ status: 'ready' }, { status: 'ready', state: { status: 'initializing' } },
+    { status: 'failed', stage: 'unknown' }, { status: 'upgraded', backup: '/private/root' }]) {
+    harness.respondWith(result);
+    await assert.rejects(harness.api.upgrade_launcher_library(confirmation), error => error.name === 'LauncherRootRecoveryContractError' && !error.message.includes('/private'));
+  }
+});

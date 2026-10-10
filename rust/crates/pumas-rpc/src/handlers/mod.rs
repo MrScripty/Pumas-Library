@@ -24,6 +24,8 @@ mod runtime_profiles;
 #[cfg(feature = "inference-plugins")]
 mod serving;
 #[cfg(feature = "inference-plugins")]
+mod serving_audio;
+#[cfg(feature = "inference-plugins")]
 mod serving_llama_cpp;
 #[cfg(feature = "inference-plugins")]
 mod serving_llama_cpp_router;

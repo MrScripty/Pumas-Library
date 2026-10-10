@@ -14,6 +14,7 @@ pub(crate) mod instance_shutdown;
 #[cfg(test)]
 pub(crate) use hf::tests::recovery_api_fixture as intent_acquisition_test_fixture;
 pub(crate) use hf::PreparedIntentDownload;
+mod installed_audio;
 mod links;
 mod migration;
 mod models;

@@ -42,6 +42,12 @@ pub(super) async fn serve_torch_model(
         .model_library()
         .get_model(&request.model_id)
         .await?;
+    if record
+        .as_ref()
+        .is_some_and(|record| record.model_type == "audio")
+    {
+        return super::serving_audio::serve_audio_model(state, request, operation).await;
+    }
     let repository = record
         .as_ref()
         .and_then(|record| record.metadata.get("repo_id").and_then(Value::as_str));
@@ -511,6 +517,16 @@ pub(super) async fn unserve_torch_model(
     profile_id: RuntimeProfileId,
     model_alias: String,
 ) -> pumas_library::Result<Value> {
+    if state
+        .api
+        .model_library()
+        .get_model(&request.model_id)
+        .await?
+        .is_some_and(|record| record.model_type == "audio")
+    {
+        return super::serving_audio::unserve_audio_model(state, &profile_id, &request.model_id)
+            .await;
+    }
     let endpoint = state
         .api
         .resolve_model_runtime_profile_endpoint_for_operation(

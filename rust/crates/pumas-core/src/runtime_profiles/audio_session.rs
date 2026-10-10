@@ -25,6 +25,7 @@ const DRAIN_ATTEMPT: Duration = Duration::from_secs(5);
 type Pipes = (std::process::ChildStdin, std::process::ChildStdout, u32);
 
 struct Supervisor {
+    started: AtomicBool,
     stop: AtomicBool,
     done: AtomicBool,
     diagnostics_ok: AtomicBool,
@@ -38,6 +39,7 @@ impl Supervisor {
     fn stop(&self) {
         self.registry.close_admission();
         self.stop.store(true, Ordering::Release);
+        self.changed.notify_waiters();
     }
     async fn wait(&self) -> Result<()> {
         loop {
@@ -66,6 +68,51 @@ impl Drop for StartupGuard {
     }
 }
 
+/// A private cancellation/join capability for the original supervised child.
+#[derive(Clone)]
+pub(super) struct SessionControl(Arc<Supervisor>);
+impl SessionControl {
+    pub(super) fn new(profile: RuntimeProfileId, generation: u64) -> Self {
+        Self(Arc::new(Supervisor {
+            started: AtomicBool::new(false),
+            stop: AtomicBool::new(false),
+            done: AtomicBool::new(false),
+            diagnostics_ok: AtomicBool::new(true),
+            #[cfg(test)]
+            fail_diagnostics: AtomicBool::new(false),
+            changed: Notify::new(),
+            registry: AudioCustodyRegistry::new(profile, generation),
+            custody: ManagedChildCustodySlot::new(),
+        }))
+    }
+    pub(super) fn stop(&self) {
+        self.0.stop();
+    }
+    pub(super) fn is_stopped(&self) -> bool {
+        self.0.stop.load(Ordering::Acquire)
+    }
+    pub(super) async fn stopped(&self) {
+        loop {
+            let changed = self.0.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if self.0.stop.load(Ordering::Acquire) {
+                return;
+            }
+            changed.await;
+        }
+    }
+    // Called only after the launch future is completed or dropped, so started
+    // cannot transition after this check.
+    pub(super) async fn join(&self) -> Result<()> {
+        if self.0.started.load(Ordering::Acquire) {
+            self.0.wait().await
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// Retaining an endpoint alone never retains session admission. The producer
 /// must keep this owner; dropping it closes admission and requests exact drain.
 #[must_use]
@@ -75,13 +122,16 @@ pub(crate) struct InstalledAudioSession {
     supervisor: Arc<Supervisor>,
 }
 impl InstalledAudioSession {
-    pub(crate) async fn launch(
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn launch(
         library: Arc<ModelLibrary>,
         endpoints: &AudioEndpoints,
         runtime: Arc<AudioRuntimeOwner>,
         selected: Arc<PreparedArtifactUse>,
         profile: RuntimeProfileId,
         generation: u64,
+        control: SessionControl,
+        profile_guard: Arc<super::RuntimeProfileOperationGuard>,
     ) -> Result<Self> {
         selected.validate_library_owner(&library)?;
         if !runtime.permits_selected(&selected) {
@@ -92,17 +142,8 @@ impl InstalledAudioSession {
         // Correlation only: neither this digest nor the hello reply qualifies
         // bytes. The opaque runtime's installed spawn gate remains authoritative.
         let source_id = format!("pumas-cohere-owned-v1:{}", selected.manifest_sha256());
-        let registry = AudioCustodyRegistry::new(profile.clone(), generation);
-        let supervisor = Arc::new(Supervisor {
-            stop: AtomicBool::new(false),
-            done: AtomicBool::new(false),
-            diagnostics_ok: AtomicBool::new(true),
-            #[cfg(test)]
-            fail_diagnostics: AtomicBool::new(false),
-            changed: Notify::new(),
-            registry: registry.clone(),
-            custody: ManagedChildCustodySlot::new(),
-        });
+        let supervisor = control.0;
+        let registry = supervisor.registry.clone();
         let mut startup = StartupGuard(Some(supervisor.clone()));
         let (send, receive) = oneshot::channel();
         let worker = supervisor.clone();
@@ -110,8 +151,16 @@ impl InstalledAudioSession {
         let worker_selected = selected.clone();
         // No await before the worker owns cleanup and startup cancellation owns
         // its stop request. Cancelling a waiter never cancels this blocking owner.
+        supervisor.started.store(true, Ordering::Release);
         tokio::task::spawn_blocking(move || {
-            run_worker(worker, runtime, worker_selected, worker_library, send)
+            run_worker(
+                worker,
+                runtime,
+                worker_selected,
+                worker_library,
+                profile_guard,
+                send,
+            )
         });
         let startup_result = tokio::time::timeout(STARTUP_BUDGET, async {
             let (input, output, pid) = receive
@@ -178,13 +227,14 @@ fn run_worker(
     runtime: Arc<AudioRuntimeOwner>,
     selected: Arc<PreparedArtifactUse>,
     library: Arc<ModelLibrary>,
+    profile_guard: Arc<super::RuntimeProfileOperationGuard>,
     send: oneshot::Sender<io::Result<Pipes>>,
 ) {
     let launch_runtime = runtime.clone();
     let registry = supervisor.registry.clone();
     run_owned_worker(
         supervisor,
-        library,
+        Arc::new((library, profile_guard)),
         send,
         move |custody| {
             let spawned = launch_runtime.spawn_installed_child(selected, custody)?;
@@ -280,6 +330,44 @@ fn run_owned_worker<T, F, A>(
     supervisor.changed.notify_waiters();
 }
 
+#[cfg(all(test, not(target_env = "uclibc")))]
+pub(super) async fn controlled_uncertain_session(
+) -> (SessionControl, Arc<AtomicBool>, std::sync::Weak<()>) {
+    use std::process::{Command, Stdio};
+    let control = SessionControl::new(RuntimeProfileId::parse("lost-started-fixture").unwrap(), 11);
+    let lease = Arc::new(());
+    let weak = Arc::downgrade(&lease);
+    let (send, receive) = oneshot::channel();
+    let (fault_send, fault_receive) = oneshot::channel();
+    let worker = control.0.clone();
+    worker.started.store(true, Ordering::Release);
+    tokio::task::spawn_blocking(move || {
+        run_owned_worker(
+            worker,
+            lease,
+            send,
+            move |custody| {
+                let mut command = Command::new("/bin/sh");
+                command
+                    .args(["-c", "sleep 30"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+                let mut child = ManagedChild::spawn(&mut command, custody)?;
+                let stderr = child.take_private_stderr()?;
+                let fault = child.test_observation_failure_control();
+                fault.store(true, Ordering::Release);
+                fault_send.send(fault).unwrap();
+                Ok((child, stderr))
+            },
+            |_| Ok(()),
+        );
+    });
+    let _pipes = receive.await.unwrap().unwrap();
+    let fault = fault_receive.await.unwrap();
+    (control, fault, weak)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,6 +387,7 @@ mod tests {
 
     fn supervisor() -> Arc<Supervisor> {
         Arc::new(Supervisor {
+            started: AtomicBool::new(false),
             stop: AtomicBool::new(false),
             done: AtomicBool::new(false),
             diagnostics_ok: AtomicBool::new(true),
@@ -418,11 +507,87 @@ mod tests {
         completed(&supervisor).await;
         assert!(weak.upgrade().is_none());
     }
+    #[tokio::test]
+    async fn cancelled_hello_waiter_drains_original_supervisor() {
+        let root = tempfile::TempDir::new().unwrap();
+        let marker = root.path().join("hello-prefix");
+        let child_marker = marker.clone();
+        let supervisor = supervisor();
+        supervisor.started.store(true, Ordering::Release);
+        let lease = Arc::new(());
+        let weak = Arc::downgrade(&lease);
+        let (send, receive) = oneshot::channel();
+        let worker = supervisor.clone();
+        let registry = supervisor.registry.clone();
+        tokio::task::spawn_blocking(move || {
+            run_owned_worker(
+                worker,
+                lease,
+                send,
+                move |custody| {
+                    let mut command = Command::new("/bin/sh");
+                    command
+                        .args(["-c", "head -c 4 > \"$1\"; sleep 30", "sh"])
+                        .arg(child_marker)
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped());
+                    let mut child = ManagedChild::spawn(&mut command, custody)?;
+                    let stderr = child.take_private_stderr()?;
+                    Ok((child, stderr))
+                },
+                move |child| {
+                    registry
+                        .attach_to_child(child)
+                        .map_err(|_| io::Error::other("controlled attachment refused"))
+                },
+            );
+        });
+        let (input, output, pid) = receive.await.unwrap().unwrap();
+        let stopped = supervisor.clone();
+        let channel =
+            PrivateAudioChannel::from_pipes(input, output, Arc::new(move || stopped.stop()))
+                .unwrap();
+        let startup = supervisor.clone();
+        let waiter = tokio::spawn(async move {
+            let _guard = StartupGuard(Some(startup.clone()));
+            OwnedAudioClient::bind(
+                channel,
+                startup.registry.clone(),
+                RuntimeProfileId::parse("session-lifecycle-fixture").unwrap(),
+                1,
+                pid,
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if std::fs::metadata(&marker).is_ok_and(|metadata| metadata.len() == 4) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        waiter.abort();
+        assert!(matches!(waiter.await, Err(error) if error.is_cancelled()));
+        completed(&supervisor).await;
+        assert!(weak.upgrade().is_none());
+    }
+
     #[cfg(not(target_env = "uclibc"))]
     #[tokio::test]
     async fn uncertain_drain_retains_owners_until_retry_succeeds() {
         let supervisor = supervisor();
-        let lease = Arc::new(());
+        let root = tempfile::TempDir::new().unwrap();
+        let service = super::super::RuntimeProfileService::with_provider_registry_and_adapters(
+            root.path(),
+            crate::providers::ProviderRegistry::builtin(),
+            super::super::RuntimeProviderAdapters::builtin(),
+        );
+        let profile = RuntimeProfileId::parse("session-lifecycle-fixture").unwrap();
+        let lease = Arc::new(service.begin_profile_operation(profile.clone()).unwrap());
         let weak = Arc::downgrade(&lease);
         let (send, receive) = oneshot::channel();
         let (control_send, control_receive) = oneshot::channel();
@@ -448,8 +613,10 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(150)).await;
         assert!(!supervisor.done.load(Ordering::Acquire));
         assert!(weak.upgrade().is_some());
+        assert!(service.begin_profile_operation(profile.clone()).is_err());
         control.store(false, Ordering::Release);
         completed(&supervisor).await;
         assert!(weak.upgrade().is_none());
+        assert!(service.begin_profile_operation(profile).is_ok());
     }
 }

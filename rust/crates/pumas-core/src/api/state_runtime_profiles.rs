@@ -386,6 +386,19 @@ pub(super) async fn stop_runtime_profile(
     primary: &PrimaryState,
     profile_id: RuntimeProfileId,
 ) -> std::result::Result<bool, PumasError> {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    if let Some(result) = primary
+        .runtime_profile_service
+        .audio_profiles
+        .stop(&profile_id, None)
+        .await?
+    {
+        return result;
+    }
     // Owned sessions are stopped from their immutable launch identity, even if
     // a caller cancels startup or configuration is subsequently unavailable.
     if let Some((receipt, result)) = primary
@@ -449,6 +462,19 @@ pub(super) async fn stop_runtime_profile_if_generation(
     profile_id: RuntimeProfileId,
     generation: u64,
 ) -> std::result::Result<bool, PumasError> {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    if let Some(result) = primary
+        .runtime_profile_service
+        .audio_profiles
+        .stop(&profile_id, Some(generation))
+        .await?
+    {
+        return result;
+    }
     let Some((receipt, result)) = primary
         .runtime_profile_service
         .process_owner
@@ -473,6 +499,31 @@ pub(super) async fn stop_runtime_profile_if_generation(
 pub(super) async fn stop_all_managed_runtime_profiles(
     primary: &PrimaryState,
 ) -> std::result::Result<ManagedRuntimeShutdownSummary, PumasError> {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    let results = {
+        // Poll both closures before waiting for either drain. An uncertain
+        // audio child must not leave the ordinary process admission open.
+        let (audio, processes) = tokio::join!(
+            primary
+                .runtime_profile_service
+                .audio_profiles
+                .close_and_drain(),
+            primary
+                .runtime_profile_service
+                .process_owner
+                .close_and_drain(),
+        );
+        processes?.into_iter().chain(audio?).collect::<Vec<_>>()
+    };
+    #[cfg(not(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    )))]
     let results = primary
         .runtime_profile_service
         .process_owner

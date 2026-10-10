@@ -1631,7 +1631,6 @@ mod tests {
 
     // Fixture startup includes real filesystem and HTTP work under parallel load.
     // Keep its bound separate from cancellation and shutdown assertions.
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     const FIXTURE_READINESS_TIMEOUT: Duration = Duration::from_secs(10);
 
     async fn create_test_manager() -> (VersionManager, TempDir) {

@@ -32,7 +32,7 @@ export function LauncherRootRecoveryView({
   }, [title]);
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden bg-[hsl(var(--surface-base))] text-[hsl(var(--text-primary))]">
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-[hsl(var(--surface-lowest))] text-[hsl(var(--text-primary))]">
       <header className="app-region-drag flex h-10 flex-shrink-0 items-center justify-end px-2">
         {onMinimize ? (
           <HeaderWindowControls onClose={onClose} onMinimize={onMinimize} />
@@ -49,7 +49,7 @@ export function LauncherRootRecoveryView({
       <main className="flex flex-1 items-center justify-center p-6">
         <section
           aria-labelledby="launcher-root-recovery-title"
-          className="w-full max-w-md rounded-lg border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-raised))] p-6 shadow-lg"
+          className="w-full max-w-md rounded-lg border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-low))] p-6 shadow-lg"
         >
           <h1
             ref={headingRef}

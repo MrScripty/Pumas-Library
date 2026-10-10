@@ -357,14 +357,26 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
     );
   } else if (presentation.kind === 'startup-recovery') {
     const canSelectLibrary = presentation.state.action === 'select-library';
-    content = (
-      <LauncherRootRecoveryView
-        title={canSelectLibrary ? 'Library needs attention' : 'Correct launcher input'}
-        message={canSelectLibrary
-          ? presentation.state.reason === 'invalid'
+    const reason = presentation.state.reason;
+    const title = reason === 'migration-required' ? 'Library upgrade required'
+      : reason === 'backend-unavailable' ? 'Library could not start'
+      : canSelectLibrary ? 'Library needs attention' : 'Correct launcher input';
+    const message = reason === 'migration-required'
+      ? 'This library uses an older download database. Close every app using it and follow the offline library upgrade procedure before reopening. Your library has not been upgraded automatically.'
+      : reason === 'backend-unavailable'
+        ? 'Pumas Library could not open this library. Another app may already be using it. ' +
+          (canSelectLibrary
+            ? 'Close other apps using the library and reopen Pumas Library, or select another library.'
+            : `Close other apps using the library or correct the ${presentation.state.authoritySource} launch input, then reopen Pumas Library.`)
+        : canSelectLibrary
+          ? reason === 'invalid'
             ? 'The saved Pumas library is not valid. Select an existing library to continue.'
             : 'The saved Pumas library is unavailable. Restore access or select another library.'
-          : `The ${presentation.state.authoritySource} launcher input controls this library. Correct that launch input and reopen Pumas Library.`}
+          : `The ${presentation.state.authoritySource} launcher input controls this library. Correct that launch input and reopen Pumas Library.`;
+    content = (
+      <LauncherRootRecoveryView
+        title={title}
+        message={message}
         primaryAction={canSelectLibrary
           ? { label: 'Select Library', onAction: () => { void chooseLibraryRoot(); } }
           : undefined}

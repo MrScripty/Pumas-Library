@@ -721,12 +721,12 @@ const CLOSED_STARTUP_STATES = [
   { status: 'ready', selectionAction: 'select-library', libraryScopeId: null },
   { status: 'ready', selectionAction: 'correct-launch-input', libraryScopeId: null },
   { status: 'ready', selectionAction: 'select-library', libraryScopeId: `display-v1:${'c'.repeat(64)}` },
-  ...['invalid', 'unavailable'].flatMap((reason) =>
-    ['persisted', 'environment', 'argument'].map((authoritySource) => ({
+  ...['invalid', 'unavailable', 'migration-required', 'backend-unavailable'].flatMap((reason) =>
+    ['persisted', 'environment', 'argument', 'default'].map((authoritySource) => ({
       status: 'recovery-required',
       reason,
       authoritySource,
-      action: authoritySource === 'persisted'
+      action: authoritySource === 'persisted' || authoritySource === 'default'
         ? 'select-library'
         : 'correct-launch-input',
     }))

@@ -92,6 +92,35 @@ describe('LauncherRootRecoveryProvider', () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    ['migration-required', 'Library upgrade required', /older download database/],
+    ['backend-unavailable', 'Library could not start', /Another app may already be using it/],
+  ] as const)('keeps %s visible and permits choosing another library', async (reason, title, message) => {
+    const bridge = installElectronBridge(async () => ({
+      status: 'recovery-required', reason, authoritySource: 'persisted', action: 'select-library',
+    }));
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    expect(await screen.findByRole('heading', { name: title })).toBeVisible();
+    expect(screen.getByText(message)).toBeVisible();
+    expect(screen.queryByText('Library content')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select Library' }));
+    await waitFor(() => expect(bridge.select_launcher_root).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('heading', { name: title })).toBeVisible();
+    expect(bridge.notify_launcher_root_presentation_committed).toHaveBeenCalledWith('recovery-required');
+  });
+
+  it.each(['environment', 'argument'] as const)('preserves %s authority after backend failure', async (authoritySource) => {
+    const bridge = installElectronBridge(async () => ({
+      status: 'recovery-required', reason: 'backend-unavailable', authoritySource, action: 'correct-launch-input',
+    }));
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    expect(await screen.findByRole('heading', { name: 'Library could not start' })).toBeVisible();
+    expect(screen.getByRole('status')).toHaveTextContent(`correct the ${authoritySource} launch input`);
+    expect(screen.queryByRole('button', { name: 'Select Library' })).not.toBeInTheDocument();
+    expect(bridge.select_launcher_root).not.toHaveBeenCalled();
+    expect(screen.queryByText('Library content')).not.toBeInTheDocument();
+  });
+
   it('treats browser mode as not applicable and renders application content', () => {
     render(
       <LauncherRootRecoveryProvider>

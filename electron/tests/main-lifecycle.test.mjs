@@ -141,6 +141,8 @@ function createFailedProcessRuntime() {
       if (specifier === 'child_process') return {
         spawn() {
           const child = new EventEmitter();
+          child.stdout = new EventEmitter();
+          child.stderr = new EventEmitter();
           children.push(child);
           return child;
         },
@@ -148,7 +150,7 @@ function createFailedProcessRuntime() {
       if (specifier === 'http') return {
         request() {
           const request = new EventEmitter();
-          Object.assign(request, { write() {}, end() {} });
+          Object.assign(request, { write() {}, end() {}, destroy() {} });
           requests.push(request);
           return request;
         },
@@ -159,7 +161,7 @@ function createFailedProcessRuntime() {
   return { module, timers, requests, children, expireStartup() { now = 30_000; } };
 }
 
-test('failed backend startup stops its pending restart before application cleanup completes', async () => {
+test('failed backend startup preserves the recovery window and never publishes ready', async () => {
   const root = mkdtempSync(join(tmpdir(), 'pumas-main-lifecycle-'));
   mkdirSync(join(root, 'shared-resources', 'models'), { recursive: true });
   const runtime = createFailedProcessRuntime();
@@ -173,8 +175,7 @@ test('failed backend startup stops its pending restart before application cleanu
     const contents = harness.windows[0].webContents;
     const bootstrap = { sender: contents, senderFrame: contents.mainFrame };
     harness.ipcMain.emit('launcher:getRootBootstrap', bootstrap);
-    assert.equal(bootstrap.returnValue.status, 'ready');
-    assert.equal(bootstrap.returnValue.libraryScopeId, null);
+    assert.equal(bootstrap.returnValue.status, 'initializing');
     for (const denied of [
       { sender: contents, senderFrame: {} },
       { sender: {}, senderFrame: contents.mainFrame },
@@ -184,22 +185,63 @@ test('failed backend startup stops its pending restart before application cleanu
     }
     assert.equal(runtime.requests.length, 1, 'bootstrap must not start another backend request');
     runtime.children[0].emit('exit', 1, null);
+    runtime.children[0].emit('close', 1, null);
     assert.deepEqual(
       [...runtime.timers].map((timer) => timer.delayMs).sort((a, b) => a - b),
-      [1_000, 60_000],
-      'crash has a pending restart and an outstanding health RPC deadline'
+      [],
+      'startup refusal cancels its health request and must not schedule a restart'
     );
     runtime.expireStartup();
     runtime.requests[0].emit('error', new Error('connection refused'));
     await setImmediate();
-    assert.equal(harness.exits.length, 1, 'failed startup must finish application cleanup');
-    assert.equal(runtime.timers.size, 0, 'failed initialization must retain its bridge until restart is stopped');
+    assert.equal(harness.exits.length, 0, 'failed startup must keep the recovery window open');
+    const state = harness.handlers.get('launcher:getRootState')();
+    assert.equal(state.status, 'recovery-required');
+    assert.equal(state.reason, 'backend-unavailable');
+    assert.equal(state.action, 'select-library');
+    harness.app.quit();
+    await setImmediate();
+    assert.equal(harness.exits.length, 1, 'the user can still close the recovery window');
+    assert.equal(runtime.timers.size, 0, 'user close must settle startup requests and timers');
     assert.ok(harness.errors.some((args) => args.some((value) =>
-      value?.message === 'RPC server failed to start within timeout'
+      value?.cause?.message === 'Library backend could not start'
     )), 'cleanup must preserve the original startup failure');
   } finally {
     runtime.timers.clear();
     harness.timers.clear();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a migration refusal drained after exit reaches recovery instead of crashing on every launch', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pumas-main-migration-'));
+  mkdirSync(join(root, 'shared-resources', 'models'), { recursive: true });
+  try {
+    for (let launch = 0; launch < 2; launch += 1) {
+      const runtime = createFailedProcessRuntime();
+      const harness = createMainHarness({ root, bridgeRuntime: runtime });
+      harness.ready();
+      await setImmediate();
+      const child = runtime.children[0];
+      child.emit('exit', 1, null);
+      // Node's exit event does not imply stdout is drained.
+      child.stdout.emit('data', Buffer.from('PUMAS_STARTUP_FAILURE={"version":1,'));
+      child.stdout.emit('data', Buffer.from('"reason":"migration-required"}\n'));
+      child.emit('close', 1, null);
+      await setImmediate();
+      assert.equal(harness.exits.length, 0);
+      const state = harness.handlers.get('launcher:getRootState')();
+      assert.equal(state.status, 'recovery-required');
+      assert.equal(state.reason, 'migration-required');
+      assert.equal(state.action, 'select-library');
+      assert.equal(runtime.children.length, 1);
+      assert.equal(runtime.timers.size, 0);
+      harness.app.quit();
+      await setImmediate();
+      assert.equal(harness.exits.length, 1);
+      harness.timers.clear();
+    }
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

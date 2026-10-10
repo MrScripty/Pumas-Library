@@ -10,7 +10,7 @@ use crate::acquisition::{
     AcquisitionConsumerReceipt, AcquisitionDemand, AcquisitionPhase, AcquisitionRecord,
     ArtifactManifest, VerifiedFile, WorkspaceIdentity,
 };
-use crate::error::Result;
+use crate::error::{PumasError, Result};
 use crate::metadata::{
     AtomicPublication, AtomicPublishFailure, AtomicPublishFailureKind, AtomicPublishResult,
     AtomicPublishStage, StagingCleanup,
@@ -1961,6 +1961,54 @@ impl DownloadPersistence {
             let data = normalize_legacy_store(value, &store.path)?;
             serde_json::to_value(data).map_err(Into::into)
         })
+    }
+
+    /// Upgrade a stopped library with a durable, private backup of the original
+    /// database. The caller must stop every historical reader/writer first;
+    /// exclusion of cooperating current owners cannot establish that fact.
+    /// Platforms without a qualified physical store lease fail before mutation.
+    pub fn migrate_library_offline(launcher_root: impl AsRef<Path>) -> Result<PathBuf> {
+        use std::io::Write;
+
+        let root = launcher_root.as_ref().canonicalize()?;
+        let lifetime = crate::platform::store_lifetime::StoreLifetime::acquire(&root)?;
+        lifetime.require_current()?;
+        let data_dir = root.join("launcher-data");
+        let store = Self::new(&data_dir);
+        match store.store.require_acquisition_schema() {
+            Err(PumasError::Validation { field, .. })
+                if field == "acquisition.migration_required" => {}
+            Err(error) => return Err(error),
+            Ok(()) => {
+                return Err(PumasError::Validation {
+                    field: "acquisition.migration_not_required".into(),
+                    message: "The library does not require a legacy acquisition migration".into(),
+                })
+            }
+        }
+        let original = std::fs::read(&store.path)?;
+        let backup_path = data_dir.join(format!("downloads.pre-schema7-{}.json", Uuid::new_v4()));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut backup = options.open(&backup_path)?;
+        backup.write_all(&original)?;
+        backup.sync_all()?;
+        #[cfg(unix)]
+        std::fs::File::open(&data_dir)?.sync_all()?;
+        lifetime.require_current()?;
+        Self::migrate_legacy_offline(&data_dir).map_err(|error| {
+            PumasError::Other(format!(
+                "Offline migration failed; original backup retained at {}: {error}",
+                backup_path.display()
+            ))
+        })?;
+        lifetime.require_current()?;
+        Ok(backup_path)
     }
 
     pub(crate) fn acquisition_store(&self) -> Arc<AcquisitionStore> {
@@ -4309,6 +4357,60 @@ mod tests {
             assert_eq!(std::fs::read(&store.path).unwrap(), migrated_bytes);
             assert!(DownloadPersistence::migrate_legacy_offline(tmp.path()).is_err());
         }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn offline_library_upgrade_backs_up_exact_bytes_and_preserves_downloads() {
+        let root = TempDir::new().unwrap();
+        let data_dir = root.path().join("launcher-data");
+        std::fs::create_dir(&data_dir).unwrap();
+        let store = DownloadPersistence::new(&data_dir);
+        store
+            .admit_test_download(&persisted("backup-model"))
+            .unwrap();
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
+        legacy.as_object_mut().unwrap().remove("acquisitions");
+        legacy.as_object_mut().unwrap().remove("consumer_receipts");
+        legacy["schema_version"] = 5.into();
+        let original = serde_json::to_vec_pretty(&legacy).unwrap();
+        std::fs::write(&store.path, &original).unwrap();
+        let backup = DownloadPersistence::migrate_library_offline(root.path()).unwrap();
+        assert_eq!(std::fs::read(&backup).unwrap(), original);
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&backup).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        store.store.require_acquisition_schema().unwrap();
+        let upgraded: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
+        for (key, value) in legacy.as_object().unwrap() {
+            if key != "schema_version" {
+                assert_eq!(&upgraded[key], value);
+            }
+        }
+        let final_bytes = std::fs::read(&store.path).unwrap();
+        assert!(DownloadPersistence::migrate_library_offline(root.path()).is_err());
+        assert_eq!(std::fs::read(&store.path).unwrap(), final_bytes);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn offline_library_upgrade_refuses_a_current_owner_without_writing() {
+        let root = TempDir::new().unwrap();
+        let data_dir = root.path().join("launcher-data");
+        std::fs::create_dir(&data_dir).unwrap();
+        let source = serde_json::to_vec(&DownloadStoreData::empty()).unwrap();
+        std::fs::write(data_dir.join("downloads.json"), &source).unwrap();
+        let _owner = crate::platform::store_lifetime::StoreLifetime::acquire(root.path()).unwrap();
+        assert!(DownloadPersistence::migrate_library_offline(root.path()).is_err());
+        assert_eq!(
+            std::fs::read(data_dir.join("downloads.json")).unwrap(),
+            source
+        );
+        assert_eq!(std::fs::read_dir(&data_dir).unwrap().count(), 1);
     }
 
     #[test]

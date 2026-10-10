@@ -144,7 +144,8 @@ function decodeLauncherRootStartupState(value: unknown): LauncherRootStartupStat
     if (
       hasExactShape(value, ['status', 'reason', 'authoritySource', 'action']) &&
       value['status'] === 'recovery-required' &&
-      (value['reason'] === 'invalid' || value['reason'] === 'unavailable') &&
+      (value['reason'] === 'invalid' || value['reason'] === 'unavailable' ||
+        value['reason'] === 'migration-required' || value['reason'] === 'backend-unavailable') &&
       isLauncherRootAuthoritySource(value['authoritySource']) &&
       isCorrelatedLauncherRootStartupAction(
         value['authoritySource'],
@@ -253,15 +254,15 @@ function isLauncherRootSelectionAction(
 
 function isLauncherRootAuthoritySource(
   value: unknown
-): value is 'persisted' | 'environment' | 'argument' {
-  return value === 'persisted' || value === 'environment' || value === 'argument';
+): value is 'persisted' | 'environment' | 'argument' | 'default' {
+  return value === 'persisted' || value === 'environment' || value === 'argument' || value === 'default';
 }
 
 function isCorrelatedLauncherRootStartupAction(
-  authoritySource: 'persisted' | 'environment' | 'argument',
+  authoritySource: 'persisted' | 'environment' | 'argument' | 'default',
   action: unknown
 ): action is 'select-library' | 'correct-launch-input' {
-  return authoritySource === 'persisted'
+  return authoritySource === 'persisted' || authoritySource === 'default'
     ? action === 'select-library'
     : action === 'correct-launch-input';
 }

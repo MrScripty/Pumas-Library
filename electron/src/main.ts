@@ -38,6 +38,7 @@ import { isS3ImportMethod, receiveS3ImportRpc } from './s3-import-rpc';
 import { decodeRuntimeRunningOutcome } from './generated/desktop-contract';
 import {
   LauncherRootRecoveryRequiredError,
+  BackendInitializationRecoveryRequiredError,
   classifyBackendInitializationOutcome,
   observeBackendInitialization,
   projectBackendInitializationFailure,
@@ -756,13 +757,8 @@ async function initializeBackend(): Promise<void> {
       isPackaged: app.isPackaged,
       userDataPath: app.getPath('userData'),
     });
-    launcherRootStartupState = projectLauncherRootStartupState(
-      launcherRootResolution,
-      launcherRootResolution.status === 'resolved'
-        ? readLibraryDisplayScope(launcherRootResolution.launcherRoot)
-        : null
-    );
     if (launcherRootResolution.status === 'recovery-required') {
+      launcherRootStartupState = projectLauncherRootStartupState(launcherRootResolution);
       throw new LauncherRootRecoveryRequiredError(launcherRootResolution);
     }
     const launcherRoot = launcherRootResolution.launcherRoot;
@@ -775,7 +771,17 @@ async function initializeBackend(): Promise<void> {
       launcherRoot,
     });
 
-    await pythonBridge.start();
+    try {
+      await pythonBridge.start();
+    } catch (cause) {
+      const error = new BackendInitializationRecoveryRequiredError(launcherRootResolution, cause);
+      launcherRootStartupState = error.recoveryState;
+      throw error;
+    }
+    launcherRootStartupState = projectLauncherRootStartupState(
+      launcherRootResolution,
+      readLibraryDisplayScope(launcherRoot)
+    );
     startModelLibraryUpdateForwarder();
     startModelDownloadUpdateForwarder();
     startRuntimeProfileUpdateForwarder();
@@ -858,6 +864,9 @@ if (!hasSingleInstanceLock) {
 
           if (disposition.status === 'recovery-required') {
             log.error('Launcher root recovery is required before backend startup.');
+            if (outcome.status === 'rejected') {
+              logBackendInitializationFailure('Library startup requires recovery', outcome.error);
+            }
             return;
           }
 

@@ -197,3 +197,19 @@ test('review audio dependency qualification requires bounded exact-source confin
   assert.doesNotMatch(upload, /review-audio-runtime|\*|rust\/target/);
   assert.doesNotMatch(audio, /continue-on-error|secrets\.|permissions:|pull_request_target|sudo|--privileged/);
 });
+
+
+test('controlled session lifecycle reuses the authenticated managed interpreter', () => {
+  const audio = job('review-audio-dependencies');
+  const controlled = audio.indexOf('Check controlled session lifecycle');
+  assert.ok(controlled > audio.indexOf('Qualify exact frozen dependencies'));
+  const step = audio.slice(controlled, audio.indexOf('Preserve confined dependency evidence only'));
+  assert.match(step, /runtime.json/);
+  assert.match(step, /interpreter_executable_sha256/);
+  assert.match(step, /hashlib.file_digest/);
+  assert.match(step, /is_relative_to\(root\)/);
+  assert.match(step, /timeout --kill-after=30s 20m cargo test --locked/);
+  assert.match(step, /runtime_profiles::audio_session::protocol_tests/);
+  assert.doesNotMatch(step, /pip install|curl |wget |continue-on-error/);
+  assert.match(audio, /controlled-session-protocol.log/);
+});

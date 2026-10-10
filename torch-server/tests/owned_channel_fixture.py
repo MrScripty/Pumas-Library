@@ -164,6 +164,9 @@ class Gate:
             calls=0,
         )
         plan._custody.loaded = model
+        observed = getattr(self, "_load_entered", None)
+        if observed is not None:
+            observed()
         if self.hold_load:
             print("controlled load entered", file=sys.stderr, flush=True)
             self.actor._active.cancel.wait()

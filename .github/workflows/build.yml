@@ -329,6 +329,32 @@ jobs:
           timeout --kill-after=30s 45m cargo run --locked --manifest-path rust/Cargo.toml -p pumas-app-manager --features test-support --example qualify_audio_dependencies -- "$QUALIFICATION_ROOT" 2>&1 | tee "$EVIDENCE_DIR/probe.log"
           test -s "$QUALIFICATION_ROOT/audio-confined-dependency-probe.json"
           cp "$QUALIFICATION_ROOT/audio-confined-dependency-probe.json" "$EVIDENCE_DIR/"
+      - name: Check controlled session lifecycle with the managed interpreter
+        timeout-minutes: 25
+        env:
+          QUALIFICATION_ROOT: ${{ runner.temp }}/review-audio-runtime
+          EVIDENCE_DIR: ${{ runner.temp }}/review-audio-evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          PUMAS_AUDIO_SESSION_PYTHON="$(python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path(os.environ['QUALIFICATION_ROOT']).resolve(strict=True)
+          record = json.loads((root / 'torch-versions/v2.10.0/runtime.json').read_text())['managed_python']
+          pin = json.loads(Path('rust/crates/pumas-core/src/runtime_read_source/audio_candidate_recipe.json').read_text())
+          assert {key: record[key] for key in ('provider', 'distribution')} == pin['managed_python']
+          executable = Path(record['executable']['path'])
+          assert executable.is_absolute() and executable.resolve(strict=True) == executable
+          assert executable.is_relative_to(root) and '\n' not in str(executable) and '\r' not in str(executable)
+          assert record['executable']['sha256'] == pin['interpreter_executable_sha256']
+          with executable.open('rb') as source:
+              assert hashlib.file_digest(source, 'sha256').hexdigest() == pin['interpreter_executable_sha256']
+          print(executable)
+          PY
+          )"
+          export PUMAS_AUDIO_SESSION_PYTHON
+          timeout --kill-after=30s 20m cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features test-support runtime_profiles::audio_session::protocol_tests -- --nocapture 2>&1 | tee "$EVIDENCE_DIR/controlled-session-protocol.log"
       - name: Preserve confined dependency evidence only
         if: always()
         uses: actions/upload-artifact@v7.0.1
@@ -338,6 +364,7 @@ jobs:
             ${{ runner.temp }}/review-audio-evidence/source.json
             ${{ runner.temp }}/review-audio-evidence/probe.log
             ${{ runner.temp }}/review-audio-evidence/audio-confined-dependency-probe.json
+            ${{ runner.temp }}/review-audio-evidence/controlled-session-protocol.log
           if-no-files-found: ignore
           retention-days: 7
 

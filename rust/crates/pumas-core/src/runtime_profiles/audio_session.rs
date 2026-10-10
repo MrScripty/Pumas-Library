@@ -133,6 +133,47 @@ impl InstalledAudioSession {
         control: SessionControl,
         profile_guard: Arc<super::RuntimeProfileOperationGuard>,
     ) -> Result<Self> {
+        let worker_library = library.clone();
+        let worker_selected = selected.clone();
+        let worker_runtime = runtime.clone();
+        Self::launch_inner(
+            library,
+            endpoints,
+            runtime,
+            selected,
+            profile,
+            generation,
+            control,
+            move |worker, send| {
+                run_worker(
+                    worker,
+                    worker_runtime,
+                    worker_selected,
+                    worker_library,
+                    profile_guard,
+                    send,
+                )
+            },
+        )
+        .await
+    }
+
+    // Private mechanical seam for the controlled protocol tests. Shipping
+    // callers can only enter launch(), whose worker is the fixed run_worker.
+    #[allow(clippy::too_many_arguments)]
+    async fn launch_inner<F>(
+        library: Arc<ModelLibrary>,
+        endpoints: &AudioEndpoints,
+        runtime: Arc<AudioRuntimeOwner>,
+        selected: Arc<PreparedArtifactUse>,
+        profile: RuntimeProfileId,
+        generation: u64,
+        control: SessionControl,
+        start_worker: F,
+    ) -> Result<Self>
+    where
+        F: FnOnce(Arc<Supervisor>, oneshot::Sender<io::Result<Pipes>>) + Send + 'static,
+    {
         selected.validate_library_owner(&library)?;
         if !runtime.permits_selected(&selected) {
             return Err(failure(
@@ -147,21 +188,10 @@ impl InstalledAudioSession {
         let mut startup = StartupGuard(Some(supervisor.clone()));
         let (send, receive) = oneshot::channel();
         let worker = supervisor.clone();
-        let worker_library = library.clone();
-        let worker_selected = selected.clone();
         // No await before the worker owns cleanup and startup cancellation owns
         // its stop request. Cancelling a waiter never cancels this blocking owner.
         supervisor.started.store(true, Ordering::Release);
-        tokio::task::spawn_blocking(move || {
-            run_worker(
-                worker,
-                runtime,
-                worker_selected,
-                worker_library,
-                profile_guard,
-                send,
-            )
-        });
+        tokio::task::spawn_blocking(move || start_worker(worker, send));
         let startup_result = tokio::time::timeout(STARTUP_BUDGET, async {
             let (input, output, pid) = receive
                 .await
@@ -620,3 +650,7 @@ mod tests {
         assert!(service.begin_profile_operation(profile).is_ok());
     }
 }
+
+#[cfg(all(test, target_os = "linux", not(target_env = "uclibc")))]
+#[path = "audio_session/protocol_tests.rs"]
+mod protocol_tests;

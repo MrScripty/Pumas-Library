@@ -7,12 +7,13 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const attribution = 'docs/release-attribution/0.7.0';
 const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const capture = args => execFileSync(args[0], args.slice(1), { cwd: root, encoding: 'utf8' }).trim();
 
 export function packageQualification(binary, outputDirectory, provenance, options = {}) {
   const repository = options.repository ?? root;
+  const version = JSON.parse(fs.readFileSync(path.join(repository, 'package.json'), 'utf8')).version;
+  const attribution = `docs/release-attribution/${version}`;
   const execute = options.execute ?? execFileSync;
   if (!fs.statSync(binary).isFile() || fs.statSync(binary).size === 0) throw new Error('Missing RPC binary');
   const output = path.join(outputDirectory, 'pumas-rpc-qualification-linux.tar.gz');

@@ -14,10 +14,15 @@ use super::{
     FileVerificationRequirement, ManifestValidationError, RevisionStrength, Sha256Evidence,
 };
 
+mod conditional;
+mod conditional_manifest;
+#[cfg(test)]
+mod conditional_tests;
 mod list_xml;
 mod manifest;
 mod prefix;
 mod sdk;
+pub use conditional_manifest::S3ConditionalManifestEntry;
 pub use manifest::{S3ManifestEntry, S3ManifestSelection};
 pub use prefix::{S3PrefixError, S3PrefixLimits, S3PrefixListing, S3PrefixObject};
 
@@ -38,7 +43,7 @@ pub enum S3Addressing {
 
 /// Explicit caller-authorized source configuration, never read from model metadata.
 ///
-/// General-purpose/versioned buckets only. Environment discovery and remote
+/// General-purpose buckets with explicit version or conditional-read selection. Environment discovery and remote
 /// writes are absent. Authentication is supplied separately in memory.
 pub struct S3ReaderConfig {
     /// Absolute HTTP(S) origin, without credentials, query, fragment, or path.
@@ -115,7 +120,7 @@ pub struct S3ObjectSelection {
     store: Arc<aws_sdk_s3::Client>,
     key: Path,
     bucket: String,
-    version: String,
+    version: Option<String>,
     etag: String,
     size: u64,
     timeout: Duration,
@@ -371,7 +376,7 @@ impl S3Reader {
             store: Arc::clone(&self.store),
             key,
             bucket: self.bucket.clone(),
-            version: version.to_owned(),
+            version: Some(version.to_owned()),
             etag,
             size,
             timeout: self.timeout,
@@ -386,7 +391,8 @@ impl S3ObjectSelection {
     }
 
     /// Stream a nonempty half-open range into caller-owned staging. VersionId
-    /// and If-Match are sent together; response metadata is checked before writes.
+    /// is sent for immutable selections; both modes send If-Match and check
+    /// response metadata before writes. Raw bytes remain unverified.
     /// Dropping this future stops polling reader I/O; remote completion is not
     /// implied. Partial writes remain the caller's cleanup responsibility.
     pub async fn read_range<W: AsyncWrite + Unpin>(
@@ -432,7 +438,7 @@ impl S3ObjectSelection {
                 .get_object()
                 .bucket(&self.bucket)
                 .key(self.key.as_ref())
-                .version_id(&self.version)
+                .set_version_id(self.version.clone())
                 .if_match(&self.etag)
                 .range(format!("bytes={}-{}", range.start, range.end - 1))
                 .send()
@@ -447,22 +453,41 @@ impl S3ObjectSelection {
         if result.content_length().is_none_or(|size| size < 0) {
             return Err(sdk::protocol_failure());
         }
-        if result.version_id() != Some(&self.version)
+        if !self.matches_version(result.version_id())
             || result.e_tag() != Some(&self.etag)
             || size != self.size
             || actual != range
         {
             return Err(S3ReaderError::Changed);
         }
+        if self.version.is_none()
+            && result.content_length() != Some((range.end - range.start) as i64)
+        {
+            return Err(S3ReaderError::Changed);
+        }
         Ok(result.body)
     }
 
+    fn matches_version(&self, observed: Option<&str>) -> bool {
+        match &self.version {
+            Some(version) => observed == Some(version.as_str()),
+            None => observed.is_none_or(|version| version == "null"),
+        }
+    }
+
     pub(crate) fn acquisition_identity(&self) -> String {
-        format!(
-            "{}:{}",
-            self.manifest.source().source_id(),
-            hex::encode(&self.version)
-        )
+        match &self.version {
+            Some(version) => format!(
+                "{}:{}",
+                self.manifest.source().source_id(),
+                hex::encode(version)
+            ),
+            None => format!(
+                "{}:conditional:{}",
+                self.manifest.source().source_id(),
+                hex::encode(self.manifest.source().revision().value())
+            ),
+        }
     }
 
     /// Project checked protocol bytes into the existing lifecycle's streaming
@@ -493,11 +518,21 @@ impl S3ObjectSelection {
         let deadline =
             transfer_deadline.map_or(attempt_deadline, |limit| limit.min(attempt_deadline));
         let body = if self.size == 0 && resume == 0 {
-            // Selection already checked HEAD for this immutable VersionId and
-            // a known size of zero. There is no valid byte range to request.
-            // Still pass through the owner's writer and SHA-256 verifier: HEAD
-            // is identity/length evidence, not a verified-file receipt.
-            futures::stream::empty().boxed()
+            // There is no valid byte range for an empty object. Immutable
+            // selection retains its existing HEAD-only transfer optimization;
+            // fresh conditional selection must also check an empty If-Match GET.
+            // Both paths pass through the owner's writer and SHA-256 verifier.
+            if self.version.is_some() {
+                futures::stream::empty().boxed()
+            } else {
+                let body = tokio::time::timeout_at(deadline, self.open_conditional_empty())
+                    .await
+                    .map_err(|_| acquisition_error(S3ReaderError::TimedOut))?
+                    .map_err(acquisition_error)?;
+                sdk::body_stream(body)
+                    .map(|chunk| chunk.map_err(acquisition_error))
+                    .boxed()
+            }
         } else {
             let result =
                 tokio::time::timeout_at(deadline, self.open_checked_range(resume..self.size))

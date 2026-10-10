@@ -24,6 +24,7 @@ const MEMBERS: &[&str] = &[
 ];
 const CODE: &[&str] = &[
     "owned_audio.py",
+    "installed_cohere_source.py",
     "model_manager.py",
     "device_manager.py",
     "private_owned_channel.py",
@@ -34,6 +35,7 @@ const CODE: &[&str] = &[
     "audio_input.py",
     "audio_contract.py",
     "loaders/cohere_asr_loader.py",
+    "loaders/owned_cohere_source.py",
     "loaders/__init__.py",
     "tests/owned_channel_fixture.py",
     "owned_worker.py",

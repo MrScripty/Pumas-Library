@@ -76,6 +76,190 @@ class _NativeProcessor:
         return CohereAsrProcessor(feature_extractor=feature_extractor, tokenizer=tokenizer)
 
 
+class RetainedSpeechAcquisition:
+    """Private staged native references, not a runtime/cleanup qualification.
+
+    A constructor can allocate native state before raising without returning an
+    object. That state is unknown: retained Python references cannot prove its
+    disposal. The actor must quarantine until its external owner observes exact
+    process/device cessation; no source policy can clear this unknown flag.
+    """
+
+    def __init__(self):
+        self.objects = {}
+        self.in_flight = None
+        self.unknown_allocations = False
+
+    def construct(self, stage, invoke):
+        if self.in_flight is not None or stage in self.objects or self.unknown_allocations:
+            raise SpeechRuntimeUnsupported("Native ASR acquisition cannot be replayed")
+        self.in_flight = stage
+        try:
+            value = invoke()
+        except BaseException:
+            self.unknown_allocations = True
+            raise
+        else:
+            # Retain each returned object before starting another constructor.
+            self.objects[stage] = value
+            self.in_flight = None
+            return value
+
+    def retain(self, stage, value):
+        """Hold source references before any potentially allocating native call."""
+        if self.in_flight is not None or stage in self.objects or self.unknown_allocations:
+            raise SpeechRuntimeUnsupported("Native ASR acquisition cannot be replayed")
+        self.objects[stage] = value
+
+    def clear_after_cleanup(self):
+        if self.in_flight is not None or self.unknown_allocations:
+            raise SpeechRuntimeUnsupported("Native ASR partial acquisition is unconfirmed")
+        reader = self.objects.get("model_read_source")
+        self.objects.clear()
+        if reader is not None:
+            reader.close()
+
+
+def _retained_processor(source, descriptors, acquisition):
+    def native_classes():
+        try:
+            from transformers import (
+                CohereAsrFeatureExtractor,
+                CohereAsrProcessor,
+                TokenizersBackend,
+            )
+            from tokenizers import AddedToken, Tokenizer
+        except ImportError as error:
+            raise SpeechRuntimeUnsupported(
+                "Installed native Cohere processor classes are required"
+            ) from error
+        return (
+            CohereAsrFeatureExtractor,
+            CohereAsrProcessor,
+            TokenizersBackend,
+            Tokenizer,
+            AddedToken,
+        )
+
+    feature_class, processor_class, tokenizer_class, backend_class, added_token_class = (
+        acquisition.construct("processor_classes", native_classes)
+    )
+    feature = acquisition.construct(
+        "feature_extractor",
+        lambda: feature_class.from_dict(descriptors["preprocessor_config.json"]),
+    )
+    from loaders.owned_cohere_source import MAX_TOKENIZER_BYTES, tokenizer_options
+
+    backend = acquisition.construct(
+        "tokenizer_backend",
+        lambda: backend_class.from_str(
+            source.read("tokenizer.json", MAX_TOKENIZER_BYTES).decode("utf-8")
+        ),
+    )
+    options = acquisition.construct(
+        "tokenizer_options", lambda: tokenizer_options(descriptors, backend, added_token_class)
+    )
+    tokenizer = acquisition.construct(
+        "tokenizer",
+        lambda: tokenizer_class(tokenizer_object=backend, **options),
+    )
+    return acquisition.construct(
+        "processor", lambda: processor_class(feature_extractor=feature, tokenizer=tokenizer)
+    )
+
+
+def load_cohere_asr_retained(source, device, acquisition):
+    """Conditional CPU constructor plumbing; no shipping policy admits it.
+
+    The source-owned gate retains original selected member FDs. Fixed classes
+    receive held JSON and state_dict, never a package-directory/cache locator.
+    This still does not contain runtime imports or native library/data reads.
+    """
+    if type(acquisition) is not RetainedSpeechAcquisition or _supported_device(device) != "cpu":
+        raise SpeechRuntimeUnsupported("Owned native ASR acquisition supports CPU only")
+    from loaders.owned_cohere_source import (
+        HeldCohereReadSource,
+        decode_object,
+        validate_owned_options,
+    )
+
+    if (
+        type(source) is not HeldCohereReadSource
+        or acquisition.objects.get("model_read_source") is not source
+    ):
+        raise SpeechRuntimeUnsupported("Owned native ASR requires original held selected members")
+    source.validate()
+    descriptors = {
+        name: _validate_descriptor(decode_object(source.read(name, MAX_DESCRIPTOR_BYTES)), name)
+        for name in source.names - {"model.safetensors", "tokenizer.json"}
+    }
+    config_data = descriptors["config.json"]
+    if config_data.get("model_type") != "cohere_asr" or config_data.get("architectures") != [
+        "CohereAsrForConditionalGeneration"
+    ]:
+        raise ValueError("Installed package is not native Cohere ASR")
+    validate_owned_options(descriptors)
+    _, model_class, _, _ = acquisition.construct("native_api", _native_api)
+    processor = _retained_processor(source, descriptors, acquisition)
+
+    def model_classes():
+        from transformers import CohereAsrConfig, GenerationConfig
+        from safetensors.torch import load_file
+
+        return CohereAsrConfig, GenerationConfig, load_file
+
+    config_class, generation_class, load_weights = acquisition.construct(
+        "model_classes", model_classes
+    )
+    config = acquisition.construct("config", lambda: config_class.from_dict(config_data))
+    generation = acquisition.construct(
+        "generation_config",
+        lambda: (
+            generation_class.from_dict(descriptors["generation_config.json"])
+            if "generation_config.json" in descriptors
+            else generation_class.from_model_config(config)
+        ),
+    )
+    weights = acquisition.construct(
+        "weights", lambda: load_weights(source.weights_filename(), device="cpu")
+    )
+    source.validate()
+    loaded = acquisition.construct(
+        "model",
+        lambda: model_class.from_pretrained(
+            None,
+            config=config,
+            state_dict=weights,
+            generation_config=generation,
+            local_files_only=True,
+            trust_remote_code=False,
+            use_safetensors=True,
+            device_map=str(device),
+            attn_implementation="eager",
+            dtype="auto",
+            output_loading_info=True,
+        ),
+    )
+    # Retain returned native state before inspecting diagnostics or evaluating.
+    if type(loaded) is not tuple or len(loaded) != 2 or type(loaded[1]) is not dict:
+        raise SpeechRuntimeUnsupported("Owned native ASR loading evidence is unavailable")
+    model, report = loaded
+    expected = {"missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs"}
+    if (
+        not expected.issubset(report)
+        or set(report) - expected - {"conversion_errors"}
+        or any(type(report[key]) not in (set, list, tuple) for key in expected)
+        or ("conversion_errors" in report and type(report["conversion_errors"]) is not dict)
+        or any(report.values())
+    ):
+        raise SpeechRuntimeUnsupported(
+            "Owned native ASR selected weights are incomplete or incompatible"
+        )
+    source.validate()
+    acquisition.construct("model_eval", lambda: model.eval())
+    return model, processor, COHERE_ASR
+
+
 class SpeechRuntimeUnsupported(RuntimeError):
     """The installed runtime lacks the required native ASR implementation."""
 
@@ -171,6 +355,10 @@ def _descriptor(file):
         raise ValueError("Native ASR descriptor is invalid") from error
     if type(value) is not dict:
         raise ValueError("Native ASR descriptor must be an object")
+    return _validate_descriptor(value, file.name)
+
+
+def _validate_descriptor(value, name):
     pending = [value]
     while pending:
         item = pending.pop()
@@ -184,7 +372,7 @@ def _descriptor(file):
                     or type(mapping) is not dict
                     or not mapping
                     or any(
-                        key not in _MAP_ROLES.get(file.name, ())
+                        key not in _MAP_ROLES.get(name, ())
                         or type(alias) is not str
                         or alias != _ORIGINAL_AUTO_MAP.get(key)
                         for key, alias in mapping.items()

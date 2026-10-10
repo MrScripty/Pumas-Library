@@ -4,12 +4,18 @@
 //! with domain-specific methods. The struct definitions remain in `lib.rs`.
 
 mod builder;
+pub(crate) mod catalog;
+pub use catalog::{
+    CatalogOwnerCheckpoint, CatalogQueryRequest, CatalogQueryResponse, InstanceProfile,
+};
 mod conversion;
 mod hf;
 pub(crate) mod instance_shutdown;
 #[cfg(test)]
 pub(crate) use hf::tests::recovery_api_fixture as intent_acquisition_test_fixture;
 pub(crate) use hf::PreparedIntentDownload;
+mod installed_audio;
+pub use installed_audio::{ExperimentalLocalCohereLoadResponse, ExperimentalLocalCohereReport};
 mod links;
 mod migration;
 mod models;
@@ -31,8 +37,9 @@ pub use s3_inspection::{
 mod serving;
 #[cfg(feature = "s3")]
 pub use s3_models::{
-    S3ModelBundleProgress, S3ModelImportControl, S3ModelImportError, S3ModelImportPhase,
-    S3ModelImportProgress, S3ModelImportRequest,
+    S3ConditionalBundleModelImportRequest, S3ConditionalModelImportRequest, S3ModelBundleProgress,
+    S3ModelImportControl, S3ModelImportError, S3ModelImportPhase, S3ModelImportProgress,
+    S3ModelImportRequest,
 };
 mod state;
 mod state_hf;

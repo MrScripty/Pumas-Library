@@ -168,8 +168,17 @@ impl PumasApi {
     // Model Library Methods
     // ========================================
 
-    /// List all models in the library.
+    /// List models. CatalogQuery reads the acknowledged index only; Full reconciles.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
+        if let crate::ApiInner::Catalog(state) = &self.inner {
+            let crate::CatalogQueryResponse::List(result) =
+                state.query(crate::CatalogQueryRequest::List).await?
+            else {
+                unreachable!()
+            };
+            return Ok(result);
+        }
+        self.try_primary()?;
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),
@@ -180,13 +189,28 @@ impl PumasApi {
         primary.model_library.list_models().await
     }
 
-    /// Search models using full-text search.
+    /// Search models. Full uses FTS; CatalogQuery uses literal case-insensitive
+    /// substring matching of indexed ID, names, type and tags, without reconciliation.
     pub async fn search_models(
         &self,
         query: &str,
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
+        if let crate::ApiInner::Catalog(state) = &self.inner {
+            let crate::CatalogQueryResponse::Search(result) = state
+                .query(crate::CatalogQueryRequest::Search {
+                    query: query.into(),
+                    limit,
+                    offset,
+                })
+                .await?
+            else {
+                unreachable!()
+            };
+            return Ok(result);
+        }
+        self.try_primary()?;
         let primary = self.primary();
 
         if query.trim().is_empty() {
@@ -240,6 +264,7 @@ impl PumasApi {
     /// source-of-truth for both metadata-backed models and metadata-less
     /// partial downloads staged from persisted/HF download data.
     pub async fn rebuild_model_index(&self) -> Result<usize> {
+        self.try_primary()?;
         let primary = self.primary();
         reconcile_required_model_index(primary.as_ref(), "api-rebuild-model-index").await?;
         load_model_count(primary.model_library.clone()).await
@@ -247,6 +272,7 @@ impl PumasApi {
 
     /// Get model-library status information for GUI polling.
     pub async fn get_library_status(&self) -> Result<models::LibraryStatusResponse> {
+        self.try_primary()?;
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),
@@ -274,6 +300,7 @@ impl PumasApi {
         &self,
         file_path: &str,
     ) -> Result<models::FileTypeValidationResponse> {
+        self.try_primary()?;
         let path = match validate_existing_local_file_path(file_path).await {
             Ok(path) => path,
             Err(err) => {
@@ -313,6 +340,18 @@ impl PumasApi {
 
     /// Get a single model by ID.
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
+        if let crate::ApiInner::Catalog(state) = &self.inner {
+            let crate::CatalogQueryResponse::Get(result) = state
+                .query(crate::CatalogQueryRequest::Get {
+                    model_id: model_id.into(),
+                })
+                .await?
+            else {
+                unreachable!()
+            };
+            return Ok(result);
+        }
+        self.try_primary()?;
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),
@@ -321,6 +360,40 @@ impl PumasApi {
         )
         .await?;
         primary.model_library.get_model(model_id).await
+    }
+
+    /// Observe a canonical ID and report a reclassification performed by this read.
+    ///
+    /// Requires the Full instance profile; indexed CatalogQuery reads retain `get_model`.
+    /// Existing `get_model` semantics are unchanged. A replacement is an explicit
+    /// selection refresh hint, not an alias. Missing means no indexed row at this path;
+    /// earlier moves are not reconstructed. Overlapping reconciliation returns a
+    /// typed conflict rather than an ambiguous missing result.
+    pub async fn lookup_model(&self, model_id: &str) -> Result<models::ModelLookupReport> {
+        if model_id.len() > 4096 || !crate::intent::valid_relative_identity(model_id) {
+            return Err(PumasError::InvalidParams {
+                message: "model_id must be a canonical relative model path".into(),
+            });
+        }
+        let primary = self.try_primary()?;
+        let changes = super::reconciliation::reconcile_model_lookup(primary, model_id).await?;
+        let resolution = if let Some((_, replacement_model_id)) = changes
+            .into_iter()
+            .find(|(from, to)| from == model_id && from != to)
+        {
+            models::ModelLookupResolution::Reclassified {
+                replacement_model_id,
+            }
+        } else if primary.model_library.get_model(model_id).await?.is_some() {
+            models::ModelLookupResolution::Found
+        } else {
+            models::ModelLookupResolution::Missing
+        };
+        Ok(models::ModelLookupReport {
+            contract_version: models::MODEL_LOOKUP_CONTRACT_VERSION,
+            requested_model_id: model_id.to_string(),
+            resolution,
+        })
     }
 
     /// Get inference settings schema for a model.
@@ -332,6 +405,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<Vec<models::InferenceParamSchema>> {
+        self.try_primary()?;
         load_inference_settings_for_model(
             self.primary().model_library.clone(),
             model_id.to_string(),
@@ -345,6 +419,7 @@ impl PumasApi {
         &self,
         model_ids: Vec<String>,
     ) -> Result<Vec<models::ModelInferenceSettingsBatchItem>> {
+        self.try_primary()?;
         let library = self.primary().model_library.clone();
         let mut items = Vec::with_capacity(model_ids.len());
         for model_id in model_ids {
@@ -372,6 +447,7 @@ impl PumasApi {
         model_id: &str,
         settings: Vec<models::InferenceParamSchema>,
     ) -> Result<()> {
+        self.try_primary()?;
         let library = self.primary().model_library.clone();
         let model_dir = library.library_root().join(model_id);
 
@@ -404,6 +480,7 @@ impl PumasApi {
         model_id: &str,
         notes: Option<String>,
     ) -> Result<models::UpdateModelNotesResponse> {
+        self.try_primary()?;
         let library = self.primary().model_library.clone();
         let model_dir = library.library_root().join(model_id);
 
@@ -446,6 +523,7 @@ impl PumasApi {
         platform_context: &str,
         backend_key: Option<&str>,
     ) -> Result<model_library::ModelDependencyRequirementsResolution> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_dependency_requirements(model_id, platform_context, backend_key)
@@ -457,6 +535,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::ModelExecutionDescriptor> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_execution_descriptor(model_id)
@@ -468,6 +547,7 @@ impl PumasApi {
         &self,
         request: models::ResolveModelArtifactLoadTargetRequest,
     ) -> Result<models::ResolveModelArtifactLoadTargetResponse> {
+        self.try_primary()?;
         self.try_primary()?
             .model_library
             .resolve_model_artifact_load_target(request)
@@ -479,6 +559,7 @@ impl PumasApi {
         &self,
         model_ids: Vec<String>,
     ) -> Result<Vec<models::ModelExecutionDescriptorBatchItem>> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_execution_descriptors_batch(&model_ids)
@@ -490,6 +571,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::ResolvedModelPackageFacts> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_package_facts(model_id)
@@ -502,6 +584,7 @@ impl PumasApi {
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<models::ModelLibraryUpdateFeed> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .list_model_library_updates_since(cursor, limit)
@@ -513,6 +596,7 @@ impl PumasApi {
         &self,
         cursor: &str,
     ) -> Result<models::ModelLibraryUpdateSubscription> {
+        self.try_primary()?;
         self.try_primary()?
             .model_library
             .subscribe_model_library_updates_since(cursor)
@@ -524,6 +608,7 @@ impl PumasApi {
         &self,
         cursor: &str,
     ) -> Result<model_library::ModelLibraryUpdateSubscriber> {
+        self.try_primary()?;
         self.try_primary()?
             .model_library
             .subscribe_model_library_update_stream_since(cursor)
@@ -535,6 +620,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::ModelPackageFactsSummaryResult> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_package_facts_summary(model_id)
@@ -546,6 +632,7 @@ impl PumasApi {
         &self,
         model_ids: Vec<String>,
     ) -> Result<Vec<models::ModelPackageFactsSummaryBatchItem>> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_model_package_facts_summaries(&model_ids)
@@ -558,6 +645,7 @@ impl PumasApi {
         limit: usize,
         offset: usize,
     ) -> Result<models::ModelPackageFactsSummarySnapshot> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .model_package_facts_summary_snapshot(limit, offset)
@@ -572,6 +660,7 @@ impl PumasApi {
         &self,
         request: models::ModelLibrarySelectorSnapshotRequest,
     ) -> Result<models::ModelLibrarySelectorSnapshot> {
+        self.try_primary()?;
         self.try_primary()?
             .model_library
             .model_library_selector_snapshot(request)
@@ -580,6 +669,7 @@ impl PumasApi {
 
     /// Resolve a canonical model id or legacy local path into a Pumas model ref.
     pub async fn resolve_pumas_model_ref(&self, input: &str) -> Result<models::PumasModelRef> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .resolve_pumas_model_ref(input)
@@ -590,6 +680,7 @@ impl PumasApi {
     pub async fn audit_dependency_pin_compliance(
         &self,
     ) -> Result<model_library::DependencyPinAuditReport> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .audit_dependency_pin_compliance()
@@ -601,6 +692,7 @@ impl PumasApi {
         &self,
         filter: Option<model_library::ModelReviewFilter>,
     ) -> Result<Vec<model_library::ModelReviewItem>> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .list_models_needing_review(filter)
@@ -615,6 +707,7 @@ impl PumasApi {
         reviewer: &str,
         reason: Option<&str>,
     ) -> Result<model_library::SubmitModelReviewResult> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .submit_model_review(model_id, patch, reviewer, reason)
@@ -628,6 +721,7 @@ impl PumasApi {
         reviewer: &str,
         reason: Option<&str>,
     ) -> Result<bool> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .reset_model_review(model_id, reviewer, reason)
@@ -639,6 +733,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<Option<models::ModelMetadata>> {
+        self.try_primary()?;
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),
@@ -654,7 +749,20 @@ impl PumasApi {
         &self,
         spec: &model_library::ModelImportSpec,
     ) -> Result<model_library::ModelImportResult> {
+        self.try_primary()?;
         self.primary().model_importer.import(spec).await
+    }
+
+    /// Import an explicit local Cohere directory through the managed copied-import owner.
+    pub async fn import_local_cohere(
+        &self,
+        spec: &model_library::ModelImportSpec,
+    ) -> Result<model_library::ModelImportResult> {
+        self.try_primary()?;
+        self.primary()
+            .model_importer
+            .import_local_cohere(spec)
+            .await
     }
 
     /// Import multiple models in batch.
@@ -662,6 +770,7 @@ impl PumasApi {
         &self,
         specs: Vec<model_library::ModelImportSpec>,
     ) -> Vec<model_library::ModelImportResult> {
+        let _ = self.primary();
         self.primary()
             .model_importer
             .batch_import(specs, None)
@@ -673,6 +782,7 @@ impl PumasApi {
         &self,
         spec: &model_library::ExternalDiffusersImportSpec,
     ) -> Result<model_library::ModelImportResult> {
+        self.try_primary()?;
         self.primary()
             .model_importer
             .import_external_diffusers_directory(spec)
@@ -684,6 +794,7 @@ impl PumasApi {
         &self,
         paths: &[String],
     ) -> Result<Vec<model_library::ImportPathClassification>> {
+        self.try_primary()?;
         let paths = paths.to_vec();
         tokio::task::spawn_blocking(move || {
             Ok(paths
@@ -707,6 +818,7 @@ impl PumasApi {
         &self,
         spec: &model_library::InPlaceImportSpec,
     ) -> Result<model_library::ModelImportResult> {
+        self.try_primary()?;
         let mut validated_spec = spec.clone();
         validated_spec.model_dir =
             validate_existing_local_directory_path(spec.model_dir.to_string_lossy().as_ref())
@@ -724,11 +836,13 @@ impl PumasApi {
     /// creates metadata from directory structure and file type detection, and
     /// indexes the models.
     pub async fn adopt_orphan_models(&self) -> Result<model_library::OrphanScanResult> {
+        self.try_primary()?;
         Ok(self.primary().model_importer.adopt_orphans(false).await)
     }
 
     /// Reclassify a single model (re-detect type and relocate directory if needed).
     pub async fn reclassify_model(&self, model_id: &str) -> Result<Option<String>> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .reclassify_model(model_id)
@@ -737,6 +851,7 @@ impl PumasApi {
 
     /// Reclassify all models in the library (re-detect types and relocate directories).
     pub async fn reclassify_all_models(&self) -> Result<model_library::ReclassifyResult> {
+        self.try_primary()?;
         self.primary().model_library.reclassify_all_models().await
     }
 }
@@ -750,6 +865,157 @@ mod tests {
     use crate::models::ModelMetadata;
     use crate::PumasApi;
     use tempfile::TempDir;
+
+    async fn lookup_fixture(api: &PumasApi, model_id: &str) -> Vec<u8> {
+        let dir = api.primary().model_library.library_root().join(model_id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let header = br#"{"weight":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}}"#;
+        let bytes = [
+            (header.len() as u64).to_le_bytes().as_slice(),
+            header.as_slice(),
+            1.0_f32.to_le_bytes().as_slice(),
+        ]
+        .concat();
+        std::fs::write(dir.join("weights.safetensors"), &bytes).unwrap();
+        let metadata = ModelMetadata {
+            schema_version: Some(1),
+            model_id: Some(model_id.into()),
+            model_type: Some(model_id.split('/').next().unwrap().into()),
+            family: Some("fixture".into()),
+            official_name: Some("lookup".into()),
+            cleaned_name: Some("lookup".into()),
+            subtype: Some("stale-subtype".into()),
+            ..Default::default()
+        };
+        api.primary()
+            .model_library
+            .save_metadata(&dir, &metadata)
+            .await
+            .unwrap();
+        bytes
+    }
+
+    #[tokio::test]
+    async fn lookup_model_reports_actual_reclassification_and_preserves_legacy_lookup() {
+        use crate::models::ModelLookupResolution;
+        let root = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(root.path(), None).await;
+        let old = "llm/fixture/lookup";
+        let replacement = "unknown/fixture/lookup";
+        let bytes = lookup_fixture(&api, old).await;
+        let report = api.lookup_model(old).await.unwrap();
+        assert_eq!(report.contract_version, 1);
+        assert_eq!(report.requested_model_id, old);
+        assert_eq!(
+            report.resolution,
+            ModelLookupResolution::Reclassified {
+                replacement_model_id: replacement.into()
+            }
+        );
+        assert!(!api
+            .primary()
+            .model_library
+            .library_root()
+            .join(old)
+            .exists());
+        assert_eq!(
+            std::fs::read(
+                api.primary()
+                    .model_library
+                    .library_root()
+                    .join(replacement)
+                    .join("weights.safetensors")
+            )
+            .unwrap(),
+            bytes
+        );
+        assert!(api.get_model(old).await.unwrap().is_none());
+        assert!(api.get_model(replacement).await.unwrap().is_some());
+        assert_eq!(
+            api.lookup_model(old).await.unwrap().resolution,
+            ModelLookupResolution::Missing,
+            "no alias history is retained after the reporting read"
+        );
+    }
+
+    #[tokio::test]
+    async fn lookup_model_unchanged_reads_and_missing_are_explicit() {
+        use crate::models::ModelLookupResolution;
+        let root = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(root.path(), None).await;
+        let id = "unknown/fixture/lookup";
+        let bytes = lookup_fixture(&api, id).await;
+        for _ in 0..3 {
+            assert_eq!(
+                api.lookup_model(id).await.unwrap().resolution,
+                ModelLookupResolution::Found
+            );
+            assert_eq!(api.get_model(id).await.unwrap().unwrap().id, id);
+        }
+        assert_eq!(
+            std::fs::read(
+                api.primary()
+                    .model_library
+                    .library_root()
+                    .join(id)
+                    .join("weights.safetensors")
+            )
+            .unwrap(),
+            bytes
+        );
+        assert_eq!(
+            api.lookup_model("unknown/fixture/missing")
+                .await
+                .unwrap()
+                .resolution,
+            ModelLookupResolution::Missing
+        );
+        for invalid in ["", "../escape", "/absolute"] {
+            assert!(matches!(
+                api.lookup_model(invalid).await,
+                Err(PumasError::InvalidParams { .. })
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn lookup_model_in_flight_returns_conflict_instead_of_missing() {
+        let root = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(root.path(), None).await;
+        let scope = ReconcileScope::AllModels;
+        let primary = api.primary();
+        let run = match primary
+            .reconciliation
+            .try_start(&scope, ReconcileIntent::Forced)
+            .await
+        {
+            StartOutcome::Started(run) => run,
+            _ => panic!("fixture must admit reconciliation"),
+        };
+        assert!(matches!(
+            api.lookup_model("unknown/fixture/missing").await,
+            Err(PumasError::ModelIndexRefreshInProgress)
+        ));
+        run.finish_failure().await;
+    }
+
+    #[tokio::test]
+    async fn lookup_model_busy_custody_is_a_conflict_without_poisoning_shutdown() {
+        let root = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(root.path(), None).await;
+        lookup_fixture(&api, "llm/fixture/lookup").await;
+        let custody = crate::model_library::DownloadDestinationRoot::open(
+            api.primary().model_library.library_root(),
+        )
+        .unwrap();
+        let grant = custody.try_acquire_execution_grant().unwrap();
+        assert!(matches!(
+            api.lookup_model("llm/fixture/lookup").await,
+            Err(PumasError::DownloadRootBusy)
+        ));
+        drop(grant);
+        api.primary().runtime_tasks.shutdown_owned().await.unwrap();
+    }
 
     #[tokio::test]
     async fn validate_existing_local_file_path_canonicalizes_existing_file() {
@@ -779,7 +1045,17 @@ mod tests {
     #[tokio::test]
     async fn get_inference_settings_batch_reports_per_model_errors() {
         let temp_dir = TempDir::new().unwrap();
-        let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
+        let api = PumasApi::builder(temp_dir.path())
+            .with_registry(
+                crate::registry::LibraryRegistry::open_at(&temp_dir.path().join("registry.db"))
+                    .unwrap(),
+            )
+            .with_connectivity_probe(false)
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
         let model_id = "llm/batch/inference";
         let model_dir = api.shared_resources_dir().join("models").join(model_id);
         std::fs::create_dir_all(&model_dir).unwrap();

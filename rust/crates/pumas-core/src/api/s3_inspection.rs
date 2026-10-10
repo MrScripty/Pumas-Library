@@ -180,6 +180,11 @@ mod tests {
     async fn persisted_inspection_changed_atomic_image_is_unavailable_and_noncreating() {
         let root = tempfile::tempdir().unwrap();
         let api = PumasApi::builder(root.path())
+            .with_registry(
+                crate::registry::LibraryRegistry::open_at(&root.path().join("registry.db"))
+                    .unwrap(),
+            )
+            .with_connectivity_probe(false)
             .auto_create_dirs(true)
             .with_hf_client(false)
             .with_process_manager(false)

@@ -24,6 +24,8 @@ mod runtime_profiles;
 #[cfg(feature = "inference-plugins")]
 mod serving;
 #[cfg(feature = "inference-plugins")]
+mod serving_audio;
+#[cfg(feature = "inference-plugins")]
 mod serving_llama_cpp;
 #[cfg(feature = "inference-plugins")]
 mod serving_llama_cpp_router;
@@ -37,6 +39,8 @@ mod serving_onnx;
 mod serving_torch;
 mod shared;
 mod status;
+#[cfg(test)]
+mod status_diagnostic_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(feature = "inference-plugins")]
@@ -75,7 +79,7 @@ use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, warn, Instrument};
 
 const MODEL_LIBRARY_UPDATE_STREAM_LIMIT: usize = 250;
 
@@ -459,58 +463,88 @@ pub async fn handle_rpc(State(state): State<Arc<AppState>>, body: Bytes) -> impl
     }
     let method = request.command.method().to_string();
 
-    debug!(
-        rpc_method = diagnostic_method(&method),
+    execute_rpc_call(
+        id,
+        &method,
+        Box::pin(dispatch_admitted_command(&state, request.command)),
+    )
+    .await
+}
+
+/// INFO spans correlate sanitized failure events even when caller string IDs
+/// cannot be logged. IDs are process-local; they are not durable/global identity.
+async fn execute_rpc_call(
+    id: Option<Value>,
+    method: &str,
+    dispatch: std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<RpcOutcome, RpcDispatchError>> + Send + '_>,
+    >,
+) -> (StatusCode, Json<JsonRpcResponse>) {
+    static NEXT_CALL_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let span = tracing::info_span!(
+        "rpc_call",
+        rpc_call_id = NEXT_CALL_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        rpc_method = diagnostic_method(method),
         request_id = ?diagnostic_request_id(id.as_ref()),
-        "RPC call received"
     );
+    async {
+        debug!(
+            rpc_method = diagnostic_method(method),
+            request_id = ?diagnostic_request_id(id.as_ref()),
+            "RPC call received"
+        );
 
-    let result = dispatch_admitted_command(&state, request.command).await;
+        let result = dispatch.await;
 
-    match result {
-        Ok(outcome) => {
-            let uses_response_wrapper = outcome.uses_response_wrapper();
-            let value = match outcome.into_value() {
-                Ok(value) => value,
-                Err(public_error) => {
-                    error!(
-                        rpc_method = diagnostic_method(&method),
-                        request_id = ?diagnostic_request_id(id.as_ref()),
-                        error_code = public_error.code,
-                        error_class = public_error.class.as_str(),
-                        "RPC outcome serialization failed"
-                    );
-                    return (
-                        StatusCode::OK,
-                        Json(JsonRpcResponse::error(id, public_error)),
-                    );
-                }
-            };
-            let value = if uses_response_wrapper {
-                wrap_response(&method, value)
-            } else {
-                value
-            };
-            (StatusCode::OK, Json(JsonRpcResponse::success(id, value)))
-        }
-        Err(error) => {
-            let public_error = match error {
-                RpcDispatchError::Domain(error) => PublicError::from(&error),
-                RpcDispatchError::MethodNotFound => PublicError::method_not_found(),
-            };
-            error!(
-                rpc_method = diagnostic_method(&method),
-                request_id = ?diagnostic_request_id(id.as_ref()),
-                error_code = public_error.code,
-                error_class = public_error.class.as_str(),
-                "RPC call failed"
-            );
-            (
-                StatusCode::OK,
-                Json(JsonRpcResponse::error(id, public_error)),
-            )
+        match result {
+            Ok(outcome) => {
+                let uses_response_wrapper = outcome.uses_response_wrapper();
+                let value = match outcome.into_value() {
+                    Ok(value) => value,
+                    Err(public_error) => {
+                        error!(
+                            rpc_method = diagnostic_method(method),
+                            request_id = ?diagnostic_request_id(id.as_ref()),
+                            failure_stage = "serialization",
+                            failure_category = "outcome_serialization",
+                            error_code = public_error.code,
+                            error_class = public_error.class.as_str(),
+                            "RPC outcome serialization failed"
+                        );
+                        return (
+                            StatusCode::OK,
+                            Json(JsonRpcResponse::error(id, public_error)),
+                        );
+                    }
+                };
+                let value = if uses_response_wrapper {
+                    wrap_response(method, value)
+                } else {
+                    value
+                };
+                (StatusCode::OK, Json(JsonRpcResponse::success(id, value)))
+            }
+            Err(error) => {
+                let public_error = match error {
+                    RpcDispatchError::Domain(error) => PublicError::from(&error),
+                    RpcDispatchError::MethodNotFound => PublicError::method_not_found(),
+                };
+                error!(
+                    rpc_method = diagnostic_method(method),
+                    request_id = ?diagnostic_request_id(id.as_ref()),
+                    error_code = public_error.code,
+                    error_class = public_error.class.as_str(),
+                    "RPC call failed"
+                );
+                (
+                    StatusCode::OK,
+                    Json(JsonRpcResponse::error(id, public_error)),
+                )
+            }
         }
     }
+    .instrument(span)
+    .await
 }
 
 enum RpcDispatchError {
@@ -964,6 +998,9 @@ async fn dispatch_admitted_command(
             .await
             .map(Box::new)
             .map(RpcOutcome::PartialDownload),
+        RpcCommand::LookupModel { model_id } => models::lookup_model(state, &model_id)
+            .await
+            .map(RpcOutcome::ModelLookup),
         RpcCommand::GetModels => models::get_models(state)
             .await
             .map(Box::new)
@@ -1330,6 +1367,7 @@ fn shutdown_result(state: &AppState) -> pumas_library::Result<RpcOutcome> {
 
 fn diagnostic_method(method: &str) -> &'static str {
     match method {
+        "get_model_download_status" => "get_model_download_status",
         "health_check" => "health_check",
         "shutdown" => "shutdown",
         "set_hf_token" => "set_hf_token",
@@ -1647,6 +1685,10 @@ async fn dispatch_method(
         #[cfg(feature = "inference-plugins")]
         "serve_model" => serving::serve_model(state, params).await,
         #[cfg(feature = "inference-plugins")]
+        "serve_experimental_local_cohere" => {
+            serving::serve_experimental_local_cohere(state, params).await
+        }
+        #[cfg(feature = "inference-plugins")]
         "unserve_model" => serving::unserve_model(state, params).await,
 
         // Version Management
@@ -1667,6 +1709,7 @@ async fn dispatch_method(
 
         // Model Library
         "import_model" => models::import_model(state, params).await,
+        "import_local_cohere" => models::import_local_cohere(state, params).await,
         "search_hf_models" => models::search_hf_models(state, params).await,
         "get_related_models" => models::get_related_models(state, params).await,
         "import_batch" => models::import_batch(state, params).await,

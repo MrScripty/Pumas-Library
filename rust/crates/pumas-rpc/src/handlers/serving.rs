@@ -69,7 +69,27 @@ pub async fn validate_model_serving_config(
 
 pub async fn serve_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let command: ServeModelParams = parse_params("serve_model", params)?;
-    let request = request_with_effective_gateway_alias(state, command.request).await?;
+    serve_validated(state, command.request, false).await
+}
+
+/// Explicit local experiment; ordinary serve_model never selects this policy.
+pub async fn serve_experimental_local_cohere(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let command: ServeModelParams = parse_params("serve_experimental_local_cohere", params)?;
+    let mut response = serve_validated(state, command.request, true).await?;
+    response["experimental"] = Value::Bool(true);
+    response["production_available"] = Value::Bool(false);
+    Ok(response)
+}
+
+async fn serve_validated(
+    state: &AppState,
+    request: ServeModelRequest,
+    experimental: bool,
+) -> pumas_library::Result<Value> {
+    let request = request_with_effective_gateway_alias(state, request).await?;
     let validation = state
         .api
         .validate_model_serving_config(request.clone())
@@ -86,38 +106,51 @@ pub async fn serve_model(state: &AppState, params: &Value) -> pumas_library::Res
         return non_critical_failure_response(state, error).await;
     }
 
-    let result = execute_serving_load(&state.api, request, async |request, operation| match state
-        .provider_registry
-        .get(request.config.provider)
-        .map(|behavior| behavior.serving_adapter_kind)
-    {
-        Some(ProviderServingAdapterKind::OllamaProviderApi) => {
-            serve_ollama_model(state, request, operation).await
+    let result = execute_serving_load(&state.api, request, async |request, operation| {
+        if experimental {
+            return super::serving_audio::serve_experimental_local_cohere(
+                state, request, operation,
+            )
+            .await;
         }
-        Some(ProviderServingAdapterKind::LlamaCppRuntime) => {
-            serve_llama_cpp_model(state, request, operation).await
-        }
-        Some(ProviderServingAdapterKind::TorchRuntime) => {
-            super::serving_torch::serve_torch_model(state, request, operation).await
-        }
-        Some(ProviderServingAdapterKind::OnnxRuntime) => {
-            serve_onnx_model(state, request, operation).await
-        }
-        None => {
-            let error = serving_error(
-                ModelServeErrorCode::UnsupportedProvider,
-                "selected serving provider is not registered",
-                &request,
-            );
-            non_critical_failure_response(state, error).await
+        match state
+            .provider_registry
+            .get(request.config.provider)
+            .map(|behavior| behavior.serving_adapter_kind)
+        {
+            Some(ProviderServingAdapterKind::OllamaProviderApi) => {
+                serve_ollama_model(state, request, operation).await
+            }
+            Some(ProviderServingAdapterKind::LlamaCppRuntime) => {
+                serve_llama_cpp_model(state, request, operation).await
+            }
+            Some(ProviderServingAdapterKind::TorchRuntime) => {
+                super::serving_torch::serve_torch_model(state, request, operation).await
+            }
+            Some(ProviderServingAdapterKind::OnnxRuntime) => {
+                serve_onnx_model(state, request, operation).await
+            }
+            None => {
+                let error = serving_error(
+                    ModelServeErrorCode::UnsupportedProvider,
+                    "selected serving provider is not registered",
+                    &request,
+                );
+                non_critical_failure_response(state, error).await
+            }
         }
     })
     .await?;
+    let report = result.get("experimental_local_cohere").cloned();
     let mut response: ServeModelResponse = serde_json::from_value(result)?;
     if let Some(snapshot) = &mut response.snapshot {
         decorate_serving_snapshot(state, snapshot);
     }
-    Ok(serde_json::to_value(response)?)
+    let mut response = serde_json::to_value(response)?;
+    if let Some(report) = report {
+        response["experimental_local_cohere"] = report;
+    }
+    Ok(response)
 }
 
 async fn execute_serving_load<F>(
@@ -140,13 +173,19 @@ where
         }
     };
     let result = provider(request, &operation).await;
-    let mut response: ServeModelResponse = serde_json::from_value(result?)?;
+    let result = result?;
+    let report = result.get("experimental_local_cohere").cloned();
+    let mut response: ServeModelResponse = serde_json::from_value(result)?;
     if let Some(error) = response.load_error.clone() {
         operation.finish_failure(error);
     }
     drop(operation);
     response.snapshot = Some(api.get_serving_status().await?.snapshot);
-    Ok(serde_json::to_value(response)?)
+    let mut response = serde_json::to_value(response)?;
+    if let Some(report) = report {
+        response["experimental_local_cohere"] = report;
+    }
+    Ok(response)
 }
 
 #[cfg(test)]

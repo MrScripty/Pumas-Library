@@ -58,6 +58,50 @@ fn endpoints_reject_remote_hosts_credentials_and_ambiguous_context() {
         "http://[::1]:8000"
     );
 }
+
+#[tokio::test]
+async fn admission_fence_binds_both_generations_without_exposing_credentials() {
+    let (_temp, _registry, _root, api) = fixture().await;
+    let mut registration = api.prepare_http_service(endpoint(1), http_build()).unwrap();
+    let mut description = registration.description().clone();
+    assert!(
+        description.admission_fence().is_err(),
+        "legacy peers may ignore fence headers"
+    );
+    description
+        .build_info
+        .schemas
+        .push(crate::build_info::SchemaAdvertisement {
+            name: "pumas.http-admission-fence".into(),
+            version: HTTP_ADMISSION_FENCE_SCHEMA_VERSION + 1,
+        });
+    assert!(
+        description.admission_fence().is_err(),
+        "future schemas are not implemented"
+    );
+    description.build_info.schemas.last_mut().unwrap().version =
+        HTTP_ADMISSION_FENCE_SCHEMA_VERSION;
+    let fence = description.admission_fence().unwrap();
+    assert!(fence.matches(&description));
+    let encoded = serde_json::to_value(&fence).unwrap();
+    assert_eq!(encoded.as_object().unwrap().len(), 2);
+    assert!(!encoded.to_string().contains("token"));
+    assert_eq!(
+        serde_json::from_value::<HttpAdmissionFence>(encoded.clone()).unwrap(),
+        fence
+    );
+    let mut unknown = encoded;
+    unknown["safe_start"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<HttpAdmissionFence>(unknown).is_err());
+    let mut changed = description.clone();
+    changed.service_generation.push_str("-successor");
+    assert!(!fence.matches(&changed));
+    changed = description.clone();
+    changed.instance.generation.push_str("-successor");
+    assert!(!fence.matches(&changed));
+    registration.complete_shutdown(Ok(())).unwrap();
+    api.shutdown_instance().await.unwrap();
+}
 #[tokio::test]
 async fn publication_is_explicit_and_same_owner_cannot_replace_live_service() {
     let (temp, registry, root, api) = fixture().await;

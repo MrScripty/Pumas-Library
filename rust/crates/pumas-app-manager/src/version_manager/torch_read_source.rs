@@ -1,6 +1,7 @@
 //! Selected installed-byte custody, without native/runtime qualification.
-//! Linux managed CPython only. System ELF libraries, loader search paths and
-//! model-specific executable read sets are deliberately not attested here.
+//! Linux managed CPython only. The optional NativeLibraries cohort retains
+//! source-pinned system-loader/library bytes. Byte provenance and custody do
+//! not attest dynamic loader behavior, enforced reads or production ASR.
 
 use super::installer::{self, StagedFilesManifest, TorchVersionsLock};
 use super::managed_depot_lease::ManagedDepotLease;
@@ -14,9 +15,128 @@ use std::fs::File;
 use std::io::{self, Read};
 
 impl VersionManager {
+    /// Prepare a source-pinned native cohort and retain all selected runtime
+    /// bytes. This does not grant audio admission or qualify native execution.
+    /// The owned native directory disappears only after its final custody owner.
+    /// The manager owns preparation through nested stages and joins it at shutdown.
+    /// Do not hold a caller-side Torch lifecycle lease while awaiting this method.
+    pub async fn prepare_torch_audio_runtime_bytes(
+        &self,
+        tag: &str,
+    ) -> Result<Arc<RetainedRuntimeReadSource>> {
+        let tag = tag.to_owned();
+        self.owned_runtime_preparation(move |manager| async move {
+            manager.prepare_torch_audio_runtime_bytes_owned(&tag).await
+        })
+        .await
+    }
+
+    /// Prepare the exact active tag observed by a serving request. A changed
+    /// selection refuses under the owned lifecycle lock; it never retargets.
+    pub async fn prepare_active_torch_audio_runtime_bytes(
+        &self,
+        expected_tag: &str,
+    ) -> Result<Arc<RetainedRuntimeReadSource>> {
+        let tag = expected_tag.to_owned();
+        self.owned_runtime_preparation(move |manager| async move {
+            if manager.get_active_version().await?.as_deref() != Some(tag.as_str()) {
+                return Err(refused("Active Torch runtime selection changed"));
+            }
+            manager.prepare_torch_audio_runtime_bytes_owned(&tag).await
+        })
+        .await
+    }
+
+    async fn prepare_torch_audio_runtime_bytes_owned(
+        &self,
+        tag: &str,
+    ) -> Result<Arc<RetainedRuntimeReadSource>> {
+        // Validate the existing selection before downloading any additional
+        // public artifact. Its read leases remain held until recapture finishes.
+        let existing = self.retain_torch_runtime_bytes_owned(tag).await?;
+        let recipe_source = existing.clone();
+        let recipe_path = self.versions_dir().join(tag).join("runtime.json");
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let metadata = serde_json::from_slice(&bounded_json(&recipe_path, 1024 * 1024)?)
+                .map_err(|error| refused(error.to_string()))?;
+            super::audio_runtime_recipe::validate(&metadata, &recipe_source)
+                .map_err(PumasError::from)
+        })
+        .await
+        .map_err(|error| refused(format!("Audio recipe validation task failed: {error}")))??;
+        let native = super::audio_native_cohort::prepare(&self.launcher_root)
+            .await
+            .map_err(PumasError::from)?;
+        let versions = self.versions_dir();
+        let lock = TorchVersionsLock::try_acquire_read(&versions).map_err(PumasError::from)?;
+        let runtime = versions.join(tag);
+        let launcher = self.launcher_root.clone();
+        let selected = tokio::task::spawn_blocking(move || {
+            capture_installed_with_native(&launcher, &runtime, lock, Some(native))
+        })
+        .await
+        .map_err(|error| refused(format!("Native runtime capture task failed: {error}")))??;
+        drop(existing);
+        Ok(selected)
+    }
     /// Retain actual interpreter, dependency and embedded sidecar selections.
     /// This does not grant serving availability or complete execution proof.
+    /// Manager-owned lifecycle custody survives cancellation of the result waiter.
+    /// Do not hold a caller-side Torch lifecycle lease while awaiting this method.
     pub async fn retain_torch_runtime_bytes(
+        &self,
+        tag: &str,
+    ) -> Result<Arc<RetainedRuntimeReadSource>> {
+        let tag = tag.to_owned();
+        self.owned_runtime_preparation(move |manager| async move {
+            manager.retain_torch_runtime_bytes_owned(&tag).await
+        })
+        .await
+    }
+
+    // Registered under the same admission lock as manager shutdown. A caller
+    // owns only its result waiter; the manager owns every nested blocking stage.
+    async fn owned_runtime_preparation<T, F, Fut>(&self, operation: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(VersionManager) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<T>> + Send + 'static,
+    {
+        if self.app_id != AppId::Torch {
+            return Err(refused(
+                "Runtime byte preparation requires the Torch manager",
+            ));
+        }
+        let receive = {
+            let _admission = self.installing_tag.lock().await;
+            let mut registered = self
+                .installation_tasks
+                .lock()
+                .map_err(|_| refused("Installation task registry poisoned"))?;
+            if self.torch_shutting_down.load(Ordering::SeqCst) {
+                return Err(refused("Version manager is shutting down"));
+            }
+            registered.harvest_finished();
+            let manager = self.clone();
+            let (send, receive) = tokio::sync::oneshot::channel();
+            registered.tasks.push(tokio::spawn(async move {
+                let _lifecycle = manager.lifecycle_lock.clone().lock_owned().await;
+                // Keep the manager's original state/root owners through the
+                // result handoff, even if the preparation future consumes a clone.
+                let result = operation(manager.clone()).await;
+                let _ = send.send(result);
+                // Ordinary source refusal is returned to the caller, not a
+                // cleanup failure. A panic stays in the registered JoinHandle.
+                Ok(())
+            }));
+            receive
+        };
+        receive
+            .await
+            .map_err(|_| refused("Runtime byte preparation worker lost"))?
+    }
+
+    async fn retain_torch_runtime_bytes_owned(
         &self,
         tag: &str,
     ) -> Result<Arc<RetainedRuntimeReadSource>> {
@@ -105,6 +225,35 @@ fn file_manifest(path: &Path, relative: String) -> Result<RuntimeReadFile> {
     RuntimeReadFile::new(relative, size, format!("{:x}", sha.finalize())).map_err(PumasError::from)
 }
 
+// These namespaces are never executable/read inputs to the owned -I -S -B
+// worker. They remain present and identity-tracked, but get no content grant.
+// This is source-fixed selection, not a caller-controlled ignore list.
+fn inert_import_member(path: &str) -> bool {
+    path.split('/').any(|name| {
+        name == "__pycache__"
+            || name.ends_with(".pyc")
+            || name.ends_with(".pyo")
+            || name.ends_with(".pth")
+            || matches!(name, "sitecustomize.py" | "usercustomize.py")
+    })
+}
+
+// Only the 42 observed generated entrypoints and their RECORDs vary with the
+// installer staging path. They are never imports or runtime program inputs.
+// Keep full installer validation and namespace identity, but grant no content
+// read for these exact source-fixed names. All other metadata remains selected.
+fn inert_dependency_member(path: &str) -> bool {
+    static NAMES: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+        let pin: serde_json::Value = serde_json::from_str(
+            pumas_library::runtime_read_source::AUDIO_RUNTIME_CANDIDATE_RECIPE,
+        )
+        .expect("source-fixed audio recipe JSON");
+        serde_json::from_value(pin["dependency_inert_members"].clone())
+            .expect("source-fixed inert dependency names")
+    });
+    inert_import_member(path) || NAMES.iter().any(|name| name == path)
+}
+
 fn tree_manifest(
     root: &Path,
     excluded: &[String],
@@ -143,15 +292,24 @@ fn tree_manifest(
         }
         if entry.file_type().is_symlink() {
             let target = std::fs::canonicalize(entry.path()).map_err(PumasError::from)?;
-            if !aliases || !target.starts_with(root) || !target.is_file() {
+            // UV creates this exact minor-version directory alias alongside
+            // the pinned full distribution. Do not follow it or select bytes
+            // through it; retain the link identity as an omission. Every other
+            // directory alias and every external alias remains refused.
+            let fixed_directory_alias = relative == "cpython-3.12-linux-x86_64-gnu"
+                && target == root.join("cpython-3.12.14-linux-x86_64-gnu")
+                && target.is_dir();
+            if !aliases || !target.starts_with(root) || !(target.is_file() || fixed_directory_alias)
+            {
                 return Err(refused("Unsupported external or directory runtime alias"));
             }
             omissions.push(relative);
         } else if entry.file_type().is_file() {
-            if relative.ends_with(".pyc") || relative.ends_with(".pth") {
-                return Err(refused("Unreported import mutation is unsupported"));
+            if inert_import_member(&relative) {
+                omissions.push(relative);
+            } else {
+                members.push(file_manifest(entry.path(), relative)?);
             }
-            members.push(file_manifest(entry.path(), relative)?);
         } else if !entry.file_type().is_dir() {
             return Err(refused("Runtime selection contains a special file"));
         }
@@ -166,6 +324,15 @@ fn capture_installed(
     launcher: &Path,
     runtime: &Path,
     lock: TorchVersionsLock,
+) -> Result<Arc<RetainedRuntimeReadSource>> {
+    capture_installed_with_native(launcher, runtime, lock, None)
+}
+
+fn capture_installed_with_native(
+    launcher: &Path,
+    runtime: &Path,
+    lock: TorchVersionsLock,
+    native: Option<RuntimeReadRoot>,
 ) -> Result<Arc<RetainedRuntimeReadSource>> {
     if !cfg!(target_os = "linux") {
         return Err(refused(
@@ -232,24 +399,16 @@ fn capture_installed(
     )?)
     .map_err(|error| refused(error.to_string()))?;
     installer::validate_staged_files(&packages, &installed)?;
-    if installed.files.iter().any(|file| {
-        file.path.ends_with(".pyc")
-            || file.path.ends_with(".pyo")
-            || file.path.ends_with(".pth")
-            || matches!(
-                Path::new(&file.path)
-                    .file_name()
-                    .and_then(|name| name.to_str()),
-                Some("sitecustomize.py" | "usercustomize.py")
-            )
-    }) {
-        return Err(refused(
-            "Installed package import hooks or bytecode are unsupported",
-        ));
-    }
+    let dependency_omissions = installed
+        .files
+        .iter()
+        .filter(|file| inert_dependency_member(&file.path))
+        .map(|file| file.path.clone())
+        .collect::<Vec<_>>();
     let dependencies = installed
         .files
         .into_iter()
+        .filter(|file| !inert_dependency_member(&file.path))
         .map(|file| RuntimeReadFile::new(file.path, file.size, file.sha256))
         .collect::<io::Result<Vec<_>>>()
         .map_err(PumasError::from)?;
@@ -290,7 +449,7 @@ fn capture_installed(
     }
     let (interpreter_members, interpreter_omissions) = tree_manifest(&depot, &[], true)?;
     let shared_lock = Arc::new(lock);
-    let selections = vec![
+    let mut selections = vec![
         RuntimeReadRoot::new(
             RuntimeReadRole::Interpreter,
             interpreter_dir,
@@ -302,7 +461,7 @@ fn capture_installed(
             RuntimeReadRole::Dependencies,
             packages_dir,
             dependencies,
-            vec![],
+            dependency_omissions,
             shared_lock.clone(),
         ),
         RuntimeReadRoot::new(
@@ -316,6 +475,9 @@ fn capture_installed(
     .into_iter()
     .collect::<io::Result<Vec<_>>>()
     .map_err(PumasError::from)?;
+    if let Some(native) = native {
+        selections.push(native);
+    }
     RetainedRuntimeReadSource::capture(selections).map_err(PumasError::from)
 }
 

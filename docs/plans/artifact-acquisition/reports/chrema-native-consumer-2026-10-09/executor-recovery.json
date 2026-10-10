@@ -1,0 +1,9 @@
+{
+  "verified_utc": "2026-10-09T11:13:30.877119+00:00",
+  "actual_executor_operation": "ps -eo pid,ppid,stat,comm (exit0)",
+  "matching_pumas_rpc_or_node_processes": [],
+  "Chrema_native_dispatch_started": false,
+  "draft_probe_only": true,
+  "reconciliation_retry_performed": false,
+  "disconnection_reported_utc": "2026-10-09T11:10:56Z"
+}

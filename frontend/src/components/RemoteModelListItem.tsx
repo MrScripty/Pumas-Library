@@ -20,6 +20,8 @@ interface RemoteModelListItemProps {
   activeArtifactLabels?: string[];
   modelError?: string;
   isHydratingDetails: boolean;
+  hasHydratedDetails?: boolean;
+  hydrationError?: string;
   isMenuOpen: boolean;
   selectedGroups: Set<string>;
   onToggleMenu: () => void;
@@ -43,6 +45,8 @@ export function RemoteModelListItem({
   activeArtifactLabels = [],
   modelError,
   isHydratingDetails,
+  hasHydratedDetails = false,
+  hydrationError,
   isMenuOpen,
   selectedGroups,
   onToggleMenu,
@@ -62,8 +66,8 @@ export function RemoteModelListItem({
   const retryHint = formatDownloadRetryHint(downloadStatus);
   const progressValue = downloadStatus?.progress ?? 0;
   const progressDegrees = Math.min(360, Math.max(0, Math.round(progressValue * 360)));
-  const hasExactDetails = hasExactDownloadDetails(model);
-  const downloadOptions = getRemoteDownloadOptions(model);
+  const hasExactDetails = hasHydratedDetails || hasExactDownloadDetails(model);
+  const downloadOptions = hasHydratedDetails ? model.downloadOptions ?? [] : getRemoteDownloadOptions(model);
   const hasFileGroups = hasRemoteFileGroups(downloadOptions);
   const quantLabels = getRemoteQuantLabels(downloadOptions, hasFileGroups);
   const selectedTotalBytes = getSelectedRemoteTotalBytes(downloadOptions, selectedGroups);
@@ -89,6 +93,7 @@ export function RemoteModelListItem({
           hasFileGroups={hasFileGroups}
           isHydratingDetails={isHydratingDetails}
           isMenuOpen={isMenuOpen}
+          hydrationError={hydrationError}
           model={model}
           downloadKey={downloadKey}
           progressDegrees={progressDegrees}

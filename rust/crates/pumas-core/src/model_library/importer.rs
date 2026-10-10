@@ -77,10 +77,16 @@ use walkdir::WalkDir;
 pub(crate) const TEMP_IMPORT_PREFIX: &str = ".tmp_import_";
 
 mod acquired;
+mod acquired_vision;
+mod acquired_vision_gguf;
+pub use acquired_vision::{AcquiredGgufVisionSpec, AcquiredGgufVisionTask};
+mod acquired_onnx;
+mod acquired_package;
 #[cfg(test)]
 mod acquisition_integration_tests;
 #[cfg(test)]
 mod admission_tests;
+mod local_cohere;
 pub(super) mod publication;
 mod recovery;
 mod staging;
@@ -222,6 +228,25 @@ impl ModelImporter {
     /// * `spec` - Import specification with path and metadata hints
     pub async fn import(&self, spec: &ModelImportSpec) -> Result<ModelImportResult> {
         self.import_owned(spec, None).await
+    }
+
+    /// Copy the closed local Cohere member set and author local selected-byte
+    /// identity. This declares speech intent, not upstream or model qualification.
+    pub async fn import_local_cohere(&self, spec: &ModelImportSpec) -> Result<ModelImportResult> {
+        if spec.repo_id.is_some()
+            || spec
+                .model_type
+                .as_deref()
+                .is_some_and(|value| value != "audio")
+        {
+            return Err(PumasError::Validation {
+                field: "import.local_cohere".into(),
+                message:
+                    "Local Cohere import requires audio intent and no upstream repository claim"
+                        .into(),
+            });
+        }
+        self.import_owned_with_local_cohere(spec, None, true).await
     }
 
     /// Copy one verified GGUF input into the model library under the current

@@ -18,8 +18,11 @@ def hash_file(path, algorithm="sha256"):
 
 
 def write_metadata(directory, extracted):
-    inventory = json.loads((ROOT / "docs/release-attribution/0.7.0/inventory.json").read_text())
-    notices = ROOT / "docs/release-attribution/0.7.0/THIRD-PARTY-NOTICES.txt"
+    version = json.loads((ROOT / "package.json").read_text())["version"]
+    inventory = json.loads(
+        (ROOT / f"docs/release-attribution/{version}/inventory.json").read_text()
+    )
+    notices = ROOT / f"docs/release-attribution/{version}/THIRD-PARTY-NOTICES.txt"
     for name, expected in inventory["input_sha256"].items():
         if hash_file(ROOT / name) != expected:
             raise ValueError(f"Attribution inputs changed: {name}")
@@ -28,8 +31,8 @@ def write_metadata(directory, extracted):
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     subjects = []
     for filename, tree in (
-        ("Pumas.Library-0.7.0.AppImage", extracted / "appimage/squashfs-root"),
-        ("pumas-library-electron_0.7.0_amd64.deb", extracted / "deb/opt/Pumas Library"),
+        (f"Pumas.Library-{version}.AppImage", extracted / "appimage/squashfs-root"),
+        (f"pumas-library-electron_{version}_amd64.deb", extracted / "deb/opt/Pumas Library"),
     ):
         artifact = directory / filename
         if hash_file(tree / "resources/THIRD-PARTY-NOTICES.txt") != hash_file(notices):
@@ -56,7 +59,7 @@ def write_metadata(directory, extracted):
         package = {
             "name": "Pumas Library",
             "SPDXID": "SPDXRef-Pumas",
-            "versionInfo": "0.7.0",
+            "versionInfo": version,
             "downloadLocation": "NOASSERTION",
             "filesAnalyzed": True,
             "packageVerificationCode": {
@@ -125,7 +128,7 @@ def write_metadata(directory, extracted):
             "relationships": relationships,
         }
         (directory / (filename + ".spdx.json")).write_text(json.dumps(document, indent=2) + "\n")
-    shutil.copyfile(notices, directory / "THIRD-PARTY-NOTICES-0.7.0.txt")
+    shutil.copyfile(notices, directory / f"THIRD-PARTY-NOTICES-{version}.txt")
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     patch = subprocess.check_output(["git", "diff", "HEAD", "--binary"], cwd=ROOT)
     provenance = {
@@ -161,7 +164,9 @@ def write_metadata(directory, extracted):
             },
         },
     }
-    (directory / "pumas-library-0.7.0.provenance.jsonl").write_text(json.dumps(provenance) + "\n")
+    (directory / f"pumas-library-{version}.provenance.jsonl").write_text(
+        json.dumps(provenance) + "\n"
+    )
     final = sorted(
         p for p in directory.iterdir() if p.is_file() and p.name != "checksums-sha256.txt"
     )

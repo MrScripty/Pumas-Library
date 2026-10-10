@@ -110,6 +110,79 @@ RFC authority: [HTTP Semantics, RFC 9110](https://www.rfc-editor.org/rfc/rfc9110
 
 Source configuration includes endpoint, region where applicable, bucket, addressing style, TLS/approved local-development policy, and explicit credential-provider identity. Preserve object version IDs and conditional reads. Treat ETag as an opaque source validator unless its specific documented checksum semantics are established. A multipart or encrypted-object ETag must not be relabeled SHA-256/MD5 evidence.
 
+The native model facade has two explicit selection contracts. Existing
+`PumasApi::import_s3_model(S3ModelImportRequest, control)` requires VersionIds for
+every declared member. `PumasApi::import_s3_conditional_model` accepts a
+`S3ConditionalModelImportRequest` for one ordinary non-versioned object: caller
+endpoint/bucket authority, exact `source_key`, mandatory `Sha256Evidence`, the
+logical file path in `import.path`, held `AcquisitionWorkspace`, finite retry
+policy and the existing operation UUID/control. It requires HEAD size and a
+strong quoted HTTP ETag (rejecting the `W/` weak-validator prefix), and sends
+If-Match on every fresh GET. `RevisionStrength::Weak` classifies mutable source
+provenance; it does not permit HTTP weak validators. ETag and size are not content
+integrity evidence: the required whole-file SHA-256 must match before verified
+handoff or receipt issuance. Selection, cancellation, byte verification, descriptor custody and
+receipt-bound model publication use the existing owners. Downloaded bytes still
+need shared model qualification; malformed, unsafe, unknown or incomplete packages
+are refused. Qualification does not establish backend compatibility or inference.
+
+The conditional single-object request cannot hydrate a prefix, discover or
+substitute a VersionId, or supply missing package companions.
+Existing versioned manifests/discovery retain their mandatory VersionId contract.
+The existing single-object RPC starts accept explicit `read_mode: "conditional"`
+with VersionId omitted and mandatory SHA-256. Omitted mode preserves VersionId
+requirements. Conditional bundles use explicit authored members as described
+below; conditional prefix discovery remains explicitly unsupported.
+The existing dialog still submits VersionId selections.
+See the [conditional-read contract](../plans/artifact-acquisition/reports/s3-conditional-read-contract-2026-10-09.md)
+for response, empty-object and recovery requirements.
+
+The additive native `PumasApi::import_s3_conditional_bundle` accepts
+`S3ConditionalBundleModelImportRequest` with 2–32 caller-authored
+`S3ConditionalManifestEntry` members. Every member declares its exact object key,
+logical path, strong quoted HTTP ETag, SDK-representable size and mandatory
+whole-file SHA-256. Pure complete-set validation precedes HEAD: shared manifest
+rules check namespace, source size/digest consistency, aggregate size and revision
+bounds; an explicit check rejects conflicting ETags for the same raw object key.
+Importer-owned paths and exact primary membership are checked before source I/O.
+Sequential scope-owned HEAD resolution must match every authored ETag/size before
+it can return the entire unchanged authored manifest. It never returns a shortened
+selection. This records Weak `s3.explicit_conditional_objects` revision evidence;
+the declared hashes supply integrity, and a listing supplies no authority.
+
+The existing shared acquisition owner verifies every selected file before issuing
+the complete-set receipt. GET uses the exact per-object If-Match; empty members
+require an actual conditional GET as well. The shared model importer proves the
+selected package's required companion/index/shard relationships and retains unsafe
+format/custom-code policy. Publication uses its existing held descriptors, copied
+byte verification, exact receipt and atomic publisher. This is an authored package
+selection, not an atomic snapshot of the bucket or a backend/inference admission.
+Exact retained demand/manifest/workspace must still match on replay. Cancellation
+discards continuation evidence; pause can retain checked live prefix custody, and
+cold reopen restarts partial bytes at zero. See the
+[authored conditional manifest qualification](../plans/artifact-acquisition/reports/s3-authored-conditional-manifest-2026-10-09.md).
+
+The existing anonymous/authenticated bundle RPC starts expose this exact native
+capability with explicit `read_mode: "conditional"`. Every one of the 2–32 `files`
+members supplies `key`, `logical_path`, `sha256`, `expected_etag` and
+`expected_size`; VersionId must be omitted. Size is a canonical decimal string
+from `"0"` through `"9223372036854775807"`, preserving the SDK range across JS.
+Omitted or `version_id` mode retains the closed existing VersionId member shape;
+mixed sets and conditional facts in versioned members are invalid. Pure wire,
+shared-manifest and native-reader preflight precede job admission/reservation.
+Generated contracts project these closed alternatives for both consumers.
+
+The existing worker retains a typed complete selector, original import intent,
+exact record and held physical reservation across explicit same-process retry.
+Authenticated retry requires fresh credentials; it cannot silently fall back.
+Cancellation drains and clears continuation proof, so incomplete members restart
+at zero while complete files still require custody/full-hash reuse checks. Changed
+authored source facts refuse before GET and preserve retained work. A reopened
+process can inspect persisted custody, but cannot invent live reservation/retry
+authority or start another import over the existing demand. The existing dialog
+continues to select VersionId entries; conditional prefix discovery remains
+unsupported. See the [RPC qualification](../plans/artifact-acquisition/reports/s3-authored-conditional-rpc-2026-10-09.md).
+
 The optional S3 reader retains `S3ReaderConfig` and anonymous `S3Reader::new`.
 `S3Reader::new_authenticated(config, S3Credentials)` consumes explicitly supplied
 access-key ID, secret and optional session token for a bounded acquisition.
@@ -133,8 +206,16 @@ facts, pinned manifest entries, a model import spec, a reserved workspace, finit
 retry budgets, a retained operation UUID and optional ephemeral credentials.
 Its request is not Debug/serde-enabled; only phase/current-file byte progress is
 serializable. Selection runs under the same bounded acquisition consumer scope
-as transfer, and verified single/bundled GGUF publication uses the existing
-importer and exact receipt pipeline. The stable demand owner is
+as transfer. Model publication delegates to the shared descriptor/receipt-bound
+`ModelImporter::import_acquired_model` qualification bridge and the existing
+atomic copied-import publisher. S3 remains a generic object store: acquisition
+success, qualified model publication and backend compatibility are separate
+outcomes. The [bounded acceptance contract](../plans/artifact-acquisition/reports/acquisition-model-bridge-2026-10-08.md)
+includes GGUF, genuine single-file safetensors and complete supported safetensors
+packages. The [ONNX structural extension](../plans/artifact-acquisition/reports/acquired-onnx-package-2026-10-08.md)
+also qualifies bounded static FLOAT graphs and their selected relative external
+tensor files. This qualification leaves task classification unknown and does not
+authorize runtime admission. Existing GGUF importer entry points remain compatible. The stable demand owner is
 `model.s3.workflow`. Neither source access nor credentials enter the importer
 payload or progress; no account/source-configuration persistence is introduced.
 
@@ -148,12 +229,13 @@ be reconciled under the same operation identity, never implicitly replayed with
 new demand identity. Desktop/RPC composition and live-provider acceptance remain
 unqualified by this native entry point.
 
-The optional RPC/desktop composition admits one explicit GGUF through that
-facade. The anonymous `start_s3_model_import` stays unchanged; the distinct
+The optional RPC/desktop composition delegates selected bytes to the shared
+model facade. The anonymous `start_s3_model_import` retains its existing method; the distinct
 `start_authenticated_s3_model_import` takes the same source facts plus explicitly
 supplied request-scoped access key, secret and optional session token. Both
 require caller-supplied HTTPS origin, bucket, region, addressing, exact key,
-immutable VersionId and SHA-256; neither accepts HTTP opt-outs. The closed
+SHA-256 and either an immutable VersionId or explicit conditional mode with
+VersionId omitted; neither accepts HTTP opt-outs. The closed
 credential DTO is Deserialize-only and bounds each value to 4096 printable ASCII
 characters without whitespace, with the native access-key delimiter restrictions.
 The actual authenticated constructor validates before job/workspace admission.
@@ -178,8 +260,11 @@ Controlled HTTPS/RPC and DOM/preload fixtures support this secret boundary;
 packaged/browser behavior and real-provider acceptance remain separate.
 
 The additive desktop bundle starts take 2–32 explicit per-file key/VersionId/
-logical-path/SHA-256 pins and one exact primary GGUF basename, with only the
-existing native inert auxiliary formats. Complete structural preflight uses
+logical-path/SHA-256 pins and one exact selected primary weight logical path.
+Safe nested primaries and additional weight shards/components are admitted as
+source selections; extensions grant no model authority. Native and desktop S3
+imports delegate byte/package qualification to the shared acquired-model importer.
+Complete structural preflight uses
 `S3Reader::validate_manifest_entries` plus shared manifest validation before
 job/workspace admission; it grants no selection or byte-verification authority.
 Importer-owned reserved roots and their normalized aliases/descendants are
@@ -191,8 +276,13 @@ A checked HEAD for the exact immutable VersionId and explicit size zero yields
 an empty acquisition stream without GET or an impossible byte range. The shared
 workspace writer, SHA-256 verifier and receipt owner still verify and publish
 every selected member. Missing/invalid Content-Length or an absent/wrong-version
-object fails selection; an empty file never stands for unknown length. Empty
-auxiliaries are supported, while the primary must pass existing GGUF validation.
+object fails selection; an empty file never stands for unknown length. GGUF
+retains its existing inert auxiliary policy, including empty auxiliary files. Safetensors files and bounded
+complete supported packages must satisfy shared config/tokenizer/processor/index/
+shard/component closure before registration. ONNX graphs must satisfy the shared
+bounded structural class and exact external-tensor closure. Unsupported packages
+and custom code remain refused; registration does not establish backend
+compatibility or inference readiness.
 Public range reads remain nonempty; selection and `s3/manifest.rs` identity
 implementation are unchanged. Anonymous/authenticated single-object wire shapes remain unchanged;
 bundle authentication uses the same ephemeral credential DTO and constructors.
@@ -336,7 +426,7 @@ Persisting progress is not the same as making the file bytes durable. After a cr
 
 Acquisition FilesReady and model/runtime publication are distinct commits. The managed HF importer issues receipt version 1 only after complete finalization and durable metadata, index and applicable pinned package-facts outputs. The receipt binds the acquisition ID, persisted `Using` lease, HF demand and operation, current queue admission, manifest and ordered verified-file receipts, destination/workspace identity, resulting model ID, and a versioned canonical output projection. Canonical JSON sorts object keys recursively, preserves array order and explicit nulls, and rejects unsupported values. Its projection contract explicitly lists metadata, model-index and package-facts fields; package-facts content includes its independent contract version. Cold recovery compares current read-only outputs to the issuer-published proof, never computes new proof from current outputs alone. Partial imports and ordinary model-import callers have no receipt authority. A crash before receipt publication, unsupported/malformed receipt, or changed/missing output remains recovery-required and never replays import effects. Unknown publication visibility is failure, not success.
 
-The current Q1 candidate also routes llama.cpp archive acquisition through the shared consumer. Its native receipt binds the exact tag/metadata and hashes of the extracted output tree and launcher. The installer claims its cancellation/publication arbitration before returning the prepared receipt payload, so an accepted cancellation cannot later be replayed as an installation; after the claim, cancellation is refused and restart may finish the exact staged publication. If cancellation wins before receipt issuance, the installer durably revokes the exact attempt, drains and removes its owned workspace under the native lock, then withdraws only the unchanged, receipt-free `Using` lease. Cleanup or withdrawal failure retains recovery custody and prevents same-tag retry from selecting the unresolved attempt. Cold recovery verifies or completes publication from a committed receipt, settles the same acquisition, and explicitly reclaims its owned workspace. A retained `Using` acquisition without a receipt or exact withdrawal remains unresolved. Source-only composed review found no substantiated P0–P3 issue; objective-level consumer/platform evidence is still required.
+The current Q1 candidate also routes llama.cpp archive acquisition through the shared consumer. Its native receipt binds the exact tag/metadata and hashes of the extracted output tree and launcher. The installer claims its cancellation/publication arbitration before returning the prepared receipt payload, so an accepted cancellation cannot later be replayed as an installation; after the claim, cancellation is refused and restart may finish the exact staged publication. If cancellation wins before receipt issuance, the installer durably revokes the exact attempt, drains and removes its owned workspace under the native lock, then withdraws only the unchanged, receipt-free `Using` lease. Cleanup or withdrawal failure retains recovery custody and prevents same-tag retry from selecting the unresolved attempt. Cold recovery verifies or completes publication from a committed receipt, settles the same acquisition, and explicitly reclaims its owned workspace. A retained `Using` acquisition without a receipt or exact withdrawal remains unresolved.
 
 Receipt publication conditionally validates the exact durable `Using` lease, demand/manifest/files, non-revoked queue admission, workspace/destination, and held root grant in the same canonical store transaction. A cold worker does not renew or replace that lease before checking its receipt. Only after read-only validation may it obtain a private receipt-qualified settlement capability. Acquisition transition to `Adopted` and exact queue release are one atomic `AcquisitionStore` document publication; the immutable receipt remains paired with the adopted acquisition as completion history. Thus recovery has no intermediate acknowledgement-with-unreleased-queue state. An identical already-published receipt is idempotent; conflicting, orphaned, duplicated, malformed, or unknown-version receipts fail closed. No implicit receipt pruning exists; any future terminal-record compaction must remove the exact acquisition and receipt together under a separately selected retention policy. Migration never manufactures receipts, so pre-receipt `Using` remains unresolved even if output files match. No cross-store exactly-once remote-I/O guarantee is assumed.
 

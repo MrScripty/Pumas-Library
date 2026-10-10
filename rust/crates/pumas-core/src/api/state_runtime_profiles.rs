@@ -223,7 +223,7 @@ async fn prepare_runtime_profile_launch_spec(
                 });
             }
             launch_spec.extra_args =
-                append_llama_cpp_model_arg(&launch_spec.extra_args, &model_path)?;
+                append_llama_cpp_model_arg(&launch_spec.extra_args, &model_path, model_id)?;
             selected_model_path = Some(model_path);
             if let Some(overrides) = overrides {
                 apply_llama_cpp_launch_overrides(&mut launch_spec, overrides);
@@ -361,7 +361,11 @@ fn replace_llama_cpp_models_dir_with_preset(args: &[String], preset_path: &Path)
     output
 }
 
-fn append_llama_cpp_model_arg(args: &[String], model_path: &Path) -> crate::Result<Vec<String>> {
+fn append_llama_cpp_model_arg(
+    args: &[String],
+    model_path: &Path,
+    model_id: &str,
+) -> crate::Result<Vec<String>> {
     let mut output = args.to_vec();
     output.push("--model".to_string());
     output.push(model_path.to_string_lossy().to_string());
@@ -369,6 +373,10 @@ fn append_llama_cpp_model_arg(args: &[String], model_path: &Path) -> crate::Resu
         output.extend([
             "--mmproj".to_string(),
             projector.to_string_lossy().to_string(),
+            // Vision results must identify the selected library model, rather
+            // than an implicit file-name alias. Text-only launches are unchanged.
+            "--alias".to_string(),
+            model_id.to_owned(),
         ]);
     }
     Ok(output)
@@ -378,6 +386,19 @@ pub(super) async fn stop_runtime_profile(
     primary: &PrimaryState,
     profile_id: RuntimeProfileId,
 ) -> std::result::Result<bool, PumasError> {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    if let Some(result) = primary
+        .runtime_profile_service
+        .audio_profiles
+        .stop(&profile_id, None)
+        .await?
+    {
+        return result;
+    }
     // Owned sessions are stopped from their immutable launch identity, even if
     // a caller cancels startup or configuration is subsequently unavailable.
     if let Some((receipt, result)) = primary
@@ -441,6 +462,19 @@ pub(super) async fn stop_runtime_profile_if_generation(
     profile_id: RuntimeProfileId,
     generation: u64,
 ) -> std::result::Result<bool, PumasError> {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    if let Some(result) = primary
+        .runtime_profile_service
+        .audio_profiles
+        .stop(&profile_id, Some(generation))
+        .await?
+    {
+        return result;
+    }
     let Some((receipt, result)) = primary
         .runtime_profile_service
         .process_owner
@@ -465,6 +499,31 @@ pub(super) async fn stop_runtime_profile_if_generation(
 pub(super) async fn stop_all_managed_runtime_profiles(
     primary: &PrimaryState,
 ) -> std::result::Result<ManagedRuntimeShutdownSummary, PumasError> {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    let results = {
+        // Poll both closures before waiting for either drain. An uncertain
+        // audio child must not leave the ordinary process admission open.
+        let (audio, processes) = tokio::join!(
+            primary
+                .runtime_profile_service
+                .audio_profiles
+                .close_and_drain(),
+            primary
+                .runtime_profile_service
+                .process_owner
+                .close_and_drain(),
+        );
+        processes?.into_iter().chain(audio?).collect::<Vec<_>>()
+    };
+    #[cfg(not(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    )))]
     let results = primary
         .runtime_profile_service
         .process_owner
@@ -523,21 +582,23 @@ mod tests {
         let model = root.path().join("Qwen.gguf");
         let projector = root.path().join("mmproj-BF16.gguf");
         std::fs::write(&model, b"model").unwrap();
-        let text_args = append_llama_cpp_model_arg(&[], &model).unwrap();
+        let text_args = append_llama_cpp_model_arg(&[], &model, "library/vision").unwrap();
         assert_eq!(text_args, vec!["--model", model.to_str().unwrap()]);
         std::fs::write(&projector, b"projector").unwrap();
-        let args = append_llama_cpp_model_arg(&[], &model).unwrap();
+        let args = append_llama_cpp_model_arg(&[], &model, "library/vision").unwrap();
         assert_eq!(
             args,
             vec![
                 "--model",
                 model.to_str().unwrap(),
                 "--mmproj",
-                projector.to_str().unwrap()
+                projector.to_str().unwrap(),
+                "--alias",
+                "library/vision"
             ]
         );
         std::fs::write(root.path().join("mmproj-F16.gguf"), b"other").unwrap();
-        assert!(append_llama_cpp_model_arg(&[], &model)
+        assert!(append_llama_cpp_model_arg(&[], &model, "library/vision")
             .unwrap_err()
             .to_string()
             .contains("multiple mmproj"));

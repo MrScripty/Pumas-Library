@@ -18,6 +18,7 @@ import sysconfig
 REQUIRED_CODE = (
     "owned_worker.py",
     "owned_audio.py",
+    "installed_cohere_source.py",
     "model_manager.py",
     "device_manager.py",
     "private_owned_channel.py",
@@ -29,6 +30,7 @@ REQUIRED_CODE = (
     "audio_contract.py",
     "loaders/__init__.py",
     "loaders/cohere_asr_loader.py",
+    "loaders/owned_cohere_source.py",
 )
 REQUIRED_MODEL = frozenset(
     {
@@ -59,7 +61,17 @@ class StartupRefusal(ValueError):
         super().__init__(code)
 
 
-def _inspect(fd, *, prefix="", seen=None, depth=0, count=None, code_root=False):
+def _inert_import_member(path):
+    parts = Path(path).parts
+    return "__pycache__" in parts or any(
+        name.endswith((".pth", ".pyc", ".pyo")) or name in {"sitecustomize.py", "usercustomize.py"}
+        for name in parts
+    )
+
+
+def _inspect(
+    fd, *, prefix="", seen=None, depth=0, count=None, code_root=False, inert_imports=False
+):
     seen = set() if seen is None else seen
     count = [0] if count is None else count
     if depth > 64:
@@ -77,15 +89,24 @@ def _inspect(fd, *, prefix="", seen=None, depth=0, count=None, code_root=False):
             if not stat.S_ISDIR(info.st_mode):
                 raise StartupRefusal("unsupported_runtime_member")
             continue
-        if name.endswith((".pth", ".pyc", ".pyo")) or name in {
-            "sitecustomize.py",
-            "usercustomize.py",
-        }:
-            raise StartupRefusal("unsupported_runtime_member")
+        if _inert_import_member(relative):
+            if not inert_imports or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+                raise StartupRefusal("unsupported_runtime_member")
+            # Fixed inert namespaces receive no kernel content grants. No caller
+            # can configure this list. The source-only loader below also avoids
+            # Python's otherwise implicit .pyc read alongside a selected .py.
+            continue
         if stat.S_ISDIR(info.st_mode):
             nested = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             try:
-                _inspect(nested, prefix=relative + "/", seen=seen, depth=depth + 1, count=count)
+                _inspect(
+                    nested,
+                    prefix=relative + "/",
+                    seen=seen,
+                    depth=depth + 1,
+                    count=count,
+                    inert_imports=inert_imports,
+                )
             finally:
                 os.close(nested)
         elif stat.S_ISREG(info.st_mode):
@@ -97,6 +118,12 @@ def _inspect(fd, *, prefix="", seen=None, depth=0, count=None, code_root=False):
     return seen
 
 
+class _SourceOnlyLoader(importlib.machinery.SourceFileLoader):
+    def get_code(self, fullname):
+        filename = self.get_filename(fullname)
+        return self.source_to_code(self.get_data(filename), filename)
+
+
 class _RetainedImports:
     def __init__(self, roots, excluded):
         self.roots = roots
@@ -105,6 +132,8 @@ class _RetainedImports:
     def admitted(self, location):
         lexical = Path(location).absolute()
         actual = Path(location).resolve(strict=True)
+        if _inert_import_member(lexical) or _inert_import_member(actual):
+            return False
         if any(lexical.is_relative_to(root) for root in self.excluded):
             return False
         # The package role may physically live inside the installed venv; its
@@ -128,6 +157,8 @@ class _RetainedImports:
         for location in locations:
             if not self.admitted(location):
                 raise StartupRefusal("ambient_import_refused")
+        if type(spec.loader) is importlib.machinery.SourceFileLoader:
+            spec.loader = _SourceOnlyLoader(fullname, spec.origin)
         return spec
 
 
@@ -135,6 +166,9 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Private inherited owned worker")
     for root in ("code", "packages", "model"):
         parser.add_argument(f"--{root}-root-fd", required=True, type=int)
+    parser.add_argument("--experimental-local-cohere", action="store_true")
+    parser.add_argument("--model-id")
+    parser.add_argument("--selected-artifact-id")
     return parser.parse_args(argv)
 
 
@@ -163,9 +197,9 @@ async def bootstrap(args, *, channel_factory=None):
             if not stat.S_ISDIR(os.fstat(copy).st_mode):
                 raise StartupRefusal("invalid_bootstrap_descriptor")
         code, packages, model = owned
-        if not set(REQUIRED_CODE).issubset(_inspect(code, code_root=True)):
+        if not set(REQUIRED_CODE).issubset(_inspect(code, code_root=True, inert_imports=True)):
             raise StartupRefusal("missing_bootstrap_member")
-        _inspect(packages)
+        _inspect(packages, inert_imports=True)
         members = _inspect(model)
         if not REQUIRED_MODEL.issubset(members) or not members.issubset(
             REQUIRED_MODEL | OPTIONAL_MODEL
@@ -205,9 +239,18 @@ async def bootstrap(args, *, channel_factory=None):
         if channel_factory is None:
             from device_manager import DeviceManager
             from model_manager import ModelManager
-            from private_owned_channel import create_private_owned_channel
+            from private_owned_channel import _create_bootstrap_private_owned_channel
 
-            channel = create_private_owned_channel(ModelManager(DeviceManager()))
+            try:
+                channel = _create_bootstrap_private_owned_channel(
+                    ModelManager(DeviceManager()),
+                    model,
+                    args.model_id,
+                    args.selected_artifact_id,
+                    experimental=getattr(args, "experimental_local_cohere", False),
+                )
+            except (ValueError, OSError) as error:
+                raise StartupRefusal("installed_runtime_unready") from error
         else:
             channel = channel_factory(model)
         await channel.serve_stdio(output=output)

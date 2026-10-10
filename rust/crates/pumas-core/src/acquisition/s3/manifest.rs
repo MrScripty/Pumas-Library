@@ -13,7 +13,9 @@ pub struct S3ManifestEntry {
     pub expected_sha256: Sha256Evidence,
 }
 
-/// Complete resolved set of exact versions under one explicit reader authority.
+/// Complete resolved set under one explicit reader authority. Public manifest
+/// resolution requires exact versions or caller-authored conditional facts;
+/// conditional selections retain weak mutable revision evidence and full SHA-256.
 /// The revision preserves every per-object source identity in logical-path order.
 /// This is an explicit selection, not an atomic snapshot of a remote prefix.
 #[derive(Clone)]
@@ -25,6 +27,13 @@ pub struct S3ManifestSelection {
 impl S3ManifestSelection {
     pub fn manifest(&self) -> &ArtifactManifest {
         &self.manifest
+    }
+
+    pub(crate) fn from_single_object(object: S3ObjectSelection) -> Self {
+        Self {
+            manifest: object.manifest().clone(),
+            objects: vec![object],
+        }
     }
 
     pub(crate) fn into_parts(self) -> (ArtifactManifest, Vec<S3ObjectSelection>) {
@@ -87,7 +96,10 @@ impl S3Reader {
                 let file = &object.manifest.files()[0];
                 Ok(ArtifactFile::new(
                     file.logical_path(),
-                    versioned_source_key(file.source_key(), &object.version)?,
+                    versioned_source_key(
+                        file.source_key(),
+                        object.version.as_deref().ok_or(S3ReaderError::Changed)?,
+                    )?,
                     file.expected_size(),
                     file.expected_sha256().cloned(),
                     file.verification(),
@@ -98,7 +110,7 @@ impl S3Reader {
         Ok(S3ManifestSelection { manifest, objects })
     }
 
-    fn explicit_scope_identity(&self) -> String {
+    pub(super) fn explicit_scope_identity(&self) -> String {
         let addressing = match self.addressing {
             S3Addressing::Path => "path",
             S3Addressing::VirtualHosted => "virtual_hosted",
@@ -110,11 +122,15 @@ impl S3Reader {
         )
     }
 
-    pub(super) fn validated_object(
-        &self,
-        source_key: &str,
-        version: &str,
-    ) -> Result<(Path, ArtifactSourceIdentity), S3ReaderError> {
+    pub(super) fn object_scope_identity(&self, source_key: &str) -> String {
+        format!(
+            "{}:{}",
+            self.explicit_scope_identity(),
+            hex::encode(source_key)
+        )
+    }
+
+    pub(super) fn validated_key(&self, source_key: &str) -> Result<Path, S3ReaderError> {
         let key = Path::parse(source_key)
             .map_err(|_| S3ReaderError::Configuration("unsupported object key"))?;
         if key.as_ref() != source_key || source_key.is_empty() || source_key.len() > 1024 {
@@ -122,6 +138,15 @@ impl S3Reader {
                 "object key must preserve its exact identity",
             ));
         }
+        Ok(key)
+    }
+
+    pub(super) fn validated_object(
+        &self,
+        source_key: &str,
+        version: &str,
+    ) -> Result<(Path, ArtifactSourceIdentity), S3ReaderError> {
+        let key = self.validated_key(source_key)?;
         if version.is_empty() || version == "null" || version.chars().any(char::is_control) {
             return Err(S3ReaderError::Configuration(
                 "an immutable VersionId is required",
@@ -129,11 +154,7 @@ impl S3Reader {
         }
         let source = ArtifactSourceIdentity::new(
             "s3",
-            format!(
-                "{}:{}",
-                self.explicit_scope_identity(),
-                hex::encode(source_key)
-            ),
+            self.object_scope_identity(source_key),
             ArtifactRevisionEvidence::new("s3.version_id", version, RevisionStrength::Immutable)?,
         )?;
         Ok((key, source))

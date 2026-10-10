@@ -27,7 +27,7 @@ fn request_value() -> Value {
 fn request() -> OperationRequest {
     serde_json::from_value(request_value()).unwrap()
 }
-async fn json_body(response: Response) -> Value {
+pub(super) async fn json_body(response: Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), MAX_BYTES).await.unwrap()).unwrap()
 }
 async fn typed_stream(bytes: Vec<u8>) -> String {
@@ -321,7 +321,7 @@ async fn projection_fault_immediately_drops_provider_and_body_disposal_closes_si
         assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
 }
-async fn fixture(endpoint: &str, task: Option<&str>) -> (TempDir, Arc<AppState>) {
+pub(super) async fn fixture(endpoint: &str, task: Option<&str>) -> (TempDir, Arc<AppState>) {
     let root = TempDir::new().unwrap();
     let state = Arc::new(crate::handlers::test_support::build_test_app_state(root.path()).await);
     record(&state, endpoint, "llama-cpu", "llama").await;
@@ -351,7 +351,7 @@ async fn fixture(endpoint: &str, task: Option<&str>) -> (TempDir, Arc<AppState>)
     }
     (root, state)
 }
-async fn record(state: &AppState, endpoint: &str, profile: &str, alias: &str) {
+pub(super) async fn record(state: &AppState, endpoint: &str, profile: &str, alias: &str) {
     let mut config = RuntimeProfileConfig::default_ollama();
     config.profile_id = RuntimeProfileId::parse(profile).unwrap();
     config.provider = RuntimeProviderId::LlamaCpp;
@@ -382,7 +382,7 @@ async fn record(state: &AppState, endpoint: &str, profile: &str, alias: &str) {
         .await
         .unwrap();
 }
-async fn operation(state: Arc<AppState>, value: Value) -> Response {
+pub(super) async fn operation(state: Arc<AppState>, value: Value) -> Response {
     handle_model_operations(
         State(state),
         None,
@@ -390,7 +390,7 @@ async fn operation(state: Arc<AppState>, value: Value) -> Response {
     )
     .await
 }
-async fn backend_request(socket: &mut TcpStream) -> String {
+pub(super) async fn backend_request(socket: &mut TcpStream) -> String {
     let mut bytes = Vec::new();
     let header_end = loop {
         let mut b = [0];
@@ -413,7 +413,7 @@ async fn backend_request(socket: &mut TcpStream) -> String {
     socket.read_exact(&mut bytes[header_end..]).await.unwrap();
     String::from_utf8(bytes).unwrap()
 }
-async fn public_server(
+pub(super) async fn public_server(
     state: Arc<AppState>,
 ) -> (String, tokio::task::JoinHandle<anyhow::Result<()>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1396,8 +1396,6 @@ async fn modality_facade_ambiguity_and_unsupported_pairs_have_no_provider_effect
         "capability_unavailable"
     );
     for input in [
-        json!({"kind":"image","encoding":"png","data_base64":"iVBORw0KGgo="}),
-        json!({"kind":"messages","messages":[{"role":"user","content":[{"kind":"text","text":"caption"},{"kind":"image","encoding":"png","data_base64":"iVBORw0KGgo="}]}]}),
         json!({"kind":"messages","messages":[{"role":"user","content":[{"kind":"audio","encoding":"pcm_s16le","sample_rate_hz":16000,"channels":1,"sample_count":1,"data_base64":"AAA="}]}]}),
     ] {
         let mut value = modality_request();
@@ -1459,6 +1457,15 @@ fn declared(capability: Capability, available: bool) -> CapabilityDescriptor {
             SemanticTask::TextToImage,
             vec![InputFormat::Text],
             vec![OutputFormat::PngBase64],
+        ),
+        Capability::ImageToText => (
+            SemanticTask::ImageToText,
+            vec![
+                InputFormat::PngBase64,
+                InputFormat::JpegBase64,
+                InputFormat::MessagesImage,
+            ],
+            vec![OutputFormat::Text],
         ),
         Capability::AudioTranscription => (
             SemanticTask::SpeechToText,

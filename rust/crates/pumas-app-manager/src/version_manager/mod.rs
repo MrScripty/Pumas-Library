@@ -42,6 +42,8 @@
 //! }
 //! ```
 
+mod audio_native_cohort;
+mod audio_runtime_recipe;
 mod cohere_asr_profile;
 mod constraints;
 mod dependencies;

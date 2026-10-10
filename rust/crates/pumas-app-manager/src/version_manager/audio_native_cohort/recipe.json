@@ -1,0 +1,118 @@
+{
+  "recipe": "debian-trixie-amd64-20261009-v1",
+  "metadata_url": "https://deb.debian.org/debian/dists/trixie/main/binary-amd64/Packages.xz",
+  "packages": [
+    {
+      "name": "base-files",
+      "version": "13.8+deb13u7",
+      "url": "https://deb.debian.org/debian/pool/main/b/base-files/base-files_13.8+deb13u7_amd64.deb",
+      "size": 88296,
+      "sha256": "fcd42bb5cb63f7bfc4326a92541247872206d60a192fdff65ca14eb83ed408b9",
+      "source_package": "base-files"
+    },
+    {
+      "name": "gcc-14-base",
+      "version": "14.2.0-19",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-14/gcc-14-base_14.2.0-19_amd64.deb",
+      "size": 49432,
+      "sha256": "5b6825de4263824b78c4c51f6476414f3b4e89c2ab63e81dc8b9b5501e867cf6",
+      "source_package": "gcc-14"
+    },
+    {
+      "name": "libgcc-s1",
+      "version": "14.2.0-19",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-14/libgcc-s1_14.2.0-19_amd64.deb",
+      "size": 72772,
+      "sha256": "3c71917b490d1a17aed43196a2787a256ecf060526cdb20216a74bedc061b150",
+      "source_package": "gcc-14"
+    },
+    {
+      "name": "libgomp1",
+      "version": "14.2.0-19",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-14/libgomp1_14.2.0-19_amd64.deb",
+      "size": 137148,
+      "sha256": "72b7a1a33c48f3195efeb044111b34ae684b1e640bb6495c832443b798601cd5",
+      "source_package": "gcc-14"
+    },
+    {
+      "name": "libstdc++6",
+      "version": "14.2.0-19",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-14/libstdc++6_14.2.0-19_amd64.deb",
+      "size": 713628,
+      "sha256": "ab1fa05837aa7a92aae748fd07a18a35f7d18bb4a71c4724fe2bbf0e32089de0",
+      "source_package": "gcc-14"
+    },
+    {
+      "name": "libc6",
+      "version": "2.41-12+deb13u4",
+      "url": "https://deb.debian.org/debian/pool/main/g/glibc/libc6_2.41-12+deb13u4_amd64.deb",
+      "size": 2846580,
+      "sha256": "967aa62605721081c3eb2a17650611a792aa802d76a6511d1840242623d204c9",
+      "source_package": "glibc"
+    },
+    {
+      "name": "libhwloc15",
+      "version": "2.12.0-4",
+      "url": "https://deb.debian.org/debian/pool/main/h/hwloc/libhwloc15_2.12.0-4_amd64.deb",
+      "size": 164224,
+      "sha256": "aa53c4a1878475e7309f2c265c54d9a8a4602dec95564cf84d471d7376ff616c",
+      "source_package": "hwloc"
+    },
+    {
+      "name": "libcap2",
+      "version": "1:2.75-10+deb13u1+b3",
+      "url": "https://deb.debian.org/debian/pool/main/libc/libcap2/libcap2_2.75-10+deb13u1+b3_amd64.deb",
+      "size": 28988,
+      "sha256": "89fc4d34fc7a28ad6f0fcd0c561ab253b9dedf6f77f5a000b47c276c8295bf67",
+      "source_package": "libcap2 (1:2.75-10+deb13u1)"
+    },
+    {
+      "name": "libcrypt1",
+      "version": "1:4.4.38-1",
+      "url": "https://deb.debian.org/debian/pool/main/libx/libxcrypt/libcrypt1_4.4.38-1_amd64.deb",
+      "size": 90072,
+      "sha256": "0ebc144d662e3197982d1bf3a7b8b35ca845e54c68811de0328b1f0d7c67585c",
+      "source_package": "libxcrypt"
+    },
+    {
+      "name": "libtbb12",
+      "version": "2022.1.0-1+deb13u1",
+      "url": "https://deb.debian.org/debian/pool/main/o/onetbb/libtbb12_2022.1.0-1+deb13u1_amd64.deb",
+      "size": 91928,
+      "sha256": "37378f4e8bae165a645d7112799c33b331f4ef077876eedd19c3ad67206cba8f",
+      "source_package": "onetbb"
+    },
+    {
+      "name": "libtbbbind-2-5",
+      "version": "2022.1.0-1+deb13u1",
+      "url": "https://deb.debian.org/debian/pool/main/o/onetbb/libtbbbind-2-5_2022.1.0-1+deb13u1_amd64.deb",
+      "size": 14092,
+      "sha256": "e58dd930cb52c748300744df48b3f8e7aff72f7d6dba6ba247ac272e731f9097",
+      "source_package": "onetbb"
+    },
+    {
+      "name": "libtbbmalloc2",
+      "version": "2022.1.0-1+deb13u1",
+      "url": "https://deb.debian.org/debian/pool/main/o/onetbb/libtbbmalloc2_2022.1.0-1+deb13u1_amd64.deb",
+      "size": 50436,
+      "sha256": "39950b32533de7edd9e8ecde3c5c262368ee512f0487cfc92ef7f2799426db68",
+      "source_package": "onetbb"
+    },
+    {
+      "name": "libudev1",
+      "version": "257.13-1~deb13u1",
+      "url": "https://deb.debian.org/debian/pool/main/s/systemd/libudev1_257.13-1~deb13u1_amd64.deb",
+      "size": 152300,
+      "sha256": "5d41c284f5a93b05bc7d648b61a02dd2bb9ff05b2261ad1a8b7d96044a0cfa88",
+      "source_package": "systemd"
+    },
+    {
+      "name": "zlib1g",
+      "version": "1:1.3.dfsg+really1.3.1-1+b1",
+      "url": "https://deb.debian.org/debian/pool/main/z/zlib/zlib1g_1.3.dfsg+really1.3.1-1+b1_amd64.deb",
+      "size": 88892,
+      "sha256": "015be740d6236ad114582dea500c1d907f29e16d6db00566ca32fb68d71ac90d",
+      "source_package": "zlib (1:1.3.dfsg+really1.3.1-1)"
+    }
+  ]
+}

@@ -96,6 +96,14 @@ npm run -w frontend build
 npm run -w frontend build:library-only
 ```
 
+`pnpm --dir frontend test:desktop-contract` also exercises the model import UI,
+built privileged preload, native S3 RPC and owned loopback HTTPS objects. It
+builds the locked, inference-disabled S3 RPC offline and uses Cargo's reported
+executable; the locked dependencies must already be cached. For an independently
+pinned candidate, set `PUMAS_S3_PUBLIC_RPC_BIN` to that exact executable. This
+mounted React/jsdom and native-process check establishes import behavior, not a
+native browser/Electron window, hosted S3 service, or model inference.
+
 ### Electron and Launcher
 
 ```bash

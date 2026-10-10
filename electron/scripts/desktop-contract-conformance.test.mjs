@@ -713,3 +713,24 @@ test('S3 retry availability preserves producer identity and cold refusal',()=>{
   assert.equal(contract.decodeS3TransferRetryParams({operation_id:fixtures.s3_retry_ready.operation_id,credentials:null}).status,'valid');
   assert.equal(contract.decodeS3TransferRetryParams({operation_id:fixtures.s3_retry_ready.operation_id,credentials:null,version_id:'changed'}).status,'invalid');
 });
+
+
+test('actual model lookup producer reports cross the versioned migration decoder', () => {
+  assert.equal(fixtures.model_lookup_outcomes.length, 3);
+  for (const value of fixtures.model_lookup_outcomes) {
+    const decoded = contract.decodeModelLookupOutcome(value);
+    assert.equal(decoded.status, 'valid');
+    assert.deepEqual(JSON.parse(JSON.stringify(decoded.value)), value);
+  }
+  const moved = fixtures.model_lookup_outcomes.find(value => value.resolution.status === 'reclassified');
+  for (const invalid of [
+    {...moved, contract_version:2}, {...moved, unexpected:true},
+    {...moved, resolution:{status:'reclassified'}},
+    {...moved, resolution:{status:'found', replacement_model_id:'unknown/fixture/lookup'}},
+    {...moved, resolution:{status:'reclassified', replacement_model_id:'../escape'}},
+  ]) assert.equal(contract.decodeModelLookupOutcome(invalid).status, 'invalid');
+  assert.equal(contract.decodeModelLookupParams({model_id:'llm/fixture/lookup'}).status, 'valid');
+  for (const model_id of ['', ' a/b', 'a/b ', 'a/x y', 'C:/a/b', 'a/../b', 'a/./b', 'a//b', 'a/b/', 'a\\b', 'a\nb', 'x'.repeat(4097)]) {
+    assert.equal(contract.decodeModelLookupParams({model_id}).status, 'invalid');
+  }
+});

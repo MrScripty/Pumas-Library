@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AudioCustodyError {
     UnqualifiedRuntime,
+    ReadConfinementUnavailable,
     Unavailable,
     StaleIdentity,
     Busy,
@@ -137,6 +138,25 @@ impl AudioCustodyRegistry {
             return Err(AudioCustodyError::StaleIdentity);
         }
         state.runtime_owner = Some(owner);
+        Ok(())
+    }
+
+    /// Atomically retain the original runtime and attach its exact child. No
+    /// pre-child refusal may leave an unresolved runtime in this registry.
+    pub(crate) fn retain_runtime_and_attach(
+        self: &Arc<Self>,
+        owner: Arc<AudioRuntimeOwner>,
+        child: &mut ManagedChild,
+    ) -> Result<()> {
+        let mut state = self.lock()?;
+        self.admission_open()?;
+        if state.child_attached || state.child_drained || state.runtime_owner.is_some() {
+            return Err(AudioCustodyError::StaleIdentity);
+        }
+        state.runtime_owner = Some(owner);
+        state.pid = Some(child.id());
+        state.child_attached = true;
+        child.attach_cleanup_lease(Arc::new(ChildCleanupLease(self.clone())));
         Ok(())
     }
 
@@ -715,6 +735,51 @@ mod tests {
 
     const INSTANCE: &str = "10000000-0000-0000-0000-000000000001";
     const LOAD: &str = "20000000-0000-0000-0000-000000000001";
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn atomic_runtime_attachment_refuses_without_retention_and_releases_after_drain() {
+        use crate::platform::managed_child::ManagedChildCustodySlot;
+        use std::process::Command;
+        use std::time::Duration;
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("fixture.py"),
+            b"# controlled custody only\n",
+        )
+        .unwrap();
+        for closed in [true, false] {
+            let owner = AudioRuntimeOwner::controlled_fixture(
+                temp.path(),
+                &["fixture.py"],
+                &["model.safetensors"],
+            )
+            .unwrap();
+            let weak = Arc::downgrade(&owner);
+            let registry = AudioCustodyRegistry::new(profile(), 1);
+            if closed {
+                registry.close_admission();
+            }
+            let custody = ManagedChildCustodySlot::new();
+            let mut command = Command::new("/bin/sh");
+            command.args(["-c", "sleep 30"]);
+            let mut child = ManagedChild::spawn(&mut command, custody.clone()).unwrap();
+            let result = registry.retain_runtime_and_attach(owner, &mut child);
+            if closed {
+                assert_eq!(result, Err(AudioCustodyError::Unavailable));
+                assert!(registry.lock().unwrap().runtime_owner.is_none());
+                assert!(weak.upgrade().is_none());
+            } else {
+                result.unwrap();
+                assert!(weak.upgrade().is_some());
+                assert!(registry.lock().unwrap().child_attached);
+            }
+            child.terminate_and_drain(Duration::from_secs(5)).unwrap();
+            drop(child);
+            assert!(weak.upgrade().is_none());
+            assert!(!custody.is_active() && !custody.has_parked_child());
+        }
+    }
 
     struct Bytes(Arc<AtomicUsize>);
     impl Drop for Bytes {

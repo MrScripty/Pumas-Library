@@ -31,6 +31,10 @@ function expectedNames(platform) {
       const osKey = platform.replace(/-no-inference$/, '');
       return os === platforms[osKey] && artifact.variant === 'no-inference';
     }
+    if (platform.startsWith('headless-inference-')) {
+      const key = platform.replace('headless-inference-', 'headless-');
+      return os === headlessPlatforms[key] && artifact.variant === 'headless-inference';
+    }
     if (platform in headlessPlatforms) {
       return os === headlessPlatforms[platform] && artifact.variant === 'headless';
     }

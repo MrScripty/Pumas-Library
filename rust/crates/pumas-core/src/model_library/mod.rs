@@ -45,6 +45,7 @@ mod model_type_resolver;
 mod mutation_authority;
 mod naming;
 mod package_facts;
+mod package_selection;
 mod read_only;
 pub mod sharding;
 mod task_signature;
@@ -88,10 +89,10 @@ pub use hf_cache::{CacheStats, CachedRepoDetails, HfCacheConfig, HfSearchCache};
 pub use identifier::{extract_gguf_metadata, identify_model_type, ModelTypeInfo};
 pub(crate) use importer::TEMP_IMPORT_PREFIX;
 pub use importer::{
-    InPlaceImportSpec, IncompleteShardRecovery, InterruptedDownload, MissingShardRange,
-    ModelImporter, OrphanScanResult, ShardIndexDiscovery, ShardModelDiscovery,
-    ShardRecoveryDiagnostic, ShardRecoveryDiagnosticKind, ShardRecoveryDiscovery,
-    ShardSetDiscovery, ShardSetDiscoveryStatus,
+    AcquiredGgufVisionSpec, AcquiredGgufVisionTask, InPlaceImportSpec, IncompleteShardRecovery,
+    InterruptedDownload, MissingShardRange, ModelImporter, OrphanScanResult, ShardIndexDiscovery,
+    ShardModelDiscovery, ShardRecoveryDiagnostic, ShardRecoveryDiagnosticKind,
+    ShardRecoveryDiscovery, ShardSetDiscovery, ShardSetDiscoveryStatus,
 };
 pub use library::{
     MetadataProjectionCleanupDryRunItem, MetadataProjectionCleanupDryRunReport,

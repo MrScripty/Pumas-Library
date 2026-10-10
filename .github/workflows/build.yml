@@ -30,7 +30,24 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
-      - uses: rhysd/actionlint@v1.7.8
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - name: Run checksum-pinned actionlint with shell and Python checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install pyflakes==3.3.2
+          command -v shellcheck
+          command -v pyflakes
+          tool_dir="$(mktemp -d)"
+          trap 'rm -rf "$tool_dir"' EXIT
+          curl --fail --location --retry 3 \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.8/actionlint_1.7.8_linux_amd64.tar.gz \
+            --output "$tool_dir/actionlint.tar.gz"
+          echo "be92c2652ab7b6d08425428797ceabeb16e31a781c07bc388456b4e592f3e36a  $tool_dir/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$tool_dir/actionlint.tar.gz" -C "$tool_dir" actionlint
+          "$tool_dir/actionlint" -color
       - run: npm run check:dependency-ownership
       - run: npm run check:release-versions
       - run: node scripts/release/check-attribution.cjs
@@ -83,6 +100,8 @@ jobs:
       # Separate package invocations prevent workspace feature unification from
       # silently enabling the features this gate is supposed to exclude.
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
+      - name: Require actual Linux audio read-confinement proof
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features platform::audio_read_boundary::tests::kernel_exec_denies_unselected_reads_and_ambient_descriptors -- --ignored --exact --nocapture
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features hf-client
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
       - name: Build inference-disabled release backend
@@ -131,6 +150,223 @@ jobs:
           name: headless-${{ matrix.headless_os }}
           path: headless-output/
           if-no-files-found: error
+
+  headless-inference:
+    name: Inference headless candidate (${{ matrix.target }})
+    needs: lint-workflows
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x86_64
+            check: linux
+          - os: windows-2025
+            target: windows-x86_64
+            check: windows
+          - os: macos-15
+            target: macos-arm64
+            check: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: headless-inference-${{ matrix.target }}
+      - name: Prefetch locked source dependencies
+        run: cargo fetch --locked --manifest-path rust/Cargo.toml
+      - name: Provision pinned official CPU runtime
+        run: python scripts/release/onnx_runtime_stage.py --target ${{ matrix.target }} --download --output-dir "${{ runner.temp }}/pumas-ort"
+      - name: Verify native ORT loader and C API before candidate compilation
+        run: python scripts/release/onnx_runtime_probe.py --target ${{ matrix.target }} --runtime-dir "${{ runner.temp }}/pumas-ort" --output "${{ runner.temp }}/native-loader.json"
+      - name: Build, extract and authenticate native inference candidate
+        env:
+          ORT_SKIP_DOWNLOAD: '1'
+          CARGO_BUILD_JOBS: '1'
+        run: python scripts/release/headless_inference_ci.py --target ${{ matrix.target }} --runtime-dir "${{ runner.temp }}/pumas-ort" --output-dir "${{ runner.temp }}/inference-candidate" --build-id "ci-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Verify required inference archive
+        run: node scripts/release/check-artifacts.mjs "${{ runner.temp }}/inference-candidate" headless-inference-${{ matrix.check }}
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: headless-inference-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/inference-candidate/*.tar.gz
+            ${{ runner.temp }}/inference-candidate/*.zip
+          if-no-files-found: error
+      - name: Preserve bounded build and startup evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: inference-evidence-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/inference-candidate/*.json
+            ${{ runner.temp }}/inference-candidate/*.jsonl
+            ${{ runner.temp }}/inference-candidate/*.log
+            ${{ runner.temp }}/inference-candidate/*.sha256
+            ${{ runner.temp }}/native-loader.json
+          if-no-files-found: ignore
+
+  review-inference-linux:
+    name: Review Linux inference candidate
+    needs: lint-workflows
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: review-inference-linux-x86_64
+      - name: Prefetch locked source dependencies
+        run: cargo fetch --locked --manifest-path rust/Cargo.toml
+      - name: Provision pinned official CPU runtime
+        run: python scripts/release/onnx_runtime_stage.py --target linux-x86_64 --download --output-dir "${{ runner.temp }}/review-ort"
+      - name: Verify native ORT loader and C API before candidate compilation
+        run: python scripts/release/onnx_runtime_probe.py --target linux-x86_64 --runtime-dir "${{ runner.temp }}/review-ort" --output "${{ runner.temp }}/review-native-loader.json"
+      - name: Build, extract and authenticate exact review-head candidate
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          ORT_SKIP_DOWNLOAD: '1'
+          CARGO_BUILD_JOBS: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          unset GIT_PAGER
+          python scripts/release/headless_inference_ci.py --target linux-x86_64 --runtime-dir "${{ runner.temp }}/review-ort" --output-dir "${{ runner.temp }}/review-inference-candidate" --build-id "review-ci-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Verify required review inference archive
+        run: node scripts/release/check-artifacts.mjs "${{ runner.temp }}/review-inference-candidate" headless-inference-linux
+      - name: Verify extracted Pumas with an untrained synthetic ONNX graph
+        timeout-minutes: 3
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/release/verify_synthetic_packaged_onnx.py --candidate-dir "${{ runner.temp }}/review-inference-candidate" --expected-source "$EXPECTED_SOURCE_SHA"
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: review-inference-linux-x86_64
+          path: ${{ runner.temp }}/review-inference-candidate/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: Preserve bounded review build and startup evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: review-inference-evidence-linux-x86_64
+          path: |
+            ${{ runner.temp }}/review-inference-candidate/*.json
+            ${{ runner.temp }}/review-inference-candidate/*.jsonl
+            ${{ runner.temp }}/review-inference-candidate/*.log
+            ${{ runner.temp }}/review-inference-candidate/*.sha256
+            ${{ runner.temp }}/review-native-loader.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  review-audio-dependencies:
+    name: Review confined audio dependencies
+    needs: lint-workflows
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: '1'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: review-audio-dependencies-linux
+      - name: Qualify exact frozen dependencies under required confinement
+        timeout-minutes: 50
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVIDENCE_DIR: ${{ runner.temp }}/review-audio-evidence
+          QUALIFICATION_ROOT: ${{ runner.temp }}/review-audio-runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          mkdir -p "$EVIDENCE_DIR"
+          python -c 'import json, os, subprocess; print(json.dumps({"head": os.environ["EXPECTED_SOURCE_SHA"], "tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(), "scope": "confined dependencies only", "pretrained_model_acceptance": False}))' > "$EVIDENCE_DIR/source.json"
+          timeout --kill-after=30s 45m cargo run --locked --manifest-path rust/Cargo.toml -p pumas-app-manager --features test-support --example qualify_audio_dependencies -- "$QUALIFICATION_ROOT" 2>&1 | tee "$EVIDENCE_DIR/probe.log"
+          test -s "$QUALIFICATION_ROOT/audio-confined-dependency-probe.json"
+          cp "$QUALIFICATION_ROOT/audio-confined-dependency-probe.json" "$EVIDENCE_DIR/"
+      - name: Check controlled session lifecycle with the managed interpreter
+        timeout-minutes: 25
+        env:
+          QUALIFICATION_ROOT: ${{ runner.temp }}/review-audio-runtime
+          EVIDENCE_DIR: ${{ runner.temp }}/review-audio-evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          PUMAS_AUDIO_SESSION_PYTHON="$(python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path(os.environ['QUALIFICATION_ROOT']).resolve(strict=True)
+          record = json.loads((root / 'torch-versions/v2.10.0/runtime.json').read_text())['managed_python']
+          pin = json.loads(Path('rust/crates/pumas-core/src/runtime_read_source/audio_candidate_recipe.json').read_text())
+          assert {key: record[key] for key in ('provider', 'distribution')} == pin['managed_python']
+          executable = Path(record['executable']['path'])
+          assert executable.is_absolute() and executable.resolve(strict=True) == executable
+          assert executable.is_relative_to(root) and '\n' not in str(executable) and '\r' not in str(executable)
+          assert record['executable']['sha256'] == pin['interpreter_executable_sha256']
+          with executable.open('rb') as source:
+              assert hashlib.file_digest(source, 'sha256').hexdigest() == pin['interpreter_executable_sha256']
+          print(executable)
+          PY
+          )"
+          export PUMAS_AUDIO_SESSION_PYTHON
+          timeout --kill-after=30s 20m cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features test-support runtime_profiles::audio_session::protocol_tests -- --nocapture 2>&1 | tee "$EVIDENCE_DIR/controlled-session-protocol.log"
+      - name: Preserve confined dependency evidence only
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: review-audio-dependency-evidence-linux
+          path: |
+            ${{ runner.temp }}/review-audio-evidence/source.json
+            ${{ runner.temp }}/review-audio-evidence/probe.log
+            ${{ runner.temp }}/review-audio-evidence/audio-confined-dependency-probe.json
+            ${{ runner.temp }}/review-audio-evidence/controlled-session-protocol.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   build-frontend:
     name: Frontend and desktop contracts
@@ -703,7 +939,7 @@ jobs:
 
   release-candidate:
     name: Assemble release candidate
-    needs: [rust-quality, headless, headless-rpc, torch-quality, build-electron, build-electron-no-inference, windows-release, windows-no-inference, verify-launcher]
+    needs: [rust-quality, headless, headless-rpc, headless-inference, torch-quality, build-electron, build-electron-no-inference, windows-release, windows-no-inference, verify-launcher]
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10

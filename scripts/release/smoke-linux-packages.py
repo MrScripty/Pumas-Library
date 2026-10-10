@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix="pumas-installer-smoke-") as temporary:
             ("LICENSE.txt", root / "LICENSE"),
             (
                 "THIRD-PARTY-NOTICES.txt",
-                root / "docs/release-attribution/0.7.0/THIRD-PARTY-NOTICES.txt",
+                root / f"docs/release-attribution/{version}/THIRD-PARTY-NOTICES.txt",
             ),
             ("frontend/index.html", root / "frontend/dist/index.html"),
         ):

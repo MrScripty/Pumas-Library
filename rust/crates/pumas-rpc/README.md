@@ -3,18 +3,29 @@
 ## Explicit S3 model import
 
 The optional `s3` Cargo feature composes the existing native
-`PumasApi::import_s3_model` operation. It imports one GGUF with an
-explicit caller pin, using the existing transfer, verification, model importer,
+VersionId and conditional single-object operations. Selected bytes pass
+the shared model importer, which supports genuine single-file GGUF/safetensors
+and bounded complete supported packages. It uses the existing transfer, verification,
 registration and receipt owners. Default feature selection remains unchanged.
 Without `s3`, these commands return the closed `unavailable` outcome.
 
 `start_s3_model_import` accepts only `operation_id` (canonical lowercase UUID),
 `endpoint` (HTTPS origin without userinfo, path, query or fragment), `region`,
-`bucket`, `addressing` (`path` or `virtual_hosted`), `key`, `version_id`,
-`filename` (ASCII GGUF basename), `sha256` (64 hex digits), `family` and
-`official_name`. VersionId and digest are required; neither is discovered or
-substituted. Unknown fields, credentials and HTTP opt-outs are rejected before
-I/O. This anonymous command remains source compatible.
+`bucket`, `addressing` (`path` or `virtual_hosted`), `key`, `filename` (safe ASCII
+relative logical path), `sha256` (64 hex digits), `family`, `official_name` and
+optional `read_mode`. Omission or `"version_id"` requires a nonempty immutable
+`version_id`. Existing callers remain compatible. Explicit `"conditional"`
+requires omission of `version_id`; supplied empty, null or fake pins fail before
+I/O. Full SHA-256 is mandatory in both modes. Unknown fields, credentials and HTTP
+opt-outs are rejected before I/O.
+
+Conditional mode accepts one ordinary non-versioned object. HEAD must return a
+known size and strong quoted HTTP ETag; `W/` validators fail. Every GET uses
+exact If-Match; nonempty reads use the selected range. Returned metadata/bytes
+must match. ETag and size
+remain Weak source revision evidence, never a content digest or immutable pin.
+Bundles and prefix discovery explicitly reject conditional mode as unsupported.
+The existing dialog still submits VersionId selections; no new UI mode is added.
 
 `start_authenticated_s3_model_import` is a distinct additive command. Its closed
 params are `{source: <the existing start params>, credentials: {access_key_id,
@@ -46,9 +57,10 @@ reaches renderer diagnostics. No listener, TLS trust or security settings change
 `operation_id`, `endpoint`, `region`, `bucket`, `addressing`, `family`,
 `official_name`, `primary_logical_path` and `files`. The set has 2–32 members,
 each exactly `{key, version_id, logical_path, sha256}`. The primary must be a
-selected ASCII GGUF basename; other paths must be portable relative paths with
-extensions `json`, `txt`, `md`, `model`, `tiktoken`, `vocab` or `merges`, matching
-the existing native bundle importer. One key may select different versions;
+selected safe ASCII relative weight path; other paths must be portable relative
+paths. All selected bytes undergo shared format/package qualification, including
+required config, tokenizer/processor, indexes and referenced shards. GGUF retains
+its existing inert auxiliary policy. Extensions alone grant no model authority. One key may select different versions;
 conflicting evidence for the same key/version, duplicate/colliding paths,
 staging aliases and prefix collisions are refused by shared manifest validation.
 The actual reader's pure preflight also enforces exact object-key semantics and
@@ -61,7 +73,9 @@ This is an explicit set, without prefix enumeration or atomic snapshot claims.
 A pinned HEAD with an explicit zero length supports empty auxiliary members
 without GET or a byte-range request. The shared writer and SHA-256 verifier
 produce the empty file and exact receipt; missing/unknown length is not empty.
-The primary still must pass existing GGUF format validation.
+The complete selection must pass the shared importer’s supported package validation.
+Unsafe formats/custom code retain existing policy; transfer grants no execution.
+Structural publication does not establish backend compatibility or inference.
 
 `start_authenticated_s3_model_bundle_import` takes
 `{source: <bundle start params>, credentials: <the same credential params>}`.
@@ -278,7 +292,8 @@ its existing bounds. Streaming requires an available streaming declaration.
 | Text or TextBatch → EmbeddingsFloat32 | Declared available embedding adapter |
 | Text → PngBase64 | Declared available image generation adapter, explicit size options |
 | PCM Audio → Text | Existing qualified speech owner; otherwise `capability_unavailable` |
-| Image → Text, or messages containing image/audio parts | `unsupported_modality`; no qualified vision or mixed-content adapter is declared |
+| PNG/JPEG image or image-bearing messages → Text | Dedicated llama.cpp adapter; declared image-to-text task and live vision readiness required |
+| Messages containing audio parts | `unsupported_modality`; no mixed-audio adapter is declared |
 | Any input → PCM audio output | `unsupported_modality`; no qualified audio-output adapter is declared |
 
 Image input is closed `{kind:"image", encoding:"png"|"jpeg",
@@ -289,9 +304,10 @@ Desired outputs are `text`, `embeddings_float32`, `png_base64`, `labels`,
 `pcm_s16le`, or `pcm_f32le`. The Image→Text semantic hint is `image_to_text`;
 recognizing that request does not qualify execution.
 
-All requests retain the 32 MiB transport limit. Messages and parts are each
-limited to 128 entries; image payloads receive bounded base64 transport-grammar
-validation, without claiming decoded image validation. PCM validation and owned
+All requests retain the 32 MiB transport limit. Image-bearing requests permit
+128 messages and 128 total parts, with at most four images. PNG/JPEG payloads
+receive strict base64, container and full raster validation before backend
+probes; image dimensions, pixels and compressed bytes are bounded. PCM validation and owned
 byte decoding retain their existing boundaries. Errors before admission use
 `outcome:"not_admitted"`; unsupported modality transport is HTTP 422, unavailable
 runtime/capability is HTTP 503. Typed results, correlation, cancellation,
@@ -299,7 +315,18 @@ streaming and disposal use the existing admitted operation owner.
 
 Lanternwake's Audio→Text path can use this request without naming transcription,
 but an installed speech runtime remains unavailable until its owning contract
-is qualified. Tuldok's Image→Text caption request now has a typed admission and
-explicit unsupported result; its vision execution remains an implementation and
-qualification gap. Controlled adapter tests do not qualify real model inference
+is qualified. Tuldok's Image→Text caption and annotation requests use the dedicated
+llama.cpp adapter. Its closed parser must adopt the seven capability variants and
+image formats/bounds in the [image-to-text contract](../../../docs/contracts/image-to-text-v0.8.md).
+Real matching model/projector/runtime inference and native teardown remain
+qualification gates. Controlled adapter tests do not qualify real model inference
 or packaged consumer distribution.
+
+Conditional RPC qualification uses the actual production process and owned HTTPS
+fixtures (`scripts/tests/qualify-s3-conditional-rpc.py`). It checks exact verified
+receipts, copied bytes, Confirmed publication and Ready metadata. Catalog lookup
+visibility remains an independently reproduced baseline issue, excluded from
+this qualification. Retried partial transfers retain the same acquisition, but a
+re-reserved RPC workspace restarts at byte zero unless the core has matching live
+prefix custody. Changed conditional ETag or size fails before appending or publishing.
+Authenticated retry requires fresh credentials; saved work never stores them.

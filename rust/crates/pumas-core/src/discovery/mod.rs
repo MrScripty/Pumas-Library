@@ -2,7 +2,9 @@
 //!
 //! Registry IDs identify cache entries, not physical libraries. Advertisements
 //! are hints until an authenticated live handshake succeeds. This module does
-//! not reclaim historical owners or claim a cross-registry/store lifetime lease.
+//! not automatically reclaim historical owners. Explicit pending-reservation and
+//! restricted CatalogQuery recovery use the same native store lifetime and require
+//! complete bounded checkpoints; full operating owners remain unqualified.
 
 use crate::models::{
     ModelLibrarySelectorSnapshot, ModelLibrarySelectorSnapshotRequest,
@@ -15,12 +17,40 @@ use crate::{PumasApi, PumasError, PumasLocalClient, PumasReadOnlyLibrary, Result
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod catalog;
+pub use crate::CatalogOwnerCheckpoint;
+pub use catalog::recover_catalog_owner;
 mod http;
 pub use http::*;
+mod start;
+pub use start::{
+    prepare_local_access, recover_pending_reservation, LocalStartAuthority, LocalStartupCustody,
+    PendingReservationCheckpoint, PreparedLocalAccess,
+};
+mod retention;
+pub use retention::LocalOwnerRetention;
 
 pub const DISCOVERY_SCHEMA_VERSION: u32 = 1;
 pub const LOCAL_IPC_PROTOCOL: &str = "pumas.local-ipc";
 pub const LOCAL_IPC_VERSION: u32 = 1;
+
+/// An unverified registry hint. This is not a live handshake or start authority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisteredOwnerObservation {
+    pub generation: String,
+    pub status: InstanceStatus,
+    pub transport: LocalInstanceTransportKind,
+}
+
+/// A registered root, without metadata, credentials, endpoints or model reads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisteredLibraryObservation {
+    pub registry_library_id: String,
+    pub library_root: PathBuf,
+    pub owner: Option<RegisteredOwnerObservation>,
+}
 
 // Preserve the first-slice import path while sharing the single protocol type.
 pub use crate::build_info::ProtocolAdvertisement;
@@ -44,10 +74,13 @@ pub struct InstanceDescription {
 
 impl InstanceDescription {
     pub(crate) fn local(library: &LibraryEntry, instance: &InstanceEntry) -> Self {
+        Self::local_with_id(&library.id, instance)
+    }
+    pub(crate) fn local_with_id(library_id: &str, instance: &InstanceEntry) -> Self {
         Self {
             discovery_schema_version: DISCOVERY_SCHEMA_VERSION,
             build_info: Some(Box::new(crate::PumasBuildInfo::library())),
-            registry_library_id: library.id.clone(),
+            registry_library_id: library_id.into(),
             library_root: instance.library_path.clone(),
             generation: instance.started_at.clone(),
             pumas_version: env!("CARGO_PKG_VERSION").into(),
@@ -178,6 +211,27 @@ pub struct LocalDiscovery {
 }
 
 impl LocalDiscovery {
+    /// Enumerate bounded hints from a private validated DB/WAL observation copy.
+    /// SQLite never opens the source. This is neither an atomic live snapshot
+    /// nor authentication; select a root and use the existing live attach path.
+    /// Ordinary filesystem reads may update access times. No source contents,
+    /// sidecars, schema or model/index paths are written or opened by SQLite.
+    pub fn enumerate_registered_libraries_at(
+        path: &Path,
+    ) -> Result<Vec<RegisteredLibraryObservation>> {
+        #[cfg(target_os = "linux")]
+        {
+            crate::registry::library_registry::local_enumeration::observe(path)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = path;
+            Err(PumasError::InvalidParams {
+                message: "local enumeration is qualified only on Linux".into(),
+            })
+        }
+    }
+
     pub fn open() -> Result<Self> {
         Self::open_at(&crate::platform::registry_db_path()?)
     }
@@ -366,31 +420,7 @@ pub async fn attach_or_start(
             protocol_version,
         });
     }
-    // Preflight this build's contract before any owner transition.
-    let candidate_library = LibraryEntry {
-        id: String::new(),
-        name: String::new(),
-        path: root.clone(),
-        created_at: String::new(),
-        last_accessed: String::new(),
-        version: None,
-        metadata_json: "{}".into(),
-    };
-    let candidate_instance = InstanceEntry {
-        library_path: root.clone(),
-        pid: 0,
-        port: 0,
-        transport_kind: LocalInstanceTransportKind::LoopbackTcp,
-        endpoint: String::new(),
-        connection_token: None,
-        started_at: String::new(),
-        version: None,
-        status: InstanceStatus::Claiming,
-    };
-    let protocol_version = requirements.negotiate(&InstanceDescription::local(
-        &candidate_library,
-        &candidate_instance,
-    ))?;
+    let protocol_version = preflight_start(&root, requirements)?;
     // The claim transaction refuses a concurrent winner; never replaces an existing row.
     let api = PumasApi::builder(&root)
         .with_registry(registry.clone())
@@ -413,6 +443,34 @@ pub async fn attach_or_start(
         description,
         protocol_version,
     })
+}
+
+fn preflight_start(root: &Path, requirements: &CompatibilityRequirements) -> Result<u32> {
+    // Preflight this build's contract before any owner transition.
+    let candidate_library = LibraryEntry {
+        id: String::new(),
+        name: String::new(),
+        path: root.to_owned(),
+        created_at: String::new(),
+        last_accessed: String::new(),
+        version: None,
+        metadata_json: "{}".into(),
+    };
+    let candidate_instance = InstanceEntry {
+        library_path: root.to_owned(),
+        pid: 0,
+        port: 0,
+        transport_kind: LocalInstanceTransportKind::LoopbackTcp,
+        endpoint: String::new(),
+        connection_token: None,
+        started_at: String::new(),
+        version: None,
+        status: InstanceStatus::Claiming,
+    };
+    requirements.negotiate(&InstanceDescription::local(
+        &candidate_library,
+        &candidate_instance,
+    ))
 }
 
 #[cfg(test)]

@@ -38,6 +38,12 @@ requires successful composed `shutdown_instance()`; PID liveness and subsystem
 drains do not authorize reclaim.
 `PumasLocalClient` explicitly connects to an existing ready owner.
 `PumasReadOnlyLibrary` reads indexed state without taking lifecycle ownership.
+An explicit `InstanceProfile::CatalogQuery` owner opens an existing index read-only
+through the same builder/API and restricted local IPC dispatcher. It supports
+indexed list/get/literal-search observations and same-boot, exact-checkpoint cold
+reopen using the existing physical lease. It admits no acquisition, child/service
+launch or external HTTP owner. Full/legacy/unknown histories remain refused; see
+the [restricted custody contract](plans/operating-owner-custody-design.md).
 
 On Linux/macOS the existing owner also holds the physical launcher directory
 across independent rendezvous registries and symlink aliases. The lifetime is

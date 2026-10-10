@@ -88,6 +88,16 @@ export function RemoteModelSummary({
           {model.name}
         </span>
       </div>
+      {model.cachedDiscovery && (
+        <div className="mt-2 space-y-1 rounded border border-[hsl(var(--launcher-border))] p-2 text-xs text-[hsl(var(--text-secondary))]" aria-label="Cached discovery observation">
+          <p className="font-medium">{model.cachedDiscovery.freshness === 'stale' ? 'Cached observation · stale' : 'Cached observation · within TTL at search'}</p>
+          <p className="break-all">Source: {model.cachedDiscovery.sourceUrl}</p>
+          <p>Observed: <time dateTime={model.cachedDiscovery.observedAt}>{model.cachedDiscovery.observedAt}</time></p>
+          {model.cachedDiscovery.freshUntil && <p>Cache freshness until: <time dateTime={model.cachedDiscovery.freshUntil}>{model.cachedDiscovery.freshUntil}</time></p>}
+          <p className="break-all">Revision observed: <code>{model.cachedDiscovery.revisionObserved ?? 'Not recorded'}</code></p>
+          <p>Saved metadata does not confirm current access, download selection or backend readiness.</p>
+        </div>
+      )}
       <div className="mt-1 flex items-start justify-between gap-4 text-xs text-[hsl(var(--text-muted))]">
         <div className="flex min-w-0 flex-col gap-1">
           {model.developer && onSearchDeveloper && (
@@ -135,7 +145,7 @@ export function RemoteModelSummary({
           {quantLabels.length ? quantLabels.join(', ') : 'Unknown'}
         </MetadataItem>
         <MetadataItem icon={<Download />}>
-          {formatDownloadSizeRange(model, isHydratingDetails)}
+          {model.cachedDiscovery ? 'Download details require online check' : formatDownloadSizeRange(model, isHydratingDetails)}
         </MetadataItem>
       </div>
       {model.compatibleEngines && model.compatibleEngines.length > 0 && (

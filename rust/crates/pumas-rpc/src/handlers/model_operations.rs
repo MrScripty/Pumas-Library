@@ -1,10 +1,14 @@
 //! Additive selected-model capabilities and closed typed operations.
+mod image_input;
 mod modality;
 mod projection;
 mod stream;
 #[cfg(test)]
 mod tests;
 pub(super) mod types;
+pub(super) mod vision;
+#[cfg(test)]
+mod vision_tests;
 
 use self::types::*;
 use super::openai_gateway::{self, OpenAiServedModelLookup};
@@ -104,6 +108,8 @@ fn status_for(code: ErrorCode) -> StatusCode {
         ErrorCode::AmbiguousModel | ErrorCode::AmbiguousOperation => StatusCode::CONFLICT,
         ErrorCode::UnsupportedModality => StatusCode::UNPROCESSABLE_ENTITY,
         ErrorCode::CapabilityUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+        ErrorCode::RequestLimit => StatusCode::PAYLOAD_TOO_LARGE,
+        ErrorCode::TransportLost => StatusCode::BAD_GATEWAY,
         _ => StatusCode::BAD_REQUEST,
     }
 }
@@ -152,7 +158,7 @@ pub async fn handle_model_operations(
             )
         }
     };
-    let (request, served, body) = if capability_present {
+    let (request, served, body, declarations) = if capability_present {
         let request: OperationRequest = match serde_json::from_slice(&bytes) {
             Ok(request) => request,
             Err(_) => {
@@ -165,7 +171,7 @@ pub async fn handle_model_operations(
             }
         };
         let id = Some(request.request_id.clone());
-        let body = match projection::provider_request(&request) {
+        let body = match prepare_provider_request(&request, &state, disconnect.as_ref()).await {
             Ok(body) => body,
             Err(code) => return error(status_for(code), id, code, false),
         };
@@ -173,7 +179,7 @@ pub async fn handle_model_operations(
             Ok(model) => model,
             Err(code) => return error(status_for(code), id, code, false),
         };
-        (request, served, body)
+        (request, served, body, None)
     } else {
         let request: modality::ModalityRequest = match serde_json::from_slice(&bytes) {
             Ok(request) => request,
@@ -190,19 +196,38 @@ pub async fn handle_model_operations(
         if let Err(code) = request.validate() {
             return error(status_for(code), id, code, false);
         }
+        // Decode image envelopes and check finite options before any backend
+        // discovery. Preparing a provider body never authorizes execution.
+        let image_body = match request.image_preflight() {
+            Ok(Some(image_request)) => {
+                match prepare_provider_request(&image_request, &state, disconnect.as_ref()).await {
+                    Ok(body) => Some(body),
+                    Err(code) => return error(status_for(code), id, code, false),
+                }
+            }
+            Ok(None) => None,
+            Err(code) => return error(status_for(code), id, code, false),
+        };
         let served = match selected(&state, &request.model, request.profile.as_deref()).await {
             Ok(model) => model,
             Err(code) => return error(status_for(code), id, code, false),
         };
-        let request = match request.resolve(&descriptors(&state, &served).await) {
+        let declarations = match operation_descriptors(&state, &served, disconnect.as_ref()).await {
+            Ok(declarations) => declarations,
+            Err(code) => return error(status_for(code), id, code, false),
+        };
+        let request = match request.resolve(&declarations) {
             Ok(request) => request,
             Err(code) => return error(status_for(code), id, code, false),
         };
-        let body = match projection::provider_request(&request) {
-            Ok(body) => body,
-            Err(code) => return error(status_for(code), id, code, false),
+        let body = match image_body {
+            Some(body) if request.capability == Capability::ImageToText => body,
+            _ => match projection::provider_request(&request) {
+                Ok(body) => body,
+                Err(code) => return error(status_for(code), id, code, false),
+            },
         };
-        (request, served, body)
+        (request, served, body, Some(declarations))
     };
     let id = Some(request.request_id.clone());
     let available = if request.capability == Capability::AudioTranscription {
@@ -212,10 +237,17 @@ pub async fn handle_model_operations(
                 .owned_audio_endpoint(&served.profile_id, &served.model_id)
                 .is_some()
     } else {
-        descriptors(&state, &served)
-            .await
-            .into_iter()
-            .any(|d| d.capability == request.capability && d.availability.available())
+        // Modality resolution already observed these declarations. Reuse that
+        // observation here; the gateway still performs its final live guard.
+        match declarations {
+            Some(declarations) => declarations,
+            None => match operation_descriptors(&state, &served, disconnect.as_ref()).await {
+                Ok(declarations) => declarations,
+                Err(code) => return error(status_for(code), id, code, false),
+            },
+        }
+        .into_iter()
+        .any(|d| d.capability == request.capability && d.availability.available())
     };
     if !available {
         return error(
@@ -234,6 +266,7 @@ pub async fn handle_model_operations(
         marker: &admitted,
         expected: &served,
         cancellation: &cancellation,
+        vision: request.capability == Capability::ImageToText,
     };
     let provider_bytes = serde_json::to_vec(&body).expect("closed request is serializable");
     let path = OriginalUri(
@@ -301,7 +334,15 @@ pub async fn handle_model_operations(
     };
     let result = serde_json::from_slice(&bytes)
         .map_err(|_| ErrorCode::InvalidProviderResult)
-        .and_then(|value| projection::result(&request, value));
+        .and_then(|value: serde_json::Value| {
+            if request.capability == Capability::ImageToText
+                && value.get("model").and_then(serde_json::Value::as_str)
+                    != Some(served.model_id.as_str())
+            {
+                return Err(ErrorCode::InvalidProviderResult);
+            }
+            projection::result(&request, value)
+        });
     match result {
         Ok(result) => {
             let response = OperationResponse {
@@ -330,6 +371,49 @@ pub async fn handle_model_operations(
             code,
             admitted.load(Ordering::Acquire),
         ),
+    }
+}
+
+async fn prepare_provider_request(
+    request: &OperationRequest,
+    state: &AppState,
+    disconnect: Option<&Extension<RequestDisconnect>>,
+) -> Result<serde_json::Value, ErrorCode> {
+    if request.capability != Capability::ImageToText {
+        return projection::provider_request(request);
+    }
+    use std::sync::OnceLock;
+    static DECODERS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    let permit = DECODERS
+        .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(2)))
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ErrorCode::CapabilityUnavailable)?;
+    let request = request.clone();
+    let decode = tokio::task::spawn_blocking(move || {
+        // A running codec cannot be asynchronously interrupted. It retains its
+        // memory and capacity share through its bounded, effect-free decode.
+        let _permit = permit;
+        projection::provider_request(&request)
+    });
+    tokio::select! {
+        biased;
+        () = state.shutdown_request.clone().requested() => Err(ErrorCode::TransportLost),
+        () = async { match disconnect { Some(Extension(signal)) => signal.clone().disconnected().await, None => std::future::pending().await } } => Err(ErrorCode::TransportLost),
+        result = decode => result.map_err(|_| ErrorCode::InvalidRequest)?,
+    }
+}
+
+async fn operation_descriptors(
+    state: &AppState,
+    served: &ServedModelStatus,
+    disconnect: Option<&Extension<RequestDisconnect>>,
+) -> Result<Vec<CapabilityDescriptor>, ErrorCode> {
+    tokio::select! {
+        biased;
+        () = state.shutdown_request.clone().requested() => Err(ErrorCode::TransportLost),
+        () = async { match disconnect { Some(Extension(signal)) => signal.clone().disconnected().await, None => std::future::pending().await } } => Err(ErrorCode::TransportLost),
+        declarations = descriptors(state, served) => Ok(declarations),
     }
 }
 
@@ -447,6 +531,17 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
             .await
             .is_ok(),
     };
+    let image_adapter = state
+        .provider_registry
+        .get(served.provider)
+        .is_some_and(|provider| {
+            provider.supports_serving_task(pumas_library::ServingTask::ImageToText)
+        })
+        && vision::supported_profile(state, served).await;
+    let vision_ready = image_adapter
+        && runtime_ready
+        && semantic_match(Capability::ImageToText, task, model_type, served.provider) == Some(true)
+        && vision::ready(state, served).await;
     [
         Capability::ChatGeneration,
         Capability::TextGeneration,
@@ -454,6 +549,7 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
         Capability::ImageGeneration,
         Capability::AudioTranscription,
         Capability::AudioClassification,
+        Capability::ImageToText,
     ]
     .into_iter()
     .map(|capability| {
@@ -510,6 +606,26 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     None,
                     vec![],
                 ),
+                Capability::ImageToText => (
+                    SemanticTask::ImageToText,
+                    vec![
+                        InputFormat::PngBase64,
+                        InputFormat::JpegBase64,
+                        InputFormat::MessagesImage,
+                    ],
+                    vec![OutputFormat::Text],
+                    Some(OpenAiGatewayEndpoint::ChatCompletions),
+                    vec![
+                        bound(OptionName::MaxTokens, 1., 2048.),
+                        bound(OptionName::Temperature, 0., 2.),
+                        bound(OptionName::TopP, 0., 1.),
+                        bound(OptionName::ImageBytes, 1., (8 * 1024 * 1024) as f64),
+                        bound(OptionName::ImagePixels, 1., 4_194_304.),
+                        bound(OptionName::ImageCount, 1., 4.),
+                        bound(OptionName::Width, 1., 4096.),
+                        bound(OptionName::Height, 1., 4096.),
+                    ],
+                ),
             };
         let adapter = endpoint.is_some_and(|endpoint| {
             state
@@ -530,13 +646,13 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
             Some(AvailabilityReason::UnqualifiedAudioRuntime)
         } else if capability == Capability::AudioTranscription {
             None
-        } else if !adapter {
+        } else if !adapter || (capability == Capability::ImageToText && !image_adapter) {
             Some(AvailabilityReason::UnsupportedAdapter)
         } else if semantics == Some(false) {
             Some(AvailabilityReason::ModelTaskMismatch)
         } else if semantics.is_none() {
             Some(AvailabilityReason::UnknownModelTask)
-        } else if !runtime_ready {
+        } else if !runtime_ready || (capability == Capability::ImageToText && !vision_ready) {
             Some(AvailabilityReason::RuntimeUnavailable)
         } else {
             None
@@ -598,6 +714,9 @@ fn semantic_match(
             ),
             Capability::ImageGeneration => {
                 matches!(task, "text-to-image" | "text_to_image" | "text->image")
+            }
+            Capability::ImageToText => {
+                matches!(task, "image-to-text" | "image_to_text" | "image->text")
             }
             _ => false,
         });

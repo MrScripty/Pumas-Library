@@ -35,14 +35,15 @@ pub(super) enum ImportBoundary {
 pub(super) type ImportHook =
     Arc<dyn Fn(ImportBoundary, &DownloadRecoveryDestination) -> Result<()> + Send + Sync>;
 
-struct VerifiedCopyInput {
-    file: std::fs::File,
-    receipt: crate::acquisition::VerifiedFile,
+pub(super) struct VerifiedCopyInput {
+    pub file: std::fs::File,
+    pub receipt: crate::acquisition::VerifiedFile,
 }
 
 struct AcquiredCopyInput {
     files: Vec<VerifiedCopyInput>,
     primary: usize,
+    vision: Option<AcquiredGgufVisionSpec>,
     consumer_receipt: crate::acquisition::AcquisitionConsumerReceipt,
 }
 
@@ -64,6 +65,17 @@ impl ModelImporter {
         consumer_receipt: &crate::acquisition::AcquisitionConsumerReceipt,
         spec: &ModelImportSpec,
     ) -> Result<ModelImportResult> {
+        self.import_acquired_owned_with_vision(acquired, consumer_receipt, spec, None)
+            .await
+    }
+
+    pub(super) async fn import_acquired_owned_with_vision(
+        &self,
+        acquired: &crate::acquisition::AcquiredArtifactUse,
+        consumer_receipt: &crate::acquisition::AcquisitionConsumerReceipt,
+        spec: &ModelImportSpec,
+        vision: Option<AcquiredGgufVisionSpec>,
+    ) -> Result<ModelImportResult> {
         let authority = self.library.mutation_authority()?;
         let consumer_receipt = consumer_receipt.clone();
         let primary = acquired
@@ -72,7 +84,7 @@ impl ModelImporter {
             .iter()
             .position(|file| file.path == spec.path)
             .ok_or_else(|| {
-                super::acquired::recovery_required("Selected primary GGUF input is unavailable")
+                super::acquired::recovery_required("Selected primary model input is unavailable")
             })?;
         let mut files = Vec::with_capacity(acquired.record().files.len());
         for (index, receipt) in acquired.record().files.iter().enumerate() {
@@ -84,7 +96,7 @@ impl ModelImporter {
         let importer = self.clone();
         let spec = spec.clone();
         acquired
-            .run_blocking("copy and settle acquired GGUF model", move || {
+            .run_blocking("copy and settle acquired model", move || {
                 importer.import_staged(
                     &spec,
                     &authority,
@@ -92,8 +104,10 @@ impl ModelImporter {
                     Some(AcquiredCopyInput {
                         files,
                         primary,
+                        vision,
                         consumer_receipt,
                     }),
+                    false,
                 )
             })
             .await
@@ -103,6 +117,16 @@ impl ModelImporter {
         &self,
         spec: &ModelImportSpec,
         progress: Option<mpsc::Sender<ImportProgress>>,
+    ) -> Result<ModelImportResult> {
+        self.import_owned_with_local_cohere(spec, progress, false)
+            .await
+    }
+
+    pub(super) async fn import_owned_with_local_cohere(
+        &self,
+        spec: &ModelImportSpec,
+        progress: Option<mpsc::Sender<ImportProgress>>,
+        local_cohere: bool,
     ) -> Result<ModelImportResult> {
         // No per-call runtime: this is deliberately unavailable on standalone
         // ModelLibrary instances, before any workspace or other effect exists.
@@ -116,7 +140,13 @@ impl ModelImporter {
             .run_owned("copied model import", move |context| async move {
                 let result = context
                     .run_blocking("prepare and settle copied import", move || {
-                        importer.import_staged(&spec, &authority, progress.as_ref(), None)
+                        importer.import_staged(
+                            &spec,
+                            &authority,
+                            progress.as_ref(),
+                            None,
+                            local_cohere,
+                        )
                     })
                     .await?;
                 // Ordinary input/collision refusals are results, not owner failures.
@@ -138,7 +168,18 @@ impl ModelImporter {
         authority: &LibraryMutationAuthority,
         progress: Option<&mpsc::Sender<ImportProgress>>,
         acquired: Option<AcquiredCopyInput>,
+        local_cohere: bool,
     ) -> Result<ModelImportResult> {
+        let selected_primary = acquired
+            .as_ref()
+            .map(|input| {
+                normalized_acquired_payload_path(
+                    &input.files[input.primary].receipt.path,
+                    input.files.len() > 1,
+                )
+            })
+            .transpose()?;
+        let vision = acquired.as_ref().and_then(|input| input.vision.clone());
         let acquisition = acquired
             .as_ref()
             .map(|input| input.consumer_receipt.clone());
@@ -160,24 +201,37 @@ impl ModelImporter {
                 }
             })?
         };
-        let (type_info, acquired) = if let Some(mut input) = acquired {
-            use std::io::{Read, Seek, SeekFrom};
-            let file = &mut input.files[input.primary].file;
-            let mut magic = [0; 4];
-            file.read_exact(&mut magic)?;
-            if magic != *b"GGUF" {
-                return Err(PumasError::Validation {
-                    field: "import.acquired".into(),
-                    message: "Acquired model import currently supports GGUF content only".into(),
-                });
-            }
-            file.seek(SeekFrom::Start(0))?;
-            let info = crate::model_library::identifier::identify_model_reader(file, &source_path)?;
-            file.seek(SeekFrom::Start(0))?;
-            (info, Some(input))
-        } else {
-            (self.detect_type(&source_path)?, None)
-        };
+        let (type_info, acquired, acquired_diffusers, acquired_directory) =
+            if let Some(mut input) = acquired {
+                let qualification = if let Some(vision) = &input.vision {
+                    super::acquired_package::qualify_vision(
+                        &mut input.files,
+                        input.primary,
+                        &vision.vision_projector,
+                    )?
+                } else {
+                    super::acquired_package::qualify(&mut input.files, input.primary)?
+                };
+                (
+                    qualification.info,
+                    Some(input),
+                    qualification.diffusers,
+                    qualification.directory,
+                )
+            } else if local_cohere {
+                (
+                    ModelTypeInfo {
+                        format: crate::model_library::FileFormat::Safetensors,
+                        model_type: ModelType::Audio,
+                        ..Default::default()
+                    },
+                    None,
+                    false,
+                    false,
+                )
+            } else {
+                (self.detect_type(&source_path)?, None, false, false)
+            };
         let security_tier = type_info.format.security_tier();
         if security_tier == SecurityTier::Pickle && !spec.security_acknowledged.unwrap_or(false) {
             return Ok(refused(
@@ -186,11 +240,11 @@ impl ModelImporter {
                 security_tier,
             ));
         }
-        let validation = source_metadata
-            .is_dir()
+        let validation = (!local_cohere && source_metadata.is_dir())
             .then(|| validate_diffusers_directory_for_import(&source_path))
             .filter(|value| value.validation_state == crate::models::AssetValidationState::Valid);
-        let model_type = if validation.is_some() {
+        let diffusers = acquired_diffusers || validation.is_some();
+        let model_type = if diffusers {
             "diffusion".to_string()
         } else if let Some(hint) = spec.model_type.as_deref() {
             self.library
@@ -200,7 +254,7 @@ impl ModelImporter {
         } else {
             type_info.model_type.as_str().to_string()
         };
-        let family = if validation.is_some() {
+        let family = if diffusers {
             spec.family.clone()
         } else {
             type_info
@@ -217,8 +271,10 @@ impl ModelImporter {
         // Preflight the whole filename mapping before a stage is created.
         let plan = match if let Some(input) = acquired {
             CopyPlan::verified_set(input.files)
+        } else if local_cohere {
+            CopyPlan::local_cohere(&source_path)
         } else {
-            CopyPlan::open(&source_path, validation.is_some())
+            CopyPlan::open(&source_path, diffusers)
         } {
             Err(PumasError::Validation { message, .. }) => {
                 return Ok(refused(spec, &message, security_tier))
@@ -259,7 +315,7 @@ impl ModelImporter {
             #[cfg(test)]
             self.import_boundary(ImportBoundary::BeforeHash, &stage)?;
             let mut bundle_index_bytes = None;
-            let mut metadata = if validation.is_some() {
+            let mut metadata = if diffusers {
                 let (staged_validation, index_bytes) =
                     crate::model_library::external_assets::validate_staged_diffusers_directory(
                         &stage,
@@ -299,16 +355,50 @@ impl ModelImporter {
                 metadata.size_bytes = Some(files.iter().filter_map(|file| file.size).sum());
                 metadata
             } else {
-                let primary = files
-                    .iter()
-                    .filter(|file| is_model_file(&file.name))
-                    .max_by_key(|file| file.size);
+                let primary = if let Some(selected) = &selected_primary {
+                    files.iter().find(|file| &file.name == selected)
+                } else {
+                    files
+                        .iter()
+                        .filter(|file| is_model_file(&file.name))
+                        .max_by_key(|file| file.size)
+                };
                 let hashes = primary.map(|file| DualHash {
                     sha256: file.sha256.clone().expect("copy-time SHA256"),
                     blake3: file.blake3.clone().expect("copy-time BLAKE3"),
                 });
                 self.create_metadata(spec, &type_info, &files, hashes)?
             };
+            if acquired_directory && !diffusers {
+                metadata.entry_path = Some(target_path.display().to_string());
+                metadata.expected_files =
+                    Some(files.iter().map(|file| file.name.clone()).collect());
+                metadata.storage_kind = Some(crate::models::StorageKind::LibraryOwned);
+            }
+            if let Some(primary) = &selected_primary {
+                if type_info.format == crate::model_library::FileFormat::Gguf {
+                    metadata.entry_path = Some(target_path.join(primary).display().to_string());
+                    metadata.expected_files =
+                        Some(files.iter().map(|file| file.name.clone()).collect());
+                    metadata.selected_artifact_files = metadata.expected_files.clone();
+                    metadata.storage_kind = Some(crate::models::StorageKind::LibraryOwned);
+                }
+            }
+            if vision.is_some() {
+                // This is caller-declared semantic intent, not Hugging Face
+                // pipeline evidence; leave pipeline_tag absent.
+                metadata.task_type_primary = Some("image-to-text".into());
+                metadata.input_modalities = Some(vec!["image".into(), "text".into()]);
+                metadata.output_modalities = Some(vec!["text".into()]);
+                metadata.task_classification_source =
+                    Some("explicit-acquired-vision-selection".into());
+                metadata.task_classification_confidence = Some(0.0);
+                metadata.metadata_needs_review = Some(true);
+                metadata.review_reasons = Some(vec!["native-vision-qualification-required".into()]);
+            }
+            if local_cohere {
+                super::local_cohere::apply_metadata(&stage, &target_path, &files, &mut metadata)?;
+            }
             // save_metadata would derive the ID from the stage pathname. Keep
             // the intended final ID and publish through held directory authority.
             metadata.model_id = Some(model_id.clone());
@@ -609,7 +699,10 @@ enum CopySource {
     Verified(BTreeMap<String, VerifiedCopyInput>),
 }
 
-fn normalized_acquired_payload_path(original: &str, preserve_layout: bool) -> Result<String> {
+pub(super) fn normalized_acquired_payload_path(
+    original: &str,
+    preserve_layout: bool,
+) -> Result<String> {
     let normalized = if preserve_layout {
         original.to_owned()
     } else {
@@ -628,6 +721,44 @@ fn normalized_acquired_payload_path(original: &str, preserve_layout: bool) -> Re
 }
 
 impl CopyPlan {
+    fn local_cohere(path: &Path) -> Result<Self> {
+        if !std::fs::symlink_metadata(path)?.is_dir() {
+            return Err(invalid_filename(
+                "Local Cohere source must be a real directory",
+            ));
+        }
+        let source = crate::platform::capability_fs::open_pinned_directory(path)?;
+        let mut files = Vec::new();
+        for name in crate::model_library::artifact_use::REQUIRED_MEMBERS
+            .iter()
+            .chain(crate::model_library::artifact_use::OPTIONAL_MEMBERS.iter())
+        {
+            match source.symlink_metadata(name) {
+                Ok(metadata) if metadata.is_file() && !metadata.is_symlink() => {
+                    files.push((
+                        PathBuf::from(name),
+                        (*name).to_string(),
+                        (*name).to_string(),
+                    ));
+                }
+                Err(error)
+                    if error.kind() == io::ErrorKind::NotFound
+                        && crate::model_library::artifact_use::OPTIONAL_MEMBERS.contains(name) => {}
+                _ => {
+                    return Err(invalid_filename(
+                        "Local Cohere selected member is missing or not a regular file",
+                    ))
+                }
+            }
+        }
+        files.sort_by(|left, right| left.2.cmp(&right.2));
+        Ok(Self {
+            source: CopySource::Directory(source),
+            files,
+            directories: Vec::new(),
+        })
+    }
+
     fn verified_set(inputs: Vec<VerifiedCopyInput>) -> Result<Self> {
         let preserve_layout = inputs.len() > 1;
         let mut source = BTreeMap::new();

@@ -37,18 +37,7 @@ export function formatDownloadRetryHint(downloadStatus: DownloadStatus | undefin
   return `Retrying ${retryProgress}${retryDelay}`;
 }
 
-export function hasExactDownloadDetails(model: RemoteModelInfo): boolean {
-  if (typeof model.totalSizeBytes === 'number' && model.totalSizeBytes > 0) {
-    return true;
-  }
-
-  return (
-    model.downloadOptions?.some(
-      (option) =>
-        (typeof option.sizeBytes === 'number' && option.sizeBytes > 0) || Boolean(option.fileGroup)
-    ) ?? false
-  );
-}
+export { hasExactDownloadDetails } from '../utils/hfDownloadDetails';
 
 export function getRemoteDownloadOptions(model: RemoteModelInfo): RemoteDownloadOption[] {
   if (model.downloadOptions?.length) {

@@ -48,6 +48,7 @@ function job(name) {
 test('release-producing jobs run only for version tags', () => {
   for (const name of [
     'headless-rpc',
+    'headless-inference',
     'build-rust',
     'build-electron',
     'build-electron-no-inference',
@@ -64,6 +65,34 @@ test('shared quality jobs remain available to pull requests and ordinary pushes'
   for (const name of ['lint-workflows', 'rust-quality', 'headless', 'build-frontend', 'torch-quality']) {
     assert.doesNotMatch(job(name), /^    if:/m, `${name} must not be job-gated to version tags`);
   }
+});
+
+test('review inference candidate is bounded, source-pinned and never publishes a release', () => {
+  const review = job('review-inference-linux');
+  assert.match(review, /^    if: github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch'$/m);
+  assert.match(review, /^    needs: lint-workflows$/m);
+  assert.match(review, /^    runs-on: ubuntu-24\.04$/m);
+  assert.match(review, /^    timeout-minutes: 60$/m);
+  assert.match(review, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(review, /persist-credentials: false/);
+  assert.match(review, /EXPECTED_SOURCE_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(review, /test "\$\(git rev-parse HEAD\)" = "\$EXPECTED_SOURCE_SHA"/);
+  assert.match(review, /CARGO_BUILD_JOBS: '1'/);
+  assert.match(review, /ORT_SKIP_DOWNLOAD: '1'/);
+  assert.match(review, /cargo fetch --locked --manifest-path rust\/Cargo\.toml/);
+  assert.match(review, /onnx_runtime_stage\.py --target linux-x86_64 --download/);
+  assert.match(review, /onnx_runtime_probe\.py --target linux-x86_64/);
+  assert.match(review, /headless_inference_ci\.py --target linux-x86_64/);
+  assert.match(review, /check-artifacts\.mjs .* headless-inference-linux/);
+  assert.match(review, /name: Verify extracted Pumas with an untrained synthetic ONNX graph\n        timeout-minutes: 3/);
+  assert.match(review, /verify_synthetic_packaged_onnx\.py --candidate-dir .* --expected-source "\$EXPECTED_SOURCE_SHA"/);
+  assert.ok(review.indexOf('verify_synthetic_packaged_onnx.py') < review.indexOf('uses: actions/upload-artifact@'));
+  assert.match(review, /name: review-inference-linux-x86_64/);
+  assert.match(review, /name: Preserve bounded review build and startup evidence\n        if: always\(\)/);
+  assert.match(review, /name: review-inference-evidence-linux-x86_64/);
+  assert.equal((review.match(/retention-days: 7/g) ?? []).length, 2);
+  assert.doesNotMatch(review, /secrets\.|permissions:|pull_request_target|gh release|git push|CARGO_PROFILE_RELEASE_|RUSTFLAGS/);
+  assert.doesNotMatch(job('release-candidate'), /review-inference/);
 });
 
 test('release builds and frontend artifact upload are guarded inside shared jobs', () => {
@@ -147,4 +176,40 @@ test('release build commands never enable test-support or all-features', () => {
   assert.match(manager, /^default = \[\]$/m);
   assert.match(rpc, /^test-support = \["pumas-app-manager\?\/test-support"\]$/m);
   assert.match(rpc, /^default = \["inference-plugins"\]$/m);
+});
+
+
+test('review audio dependency qualification requires bounded exact-source confinement', () => {
+  const audio = job('review-audio-dependencies');
+  assert.match(audio, /if: github.event_name == 'pull_request' \|\| github.event_name == 'workflow_dispatch'/);
+  assert.match(audio, /runs-on: ubuntu-24\.04/);
+  assert.match(audio, /timeout-minutes: 60/);
+  assert.match(audio, /persist-credentials: false/);
+  assert.ok(audio.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}'));
+  assert.match(audio, /CARGO_BUILD_JOBS: '1'/);
+  assert.match(audio, /CARGO_PROFILE_DEV_DEBUG: '0'/);
+  assert.match(audio, /set -euo pipefail/);
+  assert.match(audio, /timeout --kill-after=30s 45m cargo run --locked/);
+  assert.match(audio, /--features test-support --example qualify_audio_dependencies -- "\$QUALIFICATION_ROOT"/);
+  assert.match(audio, /pretrained_model_acceptance/);
+  assert.match(audio, /if: always\(\)/);
+  const upload = audio.slice(audio.indexOf('uses: actions/upload-artifact'));
+  assert.doesNotMatch(upload, /review-audio-runtime|\*|rust\/target/);
+  assert.doesNotMatch(audio, /continue-on-error|secrets\.|permissions:|pull_request_target|sudo|--privileged/);
+});
+
+
+test('controlled session lifecycle reuses the authenticated managed interpreter', () => {
+  const audio = job('review-audio-dependencies');
+  const controlled = audio.indexOf('Check controlled session lifecycle');
+  assert.ok(controlled > audio.indexOf('Qualify exact frozen dependencies'));
+  const step = audio.slice(controlled, audio.indexOf('Preserve confined dependency evidence only'));
+  assert.match(step, /runtime.json/);
+  assert.match(step, /interpreter_executable_sha256/);
+  assert.match(step, /hashlib.file_digest/);
+  assert.match(step, /is_relative_to\(root\)/);
+  assert.match(step, /timeout --kill-after=30s 20m cargo test --locked/);
+  assert.match(step, /runtime_profiles::audio_session::protocol_tests/);
+  assert.doesNotMatch(step, /pip install|curl |wget |continue-on-error/);
+  assert.match(audio, /controlled-session-protocol.log/);
 });

@@ -3,8 +3,8 @@
 use crate::{
     acquisition::{
         AcquisitionDemand, AcquisitionHost, AcquisitionRetryPolicy, AcquisitionS3ManifestRequest,
-        AcquisitionWorkspace, HttpAttemptHost, S3Credentials, S3ManifestEntry, S3Reader,
-        S3ReaderConfig, S3ReaderError,
+        AcquisitionWorkspace, HttpAttemptHost, S3ConditionalManifestEntry, S3Credentials,
+        S3ManifestEntry, S3Reader, S3ReaderConfig, S3ReaderError, Sha256Evidence,
     },
     model_library::{ModelImportResult, ModelImportSpec, ModelImporter},
     PumasApi, PumasError,
@@ -35,10 +35,55 @@ pub struct S3ModelImportRequest {
     pub source: S3ReaderConfig,
     pub credentials: Option<S3Credentials>,
     pub entries: Vec<S3ManifestEntry>,
-    /// Exact logical primary GGUF path and model metadata, not a source URL.
+    /// Exact logical primary weight path and model metadata, not a source URL.
     pub import: ModelImportSpec,
     pub workspace: AcquisitionWorkspace,
     pub retry: AcquisitionRetryPolicy,
+}
+
+/// Opt-in single-object request for a non-versioned general-purpose bucket.
+/// The exact object requires HEAD size, a strong quoted HTTP ETag (W/ is
+/// refused), and whole-file SHA-256. Weak revision strength classifies mutable
+/// provenance, not the HTTP validator; ETag/size alone never prove integrity.
+/// These authorize byte acquisition, not model execution or package completeness.
+/// This does not admit conditional bundles or prefix discovery. Like the versioned
+/// request, credentials are ephemeral and the caller holds workspace custody.
+pub struct S3ConditionalModelImportRequest {
+    pub operation_id: uuid::Uuid,
+    pub source: S3ReaderConfig,
+    pub credentials: Option<S3Credentials>,
+    pub source_key: String,
+    pub expected_sha256: Sha256Evidence,
+    /// Exact logical path of the single selected model file and model metadata.
+    pub import: ModelImportSpec,
+    pub workspace: AcquisitionWorkspace,
+    pub retry: AcquisitionRetryPolicy,
+}
+
+/// Authored complete non-versioned file set. Strong per-object ETags and sizes
+/// must match HEAD; every file requires full SHA-256 before model qualification.
+/// This grants no atomic bucket snapshot or model execution authority.
+/// Credentials are ephemeral; the caller retains exact workspace/operation custody.
+pub struct S3ConditionalBundleModelImportRequest {
+    pub operation_id: uuid::Uuid,
+    pub source: S3ReaderConfig,
+    pub credentials: Option<S3Credentials>,
+    pub entries: Vec<S3ConditionalManifestEntry>,
+    /// Exact selected primary weight path plus existing import policy/metadata.
+    pub import: ModelImportSpec,
+    pub workspace: AcquisitionWorkspace,
+    pub retry: AcquisitionRetryPolicy,
+}
+
+enum SelectionMode {
+    Versioned,
+    ConditionalObject(ConditionalObject),
+    ConditionalManifest(Vec<S3ConditionalManifestEntry>),
+}
+
+struct ConditionalObject {
+    source_key: String,
+    expected_sha256: Sha256Evidence,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -297,7 +342,7 @@ impl AcquisitionHost for Host {
 
 impl PumasApi {
     /// Resolve explicit immutable S3 pins, acquire/verify the complete set, and
-    /// publish one GGUF with optional selected data/text auxiliaries. No prefix
+    /// publish a package qualified by the shared model importer. No prefix
     /// discovery, account setup, credential storage, implicit workspace or RPC is
     /// created. Success follows the existing consumer receipt's durable settlement.
     ///
@@ -309,6 +354,69 @@ impl PumasApi {
     pub async fn import_s3_model(
         &self,
         request: S3ModelImportRequest,
+        control: S3ModelImportControl,
+    ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
+        self.import_s3_model_mode(request, SelectionMode::Versioned, control)
+            .await
+    }
+
+    /// Acquire a digest-bound conditional single object and qualify it through
+    /// the same shared importer, cancellation gate and durable publication path.
+    /// Missing or HTTP weak (W/) validators and incomplete model packages fail.
+    /// Mutable provenance remains Weak despite a strong HTTP ETag; the mandatory
+    /// whole-file digest supplies content integrity. VersionId
+    /// callers retain their immutable selection contract.
+    pub async fn import_s3_conditional_model(
+        &self,
+        request: S3ConditionalModelImportRequest,
+        control: S3ModelImportControl,
+    ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
+        let conditional = ConditionalObject {
+            source_key: request.source_key,
+            expected_sha256: request.expected_sha256,
+        };
+        let request = S3ModelImportRequest {
+            operation_id: request.operation_id,
+            source: request.source,
+            credentials: request.credentials,
+            entries: Vec::new(),
+            import: request.import,
+            workspace: request.workspace,
+            retry: request.retry,
+        };
+        self.import_s3_model_mode(
+            request,
+            SelectionMode::ConditionalObject(conditional),
+            control,
+        )
+        .await
+    }
+
+    /// Acquire every member of a caller-authored conditional manifest, then use
+    /// the existing complete-package validator, receipt and atomic copy publisher.
+    /// Any failed HEAD or inconsistent response refuses the entire selection.
+    pub async fn import_s3_conditional_bundle(
+        &self,
+        request: S3ConditionalBundleModelImportRequest,
+        control: S3ModelImportControl,
+    ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
+        let mode = SelectionMode::ConditionalManifest(request.entries);
+        let request = S3ModelImportRequest {
+            operation_id: request.operation_id,
+            source: request.source,
+            credentials: request.credentials,
+            entries: Vec::new(),
+            import: request.import,
+            workspace: request.workspace,
+            retry: request.retry,
+        };
+        self.import_s3_model_mode(request, mode, control).await
+    }
+
+    async fn import_s3_model_mode(
+        &self,
+        request: S3ModelImportRequest,
+        mode: SelectionMode,
         control: S3ModelImportControl,
     ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
         match control
@@ -330,7 +438,7 @@ impl PumasApi {
             control: control.clone(),
             complete: false,
         };
-        let result = self.import_s3_model_owned(request, control).await;
+        let result = self.import_s3_model_owned(request, mode, control).await;
         progress.finish(&result);
         result
     }
@@ -338,33 +446,35 @@ impl PumasApi {
     async fn import_s3_model_owned(
         &self,
         request: S3ModelImportRequest,
+        mode: SelectionMode,
         control: S3ModelImportControl,
     ) -> std::result::Result<ModelImportResult, S3ModelImportError> {
-        ModelImporter::validate_acquired_payload_paths(
-            &request
+        if let SelectionMode::ConditionalManifest(entries) = &mode {
+            S3ConditionalManifestEntry::require_bounded_set(entries.len())?;
+        }
+        let paths: Vec<_> = match &mode {
+            SelectionMode::Versioned => request
                 .entries
                 .iter()
                 .map(|entry| entry.logical_path.as_str())
-                .collect::<Vec<_>>(),
-        )?;
+                .collect(),
+            SelectionMode::ConditionalObject(_) => vec![request.import.path.as_str()],
+            SelectionMode::ConditionalManifest(entries) => entries
+                .iter()
+                .map(|entry| entry.logical_path.as_str())
+                .collect(),
+        };
+        ModelImporter::validate_acquired_payload_paths(&paths)?;
+        if !paths.contains(&request.import.path.as_str()) {
+            return Err(PumasError::Validation {
+                field: "s3.model.primary".into(),
+                message: "The import spec must name the exact selected primary weight logical path"
+                    .into(),
+            }
+            .into());
+        }
         let consumer = self.acquisition().open_consumer(CONSUMER)?;
         let result = async {
-            if !request
-                .entries
-                .iter()
-                .any(|entry| entry.logical_path == request.import.path)
-                || !std::path::Path::new(&request.import.path)
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
-            {
-                return Err(PumasError::Validation {
-                    field: "s3.model.primary".into(),
-                    message:
-                        "The import spec must name the exact selected primary GGUF logical path"
-                            .into(),
-                }
-                .into());
-            }
             let reader = match request.credentials {
                 Some(credentials) => S3Reader::new_authenticated(request.source, credentials)?,
                 None => S3Reader::new(request.source)?,
@@ -374,15 +484,45 @@ impl PumasApi {
                 operation: request.operation_id.to_string(),
             };
             control.phase(S3ModelImportPhase::Selecting);
-            let selection = consumer
-                .resolve_s3_manifest(
-                    reader,
-                    request.entries,
-                    &demand,
-                    &request.retry,
-                    Box::new(Host(control.clone())),
-                )
-                .await??;
+            let selection = match mode {
+                SelectionMode::ConditionalObject(object) => {
+                    consumer
+                        .resolve_s3_conditional(
+                            reader,
+                            (
+                                object.source_key,
+                                request.import.path.clone(),
+                                object.expected_sha256,
+                            ),
+                            &demand,
+                            &request.retry,
+                            Box::new(Host(control.clone())),
+                        )
+                        .await??
+                }
+                SelectionMode::ConditionalManifest(entries) => {
+                    consumer
+                        .resolve_s3_conditional_manifest(
+                            reader,
+                            entries,
+                            &demand,
+                            &request.retry,
+                            Box::new(Host(control.clone())),
+                        )
+                        .await??
+                }
+                SelectionMode::Versioned => {
+                    consumer
+                        .resolve_s3_manifest(
+                            reader,
+                            request.entries,
+                            &demand,
+                            &request.retry,
+                            Box::new(Host(control.clone())),
+                        )
+                        .await??
+                }
+            };
             if control.is_cancelled() {
                 return Err(PumasError::DownloadCancelled.into());
             }
@@ -395,7 +535,6 @@ impl PumasApi {
                     .try_fold(0_u64, |sum, file| sum.checked_add(file.expected_size()?));
             });
             control.phase(S3ModelImportPhase::Acquiring);
-            let bundle = selection.manifest().files().len() > 1;
             let spec = request.import;
             let prepared_spec = spec.clone();
             let importer = self.primary().model_importer.clone();
@@ -413,15 +552,9 @@ impl PumasApi {
                         Ok((acquired, serde_json::to_value(prepared_spec)?))
                     },
                     move |acquired, receipt| async move {
-                        if bundle {
-                            importer
-                                .import_acquired_gguf_bundle(&acquired, &receipt, &spec)
-                                .await
-                        } else {
-                            importer
-                                .import_acquired_gguf(&acquired, &receipt, &spec)
-                                .await
-                        }
+                        importer
+                            .import_acquired_model(&acquired, &receipt, &spec)
+                            .await
                     },
                 )
                 .await

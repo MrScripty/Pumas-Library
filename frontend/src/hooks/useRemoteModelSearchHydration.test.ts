@@ -353,4 +353,88 @@ describe('useRemoteModelSearch hydration', () => {
     ]);
     expect(result.current.hydratingRepoIds.size).toBe(0);
   });
+  it('does not treat discovery totals as loaded files and remembers successful unknown-size details', async () => {
+    const original = baseRemoteModel({ totalSizeBytes: 9999, downloadOptions: [] });
+    getHfDownloadDetailsMock.mockResolvedValueOnce({ success: true, details: {
+      repoId: original.repoId, totalSizeBytes: null, downloadOptions: [{ quant: 'Q4_K_M', sizeBytes: null }],
+    } });
+    const { result } = await renderResults([original]);
+    expect(getHfDownloadDetailsMock).not.toHaveBeenCalled();
+    await act(async () => { await result.current.hydrateModelDetails(original); });
+    expect(result.current.hydratedRepoIds.has(original.repoId)).toBe(true);
+    await act(async () => { await result.current.hydrateModelDetails(requireRemoteModel(result.current.results[0])); });
+    expect(getHfDownloadDetailsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears only the selected failure on retry and rejects off-result requests', async () => {
+    const first = baseRemoteModel();
+    const second = baseRemoteModel({ repoId: 'acme/model-b' });
+    const foreign = baseRemoteModel({ repoId: 'not/current' });
+    const pending = createDeferred<GetHFDownloadDetailsResponse>();
+    getHfDownloadDetailsMock.mockResolvedValueOnce({ success: false, error: 'First unavailable' })
+      .mockResolvedValueOnce({ success: false, error: 'Second unavailable' })
+      .mockReturnValueOnce(pending.promise);
+    const { result } = await renderResults([first, second]);
+    await act(async () => { await result.current.hydrateModelDetails(first); await result.current.hydrateModelDetails(second); });
+    expect(result.current.hydrationErrors).toEqual({ 'acme/model-a': 'First unavailable', 'acme/model-b': 'Second unavailable' });
+    let retry: Promise<void> | undefined;
+    await act(async () => { retry = result.current.hydrateModelDetails(first); });
+    expect(result.current.hydrationErrors).toEqual({ 'acme/model-b': 'Second unavailable' });
+    await act(async () => { await result.current.hydrateModelDetails(foreign); });
+    expect(getHfDownloadDetailsMock).toHaveBeenCalledTimes(3);
+    await act(async () => { pending.resolve({ success: true, details: { repoId: first.repoId, downloadOptions: [], totalSizeBytes: null } }); await retry; });
+    expect(result.current.hydratedRepoIds.has(first.repoId)).toBe(true);
+    expect(result.current.hydrationErrors).toEqual({ 'acme/model-b': 'Second unavailable' });
+  });
+
+  it('ignores old failure and loaded state after a new query or unmount', async () => {
+    const pending = createDeferred<GetHFDownloadDetailsResponse>();
+    const model = baseRemoteModel();
+    searchHfModelsMock.mockResolvedValue({ success: true, models: [model] });
+    getHfDownloadDetailsMock.mockReturnValueOnce(pending.promise);
+    const { result, rerender, unmount } = renderHook(({ searchQuery }) => useRemoteModelSearch({ enabled: true, searchQuery }), { initialProps: { searchQuery: 'first' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    let request: Promise<void> | undefined;
+    await act(async () => { request = result.current.hydrateModelDetails(model); });
+    rerender({ searchQuery: 'second' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    await act(async () => { pending.reject(new Error('Old failure')); await request; });
+    expect(result.current.hydrationErrors).toEqual({});
+    expect(result.current.hydratedRepoIds.size).toBe(0);
+    const abandoned = createDeferred<GetHFDownloadDetailsResponse>();
+    getHfDownloadDetailsMock.mockReturnValueOnce(abandoned.promise);
+    await act(async () => { request = result.current.hydrateModelDetails(model); });
+    unmount();
+    await act(async () => { abandoned.reject(new Error('After unmount')); await request; });
+    expect(result.current.hydrationErrors).toEqual({});
+  });
+
+  it('retained callbacks reuse loaded empty details and cannot hydrate after a source switch', async () => {
+    const model = baseRemoteModel();
+    searchHfModelsMock.mockResolvedValue({ success: true, models: [model] });
+    getHfDownloadDetailsMock.mockResolvedValue({ success: true, details: { repoId: model.repoId, totalSizeBytes: null, downloadOptions: [] } });
+    const { result, rerender } = renderHook(({ source }: { source: 'huggingface' | 'cached' }) =>
+      useRemoteModelSearch({ enabled: true, searchQuery: 'same', source }), { initialProps: { source: 'huggingface' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    const retained = result.current.hydrateModelDetails;
+    await act(async () => { await retained(model); await retained(model); });
+    expect(getHfDownloadDetailsMock).toHaveBeenCalledTimes(1);
+    rerender({ source: 'cached' });
+    await act(async () => { await retained(model); });
+    expect(getHfDownloadDetailsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows explicit retry after a synchronous transport failure', async () => {
+    const model = baseRemoteModel();
+    getHfDownloadDetailsMock.mockImplementationOnce(() => { throw new TypeError('Transport unavailable'); })
+      .mockResolvedValueOnce({ success: true, details: { repoId: model.repoId, totalSizeBytes: 20, downloadOptions: [{ quant: 'Q4_K_M', sizeBytes: 20 }] } });
+    const { result } = await renderResults([model]);
+    await act(async () => { await result.current.hydrateModelDetails(model); });
+    expect(result.current.hydrationErrors[model.repoId]).toBe('Transport unavailable');
+    await act(async () => { await result.current.hydrateModelDetails(model); });
+    expect(getHfDownloadDetailsMock).toHaveBeenCalledTimes(2);
+    expect(result.current.hydrationErrors).toEqual({});
+    expect(result.current.hydratedRepoIds.has(model.repoId)).toBe(true);
+  });
+
 });

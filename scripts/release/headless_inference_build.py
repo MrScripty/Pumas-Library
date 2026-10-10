@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Opt-in local inference candidate production; no download or publication.
 
-Caller-reviewed compatibility/runtime records remain mandatory. The current
-0.7 source is refused before Cargo; this command never grants inference acceptance.
+Caller-reviewed compatibility/runtime records remain mandatory. Older 0.7
+sources are refused before Cargo; this command never grants inference acceptance.
 """
 
 import argparse
@@ -129,10 +129,16 @@ def core_projection(rpc):
         name for name in core["compiled_features"] if not name.startswith("pumas-rpc/")
     ]
     core["protocols"] = [item for item in core["protocols"] if item["name"] != "pumas.local-http"]
-    core["schemas"] = [
-        item for item in core["schemas"] if item["name"] != "pumas.http-advertisement"
-    ]
+    rpc_only = package.discovery.rpc_schemas(rpc["target"])
+    core["schemas"] = [item for item in core["schemas"] if item["name"] not in rpc_only]
     return core
+
+
+def attribution_directory(repository):
+    with (Path(repository) / "rust/Cargo.toml").open("rb") as stream:
+        version = tomllib.load(stream)["workspace"]["package"]["version"]
+    require(package.matches(version, package.VERSION, 96), "v0.8 attribution version required")
+    return Path("docs/release-attribution") / f"{version}-s3"
 
 
 def produce(
@@ -147,6 +153,7 @@ def produce(
     output,
     runner=subprocess.run,
     environment=None,
+    runtime_notices=(),
 ):
     """Build one native source-bound candidate; supplied records must be pinned first."""
     repository, output = Path(repository).resolve(), Path(output).resolve()
@@ -203,7 +210,8 @@ def produce(
     )
     # Same dependency closure as the existing default+S3 inventory, checked below
     # against actual core/RPC artifacts without the default feature marker.
-    attribution = provenance.attribution_binding(repository)
+    notices_directory = attribution_directory(repository)
+    attribution = provenance.attribution_binding(repository, notices_directory)
     provenance.capture(
         ["node", "scripts/release/check-attribution.cjs", "--features", "s3"],
         repository,
@@ -217,7 +225,7 @@ def produce(
         )
     require(
         package.sha256(notices_file)
-        == package.sha256(repository / provenance.ATTRIBUTION / "THIRD-PARTY-NOTICES.txt"),
+        == package.sha256(repository / notices_directory / "THIRD-PARTY-NOTICES.txt"),
         "supplied notices differ from checked S3 attribution",
     )
     require(
@@ -280,12 +288,12 @@ def produce(
     require(source_identity(repository, tool_runner) == before, "source changed during build")
     provenance.check_configuration(repository, environment)
     require(
-        provenance.attribution_binding(repository) == attribution,
+        provenance.attribution_binding(repository, notices_directory) == attribution,
         "attribution changed during build",
     )
     require(
         package.sha256(notices_file)
-        == package.sha256(repository / provenance.ATTRIBUTION / "THIRD-PARTY-NOTICES.txt"),
+        == package.sha256(repository / notices_directory / "THIRD-PARTY-NOTICES.txt"),
         "supplied notices changed during build",
     )
     require(
@@ -307,6 +315,14 @@ def produce(
         "rustc": rustc_version,
     }
     package.validate_build_record(build, target, expected)
+    if runtime_notices:
+        combined = output / "THIRD-PARTY-NOTICES.txt"
+        combined.write_bytes(
+            Path(notices_file).read_bytes()
+            + b"\n\nONNX Runtime native distribution notices\n\n"
+            + b"\n\n".join(runtime_notices)
+        )
+        notices_file = combined
     inputs = {
         target["binary"]: binary,
         "LICENSE.txt": license_file,

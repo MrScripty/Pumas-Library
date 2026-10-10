@@ -10,11 +10,13 @@ import { Search } from 'lucide-react';
 import type { RemoteModelInfo } from '../types/apps';
 import type { DownloadStatus } from '../hooks/modelDownloadState';
 import { RemoteModelListItem } from './RemoteModelListItem';
+import { RemoteModelSummary } from './RemoteModelSummary';
 import {
   getRemoteDownloadArtifactLabel,
   getRemoteDownloadOptions,
+  getRemoteDownloadFlags,
 } from './RemoteModelListItemState';
-import { EmptyState } from './ui';
+import { EmptyState, ListItem } from './ui';
 
 interface RemoteModelsListProps {
   models: RemoteModelInfo[];
@@ -24,6 +26,8 @@ interface RemoteModelsListProps {
   downloadStatusByRepo: Record<string, DownloadStatus>;
   downloadErrors: Record<string, string>;
   hydratingRepoIds: Set<string>;
+  hydratedRepoIds?: Set<string>;
+  hydrationErrors?: Record<string, string>;
   onHydrateModelDetails?: (model: RemoteModelInfo) => Promise<void>;
   onStartDownload: (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => Promise<void>;
   onCancelDownload: (downloadKey: string) => Promise<void>;
@@ -34,6 +38,7 @@ interface RemoteModelsListProps {
   onClearFilters?: () => void;
   selectedKind: string;
   onHfAuthClick?: () => void;
+  isCachedSearch?: boolean;
 }
 
 function findDownloadForRepo(
@@ -64,6 +69,8 @@ export function RemoteModelsList({
   downloadStatusByRepo,
   downloadErrors,
   hydratingRepoIds,
+  hydratedRepoIds,
+  hydrationErrors,
   onHydrateModelDetails,
   onStartDownload,
   onCancelDownload,
@@ -74,6 +81,7 @@ export function RemoteModelsList({
   onClearFilters,
   selectedKind,
   onHfAuthClick,
+  isCachedSearch = false,
 }: RemoteModelsListProps) {
   const [openQuantMenuRepoId, setOpenQuantMenuRepoId] = useState<string | null>(null);
   // Track selected file groups per repo for multi-select checkbox mode
@@ -83,7 +91,7 @@ export function RemoteModelsList({
     return (
       <div className="flex items-center gap-2 text-xs text-[hsl(var(--text-muted))]">
         <Search className="w-3.5 h-3.5 animate-pulse" />
-        <span>Searching Hugging Face...</span>
+        <span>{isCachedSearch ? 'Searching cached details...' : 'Searching Hugging Face...'}</span>
       </div>
     );
   }
@@ -96,7 +104,7 @@ export function RemoteModelsList({
     return (
       <EmptyState
         icon={<Search />}
-        message={searchQuery.trim()
+        message={isCachedSearch ? 'No retained public details match this search.' : searchQuery.trim()
           ? 'No Hugging Face models match your search.'
           : 'Type to search Hugging Face models.'}
         action={(searchQuery.trim() || selectedKind !== 'all') && onClearFilters ? {
@@ -123,6 +131,24 @@ export function RemoteModelsList({
           .map(([, status]) => getRemoteDownloadArtifactLabel(status, downloadOptions))
           .filter((label): label is string => Boolean(label));
 
+        if (isCachedSearch) {
+          const flags = getRemoteDownloadFlags(downloadStatus);
+          return <ListItem key={model.repoId}><div className="p-2 space-y-2">
+            <RemoteModelSummary model={model} quantLabels={model.quants} isHydratingDetails={false}
+              activeArtifactLabels={[...new Set(activeArtifactLabels)]} modelError={modelError}
+              onSearchDeveloper={onSearchDeveloper} />
+            <p className="text-xs text-[hsl(var(--text-secondary))]">Switch to Hugging Face search for current download details.</p>
+            {downloadStatus && <div className="flex gap-2 text-xs">
+              {flags.isDownloading && !flags.isQueued && !flags.isPausing && <button type="button"
+                onClick={() => void onPauseDownload(downloadKey)}>Pause existing download</button>}
+              {(flags.isPaused || flags.isErrored) && <button type="button"
+                onClick={() => void onResumeDownload(downloadKey)}>Resume existing download</button>}
+              {(flags.isDownloading || flags.isPaused || flags.isErrored) && <button type="button"
+                onClick={() => void onCancelDownload(downloadKey)}>Cancel existing download</button>}
+            </div>}
+          </div></ListItem>;
+        }
+
         return (
           <RemoteModelListItem
             key={model.repoId}
@@ -132,6 +158,8 @@ export function RemoteModelsList({
             activeArtifactLabels={[...new Set(activeArtifactLabels)]}
             modelError={modelError}
             isHydratingDetails={isHydratingDetails}
+            hasHydratedDetails={hydratedRepoIds?.has(model.repoId) ?? false}
+            hydrationError={hydrationErrors?.[model.repoId]}
             isMenuOpen={openQuantMenuRepoId === model.repoId}
             selectedGroups={repoSelected}
             onToggleMenu={() =>

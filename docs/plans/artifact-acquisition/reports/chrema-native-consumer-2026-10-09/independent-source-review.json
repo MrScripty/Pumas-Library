@@ -1,0 +1,46 @@
+{
+  "review": "independent frozen-source final actual Chrema native runner clearance",
+  "verdict": "CLEAR_FOR_BOUNDED_ACTUAL_NATIVE_QUALIFICATION",
+  "native_runs_performed": 0,
+  "files": [
+    {
+      "path": "/workspace/pumas-v08-chrema-native-evidence/chrema_native_probe.mjs",
+      "size": 9422,
+      "sha256": "3013f08cea338460fb9558c946339fe7f395b20590ae21fec8ac90a14c25e4bd"
+    },
+    {
+      "path": "/workspace/pumas-v08-chrema-native-evidence/qualify_chrema_native.py",
+      "size": 13898,
+      "sha256": "1dbf226fab291d50858f97b0811cbc078e8acf3f59c0a8eaf6740b5af70177ab"
+    }
+  ],
+  "resolved_previous_findings": [
+    "Observer decode errors contained; original request.end always forwarded and actual close callback continues.",
+    "Seven expected grants and exact per-method sequence asserted.",
+    "Finally stdin write/drain both contained by BrokenPipeError/ConnectionResetError handling before awaited communicate."
+  ],
+  "blocking_before_dispatch": [],
+  "clear_aspects": [
+    "Unique fresh workdir required, exact Chrema head/tree and clean status, Pumas helper hash and executable bytes pinned.",
+    "No implementation modifications or fake native peer: exact Chrema dynamic import, real existing Pumas helper owned fixture, actual observer processes and direct native transports.",
+    "Sequential fresh normal-release/caller-cancel/operator-revocation contexts; actual completed read checkpoint before caller ending.",
+    "Python owns fixture bootstrap and retention helpers; Chrema owns only describe observer children and passive streams, never signals borrowed owner.",
+    "Failure path exits fixture context and awaits real caller with bounded communicate; unresolved caller persists explicit PID and refuses retry.",
+    "Native actual catalog/lookup before and after normal borrower release; retained and revoked SSE actual bytes checked.",
+    "Successful fixture requires zero exits, own PIDs absent, sentinel intact, empty native instance registry; caller returncode and Node observers absent separately checked.",
+    "Configured denial proxy is accurately not OS-wide network isolation."
+  ],
+  "claim_limits": [
+    "Owner-revocation uses Python-owned context close: unchanged helper SIGTERM to its own bootstrap, handled gracefully by actual Pumas, not a shutdown RPC.",
+    "Inherited Pumas helper can escalate to SIGKILL after its own child shutdown timeout, then raises custody unresolved. Runner has no direct kill and cannot promise no force in all failure branches; successful zero-exit receipts can establish no force used for accepted runs.",
+    "Six Node CLI observer children plus six fixture bootstrap/retention lifecycle children expected across three cases. Existing Python helper also creates three short-lived describe observations internally, awaited by helper but absent from its child_pids/cleanup_results; distinguish lifecycle counts from every native process.",
+    "Completed-read cancellation does not qualify in-flight remote reconciliation cancellation or inference/model/backend cessation.",
+    "No native execution occurred in this review; dispatch remains parent owned."
+  ],
+  "chrema": {
+    "head": "d9f660beb8273aac16e62fae3902b9f5e4d1559b",
+    "tree": "cc755424881f3c53b20b626ca7b44f14fb5f2cb8",
+    "clean": true
+  },
+  "execution_status": "Parent first actual run underway; no execution/result acceptance supplied by this source review."
+}

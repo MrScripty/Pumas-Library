@@ -32,14 +32,14 @@ use tempfile::TempDir;
 // A deliberately closed, unsharded native package variant. Unknown members are
 // never copied, and an indexed selection containing one is refused. Expanding
 // loader formats/member coverage requires corresponding qualification evidence.
-const REQUIRED_MEMBERS: &[&str] = &[
+pub(super) const REQUIRED_MEMBERS: &[&str] = &[
     "config.json",
     "model.safetensors",
     "preprocessor_config.json",
     "tokenizer.json",
     "tokenizer_config.json",
 ];
-const OPTIONAL_MEMBERS: &[&str] = &[
+pub(super) const OPTIONAL_MEMBERS: &[&str] = &[
     "added_tokens.json",
     "generation_config.json",
     "processor_config.json",
@@ -76,6 +76,25 @@ pub(crate) struct PreparedArtifactUse {
 }
 
 impl ModelLibrary {
+    /// Exercise the real owned preparation boundary without exposing its grant.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn test_prepare_cohere_artifact_use(
+        &self,
+        model_id: &str,
+        selected_artifact_id: &str,
+    ) -> Result<(String, Vec<String>)> {
+        let prepared = self.prepare_cohere_artifact_use(model_id, selected_artifact_id)?;
+        prepared.validate_read_source()?;
+        Ok((
+            prepared.manifest_sha256().to_owned(),
+            prepared
+                .manifest()
+                .map(|member| member.relative_path.clone())
+                .collect(),
+        ))
+    }
+
     /// Blocking preparation for an owning load task, before provider effects.
     /// Selectors must agree with the trusted index and canonical metadata. No
     /// caller path, digest, manifest JSON, or runtime identity can authorize it.
@@ -105,7 +124,18 @@ impl ModelLibrary {
                 "selected publication is not a ready managed package",
             ));
         }
-        let indexed: ModelMetadata = serde_json::from_value(record.metadata)?;
+        // ModelRecord owns normalized identity columns; ordinary projections
+        // intentionally omit those duplicate keys from metadata_json.
+        let mut indexed: ModelMetadata = serde_json::from_value(record.metadata)?;
+        if record.id != model_id
+            || indexed
+                .model_id
+                .as_deref()
+                .is_some_and(|id| id != record.id)
+        {
+            return Err(refusal("indexed model identity disagrees with selection"));
+        }
+        indexed.model_id = Some(record.id);
         let destination = root.resolve(Path::new(model_id))?;
         let canonical =
             super::importer::publication::read_held_canonical_import_metadata(&destination)?
@@ -174,6 +204,29 @@ impl PreparedArtifactUse {
     /// A public locator cannot substitute for this retained source capability.
     pub(crate) fn clone_read_source_directory(&self) -> std::io::Result<File> {
         Ok(self.directory.try_clone()?.into_std_file())
+    }
+
+    /// Duplicate already held copied member capabilities for the confined
+    /// child. Callers validate the whole source before and after rule setup.
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    pub(crate) fn clone_read_source_members(
+        &self,
+    ) -> impl Iterator<Item = std::io::Result<File>> + '_ {
+        self.members.iter().map(|member| member.file.try_clone())
+    }
+
+    /// Confirm that the session's retained library owns the original physical
+    /// root. Equal model labels in another library cannot retarget an endpoint.
+    pub(crate) fn validate_library_owner(&self, library: &ModelLibrary) -> Result<()> {
+        let authority = library.mutation_authority()?;
+        if !self.root.same_physical_root(authority.root()) {
+            return Err(refusal("selected source belongs to another library"));
+        }
+        self.grant.validate_root(&self.root)
     }
 
     pub(crate) fn manifest_sha256(&self) -> &str {
@@ -386,13 +439,20 @@ fn hash_reader(reader: &mut impl Read) -> Result<(u64, String)> {
 }
 
 fn validate_native_descriptors(directory: &Dir) -> Result<()> {
+    validate_cohere_descriptors(|name| open_member(directory, name))
+}
+
+/// Validate the same closed native descriptor contract through held import files.
+pub(super) fn validate_cohere_descriptors(
+    mut open: impl FnMut(&str) -> Result<File>,
+) -> Result<()> {
     for name in [
         "config.json",
         "tokenizer_config.json",
         "preprocessor_config.json",
         "processor_config.json",
     ] {
-        let mut file = match open_member(directory, name) {
+        let mut file = match open(name) {
             Ok(file) => file,
             Err(PumasError::Io {
                 source: Some(error),
@@ -413,7 +473,8 @@ fn validate_native_descriptors(directory: &Dir) -> Result<()> {
                 "native loader descriptor exceeds its supported bound",
             ));
         }
-        let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|_| refusal("native loader descriptor is malformed JSON"))?;
         if !value.is_object() {
             return Err(refusal("native loader descriptor is not an object"));
         }
@@ -959,6 +1020,16 @@ mod tests {
         std::fs::write(fixture.package.join("config.json"), br#"{"model_type":"cohere_asr","architectures":["CohereAsrForConditionalGeneration"],"auto_map":{"AutoConfig":"configuration_cohere_asr.CohereAsrConfig"}}"#).unwrap();
         drop(fixture.prepare().unwrap());
         fixture.assert_root_available();
+    }
+
+    #[tokio::test]
+    async fn session_library_must_own_original_prepared_root() {
+        let original = Fixture::new().await;
+        let other = Fixture::new().await;
+        let prepared = original.prepare().unwrap();
+        prepared.validate_library_owner(&original.library).unwrap();
+        assert!(prepared.validate_library_owner(&other.library).is_err());
+        prepared.validate_library_owner(&original.library).unwrap();
     }
 
     #[tokio::test]

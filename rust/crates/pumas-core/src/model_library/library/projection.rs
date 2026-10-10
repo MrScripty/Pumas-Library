@@ -161,7 +161,7 @@ fn latest_payload_filesystem_timestamp(model_dir: &Path) -> Option<String> {
             let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
                 return false;
             };
-            !matches!(
+            !(matches!(
                 name,
                 METADATA_FILENAME
                     | OVERRIDES_FILENAME
@@ -169,8 +169,12 @@ fn latest_payload_filesystem_timestamp(model_dir: &Path) -> Option<String> {
                     | "metadata.json.tmp"
                     | "overrides.json.bak"
                     | "overrides.json.tmp"
-            ) && !name.starts_with("metadata.json.")
-                && !name.starts_with("overrides.json.")
+            ) || name.starts_with("metadata.json.")
+                || name.starts_with("overrides.json.")
+                // Finalizing copied publication updates this control document after indexing.
+                // Only the canonical root receipt is control state; nested names remain payload.
+                || (entry.depth() == 1
+                    && name == crate::model_library::download_recovery::IMPORT_RECEIPT))
         })
         .filter_map(|entry| entry.metadata().ok())
         .filter_map(|metadata| metadata.modified().ok())
@@ -597,6 +601,40 @@ fn normalize_quant_token(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn payload_freshness_excludes_only_the_root_publication_receipt() {
+        use std::fs::{File, FileTimes};
+        use std::time::{Duration, UNIX_EPOCH};
+
+        let root = tempfile::tempdir().unwrap();
+        let old = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let new = old + Duration::from_secs(60);
+        let indexed = chrono::DateTime::<chrono::Utc>::from(old).to_rfc3339();
+        let write_at = |path: &Path, time| {
+            let file = File::create(path).unwrap();
+            file.set_times(FileTimes::new().set_modified(time)).unwrap();
+        };
+        let payload = root.path().join("weights.safetensors");
+        write_at(&payload, old);
+        let receipt_name = crate::model_library::download_recovery::IMPORT_RECEIPT;
+        write_at(&root.path().join(receipt_name), new);
+        assert!(!payload_filesystem_is_newer(root.path(), &indexed));
+
+        write_at(&payload, new);
+        assert!(payload_filesystem_is_newer(root.path(), &indexed));
+        write_at(&payload, old);
+
+        let lookalike = root.path().join(format!("{receipt_name}.bak"));
+        write_at(&lookalike, new);
+        assert!(payload_filesystem_is_newer(root.path(), &indexed));
+        std::fs::remove_file(lookalike).unwrap();
+
+        let nested = root.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        write_at(&nested.join(receipt_name), new);
+        assert!(payload_filesystem_is_newer(root.path(), &indexed));
+    }
 
     #[test]
     fn metadata_projection_removes_column_owned_duplicates() {

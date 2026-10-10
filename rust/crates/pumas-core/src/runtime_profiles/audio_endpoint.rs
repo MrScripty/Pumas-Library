@@ -134,6 +134,28 @@ impl AudioEndpoints {
         Ok(OwnedAudioEndpoint(endpoint))
     }
 
+    /// Only the session owner calls this after confirmed child-tree drainage.
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    pub(super) fn retire_drained(&self, endpoint: &OwnedAudioEndpoint) {
+        if let Ok(mut entries) = self.entries.lock() {
+            let key = (
+                endpoint.0.profile.clone(),
+                endpoint.0.slot.model_id().to_owned(),
+            );
+            if entries
+                .get(&key)
+                .and_then(Weak::upgrade)
+                .is_some_and(|current| Arc::ptr_eq(&current, &endpoint.0))
+            {
+                entries.remove(&key);
+            }
+        }
+    }
+
     pub(crate) fn selected(
         &self,
         library: &Arc<ModelLibrary>,
@@ -205,5 +227,55 @@ impl ControlledAudioEndpointFixture {
 
     pub async fn stop(&self) {
         self.fixture.stop().await;
+    }
+}
+
+#[cfg(all(
+    test,
+    target_os = "linux",
+    target_arch = "x86_64",
+    target_pointer_width = "64"
+))]
+mod tests {
+    use super::*;
+    use crate::runtime_profiles::audio_client::fixture::Fixture;
+
+    #[tokio::test]
+    async fn retained_clone_cannot_block_drained_successor_or_retire_it() {
+        let endpoints = AudioEndpoints::default();
+        let mut first = Fixture::launch(&[0], &[]).await;
+        let first_slot = first.load().await;
+        let old = endpoints
+            .register(first._library.clone(), first_slot)
+            .unwrap();
+        let stale_clone = old.clone();
+        let mut next = Fixture::launch(&[0], &[]).await;
+        let next_slot = next.load().await;
+        // Availability alone never grants replacement; the original owner must
+        // explicitly retire only after its confirmed drain.
+        assert!(endpoints
+            .register(next._library.clone(), next_slot.clone())
+            .is_err());
+        first.stop().await;
+        assert!(!stale_clone.available());
+        assert!(endpoints
+            .register(next._library.clone(), next_slot.clone())
+            .is_err());
+        endpoints.retire_drained(&old);
+        let replacement = endpoints
+            .register(next._library.clone(), next_slot)
+            .unwrap();
+        endpoints.retire_drained(&stale_clone);
+        assert!(endpoints
+            .selected(
+                &next._library,
+                &replacement.0.profile,
+                replacement.0.slot.model_id()
+            )
+            .is_some());
+        assert!(replacement.available());
+        assert!(!stale_clone.available());
+        next.stop().await;
+        endpoints.retire_drained(&replacement);
     }
 }

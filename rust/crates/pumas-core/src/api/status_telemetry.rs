@@ -149,6 +149,7 @@ async fn library_status_response(primary: &PrimaryState) -> Result<models::Libra
 
 impl PumasApi {
     pub async fn get_status_telemetry_snapshot(&self) -> Result<models::StatusTelemetrySnapshot> {
+        self.try_primary()?;
         let primary = self.primary();
         if let Some(snapshot) = primary.status_telemetry.current_snapshot() {
             return Ok(snapshot);
@@ -162,6 +163,7 @@ impl PumasApi {
     pub async fn refresh_status_telemetry_snapshot(
         &self,
     ) -> Result<models::StatusTelemetrySnapshot> {
+        self.try_primary()?;
         let primary = self.primary();
         let snapshot = build_status_telemetry_snapshot(primary).await?;
         primary.status_telemetry.publish(snapshot.clone());
@@ -171,6 +173,7 @@ impl PumasApi {
     pub fn subscribe_status_telemetry_updates(
         &self,
     ) -> broadcast::Receiver<models::StatusTelemetryUpdateNotification> {
+        let _ = self.primary();
         self.primary().status_telemetry.subscribe()
     }
 
@@ -179,6 +182,7 @@ impl PumasApi {
         cursor: Option<&str>,
         snapshot: models::StatusTelemetrySnapshot,
     ) -> Option<models::StatusTelemetryUpdateNotification> {
+        let _ = self.primary();
         self.primary()
             .status_telemetry
             .notification_since(cursor, snapshot)

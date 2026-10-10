@@ -374,12 +374,16 @@ impl LibraryMerger {
             .await??;
 
         let metadata_library = self.destination.clone();
-        let metadata_path = dest_dir.clone();
+        let metadata_source = source_dir.to_path_buf();
         let metadata_writer = target_destination.clone();
         let moved_metadata = context
             .run_blocking("write merged model metadata", move || {
                 let mut metadata = metadata;
-                metadata_library.normalize_owned_move_metadata(&metadata_path, &mut metadata)?;
+                metadata_library.normalize_owned_move_metadata(
+                    &metadata_source,
+                    &metadata_writer,
+                    &mut metadata,
+                )?;
                 metadata_writer.write_model_metadata(&metadata)?;
                 Ok::<_, PumasError>(metadata)
             })

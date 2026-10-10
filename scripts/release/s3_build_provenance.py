@@ -18,7 +18,10 @@ import tomllib
 TARGET = "x86_64-unknown-linux-gnu"
 RPC_FEATURES = ["default", "inference-plugins", "s3"]
 CORE_FEATURES = ["gpu-monitor", "hf-client", "onnx-runtime", "process-manager", "s3"]
-ATTRIBUTION = "docs/release-attribution/0.7.0-s3"
+SOURCE_VERSION = json.loads((Path(__file__).resolve().parents[2] / "package.json").read_text())[
+    "version"
+]
+ATTRIBUTION = f"docs/release-attribution/{SOURCE_VERSION}-s3"
 ATTRIBUTION_FILES = ("README.md", "inventory.json", "THIRD-PARTY-NOTICES.txt")
 COMMAND = [
     "cargo",
@@ -108,8 +111,8 @@ def check_release_manifest(repository):
     return release
 
 
-def attribution_binding(repository):
-    directory = repository / ATTRIBUTION
+def attribution_binding(repository, directory=None):
+    directory = repository / (ATTRIBUTION if directory is None else directory)
     inventory = json.loads((directory / "inventory.json").read_text())
     require(
         inventory.get("rust_profile")
@@ -126,7 +129,7 @@ def attribution_binding(repository):
         "S3 attribution text mismatch",
     )
     return {
-        "directory": ATTRIBUTION,
+        "directory": str(directory.relative_to(repository)).replace("\\", "/"),
         "sha256": {name: digest(directory / name) for name in ATTRIBUTION_FILES},
     }
 

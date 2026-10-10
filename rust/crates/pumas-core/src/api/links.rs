@@ -30,6 +30,7 @@ impl PumasApi {
         &self,
         _version_tag: Option<&str>,
     ) -> Result<models::LinkHealthResponse> {
+        self.try_primary()?;
         let registry = self.primary().model_library.link_registry().read().await;
         registry.health().await
     }
@@ -38,6 +39,7 @@ impl PumasApi {
     ///
     /// Returns the number of broken links that were removed.
     pub async fn clean_broken_links(&self) -> Result<models::CleanBrokenLinksResponse> {
+        self.try_primary()?;
         let registry = self.primary().model_library.link_registry().write().await;
         let broken = registry.cleanup_broken().await?;
 
@@ -62,6 +64,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::LinksForModelResponse> {
+        self.try_primary()?;
         let registry = self.primary().model_library.link_registry().read().await;
         let links = registry.get_links_for_model(model_id).await;
 
@@ -88,6 +91,7 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::DeleteModelResponse> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .delete_model(model_id, true)
@@ -105,6 +109,7 @@ impl PumasApi {
         app_id: &str,
         excluded: bool,
     ) -> Result<models::BaseResponse> {
+        self.try_primary()?;
         self.primary()
             .model_library
             .index()
@@ -114,6 +119,7 @@ impl PumasApi {
 
     /// Get all model IDs excluded from linking for a given app.
     pub fn get_link_exclusions(&self, app_id: &str) -> Result<models::LinkExclusionsResponse> {
+        self.try_primary()?;
         let excluded = self
             .primary()
             .model_library

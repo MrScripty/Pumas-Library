@@ -16,6 +16,11 @@ use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+/// Source-fixed candidate bytes. Public metadata is not execution authority;
+/// actual retained byte selections must match and be revalidated independently.
+pub const AUDIO_RUNTIME_CANDIDATE_RECIPE: &str =
+    include_str!("runtime_read_source/audio_candidate_recipe.json");
+
 const MAX_MEMBERS: usize = 200_000;
 const MAX_NAME: usize = 1024;
 
@@ -25,6 +30,8 @@ pub enum RuntimeReadRole {
     Interpreter,
     Dependencies,
     Sidecar,
+    /// Source-pinned owned system loader/libraries, never ambient host paths.
+    NativeLibraries,
 }
 
 /// A bounded expected installed member. Its actual bytes are always re-read.
@@ -59,7 +66,7 @@ impl RuntimeReadFile {
 }
 
 /// Ownership transferred by an installer, never decoded from request JSON.
-/// Exclusions record an explicitly unselected directory or alias namespace;
+/// Exclusions record explicitly unselected regular files, directories or aliases;
 /// they do not attest its contents. Selected trees remain closed otherwise.
 pub struct RuntimeReadRoot {
     role: RuntimeReadRole,
@@ -168,7 +175,7 @@ impl RetainedRuntimeReadSource {
                 "runtime byte capture supports Linux only",
             ));
         }
-        if selections.is_empty() || selections.len() > 3 {
+        if selections.is_empty() || selections.len() > 4 {
             return Err(refusal("invalid runtime root count"));
         }
         let mut roles = BTreeSet::new();
@@ -275,6 +282,46 @@ impl RetainedRuntimeReadSource {
         Ok(file)
     }
 
+    /// Enumerate only identity-retained directories. Directory capabilities
+    /// permit namespace traversal/enumeration, never recursive content reads.
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    pub(crate) fn directory_manifest(&self) -> impl Iterator<Item = (RuntimeReadRole, &str)> {
+        self.roots.iter().flat_map(|root| {
+            std::iter::once((root.role, "")).chain(
+                root.directories
+                    .keys()
+                    .map(move |name| (root.role, name.as_str())),
+            )
+        })
+    }
+
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    pub(crate) fn clone_directory(&self, role: RuntimeReadRole, path: &str) -> io::Result<File> {
+        if path.is_empty() {
+            return self.clone_root(role);
+        }
+        let root = self.root(role)?;
+        let expected = root
+            .directories
+            .get(path)
+            .ok_or_else(|| refusal("runtime directory is outside retained selection"))?;
+        let (parent, name) = open_parent(&root.directory, path)?;
+        let directory =
+            open_pinned_directory_at(&parent, std::ffi::OsStr::new(&name))?.into_std_file();
+        if file_identity(&directory)? != *expected {
+            return Err(refusal("runtime retained directory identity changed"));
+        }
+        Ok(directory)
+    }
+
     fn root(&self, role: RuntimeReadRole) -> io::Result<&Root> {
         self.roots
             .iter()
@@ -369,15 +416,17 @@ fn namespace(root: &Dir, exclusions: &BTreeSet<String>) -> io::Result<Namespace>
             valid_name(&path)?;
             let metadata = directory.symlink_metadata(&name)?;
             if exclusions.contains(&path) {
-                if !metadata.is_dir() && !metadata.is_symlink() {
-                    return Err(refusal("runtime exclusions require directory or alias"));
+                if !metadata.is_dir() && !metadata.is_symlink() && !metadata.is_file() {
+                    return Err(refusal("runtime exclusions cannot contain special files"));
                 }
                 excluded.insert(
                     path,
                     Excluded {
                         identity: cap_identity(&metadata)?,
                         link: if metadata.is_symlink() {
-                            Some(directory.read_link(&name)?)
+                            // Record literal link contents without resolving an
+                            // already-excluded alias or granting target reads.
+                            Some(directory.read_link_contents(&name)?)
                         } else {
                             None
                         },
@@ -468,3 +517,76 @@ fn refusal(message: &str) -> io::Error {
 #[cfg(all(test, target_os = "linux"))]
 #[path = "runtime_read_source/tests.rs"]
 mod tests;
+
+#[cfg(all(
+    feature = "test-support",
+    target_os = "linux",
+    target_arch = "x86_64",
+    target_pointer_width = "64"
+))]
+#[path = "runtime_read_source/dependency_probe.rs"]
+mod dependency_probe;
+
+/// Explicit fixed, non-model qualification only. This cannot register an audio
+/// endpoint or alter the shipping policy. Unsupported hosts refuse before spawn.
+#[cfg(feature = "test-support")]
+pub async fn qualify_audio_dependency_reads(
+    source: Arc<RetainedRuntimeReadSource>,
+) -> io::Result<serde_json::Value> {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    {
+        dependency_probe::run(source).await
+    }
+    #[cfg(not(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    )))]
+    {
+        let _ = source;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "audio dependency qualification requires Linux x86_64",
+        ))
+    }
+}
+
+/// Read-only host preflight for the explicit dependency qualification driver.
+#[cfg(feature = "test-support")]
+pub fn audio_dependency_qualification_host_preflight() -> io::Result<()> {
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    {
+        crate::platform::audio_read_boundary::AudioReadBoundary::supported_abi().map(|_| ())
+    }
+    #[cfg(not(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    )))]
+    {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "audio dependency qualification requires Linux x86_64",
+        ))
+    }
+}
+
+#[path = "runtime_read_source/candidate_recipe.rs"]
+mod candidate_recipe;
+
+/// Check one retained role against source-fixed recipe bytes. This comparison
+/// is never production admission. Relocated CPython source remains byte-held.
+pub fn validate_audio_candidate_read_role(
+    source: &RetainedRuntimeReadSource,
+    role: RuntimeReadRole,
+) -> io::Result<()> {
+    candidate_recipe::validate(source, role)
+}

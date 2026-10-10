@@ -232,6 +232,18 @@ impl ManagedChild {
         ))
     }
 
+    /// Transfer the private diagnostic pipe to the exact session owner. A
+    /// diagnostic consumer cannot stop the process or discharge its custody.
+    #[allow(dead_code)] // Only the Linux installed-audio session consumes this today.
+    pub(crate) fn take_private_stderr(&mut self) -> io::Result<std::process::ChildStderr> {
+        self.child
+            .as_mut()
+            .expect("managed child retained")
+            .stderr
+            .take()
+            .ok_or_else(|| io::Error::other("Private child diagnostic pipe unavailable"))
+    }
+
     /// Retain every attached lease with this exact child until confirmed drain.
     /// Later guards drop before previously attached prerequisites.
     pub fn attach_cleanup_lease<T: Send + Sync + 'static>(&mut self, lease: Arc<T>) {

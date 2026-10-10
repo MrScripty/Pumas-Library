@@ -138,6 +138,27 @@ impl RuntimeProfileProcessOwner {
         }
     }
 
+    /// One namespace across binary and conditional installed-audio sessions.
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    pub(super) fn reserve_generation(&self) -> Result<u64> {
+        let mut registry = self
+            .registry
+            .lock()
+            .map_err(|_| failure("Runtime process registry poisoned"))?;
+        if registry.closed {
+            return Err(failure("Managed runtime admission is closed"));
+        }
+        registry.generation = registry
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| failure("Runtime generation exhausted"))?;
+        Ok(registry.generation)
+    }
+
     pub(crate) fn ensure_inactive(&self, profile_id: &RuntimeProfileId) -> Result<()> {
         let registry = self
             .registry

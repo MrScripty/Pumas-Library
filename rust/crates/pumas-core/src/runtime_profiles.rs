@@ -8,8 +8,22 @@ pub(crate) mod audio_client;
 pub(crate) mod audio_custody;
 #[path = "runtime_profiles/audio_endpoint.rs"]
 mod audio_endpoint;
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    target_pointer_width = "64"
+))]
+#[path = "runtime_profiles/audio_profile_owner.rs"]
+pub(crate) mod audio_profile_owner;
 #[path = "runtime_profiles/audio_runtime.rs"]
 pub(crate) mod audio_runtime;
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    target_pointer_width = "64"
+))]
+#[path = "runtime_profiles/audio_session.rs"]
+mod audio_session;
 #[cfg(all(feature = "test-support", target_os = "linux"))]
 pub use audio_endpoint::ControlledAudioEndpointFixture;
 pub use audio_endpoint::{OwnedAudioEndpoint, OwnedAudioEndpointError, OwnedAudioEndpointResult};
@@ -415,6 +429,12 @@ pub struct RuntimeProfileService {
     updates: broadcast::Sender<RuntimeProfileUpdateFeed>,
     operation_locks: Arc<Mutex<HashSet<RuntimeProfileId>>>,
     pub(crate) process_owner: Arc<process_owner::RuntimeProfileProcessOwner>,
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    pub(crate) audio_profiles: Arc<audio_profile_owner::AudioProfileOwner>,
     pub(crate) audio_endpoints: Arc<audio_endpoint::AudioEndpoints>,
     provider_registry: ProviderRegistry,
     provider_adapters: RuntimeProviderAdapters,
@@ -482,6 +502,12 @@ impl RuntimeProfileService {
             updates: broadcast::channel(RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY).0,
             operation_locks: Arc::new(Mutex::new(HashSet::new())),
             process_owner: Arc::new(process_owner::RuntimeProfileProcessOwner::default()),
+            #[cfg(all(
+                target_os = "linux",
+                target_arch = "x86_64",
+                target_pointer_width = "64"
+            ))]
+            audio_profiles: Arc::new(audio_profile_owner::AudioProfileOwner::default()),
             audio_endpoints: Arc::new(audio_endpoint::AudioEndpoints::default()),
             provider_registry,
             provider_adapters,
@@ -497,6 +523,84 @@ impl RuntimeProfileService {
         );
         self.store_lifetime = lifetime;
         self
+    }
+
+    /// Conditional private entry: retained bytes still require source-owned
+    /// installed recipe/model policy during owned blocking preparation. No public executable or qualifier input.
+    #[cfg(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_pointer_width = "64"
+    ))]
+    pub(crate) async fn launch_installed_audio_profile<F, Fut>(
+        &self,
+        library: Arc<ModelLibrary>,
+        profile: RuntimeProfileId,
+        model: String,
+        serving: Arc<crate::serving::ServingService>,
+        prepare: F,
+    ) -> Result<(u64, OwnedAudioEndpoint)>
+    where
+        F: FnOnce(Arc<RuntimeProfileOperationGuard>) -> Fut + Send + 'static,
+        Fut: std::future::Future<
+                Output = Result<(
+                    Arc<audio_runtime::AudioRuntimeOwner>,
+                    Arc<crate::model_library::artifact_use::PreparedArtifactUse>,
+                )>,
+            > + Send
+            + 'static,
+    {
+        // Reserve before every preparation await, including the manager's
+        // retained-byte producer, to fence stop/edit/delete against startup.
+        let guard = self.begin_profile_operation(profile.clone())?;
+        self.process_owner.ensure_inactive(&profile)?;
+        let generation = self.process_owner.reserve_generation()?;
+        let service = self.clone();
+        let check_profile = profile.clone();
+        let endpoint = self
+            .audio_profiles
+            .launch(
+                library,
+                self.audio_endpoints.clone(),
+                profile,
+                model,
+                generation,
+                guard,
+                serving,
+                move |guard| async move {
+                    let spec = service.managed_profile_launch_spec(check_profile).await?;
+                    if spec.launch_strategy
+                        != RuntimeProfileLaunchStrategy::BinaryProcess(
+                            RuntimeProfileBinaryLaunchKind::TorchServe,
+                        )
+                    {
+                        return Err(PumasError::InvalidParams {
+                            message: "installed audio requires a managed Torch profile".into(),
+                        });
+                    }
+                    let snapshot = service.snapshot().await?.snapshot;
+                    let configured = snapshot
+                        .profiles
+                        .iter()
+                        .find(|configured| configured.profile_id == spec.profile_id)
+                        .ok_or_else(|| {
+                            PumasError::Other("installed audio profile disappeared".into())
+                        })?;
+                    if !matches!(
+                        configured.device.mode,
+                        RuntimeDeviceMode::Auto | RuntimeDeviceMode::Cpu
+                    ) || configured.device.device_id.is_some()
+                    {
+                        return Err(PumasError::InvalidParams {
+                            message: "installed audio requires a CPU-compatible profile".into(),
+                        });
+                    }
+                    drop(service);
+                    prepare(guard).await
+                },
+            )
+            .await?;
+        Ok((generation, endpoint))
     }
 
     pub async fn snapshot(&self) -> Result<RuntimeProfilesSnapshotResponse> {
@@ -966,6 +1070,21 @@ impl RuntimeProfileService {
             return Ok(());
         }
 
+        #[cfg(all(
+            target_os = "linux",
+            target_arch = "x86_64",
+            target_pointer_width = "64"
+        ))]
+        if self
+            .audio_profiles
+            .statuses()?
+            .iter()
+            .any(|status| status.profile_id == resolved.profile_id)
+        {
+            return Err(PumasError::Other(
+                "installed audio uses its owned native endpoint, not HTTP".into(),
+            ));
+        }
         if let Some(owned) = self.process_owner.snapshot(&resolved.profile_id)? {
             return if owned.state == RuntimeLifecycleState::Running {
                 Ok(())
@@ -1041,6 +1160,20 @@ impl RuntimeProfileService {
             }
         }
         for owned in self.process_owner.statuses()? {
+            if let Some(status) = snapshot
+                .statuses
+                .iter_mut()
+                .find(|status| status.profile_id == owned.profile_id)
+            {
+                *status = owned;
+            }
+        }
+        #[cfg(all(
+            target_os = "linux",
+            target_arch = "x86_64",
+            target_pointer_width = "64"
+        ))]
+        for owned in self.audio_profiles.statuses()? {
             if let Some(status) = snapshot
                 .statuses
                 .iter_mut()

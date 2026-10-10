@@ -46,6 +46,7 @@ async fn build_test_api_with_services(
     std::env::set_var("PUMAS_REGISTRY_DB_PATH", &registry_path);
     let mut builder = PumasApi::builder(launcher_root)
         .auto_create_dirs(true)
+        .with_connectivity_probe(false)
         .with_hf_client(with_hf_client)
         .with_process_manager(with_process_manager);
     if let Some(source) = fixture {
@@ -65,7 +66,7 @@ pub(crate) async fn build_test_app_state(launcher_root: &Path) -> AppState {
             #[cfg(feature = "s3")]
             s3_imports: crate::s3_imports::S3Imports::unavailable(),
             shutdown_request: crate::server::ShutdownRequest::default(),
-            api,
+            api: api.into(),
             catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
         }
     }
@@ -83,7 +84,7 @@ pub(crate) async fn build_test_app_state(launcher_root: &Path) -> AppState {
             s3_imports: crate::s3_imports::S3Imports::unavailable(),
             shutdown_request: crate::server::ShutdownRequest::default(),
             catalog_projection: crate::catalog_projection::CatalogProjection::unavailable(),
-            api,
+            api: api.into(),
             version_managers: Arc::new(RwLock::new(Default::default())),
             size_calculator: Arc::new(Mutex::new(
                 SizeCalculator::new_with_cache(launcher_root.join("launcher-data/cache")).await,

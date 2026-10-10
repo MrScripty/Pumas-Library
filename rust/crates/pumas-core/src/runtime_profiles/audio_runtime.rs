@@ -2,8 +2,9 @@
 //!
 //! The shipping constructor refuses qualification. Existing installed Torch
 //! version checks do not prove immutable interpreter/dependency/loader code or
-//! a complete model read set. Only unit tests can qualify a fixed controlled
-//! code snapshot; that scope is not real ASR/runtime execution qualification.
+//! a complete model read set. A separate experimental constructor admits only
+//! the fixed runtime recipe and an original selected local model allocation;
+//! it does not claim real-model or production execution qualification.
 //! Neither paths, JSON, fingerprints nor a child handshake create authority.
 
 #![allow(dead_code)] // The private channel consumes this opaque owner next.
@@ -40,6 +41,10 @@ struct Member {
 
 enum Qualification {
     Unavailable,
+    ExperimentalInstalled {
+        model_read_set: BTreeSet<String>,
+        selected: Weak<PreparedArtifactUse>,
+    },
     Installed {
         model_read_set: BTreeSet<String>,
         selected: Weak<PreparedArtifactUse>,
@@ -93,6 +98,20 @@ impl AudioRuntimeOwner {
         candidate.into_runtime_owner(selected, installed::InstalledAudioPolicy::shipping())
     }
 
+    /// Explicit local attempt with fixed runtime bytes and original model custody.
+    /// This grants experimental execution, never production/model qualification.
+    pub(crate) fn for_experimental_local_cohere(
+        candidate: installed::InstalledAudioRuntimeCandidate,
+        selected: &Arc<PreparedArtifactUse>,
+    ) -> std::result::Result<Arc<Self>, AudioCustodyError> {
+        if !candidate.owns_selected(selected) {
+            return Err(AudioCustodyError::StaleIdentity);
+        }
+        crate::platform::require_audio_read_confinement()
+            .map_err(|_| AudioCustodyError::ReadConfinementUnavailable)?;
+        candidate.into_runtime_owner(selected, installed::InstalledAudioPolicy::ExperimentalLocal)
+    }
+
     /// The same conditional constructor with a fixed, source-owned policy for
     /// dummy bytes only. Absent from shipping AND test-support library builds.
     #[cfg(test)]
@@ -138,6 +157,10 @@ impl AudioRuntimeOwner {
         match &self.qualification {
             Qualification::Unavailable => false,
             Qualification::Installed {
+                model_read_set,
+                selected,
+            }
+            | Qualification::ExperimentalInstalled {
                 model_read_set,
                 selected,
             } => {

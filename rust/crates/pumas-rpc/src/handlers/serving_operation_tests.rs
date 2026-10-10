@@ -202,3 +202,40 @@ async fn generic_serving_composition_returns_terminal_snapshot_after_known_failu
     );
     assert!(api.begin_serving_load(&request()).is_ok());
 }
+
+#[tokio::test]
+async fn serving_composition_preserves_explicit_experimental_observations() {
+    let root = tempfile::TempDir::new().unwrap();
+    let api = crate::handlers::test_support::build_test_api(root.path()).await;
+    let report = serde_json::json!({
+        "experimental": true,
+        "production_available": false,
+        "observed_model_manifest_sha256": "observed-only",
+        "profile_generation": 7,
+        "host_landlock_abi": 6,
+        "child_drained": false
+    });
+    let result = execute_serving_load(&api, request(), async |request, receipt| {
+        let status = loaded_status(&request);
+        let snapshot = api.record_served_model_for_operation(receipt, status.clone())?;
+        let mut response = serde_json::to_value(ServeModelResponse {
+            success: true,
+            error: None,
+            loaded: true,
+            loaded_models_unchanged: false,
+            status: Some(status),
+            load_error: None,
+            snapshot: Some(snapshot),
+        })?;
+        response["experimental_local_cohere"] = report.clone();
+        Ok(response)
+    })
+    .await
+    .unwrap();
+    assert_eq!(result["experimental_local_cohere"], report);
+    assert_eq!(result["loaded"], true);
+    assert_eq!(
+        result["snapshot"]["served_models"][0]["load_state"],
+        "loaded"
+    );
+}

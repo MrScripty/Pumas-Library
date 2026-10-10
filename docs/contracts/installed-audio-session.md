@@ -86,3 +86,164 @@ panic follows the same cleanup path; task loss is an explicit error after the
 independent child drain, never a successful stop observation. Unresolved worker
 loss retains the pending profile guard fail-closed; normal terminal publication
 explicitly releases it so retained stop waiters cannot block a successor.
+
+## Explicit local Cohere experiment
+
+`serve_experimental_local_cohere` is an explicit JSON-RPC operation using the
+existing `ServeModelRequest`. It selects a separate source-fixed experimental
+CPU policy. Ordinary `serve_model` and the ordinary core installed API still
+use the closed shipping policy. No environment variable, submitted manifest,
+metadata flag or executable path enables the experiment.
+
+A successful experimental load returns `experimental: true`,
+`production_available: false` and `experimental_local_cohere`: the actual
+selected model/artifact, observed model manifest digest, source recipe and
+worker-code digests, kernel Landlock ABI, CPU device and exact profile generation.
+`child_drained: false` describes the live child at load completion. These are
+observations, not a qualification certificate. Real-model ASR remains locally
+untested until the user runs it. Native disposal is unqualified: use profile
+stop/unserve, which closes admission and joins the original child tree.
+
+### Linux local workflow
+
+Use Linux x86_64 with a kernel exposing Landlock ABI 6 or newer. The pinned
+managed-runtime path accepts ASCII letters/digits and `/._-` only; choose a root
+without spaces or non-ASCII characters. CPU execution can need substantial RAM:
+original selected bytes, sealed weight snapshots and native tensors coexist.
+No real-model memory requirement has been measured here. Linux Mint's
+name/version alone does not establish this. The load API performs a read-only
+kernel preflight before polling runtime preparation or copying the model. It
+refuses unavailable enforcement; do not disable confinement or substitute a
+broader filesystem grant. A read-only check before downloading anything is:
+
+```sh
+python3 - <<'PY'
+import ctypes, platform
+if platform.system() != 'Linux' or platform.machine() != 'x86_64':
+    raise SystemExit('Requires Linux x86_64')
+libc = ctypes.CDLL(None, use_errno=True)
+libc.syscall.restype = ctypes.c_long
+abi = libc.syscall(444, None, 0, 1)  # x86_64 landlock_create_ruleset VERSION
+if abi < 6:
+    raise SystemExit(f'Landlock ABI >= 6 required; query={abi}, errno={ctypes.get_errno()}')
+print(f'Landlock ABI {abi}; runtime/model checks are still required')
+PY
+```
+
+Build the normal inference-enabled RPC target and run one owner of an explicit
+library root. Do not concurrently launch the GUI against that same root.
+
+```sh
+cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc
+ROOT=/absolute/path/to/your/pumas-root
+rust/target/debug/pumas-rpc --launcher-root "$ROOT" --host 127.0.0.1 --port 18743
+```
+
+In another terminal, use `curl` and `jq` with the same running owner:
+
+```sh
+BASE=http://127.0.0.1:18743
+rpc() {
+  jq -nc --arg method "$1" --argjson params "$2" \
+    '{jsonrpc:"2.0",id:1,method:$method,params:$params}' |
+    curl --fail-with-body -sS "$BASE/rpc" -H 'Content-Type: application/json' --data-binary @-
+}
+```
+
+Install through the existing trusted managed-runtime workflow. It downloads
+public CPU runtime/dependency artifacts; it does not download the user's model.
+Use a fresh library root if `v2.10.0` already identifies a different installed
+recipe; do not overwrite an image runtime in place.
+
+```sh
+rpc preview_torch_runtime '{"tag":"v2.10.0","build":"cpu","python":"python3.12","adapter":"cohere-asr"}' | tee cohere-preview.json
+jq -e '.result.status == "ready"' cohere-preview.json
+PREVIEW=$(jq -er '.result.preview.previewId' cohere-preview.json)
+rpc install_version "$(jq -nc --arg preview "$PREVIEW" '{app_id:"torch",tag:"v2.10.0",preview_id:$preview}')"
+rpc get_installation_progress '{"app_id":"torch","tag":"v2.10.0"}'
+```
+
+Repeat the progress query until installation reports terminal success; an
+accepted installation request is not completion. Refused previews or failed
+installations are blockers, not permission to replace hashes or edit recipes.
+After successful installation:
+
+```sh
+rpc switch_version '{"app_id":"torch","tag":"v2.10.0"}'
+rpc upsert_runtime_profile '{"profile":{"profile_id":"cohere-local","provider":"torch","provider_mode":"torch_serve","management_mode":"managed","name":"Experimental local Cohere CPU","device":{"mode":"cpu"}}}'
+```
+
+Import a real local directory (no symlink root or selected members) through the
+explicit local selection operation. This copies the supported native files into
+the library and records local identity/speech intent without claiming Hugging
+Face provenance. No HF credential is needed for the local artifact.
+
+```sh
+MODEL_DIR=/absolute/path/to/your/cohere-model
+rpc import_local_cohere "$(jq -nc --arg path "$MODEL_DIR" '{local_path:$path,official_name:"Local Cohere Transcribe"}')" | tee cohere-import.json
+jq -e '.result.success == true' cohere-import.json
+MODEL=$(jq -er '.result.model_id' cohere-import.json)
+```
+
+Use the returned indexed model ID, not the source path. The publication must
+be library-owned, valid and ready, with an explicit selected artifact. The five
+required files are `config.json`, `model.safetensors`,
+`preprocessor_config.json`, `tokenizer.json` and `tokenizer_config.json`. Select
+every present supported optional member: `added_tokens.json`,
+`generation_config.json`, `processor_config.json`, `special_tokens_map.json`.
+Repository Python is not selected or executed. Do not hand-edit canonical/index
+metadata to fabricate provenance or admission.
+
+With `MODEL` set to that returned model ID:
+
+```sh
+rpc serve_experimental_local_cohere "$(jq -nc --arg model "$MODEL" '{request:{model_id:$model,config:{provider:"torch",profile_id:"cohere-local",device_mode:"cpu",keep_loaded:true}}}')" | tee cohere-load.json
+jq -e '.result.loaded == true and .result.experimental_local_cohere.experimental == true and .result.experimental_local_cohere.production_available == false' cohere-load.json
+```
+
+Proceed only after that check succeeds. This does not start Torch's HTTP image
+provider. The existing selected-model operation endpoint consumes the retained
+native slot. For a mono 16 kHz, 16-bit PCM WAV, create the closed request from its
+actual samples (the script refuses other WAV formats rather than resampling):
+
+```sh
+WAV=/absolute/path/to/your/mono-16000hz.wav
+python3 - "$MODEL" "$WAV" > cohere-transcribe.json <<'PY'
+import base64, json, sys, wave
+with wave.open(sys.argv[2], 'rb') as audio:
+    if (audio.getnchannels(), audio.getsampwidth(), audio.getframerate(), audio.getcomptype()) != (1, 2, 16000, 'NONE'):
+        raise SystemExit('Requires mono 16 kHz PCM16 WAV')
+    count = audio.getnframes()
+    if count == 0 or count > 30 * 16000:
+        raise SystemExit('Use a nonempty clip of at most 30 seconds')
+    samples = audio.readframes(count)
+print(json.dumps({'contract_version':1,'request_id':'local-cohere-1',
+    'model':sys.argv[1],'profile':'cohere-local','capability':'audio_transcription',
+    'input':{'kind':'audio','encoding':'pcm_s16le','sample_rate_hz':16000,
+             'channels':1,'sample_count':count,'data_base64':base64.b64encode(samples).decode()},
+    'output':'text','options':{'kind':'audio','language':'en','max_output_tokens':512},
+    'stream':False}))
+PY
+curl --fail-with-body -sS "$BASE/v1/model-operations" \
+  -H 'Content-Type: application/json' --data-binary @cohere-transcribe.json | tee cohere-result.json
+rpc unserve_model "$(jq -nc --arg model "$MODEL" '{request:{model_id:$model,provider:"torch",profile_id:"cohere-local"}}')" | tee cohere-unload.json
+jq -e '.result.unloaded == true' cohere-unload.json
+```
+
+A successful `unloaded: true` comes only after the captured generation's child
+and diagnostic reader have joined. A cancelled or timed-out stop is not evidence
+of drain. Retry the captured generation, so a later replacement cannot be
+stopped accidentally:
+
+```sh
+GENERATION=$(jq -er '.result.experimental_local_cohere.profile_generation' cohere-load.json)
+rpc stop_runtime_profile_if_generation "$(jq -nc --argjson generation "$GENERATION" '{profile_id:"cohere-local",generation:$generation}')"
+```
+
+`stopped: true` confirms that stop joined that generation. `false` is not a new
+drain receipt; inspect current status rather than targeting a successor.
+Orderly application shutdown also joins outstanding owned cleanup. Retain the
+root and runtime/model owners until it settles. Preserve the load, operation
+and unload responses when reporting a local result. Refusals identify bounded
+phases; arbitrary native stderr is deliberately not exposed. No successful
+fixture, import, dependency probe or load alone establishes real ASR accuracy.

@@ -404,7 +404,7 @@ def create_private_owned_channel(manager):
 
 
 def _create_installed_private_owned_channel(manager, source_owner):
-    """Conditional private source plumbing, not an enabled installed factory.
+    """Private source plumbing for qualified or explicit experimental owners.
 
     The source-owned policy catalog is empty in shipping code. Source capability
     retention is supplied by the original owner, never by load JSON; even a
@@ -418,23 +418,31 @@ def _create_installed_private_owned_channel(manager, source_owner):
     return PrivateOwnedChannel(actor, native_gate=gate)
 
 
-def _create_bootstrap_private_owned_channel(manager, model_root_fd, model_id, selected_artifact_id):
+def _create_bootstrap_private_owned_channel(
+    manager, model_root_fd, model_id, selected_artifact_id, *, experimental=False
+):
     """Connect original bootstrap capabilities only after a source policy exists.
 
     Model/artifact labels are correlation, never permission. Empty shipping
-    policy retains the existing unavailable handshake without opening members.
+    policy retains the unavailable handshake without opening members. The
+    separate fixed parent-selected experiment never enters the shipping catalog.
     """
     from owned_audio import _INSTALLED_AUDIO_POLICIES, OwnedAudioError
 
-    if not _INSTALLED_AUDIO_POLICIES:
+    if type(experimental) is not bool:
+        raise OwnedAudioError("invalid_experimental_mode")
+    if not experimental and not _INSTALLED_AUDIO_POLICIES:
         return create_private_owned_channel(manager)
-    if len(_INSTALLED_AUDIO_POLICIES) != 1:
+    if not experimental and len(_INSTALLED_AUDIO_POLICIES) != 1:
         raise OwnedAudioError("native_runtime_unqualified")
     from installed_cohere_source import _InstalledCohereSourceOwner
 
-    source = _InstalledCohereSourceOwner._capture(
-        manager, model_root_fd, model_id, selected_artifact_id
+    capture = (
+        _InstalledCohereSourceOwner._capture_experimental
+        if experimental
+        else _InstalledCohereSourceOwner._capture
     )
+    source = capture(manager, model_root_fd, model_id, selected_artifact_id)
     try:
         return _create_installed_private_owned_channel(manager, source)
     except BaseException:

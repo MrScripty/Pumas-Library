@@ -80,6 +80,13 @@ class UnavailableOwnedNativeGate:
 _INSTALLED_AUDIO_POLICIES = ()
 
 
+def _source_policies(source):
+    from installed_cohere_source import _experimental_policy_for
+
+    experimental = _experimental_policy_for(source)
+    return (experimental,) if experimental is not None else _INSTALLED_AUDIO_POLICIES
+
+
 class _InstalledAudioSourceProof:
     """Opaque, single-use original source capability; never wire qualification."""
 
@@ -90,7 +97,7 @@ class _InstalledAudioSourceProof:
 
     @classmethod
     def _from_source_policy(cls, policy, source, *, manager, model_id, source_id):
-        if not any(policy is candidate for candidate in _INSTALLED_AUDIO_POLICIES):
+        if not any(policy is candidate for candidate in _source_policies(source)):
             raise OwnedAudioError("native_runtime_unqualified")
         runtime = manager.runtime_instance_id
         if any(
@@ -220,9 +227,10 @@ class _InstalledOwnedNativeGate:
 
     @classmethod
     def _from_source_owner(cls, source):
-        if len(_INSTALLED_AUDIO_POLICIES) != 1:
+        policies = _source_policies(source)
+        if len(policies) != 1:
             raise OwnedAudioError("native_runtime_unqualified")
-        policy = _INSTALLED_AUDIO_POLICIES[0]
+        policy = policies[0]
         proof = policy.retain_source(source)
         if (
             type(proof) is not _InstalledAudioSourceProof
@@ -240,7 +248,7 @@ class _InstalledOwnedNativeGate:
 
     def _validate_memory(self):
         proof = self._proof
-        if not any(proof._policy is candidate for candidate in _INSTALLED_AUDIO_POLICIES):
+        if not any(proof._policy is candidate for candidate in _source_policies(proof._source)):
             raise OwnedAudioError("native_runtime_unqualified")
         if proof._released:
             raise OwnedAudioError("artifact_custody_unavailable")

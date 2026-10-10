@@ -94,6 +94,20 @@ impl Owned {
         assert!(!s.success());
         println!("owned SIGKILL/reap pid={} status={s}", self.child.id());
     }
+    async fn join_refused(&mut self) {
+        assert!(self.control.join("refused").exists());
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                if let Some(status) = self.child.try_wait().unwrap() {
+                    assert!(status.success(), "refused fixture child failed: {status}");
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("refused fixture child did not exit");
+    }
     fn checkpoint(&self) -> CatalogOwnerCheckpoint {
         serde_json::from_slice(&std::fs::read(self.control.join("checkpoint")).unwrap()).unwrap()
     }
@@ -294,11 +308,14 @@ async fn actual_two_competing_recoverers_one_winner_and_killed_successor_replay(
         a.control.join("checkpoint").exists(),
         b.control.join("checkpoint").exists()
     );
-    let winner = if a.control.join("checkpoint").exists() {
-        &mut a
+    let (winner, loser) = if a.control.join("checkpoint").exists() {
+        (&mut a, &mut b)
     } else {
-        &mut b
+        (&mut b, &mut a)
     };
+    // The refusal marker precedes process teardown. Join that exact loser while
+    // the acknowledged winner still owns the store before testing cold reopen.
+    loser.join_refused().await;
     let next = winner.checkpoint();
     assert_eq!(next.models_sha256, expected.models_sha256);
     assert_ne!(next.generation, expected.generation);
@@ -306,8 +323,31 @@ async fn actual_two_competing_recoverers_one_winner_and_killed_successor_replay(
     assert!(recover_catalog_owner(registry.clone(), &root, &expected)
         .await
         .is_err());
-    let api = recover_catalog_owner(registry, &root, &next).await.unwrap();
+    let api = after_fork_release(|| recover_catalog_owner(registry.clone(), &root, &next)).await;
     api.shutdown_instance().await.unwrap();
+}
+// Like api::catalog::custody_tests::after_fork_release: other parallel
+// process fixtures can briefly inherit an open lock until exec. This test-only
+// bounded retry never changes production acquisition or recovery authority.
+async fn after_fork_release<T, F, Fut>(mut acquire: F) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = pumas_library::Result<T>>,
+{
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        match acquire().await {
+            Ok(value) => return value,
+            Err(pumas_library::PumasError::InvalidParams { message })
+                if message.starts_with(
+                    "Pumas library instance is already running for physical store",
+                ) && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            Err(error) => panic!("catalog physical owner did not settle: {error}"),
+        }
+    }
 }
 async fn wire(port: u16, token: &str, method: &str, extra: serde_json::Value) -> serde_json::Value {
     let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))

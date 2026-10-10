@@ -628,3 +628,42 @@ async fn installed_spawn_refuses_retargeting_and_fixture_without_native_cohort_b
         assert!(!custody.is_cleanup_pending());
     }
 }
+
+#[tokio::test]
+async fn experimental_attempt_does_not_accept_fixture_recipe_or_retarget_allocation() {
+    let model = ModelFixture::new().await;
+    let other = ModelFixture::new().await;
+    let runtime = RuntimeFixture::new();
+    let selected = model.prepare();
+    let foreign = other.prepare();
+    let installed = runtime.capture(None);
+    // Each executable role has its own source-fixed comparison. Coherent dummy
+    // bytes and the absence of a native cohort are never an opt-in bypass.
+    for role in [
+        RuntimeReadRole::Interpreter,
+        RuntimeReadRole::Dependencies,
+        RuntimeReadRole::NativeLibraries,
+    ] {
+        assert!(
+            crate::runtime_read_source::validate_audio_candidate_read_role(&installed, role)
+                .is_err()
+        );
+    }
+    let candidate = InstalledAudioRuntimeCandidate::capture(
+        installed.clone(),
+        "bin/python3.12",
+        selected.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        super::super::AudioRuntimeOwner::for_experimental_local_cohere(candidate, &foreign)
+            .unwrap_err(),
+        AudioCustodyError::StaleIdentity,
+    );
+    let candidate =
+        InstalledAudioRuntimeCandidate::capture(installed, "bin/python3.12", selected.clone())
+            .unwrap();
+    assert!(candidate
+        .into_runtime_owner(&selected, InstalledAudioPolicy::ExperimentalLocal)
+        .is_err());
+}

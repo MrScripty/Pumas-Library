@@ -107,6 +107,7 @@ impl ModelImporter {
                         vision,
                         consumer_receipt,
                     }),
+                    false,
                 )
             })
             .await
@@ -116,6 +117,16 @@ impl ModelImporter {
         &self,
         spec: &ModelImportSpec,
         progress: Option<mpsc::Sender<ImportProgress>>,
+    ) -> Result<ModelImportResult> {
+        self.import_owned_with_local_cohere(spec, progress, false)
+            .await
+    }
+
+    pub(super) async fn import_owned_with_local_cohere(
+        &self,
+        spec: &ModelImportSpec,
+        progress: Option<mpsc::Sender<ImportProgress>>,
+        local_cohere: bool,
     ) -> Result<ModelImportResult> {
         // No per-call runtime: this is deliberately unavailable on standalone
         // ModelLibrary instances, before any workspace or other effect exists.
@@ -129,7 +140,13 @@ impl ModelImporter {
             .run_owned("copied model import", move |context| async move {
                 let result = context
                     .run_blocking("prepare and settle copied import", move || {
-                        importer.import_staged(&spec, &authority, progress.as_ref(), None)
+                        importer.import_staged(
+                            &spec,
+                            &authority,
+                            progress.as_ref(),
+                            None,
+                            local_cohere,
+                        )
                     })
                     .await?;
                 // Ordinary input/collision refusals are results, not owner failures.
@@ -151,6 +168,7 @@ impl ModelImporter {
         authority: &LibraryMutationAuthority,
         progress: Option<&mpsc::Sender<ImportProgress>>,
         acquired: Option<AcquiredCopyInput>,
+        local_cohere: bool,
     ) -> Result<ModelImportResult> {
         let selected_primary = acquired
             .as_ref()
@@ -200,6 +218,17 @@ impl ModelImporter {
                     qualification.diffusers,
                     qualification.directory,
                 )
+            } else if local_cohere {
+                (
+                    ModelTypeInfo {
+                        format: crate::model_library::FileFormat::Safetensors,
+                        model_type: ModelType::Audio,
+                        ..Default::default()
+                    },
+                    None,
+                    false,
+                    false,
+                )
             } else {
                 (self.detect_type(&source_path)?, None, false, false)
             };
@@ -211,8 +240,7 @@ impl ModelImporter {
                 security_tier,
             ));
         }
-        let validation = source_metadata
-            .is_dir()
+        let validation = (!local_cohere && source_metadata.is_dir())
             .then(|| validate_diffusers_directory_for_import(&source_path))
             .filter(|value| value.validation_state == crate::models::AssetValidationState::Valid);
         let diffusers = acquired_diffusers || validation.is_some();
@@ -243,6 +271,8 @@ impl ModelImporter {
         // Preflight the whole filename mapping before a stage is created.
         let plan = match if let Some(input) = acquired {
             CopyPlan::verified_set(input.files)
+        } else if local_cohere {
+            CopyPlan::local_cohere(&source_path)
         } else {
             CopyPlan::open(&source_path, diffusers)
         } {
@@ -365,6 +395,9 @@ impl ModelImporter {
                 metadata.task_classification_confidence = Some(0.0);
                 metadata.metadata_needs_review = Some(true);
                 metadata.review_reasons = Some(vec!["native-vision-qualification-required".into()]);
+            }
+            if local_cohere {
+                super::local_cohere::apply_metadata(&stage, &target_path, &files, &mut metadata)?;
             }
             // save_metadata would derive the ID from the stage pathname. Keep
             // the intended final ID and publish through held directory authority.
@@ -688,6 +721,44 @@ pub(super) fn normalized_acquired_payload_path(
 }
 
 impl CopyPlan {
+    fn local_cohere(path: &Path) -> Result<Self> {
+        if !std::fs::symlink_metadata(path)?.is_dir() {
+            return Err(invalid_filename(
+                "Local Cohere source must be a real directory",
+            ));
+        }
+        let source = crate::platform::capability_fs::open_pinned_directory(path)?;
+        let mut files = Vec::new();
+        for name in crate::model_library::artifact_use::REQUIRED_MEMBERS
+            .iter()
+            .chain(crate::model_library::artifact_use::OPTIONAL_MEMBERS.iter())
+        {
+            match source.symlink_metadata(name) {
+                Ok(metadata) if metadata.is_file() && !metadata.is_symlink() => {
+                    files.push((
+                        PathBuf::from(name),
+                        (*name).to_string(),
+                        (*name).to_string(),
+                    ));
+                }
+                Err(error)
+                    if error.kind() == io::ErrorKind::NotFound
+                        && crate::model_library::artifact_use::OPTIONAL_MEMBERS.contains(name) => {}
+                _ => {
+                    return Err(invalid_filename(
+                        "Local Cohere selected member is missing or not a regular file",
+                    ))
+                }
+            }
+        }
+        files.sort_by(|left, right| left.2.cmp(&right.2));
+        Ok(Self {
+            source: CopySource::Directory(source),
+            files,
+            directories: Vec::new(),
+        })
+    }
+
     fn verified_set(inputs: Vec<VerifiedCopyInput>) -> Result<Self> {
         let preserve_layout = inputs.len() > 1;
         let mut source = BTreeMap::new();

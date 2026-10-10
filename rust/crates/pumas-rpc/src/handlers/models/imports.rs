@@ -115,6 +115,60 @@ pub async fn import_model(state: &AppState, params: &Value) -> pumas_library::Re
     Ok(serde_json::to_value(result)?)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LocalCohereImportParams {
+    #[serde(alias = "localPath")]
+    local_path: String,
+    #[serde(alias = "officialName")]
+    official_name: String,
+}
+
+fn local_cohere_path(value: String) -> pumas_library::Result<PathBuf> {
+    let path = PathBuf::from(validate_non_empty(value, "local_path")?);
+    if !path.is_absolute() {
+        return Err(pumas_library::PumasError::InvalidParams {
+            message: "Local Cohere import requires an absolute directory path".into(),
+        });
+    }
+    Ok(path)
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn local_cohere_rpc_preserves_symlink_locator_for_owned_refusal() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("actual");
+    let link = temp.path().join("linked");
+    std::fs::create_dir(&target).unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let retained = local_cohere_path(link.to_str().unwrap().into()).unwrap();
+    assert_eq!(retained, link);
+    assert!(std::fs::symlink_metadata(retained).unwrap().is_symlink());
+    assert!(local_cohere_path("relative/model".into()).is_err());
+}
+
+/// Explicit local identity; caller metadata cannot claim a publisher or revision.
+pub async fn import_local_cohere(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+    let command: LocalCohereImportParams = parse_params("import_local_cohere", params)?;
+    // Preserve the caller locator: canonicalization would erase a symlink root
+    // before the owning core's atomic no-follow directory open.
+    let local_path = local_cohere_path(command.local_path)?;
+    let spec = pumas_library::model_library::ModelImportSpec {
+        path: local_path.to_string_lossy().to_string(),
+        family: "cohere_asr".into(),
+        official_name: validate_non_empty(command.official_name, "official_name")?,
+        repo_id: None,
+        model_type: Some("audio".into()),
+        subtype: None,
+        tags: None,
+        security_acknowledged: None,
+    };
+    Ok(serde_json::to_value(
+        state.api.import_local_cohere(&spec).await?,
+    )?)
+}
+
 pub async fn import_batch(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     // Parse the imports array from params
     let imports: Vec<pumas_library::model_library::ModelImportSpec> = params

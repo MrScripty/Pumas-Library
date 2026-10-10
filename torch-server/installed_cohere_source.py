@@ -1,7 +1,8 @@
 """Held model capabilities and correlation for the private installed bootstrap.
 
 This is byte ownership, never native/runtime qualification. Only the closed
-source-owned policy catalog may retain a proof or create an admitted native gate.
+source-owned production catalog or separate explicit local experiment may retain
+a proof or create an admitted gate. Neither identifies upstream model provenance.
 """
 
 import hashlib
@@ -29,6 +30,9 @@ OPTIONAL = frozenset(
         "special_tokens_map.json",
     }
 )
+
+
+_EXPERIMENTAL_LOCAL_COHERE = object()
 
 
 class InstalledSourceRefusal(ValueError):
@@ -95,6 +99,7 @@ class _InstalledCohereSourceOwner:
         owner._model_id, owner._artifact_id = model_id, selected_artifact_id
         owner._root, owner._members = None, {}
         owner._proof, owner._reader, owner._closed = None, None, False
+        owner._experimental = None
         owner._lock = threading.Lock()
         try:
             owner._root = os.dup(model_root_fd)
@@ -135,6 +140,12 @@ class _InstalledCohereSourceOwner:
         except BaseException:
             owner._close_files()
             raise
+
+    @classmethod
+    def _capture_experimental(cls, manager, model_root_fd, model_id, selected_artifact_id):
+        owner = cls._capture(manager, model_root_fd, model_id, selected_artifact_id)
+        owner._experimental = _EXPERIMENTAL_LOCAL_COHERE
+        return owner
 
     @property
     def manager(self):
@@ -240,3 +251,48 @@ class _InstalledCohereSourceOwner:
         if self._root is not None:
             os.close(self._root)
             self._root = None
+
+
+class _ExperimentalLocalCoherePolicy:
+    """Fixed local CPU attempt; no upstream model or native disposal qualification."""
+
+    def validate_source(self, source):
+        if (
+            type(source) is not _InstalledCohereSourceOwner
+            or source._experimental is not _EXPERIMENTAL_LOCAL_COHERE
+        ):
+            raise InstalledSourceRefusal("experimental_source_required")
+        source.validate()
+
+    def retain_source(self, source):
+        self.validate_source(source)
+        return source.retain_source(self)
+
+    def bind_retention(self, source, proof):
+        source.bind_retention(proof)
+
+    def model_source(self, source):
+        self.validate_source(source)
+        return source.model_source(source._proof)
+
+    def dispose_native(self, disposal, device):
+        from owned_audio import OwnedAudioError
+
+        # Do not manufacture a receipt from Python reference release. The
+        # experimental profile's owner closes admission and drains this child.
+        raise OwnedAudioError("experimental_requires_child_drain")
+
+    def release_source(self, source):
+        source.release(source._proof)
+
+
+_EXPERIMENTAL_POLICY = _ExperimentalLocalCoherePolicy()
+
+
+def _experimental_policy_for(source):
+    if (
+        type(source) is _InstalledCohereSourceOwner
+        and source._experimental is _EXPERIMENTAL_LOCAL_COHERE
+    ):
+        return _EXPERIMENTAL_POLICY
+    return None

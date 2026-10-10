@@ -753,6 +753,18 @@ impl PumasApi {
         self.primary().model_importer.import(spec).await
     }
 
+    /// Import an explicit local Cohere directory through the managed copied-import owner.
+    pub async fn import_local_cohere(
+        &self,
+        spec: &model_library::ModelImportSpec,
+    ) -> Result<model_library::ModelImportResult> {
+        self.try_primary()?;
+        self.primary()
+            .model_importer
+            .import_local_cohere(spec)
+            .await
+    }
+
     /// Import multiple models in batch.
     pub async fn import_models_batch(
         &self,

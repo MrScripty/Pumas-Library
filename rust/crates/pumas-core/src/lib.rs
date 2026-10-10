@@ -112,7 +112,8 @@ pub use system::{
 
 // Re-export builder from api module
 pub use api::{
-    CatalogOwnerCheckpoint, CatalogQueryRequest, CatalogQueryResponse, InstanceProfile,
+    CatalogOwnerCheckpoint, CatalogQueryRequest, CatalogQueryResponse,
+    ExperimentalLocalCohereLoadResponse, ExperimentalLocalCohereReport, InstanceProfile,
     PumasApiBuilder,
 };
 #[cfg(feature = "s3")]

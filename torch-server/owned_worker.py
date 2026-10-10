@@ -166,6 +166,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Private inherited owned worker")
     for root in ("code", "packages", "model"):
         parser.add_argument(f"--{root}-root-fd", required=True, type=int)
+    parser.add_argument("--experimental-local-cohere", action="store_true")
     parser.add_argument("--model-id")
     parser.add_argument("--selected-artifact-id")
     return parser.parse_args(argv)
@@ -246,6 +247,7 @@ async def bootstrap(args, *, channel_factory=None):
                     model,
                     args.model_id,
                     args.selected_artifact_id,
+                    experimental=getattr(args, "experimental_local_cohere", False),
                 )
             except (ValueError, OSError) as error:
                 raise StartupRefusal("installed_runtime_unready") from error

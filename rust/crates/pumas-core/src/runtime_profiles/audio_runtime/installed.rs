@@ -125,9 +125,16 @@ impl InstalledAudioRuntimeCandidate {
         }
         // No strong model Arc enters the runtime owner. The registry's load
         // admission/slot retains it through validated unload or child drain.
-        owner.qualification = Qualification::Installed {
-            model_read_set: self.selected_members,
-            selected: Arc::downgrade(&self.selected),
+        owner.qualification = if matches!(policy, InstalledAudioPolicy::ExperimentalLocal) {
+            Qualification::ExperimentalInstalled {
+                model_read_set: self.selected_members,
+                selected: Arc::downgrade(&self.selected),
+            }
+        } else {
+            Qualification::Installed {
+                model_read_set: self.selected_members,
+                selected: Arc::downgrade(&self.selected),
+            }
         };
         owner.installed_interpreter = Some(self.interpreter_member);
         owner.installed_bytes = Some(self.installed);
@@ -246,10 +253,12 @@ impl InstalledAudioRuntimeCandidate {
 }
 
 /// Closed source-owned policy selector. The shipping catalog has no qualified
-/// recipe. Adding a shipping variant requires complete execution qualification;
+/// recipe. The explicit local experiment is a separate bounded attempt, not
+/// production qualification. Adding a shipping variant requires that qualification;
 /// captured bytes, an ELF graph or a successful import are insufficient.
 pub(super) enum InstalledAudioPolicy {
     Unavailable,
+    ExperimentalLocal,
     #[cfg(test)]
     FixedControlledFixture,
 }
@@ -266,6 +275,49 @@ impl InstalledAudioPolicy {
 
     fn accepts(&self, candidate: &InstalledAudioRuntimeCandidate) -> Result<bool> {
         match self {
+            Self::ExperimentalLocal => {
+                // Local model hashes identify the selected bytes, not upstream
+                // provenance or completed real-model qualification. Executable
+                // inputs still match the one source-fixed runtime recipe.
+                for role in [
+                    RuntimeReadRole::Interpreter,
+                    RuntimeReadRole::Dependencies,
+                    RuntimeReadRole::NativeLibraries,
+                ] {
+                    crate::runtime_read_source::validate_audio_candidate_read_role(
+                        &candidate.installed,
+                        role,
+                    )?;
+                }
+                let recipe: serde_json::Value = serde_json::from_str(
+                    crate::runtime_read_source::AUDIO_RUNTIME_CANDIDATE_RECIPE,
+                )?;
+                let interpreter_matches = candidate.installed.manifest().any(|(role, member)| {
+                    role == RuntimeReadRole::Interpreter
+                        && member.path() == candidate.interpreter_member
+                        && Some(member.sha256()) == recipe["interpreter_executable_sha256"].as_str()
+                });
+                const REQUIRED: &[&str] = &[
+                    "config.json",
+                    "model.safetensors",
+                    "preprocessor_config.json",
+                    "tokenizer.json",
+                    "tokenizer_config.json",
+                ];
+                const OPTIONAL: &[&str] = &[
+                    "added_tokens.json",
+                    "generation_config.json",
+                    "processor_config.json",
+                    "special_tokens_map.json",
+                ];
+                Ok(interpreter_matches
+                    && REQUIRED
+                        .iter()
+                        .all(|name| candidate.selected_members.contains(*name))
+                    && candidate.selected_members.iter().all(|name| {
+                        REQUIRED.contains(&name.as_str()) || OPTIONAL.contains(&name.as_str())
+                    }))
+            }
             Self::Unavailable => {
                 let _ = candidate;
                 Ok(false)

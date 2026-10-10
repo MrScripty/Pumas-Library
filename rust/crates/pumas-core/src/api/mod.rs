@@ -15,6 +15,7 @@ pub(crate) mod instance_shutdown;
 pub(crate) use hf::tests::recovery_api_fixture as intent_acquisition_test_fixture;
 pub(crate) use hf::PreparedIntentDownload;
 mod installed_audio;
+pub use installed_audio::{ExperimentalLocalCohereLoadResponse, ExperimentalLocalCohereReport};
 mod links;
 mod migration;
 mod models;

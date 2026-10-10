@@ -42,8 +42,10 @@ impl AudioRuntimeOwner {
         selected: Arc<PreparedArtifactUse>,
         custody: Arc<ManagedChildCustodySlot>,
     ) -> io::Result<InstalledAudioChild> {
-        if !matches!(self.qualification, Qualification::Installed { .. })
-            || !self.permits_selected(&selected)
+        if !matches!(
+            self.qualification,
+            Qualification::Installed { .. } | Qualification::ExperimentalInstalled { .. }
+        ) || !self.permits_selected(&selected)
         {
             return Err(refused(
                 "installed child lacks original runtime/model qualification",
@@ -89,6 +91,12 @@ impl AudioRuntimeOwner {
                 "--selected-artifact-id={}",
                 selected.selected_artifact_id()
             ));
+        if matches!(
+            self.qualification,
+            Qualification::ExperimentalInstalled { .. }
+        ) {
+            command.arg("--experimental-local-cohere");
+        }
         // Sidecar originals are not execution inputs: only their independently
         // copied and revalidated code snapshot below gets content grants.
         let directories = installed

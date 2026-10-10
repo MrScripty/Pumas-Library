@@ -211,3 +211,22 @@ obtain the source-bound sealed reader, and release descriptors only after its
 native disposal contract is satisfied. Unexpected proof/owner loss leaves
 potentially admitted inputs for exact child-tree teardown. Fixtures exercise
 these ownership/correlation steps without qualifying real inference or disposal.
+
+## Explicit local experimental attempt
+
+The separate experimental constructor permits an attempted CPU Cohere execution
+from the original indexed selected allocation. It independently compares all
+interpreter, dependency and native-library bytes against the source-fixed recipe,
+requires the selected interpreter's exact digest, and preserves the existing
+sidecar identity, fixed model read set, held/sealed copies and Linux confinement.
+Local model hashes identify those retained bytes; they do not attest to an
+upstream revision, real transcription quality or completed native qualification.
+
+Only this distinct owner selects the fixed private child experimental mode.
+Load JSON cannot select or replace a policy. The default constructor and
+production policy catalog remain closed, and the child continues reporting
+`production_available=false`. The experimental native policy always refuses a
+confirmed disposal receipt. The profile owner closes admission and joins the
+exact original child to complete unload; no source is released on an uncertain
+drain. The explicit entrypoint and operator procedure belong to the
+[installed session contract](installed-audio-session.md).

@@ -36,6 +36,10 @@ diagnostic facts, not design or documentation requirements.
 
 ## Common Commands
 
+For an isolated local model-request workbench using an already running public
+gateway, see the [model playground](../tools/model-playground/README.md). Its
+adapter/browser fixtures are separate from real-model qualification.
+
 ### Rust
 
 Cargo builds never download ONNX Runtime. Default core/RPC builds keep the

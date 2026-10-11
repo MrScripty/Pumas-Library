@@ -1,0 +1,33 @@
+{
+  "observed_at": "2026-10-11T21:02:23.663Z",
+  "kind": "real_existing_binary_empty_library",
+  "binary_sha256": "336690da08cd505c6bb86c8007cd8ddc2976c4f02ec82f089a15fb0bb3d751fa",
+  "model_execution": "none",
+  "health": {
+    "status": "ok"
+  },
+  "result": {
+    "state": "unavailable",
+    "code": "unsupported_contract",
+    "message": "Public Pumas discovery is absent (HTTP 404). Use a runtime with discovery and typed contract v1; no legacy inference fallback is attempted.",
+    "inference": "untested"
+  },
+  "receipts": [
+    {
+      "method": "GET",
+      "path": "/.well-known/pumas",
+      "request": null,
+      "started_at": "2026-10-11T21:02:23.657Z",
+      "execution": "real_http",
+      "http_status": 404,
+      "response_bytes": 0,
+      "outcome": "not_admitted",
+      "error": {
+        "code": "invalid_response",
+        "outcome": "not_admitted",
+        "message": "Expected a JSON response."
+      },
+      "elapsed_ms": 6
+    }
+  ]
+}

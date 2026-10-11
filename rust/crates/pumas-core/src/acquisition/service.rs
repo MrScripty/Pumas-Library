@@ -1375,6 +1375,40 @@ impl AcquisitionService {
             } else {
                 self.forget_checkpoint(key)?;
             }
+            // A lost runtime checkpoint is not permission to discard bytes.
+            // Sources can continue under a selected publisher digest: only the
+            // complete assembled file may pass acquisition verification.
+            if physical_length > 0
+                && resume == 0
+                && !matches!(source, AcquisitionSource::Local { .. })
+            {
+                if file.expected_sha256().is_none()
+                    || existing_without_receipt
+                    || file
+                        .expected_size()
+                        .is_some_and(|total| physical_length >= total)
+                {
+                    return Err(PumasError::Validation {
+                        field: "artifact.http.resume".into(),
+                        message:
+                            "Safe continuation is unavailable; the partial file has been retained"
+                                .into(),
+                    });
+                }
+                let check = workspace.clone();
+                let path = file.logical_path().to_owned();
+                let checked = owned(context, "bind retained acquisition partial", move || {
+                    let mut handle = check.open_part(&path, true)?;
+                    let (prefix, hash) = check.observe_part(&path, &mut handle)?;
+                    if prefix.bytes != physical_length {
+                        return Err(invalid("Retained acquisition partial changed"));
+                    }
+                    Ok(((handle, hash), prefix))
+                })
+                .await?;
+                resume = physical_length;
+                checked_part = Some(checked);
+            }
             let response = tokio::select! {
                 biased;
                 _ = host.pause_requested() => return Err(if host.cancel_requested() {
@@ -1394,6 +1428,9 @@ impl AcquisitionService {
                     let open = workspace.clone();
                     let path = file.logical_path().to_owned();
                     let append = response.resumed;
+                    let retain_partial =
+                        physical_length > 0 && !matches!(source, AcquisitionSource::Local { .. });
+                    let remote = !matches!(source, AcquisitionSource::Local { .. });
                     let (handle, hash) = owned(
                         context,
                         "open checked acquisition partial file",
@@ -1406,7 +1443,15 @@ impl AcquisitionService {
                                     open.validate_checkpoint_part(&path, &mut handle, &prefix)?;
                                 Ok((handle, hash))
                             } else {
-                                Ok((open.open_part(&path, false)?, Sha256::new()))
+                                if retain_partial {
+                                    return Err(invalid("Source refused continuation; the partial file has been retained"));
+                                }
+                                let handle = if remote {
+                                    open.open_empty_part(&path)?
+                                } else {
+                                    open.open_part(&path, false)?
+                                };
+                                Ok((handle, Sha256::new()))
                             }
                         },
                     )
@@ -2805,6 +2850,28 @@ mod tests {
                 Some(size),
                 None,
                 FileVerificationRequirement::SizeAndImmutableRevision,
+            )
+            .unwrap()],
+        )
+        .unwrap()
+    }
+
+    fn manifest_with_digest(path: &str, bytes: &[u8]) -> ArtifactManifest {
+        let selected = manifest_with_size(path, bytes.len() as u64);
+        ArtifactManifest::new(
+            selected.source().clone(),
+            vec![ArtifactFile::new(
+                path,
+                "payload",
+                Some(bytes.len() as u64),
+                Some(
+                    super::super::Sha256Evidence::new(
+                        "publisher.sha256",
+                        hex::encode(Sha256::digest(bytes)),
+                    )
+                    .unwrap(),
+                ),
+                FileVerificationRequirement::Sha256,
             )
             .unwrap()],
         )
@@ -6304,7 +6371,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cold_service_reopen_restarts_partial_transfer_from_zero() {
+    async fn cold_service_reopen_preserves_partial_and_verifies_assembled_download() {
+        for reply in [
+            ColdReply::Valid,
+            ColdReply::FailedTransfer,
+            ColdReply::FailedTransferSameService,
+            ColdReply::CorruptPrefix,
+            ColdReply::CorruptBody,
+            ColdReply::Full,
+            ColdReply::WrongRange,
+        ] {
+            assert_cold_continuation(reply).await;
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum ColdReply {
+        Valid,
+        FailedTransfer,
+        FailedTransferSameService,
+        CorruptPrefix,
+        CorruptBody,
+        Full,
+        WrongRange,
+    }
+
+    async fn assert_cold_continuation(reply: ColdReply) {
         let timeout = Duration::from_secs(5);
         let temp = tempfile::TempDir::new().unwrap();
         let stage = temp.path().join("stage");
@@ -6316,7 +6408,7 @@ mod tests {
             consumer: "fixture".into(),
             operation: "cold-owner-reopen".into(),
         };
-        let manifest = manifest_with_size("payload.bin", 8);
+        let manifest = manifest_with_digest("payload.bin", b"DATATAIL");
         let first_demand = demand.clone();
         let first_manifest = manifest.clone();
         let first_workspace = workspace(&stage);
@@ -6337,7 +6429,13 @@ mod tests {
                 .await
                 .unwrap();
             let _ = first_sent_sender.send(());
-            if continue_receiver.await.is_ok() {
+            if matches!(
+                reply,
+                ColdReply::FailedTransfer | ColdReply::FailedTransferSameService
+            ) {
+                drop(initial);
+                let _ = continue_receiver.await;
+            } else if continue_receiver.await.is_ok() {
                 let _ = initial.write_all(b"TAIL").await;
             }
 
@@ -6353,21 +6451,13 @@ mod tests {
                     .is_some_and(|(name, _)| name.eq_ignore_ascii_case("range"))
             });
             let _ = range_sender.send(had_range);
-            if had_range {
-                reopened
-                    .write_all(
-                        b"HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nContent-Range: bytes 4-7/8\r\nETag: \"changed-v2\"\r\nConnection: close\r\n\r\nEVIL",
-                    )
-                    .await
-                    .unwrap();
-            } else {
-                reopened
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nETag: \"changed-v2\"\r\nConnection: close\r\n\r\nDATATAIL",
-                    )
-                    .await
-                    .unwrap();
-            }
+            let response = match reply {
+                ColdReply::Full => "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nDATATAIL",
+                ColdReply::WrongRange => "HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nContent-Range: bytes 3-6/8\r\nConnection: close\r\n\r\nTAIL",
+                ColdReply::CorruptBody => "HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nContent-Range: bytes 4-7/8\r\nConnection: close\r\n\r\nEVIL",
+                _ => "HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nContent-Range: bytes 4-7/8\r\nETag: \"changed-v2\"\r\nConnection: close\r\n\r\nTAIL",
+            };
+            reopened.write_all(response.as_bytes()).await.unwrap();
         });
 
         let (progress_sender, mut progress) = tokio::sync::watch::channel(0_u64);
@@ -6409,22 +6499,46 @@ mod tests {
         })
         .await
         .expect("first transfer must write DATA before pause");
-        controls.pause();
+        if !matches!(
+            reply,
+            ColdReply::FailedTransfer | ColdReply::FailedTransferSameService
+        ) {
+            controls.pause();
+        }
         let paused = tokio::time::timeout(timeout, &mut first_transfer)
             .await
             .expect("pause must stop the first transfer")
             .unwrap();
-        assert!(matches!(paused, Err(PumasError::DownloadPaused)));
+        if matches!(
+            reply,
+            ColdReply::FailedTransfer | ColdReply::FailedTransferSameService
+        ) {
+            assert!(
+                matches!(paused, Err(PumasError::DownloadFailed { ref url, ref message })
+                if url == "artifact source" && message == "Acquisition retry budget exhausted after 1 attempts: Network error: HTTP artifact stream failed"),
+                "{paused:?}"
+            );
+        } else {
+            assert!(matches!(paused, Err(PumasError::DownloadPaused)));
+        }
         continue_sender.send(()).unwrap();
         assert_eq!(
             std::fs::read(stage.join("payload.bin.part")).unwrap(),
             b"DATA"
         );
 
+        if matches!(reply, ColdReply::CorruptPrefix) {
+            std::fs::write(stage.join("payload.bin.part"), b"EVIL").unwrap();
+        }
         drop(first_transfer);
+        first_consumer.shutdown().await.unwrap();
         drop(first_consumer);
-        drop(first_service);
-        let reopened_service = Arc::new(AcquisitionService::new(store));
+        let reopened_service = if matches!(reply, ColdReply::FailedTransferSameService) {
+            first_service
+        } else {
+            first_service.shutdown().await.unwrap();
+            Arc::new(AcquisitionService::new(store.clone()))
+        };
         let reopened_consumer = reopened_service.open_consumer("fixture").unwrap();
         let reopened_receipt = tokio::time::timeout(
             timeout,
@@ -6446,89 +6560,116 @@ mod tests {
             ),
         )
         .await
-        .expect("cold recovery must finish a fresh transfer")
-        .unwrap();
+        .expect("cold recovery must settle");
         let had_range = range_receiver.await.unwrap();
         tokio::time::timeout(timeout, server)
             .await
             .expect("HTTP fixture must finish")
             .unwrap();
-        assert_eq!(
-            std::fs::read(stage.join("payload.bin")).unwrap(),
-            b"DATATAIL"
+        assert!(
+            had_range,
+            "cold owner must preserve the prefix and request its tail"
         );
-        assert!(!had_range, "cold owner must not send Range");
-        assert!(!stage.join("payload.bin.part").exists());
-        assert_eq!(reopened_receipt.verified_files[0].bytes, 8);
+        reopened_consumer.shutdown().await.unwrap();
+        reopened_service.shutdown().await.unwrap();
+        match reply {
+            ColdReply::Valid | ColdReply::FailedTransfer | ColdReply::FailedTransferSameService => {
+                let receipt = reopened_receipt.unwrap();
+                assert_eq!(
+                    std::fs::read(stage.join("payload.bin")).unwrap(),
+                    b"DATATAIL"
+                );
+                assert!(!stage.join("payload.bin.part").exists());
+                assert_eq!(receipt.verified_files[0].bytes, 8);
+            }
+            _ => {
+                if matches!(reply, ColdReply::CorruptPrefix | ColdReply::CorruptBody) {
+                    assert!(matches!(
+                        reopened_receipt,
+                        Err(PumasError::HashMismatch { .. })
+                    ));
+                } else {
+                    assert!(
+                        matches!(reopened_receipt, Err(PumasError::Validation { ref field, ref message })
+                        if field == "artifact.http.response" && message == match reply {
+                            ColdReply::Full => "HTTP source ignored the continuation range; the partial file has been retained",
+                            _ => "HTTP range response does not match the selected artifact representation",
+                        })
+                    );
+                }
+                let expected = match reply {
+                    ColdReply::CorruptPrefix => b"EVILTAIL".as_slice(),
+                    ColdReply::CorruptBody => b"DATAEVIL".as_slice(),
+                    _ => b"DATA".as_slice(),
+                };
+                assert_eq!(
+                    std::fs::read(stage.join("payload.bin.part")).unwrap(),
+                    expected
+                );
+                assert!(!stage.join("payload.bin").exists());
+                let records = store.acquisitions().unwrap();
+                let record = records.values().next().unwrap();
+                assert!(matches!(record.phase, AcquisitionPhase::Transferring));
+                assert!(reopened_service
+                    .consumer_receipt(record.id)
+                    .unwrap()
+                    .is_none());
+            }
+        }
     }
 
     #[tokio::test]
-    async fn digestless_full_size_partial_is_replaced_by_fresh_http_body() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let stage = temp.path().join("stage");
-        std::fs::create_dir(&stage).unwrap();
-        std::fs::write(stage.join("payload.bin.part"), b"DATAEVIL").unwrap();
-        let store = Arc::new(AcquisitionStore::new(temp.path()));
-        let service = Arc::new(AcquisitionService::new(store));
-        let consumer = service.open_consumer("fixture").unwrap();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
-        let mut server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut request = Vec::new();
-            while !request.ends_with(b"\r\n\r\n") {
-                assert!(request.len() < 8192);
-                request.push(socket.read_u8().await.unwrap());
-            }
-            let request = String::from_utf8(request).unwrap().to_ascii_lowercase();
-            assert!(!request.contains("range:"));
-            socket
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nDATATAIL",
-                )
-                .await
-                .unwrap();
-        });
-        let result = tokio::time::timeout(
-            Duration::from_secs(5),
-            consumer.acquire_http(
-                AcquisitionHttpRequest {
-                    demand: AcquisitionDemand {
-                        consumer: "fixture".into(),
-                        operation: "full-size-digestless".into(),
+    async fn digestless_partial_refuses_resume_without_discarding_bytes() {
+        for bytes in [
+            b"DATA".as_slice(),
+            b"DATAEVIL".as_slice(),
+            b"DATAEVILLONG".as_slice(),
+        ] {
+            let temp = tempfile::TempDir::new().unwrap();
+            let stage = temp.path().join("stage");
+            std::fs::create_dir(&stage).unwrap();
+            std::fs::write(stage.join("payload.bin.part"), bytes).unwrap();
+            let store = Arc::new(AcquisitionStore::new(temp.path()));
+            let service = Arc::new(AcquisitionService::new(store.clone()));
+            let consumer = service.open_consumer("fixture").unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let result = consumer
+                .acquire_http(
+                    AcquisitionHttpRequest {
+                        demand: AcquisitionDemand {
+                            consumer: "fixture".into(),
+                            operation: "digestless-partial".into(),
+                        },
+                        manifest: manifest_with_size("payload.bin", 8),
+                        workspace: workspace(&stage),
+                        sources: vec![AcquisitionHttpSource {
+                            url: format!("http://{}/fixture", listener.local_addr().unwrap()),
+                            authorization: None,
+                        }],
+                        retry: retry(),
                     },
-                    manifest: manifest_with_size("payload.bin", 8),
-                    workspace: workspace(&stage),
-                    sources: vec![AcquisitionHttpSource {
-                        url,
-                        authorization: None,
-                    }],
-                    retry: retry(),
-                },
-                reqwest::Client::new(),
-                Box::new(Host),
-                |_| async { Ok::<((), Value), PumasError>(((), Value::Null)) },
-                |(), _receipt| async { Ok::<(), PumasError>(()) },
-            ),
-        )
-        .await;
-        if result.is_err() {
-            server.abort();
+                    reqwest::Client::new(),
+                    Box::new(Host),
+                    |_| async { Ok::<((), Value), PumasError>(((), Value::Null)) },
+                    |(), _receipt| async { Ok::<(), PumasError>(()) },
+                )
+                .await;
+            consumer.shutdown().await.unwrap();
+            service.shutdown().await.unwrap();
+            assert!(
+                matches!(result, Err(PumasError::Validation { field, message })
+                if field == "artifact.http.resume" && message == "Safe continuation is unavailable; the partial file has been retained")
+            );
+            assert_eq!(
+                std::fs::read(stage.join("payload.bin.part")).unwrap(),
+                bytes
+            );
+            assert!(!stage.join("payload.bin").exists());
+            let records = store.acquisitions().unwrap();
+            let record = records.values().next().unwrap();
+            assert!(record.files.is_empty());
+            assert!(service.consumer_receipt(record.id).unwrap().is_none());
         }
-        let joined = tokio::time::timeout(Duration::from_secs(5), &mut server).await;
-        if joined.is_err() {
-            server.abort();
-            let _ = server.await;
-        }
-        consumer.shutdown().await.unwrap();
-        service.shutdown().await.unwrap();
-        result.expect("fresh full transfer must finish").unwrap();
-        joined.expect("fresh HTTP fixture must join").unwrap();
-        assert_eq!(
-            std::fs::read(stage.join("payload.bin")).unwrap(),
-            b"DATATAIL"
-        );
-        assert!(!stage.join("payload.bin.part").exists());
     }
 
     #[tokio::test]
@@ -6626,7 +6767,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn warm_same_validator_full_response_replaces_prefix_from_zero() {
+    async fn warm_same_validator_full_response_refuses_without_discarding_prefix() {
         assert_warm_continuation(WarmReply::Full).await;
     }
 
@@ -6647,7 +6788,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn warm_mutated_prefix_restarts_without_range() {
+    async fn warm_mutated_prefix_refuses_without_discarding_bytes() {
         assert_warm_continuation(WarmReply::MutatedPrefix).await;
     }
 
@@ -6657,12 +6798,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn checkpoint_capacity_pressure_preserves_pause_and_restarts_from_zero() {
+    async fn checkpoint_capacity_pressure_preserves_pause_and_resumes_with_digest() {
         assert_warm_continuation(WarmReply::CapacityPressure).await;
     }
 
     #[tokio::test]
-    async fn checkpoint_metadata_pressure_preserves_pause_and_restarts_from_zero() {
+    async fn checkpoint_metadata_pressure_preserves_pause_and_resumes_with_digest() {
         assert_warm_continuation(WarmReply::MetadataPressure).await;
     }
 
@@ -6689,7 +6830,16 @@ mod tests {
                 "pause-then-resume".into()
             },
         };
-        let manifest = manifest_with_size("payload.bin", 8);
+        let manifest = if matches!(
+            reply,
+            WarmReply::CapacityPressure
+                | WarmReply::UnknownPublicationPressure
+                | WarmReply::MetadataPressure
+        ) {
+            manifest_with_digest("payload.bin", b"DATATAIL")
+        } else {
+            manifest_with_size("payload.bin", 8)
+        };
         let workspace = workspace(&stage);
         if matches!(
             reply,
@@ -6701,6 +6851,9 @@ mod tests {
                     &service, &workspace, &record, index, &prefix, "retained"
                 ));
             }
+            // These synthetic checkpoints consume metadata capacity only.
+            // Start the actual transfer without their unrelated fixture file.
+            std::fs::remove_file(stage.join("payload.bin.part")).unwrap();
         }
         let (url, first_server, first_sent, continue_sender) =
             serve_after_gate(b"DATA", b"TAIL").await;
@@ -6789,6 +6942,19 @@ mod tests {
 
         if matches!(reply, WarmReply::MutatedPrefix) {
             std::fs::write(stage.join("payload.bin.part"), b"EVIL").unwrap();
+            let result = consumer.acquire_http(AcquisitionHttpRequest {
+                demand, manifest, workspace: workspace.clone(),
+                sources: vec![AcquisitionHttpSource { url, authorization: None }], retry: retry(),
+            }, reqwest::Client::new(), Box::new(Host),
+                |_| async { Ok::<((), Value), PumasError>(((), Value::Null)) },
+                |(), _receipt| async { Ok::<(), PumasError>(()) },
+            ).await;
+            assert!(matches!(result, Err(PumasError::Validation { field, message })
+                if field == "artifact.http.resume" && message == "Safe continuation is unavailable; the partial file has been retained"));
+            assert_eq!(std::fs::read(stage.join("payload.bin.part")).unwrap(), b"EVIL");
+            assert!(!stage.join("payload.bin").exists());
+            assert_eq!(store.acquisitions().unwrap(), before_pause);
+            return;
         }
         let address = reqwest::Url::parse(&url).unwrap().socket_addrs(|| None).unwrap()[0];
         let listener = tokio::net::TcpListener::bind(address).await.unwrap();
@@ -6804,7 +6970,7 @@ mod tests {
                 let request = String::from_utf8(request).unwrap();
                 let request = request.to_ascii_lowercase();
                 if matches!(reply, WarmReply::MutatedPrefix | WarmReply::CapacityPressure | WarmReply::UnknownPublicationPressure | WarmReply::MetadataPressure) {
-                    assert!(!request.contains("range:"));
+                    assert!(request.contains("range: bytes=4-"));
                     assert!(!request.contains("if-match:"));
                 } else {
                     assert!(request.contains("range: bytes=4-"));
@@ -6820,7 +6986,7 @@ mod tests {
                         retry_request.push(socket.read_u8().await.unwrap());
                     }
                     let retry_request = String::from_utf8(retry_request).unwrap().to_ascii_lowercase();
-                    assert!(!retry_request.contains("range:"));
+                    assert!(retry_request.contains("range: bytes=4-"));
                     assert!(!retry_request.contains("if-match:"));
                 }
                 if matches!(reply, WarmReply::DifferentResource) {
@@ -6840,7 +7006,7 @@ mod tests {
                     WarmReply::WeakValidator => "ETag: W/\"fixture-v1\"\r\n",
                     _ => "ETag: \"fixture-v1\"\r\n",
                 };
-                let response = if matches!(reply, WarmReply::Full | WarmReply::MutatedPrefix | WarmReply::CapacityPressure | WarmReply::UnknownPublicationPressure | WarmReply::MetadataPressure) {
+                let response = if matches!(reply, WarmReply::Full) {
                     format!("HTTP/1.1 200 OK\r\n{etag}Content-Length: 8\r\nConnection: close\r\n\r\nDATATAIL")
                 } else {
                     format!("HTTP/1.1 206 Partial Content\r\n{etag}Content-Length: 4\r\nContent-Range: bytes 4-7/8\r\nConnection: close\r\n\r\nTAIL")
@@ -6888,7 +7054,7 @@ mod tests {
             .expect("resumed HTTP fixture must join");
         second_server.take();
         second_join.unwrap();
-        if matches!(reply, WarmReply::ChangedValidator | WarmReply::MissingValidator | WarmReply::WeakValidator | WarmReply::DifferentResource) {
+        if matches!(reply, WarmReply::Full | WarmReply::ChangedValidator | WarmReply::MissingValidator | WarmReply::WeakValidator | WarmReply::DifferentResource) {
             assert!(matches!(published_receipt, Err(PumasError::Validation { .. })));
             assert_eq!(std::fs::read(stage.join("payload.bin.part")).unwrap(), b"DATA");
             assert!(!stage.join("payload.bin").exists());

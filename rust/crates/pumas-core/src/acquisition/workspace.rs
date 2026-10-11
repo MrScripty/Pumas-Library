@@ -557,6 +557,16 @@ impl AcquisitionWorkspace {
     }
 
     pub(crate) fn open_part(&self, path: &str, append: bool) -> Result<std::fs::File> {
+        self.open_part_checked(path, append, false)
+    }
+
+    /// Start only an empty partial; append mode prevents destructive truncation
+    /// even if another writer changes it after the emptiness observation.
+    pub(crate) fn open_empty_part(&self, path: &str) -> Result<std::fs::File> {
+        self.open_part_checked(path, false, true)
+    }
+
+    fn open_part_checked(&self, path: &str, append: bool, preserve: bool) -> Result<std::fs::File> {
         self.require_writable()?;
         let (parent, name) = self.parent(path, true)?;
         // Starting a new owned write invalidates evidence for the previous
@@ -568,8 +578,8 @@ impl AcquisitionWorkspace {
             .remove(&(path.into(), true));
         let mut options = options();
         options.read(true);
-        if append {
-            options.append(true);
+        if append || preserve {
+            options.append(true).create(preserve);
         } else {
             options.write(true).create(true);
         }
@@ -577,7 +587,10 @@ impl AcquisitionWorkspace {
         if !file.metadata()?.is_file() {
             return Err(changed());
         }
-        if !append {
+        if preserve && file.metadata()?.len() != 0 {
+            return Err(changed());
+        }
+        if !append && !preserve {
             file.set_len(0)?;
         }
         self.validate()?;
@@ -1503,6 +1516,33 @@ mod tests {
         assert!(junction.exists());
         drop(grant);
         std::fs::remove_dir(junction).unwrap();
+    }
+
+    #[test]
+    fn fresh_remote_partial_never_truncates_existing_or_late_arriving_bytes() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let workspace = AcquisitionWorkspace::from_capability(
+            crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+            WorkspaceIdentity {
+                root_identity: "fixture".into(),
+                relative_target: "stage".into(),
+            },
+            Arc::new(()),
+            || Ok(()),
+        )
+        .unwrap();
+        let mut handle = workspace.open_empty_part("payload.bin").unwrap();
+        std::fs::write(temp.path().join("payload.bin.part"), b"DATA").unwrap();
+        assert!(workspace.open_empty_part("payload.bin").is_err());
+        assert_eq!(
+            std::fs::read(temp.path().join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+        std::io::Write::write_all(&mut handle, b"TAIL").unwrap();
+        assert_eq!(
+            std::fs::read(temp.path().join("payload.bin.part")).unwrap(),
+            b"DATATAIL"
+        );
     }
 
     #[test]

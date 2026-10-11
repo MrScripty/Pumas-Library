@@ -1941,7 +1941,16 @@ impl PreparedDownloadTask {
                 )
                 .map(|state| {
                     state.status = DownloadStatus::Error;
-                    state.error = Some(error.to_string());
+                    state.error = Some(match error {
+                        PumasError::Validation { field, .. }
+                            if field == "artifact.http.resume"
+                                || field == "artifact.http.response" =>
+                        {
+                            crate::models::ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE
+                                .into()
+                        }
+                        _ => error.to_string(),
+                    });
                     state.task_registered = false;
                     if !persist_error_ok || nested_failures > 0 {
                         state.lifecycle_failure_unverified = true;
@@ -7970,6 +7979,24 @@ mod tests {
 
     #[tokio::test]
     async fn transferred_partial_survives_interrupted_response_and_fresh_owner_cancel() {
+        assert_interrupted_partial_recovery(FailedRecovery::Cancel).await;
+    }
+
+    #[tokio::test]
+    async fn failed_partial_resumes_without_restart_in_live_and_reopened_hf_owner() {
+        for recovery in [FailedRecovery::ResumeLive, FailedRecovery::ResumeReopened] {
+            assert_interrupted_partial_recovery(recovery).await;
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum FailedRecovery {
+        Cancel,
+        ResumeLive,
+        ResumeReopened,
+    }
+
+    async fn assert_interrupted_partial_recovery(recovery: FailedRecovery) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         async fn read_request(socket: &mut tokio::net::TcpStream) -> String {
             let mut header = Vec::new();
@@ -8010,6 +8037,7 @@ mod tests {
                 .await
                 .unwrap();
             retry.shutdown().await.unwrap();
+            listener
         });
         let mut client = configured_download_client(temp.path().join("cache")).unwrap();
         client.download_base_url = Some(format!("http://{address}"));
@@ -8020,7 +8048,7 @@ mod tests {
             vec![LfsFileInfo {
                 filename: "weights.gguf".into(),
                 size: 12,
-                sha256: "a".repeat(64),
+                sha256: "19905b512b70b712f4ca9e3c5466d5796e6e36cd6b53ddb94b494723fb825260".into(),
             }],
             Vec::new(),
         );
@@ -8065,12 +8093,47 @@ mod tests {
         })
         .await
         .unwrap();
-        server.await.unwrap();
+        let listener = server.await.unwrap();
         assert_eq!(
             std::fs::read(destination.join("weights.gguf.part")).unwrap(),
             b"partial"
         );
         assert!(!destination.join("weights.gguf").exists());
+        if !matches!(recovery, FailedRecovery::Cancel) {
+            if matches!(recovery, FailedRecovery::ResumeReopened) {
+                drop(client);
+                client = configured_download_client(temp.path().join("cache")).unwrap();
+                client.restore_persisted_downloads().await.unwrap();
+                client.set_test_download_base_url(format!("http://{address}"));
+            }
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = read_request(&mut socket).await.to_ascii_lowercase();
+                assert!(request.contains("range: bytes=7-"), "{request}");
+                socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 7-11/12\r\nConnection: close\r\n\r\nTAIL!").await.unwrap();
+            });
+            assert!(client.resume_download(&id).await.unwrap());
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while client.get_download_status(&id).await != Some(DownloadStatus::Completed)
+                    || client
+                        .download_tasks
+                        .snapshot(&id)
+                        .is_some_and(|task| !task.finished)
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            server.await.unwrap();
+            assert_eq!(
+                std::fs::read(destination.join("weights.gguf")).unwrap(),
+                b"partialTAIL!"
+            );
+            assert!(!destination.join("weights.gguf.part").exists());
+            return;
+        }
+        drop(listener);
         drop(client);
         let restarted = configured_download_client(temp.path().join("cache")).unwrap();
         assert!(restarted
@@ -8130,7 +8193,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn immediately_resuming_stalled_body_pause_restarts_with_reconstructed_workspace() {
+    async fn immediately_resuming_stalled_body_pause_preserves_partial_in_reconstructed_workspace()
+    {
         assert_pause_settles_during_stalled_response(StalledResponse::ImmediateResume).await;
     }
 
@@ -8160,12 +8224,10 @@ mod tests {
                 assert!(headers.len() < 4096);
                 headers.push(socket.read_u8().await.unwrap());
             }
-            assert!(!String::from_utf8(headers)
-                .unwrap()
-                .to_ascii_lowercase()
-                .contains("range:"));
+            let headers = String::from_utf8(headers).unwrap().to_ascii_lowercase();
+            assert!(headers.contains("range: bytes=3-"), "{headers}");
             if stall_body {
-                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\nabcde").await.unwrap();
+                socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 3-7/8\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\nde").await.unwrap();
             }
             let listener = if retry {
                 Some(listener)
@@ -8393,11 +8455,10 @@ mod tests {
                 headers.push(socket.read_u8().await.unwrap());
             }
             let headers = String::from_utf8(headers).unwrap().to_ascii_lowercase();
-            // The HF successor reconstructs its workspace grant. A prior
-            // prefix remains progress only, even on the same HTTP resource.
-            assert!(!headers.contains("range:"));
+            // A reconstructed workspace must keep the already received bytes.
+            assert!(headers.contains("range: bytes=5-"), "{headers}");
             assert!(!headers.contains("if-match:"));
-            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\nabcdefgh").await.unwrap();
+            socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 3\r\nContent-Range: bytes 5-7/8\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\nfgh").await.unwrap();
         });
         assert!(client.resume_download(id).await.unwrap());
         tokio::time::timeout(Duration::from_secs(3), async {
@@ -9597,8 +9658,6 @@ mod tests {
 
     #[tokio::test]
     async fn existing_hashless_file_without_receipt_is_preserved_after_reopen() {
-        use tokio::io::AsyncWriteExt;
-
         let temp = TempDir::new().unwrap();
         let library = Arc::new(
             crate::model_library::ModelLibrary::new(temp.path().join("library"))
@@ -9614,24 +9673,8 @@ mod tests {
         client.set_download_importer(importer);
         let revision =
             DownloadRevision::from_commit("0123456789abcdef0123456789abcdef01234567").unwrap();
-        let revision_value = revision.as_str().to_owned();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let request = read_pinned_test_request(&mut socket).await;
-            assert!(request.starts_with(&format!(
-                "GET /acme/model/resolve/{revision_value}/model.onnx HTTP/1.1"
-            )));
-            assert!(
-                !request.to_ascii_lowercase().contains("\r\nrange:"),
-                "a retained prefix cannot authorize a ranged source comparison"
-            );
-            socket
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nABCD")
-                .await
-                .unwrap();
-        });
         client.set_test_download_base_url(base_url);
         *client.auth_token.write().await = None;
         cache_pinned_repo_tree(
@@ -9676,22 +9719,22 @@ mod tests {
         })
         .await
         .expect("a hashless existing file without a receipt must refuse import");
-        server.await.unwrap();
+        assert!(matches!(listener.into_std().unwrap().accept(), Err(error)
+            if error.kind() == std::io::ErrorKind::WouldBlock));
 
         let states = client.downloads.read().await;
         let state = states.get(&download_id).unwrap();
-        assert!(state
-            .error
-            .as_deref()
-            .unwrap()
-            .contains("preserving both files for reconciliation"));
+        assert_eq!(
+            state.error.as_deref(),
+            Some(crate::models::ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE)
+        );
         assert_eq!(
             std::fs::read(destination.join("model.onnx")).unwrap(),
             existing
         );
         assert_eq!(
             std::fs::read(destination.join("model.onnx.part")).unwrap(),
-            b"ABCD"
+            b"xx"
         );
         assert!(library.load_metadata(&destination).unwrap().is_none());
         drop(states);
@@ -9720,7 +9763,7 @@ mod tests {
         );
         assert_eq!(
             std::fs::read(destination.join("model.onnx.part")).unwrap(),
-            b"ABCD"
+            b"xx"
         );
         assert!(destination.join(".pumas_download").exists());
         assert!(library.load_metadata(&destination).unwrap().is_none());
@@ -22683,11 +22726,13 @@ mod tests {
             assert!(resumed_request.starts_with(&format!(
                 "GET /acme/model/resolve/{COMMIT}/model.onnx HTTP/1.1"
             )));
-            assert!(!resumed_request.to_ascii_lowercase().contains("range:"));
+            assert!(resumed_request
+                .to_ascii_lowercase()
+                .contains("range: bytes=7-"));
             assert!(!resumed_request.to_ascii_lowercase().contains("if-match:"));
             resumed
                 .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\npartial-done",
+                    b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 7-11/12\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\n-done",
                 )
                 .await
                 .unwrap();

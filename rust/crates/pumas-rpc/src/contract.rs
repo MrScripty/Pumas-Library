@@ -1557,9 +1557,13 @@ impl DownloadProgressOutcome {
             retry_limit: progress.retry_limit,
             retrying: progress.retrying,
             next_retry_delay_seconds: progress.next_retry_delay_seconds,
-            error: progress
-                .error
-                .map(|_| "The model download did not complete successfully."),
+            error: progress.error.map(|error| {
+                if error == ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE {
+                    ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE
+                } else {
+                    "The model download did not complete successfully."
+                }
+            }),
         })
     }
 }
@@ -8033,7 +8037,7 @@ mod tests {
             error: Some(format!("credential {SECRET} failed at {PRIVATE_PATH}")),
         };
         let encoded = RpcOutcome::DownloadStatus(Box::new(
-            DownloadStatusOutcome::new(Some(progress)).unwrap(),
+            DownloadStatusOutcome::new(Some(progress.clone())).unwrap(),
         ))
         .into_value()
         .unwrap();
@@ -8048,6 +8052,16 @@ mod tests {
         );
         assert!(!encoded.to_string().contains(SECRET));
         assert!(!encoded.to_string().contains(PRIVATE_PATH));
+
+        let mut refused = progress;
+        refused.error = Some(ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE.into());
+        let refused = RpcOutcome::DownloadStatus(Box::new(
+            DownloadStatusOutcome::new(Some(refused)).unwrap(),
+        ))
+        .into_value()
+        .unwrap();
+        assert_eq!(refused.get("error").and_then(Value::as_str),
+            Some("Download continuation was refused. Any partial download has been retained; retry when the source supports resume."));
 
         let partial = PartialDownloadAction {
             action: "none".to_string(),

@@ -26,6 +26,11 @@ inference are not qualified by its Linux packaging checks.
   request is pending and allow retry after refusal. Busy-library RPC errors
   explain that the owning download or operation must finish or be cancelled;
   the existing whole-library exclusion remains in effect.
+- HTTP resume retains partial downloads across pause, failure and process restart.
+  When the selected file has a supplied SHA, it continues from the actual saved
+  offset and checks the assembled download before publication. Unsupported or
+  invalid continuation leaves the partial intact; a server ignoring the range
+  request cannot silently restart the download.
 - A failed download now shows an accessible error beside its exact library
   weight or unassociated activity row. Its retry control retains the download
   identity. An enabled play action still requires a complete catalog entry;

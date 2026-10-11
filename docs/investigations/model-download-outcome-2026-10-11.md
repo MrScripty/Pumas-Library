@@ -62,3 +62,90 @@ The cause of the HTTP continuation mismatch is not established by this UI
 reproduction. This change exposes the existing refusal and does not bypass it,
 invent a completion receipt, or automatically retry the live transfer. Download
 location reconciliation and library-lock scope remain separate pending work.
+
+
+## Resume policy follow-up
+
+The user subsequently resumed the same transfer in the still-running older
+installed process and observed it starting again. The original failed transfer
+reported 8,149,772,661 bytes; the later paused partial had 91,437,494 bytes. The
+selected file remains `Qwen3-8B-Q8_0-outq2.gguf`, not the 8.11 GB sibling.
+These observations do not recover the overwritten prefix or establish why the
+original server representation check changed.
+
+The cause of the destructive restart is established separately in
+`acquisition/service.rs`: a continuation checkpoint holds a weak reference to
+one workspace capability. HF pause/error recovery reconstructs that workspace.
+A missing or rejected checkpoint selected offset zero, and a successful full
+response called `open_part(..., false)`, truncating the retained partial. The old
+HTTP adapter also accepted a matching-validator full response to a range request
+as permission to replace the prefix. The contract and existing tests explicitly
+required these behaviors.
+
+The user revoked that discard policy. Resume now binds an actual regular-file
+partial through the current held workspace and uses its observed offset when
+the exact selected manifest supplies a whole-file SHA. The assembled download
+must verify the supplied SHA before publication. Local prefix observation is
+not a successful download receipt, historical validator, or verified-chunk
+claim. Valid live checkpoints retain conditional HTTP validation. S3 continues
+its exact version/conditional selection and supplied digest checks. An ignored
+range, invalid range, absent continuation evidence or oversized partial is
+refused with bytes retained. Fresh remote writes use an empty append descriptor,
+so they cannot truncate an existing or late-arriving partial. Owner-materialized
+local installer staging is not a remote download and retains its own behavior.
+
+HF reports a bounded continuation-refusal message through existing progress
+projections; raw response diagnostics stay local. No RPC shape, store schema,
+receipt version, checksum retention or already-acquired-file policy changes.
+No HTTP validator/access URL/prefix sidecar is persisted, and no execution lease
+is retained just to keep a checkpoint alive.
+
+The initial actual HF immediate-resume regression failed against the old code:
+the captured request omitted `Range` instead of requesting `bytes=5-`. The
+updated fixtures observe exact HTTP/S3 range offsets and exact final/retained
+bytes across pause, interruption, retry and owner restart. Negative acquisition
+fixtures refuse ignored/wrong ranges and corrupt assembled contents without
+issuing a consumer receipt. The public HTTP RPC fixture includes cold recovery,
+interruption, pause/resume, final range transfer and durable importer publication.
+Verification results and rebuilt installers are recorded in the execution ledger
+when completed. Standards snapshot
+`snapshot:v1:8232afb5-be9d-4ee8-8099-ce42f109e2ea` selects 33 policies with no
+unresolved routing categories.
+
+The running installed application and actual library were not restarted,
+retried, repaired, copied, or hashed during this implementation. The rebuilt
+candidate must replace the old process to change its policy. Already overwritten
+bytes are not recovered by this fix. Download-location reconciliation and root
+lock scope remain separate pending work.
+
+
+### Accepted resume verification
+
+- Default core package: 2,331 passed, 30 existing opt-in tests ignored across
+  unit, integration and documentation suites (the unit suite is 2,103/14).
+- Headless core unit suite: 2,074 passed, 13 existing opt-in tests ignored.
+- S3 acquisition unit coverage: 215 passed, two opt-in tests ignored; S3 reader
+  and acquisition integration suites: 58 passed.
+- Default RPC package: 438 passed, 12 opt-in tests ignored, including all 410
+  binary unit tests and the controlled public HTTP resume/import flow.
+- Default S3 RPC selection: 17 passed. The separately gated headless S3 facade
+  suite also passed 17 tests, with its existing browser-coordinator test ignored.
+- Default core/RPC all-targets Clippy, the CI-selected headless S3 core Clippy,
+  and default-feature S3 RPC all-targets Clippy passed with warnings denied.
+  Formatting and production frontend/Electron builds passed.
+
+An extra combined no-default core/RPC S3 all-targets Clippy experiment reported
+11 dead-code warnings in existing test-only inference contract declarations.
+Their feature guards are unchanged from the admitted slice baseline
+`6761244b`. The repository's strict S3 CI lint gate selects the core package
+separately; default-feature RPC lints pass. No warnings were suppressed. Strict
+headless RPC inference-test gating remains separate cleanup, and is not claimed
+qualified by this resume change.
+
+Initial broad debug builds exhausted the filesystem and produced link/write
+failures; those runs are invalid acceptance evidence. Only task-generated
+compiler output was removed. Final verification used two compiler jobs, disabled
+incremental compilation, and debug level zero for development/test artifacts;
+the optimized installer backend retains the normal release profile. Logs are
+in ignored original-repository `tmp/pr69-resume-policy-*.log`. No runtime
+inference or native Windows/macOS execution was performed.

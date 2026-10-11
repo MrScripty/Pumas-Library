@@ -46,10 +46,11 @@ async fn empty_selection_refuses_absence_unknown_length_and_changed_version() {
 }
 
 #[tokio::test]
-async fn empty_owned_single_file_verifies_digest_and_truncates_untrusted_partial() {
-    for scenario in ["valid", "digest", "cancel"] {
+async fn empty_owned_single_file_verifies_digest_and_preserves_untrusted_partial() {
+    for scenario in ["valid", "digest", "cancel", "retained"] {
         let wrong_digest = scenario == "digest";
         let cancelled = scenario == "cancel";
+        let retained = scenario == "retained";
         let state = tempfile::TempDir::new().unwrap();
         let stage = tempfile::TempDir::new().unwrap();
         let fixture = Fixture::serve(vec![head(0)]).await;
@@ -62,11 +63,13 @@ async fn empty_owned_single_file_verifies_digest_and_truncates_untrusted_partial
             Err(pumas_library::acquisition::S3ReaderError::InvalidRange)
         ));
         let owner = workspace(stage.path());
-        std::fs::write(
-            stage.path().join("stage/weights.gguf.part"),
-            b"untrusted retained bytes",
-        )
-        .unwrap();
+        if retained || cancelled {
+            std::fs::write(
+                stage.path().join("stage/weights.gguf.part"),
+                b"untrusted retained bytes",
+            )
+            .unwrap();
+        }
         let service = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
             state.path(),
         ))));
@@ -90,15 +93,30 @@ async fn empty_owned_single_file_verifies_digest_and_truncates_untrusted_partial
                 |(), _| async { Ok(()) },
             )
             .await;
-        assert_eq!(result.is_err(), wrong_digest || cancelled);
+        assert_eq!(result.is_err(), wrong_digest || cancelled || retained);
         if cancelled {
             assert!(matches!(result, Err(PumasError::DownloadCancelled)));
+        }
+        if wrong_digest {
+            assert!(matches!(result, Err(PumasError::HashMismatch { .. })));
+        }
+        if retained {
+            assert!(
+                matches!(result, Err(PumasError::Validation { ref field, ref message })
+                if field == "artifact.http.resume" && message == "Safe continuation is unavailable; the partial file has been retained")
+            );
+        }
+        if retained || cancelled {
+            assert_eq!(
+                std::fs::read(stage.path().join("stage/weights.gguf.part")).unwrap(),
+                b"untrusted retained bytes"
+            );
         }
         consumer.shutdown().await.unwrap();
         service.shutdown().await.unwrap();
         let requests = fixture.finish().await;
         assert_eq!(requests.len(), 1, "empty selection issued GET");
-        if wrong_digest || cancelled {
+        if wrong_digest || cancelled || retained {
             assert!(!stage.path().join("stage/weights.gguf").exists());
             let record = service
                 .store()

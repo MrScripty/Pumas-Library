@@ -208,12 +208,12 @@ async fn exercise_resume() {
             .unwrap()
             .unwrap();
         let headers = request(&mut first).await;
-        // A cold partial has no live representation checkpoint: never append
-        // merely because a digest-backed selection authorizes explicit resume.
-        assert!(!headers.contains("range:"));
+        // The selected publisher SHA verifies the assembled acquisition;
+        // retained bytes determine the requested offset even on a cold owner.
+        assert!(headers.contains("range: bytes=8-"));
         requests.push(headers);
-        first.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
-        first.write_all(&source_bytes[..12]).await.unwrap();
+        first.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 16\r\nContent-Range: bytes 8-23/24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
+        first.write_all(&source_bytes[8..12]).await.unwrap();
         first_requested.send(()).unwrap();
         tokio::time::timeout(WATCHDOG, interrupted)
             .await
@@ -241,12 +241,12 @@ async fn exercise_resume() {
             .unwrap();
         let headers = request(&mut cold).await;
         assert!(
-            !headers.contains("range:"),
-            "fresh owner must reacquire representation evidence"
+            headers.contains("range: bytes=12-"),
+            "fresh owner must preserve the retained bytes"
         );
         requests.push(headers);
-        cold.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
-        cold.write_all(&source_bytes[..18]).await.unwrap();
+        cold.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 12\r\nContent-Range: bytes 12-23/24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
+        cold.write_all(&source_bytes[12..18]).await.unwrap();
         cold_requested.send(()).unwrap();
         tokio::time::timeout(WATCHDOG, cold_held)
             .await
@@ -259,13 +259,11 @@ async fn exercise_resume() {
             .unwrap()
             .unwrap();
         let headers = request(&mut successor).await;
-        // RPC resume reconstructs its workspace grant. The retained prefix is
-        // progress, not authority to reuse the predecessor's HTTP checkpoint.
-        assert!(!headers.contains("range:"));
+        // A paused RPC successor also retains all 18 received bytes.
+        assert!(headers.contains("range: bytes=18-"));
         assert!(!headers.contains("if-match:"));
         requests.push(headers);
-        successor.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
-        successor.write_all(&source_bytes[..18]).await.unwrap();
+        successor.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 6\r\nContent-Range: bytes 18-23/24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
         successor.shutdown().await.unwrap();
         drop(successor);
 

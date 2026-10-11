@@ -2816,6 +2816,19 @@ impl ModelLibrary {
     /// * `model_id` - Model ID to delete
     /// * `cascade` - Whether to remove all symlinks pointing to this model
     pub async fn delete_model(&self, model_id: &str, cascade: bool) -> Result<()> {
+        self.delete_model_with_execution(model_id, cascade, None)
+            .await
+    }
+
+    /// The primary API may share its HF native root grant while retaining the
+    /// exact destination's mutation lock. Durable custody and intent checks
+    /// still belong to this library's mutation authority.
+    pub(crate) async fn delete_model_with_execution(
+        &self,
+        model_id: &str,
+        cascade: bool,
+        execution: Option<crate::model_library::mutation_authority::ModelDeletionExecution>,
+    ) -> Result<()> {
         let authority = self.mutation_authority()?;
         let tasks = authority.tasks();
         let library = self.clone();
@@ -2824,7 +2837,7 @@ impl ModelLibrary {
             .run_owned("delete model", move |context| async move {
                 owned_mutation_outcome(
                     library
-                        .delete_model_owned(&model_id, cascade, authority, context)
+                        .delete_model_owned(&model_id, cascade, authority, context, execution)
                         .await,
                 )
             })
@@ -2837,7 +2850,10 @@ impl ModelLibrary {
         cascade: bool,
         authority: LibraryMutationAuthority,
         context: crate::api::RuntimeTaskContext,
+        execution: Option<crate::model_library::mutation_authority::ModelDeletionExecution>,
     ) -> Result<()> {
+        let execution = execution.map(Arc::new);
+        let retained_execution = execution.clone();
         let model_dir = self.library_root.join(model_id);
         let mutation_index = self.index.clone();
         let mutation_model_id = model_id.to_string();
@@ -2846,8 +2862,16 @@ impl ModelLibrary {
         let (mut mutation, destination, storage_kind) = context
             .run_blocking("claim and inspect model deletion", move || {
                 let destination = deletion_root.resolve(&mutation_dir)?;
-                let mutation =
-                    authority.acquire(&mutation_index, &[(mutation_model_id, mutation_dir)])?;
+                let targets = [(mutation_model_id, mutation_dir)];
+                let mut mutation = match retained_execution.as_ref() {
+                    Some(execution) => authority.acquire_under_grant(
+                        &mutation_index,
+                        &targets,
+                        execution.grant_for(&destination)?,
+                    )?,
+                    None => authority.acquire(&mutation_index, &targets)?,
+                };
+                mutation.retain_deletion_execution(retained_execution);
                 let metadata = match destination.read_model_metadata() {
                     Ok(metadata) => metadata,
                     Err(error) => {

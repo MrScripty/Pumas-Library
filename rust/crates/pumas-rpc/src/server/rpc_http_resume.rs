@@ -37,20 +37,28 @@ impl Rpc {
     }
 
     async fn call(&mut self, method: &str) -> Value {
-        let request_id = self.next_id;
-        self.next_id += 1;
-        let response: Value = tokio::time::timeout(WATCHDOG, async {
-            self.client.post(format!("http://{}/rpc", self.address))
-                .json(&json!({"jsonrpc":"2.0", "id":request_id, "method":method, "params":{"downloadId":ID}}))
-                .send().await.unwrap().error_for_status().unwrap().json().await.unwrap()
-        }).await.expect("public RPC response watchdog");
-        assert_eq!(response["jsonrpc"], "2.0");
-        assert_eq!(response["id"], request_id);
+        let response = self.envelope(method, json!({"downloadId": ID})).await;
         assert!(
             response.get("error").is_none(),
             "unexpected RPC error: {response}"
         );
         response["result"].clone()
+    }
+
+    async fn envelope(&mut self, method: &str, params: Value) -> Value {
+        let request_id = self.next_id;
+        self.next_id += 1;
+        let response: Value =
+            tokio::time::timeout(WATCHDOG, async {
+                self.client.post(format!("http://{}/rpc", self.address))
+                .json(&json!({"jsonrpc":"2.0", "id":request_id, "method":method, "params":params}))
+                .send().await.unwrap().error_for_status().unwrap().json().await.unwrap()
+            })
+            .await
+            .expect("public RPC response watchdog");
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["id"], request_id);
+        response
     }
 
     async fn status(&mut self, status: &str, bytes: Option<u64>) -> Value {
@@ -177,6 +185,18 @@ async fn exercise_resume() {
     )
     .unwrap();
     std::fs::write(&sentinel, b"unrelated retained bytes").unwrap();
+    let delete_id = "reranker/clm-v0_1/weights-original";
+    let delete_target = root.join("shared-resources/models").join(delete_id);
+    std::fs::create_dir_all(&delete_target).unwrap();
+    std::fs::write(
+        delete_target.join("metadata.json"),
+        serde_json::to_vec(&json!({
+            "model_id": delete_id, "model_type": "reranker", "family": "clm-v0_1",
+            "official_name": "CLM-v0.1-8B-GGUF", "cleaned_name": "weights-original"
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let snapshot: PersistedDownload = serde_json::from_value(json!({
         "download_id":ID, "repo_id":"acme/model", "revision":null, "filename":"weights.gguf",
         "filenames":["weights.gguf"], "dest_dir":destination, "total_bytes":24, "status":"paused",
@@ -292,6 +312,27 @@ async fn exercise_resume() {
         .await
         .unwrap()
         .unwrap();
+    rpc.status("downloading", Some(12)).await;
+    let retained = document(root);
+    let deleted = rpc
+        .envelope("delete_model_with_cascade", json!({"model_id":delete_id}))
+        .await;
+    assert!(deleted.get("error").is_none(), "{deleted}");
+    assert_eq!(deleted["result"]["success"], true);
+    assert!(!delete_target.exists());
+    assert_eq!(std::fs::read(&partial).unwrap(), bytes[..12]);
+    assert_eq!(
+        document(root),
+        retained,
+        "another destination's download custody must not change"
+    );
+    let protected = rpc
+        .envelope("delete_model_with_cascade", json!({"model_id":MODEL_ID}))
+        .await;
+    assert_eq!(protected["error"]["code"], -32011, "{protected}");
+    assert_eq!(protected["error"]["message"], "A download or another operation is using this model library. Finish or cancel it, then try again.");
+    assert_eq!(std::fs::read(&partial).unwrap(), bytes[..12]);
+    assert_eq!(document(root), retained);
     rpc.status("downloading", Some(12)).await;
     assert_eq!(rpc.call("resume_model_download").await["success"], false);
     assert_eq!(std::fs::read(&partial).unwrap(), bytes[..12]);

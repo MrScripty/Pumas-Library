@@ -3955,6 +3955,11 @@ impl HuggingFaceClient {
             .observe_ambient_admission("prepare-download-task", &download_id);
         let auth_header = self.auth_header_value().await;
         let destination_lock = self.destination_lock(&destination.identity()).await;
+        let admission_destination_lock = self
+            .destination_locks(&destination.identity())
+            .await
+            .admission
+            .clone();
         let pause_flag = Arc::new(AtomicBool::new(false));
 
         let (admission_sender, admission_receiver) = tokio::sync::oneshot::channel();
@@ -4171,10 +4176,35 @@ impl HuggingFaceClient {
                     let admission_destination = held_destination.clone();
                     #[cfg(test)]
                     let admission_observer = owner.clone();
+                    let checked_destination = admission_destination.clone();
+                    let admission_gate = task_context.run_blocking_named(
+                        "reserve model destination admission", move || {
+                            let guard = admission_destination_lock.try_read_owned()
+                                .map_err(|_| PumasError::DownloadRootBusy)?;
+                            checked_destination.assert_no_intent_deletion_claim()?;
+                            Ok::<_, PumasError>(guard)
+                        },
+                    ).await;
+                    let admission_gate = match admission_gate {
+                        Ok(Ok(guard)) => guard,
+                        Ok(Err(error)) => {
+                            // An ordinary policy refusal performed no durable
+                            // write and must not poison owner shutdown.
+                            let _ = admission_sender.send(Err(error));
+                            return;
+                        }
+                        Err(error) => {
+                            let _ = admission_sender.send(Err(error.into_pumas_error("Download admission gate observation failed")));
+                            return;
+                        }
+                    };
                     let outcome = task_context
                         .run_fallible_blocking_named(
                             "durably admit download",
                             move || -> Result<_> {
+                                // Admission and deletion must make their exact
+                                // destination custody checks under the same lock.
+                                let _destination_lock = admission_gate;
                                 let admission_request = DownloadAdmissionRequest {
                                     snapshot: admission_snapshot,
                                     domain: DownloadAdmissionDomain::Ambient,
@@ -4312,14 +4342,66 @@ impl HuggingFaceClient {
         Ok(download_id)
     }
 
+    /// Share native root exclusion for a primary-library deletion, but refuse
+    /// an effect already using this exact destination. The caller must retain
+    /// the returned execution lease until the owned deletion has fully settled.
+    pub(crate) async fn protect_model_deletion(
+        &self,
+        context: &TaskContext,
+        model_dir: &Path,
+    ) -> Result<crate::model_library::mutation_authority::ModelDeletionExecution> {
+        let context = self.protect_download_mutation(context).await?;
+        let root = self
+            .destination_root
+            .clone()
+            .ok_or_else(|| PumasError::Config {
+                message: "Model deletion requires a configured library root".into(),
+            })?;
+        let path = model_dir.to_path_buf();
+        let destination = context
+            .run_fallible_blocking_named("resolve model deletion destination", move || {
+                root.resolve(&path)
+            })
+            .await
+            .map_err(|error| {
+                error.into_pumas_error("Model deletion destination observation failed")
+            })??;
+        let locks = self.destination_locks(&destination.identity()).await;
+        let admission = locks
+            .admission
+            .clone()
+            .try_write_owned()
+            .map_err(|_| PumasError::DownloadRootBusy)?;
+        let effects = locks
+            .effects
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| PumasError::DownloadRootBusy)?;
+        Ok(
+            crate::model_library::mutation_authority::ModelDeletionExecution::new(
+                context.held_root_execution_grant()?,
+                destination.persisted_identity()?,
+                effects,
+                admission,
+            ),
+        )
+    }
+
     async fn destination_lock(
         &self,
         identity: &crate::model_library::download_recovery::DestinationIdentity,
     ) -> Arc<tokio::sync::Mutex<()>> {
+        self.destination_locks(identity).await.effects.clone()
+    }
+
+    async fn destination_locks(
+        &self,
+        identity: &crate::model_library::download_recovery::DestinationIdentity,
+    ) -> Arc<super::DestinationLocks> {
         let mut locks = self.dest_locks.write().await;
         locks
             .entry(identity.clone())
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .or_insert_with(|| Arc::new(super::DestinationLocks::default()))
             .clone()
     }
 
@@ -8871,6 +8953,92 @@ mod tests {
         client.configure_download_destination_root(&root)?;
         client.set_persistence(Arc::new(DownloadPersistence::new(&root)));
         Ok(client)
+    }
+
+    #[tokio::test]
+    async fn deletion_execution_excludes_exact_admission_without_blocking_download_queueing() {
+        let temp = TempDir::new().unwrap();
+        let client = Arc::new(configured_download_client(temp.path().join("cache")).unwrap());
+        *client.auth_token.write().await = None;
+        let revision =
+            DownloadRevision::from_commit("8888888888888888888888888888888888888888").unwrap();
+        cache_pinned_weight(
+            &client,
+            &revision,
+            "770e607624d689265ca6c44884d0807d9b054d23c473c106c72be9de08b7376c",
+        );
+        let destination = temp.path().join("library/model");
+        let identity = destination_identity(&client, &destination);
+        let request = recovery_test_request("acme/model", &["weights.gguf".into()]);
+        let held_client = client.clone();
+        let held_destination = destination.clone();
+        let execution = client
+            .run_download_invocation(move |context| async move {
+                held_client
+                    .protect_model_deletion(&context, &held_destination)
+                    .await
+            })
+            .await
+            .unwrap();
+        let refused = client
+            .start_download_at_revision(&request, &destination, None, revision.clone())
+            .await;
+        assert!(
+            matches!(refused, Err(PumasError::DownloadRootBusy)),
+            "{refused:?}"
+        );
+        assert!(client
+            .persistence
+            .as_ref()
+            .unwrap()
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .is_empty());
+        assert!(!destination.exists());
+        let other = client
+            .destination_root
+            .as_ref()
+            .unwrap()
+            .resolve(&temp.path().join("library/other"))
+            .unwrap();
+        assert!(
+            matches!(execution.grant_for(&other), Err(PumasError::Validation { field, message })
+            if field == "model_library.mutation" && message == "Deletion execution does not identify its admitted destination")
+        );
+        drop(execution);
+
+        // A long-lived transfer effect must still permit another queued
+        // admission. Deletion exclusion must not reintroduce a transfer lock.
+        let effects = client.destination_lock(&identity).await.lock_owned().await;
+        let admitted = client
+            .start_download_at_revision(&request, &destination, None, revision)
+            .await
+            .unwrap();
+        assert!(client.pause_download(&admitted).await.unwrap());
+        drop(effects);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                client.observe_finished_download_tasks().await;
+                if client.get_download_status(&admitted).await == Some(DownloadStatus::Paused)
+                    && !client.download_tasks.contains(&admitted)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(client
+            .persistence
+            .as_ref()
+            .unwrap()
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&admitted));
+        client.shutdown_downloads().await.unwrap();
     }
 
     #[tokio::test]

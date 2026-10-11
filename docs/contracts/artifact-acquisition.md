@@ -457,6 +457,22 @@ Consumer settlement is idempotent for its exact generation. A matching visible r
 
 Every effectful in-place model import, including orphan adoption, acquires the configured model-root execution authority and rechecks current durable model/acquisition custody immediately before metadata-present shortcuts, index publication, Diffusers delegation, or other importer effects. A scan is advisory and does not reserve the target. Ordinary imports receive no custody exemption. Managed Hugging Face has two private, operation-scoped stages: its partial metadata/index stub may proceed only under the current exact queue admission, `Transferring` generation, manifest/demand, workspace, destination, and held root grant; full finalization may proceed only under the current verified-file use lease and exact matching model admission. The partial-stage capability authorizes only the existing stub upsert and its index projection, including any metadata projection performed by indexing; it cannot authorize full import, package-fact resolution, another target, or a caller-supplied path or operation string. Neither stage bypasses unrelated queue/hidden custody or unresolved Pending/quarantined state. The held root grant and existing operation owner remain live until all importer/index effects settle, including after a caller stops waiting. Missing configured authority or unresolved custody fails closed. The current candidate's HF receipt now permits a reopened `Using` record to settle only after exact receipt and read-only output validation; missing or mismatched proof remains recovery-required and never replays importer effects.
 
+Primary API and local IPC model deletion may share that primary's live HF native
+root grant. Another destination's HF transfer is not a reason to refuse deletion.
+Before deletion begins, retain exact-destination transfer-effect and admission
+exclusion, validate the grant's physical root and selected destination, and apply
+the library's existing durable download/acquisition custody and intent-deletion
+claims. Keep both destination exclusions through owned filesystem/index/link
+effects and claim settlement, including when the caller stops waiting. Admission
+rechecks intent custody under the same destination admission exclusion before
+its durable write. A refused admission with no write is an ordinary policy
+outcome, not a background write failure. Transfer-effect exclusion is separate:
+an active transfer may still have later admissions queued at its destination.
+Native exclusion against independent owners remains intact. Direct standalone
+library deletion retains its existing native-grant acquisition. Other library
+mutations, unresolved quarantine and download-location reconciliation retain
+their existing rules; this does not authorize deleting a retained download.
+
 ### Durable handoff transition ownership
 
 | Transition | Durable writer and exact identity | Filesystem authority and cancellation | Restart and reclamation |

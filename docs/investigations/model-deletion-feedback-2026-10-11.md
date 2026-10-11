@@ -95,3 +95,92 @@ role/name/state and projected interaction semantics; it does not qualify native
 pointer capture, keyboard behavior, foreign platforms or model inference.
 Completed suite and candidate evidence belongs in the
 [execution ledger](../plans/download-location-reconciliation/execution-ledger.md).
+
+## Deletion-scope follow-up
+
+After installing another Debian candidate, the user still observed no deletion
+and no visible error for the 8.11 GB entry. Read-only inspection of the installed
+frontend found `index-CTIWPst3.js`: its delete handler only logs errors and does
+not contain `deletionStateByModelId` or the `Could not delete model:` alert. The
+previously qualified resume-policy package contains `index-CThwja8r.js` with
+both. Both packages advertise `0.8.0~rc.1`; that version alone cannot establish
+which local candidate was installed. No installed file or model payload was
+hashed to make this observation.
+
+At follow-up observation, the selected original-weight directory still contained
+only `metadata.json`; its old acquisition was Withdrawn and its queue admission
+released. The outq2 sibling retained a 433,061,037-byte partial and current queue
+custody. There were no intent deletion claims. The latest app run logged a generic
+RPC conflict (`-32011`) near the attempted deletion, but the method label does
+not independently identify that request. The backend subsequently was unavailable
+at its last reported port and the root execution lock was free. These are point
+in time observations, not permission to infer a successful deletion or download.
+The user's library, app and installation were not mutated during diagnosis.
+
+The existing disposable release-RPC probe reproduced exact root-lock refusal,
+then successful exact-target deletion after releasing the external lock. The
+new minimized command,
+`cargo test --locked --offline -p pumas-library --lib deletion_of_other_weight_during_owned_download_root_grant`,
+failed before production changes with `DownloadRootBusy` in 0.39 seconds. Its
+real primary API shares two same-name model identities with a live HF task
+holding the root grant; the selected metadata-only weight must be removed while
+the sibling partial, index entry and canonical acquisition remain unchanged.
+The final regression also exercises local IPC and exact-sibling custody refusal.
+
+The earlier repair deliberately retained root-wide exclusion. HF transfers can
+share their owner's live root grant, while model deletion previously tried to
+acquire a separate exclusive grant before its exact destination checks. The
+primary API and IPC now compose deletion with the same HF owner grant and retain
+a private, exact-destination deletion execution lease. The library validates
+physical root/destination identity, checks durable custody, obtains its existing
+intent claim, and retains the lease through all owned deletion and settlement
+effects. Foreign/native owners and direct standalone library calls still use
+the existing native exclusion. No public caller supplies a grant or bypass.
+
+Transfer effects and durable admission use separate locks for the same physical
+destination identity. Deletion retains both. Admission takes its short gate and
+rechecks intent custody before the canonical write, preventing an admission
+from racing deletion without forcing ordinary queueing to wait for a transfer.
+An added regression caught a policy refusal poisoning background shutdown; the
+gate now reports ordinary pre-write refusal as a result while retaining actual
+write failures, panics and observation failures. The regression requires clean
+shutdown, preserved custody and successful queued admission after lease release.
+
+No persistent schema, receipt version, checksum policy, successful-download
+provenance or frontend behavior changed in this follow-up. The existing deletion
+alert is included in the candidate; a distinctly named local installer will
+identify this source slice. Other library mutation lock scopes and reconciliation
+C1–C10 are not implemented by this repair. Coding standards MCP snapshot
+`snapshot:v1:28e650df-0dc6-4f90-9b6d-75377680eebb` selects 33 policies and zero
+unresolved categories; all selected content matched the previously read policies.
+Final suites and installer qualification are recorded separately when completed.
+
+### Accepted deletion-scope verification
+
+The final default core package passed 2,333 tests with 30 existing opt-in skips
+(unit suite: 2,105 passed, 14 skipped). The final RPC package passed 438 tests
+with 12 existing opt-in skips, including all 410 binary unit tests. Its real
+controlled HTTP source now proves that an unrelated metadata-only model can be
+deleted while bytes are actively arriving; deletion of the active destination
+returns the exact busy refusal, its canonical custody and partial are unchanged,
+and the original transfer subsequently resumes and completes durable import.
+Headless deletion regressions passed six tests. Strict default core/RPC
+all-targets Clippy and formatting passed. Frontend source and dependencies are
+unchanged; its earlier deletion-feedback behavior tests remain applicable.
+
+An earlier RPC run failed an unrelated vision request-count assertion. Its
+cause remains unresolved; the focused case, concurrent cohort and final full
+run passed. The [separate diagnostic record](vision-request-count-2026-10-11.md)
+preserves that limitation and the new request provenance assertion. No vision
+validator or expected outcome was weakened. The first core run preceded the
+final admission-gate refinement; the complete core package was rerun afterward.
+Logs are in ignored original-repository `tmp/pr69-delete-scope-*.log`.
+
+This local Linux release selects Electron Builder build number `2026101101`,
+which its pinned FPM adapter expresses as a Debian package revision. Qualification
+must confirm that the actual package version is newer than the observed installed
+`0.8.0~rc.1`, and verify a distinctly named installer copy against the qualified
+candidate. Project/RPC semantic version and release-attribution inputs remain
+`0.8.0-rc.1`; no public release/version/tag or automatic update publication is
+selected. Optimized backend and installer checks are pending at this source
+commit boundary. No real library deletion or host installation occurred.

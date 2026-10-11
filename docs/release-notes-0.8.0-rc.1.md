@@ -26,6 +26,9 @@ inference are not qualified by its Linux packaging checks.
   request is pending and allow retry after refusal. Busy-library RPC errors
   explain that the owning download or operation must finish or be cancelled;
   the existing whole-library exclusion remains in effect.
+- Primary API and local IPC deletion can remove one model while an unrelated HF
+  download runs. Exact destination custody, admission and intent protections remain
+  enforced; the sibling download's partial data and receipts are preserved.
 - HTTP resume retains partial downloads across pause, failure and process restart.
   When the selected file has a supplied SHA, it continues from the actual saved
   offset and checks the assembled download before publication. Unsupported or

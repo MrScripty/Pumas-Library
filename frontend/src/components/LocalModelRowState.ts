@@ -96,7 +96,7 @@ function getPartialDownloadState({
   recoveringPartialModelIds?: Set<string>;
 }): PartialDownloadState {
   const hasRecovery = model.provenance === 'catalog' && Boolean(model.recovery);
-  const missingRecoveryMetadata = isPartialDownload && !hasRecovery;
+  const missingRecoveryMetadata = !isDownloading && isPartialDownload && !hasRecovery;
 
   return {
     canRecoverPartial:

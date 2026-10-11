@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { LocalModelsList } from './LocalModelsList';
+import { buildDownloadingModels, mergeLocalModelGroups } from './ModelManagerUtils';
 import type { ModelCategory, RelatedModelsState } from '../types/apps';
 
 vi.mock('./ModelMetadataModal', () => ({
@@ -39,6 +40,84 @@ const modelGroups: ModelCategory[] = [
 ];
 
 describe('LocalModelsList', () => {
+  it.each(['queued', 'downloading', 'pausing', 'paused', 'cancelling', 'error'] as const)(
+    'does not report unavailable recovery for a managed catalog download (%s)', (status) => {
+      const onPauseDownload = vi.fn();
+      const onResumeDownload = vi.fn();
+      const onRecoverPartialDownload = vi.fn();
+      const catalog: ModelCategory[] = [{ category: 'llm', models: [{
+        id: 'llm/llama/test-model', name: 'Test Model', category: 'llm',
+        provenance: 'catalog', isPartialDownload: true,
+      }] }];
+      const groups = mergeLocalModelGroups(catalog, buildDownloadingModels({
+        'dl-current': {
+          downloadId: 'dl-current', libraryModelId: 'llm/llama/test-model',
+          repoId: 'org/test-model', status, progress: 0.42,
+        },
+      }));
+      render(<LocalModelsList
+        modelGroups={groups}
+        starredModels={new Set()} excludedModels={new Set()} selectedAppId="ollama"
+        totalModels={1} hasFilters={false} relatedModelsById={{}} expandedRelated={new Set()}
+        onToggleStar={vi.fn()} onToggleLink={vi.fn()} onToggleRelated={vi.fn()}
+        onOpenRelatedUrl={vi.fn()} onPauseDownload={onPauseDownload}
+        onResumeDownload={onResumeDownload} onRecoverPartialDownload={onRecoverPartialDownload}
+      />);
+
+      expect(screen.getByText('Test Model')).toBeVisible();
+      expect(screen.queryByText(
+        'Resume is unavailable until current recovery information is available.'
+      )).not.toBeInTheDocument();
+      if (status === 'downloading' || status === 'queued') {
+        fireEvent.click(screen.getByTitle('Pause download'));
+        expect(onPauseDownload).toHaveBeenCalledWith('dl-current');
+        expect(onResumeDownload).not.toHaveBeenCalled();
+      } else if (status === 'paused' || status === 'error') {
+        fireEvent.click(screen.getByTitle(status === 'paused' ? 'Resume download' : 'Retry download'));
+        expect(onResumeDownload).toHaveBeenCalledWith('dl-current');
+        expect(onPauseDownload).not.toHaveBeenCalled();
+      } else {
+        expect(screen.queryByTitle('Pause download')).not.toBeInTheDocument();
+        expect(screen.queryByTitle('Resume download')).not.toBeInTheDocument();
+        expect(screen.queryByTitle('Retry download')).not.toBeInTheDocument();
+      }
+      expect(onRecoverPartialDownload).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([false, true])('uses current recovery authority for inactive partial models (ticket=%s)', (hasRecovery) => {
+    const onRecoverPartialDownload = vi.fn();
+    const model = {
+      id: 'llm/llama/test-model', name: 'Test Model', category: 'llm',
+      provenance: 'catalog' as const, isPartialDownload: true, downloadProgress: 0.42,
+      recovery: hasRecovery ? {
+        recoveryToken: `v1:${'a'.repeat(64)}`, repoId: 'org/test-model',
+        selectedArtifactFiles: ['weights.gguf'],
+      } : undefined,
+    };
+    render(<LocalModelsList
+      modelGroups={[{ category: 'llm', models: [model] }]}
+      starredModels={new Set()} excludedModels={new Set()} selectedAppId="ollama"
+      totalModels={1} hasFilters={false} relatedModelsById={{}} expandedRelated={new Set()}
+      onToggleStar={vi.fn()} onToggleLink={vi.fn()} onToggleRelated={vi.fn()}
+      onOpenRelatedUrl={vi.fn()} onResumeDownload={vi.fn()}
+      onRecoverPartialDownload={onRecoverPartialDownload}
+    />);
+
+    const message = 'Resume is unavailable until current recovery information is available.';
+    if (hasRecovery) {
+      expect(screen.queryByText(message)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Resume partial download (42%)' }));
+      expect(onRecoverPartialDownload).toHaveBeenCalledWith(model);
+    } else {
+      expect(screen.getByText(message)).toBeVisible();
+      const recoveryButton = screen.getByRole('button', { name: message });
+      expect(recoveryButton).toBeDisabled();
+      fireEvent.click(recoveryButton);
+      expect(onRecoverPartialDownload).not.toHaveBeenCalled();
+    }
+  });
+
   it('renders cached models as display-only without model action controls', () => {
     const callback = vi.fn();
     render(<LocalModelsList

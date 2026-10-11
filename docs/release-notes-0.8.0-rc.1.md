@@ -17,6 +17,10 @@ inference are not qualified by its Linux packaging checks.
   a claim, including headless builds. Cross-platform cancellation fixtures share
   their readiness timeout. GGUF corruption tests isolate filesystem reconciliation
   and separately exercise live reindexing.
+- A partial catalog model with a managed download no longer shows the inactive
+  recovery warning while downloading, queued, pausing, paused, cancelling or
+  awaiting retry. Live pause/resume controls continue to use the exact download
+  ID. Inactive partial models still require current recovery information.
 
 Direct Rust consumers must recompile and handle the optional checksum returned by
 `RuntimeReadFile::sha256`; `RuntimeReadFile::observed` represents absent historical

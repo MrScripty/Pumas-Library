@@ -340,25 +340,18 @@ fn prepare_selected_audio(
         .selected_artifact_id
         .ok_or_else(|| PumasError::Other("audio model has no selected artifact".into()))?;
     let selected = Arc::new(library.prepare_cohere_artifact_use(&model, &artifact)?);
-    // Select only the source-pinned interpreter member from held bytes.
-    // The digest binds a candidate; it never changes qualification.
-    let recipe: serde_json::Value =
-        serde_json::from_str(crate::runtime_read_source::AUDIO_RUNTIME_CANDIDATE_RECIPE)?;
-    let expected = recipe["interpreter_executable_sha256"]
-        .as_str()
-        .ok_or_else(|| PumasError::Other("source interpreter recipe missing".into()))?;
+    // Select the interpreter inside its retained owned role. Historical
+    // download checksums are not automatic installed-file acceptance gates.
     let members: Vec<_> = installed
         .manifest()
         .filter(|(role, member)| {
-            *role == RuntimeReadRole::Interpreter
-                && member.path().ends_with("/bin/python3.12")
-                && member.sha256() == expected
+            *role == RuntimeReadRole::Interpreter && member.path().ends_with("/bin/python3.12")
         })
         .map(|(_, member)| member.path().to_owned())
         .collect();
     let [interpreter] = members.as_slice() else {
         return Err(PumasError::Other(
-            "source-pinned interpreter selection unavailable".into(),
+            "owned interpreter selection unavailable".into(),
         ));
     };
     let candidate =

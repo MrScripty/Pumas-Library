@@ -945,31 +945,31 @@ impl CopyPlan {
                 }
             })?;
             let (size, hashes) = copy_and_hash(&mut input, &mut output)?;
-            if let CopySource::Verified(inputs) = &self.source {
+            let sha256 = if let CopySource::Verified(inputs) = &self.source {
                 let receipt = &inputs
                     .get(original)
                     .ok_or_else(|| invalid_filename("Acquired copy has no verified input receipt"))?
                     .receipt;
-                if receipt.bytes != size || receipt.sha256 != hashes.sha256 {
-                    return Err(PumasError::HashMismatch {
-                        expected: receipt.sha256.clone(),
-                        actual: hashes.sha256.clone(),
-                    });
+                if receipt.bytes != size {
+                    return Err(invalid_filename("Acquired copy length changed"));
                 }
-            }
+                receipt.sha256.clone()
+            } else {
+                hashes.sha256
+            };
             // Restore permissions from the held source descriptor, never a
             // pathname that could now identify a different object.
             output.set_permissions(metadata.permissions())?;
             output.sync_all()?;
             evidence.insert(
                 normalized.clone(),
-                ImportFileIdentity::copied(&output, size, hashes.sha256.clone())?,
+                ImportFileIdentity::copied(&output, size, sha256.clone())?,
             );
             files.push(ModelFileInfo {
                 name: normalized.clone(),
                 original_name: Some(original.clone()),
                 size: Some(size),
-                sha256: Some(hashes.sha256),
+                sha256: Some(sha256),
                 blake3: Some(hashes.blake3),
             });
             #[cfg(test)]

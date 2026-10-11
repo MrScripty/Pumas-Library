@@ -212,8 +212,6 @@ pub(crate) struct DownloadRecoveryDestination {
     #[cfg(all(test, unix))]
     import_permission_failure: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(test)]
-    import_hash_passes: Arc<std::sync::atomic::AtomicUsize>,
-    #[cfg(test)]
     cleanup_parent_sync: Option<Arc<CleanupParentSync>>,
 }
 
@@ -452,8 +450,6 @@ impl DownloadDestinationRoot {
             #[cfg(all(test, unix))]
             import_permission_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(test)]
-            import_hash_passes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            #[cfg(test)]
             cleanup_parent_sync: None,
         };
         match destination.directory(false) {
@@ -531,8 +527,6 @@ impl RecoveryRoot {
             import_document_uncertainty: Arc::new(Mutex::new(None)),
             #[cfg(all(test, unix))]
             import_permission_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            #[cfg(test)]
-            import_hash_passes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
             cleanup_parent_sync: None,
         })
@@ -1007,7 +1001,7 @@ impl DownloadRecoveryDestination {
     pub(crate) fn remove_import_stage_all(&self) -> Result<()> {
         self.validate_import_stage_bindings()?;
         if let Some(expected) = self.import_payload.get() {
-            self.verify_import_payload(expected)?;
+            self.verify_import_bindings(expected)?;
         }
         self.remove_model_directory_all()
     }

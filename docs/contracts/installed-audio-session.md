@@ -6,8 +6,12 @@ qualify an installed recipe, accept a caller executable, or enable a model.
 Shipping admission remains closed. There is no public session constructor.
 
 Before launch, the prepared source must belong to the retained library's
-physical root. The source correlation ID is `pumas-cohere-owned-v1:` followed
-by the prepared manifest digest. This is a comparison value, never authority.
+physical root. The source correlation ID is `pumas-cohere-owned-v2:` followed
+by the selected layout metadata digest; file contents are not rehashed for it.
+This is a comparison value, never authority. Rust and the embedded Python worker
+change together. An older installed v1 worker must be refreshed by a new runtime
+installation before the experimental v2 session can start; an incompatible hello
+remains a startup refusal that drains the owned child.
 
 The blocking session worker owns child supervision independently of the caller
 waiting for startup. It retains the library through every spawn/setup failure
@@ -70,7 +74,8 @@ artifact itself and prepares the original held model allocation. A stop during
 preparation closes the original admission immediately and joins already admitted
 preparation before refusing child launch.
 Finite preparation is registered with the primary runtime-task owner, including
-its blocking copy/capture and potentially large recipe/model validation, so cancellation cannot make shutdown skip that work.
+its blocking copy/capture and potentially large model copying and namespace
+validation, so cancellation cannot make shutdown skip that work.
 Only the source-pinned interpreter member is selected; no executable path,
 source ID or qualifier is accepted from RPC. The installed recipe/model policy
 still refuses unqualified execution before child launch.
@@ -107,8 +112,9 @@ stop/unserve, which closes admission and joins the original child tree.
 ### Linux local workflow
 
 Use Linux x86_64 with a kernel exposing Landlock ABI 6 or newer. The pinned
-managed-runtime path accepts ASCII letters/digits and `/._-` only; choose a root
-without spaces or non-ASCII characters. CPU execution can need substantial RAM:
+managed-runtime path uses the normal owned filesystem capabilities; the former
+checksum-normalization restriction on spaces and non-ASCII characters is removed.
+CPU execution can need substantial RAM:
 original selected bytes, sealed weight snapshots and native tensors coexist.
 No real-model memory requirement has been measured here. Linux Mint's
 name/version alone does not establish this. The load API performs a read-only

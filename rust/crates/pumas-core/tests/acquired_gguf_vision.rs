@@ -43,7 +43,9 @@ fn gguf(architecture: Option<&str>, padding: usize) -> Vec<u8> {
 }
 fn pair() -> Files {
     vec![
-        (PRIMARY.into(), gguf(Some("llama"), 0)),
+        // Keep mutation fixtures outside parsed architecture metadata, so a
+        // checksum-policy test does not also trigger valid reclassification.
+        (PRIMARY.into(), gguf(Some("llama"), 64)),
         (PROJECTOR.into(), gguf(Some("clip"), 4096)),
     ]
 }
@@ -348,7 +350,13 @@ async fn acquire(
                 Some(ImportState::Ready)
             );
             for (path, expected) in &files {
-                assert_eq!(std::fs::read(target.join(path)).unwrap(), *expected);
+                let mut current = expected.clone();
+                if (matches!(fault, Fault::ChangedBytes) && path == PRIMARY)
+                    || (matches!(fault, Fault::ChangedProjector) && path == PROJECTOR)
+                {
+                    *current.last_mut().unwrap() ^= 1;
+                }
+                assert_eq!(std::fs::read(target.join(path)).unwrap(), current);
             }
             // Canonical persisted producer metadata retains primary hashes;
             // the index's effective projection omits these column-owned fields.
@@ -497,8 +505,7 @@ async fn acquire(
                 .await;
             if matches!(
                 fault,
-                Fault::ChangedPublishedProjector
-                    | Fault::MissingPublication
+                Fault::MissingPublication
                     | Fault::MissingReceipt
                     | Fault::MissingAcquisition
                     | Fault::NotReady
@@ -599,12 +606,10 @@ async fn roles_and_complete_pair_are_required_before_publication() {
     }
 }
 #[tokio::test]
-async fn full_selection_receipt_and_copied_bytes_are_bound() {
+async fn full_selection_receipt_and_owned_bindings_are_required() {
     for fault in [
         Fault::WrongSpec,
         Fault::WrongProjector,
-        Fault::ChangedBytes,
-        Fault::ChangedProjector,
         Fault::ReplacedPath,
         Fault::Cancel,
         Fault::Generic,
@@ -616,7 +621,13 @@ async fn full_selection_receipt_and_copied_bytes_are_bound() {
     }
 }
 #[tokio::test]
-async fn changed_published_projector_cannot_reconcile() {
+async fn acquired_content_changes_keep_original_checksum_evidence() {
+    for fault in [Fault::ChangedBytes, Fault::ChangedProjector] {
+        assert!(import(pair(), PRIMARY, fault).await.0, "refused {fault:?}");
+    }
+}
+#[tokio::test]
+async fn changed_published_projector_reconciles_without_automatic_checksum_check() {
     assert!(
         import(pair(), PRIMARY, Fault::ChangedPublishedProjector)
             .await
@@ -831,7 +842,7 @@ async fn externally_retargeted_publication_cannot_acknowledge_its_own_move() {
 }
 
 #[tokio::test]
-async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_payload() {
+async fn moved_primary_requires_current_acknowledgement_and_owned_file_bindings() {
     // Freeze background reconciliation before injecting each fault. Index-only
     // damage can legitimately recover from an intact confirmed publication.
     for fault in [
@@ -927,6 +938,22 @@ async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_p
             }
             _ => unreachable!(),
         }
+        if matches!(fault, "primary_bytes" | "projector_bytes") {
+            // SHA is retained acquisition evidence. Ordinary reads succeed;
+            // an explicit verification still detects the modified fixture.
+            assert_current_primary(&api, id, PRIMARY, &pair()[0].1).await;
+            let member = if fault == "primary_bytes" { 0 } else { 1 };
+            let original = &pair()[member];
+            assert_ne!(
+                pumas_library::model_library::compute_dual_hash(target.join(&original.0))
+                    .unwrap()
+                    .sha256,
+                hex::encode(Sha256::digest(&original.1)),
+                "case={fault}: explicit checksum verification missed change"
+            );
+            api.shutdown_instance().await.unwrap();
+            continue;
+        }
         let before = library.index().get(id).unwrap();
         assert!(
             library.get_primary_model_file(id).is_none(),
@@ -938,24 +965,12 @@ async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_p
             result.is_err(),
             "corruption={fault}: descriptor={result:?}; before={before:?}; after={after:?}"
         );
-        if matches!(fault, "primary_bytes" | "projector_bytes") {
-            let migration = library.generate_migration_dry_run_report().unwrap();
-            let item = migration
-                .items
-                .iter()
-                .find(|item| item.model_id == id)
-                .unwrap();
-            assert!(item
-                .findings
-                .iter()
-                .any(|finding| finding == "mixed_gguf_artifact_files"));
-        }
         api.shutdown_instance().await.unwrap();
     }
 }
 
 #[tokio::test]
-async fn live_reindex_repairs_projection_but_preserves_payload_and_receipt_refusals() {
+async fn live_reindex_repairs_projection_without_rehashing_and_preserves_receipt_refusal() {
     for fault in [
         "missing_index",
         "old_index_entry",
@@ -975,7 +990,9 @@ async fn live_reindex_repairs_projection_but_preserves_payload_and_receipt_refus
             .unwrap();
         let library = api.model_library();
         let old_dir = library.library_root().join(&old_id);
-        let id = "vision/migrated/live-reindex";
+        // Live observation may legitimately refresh classification. Keep this
+        // moved fixture in the canonical directory for its llama header.
+        let id = "llm/llama/live-reindex";
         migrate_model(&api, &old_id, id).await;
         assert_current_primary(&api, id, PRIMARY, &pair()[0].1).await;
         let target = library.library_root().join(id);
@@ -1017,10 +1034,7 @@ async fn live_reindex_repairs_projection_but_preserves_payload_and_receipt_refus
         }
         // Await the production reconciliation boundary; no sleep or restart.
         api.rebuild_model_index().await.unwrap();
-        if matches!(
-            fault,
-            "primary_bytes" | "projector_bytes" | "pending_receipt"
-        ) {
+        if fault == "pending_receipt" {
             let before = library.index().get(id).unwrap();
             assert!(
                 library.get_primary_model_file(id).is_none(),
@@ -1032,21 +1046,25 @@ async fn live_reindex_repairs_projection_but_preserves_payload_and_receipt_refus
                 result.is_err(),
                 "corruption={fault}: result={result:?}; before={before:?}; after={after:?}"
             );
-            if fault == "pending_receipt" {
-                let receipt: serde_json::Value = serde_json::from_slice(
-                    &std::fs::read(target.join(".pumas_import_publication.json")).unwrap(),
-                )
-                .unwrap();
-                assert_eq!(receipt["state"], "pending");
-            } else {
+            let receipt: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(target.join(".pumas_import_publication.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(receipt["state"], "pending");
+        } else {
+            assert!(
+                target.exists(),
+                "case={fault}: target={target:?}; index_after={:?}",
+                library.index().get(id).unwrap()
+            );
+            assert_current_primary(&api, id, PRIMARY, &pair()[0].1).await;
+            if matches!(fault, "primary_bytes" | "projector_bytes") {
                 let member = if fault == "primary_bytes" { 0 } else { 1 };
                 assert_ne!(
                     std::fs::read(target.join(&pair()[member].0)).unwrap(),
                     pair()[member].1
                 );
             }
-        } else {
-            assert_current_primary(&api, id, PRIMARY, &pair()[0].1).await;
         }
         api.shutdown_instance().await.unwrap();
     }

@@ -8,7 +8,9 @@
 //! byte-custody scope. Linux is the currently supported capture platform.
 
 use crate::platform::capability_fs::open_pinned_directory_at;
-use cap_std::fs::{Dir, OpenOptions, OpenOptionsExt};
+#[cfg(unix)]
+use cap_std::fs::OpenOptionsExt;
+use cap_std::fs::{Dir, OpenOptions};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
@@ -16,8 +18,9 @@ use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-/// Source-fixed candidate bytes. Public metadata is not execution authority;
-/// actual retained byte selections must match and be revalidated independently.
+/// Source-fixed acquisition recipe with retained historical checksum evidence.
+/// Public metadata is not execution authority; installed ownership is validated
+/// independently, without automatically comparing file contents with this recipe.
 pub const AUDIO_RUNTIME_CANDIDATE_RECIPE: &str =
     include_str!("runtime_read_source/audio_candidate_recipe.json");
 
@@ -34,12 +37,12 @@ pub enum RuntimeReadRole {
     NativeLibraries,
 }
 
-/// A bounded expected installed member. Its actual bytes are always re-read.
+/// A bounded installed member with optional historical checksum evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeReadFile {
     path: String,
     size: u64,
-    sha256: String,
+    sha256: Option<String>,
 }
 
 impl RuntimeReadFile {
@@ -51,7 +54,17 @@ impl RuntimeReadFile {
         Ok(Self {
             path,
             size,
-            sha256: sha256.to_ascii_lowercase(),
+            sha256: Some(sha256.to_ascii_lowercase()),
+        })
+    }
+    /// Observe a member that has no retained acquisition checksum. Ownership
+    /// capture must not invent a checksum by scanning installed contents.
+    pub fn observed(path: String, size: u64) -> io::Result<Self> {
+        valid_name(&path)?;
+        Ok(Self {
+            path,
+            size,
+            sha256: None,
         })
     }
     pub fn path(&self) -> &str {
@@ -60,8 +73,8 @@ impl RuntimeReadFile {
     pub fn size(&self) -> u64 {
         self.size
     }
-    pub fn sha256(&self) -> &str {
-        &self.sha256
+    pub fn sha256(&self) -> Option<&str> {
+        self.sha256.as_deref()
     }
 }
 
@@ -199,11 +212,11 @@ impl RetainedRuntimeReadSource {
             }
             let mut members = Vec::with_capacity(expected.len());
             for manifest in selection.expected {
-                let mut file = open_member(&directory, &manifest.path)?;
+                let file = open_member(&directory, &manifest.path)?;
                 let identity = file_identity(&file)?;
-                if digest(&mut file)? != (manifest.size, manifest.sha256.clone()) {
+                if file.metadata()?.len() != manifest.size {
                     return Err(refusal(
-                        "runtime selected bytes differ from installed manifest",
+                        "runtime selected size differs from installed manifest",
                     ));
                 }
                 members.push(Member { manifest, identity });
@@ -222,7 +235,8 @@ impl RetainedRuntimeReadSource {
         Ok(owner)
     }
 
-    /// Blocking pre-effect validation. Runtime operation borrows do not scan.
+    /// Validate namespace, file identity and size without reading file contents.
+    /// Stored checksums are historical evidence, not automatic use gates.
     pub fn validate(&self) -> io::Result<()> {
         for root in &self.roots {
             let exclusions = root.excluded.keys().cloned().collect();
@@ -239,15 +253,37 @@ impl RetainedRuntimeReadSource {
                 return Err(refusal("runtime retained namespace or identity changed"));
             }
             for member in &root.members {
-                let mut file = open_member(&root.directory, &member.manifest.path)?;
+                let file = open_member(&root.directory, &member.manifest.path)?;
                 if file_identity(&file)? != member.identity
-                    || digest(&mut file)? != (member.manifest.size, member.manifest.sha256.clone())
+                    || file.metadata()?.len() != member.manifest.size
                 {
-                    return Err(refusal("runtime retained member identity or bytes changed"));
+                    return Err(refusal("runtime retained member identity or size changed"));
                 }
             }
         }
         Ok(())
+    }
+
+    /// Explicit integrity check against retained checksum evidence. Call only
+    /// for a requested verification, never as part of capture, startup or use.
+    pub fn verify_checksums(&self) -> io::Result<()> {
+        self.validate()?;
+        if self.manifest().any(|(_, member)| member.sha256.is_none()) {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "runtime checksum evidence is unavailable for some selected members",
+            ));
+        }
+        for root in &self.roots {
+            for member in &root.members {
+                let mut file = open_member(&root.directory, &member.manifest.path)?;
+                let (size, sha) = digest(&mut file)?;
+                if size != member.manifest.size || Some(sha.as_str()) != member.manifest.sha256() {
+                    return Err(refusal("runtime member differs from retained checksum"));
+                }
+            }
+        }
+        self.validate()
     }
 
     pub fn manifest(&self) -> impl Iterator<Item = (RuntimeReadRole, &RuntimeReadFile)> {
@@ -271,14 +307,12 @@ impl RetainedRuntimeReadSource {
             .iter()
             .find(|member| member.manifest.path == path)
             .ok_or_else(|| refusal("runtime member is outside retained selection"))?;
-        let mut file = open_member(&root.directory, path)?;
+        let file = open_member(&root.directory, path)?;
         if file_identity(&file)? != member.identity
-            || digest(&mut file)? != (member.manifest.size, member.manifest.sha256.clone())
+            || file.metadata()?.len() != member.manifest.size
         {
             return Err(refusal("runtime selected member changed"));
         }
-        use std::io::{Seek, SeekFrom};
-        file.seek(SeekFrom::Start(0))?;
         Ok(file)
     }
 
@@ -577,16 +611,4 @@ pub fn audio_dependency_qualification_host_preflight() -> io::Result<()> {
             "audio dependency qualification requires Linux x86_64",
         ))
     }
-}
-
-#[path = "runtime_read_source/candidate_recipe.rs"]
-mod candidate_recipe;
-
-/// Check one retained role against source-fixed recipe bytes. This comparison
-/// is never production admission. Relocated CPython source remains byte-held.
-pub fn validate_audio_candidate_read_role(
-    source: &RetainedRuntimeReadSource,
-    role: RuntimeReadRole,
-) -> io::Result<()> {
-    candidate_recipe::validate(source, role)
 }

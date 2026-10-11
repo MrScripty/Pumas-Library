@@ -17,7 +17,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("qualification root must be empty".into());
     }
     std::fs::create_dir_all(&root)?;
-    let manager = VersionManager::new(&root, AppId::Torch).await?;
+    // The empty root guarantees a cold private cache. Removing only the first
+    // managed runtime keeps that same cache for a fresh warm installation.
+    let cold = install_and_qualify(&root, "cold").await?;
+    let warm = install_and_qualify(&root, "warm").await?;
+    if cold != warm {
+        return Err("cold and warm installs selected different dependency identities".into());
+    }
+    std::fs::copy(
+        root.join("audio-warm-confined-dependency-probe.json"),
+        root.join("audio-confined-dependency-probe.json"),
+    )?;
+    Ok(())
+}
+
+async fn install_and_qualify(
+    root: &std::path::Path,
+    phase: &str,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let manager = VersionManager::new(root, AppId::Torch).await?;
+    if phase == "warm" && !manager.remove_version("v2.10.0").await? {
+        return Err("warm-cache qualification did not remove the cold installation".into());
+    }
     let preview = match manager
         .preview_torch_runtime("v2.10.0", "cpu", "python3.12", "cohere-asr")
         .await?
@@ -45,18 +66,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Installation shutdown is terminal admission closure. Use a fresh owner
     // for byte preparation, with no second installation, then join it even when
     // capture refuses. Retained source custody outlives this manager phase.
-    let preparation = VersionManager::new(&root, AppId::Torch).await?;
+    let preparation = VersionManager::new(root, AppId::Torch).await?;
     let prepared = preparation
         .prepare_torch_audio_runtime_bytes("v2.10.0")
         .await;
     let settled = preparation.shutdown_installations().await;
     let source = prepared?;
     settled?;
+    let metadata: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        manager.version_path("v2.10.0").join("runtime.json"),
+    )?)?;
+    std::fs::write(
+        root.join(format!("audio-{phase}-runtime.json")),
+        serde_json::to_vec_pretty(&metadata)?,
+    )?;
     let report = pumas_library::runtime_read_source::qualify_audio_dependency_reads(source).await?;
     std::fs::write(
-        root.join("audio-confined-dependency-probe.json"),
+        root.join(format!("audio-{phase}-confined-dependency-probe.json")),
         serde_json::to_vec_pretty(&report)?,
     )?;
     println!("{}", serde_json::to_string(&report)?);
-    Ok(())
+    let mut artifacts = metadata["artifacts"]
+        .as_array()
+        .ok_or("missing artifact identities")?
+        .clone();
+    artifacts.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    Ok(serde_json::json!({
+        "artifacts": artifacts,
+        "distribution": metadata["managed_python"]["distribution"],
+        "provider": metadata["managed_python"]["provider"],
+    }))
 }

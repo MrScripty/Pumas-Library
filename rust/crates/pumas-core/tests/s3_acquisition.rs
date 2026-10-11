@@ -387,7 +387,10 @@ async fn cold_publication_reconciliation(fault: &str) {
     let root = tempfile::TempDir::new().unwrap();
     let stage = tempfile::TempDir::new().unwrap();
     let first = api(root.path()).await;
-    let bytes = gguf();
+    let mut bytes = gguf();
+    if fault == "bytes" {
+        bytes.push(0); // Opaque padding permits an equal-size content edit.
+    }
     let fixture = Fixture::serve(vec![
         head(bytes.len()),
         range(VERSION, 0, bytes.len(), &bytes),
@@ -490,7 +493,7 @@ async fn cold_publication_reconciliation(fault: &str) {
         "none" => {}
         "bytes" => {
             let mut changed = bytes.clone();
-            changed[5] ^= 1;
+            *changed.last_mut().unwrap() ^= 1;
             std::fs::write(&payload_path, changed).unwrap();
         }
         "lease" => {
@@ -585,7 +588,7 @@ async fn cold_publication_reconciliation(fault: &str) {
             },
         )
         .await;
-    if fault != "none" {
+    if !matches!(fault, "none" | "bytes") {
         consumer.shutdown().await.unwrap();
         close(&cold).await;
         let requests = fixture.finish().await;
@@ -669,7 +672,16 @@ async fn cold_publication_reconciliation(fault: &str) {
     assert_eq!(consumer.completion_receipt(&adopted).unwrap(), Some(issued));
     assert_eq!(std::fs::read(&receipt_path).unwrap(), receipt_bytes);
     assert_eq!(std::fs::read(&metadata_path).unwrap(), metadata_bytes);
-    assert_eq!(std::fs::read(&payload_path).unwrap(), bytes);
+    assert_eq!(std::fs::read(&payload_path).ok(), payload_before);
+    assert_eq!(adopted.files[0].sha256, hex::encode(Sha256::digest(&bytes)));
+    if fault == "bytes" {
+        assert_ne!(
+            pumas_library::model_library::compute_dual_hash(&payload_path)
+                .unwrap()
+                .sha256,
+            adopted.files[0].sha256
+        );
+    }
     assert_eq!(
         std::fs::read(stage.path().join("stage").join(LOGICAL)).unwrap(),
         source_before
@@ -701,7 +713,7 @@ async fn confirmed_model_publication_cold_reconciles_and_repeats_without_source_
     cold_publication_reconciliation("none").await;
 }
 #[tokio::test]
-async fn changed_model_output_cold_reconciliation_preserves_custody() {
+async fn changed_model_output_cold_reconciles_with_original_checksum_and_receipt() {
     cold_publication_reconciliation("bytes").await;
 }
 #[tokio::test]

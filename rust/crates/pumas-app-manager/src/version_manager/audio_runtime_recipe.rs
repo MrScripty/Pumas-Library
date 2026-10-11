@@ -1,13 +1,10 @@
 //! Source-fixed candidate recipe identity, never production qualification.
 //! Expected values came from the official managed CPU installation cohort.
-//! Actual selected bytes are captured/hashed before this comparison; presenting
-//! these values in JSON without those owned bytes cannot satisfy the check.
+//! Acquisition provenance is retained separately from installed-file ownership.
 
-use pumas_library::runtime_read_source::{RetainedRuntimeReadSource, RuntimeReadRole};
+use pumas_library::runtime_read_source::RetainedRuntimeReadSource;
 use serde::Deserialize;
 use serde_json::Value;
-#[cfg(test)]
-use sha2::{Digest, Sha256};
 use std::io;
 
 const PIN: &str = pumas_library::runtime_read_source::AUDIO_RUNTIME_CANDIDATE_RECIPE;
@@ -38,19 +35,85 @@ fn artifacts(value: &Value) -> io::Result<Vec<Artifact>> {
     }
     Ok(artifacts)
 }
-#[cfg(test)]
-fn selection_digest(mut members: Vec<(&str, u64, &str)>) -> String {
-    members.sort();
-    let mut digest = Sha256::new();
-    digest.update(b"pumas-audio-runtime-recipe-v1\0");
-    for (name, size, sha256) in members {
-        digest.update((name.len() as u64).to_be_bytes());
-        digest.update(name.as_bytes());
-        digest.update(size.to_be_bytes());
-        digest.update(sha256.as_bytes());
+// Only this source-fixed Linux candidate has an exact dependency recipe.
+// Other supported Torch selections retain their existing resolution policy.
+fn install_recipe(
+    version: &str,
+    build: &str,
+    minor: &str,
+    adapter: &str,
+) -> io::Result<Option<Vec<Artifact>>> {
+    if !cfg!(all(
+        target_os = "linux",
+        target_arch = "x86_64",
+        target_env = "gnu"
+    )) {
+        return Ok(None);
     }
-    format!("{:x}", digest.finalize())
+    let pin: Value = serde_json::from_str(PIN).map_err(|_| refused())?;
+    if pin["python"] != format!("python{minor}")
+        || pin["build"] != build
+        || pin["adapter"] != adapter
+    {
+        return Ok(None);
+    }
+    let expected = artifacts(&pin["artifacts"])?;
+    if !expected
+        .iter()
+        .any(|a| a.name == "torch" && a.version == format!("{version}+{build}"))
+    {
+        return Ok(None);
+    }
+    Ok(Some(expected))
 }
+
+/// Constrain the normal index-based install without changing wheel provenance
+/// metadata by turning dependencies into direct URL requirements.
+pub(super) fn install_constraints(
+    version: &str,
+    build: &str,
+    minor: &str,
+    adapter: &str,
+) -> io::Result<Option<String>> {
+    let Some(expected) = install_recipe(version, build, minor, adapter)? else {
+        return Ok(None);
+    };
+    let mut constraints = String::new();
+    for artifact in expected {
+        if artifact.name.is_empty()
+            || artifact.version.is_empty()
+            || !artifact
+                .name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-.".contains(&b))
+            || !artifact
+                .version
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b".+!-".contains(&b))
+        {
+            return Err(refused());
+        }
+        constraints.push_str(&format!("{}=={}\n", artifact.name, artifact.version));
+    }
+    Ok(Some(constraints))
+}
+
+/// Gate staged package publication independently of pip's constraint handling.
+pub(super) fn validate_install_artifacts(
+    version: &str,
+    build: &str,
+    minor: &str,
+    adapter: &str,
+    selected: &Value,
+) -> io::Result<()> {
+    if let Some(expected) = install_recipe(version, build, minor, adapter)? {
+        if artifacts(selected)? != expected {
+            return Err(refused());
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn validate(metadata: &Value, retained: &RetainedRuntimeReadSource) -> io::Result<()> {
     let pin: Value = serde_json::from_str(PIN).map_err(|_| refused())?;
     for field in ["python", "adapter", "build"] {
@@ -63,15 +126,10 @@ pub(super) fn validate(metadata: &Value, retained: &RetainedRuntimeReadSource) -
             return Err(refused());
         }
     }
-    if metadata["managed_python"]["executable"]["sha256"] != pin["interpreter_executable_sha256"]
-        || artifacts(&metadata["artifacts"])? != artifacts(&pin["artifacts"])?
-    {
+    if artifacts(&metadata["artifacts"])? != artifacts(&pin["artifacts"])? {
         return Err(refused());
     }
-    for role in [RuntimeReadRole::Interpreter, RuntimeReadRole::Dependencies] {
-        pumas_library::runtime_read_source::validate_audio_candidate_read_role(retained, role)?;
-    }
-    // Re-observe the held namespaces and actual member bytes after matching.
+    // Re-observe held namespaces and physical ownership, not content checksums.
     retained.validate()
 }
 
@@ -88,14 +146,38 @@ mod tests {
         changed[1] = changed[0].clone();
         assert!(artifacts(&changed).is_err());
     }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
     #[test]
-    fn selected_digest_is_order_independent_and_field_framed() {
-        let first = vec![("a", 1, "sha-a"), ("bc", 2, "sha-b")];
-        let reverse = vec![("bc", 2, "sha-b"), ("a", 1, "sha-a")];
-        assert_eq!(selection_digest(first.clone()), selection_digest(reverse));
-        assert_ne!(
-            selection_digest(first),
-            selection_digest(vec![("ab", 1, "sha-a"), ("c", 2, "sha-b")])
-        );
+    fn constraints_come_from_all_source_artifacts_and_only_apply_to_candidate() {
+        let constraints = install_constraints("2.10.0", "cpu", "3.12", "cohere-asr")
+            .unwrap()
+            .unwrap();
+        assert_eq!(constraints.lines().count(), 68);
+        assert!(constraints.lines().any(|line| line == "numpy==2.5.3"));
+        assert!(constraints.lines().any(|line| line == "narwhals==2.26.0"));
+        assert!(constraints.lines().any(|line| line == "torch==2.10.0+cpu"));
+        let pin: Value = serde_json::from_str(PIN).unwrap();
+        for artifact in pin["artifacts"].as_array().unwrap() {
+            let line = format!(
+                "{}=={}",
+                artifact["name"].as_str().unwrap(),
+                artifact["version"].as_str().unwrap()
+            );
+            assert_eq!(
+                constraints.lines().filter(|actual| *actual == line).count(),
+                1
+            );
+        }
+        assert!(!constraints.contains('@'));
+        for (version, build, minor, adapter) in [
+            ("2.14.0", "cpu", "3.12", "cohere-asr"),
+            ("2.10.0", "cu128", "3.12", "cohere-asr"),
+            ("2.10.0", "cpu", "3.13", "cohere-asr"),
+            ("2.10.0", "cpu", "3.12", "none"),
+        ] {
+            assert!(install_constraints(version, build, minor, adapter)
+                .unwrap()
+                .is_none());
+        }
     }
 }

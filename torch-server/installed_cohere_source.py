@@ -61,20 +61,6 @@ def _identity(info):
     return info.st_dev, info.st_ino, info.st_size
 
 
-def _digest(fd, size):
-    digest = hashlib.sha256()
-    offset = 0
-    while offset < size:
-        block = os.pread(fd, min(1024 * 1024, size - offset), offset)
-        if not block:
-            raise InstalledSourceRefusal("installed_model_member_changed")
-        digest.update(block)
-        offset += len(block)
-    if os.pread(fd, 1, size):
-        raise InstalledSourceRefusal("installed_model_member_changed")
-    return digest.hexdigest()
-
-
 class _InstalledCohereSourceOwner:
     """Original held directory/files plus one proof and optional sealed reader.
 
@@ -116,25 +102,21 @@ class _InstalledCohereSourceOwner:
                 try:
                     if _identity(os.fstat(fd)) != before:
                         raise InstalledSourceRefusal("installed_model_member_changed")
-                    sha = _digest(fd, before[2])
-                    if _identity(os.fstat(fd)) != before:
-                        raise InstalledSourceRefusal("installed_model_member_changed")
-                    owner._members[name] = fd, before, sha
+                    owner._members[name] = fd, before
                 except BaseException:
                     os.close(fd)
                     raise
-            digest = hashlib.sha256(b"pumas-selected-artifact-bytes-v1\0")
+            digest = hashlib.sha256(b"pumas-selected-artifact-layout-v2\0")
             for label in (model_id, selected_artifact_id):
                 encoded = label.encode("utf-8")
                 digest.update(len(encoded).to_bytes(8, "big"))
                 digest.update(encoded)
-            for name, (_, identity, sha) in sorted(owner._members.items()):
+            for name, (_, identity) in sorted(owner._members.items()):
                 encoded = name.encode("utf-8")
                 digest.update(len(encoded).to_bytes(8, "big"))
                 digest.update(encoded)
                 digest.update(identity[2].to_bytes(8, "big"))
-                digest.update(sha.encode("ascii"))
-            owner._source_id = "pumas-cohere-owned-v1:" + digest.hexdigest()
+            owner._source_id = "pumas-cohere-owned-v2:" + digest.hexdigest()
             owner.validate()
             return owner
         except BaseException:
@@ -173,11 +155,9 @@ class _InstalledCohereSourceOwner:
             raise InstalledSourceRefusal("installed_source_root_changed")
         if _names(self._root) != frozenset(self._members):
             raise InstalledSourceRefusal("installed_model_read_set_changed")
-        for name, (fd, identity, sha) in self._members.items():
+        for name, (fd, identity) in self._members.items():
             before = _identity(os.stat(name, dir_fd=self._root, follow_symlinks=False))
             if before != identity or _identity(os.fstat(fd)) != identity:
-                raise InstalledSourceRefusal("installed_model_member_changed")
-            if _digest(fd, identity[2]) != sha or _identity(os.fstat(fd)) != identity:
                 raise InstalledSourceRefusal("installed_model_member_changed")
 
     def retain_source(self, policy):
@@ -221,10 +201,7 @@ class _InstalledCohereSourceOwner:
                 self._reader = HeldCohereReadSource._from_members(
                     self,
                     {name: member[0] for name, member in self._members.items()},
-                    expected={
-                        name: (member[1][2], bytes.fromhex(member[2]))
-                        for name, member in self._members.items()
-                    },
+                    expected={name: (member[1][2], None) for name, member in self._members.items()},
                 )
             return self._reader
 
@@ -245,7 +222,7 @@ class _InstalledCohereSourceOwner:
 
     def _close_files(self):
         self._closed = True
-        for fd, _, _ in self._members.values():
+        for fd, _ in self._members.values():
             os.close(fd)
         self._members.clear()
         if self._root is not None:

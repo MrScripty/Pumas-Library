@@ -332,8 +332,10 @@ class ResolverTests(unittest.TestCase):
                 resolver.installed_file_manifest(target)
             (target / "unreported.pth").unlink()
             wheel.write_bytes(b"changed")
-            with self.assertRaisesRegex(ValueError, "hash or size"):
-                resolver.installed_file_manifest(target)
+            changed = resolver.installed_file_manifest(target)
+            current = next(item for item in changed["files"] if item["path"] == "torch.pth")
+            self.assertEqual(current["sha256"], hashlib.sha256(b"changed").hexdigest())
+            self.assertEqual(current["size"], len(b"changed"))
             wheel.write_bytes(b"safe staged data")
             (target / "linked.pth").symlink_to(wheel)
             with self.assertRaisesRegex(ValueError, "symlink"):
@@ -1759,6 +1761,54 @@ class ResolverTests(unittest.TestCase):
                 self.assertEqual(exit_result.exception.code, 3)
                 self.assertFalse((pathlib.Path(directory) / "requirements.txt").exists())
                 self.assertFalse((pathlib.Path(directory) / "resolution.json").exists())
+
+    def test_cli_passes_recipe_constraints_to_normal_staged_pip_install(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            constraints = root / "candidate-constraints.txt"
+            constraints.write_text("numpy==2.5.3\n", encoding="utf-8")
+            target = root / "packages"
+            output = root / "result"
+
+            def fake_run(command, **_kwargs):
+                self.assertEqual(command[command.index("--constraint") + 1], str(constraints))
+                self.assertEqual(command[command.index("--target") + 1], str(target))
+                self.assertEqual(
+                    command[command.index("--index-url") + 1],
+                    "https://download.pytorch.org/whl/cpu",
+                )
+                self.assertIn("torch==2.10.0+cpu", command)
+                self.assertTrue(all(name in command for name in resolver.CORE))
+                self.assertNotIn("--no-deps", command)
+                pathlib.Path(command[command.index("--report") + 1]).write_text(
+                    json.dumps(report()), encoding="utf-8"
+                )
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--install",
+                        "--target",
+                        str(target),
+                        "--output",
+                        str(output),
+                        "--constraints",
+                        str(constraints),
+                    ],
+                ),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                patch.object(resolver, "installed_file_manifest", return_value={"files": []}),
+            ):
+                resolver.main()
+            self.assertTrue((output / "resolution.json").is_file())
 
     def test_cli_reads_utf8_pip_report_and_publishes_exact_artifacts(self):
         fixture = report()

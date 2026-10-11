@@ -3464,8 +3464,7 @@ mod tests {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
-    async fn native_receipt_post_rename_interruption_service_restart_refuses_changed_output_and_settles(
-    ) {
+    async fn native_receipt_post_rename_restart_refuses_empty_launcher_and_settles() {
         use sha2::Digest;
         use std::os::unix::fs::MetadataExt;
 
@@ -3661,7 +3660,7 @@ mod tests {
         drop(acquisition);
 
         // Alter only this fixture's receipt-bound launcher, preserving its inode.
-        std::fs::write(&launcher, b"altered receipt-bound launcher").unwrap();
+        std::fs::write(&launcher, b"").unwrap();
         let altered = snapshot(&destination);
         // The fixture source server is already closed. This does not directly
         // observe whether recovery attempts a request.
@@ -3680,9 +3679,9 @@ mod tests {
             Err(error) => error,
         };
         assert!(
-            error.to_string().contains(
-                "Native output differs from its durable llama.cpp receipt; recovery required"
-            ),
+            error
+                .to_string()
+                .contains("Native output has invalid owned paths or launcher; recovery required"),
             "{error}"
         );
         assert!(blocked_acquisition.shutdown().await.is_err());
@@ -4273,9 +4272,9 @@ mod tests {
             Err(error) => error,
         };
         assert!(
-            error.to_string().contains(
-                "Native output differs from its durable llama.cpp receipt; recovery required"
-            ),
+            error
+                .to_string()
+                .contains("Both staged and published llama.cpp output exist"),
             "{error}"
         );
         assert!(blocked_acquisition.shutdown().await.is_err());

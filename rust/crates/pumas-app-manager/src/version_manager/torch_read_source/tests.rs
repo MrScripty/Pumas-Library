@@ -1,4 +1,16 @@
 use super::*;
+use sha2::{Digest, Sha256};
+use std::io::Read;
+
+fn acquisition_manifest(path: &Path, relative: String) -> RuntimeReadFile {
+    let bytes = std::fs::read(path).unwrap();
+    RuntimeReadFile::new(
+        relative,
+        bytes.len() as u64,
+        format!("{:x}", Sha256::digest(bytes)),
+    )
+    .unwrap()
+}
 
 struct Installed {
     launcher: tempfile::TempDir,
@@ -37,9 +49,9 @@ impl Installed {
         std::os::unix::fs::symlink(&executable, runtime.join("venv/bin/python")).unwrap();
         std::fs::write(packages.join("dependency.py"), b"selected dependency").unwrap();
         let dependency =
-            file_manifest(&packages.join("dependency.py"), "dependency.py".into()).unwrap();
+            acquisition_manifest(&packages.join("dependency.py"), "dependency.py".into());
         std::fs::write(runtime.join("installed-files.json"), serde_json::to_vec(&serde_json::json!({"files":[{"path":dependency.path(), "size":dependency.size(), "sha256":dependency.sha256()}]})).unwrap()).unwrap();
-        let sha = file_manifest(&executable, "executable".into()).unwrap();
+        let sha = acquisition_manifest(&executable, "executable".into());
         std::fs::write(runtime.join("runtime.json"), serde_json::to_vec(&serde_json::json!({"python":"python3.12","managed_python":{"executable":{"path":executable,"sha256":sha.sha256()}}})).unwrap()).unwrap();
         Self {
             launcher,
@@ -90,7 +102,7 @@ fn missing_legacy_manifest_and_unreported_dependency_are_refused() {
 }
 
 #[test]
-fn external_interpreter_sidecar_change_and_external_alias_refuse() {
+fn external_interpreter_and_external_alias_refuse_but_installed_code_may_change() {
     for case in 0..3 {
         let installed = Installed::new();
         match case {
@@ -113,7 +125,11 @@ fn external_interpreter_sidecar_change_and_external_alias_refuse() {
             _ => std::os::unix::fs::symlink("/usr/bin/python3", installed.depot.join("external"))
                 .unwrap(),
         }
-        assert!(installed.capture().is_err());
+        if case == 1 {
+            installed.capture().unwrap();
+        } else {
+            assert!(installed.capture().is_err());
+        }
     }
 }
 
@@ -150,7 +166,7 @@ fn installer_removed_validation_script_is_optional_but_remaining_code_is_require
 }
 
 #[test]
-fn retained_validation_script_must_still_match_the_embedded_bytes() {
+fn retained_validation_script_is_owned_without_matching_embedded_bytes() {
     let installed = Installed::new();
     let owner = installed.capture().unwrap();
     assert!(owner.manifest().any(
@@ -162,7 +178,8 @@ fn retained_validation_script_must_still_match_the_embedded_bytes() {
         b"unreported validation code",
     )
     .unwrap();
-    assert!(installed.capture().is_err());
+    let current = installed.capture().unwrap();
+    current.validate().unwrap();
 }
 
 #[test]
@@ -361,7 +378,14 @@ fn only_exact_generated_entrypoints_and_records_are_inert_dependencies() {
         std::fs::write(path, b"fixture metadata or entrypoint").unwrap();
     }
     let (files, _) = tree_manifest(&installed.packages, &[], false).unwrap();
-    let files = files.iter().map(|file| serde_json::json!({"path":file.path(), "size":file.size(), "sha256":file.sha256()})).collect::<Vec<_>>();
+    let files = files
+        .iter()
+        .map(|file| {
+            let acquired =
+                acquisition_manifest(&installed.packages.join(file.path()), file.path().into());
+            serde_json::json!({"path":file.path(), "size":file.size(), "sha256":acquired.sha256()})
+        })
+        .collect::<Vec<_>>();
     std::fs::write(
         installed.runtime.join("installed-files.json"),
         serde_json::to_vec(&serde_json::json!({"files":files})).unwrap(),

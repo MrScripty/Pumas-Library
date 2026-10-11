@@ -1233,7 +1233,7 @@ impl AcquisitionService {
             inspect.file_len(&path, false)
         })
         .await?;
-        let compare_existing = match existing {
+        let existing_without_receipt = match existing {
             Some(size) => {
                 if file
                     .expected_size()
@@ -1312,7 +1312,7 @@ impl AcquisitionService {
             .unwrap_or(0);
             // A publisher digest can independently verify a complete partial.
             // Immutable revision and length alone cannot establish completion.
-            if !compare_existing
+            if !existing_without_receipt
                 && physical_length > 0
                 && file.expected_size() == Some(physical_length)
                 && file.expected_sha256().is_some()
@@ -1337,7 +1337,7 @@ impl AcquisitionService {
                     && checkpoint.owner.matches(workspace)
                     && checkpoint.request_url == url
                     && operation.record.manifest.permits_resume(file_index)
-                    && !(compare_existing && attempt == 1)
+                    && !(existing_without_receipt && attempt == 1)
                     && checkpoint.prefix.bytes > 0
                     && checkpoint.prefix.bytes == physical_length
                     && checkpoint
@@ -1506,7 +1506,7 @@ impl AcquisitionService {
                     let selected = file.clone();
                     return owned(context, "publish verified acquisition file", move || {
                         publish
-                            .publish_part(&selected, compare_existing)
+                            .publish_part(&selected, existing_without_receipt)
                             .map(|receipt| receipt.bytes)
                     })
                     .await;
@@ -4060,7 +4060,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn promoted_digestless_file_reopens_by_fresh_http_comparison_and_retains_using() {
+    async fn promoted_digestless_file_without_receipt_is_preserved_for_reconciliation() {
         let temp = tempfile::TempDir::new().unwrap();
         let stage = temp.path().join("stage");
         std::fs::create_dir(&stage).unwrap();
@@ -4122,8 +4122,8 @@ mod tests {
         ));
         drop(service);
 
-        // A promoted file has no durable receipt yet: reopen must obtain a fresh
-        // immutable-source representation instead of trusting path/size/tag.
+        // No durable receipt or supplied checksum authorizes the promoted file.
+        // Reacquisition must not manufacture verification by comparing local hashes.
         let reopened = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
             temp.path(),
         ))));
@@ -4135,7 +4135,7 @@ mod tests {
         let use_stage = stage.clone();
         let use_demand = demand.clone();
         let (url, server) = serve(b"DATA").await;
-        scope
+        let result = scope
             .run_invocation(move |context| async move {
                 let grant = workspace(&use_stage);
                 let operation = owner
@@ -4160,45 +4160,30 @@ mod tests {
                         &mut Host,
                     )
                     .await?;
-                let lease = owner.files_ready(&context, operation, grant).await?;
-                drop(lease); // Simulate loss before the consumer can acknowledge.
                 Ok(())
-            })
-            .await
-            .unwrap();
-        server.await.unwrap();
-        scope.shutdown().await.unwrap();
-        drop(reopened);
-        let owner = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
-            temp.path(),
-        ))));
-        let scope = owner.supervisor().open_scope(|| async { Ok(()) }).unwrap();
-        let current = owner.clone();
-        let before = std::fs::read(temp.path().join("downloads.json")).unwrap();
-        let result = scope
-            .run_invocation(move |context| async move {
-                let grant = workspace(&stage);
-                let evidence = current.reconciliation_lease(&context, &demand).await?;
-                current
-                    .begin(
-                        &context,
-                        demand,
-                        manifest("payload.bin"),
-                        grant.identity().clone(),
-                        evidence,
-                    )
-                    .await
-                    .map(|_| ())
             })
             .await;
         assert!(
-            matches!(result, Err(PumasError::Validation { field, .. }) if field == "acquisition.consumer_recovery_required")
+            matches!(result, Err(PumasError::Validation { field, message })
+            if field == "download.integrity" && message.contains("preserving both files"))
         );
-        assert_eq!(
-            std::fs::read(temp.path().join("downloads.json")).unwrap(),
-            before
-        );
+        server.await.unwrap();
         scope.shutdown().await.unwrap();
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+        let records = reopened.store.acquisitions().unwrap();
+        assert_eq!(records.len(), 1);
+        let record = records.values().next().unwrap();
+        assert!(matches!(record.phase, AcquisitionPhase::Transferring));
+        assert!(record.files.is_empty());
+        assert!(reopened
+            .store
+            .consumer_receipt(record.id)
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]

@@ -1708,6 +1708,14 @@ fn validate_direct_torch_report(
     if adapter == "cohere-asr" {
         super::super::cohere_asr_profile::validate(version, &resolution.artifacts)?;
     }
+    super::super::audio_runtime_recipe::validate_install_artifacts(
+        version,
+        build,
+        minor,
+        adapter,
+        &serde_json::to_value(&resolution.artifacts)?,
+    )
+    .map_err(|error| failed(error.to_string()))?;
     Ok(())
 }
 
@@ -1772,23 +1780,13 @@ pub(crate) fn validate_staged_files(target: &Path, manifest: &StagedFilesManifes
         let item = expected
             .get(name.as_str())
             .ok_or_else(|| failed("Torch staged packages contain an unreported file"))?;
-        let mut file = std::fs::File::open(entry.path()).map_err(PumasError::from)?;
-        let mut hasher = Sha256::new();
-        let mut size = 0_u64;
-        let mut buffer = [0_u8; 1024 * 1024];
-        loop {
-            use std::io::Read;
-            let count = file.read(&mut buffer).map_err(PumasError::from)?;
-            if count == 0 {
-                break;
-            }
-            hasher.update(&buffer[..count]);
-            size += count as u64;
-        }
-        if size != item.size || format!("{:x}", hasher.finalize()) != item.sha256 {
-            return Err(failed(
-                "Torch staged file differs from the validated wheel manifest",
-            ));
+        if entry
+            .metadata()
+            .map_err(|_| failed("Cannot inspect Torch staged package size"))?
+            .len()
+            != item.size
+        {
+            return Err(failed("Torch staged file size differs from its manifest"));
         }
         seen += 1;
     }
@@ -1815,8 +1813,14 @@ fn venv_packages_dir(runtime: &Path, python_minor: &str) -> PathBuf {
 pub(crate) struct BootstrapPackages {
     runtime: PathBuf,
     root: PathBuf,
-    manifest: StagedFilesManifest,
+    members: Vec<BootstrapMember>,
     directories: Vec<PathBuf>,
+}
+
+struct BootstrapMember {
+    path: String,
+    size: u64,
+    file: std::fs::File,
 }
 
 impl BootstrapPackages {
@@ -1856,26 +1860,15 @@ impl BootstrapPackages {
             if entry.file_type().is_dir() {
                 directories.push(relative.to_owned());
             } else if entry.file_type().is_file() {
-                let mut file = std::fs::File::open(entry.path()).map_err(PumasError::from)?;
-                let mut sha = Sha256::new();
-                let mut size = 0_u64;
-                let mut buffer = [0_u8; 65536];
-                loop {
-                    use std::io::Read;
-                    let count = file.read(&mut buffer).map_err(PumasError::from)?;
-                    if count == 0 {
-                        break;
-                    }
-                    sha.update(&buffer[..count]);
-                    size += count as u64;
-                }
-                files.push(StagedFile {
+                let file = std::fs::File::open(entry.path()).map_err(PumasError::from)?;
+                let size = file.metadata().map_err(PumasError::from)?.len();
+                files.push(BootstrapMember {
                     path: relative
                         .to_str()
                         .ok_or_else(|| failed("Invalid bootstrap path"))?
                         .replace(std::path::MAIN_SEPARATOR, "/"),
                     size,
-                    sha256: format!("{:x}", sha.finalize()),
+                    file,
                 });
             } else {
                 return Err(failed("Venv bootstrap contains a special file"));
@@ -1895,7 +1888,7 @@ impl BootstrapPackages {
         Ok(Self {
             runtime: runtime.to_owned(),
             root: root.to_owned(),
-            manifest: StagedFilesManifest { files },
+            members: files,
             directories,
         })
     }
@@ -1904,13 +1897,28 @@ impl BootstrapPackages {
         // Check the entire bootstrap namespace before deleting any byte. New,
         // replaced or linked members cannot become cleanup exemptions.
         let observed = Self::capture_root(&self.runtime, &self.root)?;
-        if observed.manifest != self.manifest || observed.directories != self.directories {
+        if observed.directories != self.directories || observed.members.len() != self.members.len()
+        {
             return Err(failed(
                 "Venv bootstrap changed during dependency resolution",
             ));
         }
-        for item in &self.manifest.files {
-            std::fs::remove_file(self.root.join(&item.path)).map_err(PumasError::from)?;
+        for (original, current) in self.members.iter().zip(&observed.members) {
+            if original.path != current.path
+                || original.size != current.size
+                || !pumas_library::platform::process::same_file_identity(
+                    &original.file,
+                    &current.file,
+                )
+                .map_err(PumasError::from)?
+            {
+                return Err(failed(
+                    "Venv bootstrap changed during dependency resolution",
+                ));
+            }
+        }
+        for member in &self.members {
+            std::fs::remove_file(self.root.join(&member.path)).map_err(PumasError::from)?;
         }
         for directory in &self.directories {
             // Remove only the recorded, now-empty directories; never recurse
@@ -2170,6 +2178,19 @@ impl VersionInstaller {
             .arg(&resolver_output)
             .arg("--cache-dir")
             .arg(pip_cache);
+        if let Some(constraints) = super::super::audio_runtime_recipe::install_constraints(
+            version,
+            build,
+            minor,
+            &selection.adapter,
+        )
+        .map_err(|error| failed(error.to_string()))?
+        {
+            std::fs::create_dir_all(&resolver_output).map_err(PumasError::from)?;
+            let path = resolver_output.join("audio-candidate-constraints.txt");
+            std::fs::write(&path, constraints).map_err(PumasError::from)?;
+            install.arg("--constraints").arg(path);
+        }
         let status = self
             .run_runtime_command_status_with_download_progress(
                 install,
@@ -2287,13 +2308,8 @@ impl VersionInstaller {
         .await
         .map_err(|e| failed(format!("Runtime staging task failed: {e}")))??;
         std::fs::remove_file(runtime.join("validate_runtime.py")).map_err(PumasError::from)?;
-        let observed_hash = format!(
-            "{:x}",
-            Sha256::digest(std::fs::read(&plan.interpreter_path).map_err(PumasError::from)?)
-        );
-        if observed_hash != plan.interpreter_hash
-            || std::fs::canonicalize(&plan.interpreter_path).map_err(PumasError::from)?
-                != plan.managed_python.executable
+        if std::fs::canonicalize(&plan.interpreter_path).map_err(PumasError::from)?
+            != plan.managed_python.executable
         {
             return Err(failed("Selected Python executable changed after preview"));
         }
@@ -2702,13 +2718,8 @@ impl VersionInstaller {
             ));
         }
         if let Some(plan) = plan {
-            let observed_hash = format!(
-                "{:x}",
-                Sha256::digest(std::fs::read(&plan.interpreter_path).map_err(PumasError::from)?)
-            );
-            if observed_hash != plan.interpreter_hash
-                || std::fs::canonicalize(&plan.interpreter_path).map_err(PumasError::from)?
-                    != plan.managed_python.executable
+            if std::fs::canonicalize(&plan.interpreter_path).map_err(PumasError::from)?
+                != plan.managed_python.executable
             {
                 return Err(failed("Selected Python executable changed after preview"));
             }
@@ -3257,6 +3268,87 @@ mod managed_python_provenance_tests {
         assert!(!target.exists());
     }
 
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+    #[test]
+    fn candidate_install_refuses_consistently_reported_dependency_drift() {
+        let pin: serde_json::Value = serde_json::from_str(
+            pumas_library::runtime_read_source::AUDIO_RUNTIME_CANDIDATE_RECIPE,
+        )
+        .unwrap();
+        let mut resolution = DirectTorchResolution {
+            release: "2.10.0".into(),
+            torch: "2.10.0+cpu".into(),
+            build: "cpu".into(),
+            python: "3.12".into(),
+            interpreter: "/staged/venv/python".into(),
+            implementation: "cpython".into(),
+            platform: "Linux-fixture".into(),
+            machine: "x86_64".into(),
+            adapter: "cohere-asr".into(),
+            artifacts: serde_json::from_value(pin["artifacts"].clone()).unwrap(),
+        };
+        let selection = DirectTorchSelection {
+            version: "2.10.0",
+            build: "cpu",
+            minor: "3.12",
+            adapter: "cohere-asr",
+            python: Path::new("/staged/venv/python"),
+        };
+        let check = |resolution: &DirectTorchResolution| {
+            let report = serde_json::json!({"install": resolution.artifacts.iter().map(|a|
+                serde_json::json!({"metadata": {"name": a.name, "version": a.version},
+                    "download_info": {"url": a.url, "archive_info": {"hashes": {"sha256": a.sha256}}}})
+            ).collect::<Vec<_>>()});
+            let lock = resolution
+                .artifacts
+                .iter()
+                .map(|a| format!("{} @ {} --hash=sha256:{}", a.name, a.url, a.sha256))
+                .collect::<Vec<_>>()
+                .join("\n");
+            validate_direct_torch_report(resolution, &report, &lock, &selection)
+        };
+        check(&resolution).unwrap();
+        let index = resolution
+            .artifacts
+            .iter()
+            .position(|a| a.name == "narwhals")
+            .unwrap();
+        for field in ["name", "version", "url", "sha256"] {
+            let original = resolution.artifacts[index].clone();
+            match field {
+                "name" => resolution.artifacts[index].name = "another-package".into(),
+                "version" => resolution.artifacts[index].version = "2.27.1".into(),
+                "url" => {
+                    resolution.artifacts[index].url =
+                        "https://files.pythonhosted.org/packages/changed.whl".into()
+                }
+                "sha256" => resolution.artifacts[index].sha256 = "0".repeat(64),
+                _ => unreachable!(),
+            }
+            let error = check(&resolution).expect_err(field);
+            assert!(
+                error
+                    .to_string()
+                    .contains("source-pinned audio candidate recipe"),
+                "{field}: {error}"
+            );
+            resolution.artifacts[index] = original;
+        }
+        let numpy = resolution
+            .artifacts
+            .iter_mut()
+            .find(|a| a.name == "numpy")
+            .unwrap();
+        numpy.version = "2.5.4".into();
+        let error = check(&resolution).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("source-pinned audio candidate recipe"),
+            "numpy drift: {error}"
+        );
+    }
+
     #[tokio::test]
     async fn cohere_asr_legacy_plan_refuses_before_staging_or_provisioning() {
         let root = tempfile::tempdir().unwrap();
@@ -3506,8 +3598,8 @@ mod managed_python_provenance_tests {
     }
 
     #[test]
-    fn bootstrap_cleanup_refuses_namespace_or_byte_changes_before_removal() {
-        for mutation in ["extra", "bytecode", "changed", "missing", "directory"] {
+    fn bootstrap_cleanup_refuses_namespace_or_binding_changes_before_removal() {
+        for mutation in ["extra", "bytecode", "replacement", "missing", "directory"] {
             let root = tempfile::tempdir().unwrap();
             let runtime = root.path().join("runtime");
             let packages = venv_packages_dir(&runtime, "3.12");
@@ -3520,8 +3612,10 @@ mod managed_python_provenance_tests {
                 "bytecode" => {
                     std::fs::write(packages.join("pip/new.pyc"), b"unreported cache").unwrap()
                 }
-                "changed" => {
-                    std::fs::write(packages.join("pip/__init__.py"), b"different").unwrap()
+                "replacement" => {
+                    let replacement = packages.join("pip/successor.py");
+                    std::fs::write(&replacement, b"bootstrap").unwrap();
+                    std::fs::rename(replacement, packages.join("pip/__init__.py")).unwrap();
                 }
                 "missing" => std::fs::remove_file(packages.join("pip/__init__.py")).unwrap(),
                 _ => std::fs::create_dir(packages.join("unexpected-empty")).unwrap(),

@@ -1008,14 +1008,41 @@ impl PreparedDownloadTask {
             .unwrap_or_else(|never| match never {})
     }
 
-    async fn verify_pinned_final_files(&self, context: &TaskContext) -> Result<()> {
+    async fn observe_pinned_final_files(&self, context: &TaskContext) -> Result<()> {
         if self.revision.as_persisted().is_none() {
             return Ok(());
         }
         for file in &self.files {
-            self.destination.verify_file(context, file, false).await?;
+            self.destination.observe_file(context, file, false).await?;
         }
         Ok(())
+    }
+
+    async fn verify_staged_file(
+        &self,
+        context: &TaskContext,
+        workspace: &crate::acquisition::AcquisitionWorkspace,
+        file: &FileToDownload,
+        partial: bool,
+    ) -> Result<()> {
+        let manifest = super::acquisition_source::manifest_for_download(
+            &self.repo_id,
+            &self.revision,
+            &self.files,
+        )?;
+        let selected = manifest
+            .files()
+            .iter()
+            .find(|selected| selected.logical_path() == file.filename)
+            .ok_or_else(|| PumasError::Other("Restored selected file is unavailable".into()))?
+            .clone();
+        let workspace = workspace.clone();
+        context
+            .run_fallible_blocking_named("verify acquisition file once", move || {
+                workspace.verify_file(&selected, partial).map(|_| ())
+            })
+            .await
+            .map_err(|error| error.into_pumas_error("Acquisition verification failed"))?
     }
 
     async fn install_validated_pinned_files(
@@ -1072,7 +1099,8 @@ impl PreparedDownloadTask {
                 .await?
                 .is_some()
             {
-                self.destination.verify_file(context, file, false).await?;
+                self.verify_staged_file(context, workspace, file, false)
+                    .await?;
                 if self
                     .destination
                     .part_len(context, &file.filename)
@@ -1091,11 +1119,13 @@ impl PreparedDownloadTask {
             let observed_size = self.destination.part_len(context, &file.filename).await?;
             if observed_size != Some(expected_size) {
                 if observed_size.is_some_and(|observed| observed > expected_size) {
-                    self.destination.verify_file(context, file, true).await?;
+                    self.verify_staged_file(context, workspace, file, true)
+                        .await?;
                 }
                 return Ok(false);
             }
-            self.destination.verify_file(context, file, true).await?;
+            self.verify_staged_file(context, workspace, file, true)
+                .await?;
             let manifest = super::acquisition_source::manifest_for_download(
                 &self.repo_id,
                 &self.revision,
@@ -1118,7 +1148,7 @@ impl PreparedDownloadTask {
                     error.into_pumas_error("Restore publication observation failed")
                 })??;
         }
-        self.verify_pinned_final_files(context).await?;
+        self.observe_pinned_final_files(context).await?;
         Ok(true)
     }
 
@@ -1141,7 +1171,8 @@ impl PreparedDownloadTask {
                 .await?
                 .is_some()
             {
-                self.destination.verify_file(context, file, false).await?;
+                self.verify_staged_file(context, workspace, file, false)
+                    .await?;
                 if self
                     .destination
                     .part_len(context, &file.filename)
@@ -1161,7 +1192,10 @@ impl PreparedDownloadTask {
             if file.size.is_some_and(|expected| expected != part_size) {
                 return Ok(false);
             }
-            if let Err(error) = self.destination.verify_file(context, file, true).await {
+            if let Err(error) = self
+                .verify_staged_file(context, workspace, file, true)
+                .await
+            {
                 if file.size.is_none() && matches!(error, PumasError::HashMismatch { .. }) {
                     // With no size, a hash mismatch can simply mean that the
                     // retained part had not reached the end of the object.
@@ -1416,7 +1450,7 @@ impl PreparedDownloadTask {
             // exact durable settlement; cancellation still owns replacement.
             state.files_completed = state.files.len();
         }
-        self.verify_pinned_final_files(context).await?;
+        self.observe_pinned_final_files(context).await?;
         let info = self
             .downloads
             .read()
@@ -2052,7 +2086,7 @@ impl DownloadDestination {
         }
     }
 
-    async fn verify_file(
+    async fn observe_file(
         &self,
         task_context: &TaskContext,
         file: &FileToDownload,
@@ -2063,15 +2097,9 @@ impl DownloadDestination {
                 let destination = destination.clone();
                 let filename = file.filename.clone();
                 let expected_size = file.size;
-                let expected_sha256 = file.sha256.clone();
                 task_context
-                    .run_blocking_named("verify downloaded file integrity", move || {
-                        destination.verify_download_file(
-                            &filename,
-                            is_partial,
-                            expected_size,
-                            expected_sha256.as_deref(),
-                        )
+                    .run_blocking_named("observe downloaded file ownership", move || {
+                        destination.verify_download_file(&filename, is_partial, expected_size, None)
                     })
                     .await
                     .map_err(|error| {
@@ -9568,7 +9596,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn existing_hashless_file_uses_fresh_source_and_is_not_imported_after_reopen() {
+    async fn existing_hashless_file_without_receipt_is_preserved_after_reopen() {
         use tokio::io::AsyncWriteExt;
 
         let temp = TempDir::new().unwrap();
@@ -9647,7 +9675,7 @@ mod tests {
             }
         })
         .await
-        .expect("a differing immutable source file must fail before import");
+        .expect("a hashless existing file without a receipt must refuse import");
         server.await.unwrap();
 
         let states = client.downloads.read().await;
@@ -9656,7 +9684,7 @@ mod tests {
             .error
             .as_deref()
             .unwrap()
-            .contains("differs from the immutable source artifact"));
+            .contains("preserving both files for reconciliation"));
         assert_eq!(
             std::fs::read(destination.join("model.onnx")).unwrap(),
             existing
@@ -9669,7 +9697,7 @@ mod tests {
         drop(states);
         drop(client);
 
-        // A failed live comparison must remain failed after restart. The
+        // Missing acquisition evidence must remain unresolved after restart. The
         // pinned revision and byte count cannot promote the hashless final.
         let mut reopened = configured_download_client(temp.path().join("cache")).unwrap();
         reopened
@@ -22650,16 +22678,6 @@ mod tests {
                 .await
                 .unwrap();
 
-            let (mut reopened_config, _) = listener.accept().await.unwrap();
-            let reopened_config_request = read_pinned_test_request(&mut reopened_config).await;
-            assert!(reopened_config_request.starts_with(&format!(
-                "GET /acme/model/resolve/{COMMIT}/config.json HTTP/1.1"
-            )));
-            reopened_config
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
-                .await
-                .unwrap();
-
             let (mut resumed, _) = listener.accept().await.unwrap();
             let resumed_request = read_pinned_test_request(&mut resumed).await;
             assert!(resumed_request.starts_with(&format!(
@@ -22688,12 +22706,23 @@ mod tests {
             &client,
             "acme/model",
             &revision,
-            vec![LfsFileInfo {
-                filename: "model.onnx".into(),
-                size: PAYLOAD.len() as u64,
-                sha256: "0fdf7def1d2c26ba6473f69742c3f60c14b23602c52aabb8243e01971892a352".into(),
-            }],
-            vec!["config.json".into()],
+            vec![
+                LfsFileInfo {
+                    filename: "model.onnx".into(),
+                    size: PAYLOAD.len() as u64,
+                    sha256: "0fdf7def1d2c26ba6473f69742c3f60c14b23602c52aabb8243e01971892a352"
+                        .into(),
+                },
+                // This incomplete acquisition has no durable complete-file
+                // receipt. Supplied source SHA authorizes acquisition recovery;
+                // unreceipted hashless recovery is covered by its refusal test.
+                LfsFileInfo {
+                    filename: "config.json".into(),
+                    size: 2,
+                    sha256: hex::encode(sha2::Sha256::digest(b"{}")),
+                },
+            ],
+            Vec::new(),
         );
         let mut request = recovery_test_request("acme/model", &["model.onnx".into()]);
         request.model_type = Some("vision".into());

@@ -8,10 +8,12 @@ mod torch_tests;
 use super::managed_python::ManagedPythonIdentity;
 pub(crate) use torch::is_torch_runtime_release;
 pub(crate) use torch::retry_pending_torch_cleanup;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use torch::validate_staged_files;
 pub(crate) use torch::TorchVersionsLock;
 #[cfg(test)]
 pub(crate) use torch::{move_verified_packages, BootstrapPackages};
-pub(crate) use torch::{validate_staged_files, write_embedded_torch_runtime, StagedFilesManifest};
+pub(crate) use torch::{write_embedded_torch_runtime, StagedFilesManifest};
 pub(crate) struct TorchInstallPlan {
     pub(crate) preview: crate::version_manager::TorchPreview,
     pub(crate) requirements: String,
@@ -443,16 +445,23 @@ fn verify_llama_cpp_output(root: &Path, proof: &LlamaCppInstallReceiptV1) -> Res
     } else {
         "bin/llama-server"
     };
+    let root_metadata =
+        std::fs::symlink_metadata(root).map_err(|error| PumasError::io_with_path(error, root))?;
+    let launcher = root.join(expected_launcher);
+    let launcher_metadata = std::fs::symlink_metadata(&launcher)
+        .map_err(|error| PumasError::io_with_path(error, &launcher))?;
     if proof.launcher_relative_path != expected_launcher
-        || hash_native_tree(root)? != proof.output_tree_sha256
-        || hash_regular_file(&root.join(expected_launcher))? != proof.launcher_sha256
+        || !root_metadata.is_dir()
+        || root_metadata.file_type().is_symlink()
+        || !launcher_metadata.is_file()
+        || launcher_metadata.file_type().is_symlink()
+        || launcher_metadata.len() == 0
     {
         return Err(PumasError::InstallationFailed {
-            message: "Native output differs from its durable llama.cpp receipt; recovery required"
-                .into(),
+            message: "Native output has invalid owned paths or launcher; recovery required".into(),
         });
     }
-    Ok(())
+    VersionInstaller::validate_native_output(root)
 }
 
 /// Coordinates Torch cancellation with the irreversible publication boundary.
@@ -2922,6 +2931,10 @@ impl VersionInstaller {
                         message: "Native archive contains an unsafe link".into(),
                     });
                 }
+            } else if !entry.file_type().is_file() && !entry.file_type().is_dir() {
+                return Err(PumasError::InstallationFailed {
+                    message: "Native output contains a special file".into(),
+                });
             }
         }
         Ok(())
@@ -4056,7 +4069,7 @@ mod tests {
     }
 
     #[test]
-    fn native_receipt_reconciles_staged_publication_and_rejects_changed_output() {
+    fn native_receipt_reconciles_owned_publication_without_rechecking_checksums() {
         let root = tempfile::tempdir().unwrap();
         let versions = root.path().join("llama-cpp-versions");
         let custody = Arc::new(NativeInstallWorkspace::create(&versions, "b1234+cpu").unwrap());
@@ -4117,7 +4130,7 @@ mod tests {
                 .unwrap(),
             &proof.metadata
         ));
-        // Already-published recovery checks exact bytes and metadata before success.
+        // Already-published recovery checks owned paths and metadata.
         VersionInstaller::reconcile_llama_cpp_installation(
             &versions,
             "b1234+cpu",
@@ -4133,6 +4146,21 @@ mod tests {
         )
         .unwrap();
         let published_launcher = destination.join(&proof.launcher_relative_path);
+        VersionInstaller::reconcile_llama_cpp_installation(
+            &versions,
+            "b1234+cpu",
+            AppId::LlamaCpp,
+            &manager,
+            custody.clone(),
+            proof.clone(),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(&published_launcher).unwrap(),
+            b"changed output"
+        );
+        // An empty launcher is unavailable irrespective of checksum policy.
+        std::fs::write(&published_launcher, b"").unwrap();
         let error = VersionInstaller::reconcile_llama_cpp_installation(
             &versions,
             "b1234+cpu",
@@ -4143,10 +4171,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("recovery required"));
-        assert_eq!(
-            std::fs::read(published_launcher).unwrap(),
-            b"changed output"
-        );
+        assert_eq!(std::fs::read(published_launcher).unwrap(), b"");
     }
 
     #[test]

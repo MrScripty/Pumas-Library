@@ -56,7 +56,7 @@ fn held_capability_survives_locator_replacement_without_selecting_successor() {
 }
 
 #[test]
-fn equal_bytes_replacement_and_same_size_mutation_are_rejected() {
+fn file_replacement_is_refused_and_checksum_verification_is_explicit() {
     for replacement in [false, true] {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("worker.py"), b"original").unwrap();
@@ -67,23 +67,35 @@ fn equal_bytes_replacement_and_same_size_mutation_are_rejected() {
         } else {
             std::fs::write(root.path().join("worker.py"), b"mutation").unwrap();
         }
-        assert!(owner.validate().is_err());
-        assert!(owner
-            .clone_member(RuntimeReadRole::Sidecar, "worker.py")
-            .is_err());
+        if replacement {
+            assert!(owner.validate().is_err());
+            assert!(owner
+                .clone_member(RuntimeReadRole::Sidecar, "worker.py")
+                .is_err());
+        } else {
+            owner.validate().unwrap();
+            let mut actual = Vec::new();
+            owner
+                .clone_member(RuntimeReadRole::Sidecar, "worker.py")
+                .unwrap()
+                .read_to_end(&mut actual)
+                .unwrap();
+            assert_eq!(actual, b"mutation");
+            assert_eq!(
+                owner.manifest().next().unwrap().1.sha256(),
+                Some(hex::encode(Sha256::digest(b"original")).as_str())
+            );
+            assert!(owner.verify_checksums().is_err());
+        }
     }
 }
 
 #[test]
-fn closed_namespace_refuses_missing_extra_and_untrusted_digest() {
-    for case in 0..3 {
+fn closed_namespace_refuses_missing_and_extra_files() {
+    for case in 0..2 {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("worker.py"), b"original").unwrap();
-        let expected = if case == 2 {
-            manifest("worker.py", b"invented")
-        } else {
-            manifest("worker.py", b"original")
-        };
+        let expected = manifest("worker.py", b"original");
         if case == 0 {
             std::fs::remove_file(root.path().join("worker.py")).unwrap();
         }
@@ -98,6 +110,26 @@ fn closed_namespace_refuses_missing_extra_and_untrusted_digest() {
         )])
         .is_err());
     }
+}
+
+#[test]
+fn historical_checksum_is_retained_without_automatic_content_verification() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("worker.py"), b"modified").unwrap();
+    let expected = manifest("worker.py", b"original");
+    let sha = expected.sha256().map(str::to_owned);
+    let owner = RetainedRuntimeReadSource::capture(vec![selection(
+        root.path(),
+        vec![expected],
+        vec![],
+        Arc::new(()),
+    )])
+    .unwrap();
+    owner.validate().unwrap();
+    assert_eq!(owner.manifest().next().unwrap().1.sha256(), sha.as_deref());
+    assert!(owner.verify_checksums().is_err());
+    std::fs::write(root.path().join("worker.py"), b"original").unwrap();
+    owner.verify_checksums().unwrap();
 }
 
 #[test]
@@ -124,6 +156,27 @@ fn links_and_unselected_regular_files_cannot_enter_selection() {
         )])
         .is_err());
     }
+}
+
+#[test]
+fn absent_checksum_evidence_allows_reads_but_refuses_explicit_verification() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("worker.py"), b"original").unwrap();
+    let owner = RetainedRuntimeReadSource::capture(vec![selection(
+        root.path(),
+        vec![RuntimeReadFile::observed("worker.py".into(), 8).unwrap()],
+        vec![],
+        Arc::new(()),
+    )])
+    .unwrap();
+    owner
+        .clone_member(RuntimeReadRole::Sidecar, "worker.py")
+        .unwrap();
+    assert_eq!(owner.manifest().next().unwrap().1.sha256(), None);
+    assert_eq!(
+        owner.verify_checksums().unwrap_err().kind(),
+        io::ErrorKind::NotFound
+    );
 }
 
 #[test]

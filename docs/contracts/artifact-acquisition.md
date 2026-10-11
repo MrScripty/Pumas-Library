@@ -176,7 +176,7 @@ The existing worker retains a typed complete selector, original import intent,
 exact record and held physical reservation across explicit same-process retry.
 Authenticated retry requires fresh credentials; it cannot silently fall back.
 Cancellation drains and clears continuation proof, so incomplete members restart
-at zero while complete files still require custody/full-hash reuse checks. Changed
+at zero while complete files require retained receipt and current ownership checks. Changed
 authored source facts refuse before GET and preserve retained work. A reopened
 process can inspect persisted custody, but cannot invent live reservation/retry
 authority or start another import over the existing demand. The existing dialog
@@ -396,7 +396,30 @@ A new source implementation can register behind the internal source-reader inter
 
 ## 7. Integrity, provenance and trust
 
-Record separately: requested origin and revision, actual retrieval location, expected evidence and its authority, observed evidence, and consumer approval. Compare expected digests using the existing hashing facilities. A locally computed hash alone proves neither publisher origin nor permission to install.
+Record separately: requested origin and revision, actual retrieval location, expected evidence and its authority, observed evidence, and consumer approval. Verify a supplied expected SHA when acquiring the file, before issuing its acquisition receipt. A locally computed hash alone proves neither publisher origin nor permission to install.
+
+Stored checksums are historical acquisition evidence. Startup, library reopen,
+reconciliation, runtime preparation, publication, cleanup and ordinary reads must
+not rehash already acquired file contents automatically. Retain the original SHA
+for an explicit integrity-verification request. An installed file may legitimately
+differ from the acquired artifact. Ownership checks still require regular files,
+current physical/path bindings, required-member closure, recorded lengths and
+valid receipt state; a checksum does not grant ownership. Pending or missing
+receipts cannot be promoted by observing matching files. Unknown pre-existing
+files without a supplied checksum or verified receipt remain unresolved and are
+preserved for reconciliation. An owned rewrite invalidates prior acquisition
+verification before a new download can succeed. Partial-transfer checkpoint
+checks belong to unfinished acquisition, not post-download use.
+
+Persisted receipt schemas and checksum fields are unchanged. Rust and Python
+consumers in this repository change together. The public Rust
+`RuntimeReadFile::sha256` now returns `Option<&str>`; `observed` constructs a member
+without checksum evidence and `new` retains supplied evidence. Direct Rust
+consumers must handle that optional evidence when adopting this candidate.
+`RetainedRuntimeReadSource::verify_checksums` is explicit and refuses missing
+checksum evidence. The former fixed installed-tree validation helper is removed.
+JSON-RPC receipt shapes are unchanged; an upgraded RPC server applies this policy
+without requiring its clients to scan installed files.
 
 Expiring locators are refreshable access material. Keep them in ephemeral/scoped storage rather than ordinary manifests/logs; when they cannot be recovered after restart, report WaitingForAccess. A refreshed credential/URL may access only the previously selected object, unless a new explicit selection creates a new request. Forward credentials across redirects only under the configured receiving-origin policy. Public progress identifies safe source labels, not query secrets or private object paths by default.
 
@@ -422,11 +445,11 @@ The current model-download document is schema 5, with schema 4 as its supported 
 
 Q1 does not persist its HTTP continuation checkpoint, validator, access URL or prefix proof. Schema 7 and consumer receipt versions are unchanged, and no checkpoint sidecar is introduced. Reopened service/workspace owners retain durable demand and selected-manifest custody but begin each incomplete file with a fresh request from byte zero; they never reconstruct a continuation proof from the saved counter or `.part` bytes. Ordinary HF pause/resume constructs a new workspace capability, so its successor also restarts incomplete files from zero; retries inside the same held worker may continue when the checkpoint remains valid. The shared schema does not fence an older schema-7 binary that still trusts partial length; exclusion of older concurrent writers and rollback remains a deployment obligation and unqualified evidence gap.
 
-Persisting progress is not the same as making the file bytes durable. After a crash, validate source identity and actual partial files under reopened authority; do not trust a saved byte counter as proof. Complete-file verification must re-establish readiness when prior verification cannot safely be reused. Unsupported recovery remains non-authorizing.
+Persisting progress is not the same as making the file bytes durable. After a crash, validate source identity and actual partial files under reopened authority; do not trust a saved byte counter as proof. Complete-file recovery must establish current ownership and a valid acquisition receipt; a missing receipt remains unresolved unless acquisition can verify a supplied checksum. Unsupported recovery remains non-authorizing.
 
 Acquisition FilesReady and model/runtime publication are distinct commits. The managed HF importer issues receipt version 1 only after complete finalization and durable metadata, index and applicable pinned package-facts outputs. The receipt binds the acquisition ID, persisted `Using` lease, HF demand and operation, current queue admission, manifest and ordered verified-file receipts, destination/workspace identity, resulting model ID, and a versioned canonical output projection. Canonical JSON sorts object keys recursively, preserves array order and explicit nulls, and rejects unsupported values. Its projection contract explicitly lists metadata, model-index and package-facts fields; package-facts content includes its independent contract version. Cold recovery compares current read-only outputs to the issuer-published proof, never computes new proof from current outputs alone. Partial imports and ordinary model-import callers have no receipt authority. A crash before receipt publication, unsupported/malformed receipt, or changed/missing output remains recovery-required and never replays import effects. Unknown publication visibility is failure, not success.
 
-The current Q1 candidate also routes llama.cpp archive acquisition through the shared consumer. Its native receipt binds the exact tag/metadata and hashes of the extracted output tree and launcher. The installer claims its cancellation/publication arbitration before returning the prepared receipt payload, so an accepted cancellation cannot later be replayed as an installation; after the claim, cancellation is refused and restart may finish the exact staged publication. If cancellation wins before receipt issuance, the installer durably revokes the exact attempt, drains and removes its owned workspace under the native lock, then withdraws only the unchanged, receipt-free `Using` lease. Cleanup or withdrawal failure retains recovery custody and prevents same-tag retry from selecting the unresolved attempt. Cold recovery verifies or completes publication from a committed receipt, settles the same acquisition, and explicitly reclaims its owned workspace. A retained `Using` acquisition without a receipt or exact withdrawal remains unresolved.
+The current Q1 candidate also routes llama.cpp archive acquisition through the shared consumer. Its native receipt binds the exact tag/metadata and hashes of the extracted output tree and launcher. The installer claims its cancellation/publication arbitration before returning the prepared receipt payload, so an accepted cancellation cannot later be replayed as an installation; after the claim, cancellation is refused and restart may finish the exact staged publication. If cancellation wins before receipt issuance, the installer durably revokes the exact attempt, drains and removes its owned workspace under the native lock, then withdraws only the unchanged, receipt-free `Using` lease. Cleanup or withdrawal failure retains recovery custody and prevents same-tag retry from selecting the unresolved attempt. Cold recovery checks the required regular output and closed native namespace against a committed receipt, retaining its historical hashes without recomputing them, and verifies or completes publication, settles the same acquisition, and explicitly reclaims its owned workspace. A retained `Using` acquisition without a receipt or exact withdrawal remains unresolved.
 
 Receipt publication conditionally validates the exact durable `Using` lease, demand/manifest/files, non-revoked queue admission, workspace/destination, and held root grant in the same canonical store transaction. A cold worker does not renew or replace that lease before checking its receipt. Only after read-only validation may it obtain a private receipt-qualified settlement capability. Acquisition transition to `Adopted` and exact queue release are one atomic `AcquisitionStore` document publication; the immutable receipt remains paired with the adopted acquisition as completion history. Thus recovery has no intermediate acknowledgement-with-unreleased-queue state. An identical already-published receipt is idempotent; conflicting, orphaned, duplicated, malformed, or unknown-version receipts fail closed. No implicit receipt pruning exists; any future terminal-record compaction must remove the exact acquisition and receipt together under a separately selected retention policy. Migration never manufactures receipts, so pre-receipt `Using` remains unresolved even if output files match. No cross-store exactly-once remote-I/O guarantee is assumed.
 

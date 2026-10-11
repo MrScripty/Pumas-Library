@@ -59,3 +59,22 @@ The controlled reproduction was removed. No `[DEBUG-ci-gguf]` instrumentation
 remains. This repair is separate from download-location reconciliation, whose
 plan and pending acceptance claims are unchanged. A hosted rerun still must
 validate the revised source; these results are local Linux evidence.
+
+## Subsequent checksum-policy change
+
+The preceding evidence describes the watcher-race repair at `2ada3d9e` before the
+user changed the integrity policy. The subsequent
+[checksum policy](../plans/acquisition-checksum-policy.md) permits same-file,
+same-size content changes after verified acquisition, retaining the original SHA
+for explicit verification. The focused test now distinguishes those allowed
+changes from refused receipt, index, path and file-replacement cases. Live reindex
+can recover index projections and admit changed payload contents; a pending
+receipt still refuses. An explicit deep hash operation remains tested separately.
+
+A live primary-content fixture initially used a noncanonical directory. Reindex
+legitimately moved it from `vision/migrated/live-reindex` to
+`llm/llama/live-reindex`, so the old model ID could not resolve. The fixture now
+starts at the canonical location and mutates opaque equal-size payload padding,
+separating content-check policy from classification and folder-move behavior.
+This does not alter production classification or suppress the original diagnostic.
+Current feature-specific results are recorded in the checksum-policy plan.

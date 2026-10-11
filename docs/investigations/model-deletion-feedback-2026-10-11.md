@@ -230,3 +230,49 @@ request-count event did not recur; its separate diagnostic record remains
 applicable. Logs are in original-repository `tmp/pr69-link-save-*.log`.
 The new normal optimized backend and package checks remain pending at this
 registry source boundary.
+
+### Verified deletion installers
+
+Final committed producer/RPC:
+`0ba3b6cb91cbb9bda84c0627172efb1e3cd6a272`, including deletion implementation
+`896a7e6791cd1f36f0af5a7550d0df886dfe2959` and the registry follow-up. A new
+normal optimized default-feature backend build passed with locked/offline Cargo
+inputs; current frontend and Electron production builds passed. The candidate
+frontend contains `index-CThwja8r.js` with deletion state and the visible alert.
+
+Original-repository `electron/release/deletion-scope-20261011/` retains:
+
+| Artifact | Bytes | SHA-256 for explicit artifact verification |
+| --- | ---: | --- |
+| `pumas-library-electron_0.8.0-rc.1_amd64.deb` | 125,153,924 | `3376b1f9c0f0334b9478dcb133a299c4c36adf04bc40ce146bcd0c770551a606` |
+| `Pumas.Library-0.8.0-rc.1.AppImage` | 160,747,583 | `e288a4bbe51f7d2b9ab85676eeef51009db4a58d4c696d408e3ea32a3c323047` |
+
+The Debian metadata is `0.8.0~rc.1-2026101101`, confirmed strictly newer than
+the observed installed `0.8.0~rc.1`. The distinctly named copy
+`electron/release/Pumas-Library-delete-fix-20261011-0ba3b6cb-amd64.deb` in the
+original repository was compared byte-for-byte with the qualified Debian file.
+Its SHA is the Debian SHA above. `SHA256SUMS` and `local-build-record.json`
+beside the candidates record source, toolchain, revision, reuse and limitations.
+
+Exact extracted Debian/AppImage resource and RPC health/shutdown checks passed.
+Isolated Debian installation over copied older package state, alternatives,
+Electron 43.7.0 identity and removal passed. The final optimized RPC also passed
+the disposable exact-target deletion probe: an external native lock refuses,
+then the selected target deletes after that lock is released while its sibling
+payload stays intact. This probe does not mutate the actual library or replace
+the controlled active-transfer qualification recorded above.
+
+Logs are original-repository `tmp/pr69-delete-scope-rpc-release-final.log`,
+`pr69-delete-scope-package.log`, `pr69-delete-scope-package-smoke.log`,
+`pr69-delete-scope-deb-install.log` and
+`pr69-delete-scope-release-delete-probe.log`. Disposable installation evidence
+remains in `tmp/pumas-deb-install-6dellxtg`; smoke/deletion fixture roots were
+automatically removed. Existing Vite chunk-size and Electron desktop association
+guidance remain; isolated install skipped the unsupported AppArmor profile and
+reported alternatives cleanup warnings during successful removal. No signing,
+publication, native Windows/macOS execution, actual model inference or build
+reproducibility is claimed. The earlier vision event remains an unresolved
+diagnostic, despite subsequent passing runs. Host app/install, real model data
+and the original tracked checkout were preserved. Install the distinctly named
+package and reopen Pumas to apply the new code; the running process cannot be
+updated by a source change.

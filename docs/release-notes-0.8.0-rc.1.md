@@ -26,6 +26,10 @@ inference are not qualified by its Linux packaging checks.
   request is pending and allow retry after refusal. Busy-library RPC errors
   explain that the owning download or operation must finish or be cancelled;
   the existing whole-library exclusion remains in effect.
+- A failed download now shows an accessible error beside its exact library
+  weight or unassociated activity row. Its retry control retains the download
+  identity. An enabled play action still requires a complete catalog entry;
+  transfer progress alone does not mark a model ready.
 
 Direct Rust consumers must recompile and handle the optional checksum returned by
 `RuntimeReadFile::sha256`; `RuntimeReadFile::observed` represents absent historical

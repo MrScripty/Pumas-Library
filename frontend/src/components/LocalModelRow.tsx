@@ -113,6 +113,12 @@ export function LocalModelRow({
               dependencyCount={model.dependencyCount}
               partialError={rowState.partialError}
             />}
+            {!isReadOnly && rowState.downloadError && (
+              <div role="alert" className="mt-1 text-xs text-[hsl(var(--accent-error))]">
+                {model.downloadStatus === 'error' ? 'Download failed: ' : 'Download action failed: '}
+                {rowState.downloadError}
+              </div>
+            )}
             {!isReadOnly && deletionState?.status === 'error' && (
               <div role="alert" className="mt-1 text-xs text-[hsl(var(--accent-error))]">
                 Could not delete model: {deletionState.message}

@@ -1,6 +1,7 @@
 import type { ModelInfo, RelatedModelsState } from '../types/apps';
 
 export interface LocalModelRowState {
+  downloadError?: string;
   canPause: boolean;
   canRecoverPartial: boolean;
   canResume: boolean;
@@ -153,6 +154,9 @@ export function getLocalModelRowState({
   });
 
   return {
+    downloadError: isDownloading && model.downloadKey
+      ? downloadErrors?.[model.downloadKey]
+      : undefined,
     canPause: download.canPause,
     canRecoverPartial: partial.canRecoverPartial,
     canResume: download.canResume,

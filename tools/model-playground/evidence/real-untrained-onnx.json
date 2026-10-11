@@ -1,0 +1,1839 @@
+{
+  "observed_at": "2026-10-11T21:17:54.447Z",
+  "qualification": "real_untrained_onnx_execution",
+  "checkout_commit": "bacdf3e2bcdd9c292e025549f8f7e45efa170c39",
+  "public_rust_tree": "9d9d89b53795b165a1317a9e968040337ca69af6",
+  "semantic_model_quality": "not_qualified",
+  "model_download_bytes": 0,
+  "fixture": "Pumas synthetic token-tiling ONNX graph; UNTRAINED, not Pantograph BERT",
+  "binary_sha256": "b1a05546d65d35286c05c1ade3173d18ea151e3e71a54aff18d9bda7ba821ca4",
+  "runtime_version": "1.24.2",
+  "runtime_archive_sha256": "43725474ba5663642e17684717946693850e2005efbd724ac72da278fead25e6",
+  "runtime_libraries": {
+    "libonnxruntime.so": {
+      "member": "onnxruntime-linux-x64-1.24.2/lib/libonnxruntime.so.1.24.2",
+      "sha256": "ffc84d48e845cf0b562ba4ea5ca32aaafc0d4069019fef4f63095b307d0270ad",
+      "bytes": 22065056
+    },
+    "libonnxruntime_providers_shared.so": {
+      "member": "onnxruntime-linux-x64-1.24.2/lib/libonnxruntime_providers_shared.so",
+      "sha256": "086ec1d5388f64153d9c63470d126693db9a182c8ce236d3a1119068471b8a0d",
+      "bytes": 14632
+    }
+  },
+  "setup": [
+    {
+      "method": "import_model_in_place",
+      "success": true,
+      "response": {
+        "error": null,
+        "model_id": "embedding/playground/untrained",
+        "model_path": "embedding/playground/untrained",
+        "path": "/tmp/pumas-playground-onnx-V2lYRH/shared-resources/models/embedding/playground/untrained",
+        "security_tier": null,
+        "success": true
+      }
+    },
+    {
+      "method": "upsert_runtime_profile",
+      "success": true,
+      "response": {
+        "profile_id": "playground-onnx-smoke",
+        "snapshot_required": true,
+        "success": true
+      }
+    },
+    {
+      "method": "launch_runtime_profile",
+      "success": true,
+      "response": {
+        "ready": true,
+        "success": true
+      }
+    },
+    {
+      "method": "serve_model",
+      "success": true,
+      "loaded": true,
+      "response": {
+        "loaded": true,
+        "loaded_models_unchanged": false,
+        "snapshot": {
+          "cursor": "serving:2",
+          "endpoint": {
+            "endpoint_mode": "pumas_gateway",
+            "endpoint_url": "http://127.0.0.1:39761/v1",
+            "message": "Use the Pumas /v1 serving gateway for loaded models",
+            "model_count": 1
+          },
+          "last_errors": [],
+          "router_profiles": [],
+          "schema_version": 1,
+          "served_models": [
+            {
+              "context_size": 256,
+              "device_mode": "auto",
+              "keep_loaded": true,
+              "load_state": "loaded",
+              "model_alias": "untrained-token-tiling-fixture",
+              "model_id": "embedding/playground/untrained",
+              "profile_id": "playground-onnx-smoke",
+              "provider": "onnx_runtime"
+            }
+          ]
+        },
+        "status": {
+          "context_size": 256,
+          "device_mode": "auto",
+          "keep_loaded": true,
+          "load_state": "loaded",
+          "model_alias": "untrained-token-tiling-fixture",
+          "model_id": "embedding/playground/untrained",
+          "profile_id": "playground-onnx-smoke",
+          "provider": "onnx_runtime"
+        },
+        "success": true
+      }
+    },
+    {
+      "method": "unserve_model",
+      "success": true,
+      "unloaded": true,
+      "response": {
+        "snapshot": {
+          "cursor": "serving:3",
+          "endpoint": {
+            "endpoint_mode": "not_configured",
+            "message": "Serving endpoint is not configured",
+            "model_count": 0
+          },
+          "last_errors": [],
+          "router_profiles": [],
+          "schema_version": 1,
+          "served_models": []
+        },
+        "success": true,
+        "unloaded": true
+      }
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/.well-known/pumas",
+      "request": null,
+      "started_at": "2026-10-11T21:17:55.607Z",
+      "execution": "real_http",
+      "http_status": 200,
+      "response_bytes": 1789,
+      "outcome": "observed",
+      "response": {
+        "advertisement_schema_version": 1,
+        "service_generation": "e99d58c3-f239-4fe9-b02c-ff5deeda9123",
+        "instance": {
+          "discovery_schema_version": 1,
+          "build_info": {
+            "build_info_schema_version": 1,
+            "component": "pumas-library",
+            "package_version": "0.8.0-rc.1",
+            "compiled_features": [
+              "pumas-library/hf-client",
+              "pumas-library/process-manager",
+              "pumas-library/gpu-monitor",
+              "pumas-library/onnx-runtime"
+            ],
+            "protocols": [
+              {
+                "name": "pumas.local-ipc",
+                "versions": [
+                  1
+                ]
+              }
+            ],
+            "schemas": [
+              {
+                "name": "pumas.build-info",
+                "version": 1
+              },
+              {
+                "name": "pumas.discovery",
+                "version": 1
+              },
+              {
+                "name": "pumas.model-ref",
+                "version": 1
+              },
+              {
+                "name": "pumas.model-selector",
+                "version": 1
+              }
+            ]
+          },
+          "registry_library_id": "c28f8f9c-7e8e-4b8c-914f-f77c8c87dfdf",
+          "library_root": "/tmp/pumas-playground-onnx-V2lYRH",
+          "generation": "2026-10-11T21:17:55.344910623+00:00",
+          "pumas_version": "0.8.0-rc.1",
+          "protocols": [
+            {
+              "name": "pumas.local-ipc",
+              "versions": [
+                1
+              ]
+            }
+          ],
+          "capabilities": [
+            "model.query@1",
+            "model.get.local@1",
+            "model.selector@1",
+            "artifact.resolve@1"
+          ],
+          "model_ref_schema_version": 1,
+          "selector_schema_version": 1
+        },
+        "endpoint": "http://127.0.0.1:39761/",
+        "build_info": {
+          "build_info_schema_version": 1,
+          "component": "pumas-rpc",
+          "package_version": "0.8.0-rc.1",
+          "compiled_features": [
+            "pumas-library/hf-client",
+            "pumas-library/process-manager",
+            "pumas-library/gpu-monitor",
+            "pumas-library/onnx-runtime",
+            "pumas-rpc/inference-plugins"
+          ],
+          "protocols": [
+            {
+              "name": "pumas.local-ipc",
+              "versions": [
+                1
+              ]
+            },
+            {
+              "name": "pumas.local-http",
+              "versions": [
+                1
+              ]
+            }
+          ],
+          "schemas": [
+            {
+              "name": "pumas.build-info",
+              "version": 1
+            },
+            {
+              "name": "pumas.discovery",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-ref",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-selector",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-advertisement",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-operations.image-to-text",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-admission-fence",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-owner-retention",
+              "version": 1
+            }
+          ]
+        }
+      },
+      "elapsed_ms": 3
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "request": null,
+      "started_at": "2026-10-11T21:17:55.610Z",
+      "execution": "real_http",
+      "http_status": 200,
+      "response_bytes": 114,
+      "outcome": "observed",
+      "response": {
+        "data": [
+          {
+            "created": 0,
+            "id": "untrained-token-tiling-fixture",
+            "object": "model",
+            "owned_by": "pumas"
+          }
+        ],
+        "object": "list"
+      },
+      "elapsed_ms": 2
+    },
+    {
+      "method": "POST",
+      "path": "/rpc",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "playground-plugins",
+        "method": "get_plugins",
+        "params": {}
+      },
+      "started_at": "2026-10-11T21:17:55.612Z",
+      "execution": "real_http",
+      "http_status": 200,
+      "response_bytes": 82,
+      "outcome": "observed",
+      "response": {
+        "jsonrpc": "2.0",
+        "result": {
+          "plugins": [],
+          "success": true
+        },
+        "id": "playground-plugins"
+      },
+      "elapsed_ms": 2
+    },
+    {
+      "method": "GET",
+      "path": "/v1/capabilities?model=untrained-token-tiling-fixture&profile=playground-onnx-smoke",
+      "request": null,
+      "started_at": "2026-10-11T21:17:55.618Z",
+      "execution": "real_http",
+      "http_status": 200,
+      "response_bytes": 3095,
+      "outcome": "observed",
+      "response": {
+        "supported_contract_versions": [
+          1
+        ],
+        "model": "untrained-token-tiling-fixture",
+        "profile": "playground-onnx-smoke",
+        "max_request_bytes": 33554432,
+        "max_response_bytes": 33554432,
+        "max_stream_event_bytes": 262144,
+        "capabilities": [
+          {
+            "capability": "chat_generation",
+            "semantic_task": "chat_generation",
+            "input_formats": [
+              "messages_text"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              }
+            ]
+          },
+          {
+            "capability": "text_generation",
+            "semantic_task": "text_generation",
+            "input_formats": [
+              "text"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              }
+            ]
+          },
+          {
+            "capability": "text_embedding",
+            "semantic_task": "text_embedding",
+            "input_formats": [
+              "text",
+              "text_batch"
+            ],
+            "output_formats": [
+              "embeddings_float32"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "available"
+            },
+            "option_bounds": [
+              {
+                "option": "dimensions",
+                "minimum": 1,
+                "maximum": 8192
+              },
+              {
+                "option": "input_count",
+                "minimum": 1,
+                "maximum": 128
+              },
+              {
+                "option": "input_characters",
+                "minimum": 0,
+                "maximum": 65536
+              }
+            ]
+          },
+          {
+            "capability": "image_generation",
+            "semantic_task": "text_to_image",
+            "input_formats": [
+              "text"
+            ],
+            "output_formats": [
+              "png_base64"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "width",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "height",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "seed",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "option": "input_characters",
+                "minimum": 1,
+                "maximum": 4000
+              }
+            ]
+          },
+          {
+            "capability": "audio_transcription",
+            "semantic_task": "speech_to_text",
+            "input_formats": [
+              "pcm_s16le",
+              "pcm_f32le"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unqualified_audio_runtime"
+            },
+            "option_bounds": [
+              {
+                "option": "max_output_tokens",
+                "minimum": 512,
+                "maximum": 512
+              }
+            ]
+          },
+          {
+            "capability": "audio_classification",
+            "semantic_task": "audio_classification",
+            "input_formats": [
+              "pcm_s16le",
+              "pcm_f32le"
+            ],
+            "output_formats": [
+              "labels"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": []
+          },
+          {
+            "capability": "image_to_text",
+            "semantic_task": "image_to_text",
+            "input_formats": [
+              "png_base64",
+              "jpeg_base64",
+              "messages_image"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 2048
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              },
+              {
+                "option": "image_bytes",
+                "minimum": 1,
+                "maximum": 8388608
+              },
+              {
+                "option": "image_pixels",
+                "minimum": 1,
+                "maximum": 4194304
+              },
+              {
+                "option": "image_count",
+                "minimum": 1,
+                "maximum": 4
+              },
+              {
+                "option": "width",
+                "minimum": 1,
+                "maximum": 4096
+              },
+              {
+                "option": "height",
+                "minimum": 1,
+                "maximum": 4096
+              }
+            ]
+          }
+        ]
+      },
+      "elapsed_ms": 5
+    },
+    {
+      "method": "GET",
+      "path": "/v1/capabilities?model=untrained-token-tiling-fixture&profile=playground-onnx-smoke",
+      "request": null,
+      "started_at": "2026-10-11T21:17:55.628Z",
+      "execution": "real_http",
+      "http_status": 200,
+      "response_bytes": 3095,
+      "outcome": "observed",
+      "response": {
+        "supported_contract_versions": [
+          1
+        ],
+        "model": "untrained-token-tiling-fixture",
+        "profile": "playground-onnx-smoke",
+        "max_request_bytes": 33554432,
+        "max_response_bytes": 33554432,
+        "max_stream_event_bytes": 262144,
+        "capabilities": [
+          {
+            "capability": "chat_generation",
+            "semantic_task": "chat_generation",
+            "input_formats": [
+              "messages_text"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              }
+            ]
+          },
+          {
+            "capability": "text_generation",
+            "semantic_task": "text_generation",
+            "input_formats": [
+              "text"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              }
+            ]
+          },
+          {
+            "capability": "text_embedding",
+            "semantic_task": "text_embedding",
+            "input_formats": [
+              "text",
+              "text_batch"
+            ],
+            "output_formats": [
+              "embeddings_float32"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "available"
+            },
+            "option_bounds": [
+              {
+                "option": "dimensions",
+                "minimum": 1,
+                "maximum": 8192
+              },
+              {
+                "option": "input_count",
+                "minimum": 1,
+                "maximum": 128
+              },
+              {
+                "option": "input_characters",
+                "minimum": 0,
+                "maximum": 65536
+              }
+            ]
+          },
+          {
+            "capability": "image_generation",
+            "semantic_task": "text_to_image",
+            "input_formats": [
+              "text"
+            ],
+            "output_formats": [
+              "png_base64"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "width",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "height",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "seed",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "option": "input_characters",
+                "minimum": 1,
+                "maximum": 4000
+              }
+            ]
+          },
+          {
+            "capability": "audio_transcription",
+            "semantic_task": "speech_to_text",
+            "input_formats": [
+              "pcm_s16le",
+              "pcm_f32le"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unqualified_audio_runtime"
+            },
+            "option_bounds": [
+              {
+                "option": "max_output_tokens",
+                "minimum": 512,
+                "maximum": 512
+              }
+            ]
+          },
+          {
+            "capability": "audio_classification",
+            "semantic_task": "audio_classification",
+            "input_formats": [
+              "pcm_s16le",
+              "pcm_f32le"
+            ],
+            "output_formats": [
+              "labels"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": []
+          },
+          {
+            "capability": "image_to_text",
+            "semantic_task": "image_to_text",
+            "input_formats": [
+              "png_base64",
+              "jpeg_base64",
+              "messages_image"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 2048
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              },
+              {
+                "option": "image_bytes",
+                "minimum": 1,
+                "maximum": 8388608
+              },
+              {
+                "option": "image_pixels",
+                "minimum": 1,
+                "maximum": 4194304
+              },
+              {
+                "option": "image_count",
+                "minimum": 1,
+                "maximum": 4
+              },
+              {
+                "option": "width",
+                "minimum": 1,
+                "maximum": 4096
+              },
+              {
+                "option": "height",
+                "minimum": 1,
+                "maximum": 4096
+              }
+            ]
+          }
+        ]
+      },
+      "elapsed_ms": 4
+    },
+    {
+      "method": "POST",
+      "path": "/v1/model-operations",
+      "request": {
+        "contract_version": 1,
+        "request_id": "onnx-smoke-real-request",
+        "model": "untrained-token-tiling-fixture",
+        "profile": "playground-onnx-smoke",
+        "capability": "text_embedding",
+        "input": {
+          "kind": "text",
+          "text": "hello world"
+        },
+        "output": "embeddings_float32",
+        "options": {
+          "kind": "embeddings",
+          "dimensions": 256
+        },
+        "stream": false
+      },
+      "started_at": "2026-10-11T21:17:55.632Z",
+      "execution": "real_http",
+      "http_status": 200,
+      "response_bytes": 1898,
+      "outcome": "completed",
+      "response": {
+        "contract_version": 1,
+        "request_id": "onnx-smoke-real-request",
+        "result": {
+          "kind": "embeddings",
+          "vectors": [
+            [
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625,
+              0.0625
+            ]
+          ]
+        }
+      },
+      "elapsed_ms": 4
+    }
+  ],
+  "cleanup": {
+    "unload": "passed",
+    "exit_code": 0
+  },
+  "result": {
+    "state": "succeeded",
+    "actual_vectors": [
+      [
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625,
+        0.0625
+      ]
+    ],
+    "expected_component": 0.0625,
+    "oracle": "Source graph token-tiling + mean pooling + L2 normalization",
+    "max_absolute_error": 0
+  },
+  "fixture_record": {
+    "schema_version": 1,
+    "scope": "synthetic untrained graph; execution and lifecycle only",
+    "pretrained_model_acceptance": false,
+    "onnx_ir_version": 8,
+    "opset": 13,
+    "tensor_dtype": "float32; the model_fp16.onnx filename is the legacy harness input",
+    "files": {
+      "onnx/model_fp16.onnx": {
+        "sha256": "3639dc4b3eca8394bc178e96f322d90ca76b93999e409b9f173d6c65094791f5",
+        "bytes": 505
+      },
+      "config.json": {
+        "sha256": "e3e7617ea4e848f8a3e0dbe696d216310931811c530b91e5576d0819ed07d6b2",
+        "bytes": 64
+      },
+      "tokenizer.json": {
+        "sha256": "2a69e7c2c3e125803b093da488b56d4cdb0c9aca5377a7b60d1609720fdc06fb",
+        "bytes": 284
+      },
+      "tokenizer_config.json": {
+        "sha256": "19effa13060dc79faeae396705ec892b17614bd74a36623faf7feb078ea6673c",
+        "bytes": 48
+      }
+    }
+  },
+  "runtime_mapping": "selected pinned library observed in real Pumas process",
+  "build": {
+    "build_info_schema_version": 1,
+    "component": "pumas-rpc",
+    "package_version": "0.8.0-rc.1",
+    "compiled_features": [
+      "pumas-library/hf-client",
+      "pumas-library/process-manager",
+      "pumas-library/gpu-monitor",
+      "pumas-library/onnx-runtime",
+      "pumas-rpc/inference-plugins"
+    ],
+    "protocols": [
+      {
+        "name": "pumas.local-ipc",
+        "versions": [
+          1
+        ]
+      },
+      {
+        "name": "pumas.local-http",
+        "versions": [
+          1
+        ]
+      }
+    ],
+    "schemas": [
+      {
+        "name": "pumas.build-info",
+        "version": 1
+      },
+      {
+        "name": "pumas.discovery",
+        "version": 1
+      },
+      {
+        "name": "pumas.model-ref",
+        "version": 1
+      },
+      {
+        "name": "pumas.model-selector",
+        "version": 1
+      },
+      {
+        "name": "pumas.http-advertisement",
+        "version": 1
+      },
+      {
+        "name": "pumas.model-operations.image-to-text",
+        "version": 1
+      },
+      {
+        "name": "pumas.http-admission-fence",
+        "version": 1
+      },
+      {
+        "name": "pumas.http-owner-retention",
+        "version": 1
+      }
+    ]
+  },
+  "fence": {
+    "instance": "2026-10-11T21:17:55.344910623+00:00",
+    "service": "e99d58c3-f239-4fe9-b02c-ff5deeda9123"
+  },
+  "browser_receipt": {
+    "format": "pumas-playground-receipt-v1",
+    "captured_at": "2026-10-11T21:17:56.797Z",
+    "endpoint": "http://127.0.0.1:39761",
+    "build": {
+      "build_info_schema_version": 1,
+      "component": "pumas-rpc",
+      "package_version": "0.8.0-rc.1",
+      "compiled_features": [
+        "pumas-library/hf-client",
+        "pumas-library/process-manager",
+        "pumas-library/gpu-monitor",
+        "pumas-library/onnx-runtime",
+        "pumas-rpc/inference-plugins"
+      ],
+      "protocols": [
+        {
+          "name": "pumas.local-ipc",
+          "versions": [
+            1
+          ]
+        },
+        {
+          "name": "pumas.local-http",
+          "versions": [
+            1
+          ]
+        }
+      ],
+      "schemas": [
+        {
+          "name": "pumas.build-info",
+          "version": 1
+        },
+        {
+          "name": "pumas.discovery",
+          "version": 1
+        },
+        {
+          "name": "pumas.model-ref",
+          "version": 1
+        },
+        {
+          "name": "pumas.model-selector",
+          "version": 1
+        },
+        {
+          "name": "pumas.http-advertisement",
+          "version": 1
+        },
+        {
+          "name": "pumas.model-operations.image-to-text",
+          "version": 1
+        },
+        {
+          "name": "pumas.http-admission-fence",
+          "version": 1
+        },
+        {
+          "name": "pumas.http-owner-retention",
+          "version": 1
+        }
+      ]
+    },
+    "fence": {
+      "instance": "2026-10-11T21:17:55.344910623+00:00",
+      "service": "e99d58c3-f239-4fe9-b02c-ff5deeda9123"
+    },
+    "evidence": "Actual HTTP exchanges; inference success is only a validated terminal result.",
+    "receipts": [
+      {
+        "method": "GET",
+        "path": "/v1/capabilities?model=untrained-token-tiling-fixture&profile=playground-onnx-smoke",
+        "request": null,
+        "started_at": "2026-10-11T21:17:56.780Z",
+        "execution": "real_http",
+        "http_status": 200,
+        "response_bytes": 3095,
+        "outcome": "observed",
+        "response": {
+          "supported_contract_versions": [
+            1
+          ],
+          "model": "untrained-token-tiling-fixture",
+          "profile": "playground-onnx-smoke",
+          "max_request_bytes": 33554432,
+          "max_response_bytes": 33554432,
+          "max_stream_event_bytes": 262144,
+          "capabilities": [
+            {
+              "capability": "chat_generation",
+              "semantic_task": "chat_generation",
+              "input_formats": [
+                "messages_text"
+              ],
+              "output_formats": [
+                "text"
+              ],
+              "streaming": false,
+              "availability": {
+                "state": "unavailable",
+                "reason": "unsupported_adapter"
+              },
+              "option_bounds": [
+                {
+                  "option": "max_tokens",
+                  "minimum": 1,
+                  "maximum": 4294967295
+                },
+                {
+                  "option": "temperature",
+                  "minimum": 0,
+                  "maximum": 2
+                },
+                {
+                  "option": "top_p",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              ]
+            },
+            {
+              "capability": "text_generation",
+              "semantic_task": "text_generation",
+              "input_formats": [
+                "text"
+              ],
+              "output_formats": [
+                "text"
+              ],
+              "streaming": false,
+              "availability": {
+                "state": "unavailable",
+                "reason": "unsupported_adapter"
+              },
+              "option_bounds": [
+                {
+                  "option": "max_tokens",
+                  "minimum": 1,
+                  "maximum": 4294967295
+                },
+                {
+                  "option": "temperature",
+                  "minimum": 0,
+                  "maximum": 2
+                },
+                {
+                  "option": "top_p",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              ]
+            },
+            {
+              "capability": "text_embedding",
+              "semantic_task": "text_embedding",
+              "input_formats": [
+                "text",
+                "text_batch"
+              ],
+              "output_formats": [
+                "embeddings_float32"
+              ],
+              "streaming": false,
+              "availability": {
+                "state": "available"
+              },
+              "option_bounds": [
+                {
+                  "option": "dimensions",
+                  "minimum": 1,
+                  "maximum": 8192
+                },
+                {
+                  "option": "input_count",
+                  "minimum": 1,
+                  "maximum": 128
+                },
+                {
+                  "option": "input_characters",
+                  "minimum": 0,
+                  "maximum": 65536
+                }
+              ]
+            },
+            {
+              "capability": "image_generation",
+              "semantic_task": "text_to_image",
+              "input_formats": [
+                "text"
+              ],
+              "output_formats": [
+                "png_base64"
+              ],
+              "streaming": false,
+              "availability": {
+                "state": "unavailable",
+                "reason": "unsupported_adapter"
+              },
+              "option_bounds": [
+                {
+                  "option": "width",
+                  "minimum": 1,
+                  "maximum": 4294967295
+                },
+                {
+                  "option": "height",
+                  "minimum": 1,
+                  "maximum": 4294967295
+                },
+                {
+                  "option": "seed",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                {
+                  "option": "input_characters",
+                  "minimum": 1,
+                  "maximum": 4000
+                }
+              ]
+            },
+            {
+              "capability": "audio_transcription",
+              "semantic_task": "speech_to_text",
+              "input_formats": [
+                "pcm_s16le",
+                "pcm_f32le"
+              ],
+              "output_formats": [
+                "text"
+              ],
+              "streaming": false,
+              "availability": {
+                "state": "unavailable",
+                "reason": "unqualified_audio_runtime"
+              },
+              "option_bounds": [
+                {
+                  "option": "max_output_tokens",
+                  "minimum": 512,
+                  "maximum": 512
+                }
+              ]
+            },
+            {
+              "capability": "audio_classification",
+              "semantic_task": "audio_classification",
+              "input_formats": [
+                "pcm_s16le",
+                "pcm_f32le"
+              ],
+              "output_formats": [
+                "labels"
+              ],
+              "streaming": false,
+              "availability": {
+                "state": "unavailable",
+                "reason": "unsupported_adapter"
+              },
+              "option_bounds": []
+            },
+            {
+              "capability": "image_to_text",
+              "semantic_task": "image_to_text",
+              "input_formats": [
+                "png_base64",
+                "jpeg_base64",
+                "messages_image"
+              ],
+              "output_formats": [
+                "text"
+              ],
+              "streaming": false,
+              "availability": {
+                "state": "unavailable",
+                "reason": "unsupported_adapter"
+              },
+              "option_bounds": [
+                {
+                  "option": "max_tokens",
+                  "minimum": 1,
+                  "maximum": 2048
+                },
+                {
+                  "option": "temperature",
+                  "minimum": 0,
+                  "maximum": 2
+                },
+                {
+                  "option": "top_p",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                {
+                  "option": "image_bytes",
+                  "minimum": 1,
+                  "maximum": 8388608
+                },
+                {
+                  "option": "image_pixels",
+                  "minimum": 1,
+                  "maximum": 4194304
+                },
+                {
+                  "option": "image_count",
+                  "minimum": 1,
+                  "maximum": 4
+                },
+                {
+                  "option": "width",
+                  "minimum": 1,
+                  "maximum": 4096
+                },
+                {
+                  "option": "height",
+                  "minimum": 1,
+                  "maximum": 4096
+                }
+              ]
+            }
+          ]
+        },
+        "elapsed_ms": 6
+      },
+      {
+        "method": "POST",
+        "path": "/v1/model-operations",
+        "request": {
+          "contract_version": 1,
+          "request_id": "02079576-8b1e-415b-a950-5f03fe7a87c9",
+          "model": "untrained-token-tiling-fixture",
+          "profile": "playground-onnx-smoke",
+          "capability": "text_embedding",
+          "input": {
+            "kind": "text",
+            "text": "hello world"
+          },
+          "output": "embeddings_float32",
+          "options": {
+            "kind": "embeddings",
+            "dimensions": 256
+          },
+          "stream": false
+        },
+        "started_at": "2026-10-11T21:17:56.786Z",
+        "execution": "real_http",
+        "http_status": 200,
+        "response_bytes": 1911,
+        "outcome": "completed",
+        "response": {
+          "contract_version": 1,
+          "request_id": "02079576-8b1e-415b-a950-5f03fe7a87c9",
+          "result": {
+            "kind": "embeddings",
+            "vectors": [
+              [
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625,
+                0.0625
+              ]
+            ]
+          }
+        },
+        "elapsed_ms": 7
+      }
+    ]
+  },
+  "browser": {
+    "version": "151.0.7922.173",
+    "real_ui_request": "passed",
+    "visible_result": "passed"
+  }
+}

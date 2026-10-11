@@ -157,5 +157,36 @@ node tools/model-playground/test/real-observation-smoke.mjs
 
 Supplying the two browser environment variables also captures that real runtime's
 UI observation. This check launches and stops only its own disposable instance.
+
+For a real Linux x86_64 CPU embedding smoke, build current public Pumas with normal
+registry fetching and explicitly stage its pinned ONNX Runtime. A CMake executable
+must be on PATH for the native build. The stage command downloads an approximately
+8 MB native runtime archive; neither command acquires pretrained model weights.
+
+```bash
+cargo build --manifest-path rust/Cargo.toml -p pumas-rpc --locked
+python3 scripts/release/onnx_runtime_stage.py \
+  --target linux-x86_64 --download --output-dir /tmp/playground-ort-runtime
+PUMAS_RPC_BINARY="$PWD/rust/target/debug/pumas-rpc" \
+PUMAS_ORT_DIR=/tmp/playground-ort-runtime \
+node tools/model-playground/test/real-onnx-smoke.mjs
+```
+
+Adjust the binary path if `CARGO_TARGET_DIR` is set. This opt-in smoke verifies the
+runtime library hashes, creates Pumas' existing 505-byte **untrained** ONNX graph,
+and uses public setup RPCs in a fresh temporary library, registry and XDG state.
+It imports, serves, calls the playground API, checks the actual 256-dimensional
+embedding against the graph's numerical oracle, unserves, and checks clean process
+shutdown. This lifecycle setup is confined to the test; the normal UI cannot
+perform it. Add the same two browser environment variables to also exercise the
+real UI and capture `evidence/real-untrained-onnx-browser.png`.
+
+The graph tiles token values and has no learned semantic weights. It qualifies the
+CPU execution path, not embedding quality or a pretrained model. The smoke never
+downloads models or substitutes responses. Set `PUMAS_SMOKE_MIXED_BATCH=1` to probe
+`["hello world", "world"]`; the inspected public runtime returns `provider_failure`
+with unknown outcome for this case, so that probe currently exits nonzero and
+writes a separate failure receipt. The successful single-input evidence is retained.
+
 See [verification evidence](evidence/verification.md) for actual measured coverage,
 screenshots, compatibility gaps, and the unpublished-fix dependency.

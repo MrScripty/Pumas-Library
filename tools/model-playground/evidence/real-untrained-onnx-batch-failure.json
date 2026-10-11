@@ -1,0 +1,952 @@
+{
+  "observed_at": "2026-10-11T21:20:06.634Z",
+  "qualification": "failed_real_untrained_onnx_attempt",
+  "checkout_commit": "bacdf3e2bcdd9c292e025549f8f7e45efa170c39",
+  "public_rust_tree": "9d9d89b53795b165a1317a9e968040337ca69af6",
+  "semantic_model_quality": "not_qualified",
+  "model_download_bytes": 0,
+  "fixture": "Pumas synthetic token-tiling ONNX graph; UNTRAINED, not Pantograph BERT",
+  "binary_sha256": "b1a05546d65d35286c05c1ade3173d18ea151e3e71a54aff18d9bda7ba821ca4",
+  "runtime_version": "1.24.2",
+  "runtime_archive_sha256": "43725474ba5663642e17684717946693850e2005efbd724ac72da278fead25e6",
+  "runtime_libraries": {
+    "libonnxruntime.so": {
+      "member": "onnxruntime-linux-x64-1.24.2/lib/libonnxruntime.so.1.24.2",
+      "sha256": "ffc84d48e845cf0b562ba4ea5ca32aaafc0d4069019fef4f63095b307d0270ad",
+      "bytes": 22065056
+    },
+    "libonnxruntime_providers_shared.so": {
+      "member": "onnxruntime-linux-x64-1.24.2/lib/libonnxruntime_providers_shared.so",
+      "sha256": "086ec1d5388f64153d9c63470d126693db9a182c8ce236d3a1119068471b8a0d",
+      "bytes": 14632
+    }
+  },
+  "setup": [
+    {
+      "method": "import_model_in_place",
+      "success": true,
+      "response": {
+        "error": null,
+        "model_id": "embedding/playground/untrained",
+        "model_path": "embedding/playground/untrained",
+        "path": "/tmp/pumas-playground-onnx-g4e6d1/shared-resources/models/embedding/playground/untrained",
+        "security_tier": null,
+        "success": true
+      }
+    },
+    {
+      "method": "upsert_runtime_profile",
+      "success": true,
+      "response": {
+        "profile_id": "playground-onnx-smoke",
+        "snapshot_required": true,
+        "success": true
+      }
+    },
+    {
+      "method": "launch_runtime_profile",
+      "success": true,
+      "response": {
+        "ready": true,
+        "success": true
+      }
+    },
+    {
+      "method": "serve_model",
+      "success": true,
+      "loaded": true,
+      "response": {
+        "loaded": true,
+        "loaded_models_unchanged": false,
+        "snapshot": {
+          "cursor": "serving:2",
+          "endpoint": {
+            "endpoint_mode": "pumas_gateway",
+            "endpoint_url": "http://127.0.0.1:42437/v1",
+            "message": "Use the Pumas /v1 serving gateway for loaded models",
+            "model_count": 1
+          },
+          "last_errors": [],
+          "router_profiles": [],
+          "schema_version": 1,
+          "served_models": [
+            {
+              "context_size": 256,
+              "device_mode": "auto",
+              "keep_loaded": true,
+              "load_state": "loaded",
+              "model_alias": "untrained-token-tiling-fixture",
+              "model_id": "embedding/playground/untrained",
+              "profile_id": "playground-onnx-smoke",
+              "provider": "onnx_runtime"
+            }
+          ]
+        },
+        "status": {
+          "context_size": 256,
+          "device_mode": "auto",
+          "keep_loaded": true,
+          "load_state": "loaded",
+          "model_alias": "untrained-token-tiling-fixture",
+          "model_id": "embedding/playground/untrained",
+          "profile_id": "playground-onnx-smoke",
+          "provider": "onnx_runtime"
+        },
+        "success": true
+      }
+    },
+    {
+      "method": "unserve_model",
+      "success": true,
+      "unloaded": true,
+      "response": {
+        "snapshot": {
+          "cursor": "serving:3",
+          "endpoint": {
+            "endpoint_mode": "not_configured",
+            "message": "Serving endpoint is not configured",
+            "model_count": 0
+          },
+          "last_errors": [],
+          "router_profiles": [],
+          "schema_version": 1,
+          "served_models": []
+        },
+        "success": true,
+        "unloaded": true
+      }
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/.well-known/pumas",
+      "request": null,
+      "started_at": "2026-10-11T21:20:07.830Z",
+      "execution": "real_http",
+      "http_status": 200,
+      "response_bytes": 1789,
+      "outcome": "observed",
+      "response": {
+        "advertisement_schema_version": 1,
+        "service_generation": "7e8fd241-71bd-4a3e-bad0-55725f15a4e8",
+        "instance": {
+          "discovery_schema_version": 1,
+          "build_info": {
+            "build_info_schema_version": 1,
+            "component": "pumas-library",
+            "package_version": "0.8.0-rc.1",
+            "compiled_features": [
+              "pumas-library/hf-client",
+              "pumas-library/process-manager",
+              "pumas-library/gpu-monitor",
+              "pumas-library/onnx-runtime"
+            ],
+            "protocols": [
+              {
+                "name": "pumas.local-ipc",
+                "versions": [
+                  1
+                ]
+              }
+            ],
+            "schemas": [
+              {
+                "name": "pumas.build-info",
+                "version": 1
+              },
+              {
+                "name": "pumas.discovery",
+                "version": 1
+              },
+              {
+                "name": "pumas.model-ref",
+                "version": 1
+              },
+              {
+                "name": "pumas.model-selector",
+                "version": 1
+              }
+            ]
+          },
+          "registry_library_id": "f7b08027-4a76-4e5e-89d2-2a9a2c25a020",
+          "library_root": "/tmp/pumas-playground-onnx-g4e6d1",
+          "generation": "2026-10-11T21:20:07.564330351+00:00",
+          "pumas_version": "0.8.0-rc.1",
+          "protocols": [
+            {
+              "name": "pumas.local-ipc",
+              "versions": [
+                1
+              ]
+            }
+          ],
+          "capabilities": [
+            "model.query@1",
+            "model.get.local@1",
+            "model.selector@1",
+            "artifact.resolve@1"
+          ],
+          "model_ref_schema_version": 1,
+          "selector_schema_version": 1
+        },
+        "endpoint": "http://127.0.0.1:42437/",
+        "build_info": {
+          "build_info_schema_version": 1,
+          "component": "pumas-rpc",
+          "package_version": "0.8.0-rc.1",
+          "compiled_features": [
+            "pumas-library/hf-client",
+            "pumas-library/process-manager",
+            "pumas-library/gpu-monitor",
+            "pumas-library/onnx-runtime",
+            "pumas-rpc/inference-plugins"
+          ],
+          "protocols": [
+            {
+              "name": "pumas.local-ipc",
+              "versions": [
+                1
+              ]
+            },
+            {
+              "name": "pumas.local-http",
+              "versions": [
+                1
+              ]
+            }
+          ],
+          "schemas": [
+            {
+              "name": "pumas.build-info",
+              "version": 1
+            },
+            {
+              "name": "pumas.discovery",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-ref",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-selector",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-advertisement",
+              "version": 1
+            },
+            {
+              "name": "pumas.model-operations.image-to-text",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-admission-fence",
+              "version": 1
+            },
+            {
+              "name": "pumas.http-owner-retention",
+              "version": 1
+            }
+          ]
+        }
+      },
+      "elapsed_ms": 2
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "request": null,
+      "started_at": "2026-10-11T21:20:07.832Z",
+      "execution": "real_http",
+      "http_status": 200,
+      "response_bytes": 114,
+      "outcome": "observed",
+      "response": {
+        "data": [
+          {
+            "created": 0,
+            "id": "untrained-token-tiling-fixture",
+            "object": "model",
+            "owned_by": "pumas"
+          }
+        ],
+        "object": "list"
+      },
+      "elapsed_ms": 1
+    },
+    {
+      "method": "POST",
+      "path": "/rpc",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "playground-plugins",
+        "method": "get_plugins",
+        "params": {}
+      },
+      "started_at": "2026-10-11T21:20:07.834Z",
+      "execution": "real_http",
+      "http_status": 200,
+      "response_bytes": 82,
+      "outcome": "observed",
+      "response": {
+        "jsonrpc": "2.0",
+        "result": {
+          "plugins": [],
+          "success": true
+        },
+        "id": "playground-plugins"
+      },
+      "elapsed_ms": 2
+    },
+    {
+      "method": "GET",
+      "path": "/v1/capabilities?model=untrained-token-tiling-fixture&profile=playground-onnx-smoke",
+      "request": null,
+      "started_at": "2026-10-11T21:20:07.840Z",
+      "execution": "real_http",
+      "http_status": 200,
+      "response_bytes": 3095,
+      "outcome": "observed",
+      "response": {
+        "supported_contract_versions": [
+          1
+        ],
+        "model": "untrained-token-tiling-fixture",
+        "profile": "playground-onnx-smoke",
+        "max_request_bytes": 33554432,
+        "max_response_bytes": 33554432,
+        "max_stream_event_bytes": 262144,
+        "capabilities": [
+          {
+            "capability": "chat_generation",
+            "semantic_task": "chat_generation",
+            "input_formats": [
+              "messages_text"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              }
+            ]
+          },
+          {
+            "capability": "text_generation",
+            "semantic_task": "text_generation",
+            "input_formats": [
+              "text"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              }
+            ]
+          },
+          {
+            "capability": "text_embedding",
+            "semantic_task": "text_embedding",
+            "input_formats": [
+              "text",
+              "text_batch"
+            ],
+            "output_formats": [
+              "embeddings_float32"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "available"
+            },
+            "option_bounds": [
+              {
+                "option": "dimensions",
+                "minimum": 1,
+                "maximum": 8192
+              },
+              {
+                "option": "input_count",
+                "minimum": 1,
+                "maximum": 128
+              },
+              {
+                "option": "input_characters",
+                "minimum": 0,
+                "maximum": 65536
+              }
+            ]
+          },
+          {
+            "capability": "image_generation",
+            "semantic_task": "text_to_image",
+            "input_formats": [
+              "text"
+            ],
+            "output_formats": [
+              "png_base64"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "width",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "height",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "seed",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "option": "input_characters",
+                "minimum": 1,
+                "maximum": 4000
+              }
+            ]
+          },
+          {
+            "capability": "audio_transcription",
+            "semantic_task": "speech_to_text",
+            "input_formats": [
+              "pcm_s16le",
+              "pcm_f32le"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unqualified_audio_runtime"
+            },
+            "option_bounds": [
+              {
+                "option": "max_output_tokens",
+                "minimum": 512,
+                "maximum": 512
+              }
+            ]
+          },
+          {
+            "capability": "audio_classification",
+            "semantic_task": "audio_classification",
+            "input_formats": [
+              "pcm_s16le",
+              "pcm_f32le"
+            ],
+            "output_formats": [
+              "labels"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": []
+          },
+          {
+            "capability": "image_to_text",
+            "semantic_task": "image_to_text",
+            "input_formats": [
+              "png_base64",
+              "jpeg_base64",
+              "messages_image"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 2048
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              },
+              {
+                "option": "image_bytes",
+                "minimum": 1,
+                "maximum": 8388608
+              },
+              {
+                "option": "image_pixels",
+                "minimum": 1,
+                "maximum": 4194304
+              },
+              {
+                "option": "image_count",
+                "minimum": 1,
+                "maximum": 4
+              },
+              {
+                "option": "width",
+                "minimum": 1,
+                "maximum": 4096
+              },
+              {
+                "option": "height",
+                "minimum": 1,
+                "maximum": 4096
+              }
+            ]
+          }
+        ]
+      },
+      "elapsed_ms": 10
+    },
+    {
+      "method": "GET",
+      "path": "/v1/capabilities?model=untrained-token-tiling-fixture&profile=playground-onnx-smoke",
+      "request": null,
+      "started_at": "2026-10-11T21:20:07.855Z",
+      "execution": "real_http",
+      "http_status": 200,
+      "response_bytes": 3095,
+      "outcome": "observed",
+      "response": {
+        "supported_contract_versions": [
+          1
+        ],
+        "model": "untrained-token-tiling-fixture",
+        "profile": "playground-onnx-smoke",
+        "max_request_bytes": 33554432,
+        "max_response_bytes": 33554432,
+        "max_stream_event_bytes": 262144,
+        "capabilities": [
+          {
+            "capability": "chat_generation",
+            "semantic_task": "chat_generation",
+            "input_formats": [
+              "messages_text"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              }
+            ]
+          },
+          {
+            "capability": "text_generation",
+            "semantic_task": "text_generation",
+            "input_formats": [
+              "text"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              }
+            ]
+          },
+          {
+            "capability": "text_embedding",
+            "semantic_task": "text_embedding",
+            "input_formats": [
+              "text",
+              "text_batch"
+            ],
+            "output_formats": [
+              "embeddings_float32"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "available"
+            },
+            "option_bounds": [
+              {
+                "option": "dimensions",
+                "minimum": 1,
+                "maximum": 8192
+              },
+              {
+                "option": "input_count",
+                "minimum": 1,
+                "maximum": 128
+              },
+              {
+                "option": "input_characters",
+                "minimum": 0,
+                "maximum": 65536
+              }
+            ]
+          },
+          {
+            "capability": "image_generation",
+            "semantic_task": "text_to_image",
+            "input_formats": [
+              "text"
+            ],
+            "output_formats": [
+              "png_base64"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "width",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "height",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "option": "seed",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "option": "input_characters",
+                "minimum": 1,
+                "maximum": 4000
+              }
+            ]
+          },
+          {
+            "capability": "audio_transcription",
+            "semantic_task": "speech_to_text",
+            "input_formats": [
+              "pcm_s16le",
+              "pcm_f32le"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unqualified_audio_runtime"
+            },
+            "option_bounds": [
+              {
+                "option": "max_output_tokens",
+                "minimum": 512,
+                "maximum": 512
+              }
+            ]
+          },
+          {
+            "capability": "audio_classification",
+            "semantic_task": "audio_classification",
+            "input_formats": [
+              "pcm_s16le",
+              "pcm_f32le"
+            ],
+            "output_formats": [
+              "labels"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": []
+          },
+          {
+            "capability": "image_to_text",
+            "semantic_task": "image_to_text",
+            "input_formats": [
+              "png_base64",
+              "jpeg_base64",
+              "messages_image"
+            ],
+            "output_formats": [
+              "text"
+            ],
+            "streaming": false,
+            "availability": {
+              "state": "unavailable",
+              "reason": "unsupported_adapter"
+            },
+            "option_bounds": [
+              {
+                "option": "max_tokens",
+                "minimum": 1,
+                "maximum": 2048
+              },
+              {
+                "option": "temperature",
+                "minimum": 0,
+                "maximum": 2
+              },
+              {
+                "option": "top_p",
+                "minimum": 0,
+                "maximum": 1
+              },
+              {
+                "option": "image_bytes",
+                "minimum": 1,
+                "maximum": 8388608
+              },
+              {
+                "option": "image_pixels",
+                "minimum": 1,
+                "maximum": 4194304
+              },
+              {
+                "option": "image_count",
+                "minimum": 1,
+                "maximum": 4
+              },
+              {
+                "option": "width",
+                "minimum": 1,
+                "maximum": 4096
+              },
+              {
+                "option": "height",
+                "minimum": 1,
+                "maximum": 4096
+              }
+            ]
+          }
+        ]
+      },
+      "elapsed_ms": 5
+    },
+    {
+      "method": "POST",
+      "path": "/v1/model-operations",
+      "request": {
+        "contract_version": 1,
+        "request_id": "onnx-smoke-real-request",
+        "model": "untrained-token-tiling-fixture",
+        "profile": "playground-onnx-smoke",
+        "capability": "text_embedding",
+        "input": {
+          "kind": "text_batch",
+          "texts": [
+            "hello world",
+            "world"
+          ]
+        },
+        "output": "embeddings_float32",
+        "options": {
+          "kind": "embeddings",
+          "dimensions": 256
+        },
+        "stream": false
+      },
+      "started_at": "2026-10-11T21:20:07.860Z",
+      "execution": "real_http",
+      "http_status": 502,
+      "response_bytes": 117,
+      "outcome": "unknown",
+      "response": {
+        "contract_version": 1,
+        "request_id": "onnx-smoke-real-request",
+        "error": {
+          "code": "provider_failure",
+          "outcome": "unknown"
+        }
+      },
+      "elapsed_ms": 4
+    }
+  ],
+  "cleanup": {
+    "unload": "passed",
+    "exit_code": 0
+  },
+  "result": null,
+  "fixture_record": {
+    "schema_version": 1,
+    "scope": "synthetic untrained graph; execution and lifecycle only",
+    "pretrained_model_acceptance": false,
+    "onnx_ir_version": 8,
+    "opset": 13,
+    "tensor_dtype": "float32; the model_fp16.onnx filename is the legacy harness input",
+    "files": {
+      "onnx/model_fp16.onnx": {
+        "sha256": "3639dc4b3eca8394bc178e96f322d90ca76b93999e409b9f173d6c65094791f5",
+        "bytes": 505
+      },
+      "config.json": {
+        "sha256": "e3e7617ea4e848f8a3e0dbe696d216310931811c530b91e5576d0819ed07d6b2",
+        "bytes": 64
+      },
+      "tokenizer.json": {
+        "sha256": "2a69e7c2c3e125803b093da488b56d4cdb0c9aca5377a7b60d1609720fdc06fb",
+        "bytes": 284
+      },
+      "tokenizer_config.json": {
+        "sha256": "19effa13060dc79faeae396705ec892b17614bd74a36623faf7feb078ea6673c",
+        "bytes": 48
+      }
+    }
+  },
+  "runtime_mapping": "selected pinned library observed in real Pumas process",
+  "build": {
+    "build_info_schema_version": 1,
+    "component": "pumas-rpc",
+    "package_version": "0.8.0-rc.1",
+    "compiled_features": [
+      "pumas-library/hf-client",
+      "pumas-library/process-manager",
+      "pumas-library/gpu-monitor",
+      "pumas-library/onnx-runtime",
+      "pumas-rpc/inference-plugins"
+    ],
+    "protocols": [
+      {
+        "name": "pumas.local-ipc",
+        "versions": [
+          1
+        ]
+      },
+      {
+        "name": "pumas.local-http",
+        "versions": [
+          1
+        ]
+      }
+    ],
+    "schemas": [
+      {
+        "name": "pumas.build-info",
+        "version": 1
+      },
+      {
+        "name": "pumas.discovery",
+        "version": 1
+      },
+      {
+        "name": "pumas.model-ref",
+        "version": 1
+      },
+      {
+        "name": "pumas.model-selector",
+        "version": 1
+      },
+      {
+        "name": "pumas.http-advertisement",
+        "version": 1
+      },
+      {
+        "name": "pumas.model-operations.image-to-text",
+        "version": 1
+      },
+      {
+        "name": "pumas.http-admission-fence",
+        "version": 1
+      },
+      {
+        "name": "pumas.http-owner-retention",
+        "version": 1
+      }
+    ]
+  },
+  "fence": {
+    "instance": "2026-10-11T21:20:07.564330351+00:00",
+    "service": "7e8fd241-71bd-4a3e-bad0-55725f15a4e8"
+  },
+  "failure": {
+    "message": "/api/run: {\"code\":\"provider_failure\",\"outcome\":\"unknown\"}\n+ actual - expected\n\n+ {\n+   code: 'provider_failure',\n+   outcome: 'unknown'\n+ }\n- undefined\n"
+  },
+  "runtime_log_excerpt": "\u001b[2m2026-10-11T21:20:07.562930Z\u001b[0m \u001b[32m INFO\u001b[0m Starting Pumas RPC Server\n\u001b[2m2026-10-11T21:20:07.562992Z\u001b[0m \u001b[32m INFO\u001b[0m Launcher root configured\n\u001b[2m2026-10-11T21:20:07.589501Z\u001b[0m \u001b[32m INFO\u001b[0m Created FTS5 table: model_search\n\u001b[2m2026-10-11T21:20:07.590164Z\u001b[0m \u001b[32m INFO\u001b[0m Populated FTS5 table from models\n\u001b[2m2026-10-11T21:20:07.631285Z\u001b[0m \u001b[32m INFO\u001b[0m IPC server listening on 127.0.0.1:33673\n\u001b[2m2026-10-11T21:20:07.631679Z\u001b[0m \u001b[32m INFO\u001b[0m IPC server started on port 33673\n\u001b[2m2026-10-11T21:20:07.631883Z\u001b[0m \u001b[32m INFO\u001b[0m Found 1 orphan model directories\n\u001b[2m2026-10-11T21:20:07.632032Z\u001b[0m \u001b[32m INFO\u001b[0m Started watching model library at \"/tmp/pumas-playground-onnx-g4e6d1/shared-resources/models\"\n\u001b[2m2026-10-11T21:20:07.649397Z\u001b[0m \u001b[32m INFO\u001b[0m Validation complete: 0 valid, 0 removed, 0 orphaned\n\u001b[2m2026-10-11T21:20:07.666432Z\u001b[0m \u001b[32m INFO\u001b[0m Validation complete: 0 valid, 0 removed, 0 orphaned\n\u001b[2m2026-10-11T21:20:07.678124Z\u001b[0m \u001b[32m INFO\u001b[0m Adopted orphan model: \"/tmp/pumas-playground-onnx-g4e6d1/shared-resources/models/embedding/playground/untrained\" -> Some(\"embedding/playground/untrained\")\n\u001b[2m2026-10-11T21:20:07.678171Z\u001b[0m \u001b[32m INFO\u001b[0m Orphan scan complete: 1 found, 1 adopted, 0 errors\n\u001b[2m2026-10-11T21:20:07.678178Z\u001b[0m \u001b[32m INFO\u001b[0m Startup orphan scan: found=1, adopted=1, errors=0\n\u001b[2m2026-10-11T21:20:07.684931Z\u001b[0m \u001b[32m INFO\u001b[0m Validation complete: 0 valid, 0 removed, 0 orphaned\n\u001b[2m2026-10-11T21:20:07.756802Z\u001b[0m \u001b[32m INFO\u001b[0m Server listening on 127.0.0.1:42437 with max 64 in-flight requests and 33554432 byte request bodies\nRPC_PORT=42437\n\u001b[2m2026-10-11T21:20:07.757359Z\u001b[0m \u001b[32m INFO\u001b[0m RPC server running on 127.0.0.1:42437\n\u001b[2m2026-10-11T21:20:07.788294Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Loaded ONNX Runtime dylib from \"/workspace/playground-ort-runtime/libonnxruntime.so\"; version '1.24.2' \u001b[2m\u001b[3mrpc_call_id\u001b[0m\u001b[2m=\u001b[0m4 \u001b[3mrpc_method\u001b[0m\u001b[2m=\u001b[0m\"other_or_unsupported\" \u001b[3mrequest_id\u001b[0m\u001b[2m=\u001b[0mNone\u001b[0m\n\u001b[2m2026-10-11T21:20:07.788357Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: initializing ONNX Runtime embedding session \u001b[3mprovider\u001b[0m\u001b[2m=\u001b[0m\"onnx_runtime\" \u001b[3mmodel_id\u001b[0m\u001b[2m=\u001b[0membedding/playground/untrained \u001b[3mexecution_provider\u001b[0m\u001b[2m=\u001b[0mcpu \u001b[3mnative_library_strategy\u001b[0m\u001b[2m=\u001b[0m\"explicit-runtime-library-cpu\" \u001b[3mgraph_optimization\u001b[0m\u001b[2m=\u001b[0m\"level3\" \u001b[3mintra_threads\u001b[0m\u001b[2m=\u001b[0m1 \u001b[3minter_threads\u001b[0m\u001b[2m=\u001b[0m1 \u001b[2m\u001b[3mrpc_call_id\u001b[0m\u001b[2m=\u001b[0m4 \u001b[3mrpc_method\u001b[0m\u001b[2m=\u001b[0m\"other_or_unsupported\" \u001b[3mrequest_id\u001b[0m\u001b[2m=\u001b[0mNone\u001b[0m\n\u001b[2m2026-10-11T21:20:07.801089Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Discovered OrtHardwareDevice {vendor_id:0x1022, device_id:0x0, vendor:AMD, type:0, metadata: []}\n\u001b[2m2026-10-11T21:20:07.801398Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Successfully registered `CPUExecutionProvider` \u001b[3msource\u001b[0m\u001b[2m=\u001b[0msession options \u001b[2m\u001b[3mrpc_call_id\u001b[0m\u001b[2m=\u001b[0m4 \u001b[3mrpc_method\u001b[0m\u001b[2m=\u001b[0m\"other_or_unsupported\" \u001b[3mrequest_id\u001b[0m\u001b[2m=\u001b[0mNone\u001b[0m\n\u001b[2m2026-10-11T21:20:07.801479Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Session Options {  execution_mode:0 execution_order:DEFAULT enable_profiling:0 optimized_model_filepath:\"\" enable_mem_pattern:1 enable_mem_reuse:1 enable_cpu_mem_arena:0 profile_file_prefix:onnxruntime_profile_ session_logid: session_log_severity_level:-1 session_log_verbosity_level:0 max_num_graph_transformation_steps:10 graph_optimization_level:3 intra_op_param:OrtThreadPoolParams { thread_pool_size: 1 auto_set_affinity: 0 allow_spinning: 1 dynamic_block_base_: 0 stack_size: 0 affinity_str:  set_denormal_as_zero: 0 } inter_op_param:OrtThreadPoolParams { thread_pool_size: 1 auto_set_affinity: 0 allow_spinning: 1 dynamic_block_base_: 0 stack_size: 0 affinity_str:  set_denormal_as_zero: 0 } use_per_session_threads:1 thread_pool_allow_spinning:1 use_deterministic_compute:0 ep_selection_policy:5 config_options: {  } }\n\u001b[2m2026-10-11T21:20:07.801518Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Flush-to-zero and denormal-as-zero are off\n\u001b[2m2026-10-11T21:20:07.801528Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Creating and using per session threadpools since use_per_session_threads_ is true\n\u001b[2m2026-10-11T21:20:07.801539Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Dynamic block base set to 0\n\u001b[2m2026-10-11T21:20:07.801852Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Initializing session.\n\u001b[2m2026-10-11T21:20:07.803744Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: This model does not have any local functions defined. AOT Inlining is not performed\n\u001b[2m2026-10-11T21:20:07.803790Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer EnsureUniqueDQForNodeUnit modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803818Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer Level1_RuleBasedTransformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803826Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer DoubleQDQPairsRemover modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803852Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer ConstantSharing modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803875Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer CommonSubexpressionElimination modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803885Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer ConstantFolding modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803893Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer MatMulAddFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803901Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer ReshapeFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803909Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer FreeDimensionOverrideTransformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803917Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer GeluFusionL1 modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803923Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer LayerNormFusionL1 modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803931Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer QDQPropagationTransformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803939Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer WeightBiasQuantization modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803946Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer EnsureUniqueDQForNodeUnit modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803954Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer WhereDummyDq modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.803969Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer TransposeOptimizer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804003Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Running graph optimizations in loop 1 time/s (Graph Optimizations Loop Level : 1)\n\u001b[2m2026-10-11T21:20:07.804012Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer Level2_RuleBasedTransformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804021Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer TransposeOptimizer_CPUExecutionProvider modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804029Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer QDQS8ToU8Transformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804041Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer QDQSelectorActionTransformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804050Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer GemmActivationFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804058Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer MatMulIntegerToFloatFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804066Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer DynamicQuantizeMatMulFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804074Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer ConvActivationFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804082Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer GeluFusionL2 modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804090Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer LayerNormFusionL2 modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804097Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer SimplifiedLayerNormFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804104Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer AttentionFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804111Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer EmbedLayerNormFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804119Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer GatherSliceToSplitFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804127Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer GatherToSliceFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804134Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer MatmulTransposeFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804142Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer BiasGeluFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804150Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer GroupQueryAttentionFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804158Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer MatMulAddFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804165Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer SkipLayerNormFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804173Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer FastGeluFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804190Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer QuickGeluFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804198Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer BiasSoftmaxFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804212Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer BiasDropoutFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804220Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer MatMulScaleFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804227Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer MatMulActivationFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804235Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer MatMulNBitsFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804248Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer QDQFinalCleanupTransformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804258Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer NchwcTransformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804272Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer NhwcTransformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804285Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer ConvAddActivationFusion modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804299Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer RemoveDuplicateCastTransformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804307Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer CastFloat16Transformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804315Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: GraphTransformer MemcpyTransformer modified: 0 with status: OK\n\u001b[2m2026-10-11T21:20:07.804349Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Use DeviceBasedPartition as default\n\u001b[2m2026-10-11T21:20:07.804384Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Saving initialized tensors.\n\u001b[2m2026-10-11T21:20:07.804401Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Done saving initialized tensors\n\u001b[2m2026-10-11T21:20:07.804419Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Graph input with name attention_mask is not used by any node.\n\u001b[2m2026-10-11T21:20:07.804435Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: Session successfully initialized.\n\u001b[2m2026-10-11T21:20:07.804519Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: loaded ONNX Runtime embedding session \u001b[3mprovider\u001b[0m\u001b[2m=\u001b[0m\"onnx_runtime\" \u001b[3mmodel_id\u001b[0m\u001b[2m=\u001b[0membedding/playground/untrained \u001b[3mexecution_provider\u001b[0m\u001b[2m=\u001b[0mcpu \u001b[3mnative_library_strategy\u001b[0m\u001b[2m=\u001b[0m\"explicit-runtime-library-cpu\" \u001b[3minput_count\u001b[0m\u001b[2m=\u001b[0m2 \u001b[3moutput_count\u001b[0m\u001b[2m=\u001b[0m1 \u001b[3membedding_dimensions\u001b[0m\u001b[2m=\u001b[0m256 \u001b[2m\u001b[3mrpc_call_id\u001b[0m\u001b[2m=\u001b[0m4 \u001b[3mrpc_method\u001b[0m\u001b[2m=\u001b[0m\"other_or_unsupported\" \u001b[3mrequest_id\u001b[0m\u001b[2m=\u001b[0mNone\u001b[0m\n\u001b[2m2026-10-11T21:20:07.804709Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[1mrpc_call\u001b[0m: ONNX model loaded and recorded as served \u001b[3mprovider\u001b[0m\u001b[2m=\u001b[0m\"onnx_runtime\" \u001b[3mmodel_id\u001b[0m\u001b[2m=\u001b[0membedding/playground/untrained \u001b[3mprovider_model_id\u001b[0m\u001b[2m=\u001b[0membedding/playground/untrained \u001b[3mprofile_id\u001b[0m\u001b[2m=\u001b[0mplayground-onnx-smoke \u001b[3mgateway_alias\u001b[0m\u001b[2m=\u001b[0mSome(\"untrained-token-tiling-fixture\") \u001b[3membedding_dimensions\u001b[0m\u001b[2m=\u001b[0m256 \u001b[2m\u001b[3mrpc_call_id\u001b[0m\u001b[2m=\u001b[0m4 \u001b[3mrpc_method\u001b[0m\u001b[2m=\u001b[0m\"other_or_unsupported\" \u001b[3mrequest_id\u001b[0m\u001b[2m=\u001b[0mNone\u001b[0m\n\u001b[2m2026-10-11T21:20:07.863975Z\u001b[0m \u001b[33m WARN\u001b[0m ONNX embedding gateway request failed \u001b[3mprovider\u001b[0m\u001b[2m=\u001b[0m\"onnx_runtime\" \u001b[3mmodel_id\u001b[0m\u001b[2m=\u001b[0membedding/playground/untrained \u001b[3mgateway_model\u001b[0m\u001b[2m=\u001b[0muntrained-token-tiling-fixture \u001b[3mprofile_id\u001b[0m\u001b[2m=\u001b[0mplayground-onnx-smoke \u001b[3merror_code\u001b[0m\u001b[2m=\u001b[0mValidation\n"
+}

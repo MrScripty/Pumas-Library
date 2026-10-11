@@ -229,7 +229,7 @@ signing, publication, live library upgrade or reconciliation-plan claim is accep
 Rebuild the existing 0.8.0-rc.1 Linux x86_64 desktop candidate from the committed
 source with the locked default-feature release RPC backend, canonical frontend
 and Electron production outputs, and the previously acquired pinned ONNX Runtime
-1.24.2 native pair. No new version promise, publication, binding distribution,
+1.24.2 native inputs. No new version promise, publication, binding distribution,
 signature or inference qualification is selected. The Debian amd64 package and
 AppImage use the repository's existing names in a fresh, ignored output directory.
 They bundle the backend, native runtime and generated attribution notices; the
@@ -239,9 +239,46 @@ and prerelease consumer migration instructions are in
 
 Use the original repository's ignored Cargo target for this release because the
 validation filesystem has limited space. Copy the fresh RPC and the previously
-verified native pair into the canonical staging input before invoking stage-rpc.
+verified native inputs into the canonical staging input before invoking stage-rpc.
 The required local artifact evidence is staged RPC startup/shutdown, packaged
 Debian/AppImage resources and RPC startup, and Debian install/remove inside the
-release verifier's isolated namespace. Packaging and these smokes remain pending
-until recorded below. This candidate is for local review; foreign-platform and
-production inference obligations remain unsatisfied and it will not be published.
+release verifier's isolated namespace. The canonical desktop staging selects
+`libonnxruntime.so`; the provider-shared companion remains a verified input,
+outside this desktop bundle. This candidate is for local review; foreign-platform
+and production inference obligations remain unsatisfied and it will not be
+published.
+
+## Candidate completion evidence
+
+The release RPC built successfully from source commit `ada3258e44edf9eb3108638917f28291414328ee`
+with the normal optimized release profile (LTO, one codegen unit), locked offline
+dependencies and four jobs. Canonical staging and loopback HTTP startup/graceful
+shutdown passed. Both canonical Linux installers built successfully into
+`/media/jeremy/OrangeCream/Linux Software/repos/owned/ai-systems/Pumas-Library/tmp/pumas-release-checksum-20261011`.
+Extracted Debian and AppImage resources match the fresh build inputs; each bundled
+RPC passed HTTP startup and graceful shutdown. Debian install, alternatives,
+Electron 43.7.0 identity and removal passed inside the release verifier's isolated
+namespace. The host installation and live library were not changed.
+
+| Artifact | Size in bytes | SHA256 retained for acquisition verification |
+| --- | ---: | --- |
+| `pumas-library-electron_0.8.0-rc.1_amd64.deb` | 125073016 | `9d947e7378d8a42281fb796918de354c27cdbc266db9bb005c7550a2884502fc` |
+| `Pumas.Library-0.8.0-rc.1.AppImage` | 160644623 | `e9f4799a0b62ed4480e7a70f0deddb22d23a49666032250901da58c04d6c3f79` |
+
+`local-build-record.json` and `SHA256SUMS` beside the packages retain source,
+target, tool versions and local claim results. These one-time build-output
+checksums identify this candidate for acquisition; they are not installed-file
+automatic execution gates or proof of reproducible build bytes. Verification
+logs remain in `/tmp/pumas-checksum-release-rpc.log`,
+`/tmp/pumas-checksum-linux-package-build.log`,
+`/tmp/pumas-checksum-release-rpc-smoke.log`,
+`/tmp/pumas-checksum-linux-package-smoke.log` and
+`/tmp/pumas-checksum-deb-install.log`. The Debian verifier retained its private
+fixture inside the original repository's ignored `tmp/`.
+
+The local implementation and Linux candidate claims above are satisfied. Native
+Windows/macOS reruns, real-model inference and independent review remain pending;
+no production inference, reconciliation-plan completion or publication is claimed.
+The branch/worktree remains retained-protected for Jeremy's review and push, with
+its source and completion commits reachable from `fix/main-test-validation`.
+The original tracked dirty diff remains byte-identical to its preserved baseline.

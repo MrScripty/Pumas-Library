@@ -832,8 +832,8 @@ async fn externally_retargeted_publication_cannot_acknowledge_its_own_move() {
 
 #[tokio::test]
 async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_payload() {
-    // Fresh publications isolate each refusal: a watcher may legitimately mark
-    // tampered evidence unavailable, and restoring bytes must not promote it.
+    // Freeze background reconciliation before injecting each fault. Index-only
+    // damage can legitimately recover from an intact confirmed publication.
     for fault in [
         "missing_index",
         "old_index_entry",
@@ -860,6 +860,8 @@ async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_p
         let old_dir = library.library_root().join(&old_id);
         let id = "vision/migrated/acknowledged";
         migrate_model(&api, &old_id, id).await;
+        api.shutdown_instance().await.unwrap();
+        // Positive control after drainage: shutdown must not cause refusal.
         assert_current_primary(&api, id, PRIMARY, &pair()[0].1).await;
         let target = library.library_root().join(id);
         let metadata_path = target.join("metadata.json");
@@ -925,7 +927,17 @@ async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_p
             }
             _ => unreachable!(),
         }
-        assert_primary_refused(&api, id).await;
+        let before = library.index().get(id).unwrap();
+        assert!(
+            library.get_primary_model_file(id).is_none(),
+            "corruption={fault}: fallback primary selected; index={before:?}"
+        );
+        let result = library.resolve_model_execution_descriptor(id).await;
+        let after = library.index().get(id).unwrap();
+        assert!(
+            result.is_err(),
+            "corruption={fault}: descriptor={result:?}; before={before:?}; after={after:?}"
+        );
         if matches!(fault, "primary_bytes" | "projector_bytes") {
             let migration = library.generate_migration_dry_run_report().unwrap();
             let item = migration
@@ -937,6 +949,104 @@ async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_p
                 .findings
                 .iter()
                 .any(|finding| finding == "mixed_gguf_artifact_files"));
+        }
+        api.shutdown_instance().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn live_reindex_repairs_projection_but_preserves_payload_and_receipt_refusals() {
+    for fault in [
+        "missing_index",
+        "old_index_entry",
+        "projector_index_entry",
+        "old_index_path",
+        "primary_bytes",
+        "projector_bytes",
+        "pending_receipt",
+    ] {
+        let root = tempfile::TempDir::new().unwrap();
+        let staging = tempfile::TempDir::new().unwrap();
+        let api = api(root.path()).await;
+        let old_id = acquire(&api, staging.path(), pair(), PRIMARY, Fault::None)
+            .await
+            .unwrap()
+            .model_id
+            .unwrap();
+        let library = api.model_library();
+        let old_dir = library.library_root().join(&old_id);
+        let id = "vision/migrated/live-reindex";
+        migrate_model(&api, &old_id, id).await;
+        assert_current_primary(&api, id, PRIMARY, &pair()[0].1).await;
+        let target = library.library_root().join(id);
+        let mut indexed = library.index().get(id).unwrap().unwrap();
+        match fault {
+            "missing_index" => {
+                library.index().delete(id).unwrap();
+            }
+            "old_index_entry" | "projector_index_entry" | "old_index_path" => {
+                match fault {
+                    "old_index_entry" => {
+                        indexed.metadata["entry_path"] = serde_json::json!(old_dir.join(PRIMARY))
+                    }
+                    "projector_index_entry" => {
+                        indexed.metadata["entry_path"] = serde_json::json!(target.join(PROJECTOR))
+                    }
+                    _ => indexed.path = old_dir.display().to_string(),
+                }
+                library.index().upsert(&indexed).unwrap();
+            }
+            "primary_bytes" | "projector_bytes" => {
+                let path = target.join(if fault == "primary_bytes" {
+                    PRIMARY
+                } else {
+                    PROJECTOR
+                });
+                let mut bytes = std::fs::read(&path).unwrap();
+                *bytes.last_mut().unwrap() ^= 1;
+                std::fs::write(path, bytes).unwrap();
+            }
+            "pending_receipt" => {
+                let path = target.join(".pumas_import_publication.json");
+                let mut receipt: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                receipt["state"] = serde_json::json!("pending");
+                std::fs::write(path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        // Await the production reconciliation boundary; no sleep or restart.
+        api.rebuild_model_index().await.unwrap();
+        if matches!(
+            fault,
+            "primary_bytes" | "projector_bytes" | "pending_receipt"
+        ) {
+            let before = library.index().get(id).unwrap();
+            assert!(
+                library.get_primary_model_file(id).is_none(),
+                "corruption={fault}: index={before:?}"
+            );
+            let result = library.resolve_model_execution_descriptor(id).await;
+            let after = library.index().get(id).unwrap();
+            assert!(
+                result.is_err(),
+                "corruption={fault}: result={result:?}; before={before:?}; after={after:?}"
+            );
+            if fault == "pending_receipt" {
+                let receipt: serde_json::Value = serde_json::from_slice(
+                    &std::fs::read(target.join(".pumas_import_publication.json")).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(receipt["state"], "pending");
+            } else {
+                let member = if fault == "primary_bytes" { 0 } else { 1 };
+                assert_ne!(
+                    std::fs::read(target.join(&pair()[member].0)).unwrap(),
+                    pair()[member].1
+                );
+            }
+        } else {
+            assert_current_primary(&api, id, PRIMARY, &pair()[0].1).await;
         }
         api.shutdown_instance().await.unwrap();
     }

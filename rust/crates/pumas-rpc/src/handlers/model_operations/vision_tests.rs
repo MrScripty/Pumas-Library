@@ -297,6 +297,7 @@ async fn seventh_descriptor_requires_selected_semantics_supported_profile_and_li
         if case != "unsupported_provider" {
             state.api.upsert_runtime_profile(config).await.unwrap();
         }
+        let before_capability_query = calls.lock().unwrap().clone();
         let value = caps(state).await;
         assert_eq!(value["capabilities"].as_array().unwrap().len(), 7);
         let descriptor = &value["capabilities"][6];
@@ -324,7 +325,8 @@ async fn seventh_descriptor_requires_selected_semantics_supported_profile_and_li
                 descriptor["availability"]["reason"], reason,
                 "{case}: {value}"
             );
-            assert!(calls.lock().unwrap().is_empty(), "{case} reached backend");
+            let observed = calls.lock().unwrap().clone();
+            assert!(observed.is_empty(), "{case} reached backend: before_query={before_capability_query:?}, after_query={observed:?}");
         }
         backend.abort();
         let _ = backend.await;

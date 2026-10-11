@@ -149,3 +149,42 @@ incremental compilation, and debug level zero for development/test artifacts;
 the optimized installer backend retains the normal release profile. Logs are
 in ignored original-repository `tmp/pr69-resume-policy-*.log`. No runtime
 inference or native Windows/macOS execution was performed.
+
+### Verified resume-policy installers
+
+Committed source and newly built RPC producer:
+`bf19765a23d1cbe6fc0c3db429f2cac413cb4ce9`. The backend uses the normal
+default-feature optimized `release` profile, with locked/offline Cargo inputs;
+frontend and Electron production builds also passed. The unchanged frontend
+suite retains its earlier `963fe94e` evidence (939 passed, one existing skip),
+rather than claiming another execution.
+
+Local installers are retained in original-repository
+`electron/release/resume-policy-20261011/`, beside `SHA256SUMS` and
+`local-build-record.json`:
+
+| Artifact | Bytes | SHA-256 for explicit artifact verification |
+| --- | ---: | --- |
+| `pumas-library-electron_0.8.0-rc.1_amd64.deb` | 125,099,368 | `43301d8f143b7d7e2a55d11bbe4d82737c8f5d299334ed653ca6f3a7c114be94` |
+| `Pumas.Library-0.8.0-rc.1.AppImage` | 160,689,560 | `d9ab2dde47f590c9a229aa0b927b480e82ed1ac95e3422e3e2fb24a7668d3d48` |
+
+Exact extracted Debian/AppImage resource and backend health/shutdown checks
+passed. Isolated Debian installation, alternatives, Electron 43.7.0 identity
+and removal passed. The host installation and running app were not changed.
+Package checks verify selected build artifacts; they do not introduce automatic
+post-acquisition model hashes. No signing, publication, model inference, native
+Windows/macOS execution, byte-for-byte build reproducibility or actual retained
+model download is claimed.
+
+The first packaging attempt was blocked by sandbox DNS for GitHub; it was
+stopped, and packaging with network access passed. Electron Builder reported
+existing desktop window-association guidance. The disposable Debian installation
+skipped the bundled AppArmor profile on this host and reported alternatives
+cleanup warnings during successful removal. Logs:
+`tmp/pr69-resume-policy-rpc-release.log`,
+`tmp/pr69-resume-policy-package-network.log`,
+`tmp/pr69-resume-policy-package-smoke.log` and
+`tmp/pr69-resume-policy-deb-install.log` in the original repository. Disposable
+install evidence remains in `tmp/pumas-deb-install-sptr9k7c`; package smoke
+extraction was automatically removed. Replace the installed binary and reopen
+Pumas to apply this policy; source changes do not update the live process.

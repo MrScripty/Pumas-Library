@@ -21,6 +21,11 @@ inference are not qualified by its Linux packaging checks.
   recovery warning while downloading, queued, pausing, paused, cancelling or
   awaiting retry. Live pause/resume controls continue to use the exact download
   ID. Inactive partial models still require current recovery information.
+- Failed model deletion now shows an accessible error on the exact selected
+  model row, including partial entries. Delete controls stay disabled while the
+  request is pending and allow retry after refusal. Busy-library RPC errors
+  explain that the owning download or operation must finish or be cancelled;
+  the existing whole-library exclusion remains in effect.
 
 Direct Rust consumers must recompile and handle the optional checksum returned by
 `RuntimeReadFile::sha256`; `RuntimeReadFile::observed` represents absent historical

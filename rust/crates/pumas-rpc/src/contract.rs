@@ -141,6 +141,13 @@ impl PublicError {
     }
 
     pub(crate) fn from_pumas(error: &PumasError) -> Self {
+        if matches!(error, PumasError::DownloadRootBusy) {
+            return Self {
+                code: error.to_rpc_error_code(),
+                class: PublicErrorClass::Conflict,
+                message: "A download or another operation is using this model library. Finish or cancel it, then try again.",
+            };
+        }
         if matches!(
             error,
             PumasError::Config { .. } | PumasError::DownloadLifecycleClosed
@@ -7117,20 +7124,24 @@ mod tests {
         let in_progress = PublicError::from(&PumasError::ModelIndexRefreshInProgress);
         assert_eq!(in_progress.code, -32011);
         assert_eq!(in_progress.class, PublicErrorClass::Conflict);
+        assert_eq!(
+            in_progress.message,
+            "The request conflicts with the current library state."
+        );
 
         let root_busy = PublicError::from(&PumasError::DownloadRootBusy);
         assert_eq!(root_busy.code, -32011);
         assert_eq!(root_busy.class, PublicErrorClass::Conflict);
         assert_eq!(
             root_busy.message,
-            "The request conflicts with the current library state."
+            "A download or another operation is using this model library. Finish or cancel it, then try again."
         );
         assert_eq!(
             serde_json::to_value(root_busy).unwrap(),
             json!({
                 "code": -32011,
                 "class": "conflict",
-                "message": "The request conflicts with the current library state.",
+                "message": "A download or another operation is using this model library. Finish or cancel it, then try again.",
             })
         );
     }

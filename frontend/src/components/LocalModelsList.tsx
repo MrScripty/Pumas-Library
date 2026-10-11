@@ -8,6 +8,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import type { ModelDeletionState } from '../hooks/useModelLibraryActions';
 import type { ModelCategory, ModelInfo, RelatedModelsState } from '../types/apps';
 import type { RouterProfileSyncStatus, ServedModelStatus } from '../types/api-serving';
 import type { ServingControlObservation } from '../hooks/useServingStatus';
@@ -39,7 +40,8 @@ interface LocalModelsListProps {
   onRecoverPartialDownload?: (model: ModelInfo) => void;
   recoveringPartialModelIds?: Set<string>;
   downloadErrors?: Record<string, string>;
-  onDeleteModel?: (modelId: string) => void;
+  deletionStateByModelId?: Record<string, ModelDeletionState>;
+  onDeleteModel?: (modelId: string) => void | Promise<void>;
   onConvertModel?: (model: ModelInfo) => void;
   onServeModel?: (model: ModelInfo) => void;
   onChooseExistingLibrary?: () => Promise<void> | void;
@@ -69,6 +71,7 @@ export function LocalModelsList({
   onRecoverPartialDownload,
   recoveringPartialModelIds,
   downloadErrors,
+  deletionStateByModelId,
   onDeleteModel,
   onConvertModel,
   onServeModel,
@@ -153,6 +156,7 @@ export function LocalModelsList({
               <LocalModelRow
                 key={model.id}
                 downloadErrors={downloadErrors}
+                deletionState={deletionStateByModelId?.[model.id]}
                 excludedModels={excludedModels}
                 expandedRelated={expandedRelated}
                 model={model}

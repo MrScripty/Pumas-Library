@@ -473,6 +473,14 @@ library deletion retains its existing native-grant acquisition. Other library
 mutations, unresolved quarantine and download-location reconciliation retain
 their existing rules; this does not authorize deleting a retained download.
 
+The primary's cloned link registry serializes load, cache mutation/snapshot and
+durable publication in one shared mutation turn. Register, unregister, cascade
+removal, clear and explicit save cannot let an older snapshot publish after a
+newer mutation. Retain that turn in the actual blocking file operation when its
+waiter disappears; a load retains it through cache replacement as well. Registry
+serialization is independent of model transfer execution and does not make a
+download hold the link-registry turn. Persistent link format is unchanged.
+
 ### Durable handoff transition ownership
 
 | Transition | Durable writer and exact identity | Filesystem authority and cancellation | Restart and reclamation |

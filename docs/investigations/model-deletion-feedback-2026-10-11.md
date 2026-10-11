@@ -184,3 +184,49 @@ candidate. Project/RPC semantic version and release-attribution inputs remain
 `0.8.0-rc.1`; no public release/version/tag or automatic update publication is
 selected. Optimized backend and installer checks are pending at this source
 commit boundary. No real library deletion or host installation occurred.
+
+### Link-registry publication follow-up
+
+Before packaging, review of the newly allowed overlapping deletions found that
+`LinkRegistry::save` cloned its shared cache before dispatching an asynchronous
+blocking atomic write. Two clones could capture different states and publish
+them in reverse order. Atomic replacement of each file did not serialize their
+snapshot/publication order. The prior independent native root grant normally
+excluded overlapping library deletions; sharing the primary's HF grant makes
+this registry boundary relevant to the admitted deletion change.
+
+`cargo test --locked --offline -p pumas-library --lib overlapping_deletions_cannot_publish_stale_link_snapshots`
+was red before serialization: a second cascade removal changed the registry
+while the earlier write was deliberately held after snapshot capture. The
+verdict took 0.02 seconds. This demonstrates the ordering hole; it is not an
+observation of loss in the user's library. A test-only one-shot barrier controls
+that exact owned file operation, without sleeps or timing-based ordering guesses.
+
+The link registry now owns one mutation turn shared by its clones. Load, explicit
+save, register, unregister, cascade removal and clear retain it across cache
+observation/change and file publication. The blocking writer captures the turn,
+so aborting its waiting task cannot admit a successor before the actual write
+settles. Loading returns the turn with the file observation and retains it
+through cache replacement. The data schema, error propagation and store lifetime
+remain unchanged. Transfer work never takes this turn. The existing seven
+registry tests, including overlapping cascade removals and an abandoned waiter,
+pass; both new tests reload the canonical file and require both deleted model
+entries to remain absent. Complete suite/lint evidence is recorded when done.
+
+The first optimized backend attempt for `896a7e67` was interrupted while adding
+this required persistence fix and is not an accepted installer producer. The
+replacement candidate must be built from the committed registry follow-up.
+No installed app, model payload, registry in the user's real library, or original
+tracked checkout was modified by these fixtures.
+
+The final combined source passed 2,335 default core tests with 30 existing
+opt-in skips (2,107/14 unit), 438 default RPC tests with 12 opt-in skips
+(all 410 binary tests), and seven headless registry tests. The previously
+accepted six headless deletion regressions are retained from the unchanged
+deletion implementation. Default core/RPC all-targets Clippy passed with
+warnings denied, and formatting passed. The actual controlled HTTP transfer
+and unrelated deletion fixture still passes. The earlier unresolved vision
+request-count event did not recur; its separate diagnostic record remains
+applicable. Logs are in original-repository `tmp/pr69-link-save-*.log`.
+The new normal optimized backend and package checks remain pending at this
+registry source boundary.

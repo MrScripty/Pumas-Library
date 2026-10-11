@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
 /// Tracks all symlinks/hardlinks created for model mapping.
 ///
@@ -25,6 +25,18 @@ pub struct LinkRegistry {
     registry_path: PathBuf,
     /// In-memory cache of links
     links: Arc<RwLock<LinkData>>,
+    /// One mutation turn covers cache observation/change and durable publication.
+    /// Clones share the turn; the actual blocking worker retains it.
+    mutations: Arc<Mutex<()>>,
+    #[cfg(test)]
+    save_barrier: Arc<std::sync::Mutex<Option<Arc<SaveBarrier>>>>,
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+struct SaveBarrier {
+    entered: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
 }
 
 /// Internal link storage structure.
@@ -56,19 +68,25 @@ impl LinkRegistry {
             store_lifetime,
             registry_path: registry_path.into(),
             links: Arc::new(RwLock::new(LinkData::default())),
+            mutations: Arc::new(Mutex::new(())),
+            #[cfg(test)]
+            save_barrier: Default::default(),
         }
     }
 
     /// Load the registry from disk.
     pub async fn load(&self) -> Result<()> {
+        let turn = self.mutations.clone().lock_owned().await;
         if !fs::try_exists(&self.registry_path).await? {
             return Ok(());
         }
 
         let registry_path = self.registry_path.clone();
-        let data: Option<LinkData> = self
+        let (data, _turn) = self
             .store_lifetime
-            .spawn_blocking(move || atomic_read_json(&registry_path))
+            .spawn_blocking(move || {
+                atomic_read_json::<LinkData>(&registry_path).map(|data| (data, turn))
+            })
             .await
             .map_err(|err| {
                 crate::PumasError::Other(format!("Failed to join link registry load task: {}", err))
@@ -82,10 +100,25 @@ impl LinkRegistry {
 
     /// Save the registry to disk.
     pub async fn save(&self) -> Result<()> {
+        let turn = self.mutations.clone().lock_owned().await;
+        self.save_with_turn(turn).await
+    }
+
+    async fn save_with_turn(&self, turn: OwnedMutexGuard<()>) -> Result<()> {
         let data = self.links.read().await.clone();
         let registry_path = self.registry_path.clone();
+        #[cfg(test)]
+        let barrier = self.save_barrier.lock().unwrap().take();
         self.store_lifetime
-            .spawn_blocking(move || atomic_write_json(&registry_path, &data, false))
+            .spawn_blocking(move || {
+                let _turn = turn;
+                #[cfg(test)]
+                if let Some(barrier) = barrier {
+                    let _ = barrier.entered.lock().unwrap().take().unwrap().send(());
+                    barrier.release.lock().unwrap().recv().unwrap();
+                }
+                atomic_write_json(&registry_path, &data, false)
+            })
             .await
             .map_err(|err| {
                 crate::PumasError::Other(format!("Failed to join link registry save task: {}", err))
@@ -99,6 +132,7 @@ impl LinkRegistry {
     ///
     /// * `entry` - Link entry to register
     pub async fn register(&self, entry: LinkEntry) -> Result<()> {
+        let turn = self.mutations.clone().lock_owned().await;
         let mut data = self.links.write().await;
 
         // Add to by_model index
@@ -111,7 +145,7 @@ impl LinkRegistry {
         data.by_target.insert(entry.target.clone(), entry);
 
         drop(data);
-        self.save().await
+        self.save_with_turn(turn).await
     }
 
     /// Unregister a link by target path.
@@ -120,6 +154,7 @@ impl LinkRegistry {
     ///
     /// * `target` - Target path of the link to remove
     pub async fn unregister(&self, target: impl AsRef<Path>) -> Result<Option<LinkEntry>> {
+        let turn = self.mutations.clone().lock_owned().await;
         let target = target.as_ref();
         let mut data = self.links.write().await;
 
@@ -133,7 +168,7 @@ impl LinkRegistry {
             }
 
             drop(data);
-            self.save().await?;
+            self.save_with_turn(turn).await?;
             return Ok(Some(entry));
         }
 
@@ -168,6 +203,7 @@ impl LinkRegistry {
     ///
     /// * `model_id` - Model ID to remove all links for
     pub async fn remove_all_for_model(&self, model_id: &str) -> Result<Vec<PathBuf>> {
+        let turn = self.mutations.clone().lock_owned().await;
         let mut data = self.links.write().await;
 
         let targets = data.by_model.remove(model_id).unwrap_or_default();
@@ -178,7 +214,7 @@ impl LinkRegistry {
         }
 
         drop(data);
-        self.save().await?;
+        self.save_with_turn(turn).await?;
 
         Ok(targets)
     }
@@ -325,11 +361,12 @@ impl LinkRegistry {
 
     /// Clear all registry entries.
     pub async fn clear(&self) -> Result<()> {
+        let turn = self.mutations.clone().lock_owned().await;
         let mut data = self.links.write().await;
         data.by_target.clear();
         data.by_model.clear();
         drop(data);
-        self.save().await
+        self.save_with_turn(turn).await
     }
 }
 
@@ -363,6 +400,75 @@ mod tests {
         let registry_path = temp_dir.path().join("links.json");
         let registry = LinkRegistry::new(registry_path);
         (temp_dir, registry)
+    }
+
+    #[tokio::test]
+    async fn overlapping_deletions_cannot_publish_stale_link_snapshots() {
+        check_serialized_deletion(false).await;
+    }
+
+    #[tokio::test]
+    async fn abandoned_save_waiter_retains_registry_mutation_until_actual_write_settles() {
+        check_serialized_deletion(true).await;
+    }
+
+    async fn check_serialized_deletion(abandon_waiter: bool) {
+        let (temp, registry) = setup_registry().await;
+        for model in ["original", "outq2"] {
+            registry
+                .register(create_link_entry(
+                    model,
+                    temp.path().join(model),
+                    temp.path().join(format!("app-{model}")),
+                    LinkType::Symlink,
+                    "fixture",
+                    None,
+                ))
+                .await
+                .unwrap();
+        }
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        *registry.save_barrier.lock().unwrap() = Some(Arc::new(SaveBarrier {
+            entered: std::sync::Mutex::new(Some(entered)),
+            release: std::sync::Mutex::new(wait),
+        }));
+        let first_registry = registry.clone();
+        let first =
+            tokio::spawn(async move { first_registry.remove_all_for_model("original").await });
+        tokio::time::timeout(std::time::Duration::from_secs(5), ready)
+            .await
+            .unwrap()
+            .unwrap();
+        if abandon_waiter {
+            first.abort();
+        }
+        let second = registry.remove_all_for_model("outq2");
+        tokio::pin!(second);
+        let second_pending = futures::poll!(&mut second).is_pending();
+        let second_queued_before_mutation = registry.get_links_for_model("outq2").await.len() == 1;
+        release.send(()).unwrap();
+        let first_outcome = first.await;
+        second.await.unwrap();
+        if abandon_waiter {
+            assert!(first_outcome.unwrap_err().is_cancelled());
+        } else {
+            assert_eq!(first_outcome.unwrap().unwrap().len(), 1);
+        }
+        assert!(second_pending);
+        assert!(
+            second_queued_before_mutation,
+            "a later deletion mutated the registry while the earlier write was still unsettled"
+        );
+        let reopened = LinkRegistry::new(temp.path().join("links.json"));
+        reopened.load().await.unwrap();
+        assert_eq!(
+            reopened.count().await,
+            0,
+            "old saves must not restore deleted link entries"
+        );
+        assert!(reopened.get_links_for_model("original").await.is_empty());
+        assert!(reopened.get_links_for_model("outq2").await.is_empty());
     }
 
     #[tokio::test]

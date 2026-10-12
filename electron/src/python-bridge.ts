@@ -239,6 +239,9 @@ class NamedSseStreamOwner {
       port: this.runtime.getPort(),
       path: `${this.spec.path}${cursorQuery}`,
       method: 'GET',
+      // Each observation stream owns a single-request connection. Sharing a
+      // pooled RPC connection would mix observation and operation custody.
+      agent: false,
       headers: {
         Accept: 'text/event-stream',
       },

@@ -1402,3 +1402,39 @@ test('model-library update stream reconnect uses bridge timer ownership', async 
   assert.equal(opened, 1);
   assert.equal(bridge.modelLibraryUpdateStream.reconnectTimer, null);
 });
+
+test('all named observation streams use separate nonpooled connections', async () => {
+  const bridgeUrl = new URL('../dist/python-bridge.js', import.meta.url);
+  const requireBridge = createRequire(bridgeUrl);
+  const exports = {};
+  const seen = [];
+  runInNewContext(readFileSync(bridgeUrl, 'utf8'), {
+    exports, Buffer, process: { env: {} }, setTimeout, clearTimeout,
+    require(specifier) {
+      if (specifier === 'electron-log') return { info() {}, warn() {}, error() {} };
+      if (specifier === 'http') return {
+        get(options) {
+          seen.push(options);
+          const request = new EventEmitter();
+          request.destroy = () => {};
+          return request;
+        },
+      };
+      return requireBridge(specifier);
+    },
+  });
+  const bridge = new exports.PythonBridge({
+    port: 49152, debug: false, rustBinaryPath: process.execPath, launcherRoot: process.cwd(),
+    timerController: new FakeTimerController(),
+  });
+  bridge.process = {};
+  for (const method of ['startModelLibraryUpdateStream', 'startModelDownloadUpdateStream',
+    'startRuntimeProfileUpdateStream', 'startServingStatusUpdateStream', 'startStatusTelemetryUpdateStream']) {
+    bridge[method](() => {});
+  }
+  assert.equal(seen.length, 5);
+  assert.ok(seen.every((options) => options.agent === false));
+  assert.equal(new Set(seen.map((options) => options.path)).size, 5);
+  bridge.process = null;
+  await bridge.stop();
+});

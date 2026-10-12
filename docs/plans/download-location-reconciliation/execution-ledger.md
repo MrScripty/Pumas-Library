@@ -84,3 +84,17 @@ Format-overlap clarification: existing offline conversion intentionally continue
 producing supported HF-5. Only this explicit user confirmation selects HF-6, so an
 offline conversion cannot silently opt older direct clients into incompatibility.
 This refines the proposed converter policy without widening reader overlap.
+
+Linux review artifact passes C10 at source `709148e7`; see M3 for exact hash,
+new Debian revision, pinned inputs and actual extracted desktop/RPC/install evidence.
+The shell’s older Node 24.12 was superseded by repo-local 24.15 acquisition and
+fresh frontend/Electron builds, full tests, types and lint. No new application
+dependency, host install, real-process stop or live library mutation occurred.
+Link the parent acquisition contract to the independently scoped HF-6 discriminator,
+removing its obsolete claim that only HF-5 is current. Original dirty source diff
+remains identical to its retained baseline. Protected validation branch/worktree
+remain retained for the maintainer’s push/review; no shared history was rewritten.
+Full optimized workspace execution passed: 3,143 tests, 46 existing ignored,
+54 suite summaries, exit zero. Headless RPC also passed 259 tests (13 existing
+ignored). All local affected source/static/package checks are green; required
+native/composed claims remain open, with no full objective-acceptance claim.

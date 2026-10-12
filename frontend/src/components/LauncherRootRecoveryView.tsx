@@ -49,10 +49,10 @@ export function LauncherRootRecoveryView({
           />
         )}
       </header>
-      <main className="flex flex-1 items-center justify-center p-6">
+      <main className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
         <section
           aria-labelledby="launcher-root-recovery-title"
-          className="w-full max-w-md rounded-lg border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-low))] p-6 shadow-lg"
+          className="m-auto w-full max-w-md shrink-0 rounded-lg border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-low))] p-6 shadow-lg"
         >
           <h1
             ref={headingRef}

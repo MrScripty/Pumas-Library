@@ -17,6 +17,7 @@ mod provider_clients;
 mod s3_imports;
 mod server;
 mod startup;
+mod startup_failure;
 mod wrapper;
 
 use anyhow::Result;
@@ -59,6 +60,13 @@ fn observe_both(first: Result<()>, signal: Result<()>) -> Result<()> {
 #[command(name = "pumas-rpc")]
 #[command(about = "JSON-RPC server for Pumas Library")]
 struct Args {
+    /// Back up and explicitly migrate a stopped library's download store to schema 7.
+    #[arg(long, requires_all = ["launcher_root", "confirm_old_writers_stopped"], conflicts_with_all = ["build_info", "discover_local", "describe_local_http", "attach_or_start_local_http", "retain_local_http_owner"])]
+    #[cfg_attr(feature = "export-contract", arg(conflicts_with_all = ["export_desktop_contract", "export_desktop_fixtures"]))]
+    migrate_download_store_offline: bool,
+    /// Confirm every old reader/writer is stopped; schema 7 has no old-binary rollback.
+    #[arg(long, requires = "migrate_download_store_offline")]
+    confirm_old_writers_stopped: bool,
     /// List unverified registered library roots without starting or contacting owners.
     #[arg(long, conflicts_with_all = ["build_info", "describe_local_http", "attach_or_start_local_http", "retain_local_http_owner", "launcher_root"])]
     #[cfg_attr(feature = "export-contract", arg(conflicts_with_all = ["export_desktop_contract", "export_desktop_fixtures"]))]
@@ -109,6 +117,18 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.migrate_download_store_offline {
+        let backup = pumas_library::model_library::DownloadPersistence::migrate_library_offline(
+            args.launcher_root
+                .as_deref()
+                .expect("clap requires launcher root"),
+        )?;
+        println!(
+            "Download database upgraded to schema 7. Original backup: {}",
+            backup.display()
+        );
+        return Ok(());
+    }
     if args.discover_local {
         return local_enumeration::write();
     }
@@ -267,6 +287,7 @@ async fn run(
                 }
                 _ => unreachable!(),
             };
+            startup_failure::write(&error, &mut std::io::stdout().lock())?;
             return Err(match signal_result {
                 Ok(()) => error,
                 Err(signal) => {
@@ -369,6 +390,39 @@ mod tests {
 #[cfg(test)]
 mod discovery_cli_tests {
     use super::*;
+
+    #[test]
+    fn offline_migration_requires_explicit_root_and_historical_writer_confirmation() {
+        let complete = [
+            "pumas-rpc",
+            "--migrate-download-store-offline",
+            "--launcher-root",
+            "/selected",
+            "--confirm-old-writers-stopped",
+        ];
+        assert!(
+            Args::try_parse_from(complete)
+                .unwrap()
+                .migrate_download_store_offline
+        );
+        assert!(Args::try_parse_from(&complete[..4]).is_err());
+        assert!(Args::try_parse_from([
+            "pumas-rpc",
+            "--migrate-download-store-offline",
+            "--confirm-old-writers-stopped"
+        ])
+        .is_err());
+        assert!(Args::try_parse_from(["pumas-rpc", "--confirm-old-writers-stopped"]).is_err());
+        for mode in [
+            "--build-info",
+            "--discover-local",
+            "--describe-local-http",
+            "--attach-or-start-local-http",
+            "--retain-local-http-owner",
+        ] {
+            assert!(Args::try_parse_from(complete.into_iter().chain([mode])).is_err());
+        }
+    }
 
     #[test]
     fn observation_requires_explicit_root_and_distinct_mode() {

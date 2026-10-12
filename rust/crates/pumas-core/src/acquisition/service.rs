@@ -3112,7 +3112,7 @@ mod tests {
 
     async fn http_budget_fixture(mode: HttpBudgetFixture) {
         use HttpBudgetFixture::*;
-        let guard = Duration::from_secs(5);
+        let guard = Duration::from_secs(10);
         let temp = tempfile::TempDir::new().unwrap();
         let stage = temp.path().join("stage");
         std::fs::create_dir(&stage).unwrap();
@@ -3255,13 +3255,16 @@ mod tests {
         let published = callbacks.clone();
         let mut policy = retry();
         policy.attempts = None;
+        // Real socket setup runs before controlled clock advances. Leave room
+        // for that work while retaining the deadline and retry-reset oracles.
+        policy.elapsed = Duration::from_secs(30);
         if mode == Zero {
             policy.elapsed = Duration::ZERO;
         }
         policy.backoff = crate::network::RetryConfig::new()
             .with_jitter(false)
             .with_base_delay(if mode == Backoff {
-                Duration::from_secs(10)
+                Duration::from_secs(60)
             } else {
                 Duration::ZERO
             });
@@ -3303,13 +3306,20 @@ mod tests {
         });
         // Observe the actual request/effect before advancing Tokio's clock;
         // automatic paused-clock advancement must not race socket setup.
-        let setup = tokio::time::timeout(guard, async {
+        let elapsed_before_retry = Duration::from_secs(20);
+        // The virtual advance also counts against this enclosing watchdog.
+        let setup_guard = if mode == RetryHeaders {
+            guard + elapsed_before_retry
+        } else {
+            guard
+        };
+        let setup = tokio::time::timeout(setup_guard, async {
             while requests.load(Ordering::SeqCst) == 0 {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
             if mode == RetryHeaders {
                 tokio::time::pause();
-                tokio::time::advance(Duration::from_secs(4)).await;
+                tokio::time::advance(elapsed_before_retry).await;
                 tokio::time::resume();
                 let _ = first_response_tx.take().unwrap().send(());
                 while requests.load(Ordering::SeqCst) < 2 {
@@ -3328,8 +3338,8 @@ mod tests {
         let mut happy_setup = true;
         if setup.is_ok() && mode == Happy {
             for member in 1..=count {
-                // Each file uses 3s of its own 5s budget. The complete set
-                // takes over 9s, rejecting a whole-request deadline mutant.
+                // Each file uses 18s of its own 30s budget. The complete set
+                // takes over 54s, rejecting a whole-request deadline mutant.
                 let accepted = tokio::time::timeout(guard, async {
                     while requests.load(Ordering::SeqCst) < member {
                         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -3341,7 +3351,7 @@ mod tests {
                     break;
                 }
                 tokio::time::pause();
-                tokio::time::advance(Duration::from_secs(3)).await;
+                tokio::time::advance(Duration::from_secs(18)).await;
                 tokio::time::resume();
                 if happy_tx.send(()).await.is_err() {
                     happy_setup = false;
@@ -3358,9 +3368,9 @@ mod tests {
             }
             tokio::time::pause();
             tokio::time::advance(Duration::from_secs(if mode == RetryHeaders {
-                2
+                11
             } else {
-                6
+                31
             }))
             .await;
             tokio::time::resume();
@@ -3727,6 +3737,9 @@ mod tests {
         };
         let controls = host.clone();
         let transfer_consumer = consumer.clone();
+        // This fixture isolates pause/cancellation from elapsed-budget expiry.
+        let mut policy = retry();
+        policy.elapsed = Duration::ZERO;
         let mut transfer = tokio::spawn(async move {
             transfer_consumer
                 .acquire_http(
@@ -3738,7 +3751,7 @@ mod tests {
                             url,
                             authorization: None,
                         }],
-                        retry: retry(),
+                        retry: policy,
                     },
                     reqwest::Client::new(),
                     Box::new(host),
@@ -3748,7 +3761,7 @@ mod tests {
                 .await
         });
 
-        let progress_result = tokio::time::timeout(Duration::from_secs(2), async {
+        let progress_result = tokio::time::timeout(Duration::from_secs(10), async {
             first_sent
                 .await
                 .map_err(|_| "HTTP fixture stopped before sending the first chunk")?;

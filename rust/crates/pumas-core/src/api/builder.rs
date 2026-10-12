@@ -398,6 +398,24 @@ impl PumasApiBuilder {
                 .canonicalize()
                 .map_err(|error| PumasError::io_with_path(error, &self.launcher_root))?;
 
+            // Ordinary HF-enabled owners must reject an unsupported store before
+            // claiming the registry or starting workers. No startup effects need
+            // custody yet, so this refusal releases the physical lease normally.
+            // Reserved constructors retain their existing authority/claim rules.
+            let data_dir = self.launcher_root.join("launcher-data");
+            if self.instance_profile != crate::InstanceProfile::CatalogQuery
+                && self.enable_hf_client
+                && data_dir
+                    .try_exists()
+                    .map_err(|error| PumasError::io_with_path(error, &data_dir))?
+            {
+                crate::acquisition::store::AcquisitionStore::new_with_store_lifetime(
+                    &data_dir,
+                    store_lifetime.clone(),
+                )
+                .require_acquisition_schema()?;
+            }
+
             let registry = match self.registry.take() {
                 Some(registry) => registry,
                 None => registry::LibraryRegistry::open()?,

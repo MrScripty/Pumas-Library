@@ -2123,6 +2123,12 @@ impl VersionInstaller {
             "{:x}",
             Sha256::digest(std::fs::read(&managed_python.executable).map_err(PumasError::from)?)
         );
+        if selection.audio_candidate_recipe {
+            super::super::audio_runtime_recipe::validate_managed_python(
+                &managed_python_identity_record(&managed_python, &interpreter_hash),
+            )
+            .map_err(PumasError::from)?;
+        }
 
         let runtime = staging.path().join("runtime");
         let runtime_for_write = runtime.clone();
@@ -2170,6 +2176,15 @@ impl VersionInstaller {
             .arg(&resolver_output)
             .arg("--cache-dir")
             .arg(pip_cache);
+        let candidate_links = runtime.join("audio-candidate-links.html");
+        if selection.audio_candidate_recipe {
+            std::fs::write(
+                &candidate_links,
+                super::super::audio_runtime_recipe::candidate_links().map_err(PumasError::from)?,
+            )
+            .map_err(PumasError::from)?;
+            install.arg("--audio-candidate-links").arg(&candidate_links);
+        }
         let status = self
             .run_runtime_command_status_with_download_progress(
                 install,
@@ -2182,6 +2197,9 @@ impl VersionInstaller {
                 Some(&download_progress_path),
             )
             .await?;
+        if selection.audio_candidate_recipe {
+            std::fs::remove_file(&candidate_links).map_err(PumasError::from)?;
+        }
         if !status.success() {
             if retry_direct_torch_attempt(
                 status.code(),
@@ -2200,6 +2218,13 @@ impl VersionInstaller {
             &std::fs::read(resolver_output.join("resolution.json")).map_err(PumasError::from)?,
         )
         .map_err(|error| failed(format!("Invalid Torch installation report: {error}")))?;
+        if selection.audio_candidate_recipe {
+            super::super::audio_runtime_recipe::validate_artifacts(
+                &serde_json::to_value(&resolution.artifacts)
+                    .map_err(|error| failed(error.to_string()))?,
+            )
+            .map_err(PumasError::from)?;
+        }
         let report: serde_json::Value = serde_json::from_slice(
             &std::fs::read(resolver_output.join("pip-resolution.json"))
                 .map_err(PumasError::from)?,

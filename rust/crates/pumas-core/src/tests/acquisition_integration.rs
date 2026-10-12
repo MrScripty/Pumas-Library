@@ -34,31 +34,21 @@ async fn acquisition_integration_startup_refuses_legacy_store_without_rewriting_
         );
         assert_eq!(std::fs::read(&store_path).unwrap(), before);
         let registry = registry::LibraryRegistry::open().unwrap();
-        let retained_claim = registry.get_instance(root.path()).unwrap().unwrap();
-        assert_eq!(retained_claim.status, registry::InstanceStatus::Claiming);
-        let retained_claim = serde_json::to_value(retained_claim).unwrap();
+        assert!(registry.get_instance(root.path()).unwrap().is_none());
+        assert!(!root.path().join("shared-resources").exists());
+        assert!(!data_dir.join("metadata").exists());
         let retry = PumasApi::builder(root.path())
             .auto_create_dirs(true)
-            .with_hf_client(false)
             .with_process_manager(false)
             .build()
             .await;
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        assert!(matches!(
-            retry,
-            Err(PumasError::InvalidParams { message })
-                if message == format!(
-                    "Pumas library instance is already running for physical store {}. Drop existing owner handles before constructing another owner.",
-                    root.path().canonicalize().unwrap().display()
-                )
-        ));
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-        assert!(matches!(retry, Err(PumasError::InvalidParams { message })
-            if message.contains("PumasLocalClient")));
-        assert_eq!(
-            serde_json::to_value(registry.get_instance(root.path()).unwrap().unwrap()).unwrap(),
-            retained_claim
+        assert!(
+            matches!(retry, Err(PumasError::Validation { ref field, .. })
+            if field == "acquisition.migration_required"),
+            "schema {version} must remain upgradeable after a failed startup"
         );
+        assert!(registry.get_instance(root.path()).unwrap().is_none());
+        assert_eq!(std::fs::read(&store_path).unwrap(), before);
         let store = DownloadPersistence::new(&data_dir);
         if version != 6 {
             assert!(store
@@ -66,8 +56,7 @@ async fn acquisition_integration_startup_refuses_legacy_store_without_rewriting_
                 .unwrap()
                 .downloads
                 .is_empty());
-            // A failed builder retains its claim. Check the independent
-            // HF-disabled compatibility path on its own authored store.
+            // HF-disabled callers retain their independent legacy compatibility.
             let independent = TempDir::new().unwrap();
             let independent_data = independent.path().join("launcher-data");
             std::fs::create_dir_all(&independent_data).unwrap();

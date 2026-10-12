@@ -12,10 +12,34 @@ import {
   LauncherRootSelectionError,
 } from '../dist/launcher-root.js';
 import {
+  BackendInitializationRecoveryRequiredError,
   LauncherRootRecoveryRequiredError,
   classifyBackendInitializationOutcome,
   isLauncherRootRecoveryRequiredError,
 } from '../dist/startup-task.js';
+import { BackendStartupError } from '../dist/backend-startup.js';
+
+test('backend recovery preserves launcher authority and remains fatal to release smoke', () => {
+  for (const source of ['persisted', 'packaged-default', 'environment', 'argument']) {
+    const error = new BackendInitializationRecoveryRequiredError({
+      status: 'resolved', launcherRoot: '/private/library', source, persistedState: 'valid',
+    }, new BackendStartupError('migration-required'));
+    const explicit = source === 'environment' || source === 'argument';
+    assert.deepEqual(error.recoveryState, {
+      status: 'recovery-required', reason: 'migration-required',
+      authoritySource: explicit ? source : source === 'persisted' ? 'persisted' : 'default',
+      action: explicit ? 'correct-launch-input' : 'select-library',
+    });
+    assert.equal(isLauncherRootSelectionAvailable(error.recoveryState), !explicit);
+    assert.deepEqual(classifyBackendInitializationOutcome({ status: 'rejected', error }, 'desktop'), {
+      status: 'recovery-required', recoveryState: error.recoveryState,
+    });
+    assert.deepEqual(classifyBackendInitializationOutcome({ status: 'rejected', error }, 'release-smoke'), {
+      status: 'fatal', error,
+    });
+    assert.equal(JSON.stringify(error.recoveryState).includes('/private'), false);
+  }
+});
 
 test('startup projection strips paths and selects only valid recovery actions', () => {
   assert.deepEqual(projectLauncherRootStartupState({

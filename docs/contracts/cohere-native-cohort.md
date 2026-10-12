@@ -67,7 +67,7 @@ enforcement.
 
 Native preparation is restricted to the source-pinned candidate in
 `pumas-core/src/runtime_read_source/audio_candidate_recipe.json`: the managed CPython identity, all 68
-exact wheel artifacts, and framed hashes of the 3,487 interpreter and 23,630
+exact wheel artifacts, and framed hashes of the 3,487 interpreter and 23,588
 selected dependency members. Comparison follows actual byte capture and is
 followed by retained-source revalidation. Metadata alone cannot satisfy the
 selected-byte hashes. This fixes candidate identity; it does not register a
@@ -89,7 +89,17 @@ remains empty, so this primitive cannot admit the installed candidate today.
 
 The `test-support`-only `qualify_audio_dependencies` example installs the existing
 managed CPU recipe into an explicit empty isolated root. A read-only kernel
-preflight refuses unsupported hosts before acquisition. It then retains the
+preflight refuses unsupported hosts before acquisition. Its explicit
+`preview_torch_audio_candidate` selection uses the normal owned installer but
+limits pip discovery to a private link page containing only the source recipe's
+wheel URLs and SHA-256 fragments, with public indexes disabled. The original
+named dependency roots are preserved: listing every transitive wheel as a
+direct requirement would change pip's `REQUESTED`, `direct_url.json` and
+`RECORD` bytes. Managed interpreter identity is checked before wheel acquisition;
+the complete resolved artifact set must match the recipe before staged packages
+are moved or executed. Normal user runtime selections remain unchanged.
+
+It then retains the
 fixed CPython, dependency and native selections, rehashes each against the
 source pin, and runs only a constant probe through the owned loader and actual
 native read boundary. No caller program or model path is accepted.

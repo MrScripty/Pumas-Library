@@ -54,6 +54,18 @@ fn held(root: &Path) -> bool {
     }
 }
 
+async fn await_physical_release(root: &Path) {
+    // Parallel consumer fixtures can inherit this descriptor until exec closes
+    // it. Parent drop alone does not promise immediate native lock release.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while held(root) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("physical lease remained held after parent and inherited handles closed");
+}
+
 #[tokio::test]
 async fn reserved_authority_excludes_contenders_and_cancel_then_restart_preserves_root() {
     let (temp, root, registry) = fixture();
@@ -82,7 +94,7 @@ async fn reserved_authority_excludes_contenders_and_cancel_then_restart_preserve
     assert!(alternate.list_instances().unwrap().is_empty());
     assert!(!root.join("shared-resources").exists());
     first.cancel().unwrap();
-    assert!(!held(&root));
+    await_physical_release(&root).await;
     assert!(registry.list_instances().unwrap().is_empty());
     let owned = reserve(&root, registry.clone())
         .await
@@ -121,7 +133,7 @@ async fn incompatible_preflight_cannot_reserve_and_abandoned_authority_cannot_be
     let abandoned = reserve(&root, registry.clone()).await;
     let generation = registry.get_instance(&root).unwrap().unwrap().started_at;
     drop(abandoned);
-    assert!(!held(&root));
+    await_physical_release(&root).await;
     assert!(prepare_local_access(
         registry.clone(),
         &root,
@@ -435,7 +447,7 @@ async fn actual_reserved_process_loss_keeps_claim_and_refuses_new_consumer() {
     let before = registry.get_instance(&root).unwrap().unwrap();
     first.child.kill().unwrap();
     assert!(!first.child.wait().unwrap().success());
-    assert!(!held(&root));
+    await_physical_release(&root).await;
     let mut denied = ConsumerProcess::spawn(&root, &db, &temp.path().join("denied"), None);
     assert!(!denied.exit().await.success());
     let retained = LibraryRegistry::open_read_only_at(&db)

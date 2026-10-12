@@ -27,8 +27,8 @@ export type LauncherRootStartupState =
   | { status: 'ready'; selectionAction: LauncherRootSelectionAction; libraryScopeId: string | null }
   | {
       status: 'recovery-required';
-      reason: 'invalid' | 'unavailable';
-      authoritySource: 'persisted' | 'environment' | 'argument';
+      reason: 'invalid' | 'unavailable' | 'migration-required' | 'backend-unavailable';
+      authoritySource: 'persisted' | 'environment' | 'argument' | 'default';
       action: LauncherRootSelectionAction;
     };
 

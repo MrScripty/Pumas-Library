@@ -27,6 +27,7 @@ function installElectronBridge(
     get_launcher_root_bootstrap: vi.fn(() => ({ status: 'initializing' })),
     get_launcher_root_state: vi.fn(getRootState),
     select_launcher_root: vi.fn(selectRoot),
+    upgrade_launcher_library: vi.fn(async () => ({ status: 'unavailable' })),
     notify_launcher_root_presentation_committed: vi.fn().mockResolvedValue(undefined),
     onLauncherRootPresentationTimeout: vi.fn((callback: () => void) => {
       presentationTimeoutHandler = callback;
@@ -90,6 +91,94 @@ describe('LauncherRootRecoveryProvider', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it.each([
+    ['migration-required', 'Library upgrade required', /older download database/],
+    ['backend-unavailable', 'Library could not start', /Another app may already be using it/],
+  ] as const)('keeps %s visible and permits choosing another library', async (reason, title, message) => {
+    const bridge = installElectronBridge(async () => ({
+      status: 'recovery-required', reason, authoritySource: 'persisted', action: 'select-library',
+    }));
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    expect(await screen.findByRole('heading', { name: title })).toBeVisible();
+    expect(screen.getByText(message)).toBeVisible();
+    expect(screen.queryByText('Library content')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select Library' }));
+    await waitFor(() => expect(bridge.select_launcher_root).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('heading', { name: title })).toBeVisible();
+    expect(bridge.notify_launcher_root_presentation_committed).toHaveBeenCalledWith('recovery-required');
+  });
+
+  it('offers an in-app metadata upgrade for a legacy library', async () => {
+    installElectronBridge(async () => ({
+      status: 'recovery-required', reason: 'migration-required', authoritySource: 'persisted', action: 'select-library',
+    }));
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Upgrade Library' }));
+    expect(screen.getByText(/downloads.json/)).toBeVisible();
+    expect(screen.getByText(/model files.*not.*copied/i)).toBeVisible();
+  });
+
+  it('requires both upgrade confirmations, stays pending, and opens the library only after readiness', async () => {
+    const pending = deferred<Awaited<ReturnType<NonNullable<typeof window.electronAPI>['upgrade_launcher_library']>>>();
+    const bridge = installElectronBridge(async () => ({
+      status: 'recovery-required', reason: 'migration-required', authoritySource: 'environment', action: 'correct-launch-input',
+    }));
+    vi.mocked(bridge.upgrade_launcher_library).mockReturnValue(pending.promise);
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Upgrade Library' }));
+    const submit = screen.getByRole('button', { name: 'Upgrade Metadata and Open Library' });
+    expect(submit).toBeDisabled();
+    const writersStopped = screen.getByRole('checkbox', { name: /I have closed every other app/ });
+    const downgradeAccepted = screen.getByRole('checkbox', { name: /older app versions cannot use/ });
+    fireEvent.click(writersStopped); expect(submit).toBeDisabled();
+    expect(bridge.upgrade_launcher_library).not.toHaveBeenCalled();
+    fireEvent.click(downgradeAccepted); expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+    expect(await screen.findByRole('heading', { name: 'Upgrading library metadata' })).toBeVisible();
+    expect(screen.queryByText('Library content')).not.toBeInTheDocument();
+    expect(bridge.upgrade_launcher_library).toHaveBeenCalledExactlyOnceWith({ oldWritersStopped: true, noDowngradeAccepted: true });
+    expect(bridge.select_launcher_root).not.toHaveBeenCalled();
+    await act(async () => pending.resolve({ status: 'ready', state: { status: 'ready', selectionAction: 'correct-launch-input', libraryScopeId: null } }));
+    expect(await screen.findByText('Library content')).toBeVisible();
+  });
+
+  it('cancelling confirmation leaves metadata unchanged and clears both acknowledgments', async () => {
+    const bridge = installElectronBridge(async () => ({ status: 'recovery-required', reason: 'migration-required', authoritySource: 'persisted', action: 'select-library' }));
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Upgrade Library' }));
+    for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(bridge.upgrade_launcher_library).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Upgrade Library' }));
+    expect(screen.getByRole('button', { name: 'Upgrade Metadata and Open Library' })).toBeDisabled();
+  });
+
+  it.each(['upgrade', 'open'] as const)('preserves %s failure without retrying mutation or showing library content', async (stage) => {
+    const bridge = installElectronBridge(async () => ({ status: 'recovery-required', reason: 'migration-required', authoritySource: 'persisted', action: 'select-library' }));
+    vi.mocked(bridge.upgrade_launcher_library).mockResolvedValue({ status: 'failed', stage });
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Upgrade Library' }));
+    for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box);
+    fireEvent.click(screen.getByRole('button', { name: 'Upgrade Metadata and Open Library' }));
+    expect(await screen.findByRole('heading', { name: stage === 'open' ? 'Library metadata upgraded' : 'Library upgrade needs attention' })).toBeVisible();
+    if (stage === 'open') expect(screen.getByText(/library backend could not start/)).toBeVisible();
+    expect(screen.queryByText('Library content')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upgrade Library' })).not.toBeInTheDocument();
+    expect(bridge.upgrade_launcher_library).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['environment', 'argument'] as const)('preserves %s authority after backend failure', async (authoritySource) => {
+    const bridge = installElectronBridge(async () => ({
+      status: 'recovery-required', reason: 'backend-unavailable', authoritySource, action: 'correct-launch-input',
+    }));
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    expect(await screen.findByRole('heading', { name: 'Library could not start' })).toBeVisible();
+    expect(screen.getByRole('status')).toHaveTextContent(`correct the ${authoritySource} launch input`);
+    expect(screen.queryByRole('button', { name: 'Select Library' })).not.toBeInTheDocument();
+    expect(bridge.select_launcher_root).not.toHaveBeenCalled();
+    expect(screen.queryByText('Library content')).not.toBeInTheDocument();
   });
 
   it('treats browser mode as not applicable and renders application content', () => {

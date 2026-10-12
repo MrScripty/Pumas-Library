@@ -34,6 +34,9 @@ See [Architecture](docs/ARCHITECTURE.md) for process and ownership details.
 
 ## Desktop Quick Start
 
+For a saved library that needs attention after an upgrade, see
+[Opening an older library](docs/library-upgrade.md).
+
 The root launchers require Node and delegate every action to one shared
 implementation, so Bash and PowerShell use the same parsing, environment, and
 exit-code contract.

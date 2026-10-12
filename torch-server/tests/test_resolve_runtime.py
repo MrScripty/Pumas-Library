@@ -9,6 +9,7 @@ import re
 import tempfile
 import time
 import unittest
+import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from types import SimpleNamespace
@@ -1165,6 +1166,221 @@ class ResolverTests(unittest.TestCase):
                     resolver.main()
             self.assertEqual(exit_result.exception.code, 2)
             run.assert_not_called()
+
+    def test_audio_candidate_cli_preserves_named_roots_without_live_indexes(self):
+        # The qualification owner admits Linux x86_64 only. Model that command
+        # explicitly even when the surrounding Python suite runs on macOS.
+        fixture = report(
+            adapter="cohere-asr",
+            url="https://download.pytorch.org/whl/cpu/torch-2.10.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl",
+        )
+
+        def fake_run(command, **_kwargs):
+            pathlib.Path(command[command.index("--report") + 1]).write_text(
+                json.dumps(fixture), encoding="utf-8"
+            )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            links = root / "audio candidate links.html"
+            links.write_text("<html></html>", encoding="utf-8")
+            output = root / "result"
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--adapter",
+                        "cohere-asr",
+                        "--install",
+                        "--target",
+                        str(root / "packages"),
+                        "--output",
+                        str(output),
+                        "--audio-candidate-links",
+                        str(links),
+                    ],
+                ),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run) as run,
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(resolver.platform, "platform", return_value="Linux"),
+                patch.object(resolver.platform, "machine", return_value="x86_64"),
+                patch.object(resolver, "installed_file_manifest", return_value={"files": []}),
+            ):
+                resolver.main()
+            command = run.call_args.args[0]
+            self.assertEqual(command[command.index("--find-links") + 1], str(links))
+            self.assertIn("--no-index", command)
+            self.assertIn("torch==2.10.0+cpu", command)
+            self.assertTrue(set(resolver.CORE).issubset(command))
+            self.assertTrue(set(resolver.COHERE_ASR).issubset(command))
+            for forbidden in ("--index-url", "--extra-index-url", "--no-deps", "-r"):
+                self.assertNotIn(forbidden, command)
+            self.assertFalse(any(" @ " in item for item in command))
+            self.assertEqual(
+                json.loads((output / "resolution.json").read_text())["artifacts"],
+                [
+                    {
+                        "name": item["metadata"]["name"],
+                        "version": item["metadata"]["version"],
+                        "url": item["download_info"]["url"],
+                        "sha256": item["download_info"]["archive_info"]["hashes"]["sha256"],
+                    }
+                    for item in fixture["install"]
+                ],
+            )
+
+    def test_audio_candidate_cli_rejects_other_modes_and_missing_links_before_pip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            links = root / "links.html"
+            links.write_text("<html></html>", encoding="utf-8")
+            base = [
+                "resolve_runtime.py",
+                "--version",
+                "2.10.0",
+                "--build",
+                "cpu",
+                "--adapter",
+                "cohere-asr",
+                "--install",
+                "--target",
+                str(root / "packages"),
+                "--output",
+                str(root / "result"),
+                "--audio-candidate-links",
+                str(links),
+            ]
+            invalid = [
+                [item for item in base if item != "--install"],
+                [*base, "--discover"],
+                [*base, "--release-options"],
+                [*base, "--version", "2.9.1"],
+                [*base, "--build", "cu130"],
+                [*base, "--adapter", "none"],
+                [*base, "--torch-wheel", native_wheel()],
+                [*base, "--torch-sha256", "a" * 64],
+            ]
+            for argv in invalid:
+                with (
+                    self.subTest(argv=argv),
+                    patch.object(resolver.sys, "argv", argv),
+                    patch.object(resolver.subprocess, "run") as run,
+                    redirect_stderr(StringIO()) as stderr,
+                ):
+                    with self.assertRaises(SystemExit) as exit_result:
+                        resolver.main()
+                    self.assertEqual(exit_result.exception.code, 2)
+                    self.assertIn("require the fixed staged audio selection", stderr.getvalue())
+                    run.assert_not_called()
+            for invalid_path in (root / "missing.html", root):
+                with (
+                    self.subTest(path=invalid_path),
+                    patch.object(resolver.sys, "argv", [*base[:-1], str(invalid_path)]),
+                    patch.object(resolver.subprocess, "run") as run,
+                    redirect_stderr(StringIO()) as stderr,
+                ):
+                    with self.assertRaises(SystemExit) as exit_result:
+                        resolver.main()
+                    self.assertEqual(exit_result.exception.code, 2)
+                    self.assertIn("must be a regular file", stderr.getvalue())
+                    run.assert_not_called()
+
+    def test_pinned_find_links_preserves_installed_metadata_and_checks_wheel_hashes(self):
+        # Real pip, tiny local wheels: this proves the acquisition mechanism's
+        # metadata behavior without downloading Torch or claiming audio execution.
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            wheels = []
+            for name, dependency in (
+                ("pumas_fixture_parent", "Requires-Dist: pumas-fixture-child>=1.0\n"),
+                ("pumas_fixture_child", ""),
+            ):
+                metadata = f"{name}-1.0.dist-info"
+                files = {
+                    f"{name}.py": b"VALUE = 1\n",
+                    f"{metadata}/METADATA": (
+                        f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n{dependency}"
+                    ).encode(),
+                    f"{metadata}/WHEEL": (
+                        b"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+                    ),
+                }
+                rows = [
+                    f"{path},sha256="
+                    f"{base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip('=')},"
+                    f"{len(data)}"
+                    for path, data in files.items()
+                ]
+                files[f"{metadata}/RECORD"] = (
+                    "\n".join([*rows, f"{metadata}/RECORD,,"]) + "\n"
+                ).encode()
+                wheel = root / f"{name}-1.0-py3-none-any.whl"
+                with zipfile.ZipFile(wheel, "w") as archive:
+                    for path, data in files.items():
+                        archive.writestr(path, data)
+                wheels.append((wheel, hashlib.sha256(wheel.read_bytes()).hexdigest()))
+            links = root / "links.html"
+            links.write_text(
+                "\n".join(
+                    f'<a href="{wheel.as_uri()}#sha256={digest}">{wheel.name}</a>'
+                    for wheel, digest in wheels
+                ),
+                encoding="utf-8",
+            )
+
+            def install(destination, source):
+                return resolver.subprocess.run(
+                    [
+                        resolver.sys.executable,
+                        "-I",
+                        "-B",
+                        "-m",
+                        "pip",
+                        "--isolated",
+                        "install",
+                        "--no-index",
+                        "--no-cache-dir",
+                        "--no-compile",
+                        "--ignore-installed",
+                        "--only-binary=:all:",
+                        "--disable-pip-version-check",
+                        "--find-links",
+                        str(source),
+                        "--target",
+                        str(destination),
+                        "pumas-fixture-parent",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+
+            manifests = []
+            for mode, source in (("named", root), ("pinned", links)):
+                target = root / mode
+                result = install(target, source)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                manifests.append(resolver.installed_file_manifest(target))
+                self.assertEqual(
+                    [path.relative_to(target).as_posix() for path in target.rglob("REQUESTED")],
+                    ["pumas_fixture_parent-1.0.dist-info/REQUESTED"],
+                )
+                self.assertEqual(list(target.rglob("direct_url.json")), [])
+            self.assertEqual(manifests[0], manifests[1])
+
+            links.write_text(links.read_text().replace(wheels[1][1], "0" * 64), encoding="utf-8")
+            failed = install(root / "wrong-hash", links)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("DO NOT MATCH THE HASHES", failed.stderr)
+            self.assertIn("Expected sha256 " + "0" * 64, failed.stderr)
 
     def test_release_options_match_native_windows_and_macos_wheels(self):
         fixtures = (

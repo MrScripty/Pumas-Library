@@ -34,8 +34,8 @@ export type LauncherRootStartupState =
     }
   | {
       status: 'recovery-required';
-      reason: 'invalid' | 'unavailable';
-      authoritySource: 'persisted' | 'environment' | 'argument';
+      reason: 'invalid' | 'unavailable' | 'migration-required' | 'backend-unavailable';
+      authoritySource: 'persisted' | 'environment' | 'argument' | 'default';
       action: 'select-library' | 'correct-launch-input';
     };
 

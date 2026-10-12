@@ -405,6 +405,57 @@ for (const autoRestart of [false, true]) {
   });
 }
 
+for (const reason of ['migration-required', 'backend-unavailable']) {
+  test(`initial ${reason} refusal never starts an automatic retry chain`, async () => {
+    const { bridge, children, timers } = stopFixture();
+    bridge.process = null;
+    const health = deferred();
+    bridge.call = () => health.promise;
+    const starting = bridge.start();
+    const rejected = assert.rejects(starting, error => error.reason === reason);
+    const child = children[0];
+    child.exit(1);
+    if (reason === 'migration-required') {
+      child.stdout.emit('data', Buffer.from('PUMAS_STARTUP_FAILURE={"version":1,"reason":"migration-required"}\n'));
+    }
+    child.emit('close', 1, null);
+    health.resolve({ status: 'unavailable' });
+    await rejected;
+    assert.equal(children.length, 1);
+    assert.equal(timers.pendingCount(), 0);
+    assert.equal(bridge.isRunning(), false);
+  });
+}
+
+test('failed replacement startups retain the admitted runtime retry budget and backoff', async () => {
+  const { bridge, children, timers } = stopFixture({ options: { maxRestarts: 3 } });
+  bridge.process = null;
+  bridge.call = async () => ({ status: 'ok' });
+  await bridge.start();
+  assert.equal(bridge.isRunning(), true);
+  children[0].exit(1);
+
+  for (const delayMs of [1000, 2000, 3000]) {
+    const health = deferred();
+    bridge.call = () => health.promise;
+    assert.equal(timers.nextDelay(), delayMs);
+    await timers.runNext();
+    const starting = bridge.startPromise;
+    const rejected = assert.rejects(starting, error => error.reason === 'backend-unavailable');
+    const child = children.at(-1);
+    child.exit(1);
+    child.emit('close', 1, null);
+    health.resolve({ status: 'unavailable' });
+    await rejected;
+    await flushMicrotasks();
+    assert.equal(bridge.isRunning(), false);
+  }
+
+  assert.equal(children.length, 4, 'one initial child plus the configured three replacement attempts');
+  assert.equal(timers.pendingCount(), 0, 'exhausting the budget must not schedule another attempt');
+  await assert.rejects(bridge.stop(), /code=1.*cleanup failed/i);
+});
+
 test('an unsuccessful restart attempt cannot erase the previous cleanup failure', async () => {
   const { bridge, children, timers } = stopFixture();
   bridge.process = null;
@@ -459,32 +510,23 @@ test('a new owner replaces the prior failure receipt without accepting stale chi
 });
 
 for (const stopIntervenes of [false, true]) {
-  test(`restart after pending readiness settles re-evaluates ownership (stop=${stopIntervenes})`, async () => {
+  test(`startup refusal never schedules a replacement (stop=${stopIntervenes})`, async () => {
     const { bridge, children, timers } = stopFixture();
     bridge.process = null;
     const ready = deferred();
     bridge.waitForReady = () => ready.promise;
     const starting = bridge.start();
     const startupFailed = assert.rejects(starting, /stopped during startup/);
-    const oldChild = children[0];
-    oldChild.exit(9);
-    await timers.runNext();
-    assert.equal(children.length, 1, 'restart waits until the predecessor startup settles');
+    children[0].exit(9);
+    assert.equal(timers.pendingCount(), 0);
     const stopped = stopIntervenes ? bridge.stop() : null;
     const stopFailed = stopped ? assert.rejects(stopped, /code=9.*cleanup failed/i) : null;
     ready.resolve();
     await startupFailed;
     await flushMicrotasks();
-    if (stopIntervenes) {
-      await stopFailed;
-      assert.equal(children.length, 1);
-    } else {
-      assert.equal(children.length, 2, 'one replacement starts after the failed predecessor');
-      assert.equal(bridge.isRunning(), true);
-      const finalStop = bridge.stop();
-      children[1].exit();
-      await finalStop;
-    }
+    assert.equal(children.length, 1, 'startup failure requires user recovery, not a retry');
+    if (stopFailed) await stopFailed;
+    else await assert.rejects(bridge.stop(), /code=9.*cleanup failed/i);
     assert.equal(timers.pendingCount(), 0);
   });
 }

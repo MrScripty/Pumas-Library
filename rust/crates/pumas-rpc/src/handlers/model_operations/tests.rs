@@ -1070,8 +1070,11 @@ async fn native_fake_embedding_session_is_available_and_projects_finite_vectors(
 
 #[tokio::test]
 async fn typed_onnx_embedding_cancelled_in_operation_queue_is_not_admitted() {
+    let (_root, state) =
+        tokio::time::timeout(Duration::from_secs(30), controlled_embedding_state())
+            .await
+            .expect("controlled ONNX fixture setup hung");
     tokio::time::timeout(Duration::from_secs(5), async {
-        let (_root, state) = controlled_embedding_state().await;
         let held = Arc::new(std::sync::Mutex::new(None));
         let (entered, waiting) = oneshot::channel();
         let entered = Arc::new(std::sync::Mutex::new(Some(entered)));
@@ -1121,8 +1124,11 @@ async fn typed_onnx_embedding_cancelled_in_operation_queue_is_not_admitted() {
 
 #[tokio::test]
 async fn typed_onnx_embedding_unloaded_after_availability_is_not_admitted() {
+    let (_root, state) =
+        tokio::time::timeout(Duration::from_secs(30), controlled_embedding_state())
+            .await
+            .expect("controlled ONNX fixture setup hung");
     tokio::time::timeout(Duration::from_secs(5), async {
-        let (_root, state) = controlled_embedding_state().await;
         let gate: Arc<dyn Fn() -> futures::future::BoxFuture<'static, ()> + Send + Sync> = {
             let state = state.clone();
             Arc::new(move || {

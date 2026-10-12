@@ -3620,6 +3620,22 @@ impl HuggingFaceClient {
                 state.status,
             )
         };
+        let inspection_destination = destination.clone();
+        let destination_exists = protected_context
+            .run_fallible_blocking_named(
+                "inspect restored download destination presence",
+                move || inspection_destination.capability().model_directory_exists(),
+            )
+            .await
+            .map_err(|error| error.into_pumas_error("Download restore presence owner failed"))??;
+        if !destination_exists {
+            // A queued or retained failed download may never have created its
+            // folder. There are no outputs to finalize. Keep its exact queue
+            // custody for an explicit resume/recovery, without creating a
+            // workspace or turning this historical entry into a startup failure.
+            warn!("Download {download_id} destination is absent; retaining its state without startup finalization");
+            return Ok(None);
+        }
         let cancel_flag = Arc::new(DownloadCancellation::new());
         let pause_flag = Arc::new(AtomicBool::new(false));
         let mut prepared_download = self
@@ -8767,6 +8783,82 @@ mod tests {
         client.set_persistence(Arc::new(DownloadPersistence::new(&root)));
         Ok(client)
     }
+
+    #[tokio::test]
+    async fn restore_missing_destination_retains_download_without_failing_startup() {
+        for status in [DownloadStatus::Error, DownloadStatus::Paused] {
+            let temp = tempfile::TempDir::new().unwrap();
+            let destination = temp.path().join("missing-model");
+            let client = configured_download_client(temp.path().join("cache")).unwrap();
+            let persistence = client.persistence.as_ref().unwrap();
+            let snapshot = PersistedDownload {
+                download_id: "missing-destination".into(),
+                repo_id: "acme/model".into(),
+                filename: "weights.gguf".into(),
+                filenames: vec!["weights.gguf".into()],
+                dest_dir: destination.clone(),
+                total_bytes: Some(8),
+                status,
+                download_request: recovery_test_request("acme/model", &["weights.gguf".into()]),
+                revision: None,
+                created_at: chrono::Utc::now().to_rfc3339(),
+                known_sha256: None,
+                huggingface_evidence: None,
+            };
+            let attempt = admit_snapshot_at_root(persistence, &snapshot, temp.path());
+            let before = std::fs::read(temp.path().join("downloads.json")).unwrap();
+            assert!(client
+                .restore_persisted_downloads()
+                .await
+                .unwrap()
+                .is_empty());
+            assert_eq!(
+                client.get_download_status(&snapshot.download_id).await,
+                Some(status)
+            );
+            assert!(
+                !destination.exists(),
+                "startup must not recreate an absent destination"
+            );
+            assert_eq!(
+                std::fs::read(temp.path().join("downloads.json")).unwrap(),
+                before
+            );
+            let inventory = persistence.load_lifecycle_inventory_strict().unwrap();
+            assert_eq!(
+                inventory.queue_admissions[&snapshot.download_id].attempt_id,
+                attempt
+            );
+            let healthy_destination = temp.path().join("existing-model");
+            std::fs::create_dir(&healthy_destination).unwrap();
+            std::fs::write(healthy_destination.join("weights.gguf.part"), b"abc").unwrap();
+            let mut healthy = snapshot.clone();
+            healthy.download_id = "existing-destination".into();
+            healthy.dest_dir = healthy_destination.clone();
+            healthy.status = DownloadStatus::Paused;
+            admit_snapshot_at_root(persistence, &healthy, temp.path());
+            assert!(client
+                .restore_persisted_downloads()
+                .await
+                .unwrap()
+                .is_empty());
+            assert_eq!(
+                client.get_download_status(&healthy.download_id).await,
+                Some(DownloadStatus::Paused)
+            );
+            assert_eq!(
+                client.get_download_status(&snapshot.download_id).await,
+                Some(status)
+            );
+            assert!(!destination.exists());
+            assert_eq!(
+                std::fs::read(healthy_destination.join("weights.gguf.part")).unwrap(),
+                b"abc"
+            );
+            client.shutdown_downloads().await.unwrap();
+        }
+    }
+
     #[tokio::test]
     async fn admitted_download_survives_restart_and_cancels_with_exact_queue_settlement() {
         let temp = tempfile::TempDir::new().unwrap();

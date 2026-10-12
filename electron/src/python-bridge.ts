@@ -575,10 +575,11 @@ export class PythonBridge {
         for (const cancel of [...this.pendingRpcCalls]) cancel();
       }
 
-      // Auto-restart if enabled and not shutting down
+      // Continue an admitted runtime-recovery chain even if its replacement
+      // fails before readiness. Initial startup refusals never begin this chain.
       if (
         !this.isShuttingDown &&
-        wasReady &&
+        (wasReady || this.restartCount > 0) &&
         this.options.autoRestart &&
         this.restartCount < this.options.maxRestarts
       ) {

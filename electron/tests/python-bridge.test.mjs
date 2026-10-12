@@ -405,6 +405,57 @@ for (const autoRestart of [false, true]) {
   });
 }
 
+for (const reason of ['migration-required', 'backend-unavailable']) {
+  test(`initial ${reason} refusal never starts an automatic retry chain`, async () => {
+    const { bridge, children, timers } = stopFixture();
+    bridge.process = null;
+    const health = deferred();
+    bridge.call = () => health.promise;
+    const starting = bridge.start();
+    const rejected = assert.rejects(starting, error => error.reason === reason);
+    const child = children[0];
+    child.exit(1);
+    if (reason === 'migration-required') {
+      child.stdout.emit('data', Buffer.from('PUMAS_STARTUP_FAILURE={"version":1,"reason":"migration-required"}\n'));
+    }
+    child.emit('close', 1, null);
+    health.resolve({ status: 'unavailable' });
+    await rejected;
+    assert.equal(children.length, 1);
+    assert.equal(timers.pendingCount(), 0);
+    assert.equal(bridge.isRunning(), false);
+  });
+}
+
+test('failed replacement startups retain the admitted runtime retry budget and backoff', async () => {
+  const { bridge, children, timers } = stopFixture({ options: { maxRestarts: 3 } });
+  bridge.process = null;
+  bridge.call = async () => ({ status: 'ok' });
+  await bridge.start();
+  assert.equal(bridge.isRunning(), true);
+  children[0].exit(1);
+
+  for (const delayMs of [1000, 2000, 3000]) {
+    const health = deferred();
+    bridge.call = () => health.promise;
+    assert.equal(timers.nextDelay(), delayMs);
+    await timers.runNext();
+    const starting = bridge.startPromise;
+    const rejected = assert.rejects(starting, error => error.reason === 'backend-unavailable');
+    const child = children.at(-1);
+    child.exit(1);
+    child.emit('close', 1, null);
+    health.resolve({ status: 'unavailable' });
+    await rejected;
+    await flushMicrotasks();
+    assert.equal(bridge.isRunning(), false);
+  }
+
+  assert.equal(children.length, 4, 'one initial child plus the configured three replacement attempts');
+  assert.equal(timers.pendingCount(), 0, 'exhausting the budget must not schedule another attempt');
+  await assert.rejects(bridge.stop(), /code=1.*cleanup failed/i);
+});
+
 test('an unsuccessful restart attempt cannot erase the previous cleanup failure', async () => {
   const { bridge, children, timers } = stopFixture();
   bridge.process = null;

@@ -37,8 +37,9 @@ diagnostic facts, not design or documentation requirements.
 ## Common Commands
 
 For an isolated local model-request workbench using an already running public
-gateway, see the [model playground](../tools/model-playground/README.md). Its
-adapter/browser fixtures are separate from real-model qualification.
+gateway, see the standalone [Pumas Playground](https://github.com/MrScripty/Pumas-Playground/tree/import/standalone-playground).
+Follow its README to clone and run the prototype. Its adapter/browser fixtures
+are separate from real-model qualification; no playground code is bundled here.
 
 ### Rust
 

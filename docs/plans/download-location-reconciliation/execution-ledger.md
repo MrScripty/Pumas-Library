@@ -49,6 +49,18 @@ material execution changes; it is not a command transcript or commit counter.
 
 ## M1 admission, 2026-10-11
 
+2026-10-12 presentation amendment: the actual installed recovery UI inherited
+black text. `b098fdf1` fixes the banner, recovery dialog and S3 button using
+existing dark-theme tokens, with an actual-renderer regression that failed the
+installed candidate at 1.14:1 and passed source/extracted package at minimum
+7.86:1. Frontend lint/types/build and 943 tests passed; normal-sandbox recovery,
+Cancel, keyboard confirmation and both clean reopen processes passed. The new
+local Debian review candidate is `Pumas-Library-library-contrast-20261012-b098fdf1-amd64.deb`,
+revision `2026101202`; exact source, checksum, artifact composition and bounded
+evidence are in [M3 evidence](reports/m3-evidence.md#library-recovery-colors-2026-10-12).
+No live library/model files, host installation or Rust source changed. The
+existing protected review worktree and pending reconciliation claims remain.
+
 User selected `start` for this plan. Clean implementation worktree at `63299e8d`; GitHub main remains `ad31e391`, remote PR branch `98eb3baf` is an ancestor of this work. Preserve original dirty checkout and reviewed branch history. Standards snapshot `snapshot:v1:b87ec114-4ed8-420f-814f-768eaa91bb48`, 34 selected policies, no unresolved routing facts. Existing pinned tools/dependencies suffice. Add `download_recovery.rs` to M1 solely for a bounded capability-held selected-file stat observation (identity, size and modification time); this remains metadata-only and adds no owner or payload access. Older consumers found locally: Eidetic pin `a94fd92021f27fdeedb6e2de6e01c41c250ef576`, Lanternwake pin `95a0baad2d0aea4650fc36ad4afd969ac9391bf5`. Compatibility gate precedes UI expansion.
 
 M1 storage gate: actual strict readers from both named pins refused HF-6 with the intended unknown-discriminator diagnostic and unchanged bytes. Actual Lanternwake C# client accepted existing download and serving RPC responses from a current default-feature server over an authored upgraded fixture; empty service correctly returns model_unavailable, no inference claim. Eidetic is a direct library consumer, with no Pumas RPC client in the traced dependency path. Test-only old source copies and fixture outputs remain ignored in the original repo tmp directory.

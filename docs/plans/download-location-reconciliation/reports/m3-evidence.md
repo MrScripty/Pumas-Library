@@ -106,3 +106,29 @@ changed. Standards snapshot `snapshot:v1:d22fd88a-e65d-493d-9f4c-2a5ced924a01`
 selected 19 policies with no unresolved facts; exact texts match the previously
 read closure. Source GUI logs/screenshots remain ignored under original repo
 `tmp/library-color-green-final-20261012/` and `tmp/library-color-gui-green.log`.
+
+The rebuilt review installer is original-repository
+`electron/release/Pumas-Library-library-contrast-20261012-b098fdf1-amd64.deb`,
+Debian `0.8.0~rc.1-2026101202`, 125,368,476 bytes, SHA-256
+`2bdb18dd96bd1aa428b436e50122c0b4622692ae6bd31be7381d970ddc39f7e1`.
+Source `b098fdf16d537ad4eba367cdb2eb9e2fe83a98ca`, tree
+`18406f5fe756369292120ea2659fcfc275a3476f`; backend is byte-identical to the
+qualified `709148e7` package. All eight packaged frontend files, both staged
+native files and attribution notices match their build inputs. The extracted
+package passed the full normal-sandbox desktop color/recovery/close-reopen
+driver, also with minimum 7.86:1 contrast. These are package execution checks;
+the host was not installed or removed. The new Debian revision orders after
+the observed installed `2026101201` version.
+
+Packaging initially returned an empty pnpm dependency-list result inside the
+agent sandbox. The same exact child-process probe produced 643 JSON bytes
+outside it; the existing builder then succeeded with repository-local temporary
+outputs and its existing pinned dependencies. No dependency or validation rule
+changed. Its existing desktopName advisory remains outside this color fix.
+Local provenance and adjacent checksum identify the new bytes separately from
+the prior installer. Screenshots/logs for the actual extracted package are in
+ignored `tmp/library-color-packaged-20261012/` and
+`tmp/library-color-gui-packaged.log`. The cumulative branch remains based on
+`ad31e391`; the new suffix after accepted review baseline `46459b03` contains
+only the coherent presentation correction and its evidence, with no history
+rewrite or push. Remaining reconciliation qualification is unchanged.

@@ -1,7 +1,7 @@
 //! Owned tiny format fixtures exercise import qualification, never inference.
 use pumas_library::{
     acquisition::*,
-    model_library::{AcquiredGgufVisionSpec, AcquiredGgufVisionTask, ModelImporter},
+    model_library::{AcquiredGgufVisionSpec, AcquiredGgufVisionTask, ModelImporter, ModelLibrary},
     models::{ImportState, ModelImportSpec},
     network::RetryConfig,
     PumasApi, PumasError, Result,
@@ -652,8 +652,7 @@ async fn deep_hash_scan_and_redetection_preserve_explicit_primary() {
     assert!(import(pair(), PRIMARY, Fault::Maintenance).await.0);
 }
 
-async fn assert_current_primary(api: &PumasApi, id: &str, primary: &str, bytes: &[u8]) {
-    let library = api.model_library();
+async fn assert_current_primary(library: &ModelLibrary, id: &str, primary: &str, bytes: &[u8]) {
     let target = library.library_root().join(id);
     let expected_entry = target.join(primary);
     let metadata: pumas_library::models::ModelMetadata =
@@ -710,16 +709,16 @@ async fn assert_current_primary(api: &PumasApi, id: &str, primary: &str, bytes: 
         .any(|finding| finding == "mixed_gguf_artifact_files"));
 }
 
-async fn assert_primary_refused(api: &PumasApi, id: &str) {
+async fn assert_primary_refused(library: &ModelLibrary, id: &str, fault: &str) {
     assert!(
-        api.model_library().get_primary_model_file(id).is_none(),
-        "invalid acquired proof selected a fallback primary"
+        library.get_primary_model_file(id).is_none(),
+        "{fault}: invalid acquired proof selected a fallback primary"
     );
-    assert!(api
-        .model_library()
-        .resolve_model_execution_descriptor(id)
-        .await
-        .is_err());
+    let descriptor = library.resolve_model_execution_descriptor(id).await;
+    assert!(
+        descriptor.is_err(),
+        "{fault}: invalid acquired proof produced an execution descriptor: {descriptor:?}"
+    );
 }
 
 async fn migrate_model(api: &PumasApi, old_id: &str, new_id: &str) {
@@ -770,7 +769,7 @@ async fn owned_reclassification_and_migration_keep_selected_primary_and_original
         let migrated_id = "vision/migrated/moved-primary".to_string();
         migrate_model(&api, &old_id, &migrated_id).await;
         let migrated_dir = library.library_root().join(&migrated_id);
-        assert_current_primary(&api, &migrated_id, PRIMARY, &primary_bytes).await;
+        assert_current_primary(library, &migrated_id, PRIMARY, &primary_bytes).await;
         assert_eq!(
             std::fs::read(migrated_dir.join(".pumas_import_publication.json")).unwrap(),
             receipt
@@ -787,7 +786,7 @@ async fn owned_reclassification_and_migration_keep_selected_primary_and_original
         assert_ne!(old_id, reclassified_id);
         assert!(!migrated_dir.exists());
         assert!(library.index().get(&migrated_id).unwrap().is_none());
-        assert_current_primary(&api, &reclassified_id, PRIMARY, &primary_bytes).await;
+        assert_current_primary(library, &reclassified_id, PRIMARY, &primary_bytes).await;
         let reclassified_dir = library.library_root().join(&reclassified_id);
         assert_eq!(
             std::fs::read(reclassified_dir.join(".pumas_import_publication.json")).unwrap(),
@@ -822,18 +821,19 @@ async fn externally_retargeted_publication_cannot_acknowledge_its_own_move() {
     metadata["entry_path"] = serde_json::json!(new_dir.join(PRIMARY));
     std::fs::write(path, serde_json::to_vec(&metadata).unwrap()).unwrap();
     assert!(library.index().get(new_id).unwrap().is_none());
-    assert_primary_refused(&api, new_id).await;
+    assert_primary_refused(library, new_id, "external retarget before indexing").await;
     assert!(library.index_model_dir(&new_dir).await.is_err());
     assert!(library.index().get(new_id).unwrap().is_none());
-    assert_primary_refused(&api, new_id).await;
+    assert_primary_refused(library, new_id, "external retarget after refused indexing").await;
     assert!(library.index().get(&old_id).unwrap().is_some());
     api.shutdown_instance().await.unwrap();
 }
 
 #[tokio::test]
 async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_payload() {
-    // Fresh publications isolate each refusal: a watcher may legitimately mark
-    // tampered evidence unavailable, and restoring bytes must not promote it.
+    // Each case owns a fresh publication. Stop and drain background writers
+    // before injecting faults: reconciliation can legitimately repair an index
+    // projection from unchanged canonical metadata between the two readers.
     for fault in [
         "missing_index",
         "old_index_entry",
@@ -856,11 +856,19 @@ async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_p
             .unwrap()
             .model_id
             .unwrap();
-        let library = api.model_library();
+        let library = api.model_library().clone();
         let old_dir = library.library_root().join(&old_id);
         let id = "vision/migrated/acknowledged";
         migrate_model(&api, &old_id, id).await;
-        assert_current_primary(&api, id, PRIMARY, &pair()[0].1).await;
+        assert_current_primary(&library, id, PRIMARY, &pair()[0].1).await;
+        let library_root = library.library_root().to_path_buf();
+        api.shutdown_instance().await.unwrap();
+        drop(library);
+        drop(api);
+        let library = ModelLibrary::new(library_root).await.unwrap();
+        // Prove the independent reader can execute the positive path; refusal
+        // below must not be a consequence of querying a stopped API owner.
+        assert_current_primary(&library, id, PRIMARY, &pair()[0].1).await;
         let target = library.library_root().join(id);
         let metadata_path = target.join("metadata.json");
         let mut metadata: serde_json::Value =
@@ -925,7 +933,17 @@ async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_p
             }
             _ => unreachable!(),
         }
-        assert_primary_refused(&api, id).await;
+        assert_primary_refused(&library, id, fault).await;
+        if matches!(
+            fault,
+            "missing_index" | "old_index_entry" | "projector_index_entry" | "old_index_path"
+        ) {
+            // Exercise the competing writer deterministically, after both
+            // refusal observations. A completed canonical reindex establishes
+            // a new current acknowledgement; it does not repair payload proof.
+            library.index_model_dir(&target).await.unwrap();
+            assert_current_primary(&library, id, PRIMARY, &pair()[0].1).await;
+        }
         if matches!(fault, "primary_bytes" | "projector_bytes") {
             let migration = library.generate_migration_dry_run_report().unwrap();
             let item = migration
@@ -938,6 +956,5 @@ async fn moved_primary_requires_current_acknowledgement_and_unchanged_physical_p
                 .iter()
                 .any(|finding| finding == "mixed_gguf_artifact_files"));
         }
-        api.shutdown_instance().await.unwrap();
     }
 }

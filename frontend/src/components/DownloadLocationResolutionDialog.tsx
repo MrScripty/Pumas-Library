@@ -3,7 +3,7 @@ import type { DownloadLocationReport, DownloadResolutionRequest } from '../gener
 import { modelsAPI } from '../api/models';
 import { ModalDialog } from './ui';
 
-const buttonClass = 'rounded border border-[hsl(var(--launcher-border))] px-3 py-2 disabled:opacity-50';
+const buttonClass = 'surface-interactive surface-interactive-hover text-[hsl(var(--text-primary))] rounded px-3 py-2 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--launcher-accent-primary))]';
 
 interface Props {
   downloadId: string;
@@ -76,7 +76,7 @@ export function DownloadLocationResolutionDialog({ downloadId, name, onClose, on
 
   return <ModalDialog isOpen onClose={onClose} ariaLabelledBy={titleId}
     initialFocusRef={closeRef} restoreFocusFallbackRef={restoreFocusFallbackRef} dismissDisabled={busy}
-    contentClassName="max-w-xl rounded border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg))] p-5">
+    contentClassName="surface-overlay text-[hsl(var(--text-primary))] max-w-xl rounded border border-[hsl(var(--border-default))] p-5">
     <div className="space-y-3 text-sm">
       <h2 id={titleId}>Recover download: {name}</h2>
       {busy && <p role="status">Checking recovery information…</p>}

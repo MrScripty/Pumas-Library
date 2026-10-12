@@ -73,3 +73,36 @@ this evidence commit. The protected `fix/main-test-validation` ref retains the
 implementation and evidence, targeting main `ad31e391`; PR #69 is not pushed or
 rewritten by this task. Retain the locked worktree for the maintainer’s push/review
 and subsequent safe disposition under its existing retained-resource contract.
+
+## Library recovery colors, 2026-10-12
+
+The installed `0.8.0~rc.1-2026101201` window showed black recovery instructions,
+model names, Inspect buttons and the S3 import button on the dark library. An
+isolated authored-fixture run of that exact installed binary failed the new
+rendered-color oracle at 1.14:1. The recovery dialog also used an undefined
+`--launcher-bg` token. This amendment owns only these three component surfaces
+and the existing desktop acceptance driver, within the declared M1/M3 write sets.
+
+Use the existing opaque dark surface utilities and explicit HSL text tokens,
+matching established library controls, plus themed hover and keyboard outlines.
+The existing shorthand `text-primary`/`text-secondary` classes also collide with
+Tailwind-generated rules using raw HSL triplets as complete colors; this bounded
+fix avoids them. Their broader theme mapping remains outside this amendment.
+
+Normal-sandbox Electron 43.7.0 on the available Linux X11 desktop passed the
+actual renderer/preload/IPC/RPC workflow, with isolated launcher/profile/registry
+state and only tiny authored files. The oracle waits for full opacity, requires
+opaque recovery surfaces, and measures at least 7:1 text contrast for the banner,
+S3 import, recovery and resolved dialogs, including enabled hover/focus controls.
+Observed minimum was 7.86:1. Keyboard outlines and screenshots were inspected;
+Cancel, Enter confirmation, retained file identities, unrelated paused downloads
+and both clean close/reopen exits still passed. This proves the selected dark
+theme workflow, not general accessibility conformance or foreign native rendering.
+
+Frontend build, lint and type checks passed; all 139 test files passed with 943
+tests passed and one existing skip. The existing chunk-size advisory remains.
+No Rust source, dependency, generated contract, host installation or live library
+changed. Standards snapshot `snapshot:v1:d22fd88a-e65d-493d-9f4c-2a5ced924a01`
+selected 19 policies with no unresolved facts; exact texts match the previously
+read closure. Source GUI logs/screenshots remain ignored under original repo
+`tmp/library-color-green-final-20261012/` and `tmp/library-color-gui-green.log`.

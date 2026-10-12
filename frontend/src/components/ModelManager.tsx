@@ -278,7 +278,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       />
 
       {!isDownloadMode && <div className="px-4 py-2"><button type="button" onClick={() => setShowS3Import(true)}
-        className="rounded border border-[hsl(var(--launcher-border))] px-3 py-2 focus-visible:outline focus-visible:outline-2">
+        className="surface-interactive surface-interactive-hover text-[hsl(var(--text-primary))] rounded px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--launcher-accent-primary))]">
         Import from S3
       </button></div>}
 

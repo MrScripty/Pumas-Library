@@ -1,7 +1,7 @@
 // Actual normal-sandbox Electron workflow on an explicitly authored fixture.
 // Node 24 built-in WebSocket drives only this isolated window's CDP target.
 import { spawn } from 'node:child_process';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import assert from 'node:assert/strict';
 
@@ -85,6 +85,73 @@ async function session(run) {
     if (!cdp) throw new Error('Desktop readiness timeout: '+logs.slice(-2200));
     await cdp.call('Page.bringToFront');
     await cdp.waitFor(`()=>document.querySelector('[aria-label="Failed download recovery"]')`);
+    // Inspect rendered colors; component/DOM-shim tests cannot prove readability.
+    // This local visual oracle requires 7:1 for this dark-theme recovery workflow,
+    // not a claim of whole-application accessibility conformance.
+    const assertReadable = async (selector, label) => {
+      await cdp.waitFor(`()=>{
+        const root=document.querySelector(${JSON.stringify(selector)});if(!root)return false;
+        for(let node=root;node;node=node.parentElement){
+          if(Number(getComputedStyle(node).opacity)!==1)return false;
+        }return true;
+      }`);
+      const observations = await cdp.evaluate(`(()=>{
+        const root=document.querySelector(${JSON.stringify(selector)});
+        if(!root)throw new Error('Missing visual target');
+        const rgb=color=>color.match(/[\\d.]+/g).map(Number);
+        const luminance=color=>rgb(color).slice(0,3).map(v=>{
+          const n=v/255;return n<=0.04045?n/12.92:((n+0.055)/1.055)**2.4;
+        }).reduce((sum,n,i)=>sum+n*[0.2126,0.7152,0.0722][i],0);
+        const background=node=>{
+          for(let current=node;current;current=current.parentElement){
+            const value=getComputedStyle(current).backgroundColor;
+            if((rgb(value)[3]??1)===1)return value;
+          }throw new Error('No opaque background for visual target');
+        };
+        return [root,...root.querySelectorAll('p,h2,legend,label,span,button')]
+          .filter(node=>node.textContent.trim()&&!node.matches(':disabled')).map(node=>{
+            const style=getComputedStyle(node),bg=background(node);
+            const fgL=luminance(style.color),bgL=luminance(bg);
+            return {text:node.textContent.trim().slice(0,60),color:style.color,background:bg,
+              ownBackground:style.backgroundColor,contrast:(Math.max(fgL,bgL)+0.05)/(Math.min(fgL,bgL)+0.05)};
+          });
+      })()`);
+      console.log(label, JSON.stringify(observations));
+      for (const item of observations) assert.ok(item.contrast >= 7, `${label}: ${item.text} contrast ${item.contrast.toFixed(2)}:1`);
+      if (label !== 'S3 import') assert.match(observations[0].ownBackground, /^rgb\(/, `${label} must have an opaque theme surface`);
+    };
+    await assertReadable('[aria-label="Failed download recovery"]', 'Recovery banner');
+    await cdp.evaluate(`(()=>{
+      const button=[...document.querySelectorAll('button')].find(item=>item.textContent.trim()==='Import from S3');
+      if(!button)throw new Error('S3 import control missing');button.setAttribute('data-color-probe','s3');
+    })()`);
+    await assertReadable('[data-color-probe="s3"]', 'S3 import');
+    const saveScreenshot = async name => {
+      const capture = await cdp.call('Page.captureScreenshot', {format:'png'});
+      await writeFile(join(fixture, name), Buffer.from(capture.data,'base64'));
+    };
+    const assertControlStates = async selector => {
+      const point = await cdp.evaluate(`(()=>{
+        const box=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+        return {x:box.x+box.width/2,y:box.y+box.height/2};
+      })()`);
+      await cdp.call('Input.dispatchMouseEvent', {type:'mouseMoved',...point});
+      await assertReadable(selector, 'Hovered control');
+      await cdp.call('Input.dispatchKeyEvent', {type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+      await cdp.call('Input.dispatchKeyEvent', {type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+      const focused = await cdp.evaluate(`(()=>{
+        const control=document.querySelector(${JSON.stringify(selector)});control.focus();
+        const style=getComputedStyle(control);
+        return {visible:control.matches(':focus-visible'),width:parseFloat(style.outlineWidth),
+          style:style.outlineStyle,color:style.outlineColor,textColor:style.color};
+      })()`);
+      assert.equal(focused.visible,true,'Keyboard focus must be visible');
+      assert.ok(focused.width>=2 && focused.style!=='none','Keyboard focus must have a visible outline');
+      await assertReadable(selector, 'Focused control');
+    };
+    await assertControlStates('[aria-label="Failed download recovery"] button');
+    await assertControlStates('[data-color-probe="s3"]');
+    if (run === 1) await saveScreenshot('library-colors.png');
     const open = () => cdp.evaluate(`(()=>{
       const section=document.querySelector('[aria-label="Failed download recovery"]');
       const row=[...section.querySelectorAll('div')].find(item=>item.textContent.includes('llada-33-files'));
@@ -102,6 +169,9 @@ async function session(run) {
 
       assert.equal(await cdp.evaluate(`document.querySelector('[role="dialog"]').textContent.includes('Older applications that open the library directly')`), true);
       assert.equal(await cdp.evaluate(`document.querySelector('[role="dialog"]').textContent.includes('does not verify their historical source')`), true);
+      await assertReadable('[role="dialog"]', 'Recovery dialog');
+      await assertControlStates('[role="dialog"] button:not(:disabled)');
+      await saveScreenshot('recovery-dialog-colors.png');
       await cdp.evaluate(`[...document.querySelector('[role="dialog"]').querySelectorAll('button')].find(button=>button.textContent==='Cancel').click()`);
       await cdp.waitFor(`()=>!document.querySelector('[role="dialog"]')`);
       assert.deepEqual(await readFile(storePath), before, 'Cancel must leave storage unchanged');
@@ -113,6 +183,7 @@ async function session(run) {
       await cdp.call('Input.dispatchKeyEvent', {type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13});
       await cdp.waitFor(`()=>document.querySelector('[role="dialog"]')?.textContent.includes('old failed download was resolved')`);
       await cdp.waitFor(`()=>[...document.querySelector('[role="dialog"]')?.querySelectorAll('button')??[]].some(button=>button.textContent==='Close'&&!button.disabled)`);
+      await assertReadable('[role="dialog"]', 'Resolved recovery dialog');
       await cdp.evaluate(`[...document.querySelector('[role="dialog"]').querySelectorAll('button')].find(button=>button.textContent==='Close').click()`);
       await cdp.waitFor(`()=>!document.querySelector('[role="dialog"]')&&!document.querySelector('[aria-label="Failed download recovery"]').textContent.includes('llada-33-files')`);
       assert.deepEqual(await observe(), beforeFiles);

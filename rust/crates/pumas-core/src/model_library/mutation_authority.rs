@@ -637,7 +637,15 @@ impl LibraryMutationAuthority {
         // Settled quarantine records do not retain a trustworthy destination
         // identity. Preserve all model bytes until explicit recovery resolves
         // that custody.
-        if queued || hidden || acquiring || !inventory.quarantines.is_empty() {
+        if queued
+            || hidden
+            || acquiring
+            || !inventory.quarantines.is_empty()
+            || inventory
+                .unconfirmed_resolution_targets
+                .iter()
+                .any(|target| targets.contains(target))
+        {
             return Err(PumasError::DownloadRootBusy);
         }
         Ok(())

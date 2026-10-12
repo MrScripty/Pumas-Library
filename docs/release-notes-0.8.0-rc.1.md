@@ -47,5 +47,10 @@ automatic replacement. Existing acquisition receipts and RPC shapes are unchange
 The experimental owned Cohere session uses a coordinated private v2 layout
 correlation identifier. An older installed v1 worker needs a fresh runtime
 installation before using that path; incompatible workers are refused and drained.
-The shipping audio admission catalog remains closed. These changes do not implement
-the separate download-location reconciliation UI or rewrite model files.
+The shipping audio admission catalog remains closed. The [retained-download recovery](runbooks/download-location-reconciliation.md)
+action now inspects moved legacy files and explicitly settles the old failure
+in the running desktop. It preserves model files and original Error history.
+The first confirmation upgrades only the HF partition to format 6; older direct
+library readers must update their Pumas dependency. Local acceptance creates no
+verified HF receipt and makes no inference claim. Read-only update streams now
+close cleanly without marking the instance shutdown as failed.

@@ -15,8 +15,8 @@ use pumas_library::{
         QuantOption,
     },
     model_library::{
-        issue_download_recovery_ticket, DownloadRecoveryModelId, DownloadRecoveryTicket,
-        DownloadRecoveryToken,
+        issue_download_recovery_ticket, DownloadLocationReport, DownloadRecoveryModelId,
+        DownloadRecoveryTicket, DownloadRecoveryToken, DownloadResolutionRequest,
     },
     models::{
         BaseResponse, CleanBrokenLinksResponse, DeleteModelResponse, DiskSpaceResponse,
@@ -441,6 +441,12 @@ pub(crate) enum RpcCommand {
     ResumeModelDownload {
         download_id: String,
     },
+    InspectRetainedDownload {
+        download_id: String,
+    },
+    ResolveRetainedDownload {
+        request: DownloadResolutionRequest,
+    },
     ListModelDownloads,
     ResumePartialDownload {
         model_id: DownloadRecoveryModelId,
@@ -603,6 +609,8 @@ impl RpcCommand {
             Self::CancelModelDownload { .. } => "cancel_model_download",
             Self::PauseModelDownload { .. } => "pause_model_download",
             Self::ResumeModelDownload { .. } => "resume_model_download",
+            Self::InspectRetainedDownload { .. } => "inspect_retained_download",
+            Self::ResolveRetainedDownload { .. } => "resolve_retained_download",
             Self::ListModelDownloads => "list_model_downloads",
             Self::ResumePartialDownload { .. } => "resume_partial_download",
             Self::GetModels => "get_models",
@@ -738,6 +746,7 @@ pub(crate) enum RpcOutcome {
     DownloadStarted(DownloadStartedOutcome),
     DownloadStatus(Box<DownloadStatusOutcome>),
     DownloadMutation(DownloadMutationOutcome),
+    DownloadLocation(Box<DownloadLocationReport>),
     DownloadList(Box<DownloadListOutcome>),
     PartialDownload(Box<PartialDownloadOutcome>),
     Models(Box<ModelsOutcome>),
@@ -863,6 +872,7 @@ impl RpcOutcome {
             Self::DownloadStarted(value) => serde_json::to_value(value),
             Self::DownloadStatus(value) => serde_json::to_value(value),
             Self::DownloadMutation(value) => serde_json::to_value(value),
+            Self::DownloadLocation(value) => serde_json::to_value(value),
             Self::DownloadList(value) => serde_json::to_value(value),
             Self::PartialDownload(value) => serde_json::to_value(value),
             Self::Models(value) => serde_json::to_value(value),
@@ -6554,6 +6564,20 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             validate_bounded_non_empty(params.download_id, MAX_IDENTIFIER_BYTES)
                 .map(|download_id| RpcCommand::ResumeModelDownload { download_id })
         }),
+        "inspect_retained_download" => {
+            parse_params::<DownloadIdParams>(params).and_then(|params| {
+                validate_bounded_non_empty(params.download_id, MAX_IDENTIFIER_BYTES)
+                    .map(|download_id| RpcCommand::InspectRetainedDownload { download_id })
+            })
+        }
+        "resolve_retained_download" => {
+            parse_params::<DownloadResolutionRequest>(params).and_then(|request| {
+                request
+                    .validate()
+                    .map_err(|_| PublicError::invalid_params())?;
+                Ok(RpcCommand::ResolveRetainedDownload { request })
+            })
+        }
         "list_model_downloads" => empty().map(|()| RpcCommand::ListModelDownloads),
         "list_interrupted_downloads" | "recover_download" => Err(PublicError::method_not_found()),
         "resume_partial_download" => {

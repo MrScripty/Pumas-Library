@@ -91,6 +91,7 @@ pub(crate) struct LifecycleQuarantine {
 
 #[derive(Debug, Clone)]
 pub(crate) struct PersistedDownloadInventory {
+    pub(crate) unconfirmed_resolution_targets: BTreeSet<PersistedDestinationIdentity>,
     pub(crate) downloads: Vec<PersistedDownload>,
     pub(crate) quarantines: BTreeMap<String, LifecycleQuarantine>,
     pub(crate) hidden_admissions: BTreeMap<String, HiddenDownloadAdmission>,
@@ -487,6 +488,11 @@ struct PersistedLifecycleQuarantine {
 #[serde(deny_unknown_fields)]
 struct DownloadStoreData {
     schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hf_model_partition_version: Option<u32>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    retained_download_resolutions:
+        BTreeMap<String, super::download_resolution::RetainedDownloadResolution>,
     downloads: Vec<PersistedDownload>,
     recovery_revocations: BTreeMap<String, PersistedRecoveryRevocation>,
     lifecycle_quarantines: BTreeMap<String, PersistedLifecycleQuarantine>,
@@ -500,6 +506,8 @@ impl DownloadStoreData {
     fn empty() -> Self {
         Self {
             schema_version: DOWNLOAD_STORE_SCHEMA_VERSION,
+            hf_model_partition_version: None,
+            retained_download_resolutions: BTreeMap::new(),
             downloads: Vec::new(),
             recovery_revocations: BTreeMap::new(),
             lifecycle_quarantines: BTreeMap::new(),
@@ -544,12 +552,20 @@ enum PersistedRevocationDisposition {
     Durable,
 }
 
+pub(crate) struct RetainedResolutionView {
+    pub(crate) snapshot: Option<PersistedDownload>,
+    pub(crate) admission: Option<PersistedQueueAdmission>,
+    pub(crate) resolution: Option<super::download_resolution::RetainedDownloadResolution>,
+    pub(crate) requires_format_upgrade: bool,
+}
+
 /// Manages download persistence to `downloads.json`.
 #[derive(Clone)]
 pub struct DownloadPersistence {
     path: PathBuf,
     store: Arc<AcquisitionStore>,
     confirmed_admissions: Arc<Mutex<HashSet<String>>>,
+    confirmed_resolutions: Arc<Mutex<HashSet<String>>>,
     confirmed_cleanups: Arc<Mutex<HashSet<String>>>,
     publisher: Arc<dyn DownloadStorePublisher>,
     observer: Arc<dyn StoreTransactionObserver>,
@@ -684,6 +700,207 @@ impl RecoveryRevocation {
 }
 
 impl DownloadPersistence {
+    pub(crate) fn retained_resolution_is_confirmed(&self, operation_id: &str) -> Result<bool> {
+        Ok(self
+            .confirmed_resolutions
+            .lock()
+            .map_err(|_| {
+                super::download_resolution::invalid(
+                    "Resolution durability observation is unavailable",
+                )
+            })?
+            .contains(operation_id))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_retained_resolution_fault(mut self, mode: u8) -> Self {
+        self.publisher = Arc::new(RetainedResolutionFaultPublisher {
+            mode,
+            failed: std::sync::atomic::AtomicBool::new(false),
+        });
+        self
+    }
+
+    fn unconfirmed_resolution_targets(
+        &self,
+        data: &DownloadStoreData,
+    ) -> Result<BTreeSet<PersistedDestinationIdentity>> {
+        let confirmed = self.confirmed_resolutions.lock().map_err(|_| {
+            super::download_resolution::invalid("Resolution durability observation is unavailable")
+        })?;
+        let mut targets = BTreeSet::new();
+        for record in data
+            .retained_download_resolutions
+            .values()
+            .filter(|record| !confirmed.contains(&record.request.operation_id))
+        {
+            targets.insert(record.admission.destination.clone());
+            targets.insert(PersistedDestinationIdentity {
+                library_root: record.admission.destination.library_root.clone(),
+                relative_target: record.candidate.relative_destination.clone(),
+            });
+        }
+        Ok(targets)
+    }
+
+    pub(crate) fn retained_resolution_view(
+        &self,
+        download_id: &str,
+    ) -> Result<RetainedResolutionView> {
+        let transaction = self.transaction(StoreOperation::Load)?;
+        let data = self.load_data_strict(&transaction)?;
+        Ok(RetainedResolutionView {
+            snapshot: data
+                .downloads
+                .iter()
+                .find(|entry| entry.download_id == download_id)
+                .cloned(),
+            admission: data.queue_admissions.get(download_id).cloned(),
+            resolution: data.retained_download_resolutions.get(download_id).cloned(),
+            requires_format_upgrade: data.schema_version == 5,
+        })
+    }
+
+    /// One durable metadata publication transfers the exact failed admission
+    /// to release history. The callback reobserves the selected local artifact
+    /// under the caller's held root/destination exclusion and this store turn.
+    pub(crate) fn resolve_retained_download<F>(
+        &self,
+        request: &super::DownloadResolutionRequest,
+        observe: F,
+    ) -> Result<
+        std::result::Result<super::download_resolution::RetainedDownloadResolution, PumasError>,
+    >
+    where
+        F: FnOnce(
+            &PersistedDownload,
+            &PersistedQueueAdmission,
+        ) -> Result<super::download_resolution::RetainedDownloadResolution>,
+    {
+        if let Err(error) = request.validate() {
+            return Ok(Err(error));
+        }
+        // Refusals before publication have no unknown write outcome.
+        let (transaction, mut data) =
+            match self
+                .transaction(StoreOperation::Remove)
+                .and_then(|transaction| {
+                    self.load_data_strict(&transaction)
+                        .map(|data| (transaction, data))
+                }) {
+                Ok(prepared) => prepared,
+                Err(error) => return Ok(Err(error)),
+            };
+        let prepared = (|| -> Result<_> {
+            if let Some(existing) = data
+                .retained_download_resolutions
+                .get(&request.download_id)
+                .cloned()
+            {
+                if !existing.matches_request(request) {
+                    return Err(super::download_resolution::invalid(
+                        "Resolution operation conflicts with recorded history",
+                    ));
+                }
+                // An earlier publication may have been visible without confirmed
+                // parent sync. Identical input alone is not a durability barrier.
+                return Ok(existing);
+            }
+            if data
+                .retained_download_resolutions
+                .values()
+                .any(|record| record.request.operation_id == request.operation_id)
+            {
+                return Err(super::download_resolution::invalid(
+                    "Resolution operation identity is already used",
+                ));
+            }
+            let original = data
+                .downloads
+                .iter()
+                .find(|entry| entry.download_id == request.download_id)
+                .ok_or_else(|| {
+                    super::download_resolution::invalid(
+                        "Retained download changed since inspection",
+                    )
+                })?;
+            let admission = data
+                .queue_admissions
+                .get(&request.download_id)
+                .ok_or_else(|| {
+                    super::download_resolution::invalid("Retained admission is unavailable")
+                })?;
+            if original.status != DownloadStatus::Error
+                || original.revision.is_some()
+                || admission.domain != DownloadAdmissionDomain::Ambient
+                || admission.attempt_id != request.attempt_id
+                || original.filenames != admission.execution_files
+                || data.recovery_revocations.contains_key(&request.download_id)
+                || !data.lifecycle_quarantines.is_empty()
+                || !data.admission_attempts.is_empty()
+                || (data.schema_version == 5 && !request.accept_storage_upgrade)
+            {
+                return Err(super::download_resolution::invalid(
+                    "Failed download is not eligible for this local resolution",
+                ));
+            }
+            let (acquisitions, receipts) = transaction.target.consumer_completion_partition()?;
+            if acquisitions.values().any(|record| {
+                record.demand.consumer == "hf.model"
+                    && record.demand.operation == request.download_id
+            }) || receipts.values().any(|receipt| {
+                receipt
+                    .get("download_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(&request.download_id)
+            }) {
+                return Err(super::download_resolution::invalid(
+                    "Modern acquisition history requires its existing recovery owner",
+                ));
+            }
+            let resolution = observe(original, admission)?;
+            resolution.validate()?;
+            let destination = resolution.admission.destination.clone();
+            let candidate_target = &resolution.candidate.relative_destination;
+            let touches = |identity: &PersistedDestinationIdentity| {
+                identity.library_root == destination.library_root
+                    && (identity.relative_target == destination.relative_target
+                        || &identity.relative_target == candidate_target)
+            };
+            if data.queue_admissions.iter().any(|(id, admission)| {
+                id != &request.download_id && touches(&admission.destination)
+            }) || acquisitions.values().any(|record| {
+                !matches!(
+                    record.phase,
+                    AcquisitionPhase::Adopted { .. } | AcquisitionPhase::Withdrawn
+                ) && record.workspace.root_identity == destination.library_root
+                    && (record.workspace.relative_target == destination.relative_target
+                        || &record.workspace.relative_target == candidate_target)
+            }) {
+                return Err(PumasError::DownloadRootBusy);
+            }
+            data.schema_version = 6;
+            data.hf_model_partition_version = Some(6);
+            data.downloads
+                .retain(|entry| entry.download_id != request.download_id);
+            let released = data
+                .queue_admissions
+                .remove(&request.download_id)
+                .expect("validated retained admission");
+            data.released_queue_admissions
+                .insert(request.download_id.clone(), released);
+            data.retained_download_resolutions
+                .insert(request.download_id.clone(), resolution.clone());
+            Ok(resolution)
+        })();
+        let resolution = match prepared {
+            Ok(record) => record,
+            Err(error) => return Ok(Err(error)),
+        };
+        self.write_data(&transaction, &mut data)?;
+        Ok(Ok(resolution))
+    }
+
     /// Create a new persistence store at `{data_dir}/downloads.json`.
     pub fn new(data_dir: &Path) -> Self {
         Self::new_with_store_lifetime(data_dir, Default::default())
@@ -700,6 +917,7 @@ impl DownloadPersistence {
                 store_lifetime,
             )),
             confirmed_admissions: Arc::new(Mutex::new(HashSet::new())),
+            confirmed_resolutions: Arc::new(Mutex::new(HashSet::new())),
             confirmed_cleanups: Arc::new(Mutex::new(HashSet::new())),
             publisher: Arc::new(AtomicDownloadStorePublisher),
             observer: Arc::new(NoopStoreTransactionObserver),
@@ -1264,7 +1482,9 @@ impl DownloadPersistence {
         let confirmed_cleanups = self.confirmed_cleanups.lock().map_err(|_| {
             crate::PumasError::Other("Download cleanup confirmation lock is poisoned".into())
         })?;
+        let unconfirmed_resolution_targets = self.unconfirmed_resolution_targets(&data)?;
         Ok(PersistedDownloadInventory {
+            unconfirmed_resolution_targets,
             downloads: data.downloads,
             quarantines: data
                 .lifecycle_quarantines
@@ -1312,6 +1532,13 @@ impl DownloadPersistence {
 
         let transaction = self.transaction(StoreOperation::Admit)?;
         let mut data = self.load_data_strict(&transaction)?;
+        if self
+            .unconfirmed_resolution_targets(&data)?
+            .contains(&request.destination)
+        {
+            return Err(PumasError::DownloadRootBusy);
+        }
+
         let download_id = request.snapshot.download_id.as_str();
         if data.recovery_revocations.contains_key(download_id)
             || data.lifecycle_quarantines.contains_key(download_id)
@@ -2046,7 +2273,21 @@ impl DownloadPersistence {
             self.path.display()
         );
         match self.publisher.publish(&transaction.target, data) {
-            Ok(AtomicPublication::Durable) => Ok(()),
+            Ok(AtomicPublication::Durable) => {
+                self.confirmed_resolutions
+                    .lock()
+                    .map_err(|_| {
+                        super::download_resolution::invalid(
+                            "Resolution durability observation is unavailable",
+                        )
+                    })?
+                    .extend(
+                        data.retained_download_resolutions
+                            .values()
+                            .map(|record| record.request.operation_id.clone()),
+                    );
+                Ok(())
+            }
             Ok(AtomicPublication::PublishedDurabilityUnknown { error }) => Err(error),
             Ok(AtomicPublication::VisibilityUnknown { error, cleanup }) => {
                 Err(AtomicPublishFailure {
@@ -2084,7 +2325,7 @@ fn normalize_legacy_store(mut value: serde_json::Value, path: &Path) -> Result<D
     let version = root
         .get("schema_version")
         .and_then(serde_json::Value::as_u64);
-    if version == Some(5) {
+    if matches!(version, Some(5 | 6)) {
         return parse_current_store(value, path);
     }
     if version != Some(4) {
@@ -2465,7 +2706,11 @@ fn validate_store_data(data: &DownloadStoreData) -> Result<()> {
             });
         }
     }
-    if data.schema_version != DOWNLOAD_STORE_SCHEMA_VERSION {
+    if !matches!(
+        (data.schema_version, data.hf_model_partition_version),
+        (5, None) | (6, Some(6))
+    ) || (data.schema_version == 5 && !data.retained_download_resolutions.is_empty())
+    {
         return Err(crate::PumasError::Validation {
             field: "downloads.schema_version".to_string(),
             message: format!(
@@ -2473,6 +2718,19 @@ fn validate_store_data(data: &DownloadStoreData) -> Result<()> {
                 data.schema_version
             ),
         });
+    }
+    for (id, resolution) in &data.retained_download_resolutions {
+        validate_snapshot_files(&resolution.original)?;
+        resolution.validate()?;
+        if id != &resolution.original.download_id
+            || data.downloads.iter().any(|entry| &entry.download_id == id)
+            || data.queue_admissions.contains_key(id)
+            || data.released_queue_admissions.get(id) != Some(&resolution.admission)
+        {
+            return Err(invalid_store_migration(
+                "Resolution has no exact released admission or still owns active state",
+            ));
+        }
     }
     let mut download_ids = HashSet::new();
     for download in &data.downloads {
@@ -2810,6 +3068,46 @@ impl DownloadStorePublisher for FailAfterReceiptSettlementPublisher {
             }));
         }
         target.publish_model_partition(data)
+    }
+}
+
+#[cfg(test)]
+struct RetainedResolutionFaultPublisher {
+    mode: u8,
+    failed: std::sync::atomic::AtomicBool,
+}
+#[cfg(test)]
+impl DownloadStorePublisher for RetainedResolutionFaultPublisher {
+    fn publish(
+        &self,
+        target: &AcquisitionTransaction<'_>,
+        data: &DownloadStoreData,
+    ) -> AtomicPublishResult {
+        if data.retained_download_resolutions.is_empty()
+            || self.failed.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return target.publish_model_partition(data);
+        }
+        if self.mode != 0 {
+            target.publish_model_partition(data)?;
+        }
+        let error =
+            super::download_resolution::invalid("Injected resolution publication uncertainty");
+        if self.mode == 1 {
+            Ok(AtomicPublication::PublishedDurabilityUnknown { error })
+        } else if self.mode == 2 {
+            Ok(AtomicPublication::VisibilityUnknown {
+                error,
+                cleanup: StagingCleanup::NotRequired,
+            })
+        } else {
+            Err(Box::new(AtomicPublishFailure {
+                stage: AtomicPublishStage::Staging,
+                kind: AtomicPublishFailureKind::Filesystem,
+                error,
+                cleanup: StagingCleanup::NotRequired,
+            }))
+        }
     }
 }
 

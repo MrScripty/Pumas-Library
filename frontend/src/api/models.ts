@@ -21,6 +21,12 @@ import type {
 } from '../types/api';
 
 class ModelsAPI {
+  async inspectRetainedDownload(downloadId:string) {
+    return this.getAPI().inspect_retained_download(downloadId);
+  }
+  async resolveRetainedDownload(request:import('../generated/desktop-contract').DownloadResolutionRequest) {
+    return this.getAPI().resolve_retained_download(request);
+  }
   private getAPI() {
     if (!isAPIAvailable()) {
       throw new APIError('API not available');

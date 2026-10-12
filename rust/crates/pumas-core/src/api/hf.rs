@@ -607,6 +607,42 @@ impl PumasApi {
         super::state_hf::pause_hf_download(self.primary(), download_id).await
     }
 
+    /// Inspect a retained failed download without changing files or custody.
+    pub async fn inspect_retained_download(
+        &self,
+        download_id: &str,
+    ) -> Result<model_library::DownloadLocationReport> {
+        self.try_primary()?;
+        let primary = self.primary();
+        let client = primary
+            .hf_client
+            .as_ref()
+            .ok_or_else(|| PumasError::Config {
+                message: "HuggingFace client not initialized".into(),
+            })?;
+        client
+            .inspect_retained_download(primary.model_library.clone(), download_id)
+            .await
+    }
+
+    /// Explicitly accept observed local files and release the failed admission.
+    pub async fn resolve_retained_download(
+        &self,
+        request: model_library::DownloadResolutionRequest,
+    ) -> Result<model_library::DownloadLocationReport> {
+        self.try_primary()?;
+        let primary = self.primary();
+        let client = primary
+            .hf_client
+            .as_ref()
+            .ok_or_else(|| PumasError::Config {
+                message: "HuggingFace client not initialized".into(),
+            })?;
+        client
+            .resolve_retained_download(primary.model_library.clone(), request)
+            .await
+    }
+
     /// Resume a paused or errored HuggingFace download.
     pub async fn resume_hf_download(&self, download_id: &str) -> Result<bool> {
         self.try_primary()?;

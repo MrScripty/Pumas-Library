@@ -28,6 +28,11 @@ mod dependencies;
 pub(crate) mod dependency_pins;
 mod directory_import;
 mod download_recovery;
+mod download_resolution;
+pub use download_resolution::{
+    DownloadLocalAcceptance, DownloadLocalCandidate, DownloadLocationReport,
+    DownloadLocationStatus, DownloadResolutionRequest,
+};
 pub mod download_store;
 mod external_assets;
 mod hashing;

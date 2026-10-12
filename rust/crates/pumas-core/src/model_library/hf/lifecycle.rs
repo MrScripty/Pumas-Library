@@ -238,6 +238,52 @@ impl DestinationExecutionOwner {
         true
     }
 
+    /// Settle only a dormant claim after its exact durable admission release.
+    /// Runnable generations remain the lifecycle owner's responsibility.
+    pub(super) fn settle_retained_claim(
+        &self,
+        destination: &DestinationIdentity,
+        download_id: &str,
+    ) -> bool {
+        let next = {
+            let mut queues = self
+                .queues
+                .lock()
+                .expect("HF destination-execution owner lock poisoned");
+            let queue = queues.entry(destination.clone()).or_default();
+            let domain = DestinationDomain::Ambient;
+            if queue.released.contains(&(download_id.to_string(), domain)) {
+                return true;
+            }
+            if let Some(index) = queue
+                .claims
+                .iter()
+                .position(|claim| claim.download_id == download_id)
+            {
+                let claim = &queue.claims[index];
+                if claim.domain != domain || claim.generation.is_some() {
+                    return false;
+                }
+                queue.claims.remove(index);
+                queue.released.insert((download_id.to_string(), domain));
+                if index == 0 {
+                    queue.claims.front().map(|claim| claim.ready.clone())
+                } else {
+                    None
+                }
+            } else {
+                // Reopen after durable publication has no active old snapshot.
+                // Retain a fence even if no dormant claim was reconstructed.
+                queue.released.insert((download_id.to_string(), domain));
+                None
+            }
+        };
+        if let Some(next) = next {
+            next.notify_waiters();
+        }
+        true
+    }
+
     /// Historical terminal proof only; this never authorizes another execution.
     pub(super) fn was_released(
         &self,

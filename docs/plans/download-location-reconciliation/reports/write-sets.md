@@ -31,7 +31,9 @@ model payloads. Evidence reports reference only retained, reviewable evidence.
 ## M1 — core-to-desktop recovery
 
 ```text
+rust/crates/pumas-core/src/index/model_index.rs
 rust/crates/pumas-core/src/model_library/mod.rs
+rust/crates/pumas-core/src/model_library/download_recovery.rs
 rust/crates/pumas-core/src/model_library/download_resolution.rs
 rust/crates/pumas-core/src/model_library/download_resolution/tests.rs
 rust/crates/pumas-core/src/model_library/download_store.rs
@@ -103,6 +105,10 @@ change, new dependency or required unlisted registration/schema output.
 ## M2 — composed custody and failure proof
 
 ```text
+rust/crates/pumas-rpc/src/http_transport.rs
+rust/crates/pumas-rpc/src/handlers/mod.rs
+electron/src/python-bridge.ts
+electron/tests/python-bridge.test.mjs
 rust/crates/pumas-core/src/model_library/download_resolution.rs
 rust/crates/pumas-core/src/model_library/download_resolution/tests.rs
 rust/crates/pumas-core/src/model_library/download_store.rs
@@ -138,8 +144,11 @@ established, proof requires broader mutation or supported native exclusion diffe
 
 ```text
 scripts/acceptance/download_location_reconciliation.py
+scripts/acceptance/download_location_reconciliation_ui.mjs
+electron/tests/s3-import-transport.test.mjs
 scripts/acceptance/test_download_location_reconciliation.py
 docs/runbooks/download-location-reconciliation.md
+docs/release-notes-0.8.0-rc.1.md
 CHANGELOG.md
 RELEASING.md
 ```

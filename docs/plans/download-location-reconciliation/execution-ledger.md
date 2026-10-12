@@ -46,3 +46,41 @@ dispositions. Record deviations before expanding implementation scope.
 Terminal evidence must identify candidate package path/hash/source, PR/base/range,
 all required claim links and governed resource disposition. This ledger tracks
 material execution changes; it is not a command transcript or commit counter.
+
+## M1 admission, 2026-10-11
+
+User selected `start` for this plan. Clean implementation worktree at `63299e8d`; GitHub main remains `ad31e391`, remote PR branch `98eb3baf` is an ancestor of this work. Preserve original dirty checkout and reviewed branch history. Standards snapshot `snapshot:v1:b87ec114-4ed8-420f-814f-768eaa91bb48`, 34 selected policies, no unresolved routing facts. Existing pinned tools/dependencies suffice. Add `download_recovery.rs` to M1 solely for a bounded capability-held selected-file stat observation (identity, size and modification time); this remains metadata-only and adds no owner or payload access. Older consumers found locally: Eidetic pin `a94fd92021f27fdeedb6e2de6e01c41c250ef576`, Lanternwake pin `95a0baad2d0aea4650fc36ad4afd969ac9391bf5`. Compatibility gate precedes UI expansion.
+
+M1 storage gate: actual strict readers from both named pins refused HF-6 with the intended unknown-discriminator diagnostic and unchanged bytes. Actual Lanternwake C# client accepted existing download and serving RPC responses from a current default-feature server over an authored upgraded fixture; empty service correctly returns model_unavailable, no inference claim. Eidetic is a direct library consumer, with no Pumas RPC client in the traced dependency path. Test-only old source copies and fixture outputs remain ignored in the original repo tmp directory.
+
+Durability refinement: successful publication confirms resolution operations in the existing persistence facade's shared runtime proof cache. Until a fresh durable barrier confirms a visible resolution, its old and candidate targets remain excluded through strict custody inventory; new admissions refuse those targets and the old attempt cannot resume. Reuse the existing startup durability barrier and exact same-operation retry. This adds no store, journal, payload work or second required publication on normal success. Domain refusals and publisher uncertainty return typed results from an owned, drained effect, without poisoning clean shutdown merely for a recoverable refusal.
+
+C9 verification found an unrelated test-harness path bug: S3 transport child calls require with URL.pathname, which retains `%20` for this repository path. Native file exists, encoded path does not. Add the exact transport test to M3 to use Node fileURLToPath and retain child diagnostics; transport assertions and production transport are unchanged. Electron socket tests also require localhost access and isolated XDG log configuration.
+
+M1 bounded-discovery refinement: list_all would materialize unrelated model metadata. Add the exact index owner file to query by the existing metadata repository field with a caller-owned candidate limit and metadata-size bound. No new column, index, durable owner, SQL publication or filesystem scan. This replaces only the discovery mechanism within D2/D6; the composed owner/boundary probe remains the same. Actual desktop startup also exposed native-root contention during background reclassification; inspection/resolution now project that proven -32011 conflict as typed Busy, leaving Inspect again actionable.
+
+M2 re-plan trigger from required real desktop closure: authored fixture recovery succeeds, but closing five live update streams races HTTP shutdown and records an unconfirmed transport failure, poisoning the final instance receipt. Hypotheses were observer-disconnect misclassification, unfinished admitted work, and receiver shutdown ordering. Trace establishes ordinary five-stream disconnect; core/store resolution and standalone RPC shutdown pass. Bound the repair to the five read-only update producers, HTTP connection custody and Electron named-stream owner. Explicitly tag observer responses; only a single-request connection that has produced that exact tag may treat its closure as normal. Give named streams separate nonpooled connections. Unknown/finite responses, inference/retention streams, pending handlers, malformed requests, transport deadlines and panics retain existing failure semantics. Add the exact owning files to M2; no timeout/sleep/assertion weakening. The composed probe adds observation response classification, with no state or effect authority transferred to transport.
+
+## Local implementation verification, 2026-10-12
+
+The developer desktop path now passes inspection, unchanged cancel, provenance
+and first-upgrade warning, keyboard confirmation, immediate row refresh and normal
+close/reopen using 33 tiny files in a disposable library. The focused HTTP regression
+first failed on the shutdown grace receipt, then passed with all 18 transport tests;
+unmarked blocked writers and unfinished/panicking work retain failure semantics.
+The actual five-stream desktop now exits cleanly. Storage read/validation refusals
+are classified before publication; deletion of an inspected catalog candidate
+returns typed StaleObservation without changing metadata.
+
+Rerouted expanded contract/platform/GUI/release scope through snapshot
+`snapshot:v1:f4fcbbd8-2656-401a-8a4d-d015d4faa168`: 43 policies, zero unresolved
+routing categories; all selected text acquired, including the 11-item continuation.
+New native CI steps run retained-location cases with default and no-default features
+on the existing Linux/macOS/Windows matrix. Native non-Linux results remain pending.
+Add the existing release-note owner to M3's exact documentation write set so its
+obsolete statement that recovery is unimplemented is removed.
+
+Format-overlap clarification: existing offline conversion intentionally continues
+producing supported HF-5. Only this explicit user confirmation selects HF-6, so an
+offline conversion cannot silently opt older direct clients into incompatibility.
+This refines the proposed converter policy without widening reader overlap.

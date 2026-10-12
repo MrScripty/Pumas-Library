@@ -266,3 +266,22 @@ non-blocked tested/preserved disposition. This is not a repo-wide refactor audit
    released-admission history, snapshots and generation. No cross-store commit,
    payload backup, automatic relocation or indefinite compatibility writer is
    introduced. Review the implemented artifact, not just this proposed split.
+
+## Implemented composition review
+
+The eight-part probe above remains applicable to the produced artifact. The internal
+resolution module, existing HF invocation, persistence facade and destination owner
+contain the required matching/durability/live-settlement complexity. The runtime
+confirmation cache is proof of the existing publication barrier, not a durable
+second authority. The sole new discriminator is HF-6; offline HF-5 conversion
+retains supported overlap until explicit acceptance. The existing index owner
+performs a bounded candidate query; no new catalog schema or write path exists.
+The observed shutdown repair adds a producer-only classification of five read-only
+responses and one-request desktop transport ownership. Removing it restores false
+failed-instance receipts; widening it would mask genuine operation obligations,
+so inference/retention streams are outside that population. Necessary ordering
+stays inside core/transport owners; UI learns no locks, versions or raw store fields.
+Fault and GUI helpers are private verification mechanisms on authored fixtures.
+No additional persistent module, adapter, registry, queue owner or interpreter was
+justified. Required remaining composition evidence is explicit in M2, not inferred
+from this construction review.

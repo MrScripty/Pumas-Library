@@ -5461,14 +5461,20 @@ impl HuggingFaceClient {
         }
     }
 
-    async fn persisted_download_is_revoked(
+    async fn persisted_download_is_closed(
         context: &TaskContext,
         persistence: Arc<DownloadPersistence>,
         download_id: String,
     ) -> Result<bool> {
         context
             .run_fallible_blocking_named("inspect persisted recovery authority", move || {
-                persistence.is_revoked(&download_id)
+                Ok::<_, PumasError>(
+                    persistence.is_revoked(&download_id)?
+                        || persistence
+                            .retained_resolution_view(&download_id)?
+                            .resolution
+                            .is_some(),
+                )
             })
             .await
             .map_err(|error| {
@@ -6548,6 +6554,253 @@ impl HuggingFaceClient {
         Ok(true)
     }
 
+    /// Inspect retained legacy files without changing download custody.
+    pub(crate) async fn inspect_retained_download(
+        &self,
+        library: Arc<crate::model_library::ModelLibrary>,
+        download_id: &str,
+    ) -> Result<crate::model_library::DownloadLocationReport> {
+        let client = self.clone_for_invocation();
+        let id = download_id.to_string();
+        self.run_download_invocation(move |context| async move {
+            let context = match client.protect_download_mutation(&context).await {
+                Ok(context) => context,
+                Err(PumasError::DownloadRootBusy) => {
+                    return Ok(crate::model_library::DownloadLocationReport::outcome(
+                        &id,
+                        crate::model_library::DownloadLocationStatus::Busy,
+                    ))
+                }
+                Err(error) => return Err(error),
+            };
+            let store = client
+                .persistence
+                .clone()
+                .ok_or_else(|| PumasError::Config {
+                    message: "Download persistence is unavailable".into(),
+                })?;
+            let root = client
+                .destination_root
+                .clone()
+                .ok_or_else(|| PumasError::Config {
+                    message: "Library authority is unavailable".into(),
+                })?;
+            let requested_id = id.clone();
+            let result = context
+                .run_blocking_named("inspect retained failed download", move || {
+                    crate::model_library::download_resolution::inspect(
+                        &store,
+                        &root,
+                        library.index(),
+                        &id,
+                    )
+                })
+                .await
+                .map_err(|error| error.into_pumas_error("Retained download inspection failed"))?;
+            use crate::model_library::{
+                DownloadLocationReport as Report, DownloadLocationStatus as S,
+            };
+            let mut report = match result {
+                Ok(report) => report,
+                Err(PumasError::DownloadRootBusy) => Report::outcome(&requested_id, S::Busy),
+                Err(PumasError::Validation { .. } | PumasError::Json { .. }) => {
+                    Report::outcome(&requested_id, S::InvalidMetadata)
+                }
+                Err(_) => Report::outcome(&requested_id, S::UnavailableCapability),
+            };
+            if report.status == S::Resolved
+                && client.downloads.read().await.contains_key(&requested_id)
+            {
+                report.status = S::PublicationUncertain;
+                report.message = Report::outcome(&requested_id, S::PublicationUncertain).message;
+            }
+            Ok(report)
+        })
+        .await
+    }
+
+    pub(crate) async fn resolve_retained_download(
+        &self,
+        library: Arc<crate::model_library::ModelLibrary>,
+        request: crate::model_library::DownloadResolutionRequest,
+    ) -> Result<crate::model_library::DownloadLocationReport> {
+        request.validate()?;
+        let client = self.clone_for_invocation();
+        self.run_download_invocation(move |context| async move {
+            use crate::model_library::download_resolution::{
+                self as resolution, DownloadLocationReport as Report, DownloadLocationStatus as S,
+            };
+            let context = match client.protect_download_mutation(&context).await {
+                Ok(context) => context,
+                Err(PumasError::DownloadRootBusy) => {
+                    return Ok(Report::outcome(&request.download_id, S::Busy))
+                }
+                Err(error) => return Err(error),
+            };
+            client.observe_finished_download_tasks().await;
+            if client.download_tasks.contains(&request.download_id) {
+                return Ok(Report::outcome(&request.download_id, S::Busy));
+            }
+            let store = client
+                .persistence
+                .clone()
+                .ok_or_else(|| PumasError::Config {
+                    message: "Download persistence is unavailable".into(),
+                })?;
+            let root = client
+                .destination_root
+                .clone()
+                .ok_or_else(|| PumasError::Config {
+                    message: "Library authority is unavailable".into(),
+                })?;
+            let inspection_store = store.clone();
+            let inspection_root = root.clone();
+            let inspection_id = request.download_id.clone();
+            let inspection_library = library.clone();
+            let inspection_candidate = request.candidate_model_id.clone();
+            let view = context
+                .run_blocking_named("inspect retained resolution authority", move || {
+                    let view = inspection_store.retained_resolution_view(&inspection_id)?;
+                    let old = view
+                        .snapshot
+                        .as_ref()
+                        .map(|original| original.dest_dir.clone())
+                        .or_else(|| {
+                            view.resolution
+                                .as_ref()
+                                .map(|record| record.original.dest_dir.clone())
+                        });
+                    let old =
+                        old.ok_or_else(|| resolution::invalid("Retained download is unavailable"))?;
+                    let old = inspection_root.resolve(&old)?;
+                    let record = inspection_library
+                        .index()
+                        .get(&inspection_candidate)?
+                        .ok_or_else(|| {
+                            resolution::invalid("Selected local model is unavailable")
+                        })?;
+                    let candidate = inspection_root.resolve(Path::new(&record.path))?;
+                    Ok::<_, PumasError>((old, candidate))
+                })
+                .await
+                .map_err(|error| error.into_pumas_error("Retained resolution authority failed"))?;
+            let (old, candidate) = match view {
+                Ok(view) => view,
+                Err(PumasError::Validation { .. } | PumasError::NotFound { .. }) => {
+                    return Ok(Report::outcome(&request.download_id, S::StaleObservation));
+                }
+                Err(PumasError::Json { .. }) => {
+                    return Ok(Report::outcome(&request.download_id, S::InvalidMetadata));
+                }
+                Err(_) => {
+                    return Ok(Report::outcome(
+                        &request.download_id,
+                        S::UnavailableCapability,
+                    ));
+                }
+            };
+            let mut identities = vec![old.identity(), candidate.identity()];
+            identities.sort();
+            identities.dedup();
+            let mut admissions = Vec::new();
+            let mut effects = Vec::new();
+            for identity in identities {
+                let locks = client.destination_locks(&identity).await;
+                let Ok(admission) = locks.admission.clone().try_write_owned() else {
+                    return Ok(Report::outcome(&request.download_id, S::Busy));
+                };
+                let Ok(effect) = locks.effects.clone().try_lock_owned() else {
+                    return Ok(Report::outcome(&request.download_id, S::Busy));
+                };
+                admissions.push(admission);
+                effects.push(effect);
+            }
+            // Keep state excluded through the owned publication. Resume/cancel
+            // cannot install a generation or change this attempt mid-commit.
+            let mut states = client.downloads.write().await;
+            if client.download_tasks.contains(&request.download_id)
+                || states
+                    .get(&request.download_id)
+                    .is_some_and(|state| state.status != DownloadStatus::Error)
+            {
+                return Ok(Report::outcome(&request.download_id, S::Busy));
+            }
+            let id = request.download_id.clone();
+            let old_identity = old.identity();
+            let result = context
+                .run_blocking_named("publish retained local acceptance", move || {
+                    store.resolve_retained_download(&request, |original, admission| {
+                        old.assert_no_intent_deletion_claim()?;
+                        candidate.assert_no_intent_deletion_claim()?;
+                        if old.persisted_identity()? != admission.destination
+                            || old.model_directory_exists()?
+                        {
+                            return Err(resolution::invalid(
+                                "Retained destination changed since inspection",
+                            ));
+                        }
+                        let record = library
+                            .index()
+                            .get(&request.candidate_model_id)?
+                            .ok_or_else(|| {
+                                resolution::invalid("Selected candidate changed since inspection")
+                            })?;
+                        let (observed, files, held) = resolution::observe_candidate(
+                            &root, &record, original,
+                        )?
+                        .ok_or_else(|| {
+                            resolution::invalid("Selected local files changed since inspection")
+                        })?;
+                        if held.identity() != candidate.identity()
+                            || observed.observation != request.expected_observation
+                        {
+                            return Err(resolution::invalid(
+                                "Local observation changed since inspection",
+                            ));
+                        }
+                        Ok(resolution::RetainedDownloadResolution {
+                            original: original.clone(),
+                            admission: admission.clone(),
+                            request: request.clone(),
+                            candidate: observed,
+                            observed_files: files,
+                            resolved_at: chrono::Utc::now().to_rfc3339(),
+                        })
+                    })
+                })
+                .await
+                .map_err(|error| {
+                    error.into_pumas_error("Retained resolution publication failed")
+                })?;
+            let resolution = match result {
+                Ok(Ok(record)) => record,
+                Ok(Err(PumasError::DownloadRootBusy)) => return Ok(Report::outcome(&id, S::Busy)),
+                Ok(Err(PumasError::Validation { .. })) => {
+                    return Ok(Report::outcome(&id, S::StaleObservation))
+                }
+                Ok(Err(_)) => return Ok(Report::outcome(&id, S::InvalidMetadata)),
+                Err(_) => return Ok(Report::outcome(&id, S::PublicationUncertain)),
+            };
+            if !client
+                .destination_executions
+                .settle_retained_claim(&old_identity, &id)
+            {
+                return Ok(Report::outcome(&id, S::PublicationUncertain));
+            }
+            states.remove(&id);
+            drop(states);
+            drop(effects);
+            drop(admissions);
+            client.publish_download_snapshot().await;
+            let mut report = Report::outcome(&id, S::Resolved);
+            report.attempt_id = Some(resolution.admission.attempt_id);
+            report.original_destination = Some(resolution.admission.destination.relative_target);
+            report.candidates.push(resolution.candidate);
+            Ok(report)
+        })
+        .await
+    }
+
     /// Resume a paused or errored download from its `.part` file.
     pub async fn resume_download(&self, download_id: &str) -> Result<bool> {
         let client = self.clone_for_invocation();
@@ -6798,7 +7051,7 @@ impl HuggingFaceClient {
         }
 
         if let Some(persistence) = self.persistence.clone() {
-            if Self::persisted_download_is_revoked(context, persistence, download_id.to_string())
+            if Self::persisted_download_is_closed(context, persistence, download_id.to_string())
                 .await?
             {
                 return Ok(false);
@@ -8939,6 +9192,128 @@ mod tests {
             .configure_download_destination_root(library_root)
             .unwrap();
         client
+    }
+
+    #[tokio::test]
+    async fn retained_location_release_allows_immediate_same_destination_transfer_and_fences_stale_claim(
+    ) {
+        use crate::model_library::download_resolution::{
+            DownloadLocalAcceptance, DownloadLocationStatus, DownloadResolutionRequest,
+        };
+        use crate::model_library::hf::lifecycle::TaskGeneration;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (_temp, library, store, mut client, old_id) =
+            crate::model_library::download_resolution::tests::fixture(2).await;
+        let old = store
+            .retained_resolution_view(&old_id)
+            .unwrap()
+            .snapshot
+            .unwrap();
+        let identity = destination_identity(&client, &old.dest_dir);
+        let report = client
+            .inspect_retained_download(library.clone(), &old_id)
+            .await
+            .unwrap();
+        let candidate = &report.candidates[0];
+        let request = DownloadResolutionRequest {
+            download_id: old_id.clone(),
+            attempt_id: report.attempt_id.unwrap(),
+            candidate_model_id: candidate.model_id.clone(),
+            expected_observation: candidate.observation.clone(),
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            acceptance: DownloadLocalAcceptance::KeepExistingLocalFiles,
+            accept_storage_upgrade: true,
+        };
+        assert_eq!(
+            client
+                .resolve_retained_download(library, request)
+                .await
+                .unwrap()
+                .status,
+            DownloadLocationStatus::Resolved
+        );
+        assert!(client.destination_executions.was_released(
+            &identity,
+            &old_id,
+            DestinationDomain::Ambient
+        ));
+        assert!(!client.destination_executions.reserve_dormant(
+            identity.clone(),
+            old_id.clone(),
+            DestinationDomain::Ambient
+        ));
+        assert!(!client.destination_executions.reserve(
+            identity.clone(),
+            old_id,
+            DestinationDomain::Ambient,
+            TaskGeneration::new()
+        ));
+        cache_repo_tree(
+            &client,
+            "acme/next",
+            vec![LfsFileInfo {
+                filename: "next.gguf".into(),
+                size: 8,
+                sha256: "9c56cc51b374c3ba189210d5b6d4bf57790d351c96c47c02190ecf1e430635ab".into(),
+            }],
+            Vec::new(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        client.set_test_download_base_url(format!("http://{}", listener.local_addr().unwrap()));
+        let (seen, requested) = tokio::sync::oneshot::channel();
+        let (finish, held) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            while !bytes.ends_with(b"\r\n\r\n") {
+                assert!(bytes.len() < 16384);
+                bytes.push(
+                    tokio::time::timeout(Duration::from_secs(5), socket.read_u8())
+                        .await
+                        .unwrap()
+                        .unwrap(),
+                );
+            }
+            let request = String::from_utf8(bytes).unwrap();
+            assert!(request.starts_with("GET /acme/next/resolve/main/next.gguf HTTP/1.1"));
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nETag: \"fixture\"\r\nConnection: close\r\n\r\nabcde").await.unwrap();
+            seen.send(()).unwrap();
+            held.await.unwrap();
+        });
+        let next = client
+            .start_download(
+                &recovery_test_request("acme/next", &["next.gguf".into()]),
+                &old.dest_dir,
+                None,
+            )
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), requested)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5),async {
+            while !client.list_downloads().await.iter().any(|entry|entry.download_id==next && entry.downloaded_bytes==Some(5)) { tokio::task::yield_now().await; }
+        }).await.expect("new authorized transfer must consume bytes at the same original destination without restart");
+        assert!(client.pause_download(&next).await.unwrap());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while client.get_download_status(&next).await != Some(DownloadStatus::Paused) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        finish.send(()).unwrap();
+        server.await.unwrap();
+        assert_eq!(
+            store
+                .load_all()
+                .iter()
+                .filter(|entry| entry.status == DownloadStatus::Paused && entry.download_id != next)
+                .count(),
+            2
+        );
+        client.shutdown_downloads().await.unwrap();
     }
 
     fn configured_download_client(cache_dir: impl Into<PathBuf>) -> Result<HuggingFaceClient> {

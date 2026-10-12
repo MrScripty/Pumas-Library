@@ -1645,3 +1645,33 @@ test('library upgrade requires both confirmations and sends no renderer-supplied
     await assert.rejects(harness.api.upgrade_launcher_library(confirmation), error => error.name === 'LauncherRootRecoveryContractError' && !error.message.includes('/private'));
   }
 });
+
+test('compiled preload preserves every retained-download outcome and closes request shapes', async () => {
+  const harness = loadCompiledPreload();
+  const request = { downloadId: 'legacy-fixture', attemptId: 'c3f7d104-1234-4321-abcd-aaaaaaaaaaaa',
+    candidateModelId: 'diffusion/vit/exact-weight', expectedObservation: 'a'.repeat(64),
+    operationId: 'c3f7d104-1234-4321-abcd-bbbbbbbbbbbb',
+    acceptance: 'keep_existing_local_files', acceptStorageUpgrade: true };
+  let outcome;
+  const seen = [];
+  harness.respondWith((channel, method, params) => {
+    assert.equal(channel, 'api:call');
+    seen.push(toPlainValue(validateApiCallPayload(method, params)));
+    return outcome;
+  });
+  for (const status of ['not_applicable', 'existing_local_candidate', 'missing_files', 'ambiguous_candidates',
+    'busy', 'stale_observation', 'unsupported_history', 'invalid_metadata', 'unavailable_capability',
+    'publication_uncertain', 'resolved']) {
+    outcome = { status, downloadId: request.downloadId, attemptId: null, originalDestination: null,
+      resolutionRequest: null, candidates: [], requiresFormatUpgrade: true, message: status };
+    assert.deepEqual(toPlainValue(await harness.api.inspect_retained_download(request.downloadId)), outcome);
+    assert.deepEqual(toPlainValue(await harness.api.resolve_retained_download(request)), outcome);
+  }
+  assert.deepEqual(seen[1], { method: 'resolve_retained_download', params: request });
+  const count = seen.length;
+  assert.throws(() => harness.api.resolve_retained_download({ ...request, acceptance: 'trust_upstream' }));
+  assert.throws(() => harness.api.resolve_retained_download({ ...request, root: '/untrusted' }));
+  assert.equal(seen.length, count);
+  outcome = { ...outcome, status: 'invented_success' };
+  await assert.rejects(harness.api.inspect_retained_download(request.downloadId));
+});

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Offer explicit recovery for moved legacy download files in the running desktop,
+  preserving files and failed-attempt history while releasing exact download custody.
+  First confirmation upgrades the HF partition and warns older direct readers.
+- Close read-only desktop update streams without falsely failing instance shutdown.
+
 ## [0.7.0] - Unreleased candidate
 
 See [0.7.0 release notes](docs/release-notes-0.7.0.md) for capabilities,

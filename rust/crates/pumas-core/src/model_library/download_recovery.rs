@@ -1386,6 +1386,32 @@ impl DownloadRecoveryDestination {
         self.regular_file_len(&self.model_relative.join(file))
     }
 
+    /// Metadata-only observation through the held, no-follow parent capability.
+    /// Never opens or hashes the selected payload.
+    pub(crate) fn observe_retained_file(&self, file: &str) -> io::Result<Option<Value>> {
+        self.authority.require_current()?;
+        let Some((parent, name)) = self.file_parent_if_present(file, false)? else {
+            return Ok(None);
+        };
+        let metadata = match parent.symlink_metadata(name) {
+            Ok(metadata) if metadata.is_file() && !metadata.is_symlink() => metadata,
+            Ok(_) => return Err(invalid_capability_path()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let identity = filesystem_identity(&metadata).ok_or_else(invalid_capability_path)?;
+        let modified = metadata
+            .modified()?
+            .into_std()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| invalid_capability_path())?;
+        self.authority.require_current()?;
+        Ok(Some(
+            serde_json::json!({"identity":identity,"size":metadata.len(),
+            "modified_seconds":modified.as_secs(),"modified_nanoseconds":modified.subsec_nanos()}),
+        ))
+    }
+
     pub(crate) fn part_len(&self, file: &str) -> io::Result<Option<u64>> {
         self.regular_file_len(&self.part_relative(Path::new(file)))
     }

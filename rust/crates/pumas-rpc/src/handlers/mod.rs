@@ -1007,6 +1007,18 @@ async fn dispatch_admitted_command(
                 .await
                 .map(RpcOutcome::DownloadMutation)
         }
+        RpcCommand::InspectRetainedDownload { download_id } => state
+            .api
+            .inspect_retained_download(&download_id)
+            .await
+            .map(Box::new)
+            .map(RpcOutcome::DownloadLocation),
+        RpcCommand::ResolveRetainedDownload { request } => state
+            .api
+            .resolve_retained_download(request)
+            .await
+            .map(Box::new)
+            .map(RpcOutcome::DownloadLocation),
         RpcCommand::ListModelDownloads => models::list_model_downloads(state)
             .await
             .map(Box::new)

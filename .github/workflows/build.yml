@@ -510,6 +510,10 @@ jobs:
         run: python scripts/release/test-acquisition-integration.py --package pumas-rpc --features test-support --minimum 2
       - name: Test cross-owner inference-disabled RPC shutdown
         run: python scripts/release/test-acquisition-integration.py --package pumas-rpc --no-default-features --features test-support --minimum 1
+      - name: Test native retained-download reconciliation
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library retained_location
+      - name: Test inference-disabled retained-download reconciliation
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features retained_location
       - name: Test inference-disabled native HTTP drainage
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features http_transport::tests
       - name: Test reserved acquisition workspace custody

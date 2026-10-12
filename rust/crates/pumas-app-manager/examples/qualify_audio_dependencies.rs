@@ -18,10 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     std::fs::create_dir_all(&root)?;
     let manager = VersionManager::new(&root, AppId::Torch).await?;
-    let preview = match manager
-        .preview_torch_runtime("v2.10.0", "cpu", "python3.12", "cohere-asr")
-        .await?
-    {
+    let preview = match manager.preview_torch_audio_candidate().await? {
         TorchPreviewOutcome::Ready { preview } => preview,
         other => return Err(format!("selection refused: {other:?}").into()),
     };

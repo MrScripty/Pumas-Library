@@ -25,6 +25,12 @@ fn refused() -> io::Error {
         "selected runtime differs from source-pinned audio candidate recipe",
     )
 }
+fn mismatch(field: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("selected runtime differs from source-pinned audio candidate recipe ({field})"),
+    )
+}
 fn artifacts(value: &Value) -> io::Result<Vec<Artifact>> {
     let mut artifacts: Vec<Artifact> =
         serde_json::from_value(value.clone()).map_err(|_| refused())?;
@@ -37,6 +43,54 @@ fn artifacts(value: &Value) -> io::Result<Vec<Artifact>> {
         return Err(refused());
     }
     Ok(artifacts)
+}
+
+pub(super) fn validate_managed_python(metadata: &Value) -> io::Result<()> {
+    let pin: Value = serde_json::from_str(PIN).map_err(|_| refused())?;
+    for field in ["distribution", "provider"] {
+        if metadata[field] != pin["managed_python"][field] {
+            return Err(mismatch(&format!("managed_python.{field}")));
+        }
+    }
+    if metadata["executable"]["sha256"] != pin["interpreter_executable_sha256"] {
+        return Err(mismatch("managed_python.executable.sha256"));
+    }
+    Ok(())
+}
+
+pub(super) fn validate_artifacts(selected: &Value) -> io::Result<()> {
+    let pin: Value = serde_json::from_str(PIN).map_err(|_| refused())?;
+    let selected = artifacts(selected)?;
+    for (selected, expected) in selected.iter().zip(artifacts(&pin["artifacts"])?) {
+        if selected != &expected {
+            // Only source-owned names enter the diagnostic, never observed URLs
+            // or paths from the installed record.
+            return Err(mismatch(&format!("artifacts.{}", expected.name)));
+        }
+    }
+    Ok(())
+}
+
+/// Keep the same named dependency roots and pip-installed metadata while
+/// limiting qualification acquisition to the existing reviewed wheel cohort.
+/// Direct-URL requirements for every transitive package would add REQUESTED
+/// and direct_url.json records, changing the pinned installed-byte selection.
+pub(super) fn candidate_links() -> io::Result<String> {
+    let pin: Value = serde_json::from_str(PIN).map_err(|_| refused())?;
+    let mut links = String::from("<!doctype html>\n");
+    for artifact in artifacts(&pin["artifacts"])? {
+        let url = artifact
+            .url
+            .replace('&', "&amp;")
+            .replace('"', "&quot;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+        links.push_str(&format!(
+            "<a href=\"{url}#sha256={}\">{}</a>\n",
+            artifact.sha256, artifact.name
+        ));
+    }
+    Ok(links)
 }
 #[cfg(test)]
 fn selection_digest(mut members: Vec<(&str, u64, &str)>) -> String {
@@ -55,19 +109,11 @@ pub(super) fn validate(metadata: &Value, retained: &RetainedRuntimeReadSource) -
     let pin: Value = serde_json::from_str(PIN).map_err(|_| refused())?;
     for field in ["python", "adapter", "build"] {
         if metadata[field] != pin[field] {
-            return Err(refused());
+            return Err(mismatch(field));
         }
     }
-    for field in ["distribution", "provider"] {
-        if metadata["managed_python"][field] != pin["managed_python"][field] {
-            return Err(refused());
-        }
-    }
-    if metadata["managed_python"]["executable"]["sha256"] != pin["interpreter_executable_sha256"]
-        || artifacts(&metadata["artifacts"])? != artifacts(&pin["artifacts"])?
-    {
-        return Err(refused());
-    }
+    validate_managed_python(&metadata["managed_python"])?;
+    validate_artifacts(&metadata["artifacts"])?;
     for role in [RuntimeReadRole::Interpreter, RuntimeReadRole::Dependencies] {
         pumas_library::runtime_read_source::validate_audio_candidate_read_role(retained, role)?;
     }
@@ -78,6 +124,65 @@ pub(super) fn validate(metadata: &Value, retained: &RetainedRuntimeReadSource) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn candidate_links_only_advertise_the_exact_hashed_source_cohort() {
+        let pin: Value = serde_json::from_str(PIN).unwrap();
+        let links = candidate_links().unwrap();
+        assert_eq!(links.lines().count(), 69);
+        for artifact in artifacts(&pin["artifacts"]).unwrap() {
+            assert_eq!(
+                links
+                    .matches(&format!("{}#sha256={}", artifact.url, artifact.sha256))
+                    .count(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn selected_artifacts_must_equal_the_whole_recipe_without_disclosing_observed_values() {
+        let pin: Value = serde_json::from_str(PIN).unwrap();
+        let original = pin["artifacts"].clone();
+        validate_artifacts(&original).unwrap();
+        let mut reversed = original.clone();
+        reversed.as_array_mut().unwrap().reverse();
+        validate_artifacts(&reversed).unwrap();
+        for field in ["name", "version", "url", "sha256"] {
+            let mut changed = original.clone();
+            changed[0][field] = Value::String("private-observed-value".into());
+            let error = validate_artifacts(&changed).unwrap_err().to_string();
+            assert!(error.contains("artifacts."), "{field}: {error}");
+            assert!(!error.contains("private-observed-value"));
+        }
+        let mut missing = original.clone();
+        missing.as_array_mut().unwrap().pop();
+        assert!(validate_artifacts(&missing).is_err());
+        let mut extra = original.clone();
+        extra.as_array_mut().unwrap().push(serde_json::json!({
+            "name": "unpinned", "version": "1", "url": "https://private.invalid/secret", "sha256": "0".repeat(64)
+        }));
+        assert!(validate_artifacts(&extra).is_err());
+        let mut duplicate = original.clone();
+        duplicate[1] = duplicate[0].clone();
+        assert!(validate_artifacts(&duplicate).is_err());
+    }
+
+    #[test]
+    fn managed_candidate_identity_refuses_drift_before_wheel_acquisition() {
+        let pin: Value = serde_json::from_str(PIN).unwrap();
+        let mut identity = pin["managed_python"].clone();
+        identity["executable"] =
+            serde_json::json!({"sha256": pin["interpreter_executable_sha256"]});
+        validate_managed_python(&identity).unwrap();
+        for field in ["distribution", "provider", "executable"] {
+            let mut changed = identity.clone();
+            changed[field] = Value::String("private-observed-value".into());
+            let error = validate_managed_python(&changed).unwrap_err().to_string();
+            assert!(error.contains(&format!("managed_python.{field}")));
+            assert!(!error.contains("private-observed-value"));
+        }
+    }
+
     #[test]
     fn exact_source_artifacts_refuse_duplicate_or_changed_entries() {
         let pin: Value = serde_json::from_str(PIN).unwrap();

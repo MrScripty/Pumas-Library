@@ -1093,6 +1093,7 @@ impl VersionManager {
                         build: "auto".to_owned(),
                         python: "auto".to_owned(),
                         adapter: "none".to_owned(),
+                        audio_candidate_recipe: false,
                         created: std::time::Instant::now(),
                     },
                 })
@@ -1105,6 +1106,7 @@ impl VersionManager {
                     build: "auto".to_owned(),
                     python: "auto".to_owned(),
                     adapter: "none".to_owned(),
+                    audio_candidate_recipe: false,
                     created: std::time::Instant::now(),
                 },
             })
@@ -5574,6 +5576,7 @@ mod tests {
                 build: "auto".into(),
                 python: "auto".into(),
                 adapter: "none".into(),
+                audio_candidate_recipe: false,
                 created: std::time::Instant::now()
                     - torch_preview::PREVIEW_TTL
                     - Duration::from_secs(1),

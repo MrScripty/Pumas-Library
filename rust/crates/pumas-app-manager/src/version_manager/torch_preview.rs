@@ -733,11 +733,46 @@ mod tests {
             assert_eq!(selected.tag, tag);
             assert_eq!(selected.build, build);
             assert_eq!(selected.adapter, "cohere-asr");
+            assert!(!selected.audio_candidate_recipe);
             assert!(manager
                 .consume_torch_install_selection(&preview.preview_id, tag)
                 .await
                 .is_err());
         }
+        assert!(!root.path().join("launcher-data/managed-python").exists());
+    }
+
+    #[cfg(all(feature = "test-support", target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn audio_qualification_selection_is_explicit_exact_unverified_and_one_use() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        let TorchPreviewOutcome::Ready { preview } =
+            manager.preview_torch_audio_candidate().await.unwrap()
+        else {
+            panic!("candidate refused")
+        };
+        assert_eq!(preview.qualification, "unverified");
+        let selected = manager
+            .consume_torch_install_selection(&preview.preview_id, "v2.10.0")
+            .await
+            .unwrap();
+        assert!(selected.audio_candidate_recipe);
+        assert_eq!(
+            (
+                selected.tag.as_str(),
+                selected.build.as_str(),
+                selected.python.as_str(),
+                selected.adapter.as_str()
+            ),
+            ("v2.10.0", "cpu", "python3.12", "cohere-asr")
+        );
+        assert!(manager
+            .consume_torch_install_selection(&preview.preview_id, "v2.10.0")
+            .await
+            .is_err());
         assert!(!root.path().join("launcher-data/managed-python").exists());
     }
 
@@ -1335,6 +1370,7 @@ pub(crate) struct TorchInstallSelection {
     pub build: String,
     pub python: String,
     pub adapter: String,
+    pub audio_candidate_recipe: bool,
     pub created: Instant,
 }
 
@@ -1680,6 +1716,32 @@ impl VersionManager {
         python: &str,
         adapter: &str,
     ) -> Result<TorchPreviewOutcome> {
+        self.preview_torch_selection(tag, build, python, adapter, false)
+            .await
+    }
+
+    /// Select the existing frozen Linux CPU cohort for explicit non-model
+    /// qualification. This does not enable production audio or change normal
+    /// runtime selection. Installation still owns acquisition and cancellation.
+    #[cfg(feature = "test-support")]
+    pub async fn preview_torch_audio_candidate(&self) -> Result<TorchPreviewOutcome> {
+        if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            return Err(failed(
+                "Audio candidate qualification requires Linux x86_64",
+            ));
+        }
+        self.preview_torch_selection("v2.10.0", "cpu", "python3.12", "cohere-asr", true)
+            .await
+    }
+
+    async fn preview_torch_selection(
+        &self,
+        tag: &str,
+        build: &str,
+        python: &str,
+        adapter: &str,
+        audio_candidate_recipe: bool,
+    ) -> Result<TorchPreviewOutcome> {
         if self.app_id != AppId::Torch
             || !(build == "auto" || supported_torch_build(build))
             || !(python == "auto" || is_python_selection(python))
@@ -1718,6 +1780,7 @@ impl VersionManager {
             build: build.to_owned(),
             python: python.to_owned(),
             adapter: adapter.to_owned(),
+            audio_candidate_recipe,
             created: Instant::now(),
         };
         {

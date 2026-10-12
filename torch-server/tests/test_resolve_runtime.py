@@ -1168,7 +1168,12 @@ class ResolverTests(unittest.TestCase):
             run.assert_not_called()
 
     def test_audio_candidate_cli_preserves_named_roots_without_live_indexes(self):
-        fixture = report(adapter="cohere-asr")
+        # The qualification owner admits Linux x86_64 only. Model that command
+        # explicitly even when the surrounding Python suite runs on macOS.
+        fixture = report(
+            adapter="cohere-asr",
+            url="https://download.pytorch.org/whl/cpu/torch-2.10.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl",
+        )
 
         def fake_run(command, **_kwargs):
             pathlib.Path(command[command.index("--report") + 1]).write_text(
@@ -1203,6 +1208,9 @@ class ResolverTests(unittest.TestCase):
                     ],
                 ),
                 patch.object(resolver.subprocess, "run", side_effect=fake_run) as run,
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(resolver.platform, "platform", return_value="Linux"),
+                patch.object(resolver.platform, "machine", return_value="x86_64"),
                 patch.object(resolver, "installed_file_manifest", return_value={"files": []}),
             ):
                 resolver.main()
@@ -1217,8 +1225,14 @@ class ResolverTests(unittest.TestCase):
             self.assertFalse(any(" @ " in item for item in command))
             self.assertEqual(
                 json.loads((output / "resolution.json").read_text())["artifacts"],
-                resolver.requirements_from_report(fixture, "2.10.0", "cpu", "cohere-asr")[1][
-                    "artifacts"
+                [
+                    {
+                        "name": item["metadata"]["name"],
+                        "version": item["metadata"]["version"],
+                        "url": item["download_info"]["url"],
+                        "sha256": item["download_info"]["archive_info"]["hashes"]["sha256"],
+                    }
+                    for item in fixture["install"]
                 ],
             )
 

@@ -1,0 +1,187 @@
+{
+  "source_revision": "df53db08e2ba224edfaf713522ddd410f7d4ac44",
+  "run_id": 38522709859,
+  "url": "https://github.com/MrScripty/Pumas-Library/actions/runs/38522709859",
+  "status": "completed",
+  "conclusion": "failure",
+  "observed": "2026-10-14",
+  "jobs": [
+    {
+      "id": 115716122649,
+      "name": "Workflow and release contracts",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 115716297315,
+      "name": "Review Linux inference candidate",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 115716297392,
+      "name": "Rust quality",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 115716297437,
+      "name": "Headless without inference plugins",
+      "status": "completed",
+      "conclusion": "failure",
+      "failed_steps": [
+        "Run cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features"
+      ]
+    },
+    {
+      "id": 115716297441,
+      "name": "Frontend and desktop contracts",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 115716297465,
+      "name": "Torch native QA (macos-15)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 115716297515,
+      "name": "Review confined audio dependencies",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 115716297522,
+      "name": "Torch native QA (windows-2025)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 115716297562,
+      "name": "Torch native QA (ubuntu-24.04)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 115716298865,
+      "name": "Torch native RPC E2E (${{ matrix.os }})",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 115716299008,
+      "name": "Rust release (${{ matrix.os }})",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 115716299071,
+      "name": "Inference headless candidate (${{ matrix.target }})",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 115716299301,
+      "name": "Headless archive (${{ matrix.headless_os }})",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 115718210702,
+      "name": "Desktop package without inference (win)",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 115718210755,
+      "name": "Rust release (windows-2025)",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 115718210942,
+      "name": "Linux release startup",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 115718211412,
+      "name": "Desktop package without inference (${{ matrix.platform }})",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 115718211418,
+      "name": "Desktop package (${{ matrix.platform }})",
+      "status": "completed",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 115728209246,
+      "name": "Assemble release candidate",
+      "status": "completed",
+      "conclusion": "skipped"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 11875865202,
+      "name": "review-inference-evidence-linux-x86_64",
+      "size_in_bytes": 38521,
+      "url": "https://api.github.com/repos/MrScripty/Pumas-Library/actions/artifacts/11875865202",
+      "archive_download_url": "https://api.github.com/repos/MrScripty/Pumas-Library/actions/artifacts/11875865202/zip",
+      "expired": false,
+      "created_at": "2026-10-14T06:58:46Z",
+      "expires_at": "2026-10-21T06:58:45Z",
+      "updated_at": "2026-10-14T06:58:46Z",
+      "digest": "sha256:a51626da4d0460ffd083618ffa2461ade5126bb012044789c3490c6f92e498bf",
+      "workflow_run": {
+        "id": 38522709859,
+        "repository_id": 1118589530,
+        "head_repository_id": 1118589530,
+        "head_branch": "readiness/v080-20261014",
+        "head_sha": "df53db08e2ba224edfaf713522ddd410f7d4ac44"
+      }
+    },
+    {
+      "id": 11875745665,
+      "name": "review-inference-linux-x86_64",
+      "size_in_bytes": 30659590,
+      "url": "https://api.github.com/repos/MrScripty/Pumas-Library/actions/artifacts/11875745665",
+      "archive_download_url": "https://api.github.com/repos/MrScripty/Pumas-Library/actions/artifacts/11875745665/zip",
+      "expired": false,
+      "created_at": "2026-10-14T06:58:45Z",
+      "expires_at": "2026-10-21T06:58:44Z",
+      "updated_at": "2026-10-14T06:58:45Z",
+      "digest": "sha256:2dc6dd91e0f7f6258b5f7c96a433d45653190cb939eb6bad12c4c03283627a91",
+      "workflow_run": {
+        "id": 38522709859,
+        "repository_id": 1118589530,
+        "head_repository_id": 1118589530,
+        "head_branch": "readiness/v080-20261014",
+        "head_sha": "df53db08e2ba224edfaf713522ddd410f7d4ac44"
+      }
+    },
+    {
+      "id": 11874379748,
+      "name": "review-audio-dependency-evidence-linux",
+      "size_in_bytes": 14477,
+      "url": "https://api.github.com/repos/MrScripty/Pumas-Library/actions/artifacts/11874379748",
+      "archive_download_url": "https://api.github.com/repos/MrScripty/Pumas-Library/actions/artifacts/11874379748/zip",
+      "expired": false,
+      "created_at": "2026-10-14T06:48:05Z",
+      "expires_at": "2026-10-21T06:48:04Z",
+      "updated_at": "2026-10-14T06:48:05Z",
+      "digest": "sha256:effe0e880f823f305e59baad54cc450a220e9897273dd5c4a7baacb835113e9c",
+      "workflow_run": {
+        "id": 38522709859,
+        "repository_id": 1118589530,
+        "head_repository_id": 1118589530,
+        "head_branch": "readiness/v080-20261014",
+        "head_sha": "df53db08e2ba224edfaf713522ddd410f7d4ac44"
+      }
+    }
+  ],
+  "qualification_limit": "Native source/Torch tests and Linux untrained inference package job passed; no final release matrix or trained-model acceptance."
+}

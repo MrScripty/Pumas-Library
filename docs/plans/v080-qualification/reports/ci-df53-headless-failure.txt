@@ -1,0 +1,19 @@
+Source: df53db08e2ba224edfaf713522ddd410f7d4ac44
+Build: 38522709859
+Job: 115716297437 (Headless without inference plugins)
+URL: https://github.com/MrScripty/Pumas-Library/actions/runs/38522709859/job/115716297437
+Decoded log excerpt retrieved on 2026-10-14; ANSI and trailing whitespace normalized:
+
+2026-10-14T06:45:23.1398056Z ---- model_library::hf::download::tests::pause_is_rejected_after_final_file_commit_and_during_cleanup stdout ----
+2026-10-14T06:45:23.1398952Z
+2026-10-14T06:45:23.1400136Z thread 'model_library::hf::download::tests::pause_is_rejected_after_final_file_commit_and_during_cleanup' (8208) panicked at crates/pumas-core/src/model_library/hf/download.rs:16589:18:
+2026-10-14T06:45:23.1401670Z Worker must reach terminal cleanup: Timeout
+2026-10-14T06:45:23.1402318Z
+2026-10-14T06:45:23.1402324Z
+2026-10-14T06:45:23.1402487Z failures:
+2026-10-14T06:45:23.1403260Z     model_library::hf::download::tests::pause_is_rejected_after_final_file_commit_and_during_cleanup
+2026-10-14T06:45:23.1404069Z
+2026-10-14T06:45:23.1404635Z test result: FAILED. 2069 passed; 1 failed; 13 ignored; 0 measured; 0 filtered out; finished in 79.22s
+2026-10-14T06:45:23.1405425Z
+2026-10-14T06:45:23.1586758Z error: test failed, to rerun pass `-p pumas-library --lib`
+2026-10-14T06:45:23.2293933Z ##[error]Process completed with exit code 101.

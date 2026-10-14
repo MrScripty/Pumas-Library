@@ -42,3 +42,39 @@
 - Parent clarified that only actual demo dependency edges need qualification;
   unrelated consumers do not need simultaneous releases. Read-only inventories
   and remaining source/package gates will accompany an immutable receipt.
+
+## 2026-10-14 — immutable source handoff
+
+- Qualified code commit `5da74a2c9bd1fe3c0b1fa0184eef3667f31eed88` was pushed
+  without force; [draft PR #70](https://github.com/MrScripty/Pumas-Library/pull/70)
+  is open against main. This documentation follow-up adds the changelog,
+  migration/release notes, current consumer inventory and
+  [candidate receipt](reports/candidate.json); it changes no production source.
+- RPC's second build attempt ended in linker SIGBUS while the filesystem was
+  full, and sandbox startup independently reported ENOSPC. Cleanup of only the
+  completed task-built core test executables recovered 15,991,790,400 bytes.
+  Automatic approval review permitted the cleanup outside the broken full-disk
+  sandbox. No source, saved executable or model data was deleted.
+- The unchanged final RPC invocation passed: 233 unit tests and 24 integration
+  tests, with 13 ignored entries; S3 process targets contain zero tests without
+  their feature. The development binary passed health, inference-route absence
+  and graceful-stop smoke. Two explicitly selected native session-reference tests
+  passed owned start/borrowed retention/cleanup and borrowed cancellation keeping
+  its external owner healthy. These are not actual Chrema/Tuldok/Pantograph tests.
+- Rebuilt local RPC: 752,728,784 bytes, SHA-256
+  `da0bb23c6a4889baca2bc8500a07d07a38457cb43c2999d324d6d8a5419b04ed`.
+  Actual features are `pumas-library/hf-client,pumas-library/test-support`.
+  Source/target provenance is absent from its advertisement. This is a debug
+  test executable, not a release archive or inference qualification.
+- Receipt validation checked its exact input hashes, source-commit existence,
+  unchanged production roots and JSON. Fourteen local documentation links and
+  whitespace checks passed. No permanent test harness was added for prose.
+- GitHub's push notice reported 52 dependency alerts on default main (27 high,
+  19 moderate, 6 low); no shipped-closure triage is claimed. Keep the existing
+  release security-review gate. The receipt separately lists failed/resolved
+  setup attempts, ignored/disabled tests, not-run suites, native artifacts,
+  model/hardware inference and final publication gates.
+- Checkpoint preparation is accepted within its named source-information scope.
+  Current/final PR CI and actual consumer edges remain separately qualified;
+  parent owns any candidate tag, final version bump, native artifact acceptance
+  and release publication. No tag or release was created.

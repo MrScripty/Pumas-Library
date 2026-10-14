@@ -1,9 +1,9 @@
 # Pumas v0.8.0 checkpoint preparation
 
-**Plan status:** Active. **Acceptance status:** pending.
-**Current phase:** source checkpoint qualification.
-**Next slice:** qualify the current headless baseline, repair reproduced release
-blockers within their existing owners, and prepare the release handoff.
+**Plan status:** Accepted. **Acceptance status:** satisfied for source checkpoint
+preparation only; release publication remains unaccepted.
+**Current phase:** parent review and promotion handoff.
+**Next slice:** none.
 
 ## Objective and scope
 
@@ -23,10 +23,10 @@ Retain the task branch for draft-PR review; parent owns integration and retireme
 
 | ID | Observable result | Kind / environment / mode | State |
 | --- | --- | --- | --- |
-| A1 | Current no-inference core/RPC suites qualify the source foundation; catalogue custody failures are reproduced or explicitly dispositioned | system / representative Linux / automated | pending |
-| A2 | Existing release contracts, version alignment and current default/S3 notices pass | contract / representative Linux / automated | pending |
-| A3 | Release notes and changelog describe current contracts, migration, actual consumer pins and unqualified boundaries | contract / source inspection / manual | pending |
-| A4 | Reviewed commits are pushed with a draft PR and exact evidence; final tag action remains parent-controlled | integration / required-real GitHub / automated | pending |
+| A1 | Current no-inference core/RPC suites qualify the source foundation; catalogue custody failures are reproduced or explicitly dispositioned | system / representative Linux / automated | satisfied: full cohorts passed; catalogue failure did not reproduce |
+| A2 | Existing release contracts, version alignment and current default/S3 notices pass | contract / representative Linux / automated | satisfied: release QA and receipt |
+| A3 | Release notes and changelog describe current contracts, migration, actual consumer pins and unqualified boundaries | contract / source inspection / manual | satisfied: release notes, QA, receipt and link review |
+| A4 | Qualified source commit is pushed with a draft PR and exact evidence; final tag action remains parent-controlled | integration / required-real GitHub / automated | satisfied: `5da74a2c9bd1fe3c0b1fa0184eef3667f31eed88` pushed, draft PR #70 open |
 
 ## Decisions and standards
 
@@ -59,7 +59,7 @@ A repair that changes composition triggers a design review before editing.
 
 ## Milestone: reviewed checkpoint
 
-**Status:** Active.
+**Status:** Accepted for checkpoint preparation.
 **Write set:** this plan directory, CHANGELOG.md, docs/release-notes-0.8.0.md,
 docs/release-qa-0.8.0.md; directly affected current release guidance links only.
 Amendment before fixture edits: `scripts/launcher/commands.test.mjs` owns two
@@ -91,4 +91,6 @@ Stop investigation once current tests and source inventory support a bounded
 handoff; do not turn checkpoint preparation into open-ended feature expansion.
 
 [Execution ledger](execution-ledger.md) · [Issues](issues.md) ·
-[Release QA](../../release-qa-0.8.0.md)
+[Release QA](../../release-qa-0.8.0.md) ·
+[Immutable receipt](reports/candidate.json) ·
+[Draft PR #70](https://github.com/MrScripty/Pumas-Library/pull/70)

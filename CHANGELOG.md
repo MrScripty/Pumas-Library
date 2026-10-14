@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - Unreleased candidate
+
+Source manifests currently identify `0.8.0-rc.1`; no final release is implied.
+See [release notes and migration](docs/release-notes-0.8.0.md) and the
+[checkpoint qualification](docs/release-qa-0.8.0.md) before choosing a consumer pin.
+
+### Added
+
+- Typed generic model operations and capability discovery, including bounded
+  Image-to-Text requests and explicit model/projector roles. Availability still
+  depends on the selected model, serving profile and qualified runtime.
+- Authenticated local owner discovery, explicit existing-library enumeration,
+  owner retention and generation fencing for embedding consumers.
+- Digest-bound local imports and conditional S3 single-object/authored-bundle
+  acquisition, with immutable selection and retained download custody.
+- Pinned inference-enabled headless candidate assembly for Linux x86_64,
+  Windows x86_64 and macOS ARM64. The release inventory now requires sixteen
+  artifacts; assembly and startup do not qualify pretrained inference.
+
+### Changed
+
+- Older download metadata requires an explicit offline schema-7 upgrade with
+  stopped-reader/writer confirmation and an exact metadata-only backup.
+- Hugging Face detail resolution follows explicit model selection; cached
+  discovery and live download authority remain distinguishable.
+- Installed speech has conditional custody and qualification plumbing;
+  production Audio-to-Text remains unavailable until its admission gates pass.
+
+### Fixed
+
+- Desktop startup failures keep recovery and metadata upgrade actionable,
+  including small windows and failed replacement startup attempts.
+- Startup preserves retained downloads whose destination folders are missing,
+  without recreating folders or finalizing absent outputs.
+- Receipt-bound GGUF selection survives owned library moves, and explicit
+  headless legacy-schema preflight avoids creating a new failed owner claim.
+- Candidate packaging selects notices matching the current source version.
+
 ## [0.7.0] - Unreleased candidate
 
 See [0.7.0 release notes](docs/release-notes-0.7.0.md) for capabilities,

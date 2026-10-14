@@ -1,0 +1,367 @@
+{
+  "schema_version": 1,
+  "purpose": "immutable source-foundation receipt; not release approval",
+  "date_utc": "2026-10-14",
+  "source": {
+    "repository": "https://github.com/MrScripty/Pumas-Library",
+    "qualified_code_revision": "5da74a2c9bd1fe3c0b1fa0184eef3667f31eed88",
+    "qualified_code_tree": "b5b8e9134ba75563a37458bbab0e440e29f42022",
+    "production_source_revision": "ef9eead9fe6595f5b3152ef8df19c5dace30190b",
+    "production_source_tree": "7301cb8e86f9e7a498f5dd64b663a4ea5e174b75",
+    "production_equivalence_command": "git diff --exit-code ef9eead9fe6595f5b3152ef8df19c5dace30190b HEAD -- rust frontend electron package.json pnpm-lock.yaml scripts/release bindings",
+    "production_equivalence_result": "passed; no changes",
+    "version": "0.8.0-rc.1",
+    "receipt_followup": "The subsequent documentation commit adds this receipt, migration notes and changelog; it changes no production source."
+  },
+  "inputs": {
+    "rust/Cargo.lock": {
+      "sha256": "91fb9823de2f0346211b4f68ca400f03a628890e55dca90e0803e2dd7ad47e42",
+      "bytes": 127936
+    },
+    "pnpm-lock.yaml": {
+      "sha256": "78cac9b50e2f28d293420ffb8b9d57889a723669a3969b3a670dd3e6cbfdda18",
+      "bytes": 210197
+    },
+    "rust-toolchain.toml": {
+      "sha256": "1d76a06616a42a984bad672eeb24ca39a0496e95a8b624e21df0d420d1557734",
+      "bytes": 86
+    },
+    ".node-version": {
+      "sha256": "b911698dc3cf3227d34d0ad6727f1c4408791203c9665de99ab959331a1fb07d",
+      "bytes": 8
+    },
+    ".python-version": {
+      "sha256": "fa682ae9d943f5c8076e68335c9ba3ab4d063ad035c07ac6928653dd4ac50af7",
+      "bytes": 7
+    },
+    "scripts/release/artifact-plan.json": {
+      "sha256": "66348a507f00ffdc74741fc7d70eab02f4a0eed4d3655354784cea2971662064",
+      "bytes": 16523
+    },
+    "bindings/support-matrix.json": {
+      "sha256": "30b301e8be9298ced5a7e51a0c750593ed3e4eed95434ef83b94c85d0d31083f",
+      "bytes": 3596
+    }
+  },
+  "environment": {
+    "execution": "Cloud Linux container",
+    "target": "x86_64-unknown-linux-gnu",
+    "rustc": "1.92.0 (ded5c06cf 2025-12-08)",
+    "cargo": "1.92.0 (344c4567c 2025-10-21)",
+    "node": "24.19.0",
+    "repository_node_pin": "24.15.0",
+    "python": "3.12.14",
+    "repository_python_pin": "3.12.3",
+    "task_local_cmake": "3.31.6",
+    "profile": "development test/debug; not optimized release",
+    "native_inference_runtime": "not provisioned or loaded",
+    "model_identity": null
+  },
+  "artifacts": [
+    {
+      "role": "local development test binary; not distributable",
+      "path": "rust/target/debug/pumas-rpc",
+      "sha256": "da0bb23c6a4889baca2bc8500a07d07a38457cb43c2999d324d6d8a5419b04ed",
+      "bytes": 752728784,
+      "build_info": {
+        "build_info_schema_version": 1,
+        "component": "pumas-rpc",
+        "package_version": "0.8.0-rc.1",
+        "compiled_features": [
+          "pumas-library/hf-client",
+          "pumas-library/test-support"
+        ],
+        "protocols": [
+          {
+            "name": "pumas.local-ipc",
+            "versions": [
+              1
+            ]
+          },
+          {
+            "name": "pumas.local-http",
+            "versions": [
+              1
+            ]
+          }
+        ],
+        "schemas": [
+          {
+            "name": "pumas.build-info",
+            "version": 1
+          },
+          {
+            "name": "pumas.discovery",
+            "version": 1
+          },
+          {
+            "name": "pumas.model-ref",
+            "version": 1
+          },
+          {
+            "name": "pumas.model-selector",
+            "version": 1
+          },
+          {
+            "name": "pumas.http-advertisement",
+            "version": 1
+          },
+          {
+            "name": "pumas.http-admission-fence",
+            "version": 1
+          },
+          {
+            "name": "pumas.http-owner-retention",
+            "version": 1
+          }
+        ]
+      },
+      "build_info_sha256": "c746079e822ae0614c0f2a9fe874676a3054c02456541ce7e8b198edd75d5840",
+      "embedded_source_revision": null,
+      "embedded_target": null,
+      "provenance_limit": "Build advertisement omits source/target provenance. Source receipt records the unchanged production checkout independently; no self-authenticated release provenance is claimed."
+    }
+  ],
+  "release_artifacts": {
+    "status": "not_produced",
+    "required_count": 16,
+    "runtime_pin_for_future_inference_archives": "CPU ONNX Runtime 1.24.2; not loaded by this task"
+  },
+  "gates": [
+    {
+      "id": "core-no-default",
+      "status": "passed",
+      "command": "cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features",
+      "unit_passed": 2070,
+      "integration_passed": 218,
+      "doctest_passed": 6,
+      "ignored": 29,
+      "feature_gated_zero_test_targets": "S3 and other disabled feature-specific targets",
+      "log": "/tmp/pumas-v080-headless.log",
+      "log_sha256": "e9ad254f0060eb39175be06bbba02140201fb41c7f38a0dbc006c7186403e5fc"
+    },
+    {
+      "id": "rpc-no-default",
+      "status": "passed",
+      "command": "XDG_CONFIG_HOME=/tmp/pumas-v080-config cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features",
+      "unit_passed": 233,
+      "integration_passed": 24,
+      "ignored": 13,
+      "log": "/tmp/pumas-v080-rpc-final.log",
+      "log_sha256": "4700ca8f30fc976b8e3361ee4b7d253e645e92aad5db0b5194db8ca3a046425d"
+    },
+    {
+      "id": "release-contracts",
+      "status": "passed",
+      "command": "node --test scripts/release/*.test.mjs",
+      "passed": 33,
+      "failed": 0,
+      "skipped": 0,
+      "log": "/tmp/pumas-v080-release.log",
+      "log_sha256": "6dc12ffacc75fac7a254afbfdf081d5290af8a23c1beec6f0abac46be079d80b"
+    },
+    {
+      "id": "launcher",
+      "status": "passed",
+      "command": "npm run test:launcher",
+      "passed": 49,
+      "failed": 0,
+      "skipped": 0,
+      "log": "/tmp/pumas-v080-launcher-repaired.log",
+      "log_sha256": "3c1712ecedfde6dfb7fbb2f572a51b9795153b967ad326267f91c9ef9641ff99"
+    },
+    {
+      "id": "version-alignment",
+      "status": "passed",
+      "command": "npm run check:release-versions -- v0.8.0-rc.1"
+    },
+    {
+      "id": "dependency-ownership",
+      "status": "passed",
+      "command": "npm run check:dependency-ownership"
+    },
+    {
+      "id": "default-attribution",
+      "status": "passed",
+      "command": "node scripts/release/check-attribution.cjs"
+    },
+    {
+      "id": "s3-attribution",
+      "status": "passed",
+      "command": "node scripts/release/check-attribution.cjs --features s3"
+    },
+    {
+      "id": "rust-format",
+      "status": "passed",
+      "command": "cargo fmt --manifest-path rust/Cargo.toml --all -- --check",
+      "log": "/tmp/pumas-v080-fmt.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "development-rpc-smoke",
+      "status": "passed",
+      "command": "python3 scripts/release/smoke-rpc.py rust/target/debug/pumas-rpc --inference-disabled",
+      "claims": [
+        "HTTP health",
+        "inference route absence",
+        "graceful child shutdown"
+      ],
+      "log": "/tmp/pumas-v080-rpc-smoke.log",
+      "log_sha256": "499c48b7575abab845a33d0c179d51a8d88b2069d83c00aa2ecd15e5a5c2abc3"
+    },
+    {
+      "id": "native-session-reference",
+      "status": "passed",
+      "command": "PUMAS_CONSUMER_TEST_BINARY=/workspace/Pumas-Library/rust/target/debug/pumas-rpc python3 -m unittest test_local_http_session.NativeConsumerTests.test_owned_start_borrowed_retention_and_context_cleanup test_local_http_session.NativeConsumerTests.test_cancelled_borrowed_context_leaves_external_owner_healthy -v",
+      "cwd": "scripts/consumers",
+      "passed": 2,
+      "skipped": 0,
+      "claims": [
+        "owned startup and cleanup",
+        "borrowed retention",
+        "borrowed cancellation preserves external owner"
+      ],
+      "log": "/tmp/pumas-v080-consumer.log",
+      "log_sha256": "aa3121363a006f3da1174c7e5e86820cc3d341052f00bbe91c8801bd9987b86d"
+    },
+    {
+      "id": "candidate-ci",
+      "status": "pending",
+      "reason": "Draft PR checks must run on the final review head."
+    },
+    {
+      "id": "all-features-workspace-and-clippy",
+      "status": "not_run",
+      "reason": "No Rust production source changed; not rerun locally. Historical identical-runtime-base CI is separate."
+    },
+    {
+      "id": "enabled-s3-source-cohorts",
+      "status": "not_run",
+      "reason": "S3 is disabled in these local Cargo invocations; attribution/release fixtures do not substitute."
+    },
+    {
+      "id": "frontend-electron-torch-suites",
+      "status": "not_run",
+      "reason": "Not rerun locally for this documentation and launcher-fixture slice; no UI, Electron or Torch source changed."
+    },
+    {
+      "id": "explicit-ignored-kernel-confinement-gate",
+      "status": "not_run",
+      "reason": "The ordinary Cargo invocation leaves its ignored entry unexecuted; no new confinement claim."
+    },
+    {
+      "id": "external-consumer-acceptance",
+      "status": "not_run",
+      "reason": "Only read-only source inventories were inspected; each selected actual consumer edge needs its own locked/application acceptance."
+    },
+    {
+      "id": "native-windows-macos",
+      "status": "not_run",
+      "reason": "These native targets were not executed in this Linux container."
+    },
+    {
+      "id": "release-artifact-matrix",
+      "status": "not_run",
+      "reason": "No optimized installer/archive set, native installation acceptance or final-byte metadata was produced."
+    },
+    {
+      "id": "pretrained-model-inference",
+      "status": "not_run",
+      "reason": "No provided pretrained model/tokenizer/projector fixtures; no model downloads or real model inference run."
+    },
+    {
+      "id": "hardware-qualified-inference",
+      "status": "not_run",
+      "reason": "No hardware qualification performed."
+    },
+    {
+      "id": "final-security-sbom-signing",
+      "status": "not_run",
+      "reason": "Not performed; freshness checks do not establish dependency/security/license or signing acceptance."
+    },
+    {
+      "id": "tags-and-publication",
+      "status": "not_run",
+      "reason": "Parent-owned; no tag or release action executed."
+    }
+  ],
+  "earlier_attempts": [
+    {
+      "id": "launcher-initial",
+      "status": "failed",
+      "passed": 47,
+      "failed": 2,
+      "log_sha256": "3f93b9a0f203d9e0545f2afb98aa0c788b8382c670b41b156f831e930842820b",
+      "disposition": "Corrected fixture startup margin and Linux zombie execution-state oracle; production launcher unchanged; full rerun passed."
+    },
+    {
+      "id": "rpc-initial",
+      "status": "failed_before_tests",
+      "reason": "CMake missing",
+      "log_sha256": "882226528f3957d4a9bb5437d187aec0fa3d5378ded0f6e6fe86f33069253f8f",
+      "disposition": "Installed task-local CMake 3.31.6."
+    },
+    {
+      "id": "rpc-second",
+      "status": "failed_before_tests",
+      "reason": "Linker SIGBUS while container filesystem was full; sandbox startup also failed with ENOSPC.",
+      "log_sha256": "a64457e4488550652c51c9655a2c9d709c8be19b91bea87486d13e73db7bfc3e",
+      "disposition": "Removed only completed task-built core test executables; unchanged RPC invocation subsequently passed."
+    }
+  ],
+  "consumer_inventory": [
+    {
+      "repository": "MrScripty/Pantograph",
+      "inspected_main": "2253cbe6fe8f1969b347c61fccba31859b13a4ba",
+      "pumas_pin": "aa1d79ae2d53f0acb088bc85223ecc2ff46af12b",
+      "acceptance": "not_run; coordinate manifest, lock and CI setup pin for the actual source edge"
+    },
+    {
+      "repository": "MrScripty/Chrema",
+      "inspected_main": "508c8b8cb724b49c655dab8bc4c8336190e516c7",
+      "pumas_pin": null,
+      "acceptance": "not_run; no Pumas adapter present on inspected main; historical qualification targets a different cohort"
+    },
+    {
+      "repository": "MrScripty/Tuldok",
+      "inspected_main": "d856a984535a430909761ed13ce42eadd55b0710",
+      "pumas_contract_pin": "36c2aab2c885b8416fd4e39cf8c37c510596d6e4",
+      "acceptance": "not_run; operation DTO definitions unchanged by source comparison; real caption/runtime path remains separate"
+    }
+  ],
+  "migration": {
+    "download_store": "schema 7; explicit offline conversion from supported v4/v5/schema-6 states",
+    "backup": "exact private downloads.json metadata backup only",
+    "model_payloads": "not scanned, copied, hashed or rewritten by conversion",
+    "preconditions": [
+      "all old/current readers and writers stopped",
+      "one-way upgrade acknowledged"
+    ],
+    "downgrade": "unsupported; no automatic restore after uncertain publication",
+    "old_failed_claims": "not automatically retired; dead PID alone is insufficient",
+    "user_library_migrated_by_this_task": false,
+    "authority": "docs/library-upgrade.md"
+  },
+  "promotion": {
+    "owner": "parent/maintainer",
+    "independent_consumer_releases_required": false,
+    "source_pin_does_not_require_tag": true,
+    "candidate_tag_if_parent_accepts_all_pre_tag_gates": "v0.8.0-rc.1",
+    "final_tag": "v0.8.0 only after a separate aligned final-version commit and required acceptance",
+    "executed": false
+  },
+  "review": {
+    "draft_pr": "https://github.com/MrScripty/Pumas-Library/pull/70",
+    "base": "main",
+    "branch": "readiness/v080-20261014",
+    "qualified_code_pushed": true,
+    "ci": "pending; final documentation head requires its own PR run"
+  },
+  "github_push_notice": {
+    "default_branch_reported_alerts": 52,
+    "high": 27,
+    "moderate": 19,
+    "low": 6,
+    "assessment": "Not independently triaged against the shipped dependency closure; current release security-review gate remains open."
+  }
+}

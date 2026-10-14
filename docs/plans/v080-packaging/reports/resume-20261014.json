@@ -1,0 +1,378 @@
+{
+  "schema_version": 1,
+  "observed_date": "2026-10-14",
+  "status": "source-accepted-package-qualification-blocked",
+  "subject": {
+    "source": "9dadd33f1b906032c6102516aff03a08ae35c78c",
+    "tree": "92ce587f5f52865e21d852bbce355fa77252307f",
+    "branch": "release/v080-package-qualification-20261014",
+    "main": "055222931100eeedc43307271dbf7c504787888d",
+    "version": "0.8.0-rc.1",
+    "pull_request": 71,
+    "pull_request_state": "open-draft",
+    "independent_parent_review": "accepted"
+  },
+  "documentary_followups": {
+    "this_branch": "qualification/v080-handoff-20261014",
+    "integration": "held-separately-for-parent",
+    "development_docs_commit": "46a747503114dd5586da097331f1fbd60cbcbcbd",
+    "candidate_branch_changed": false
+  },
+  "dispatch": {
+    "query_url": "https://api.github.com/repos/MrScripty/Pumas-Library/actions/runs?head_sha=9dadd33f1b906032c6102516aff03a08ae35c78c&event=workflow_dispatch&per_page=100",
+    "exact_source_manual_run_count": 0,
+    "renewed_authorization_retries": 1,
+    "command": "gh workflow run build.yml --repo MrScripty/Pumas-Library --ref release/v080-package-qualification-20261014 -F build_candidates=true -f expected_source=9dadd33f1b906032c6102516aff03a08ae35c78c",
+    "exit_code": 1,
+    "failure": "Preliminary workflow GET: Forbidden",
+    "post_executed": false,
+    "run_id": null,
+    "manual_url": "https://github.com/MrScripty/Pumas-Library/actions/workflows/build.yml",
+    "inputs": {
+      "build_candidates": true,
+      "expected_source": "9dadd33f1b906032c6102516aff03a08ae35c78c"
+    },
+    "callable_integration_dispatch": false
+  },
+  "ordinary_ci": {
+    "run_id": 38542718075,
+    "url": "https://github.com/MrScripty/Pumas-Library/actions/runs/38542718075",
+    "conclusion": "success",
+    "applicable_jobs_passed": 9,
+    "candidate_run": false,
+    "jobs": [
+      {
+        "id": 115781173134,
+        "name": "Workflow and release contracts",
+        "conclusion": "success"
+      },
+      {
+        "id": 115781411761,
+        "name": "Review confined audio dependencies",
+        "conclusion": "success"
+      },
+      {
+        "id": 115781411769,
+        "name": "Headless without inference plugins",
+        "conclusion": "success"
+      },
+      {
+        "id": 115781411845,
+        "name": "Rust quality",
+        "conclusion": "success"
+      },
+      {
+        "id": 115781411860,
+        "name": "Frontend and desktop contracts",
+        "conclusion": "success"
+      },
+      {
+        "id": 115781412001,
+        "name": "Torch native QA (ubuntu-24.04)",
+        "conclusion": "success"
+      },
+      {
+        "id": 115781412014,
+        "name": "Torch native QA (windows-2025)",
+        "conclusion": "success"
+      },
+      {
+        "id": 115781412086,
+        "name": "Review Linux inference candidate",
+        "conclusion": "success"
+      },
+      {
+        "id": 115781412515,
+        "name": "Torch native QA (macos-15)",
+        "conclusion": "success"
+      },
+      {
+        "id": 115781413856,
+        "name": "Inference headless candidate (${{ matrix.target }})",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115781414617,
+        "name": "Torch native RPC E2E (${{ matrix.os }})",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115781414807,
+        "name": "Rust release (${{ matrix.os }})",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115781414994,
+        "name": "Headless archive (${{ matrix.headless_os }})",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115783936905,
+        "name": "Linux release startup",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115783937198,
+        "name": "Desktop package without inference (${{ matrix.platform }})",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115783937413,
+        "name": "Desktop package (${{ matrix.platform }})",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115783937451,
+        "name": "Rust release (windows-2025)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115783937453,
+        "name": "Desktop package without inference (win)",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115795060814,
+        "name": "Assemble release candidate",
+        "conclusion": "skipped"
+      }
+    ],
+    "native_source_contracts": [
+      {
+        "target": "windows-x86_64",
+        "job_id": 115781412014,
+        "test_count": 21,
+        "skipped": 4,
+        "failures": 0,
+        "observer_result": "passed-real-self-process-observation",
+        "raw_summary": [
+          "2026-10-14T09:31:55.3143737Z Ran 21 tests in 0.217s",
+          "2026-10-14T09:31:55.3144015Z OK (skipped=4)"
+        ]
+      },
+      {
+        "target": "macos-arm64",
+        "job_id": 115781412515,
+        "test_count": 21,
+        "skipped": 4,
+        "failures": 0,
+        "observer_result": "passed-real-self-process-observation",
+        "raw_summary": [
+          "2026-10-14T09:31:19.1788400Z Ran 21 tests in 0.144s",
+          "2026-10-14T09:31:19.1788810Z OK (skipped=4)"
+        ]
+      },
+      {
+        "target": "linux-x86_64",
+        "job_id": 115781412001,
+        "test_count": 21,
+        "skipped": 1,
+        "failures": 0,
+        "observer_result": "skipped-native-Windows-macOS-only",
+        "raw_summary": [
+          "2026-10-14T09:30:56.1526950Z Ran 21 tests in 0.952s",
+          "2026-10-14T09:30:56.1527461Z OK (skipped=1)"
+        ]
+      }
+    ],
+    "linux_untrained_lifecycle": "passed-in-source-bound-review-job",
+    "trained_model_accepted": false
+  },
+  "review_artifacts": [
+    {
+      "id": 11884860569,
+      "name": "review-inference-evidence-linux-x86_64",
+      "size_in_bytes": 38879,
+      "github_outer_zip_digest": "sha256:21873573371459660cdaf3a0f2116ebdf8915d3a31644f93e2bcb49c7dba22a9",
+      "expired": false,
+      "expires_at": "2026-10-21T09:55:42Z",
+      "source": "9dadd33f1b906032c6102516aff03a08ae35c78c",
+      "run_id": 38542718075
+    },
+    {
+      "id": 11884785954,
+      "name": "review-inference-linux-x86_64",
+      "size_in_bytes": 30659579,
+      "github_outer_zip_digest": "sha256:1f93d6c2006af866cf4ba7f53469e8a4cc04be881765058e450114c2ffc058db",
+      "expired": false,
+      "expires_at": "2026-10-21T09:55:40Z",
+      "source": "9dadd33f1b906032c6102516aff03a08ae35c78c",
+      "run_id": 38542718075
+    },
+    {
+      "id": 11884211273,
+      "name": "review-audio-dependency-evidence-linux",
+      "size_in_bytes": 14464,
+      "github_outer_zip_digest": "sha256:f347bc12b6284206b1b31d7e77b0a4e6b2eaa2571ffb72e313dcb58632c028a7",
+      "expired": false,
+      "expires_at": "2026-10-21T09:44:30Z",
+      "source": "9dadd33f1b906032c6102516aff03a08ae35c78c",
+      "run_id": 38542718075
+    }
+  ],
+  "local_artifact_inspection": {
+    "artifact_id": 11884860569,
+    "integration_file_reference": "retrieved",
+    "executor_transfer": "denied-http-proxy-tunnel-403",
+    "bytes_received": 0,
+    "extracted": false,
+    "inner_hashes_available": false,
+    "temporary_reference_file_removed": true,
+    "remaining_transfer_attempts": 0
+  },
+  "trained_fixture": {
+    "repository": "nomic-ai/nomic-embed-text-v1.5",
+    "revision": "ac6fcd72429d86ff25c17895e47a9bfcfc50c1b2",
+    "weight_path": "onnx/model_fp16.onnx",
+    "weight_bytes": 273859028,
+    "weight_sha256": "cf5b5a86edb00f895561803cfc04729090a958340b8ca2ad76c143f565f6bb04",
+    "digest_authority": "official-upstream-Git-LFS-pointer-not-local-computation",
+    "publisher_license_declaration": "Apache-2.0",
+    "matching_files": [
+      "config.json",
+      "tokenizer.json",
+      "tokenizer_config.json",
+      "special_tokens_map.json"
+    ],
+    "matching_file_byte_hashes": null,
+    "authorized_local_bytes": false,
+    "current_browser_metadata_probe": "inaccessible",
+    "native_trained_execution": "not-run",
+    "untrained_substitution": false
+  },
+  "preserved_sha256": {
+    "rust/Cargo.lock": "91fb9823de2f0346211b4f68ca400f03a628890e55dca90e0803e2dd7ad47e42",
+    "pnpm-lock.yaml": "78cac9b50e2f28d293420ffb8b9d57889a723669a3969b3a670dd3e6cbfdda18",
+    "docs/plans/v080-readiness/reports/candidate.json": "617b7fb1ec18c04274d7ad56d346d0a8e6d62b2b3358b1b1f18a139715fdb814",
+    "docs/plans/v080-qualification/reports/qualification.json": "12578a001da624a1a08819ae44efdcefb83a1b42f6059d9e1a1eed498345a0a6",
+    "docs/plans/v080-packaging/reports/verification.json": "1e52174649e2610308088d5d35964511b68533c5288c423dfed6843a73c040ef"
+  },
+  "actions_not_taken": [
+    "candidate-head-change",
+    "merge",
+    "tag",
+    "release",
+    "model-download",
+    "user-library-migration"
+  ],
+  "expected_artifacts": [
+    {
+      "id": "desktop-linux-appimage",
+      "target": "linux-x86_64-gnu",
+      "variant": "full",
+      "filename": "Pumas.Library-0.8.0-rc.1.AppImage",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "desktop-linux-deb",
+      "target": "linux-x86_64-gnu",
+      "variant": "full",
+      "filename": "pumas-library-electron_0.8.0-rc.1_amd64.deb",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "desktop-windows-nsis",
+      "target": "windows-x86_64-msvc",
+      "variant": "full",
+      "filename": "Pumas.Library.Setup.0.8.0-rc.1.exe",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "desktop-windows-portable",
+      "target": "windows-x86_64-msvc",
+      "variant": "full",
+      "filename": "Pumas.Library.0.8.0-rc.1.exe",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "desktop-macos-dmg",
+      "target": "macos-arm64",
+      "variant": "full",
+      "filename": "Pumas.Library-0.8.0-rc.1-arm64.dmg",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "desktop-linux-appimage-no-inference",
+      "target": "linux-x86_64-gnu",
+      "variant": "no-inference",
+      "filename": "Pumas.Library-no-inference-0.8.0-rc.1.AppImage",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "desktop-linux-deb-no-inference",
+      "target": "linux-x86_64-gnu",
+      "variant": "no-inference",
+      "filename": "pumas-library-electron-no-inference_0.8.0-rc.1_amd64.deb",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "desktop-windows-nsis-no-inference",
+      "target": "windows-x86_64-msvc",
+      "variant": "no-inference",
+      "filename": "Pumas.Library.Setup.no-inference.0.8.0-rc.1.exe",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "desktop-windows-portable-no-inference",
+      "target": "windows-x86_64-msvc",
+      "variant": "no-inference",
+      "filename": "Pumas.Library.no-inference.0.8.0-rc.1.exe",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "desktop-macos-dmg-no-inference",
+      "target": "macos-arm64",
+      "variant": "no-inference",
+      "filename": "Pumas.Library-no-inference-0.8.0-rc.1-arm64.dmg",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "headless-linux-archive",
+      "target": "headless-linux-x86_64",
+      "variant": "headless",
+      "filename": "pumas-rpc-no-inference-0.8.0-rc.1-linux-x86_64.tar.gz",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "headless-macos-archive",
+      "target": "headless-macos-arm64",
+      "variant": "headless",
+      "filename": "pumas-rpc-no-inference-0.8.0-rc.1-macos-arm64.tar.gz",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "headless-windows-archive",
+      "target": "headless-windows-x86_64",
+      "variant": "headless",
+      "filename": "pumas-rpc-no-inference-0.8.0-rc.1-windows-x86_64.zip",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "headless-inference-linux-x86_64-archive",
+      "target": "headless-inference-linux-x86_64",
+      "variant": "headless-inference",
+      "filename": "pumas-rpc-inference-0.8.0-rc.1-linux-x86_64.tar.gz",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "headless-inference-windows-x86_64-archive",
+      "target": "headless-inference-windows-x86_64",
+      "variant": "headless-inference",
+      "filename": "pumas-rpc-inference-0.8.0-rc.1-windows-x86_64.zip",
+      "candidate_status": "no_candidate_run"
+    },
+    {
+      "id": "headless-inference-macos-arm64-archive",
+      "target": "headless-inference-macos-arm64",
+      "variant": "headless-inference",
+      "filename": "pumas-rpc-inference-0.8.0-rc.1-macos-arm64.tar.gz",
+      "candidate_status": "no_candidate_run"
+    }
+  ],
+  "expected_variant_counts": {
+    "full": 5,
+    "no-inference": 5,
+    "headless": 3,
+    "headless-inference": 3
+  }
+}

@@ -104,3 +104,45 @@ The complete suite then passed as above. One intermediate Ruff invocation used
 the wrong working directory and failed before formatting/tests; the corrected
 root invocation passed. The 09:22 environment warning did not lose work: a fresh
 09:23:29 UTC git/date/read check succeeded, followed by these actual tests.
+
+## 2026-10-14 — resumed exact-source qualification handoff
+
+Refreshed canonical standards main (unchanged at 188beda1) and remote source
+identities. Candidate branch remains 9dadd33f, main 05522293, separate development
+documentation branch 46a74750. All three worktrees were clean before the handoff.
+No AGENTS.md or relevant .agents/skills was present. Source CI and independent
+cumulative parent review are now complete: PR71 ordinary Build 38542718075
+passed all nine applicable jobs. Native Windows/macOS self-process observer
+queries passed; full packaged/model qualification is still separate.
+
+Authenticated GitHub reads confirmed zero workflow_dispatch runs at exact source
+9dadd33f, both on resumption and during report preparation. The parent's renewed
+instruction admitted one identical CLI retry. It failed the preliminary workflow
+GET with Forbidden (exit 1), before any dispatch POST; known not submitted, no
+run ID. Supported connected fetch is GET-only and no dispatch mutation is exposed.
+Stopped that action; retained the exact Actions UI action/inputs in the handoff.
+No trigger rewrite, credentials, tag or speculative merge was used.
+
+Refreshed the three source-bound review artifact metadata records. Supported
+integration retrieval of the 38,879-byte evidence ZIP succeeded, but its single
+executor transfer failed at the proxy tunnel with 403 and zero bytes. Removed
+the temporary signed-reference file; no archive extraction or inner hashes were
+available. Did not try the large archive or another access route. The official
+immutable Nomic browser metadata endpoint was inaccessible; no trained bytes or
+matching config/tokenizer hashes were obtained and no substitute fixture was
+used to grant trained acceptance.
+
+On separate branch qualification/v080-handoff-20261014, recorded the exact
+sixteen rc.1 filenames derived from artifact-plan.json, source/native contract
+evidence, current review ZIP digests, manual run instructions and minimal actual
+acceptance gates in reports/resume-20261014.{md,json}. This branch is documentary
+only and held for parent integration; its commit is not the candidate artifact
+source. Original verification/qualification/readiness receipts, both lockfiles,
+runtime code, workflow and candidate/docs branches remain preserved.
+
+Documentary verification passed: JSON parse and sixteen exact plan-derived
+identities (5 full/5 no-inference/3 headless/3 inference-headless), nine green
+source jobs, three source-bound artifact ZIP identities, native observer records,
+five original lock/receipt hashes, source/tree/dispatch inputs, relative links,
+absence of signed references, and git diff --check. No runtime suite was rerun
+for this documentary change and no artifact/model validation was invented.

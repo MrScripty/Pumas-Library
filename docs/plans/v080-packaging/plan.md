@@ -2,8 +2,28 @@
 
 **Status:** Verifying. **Acceptance:** partial. **Operation:** verify the implemented
 slice admitted by the parent's explicit 2026-10-14 packaging continuation.
-**Current phase:** local verification complete; CI and independent parent review.
-**Next slice:** inspect exact-candidate checks and the parent's cumulative review.
+**Current phase:** source CI and independent parent review accepted; real package
+qualification blocked by dispatch/transfer access.
+**Next slice:** parent/native owners obtain the exact-source build-only run and
+retain actual package/fixture evidence. Candidate head remains frozen.
+
+## 2026-10-14 qualification handoff slice
+
+Before implementation: admit documentary evidence only on the separate
+`qualification/v080-handoff-20261014` branch rooted at candidate
+`9dadd33f1b906032c6102516aff03a08ae35c78c`. Write set: this plan, ledger, issues,
+and `reports/resume-20261014.{md,json}`. The original verification receipt,
+candidate branch, separate documentation followup, runtime/workflow/code,
+lockfiles and user inference work are read-only.
+
+Acceptance: use authenticated exact-source run/artifact metadata and actual job
+logs; derive all sixteen expected identities from the artifact plan; record
+known-not-submitted dispatch and zero-byte transfer failures separately from
+product failures. Validate JSON, source/filename/digest identities, local links,
+unchanged receipt/lock hashes and the exact documentary diff before commit/push.
+No new executable harness or repeated source suite is justified by this slice.
+No tag, release, merge or candidate-head change is admitted. Parent integration
+of this documentary branch remains separate from artifact source qualification.
 
 ## Objective and boundaries
 
@@ -56,11 +76,11 @@ parent adoption. Existing checkpoint/receipts and user inference work are read-o
 | ID | Observable criterion | Kind / environment / mode | Status |
 | --- | --- | --- | --- |
 | PK1 | Full desktop staging refuses absent/drifting official runtime and includes verified native files/notices; no-inference configuration excludes them | contract / representative source fixtures plus required-real final packages / automated | source regressions satisfied; actual final packages pending approved run |
-| PK2 | The shared verifier supports each native OS module observer, isolated startup, import/load/finite embedding/unload and graceful stop; actual native results remain separately identified | system / required-real selected native target / automated | implementation and Linux contract tests satisfied; native/model results pending |
+| PK2 | The shared verifier supports each native OS module observer, isolated startup, import/load/finite embedding/unload and graceful stop; actual native results remain separately identified | system / required-real selected native target / automated | native source observer contracts passed; Linux untrained review lifecycle passed; final packaged/trained native results pending |
 | PK3 | Sixteen exact artifact identities produce sixteen SPDX inventories, provenance subjects and final-byte checksum coverage, with closure/assurance limits explicit | release-artifact / controlled complete fixture and later real final files / automated | complete synthetic inventory satisfied; real artifact set pending |
 | PK4 | Manual build-only dispatch reuses the matrix with read-only contents permissions and creates no tag/release; PR/main packaging remains off | contract / workflow analysis and focused dispatch fixtures / automated | source guard/opt-in/no-publish checks and actionlint satisfied; dispatch not executed |
 | PK5 | Exact Nomic source/license/revision/weight identity, bounded download feasibility and unavailable inputs have authoritative evidence | contract / actual public upstream and executor / manual | research satisfied; trained bytes/config hashes and execution unavailable |
-| PK6 | Focused Python/Node, formatting/lint, workflow validation and independent cumulative review have retained outcomes; commit/push/draft PR are concrete | integration / available local/CI and parent review / either | local checks satisfied; CI and independent parent review pending |
+| PK6 | Focused Python/Node, formatting/lint, workflow validation and independent cumulative review have retained outcomes; commit/push/draft PR are concrete | integration / available local/CI and parent review / either | local checks and all nine applicable PR71 CI jobs passed; independent cumulative parent review accepted exact head 9dadd33f |
 
 ## Milestone, write set and gates
 
@@ -120,12 +140,14 @@ No repository AGENTS.md or relevant `.agents/skills` exists. The application
 standards router is unavailable; manual canonical reads confer no executable
 standards certification.
 
-Blockers: executor HF transfer denied; Windows/macOS final package execution and
-the full build-only dispatch require their actual native jobs/run approval;
-independent review is parent-owned once the candidate is concrete. Replan for
+Blockers: executor HF transfer denied; the approved exact-source build-only
+dispatch failed its preliminary GET before submission; no candidate run exists.
+Windows/macOS final package/model execution requires actual native files/jobs.
+Independent cumulative parent review accepted candidate 9dadd33f. Replan for
 new dependency resolution, production runtime/schema change, unverifiable model
 authority, new permanent composition, publication permissions or artifact-plan
 support expansion. Stop at preparation plus exact remaining release gates.
 
 [Ledger](execution-ledger.md) · [Issues](issues.md) ·
 [Verification receipt](reports/verification.json) · [Nomic investigation](reports/nomic-fixture.md)
+· [Current qualification handoff](reports/resume-20261014.md)

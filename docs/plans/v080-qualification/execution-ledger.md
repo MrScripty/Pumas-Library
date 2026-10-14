@@ -67,3 +67,55 @@ so inner archive/binary hashes and a local replay are unavailable, not passed.
 The same denial occurred for audio artifact 11874379748. No alternate host or
 authorization bypass was attempted. Original CI is still running; no push has
 cancelled it, and final native/model/publication gates remain explicit.
+
+## 2026-10-14 — terminal repair qualification and handoff
+
+Original Build 38522709859 completed failure: eight applicable jobs passed and
+the headless fixture failure above remained its sole failing job. Its terminal
+snapshot is [retained](reports/ci-df53-terminal.json). After that terminal result,
+committed and pushed the scoped repair as
+`aa40e155846cdac6cd94b6f5c2fd6a35cddce16e`, tree
+`f016a43b50f815f77177aafec2655e763abe3aad`.
+
+Repair Build [38526618039](https://github.com/MrScripty/Pumas-Library/actions/runs/38526618039)
+completed **success: all nine applicable jobs passed**. This includes full Rust
+quality, headless no-default/HF and RPC, enabled-S3 tests/lint, frontend/desktop,
+Linux inference review packaging, confined audio dependencies, and native source
+QA on Linux, Windows and macOS. Tag-only package/assembly jobs were skipped.
+The [final machine receipt](reports/qualification.json) retains exact job IDs,
+per-command headless totals and current artifact identities. The separately
+required ignored Linux kernel read-confinement test actually ran and passed.
+
+The exact aa40 Linux review package is artifact 11877010982, 30,659,584 bytes,
+GitHub ZIP SHA-256
+`3dfdca18419edf3b1125f2ad6e6577c2d9b480caa293e3a612d979a7bbac4303`.
+Its native pinned ORT loader, extraction/authenticated owner startup, untrained
+256-dimensional graph execution, loaded packaged-runtime identity, unload and
+graceful stop passed in CI. This establishes neither trained-model quality nor
+the final sixteen-artifact matrix. No local byte transfer of this replacement
+was attempted after the two earlier proxy denials; no inner hash is invented.
+
+Inspected Pantograph's published consumer receipt at handoff
+`3649df2d3c4c718aa278e809f27cbc2a915f8c47`: actual source
+`039cee079d273a8d4968df56a4b35e8eb8aacbbe` qualified Pumas df53 through public
+Chrema and Candle. Its owner reports 19 integration, 598 library (2 existing
+ignores), 4 HTTP tests and independent consumer review. No API repair was needed.
+The df53-to-aa40 Rust diff is solely in the existing test module; the production
+prefix is byte-identical. Parent decides final pin/lineage acceptance; this is
+not a substituted aa40 consumer run or an independent review of all PR70 changes.
+GitHub still has no submitted PR70 review or inline thread; no separate Pumas
+independent diff report was supplied.
+
+The [decision report](reports/release-blockers.md) reduces remaining release gates
+to source/review/pin acceptance, required native final artifacts, minimal trained
+model/runtime execution, final-file metadata/review and aligned final version/
+parent promotion. It explicitly excludes unrelated future capability expansion.
+The original candidate receipt remains unchanged; main remains ef9eead9 after
+refresh. Local inference artifacts and user source work remain preserved.
+
+This final followup changes evidence only. Its commit may trigger a new automatic
+Build; the terminal acceptance above belongs to immutable aa40, not an unobserved
+later documentation head. No tag, release, model download or user migration ran.
+Final mechanical checks passed: all report JSON parsed, relative Markdown links
+resolved, receipt source tree/lock/earlier-receipt hashes matched, all CI jobs were
+terminal with nine successes, artifact metadata bound aa40, and `git diff --check`.

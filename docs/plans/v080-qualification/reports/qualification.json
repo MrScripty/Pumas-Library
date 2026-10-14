@@ -1,0 +1,341 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-14",
+  "repository": "MrScripty/Pumas-Library",
+  "source": {
+    "qualified_commit": "aa40e155846cdac6cd94b6f5c2fd6a35cddce16e",
+    "tree": "f016a43b50f815f77177aafec2655e763abe3aad",
+    "base_main": "ef9eead9fe6595f5b3152ef8df19c5dace30190b",
+    "version": "0.8.0-rc.1",
+    "branch": "readiness/v080-20261014",
+    "draft_pr": "https://github.com/MrScripty/Pumas-Library/pull/70",
+    "evidence_commit": "This receipt is recorded in a subsequent documentation-only commit; qualified code identity remains the commit above.",
+    "locks": {
+      "rust_sha256": "91fb9823de2f0346211b4f68ca400f03a628890e55dca90e0803e2dd7ad47e42",
+      "pnpm_sha256": "78cac9b50e2f28d293420ffb8b9d57889a723669a3969b3a670dd3e6cbfdda18"
+    }
+  },
+  "lineage": {
+    "original_commit": "df53db08e2ba224edfaf713522ddd410f7d4ac44",
+    "rust_change": "Only pause_is_rejected_after_final_file_commit_and_during_cleanup inside the existing cfg(test) module of model_library/hf/download.rs; bounded fixture readiness/settlement and diagnostics.",
+    "unchanged_production_prefix_bytes": 284377,
+    "unchanged_production_prefix_sha256": "1cdc30e4f30b2f41104ee153bd63f9be7709aebd832084f33be109bee095d5d8",
+    "production_api_schema_dependencies_changed": false,
+    "earlier_receipt": "../../v080-readiness/reports/candidate.json",
+    "earlier_receipt_sha256": "617b7fb1ec18c04274d7ad56d346d0a8e6d62b2b3358b1b1f18a139715fdb814"
+  },
+  "ci": {
+    "run_id": 38526618039,
+    "run_number": 574,
+    "url": "https://github.com/MrScripty/Pumas-Library/actions/runs/38526618039",
+    "status": "completed",
+    "conclusion": "success",
+    "applicable_jobs_passed": 9,
+    "jobs": [
+      {
+        "id": 115728372231,
+        "name": "Workflow and release contracts",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 115728538912,
+        "name": "Headless without inference plugins",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 115728538931,
+        "name": "Frontend and desktop contracts",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 115728538932,
+        "name": "Rust quality",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 115728538975,
+        "name": "Review Linux inference candidate",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 115728538977,
+        "name": "Review confined audio dependencies",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 115728538999,
+        "name": "Torch native QA (windows-2025)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 115728539123,
+        "name": "Torch native QA (ubuntu-24.04)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 115728539127,
+        "name": "Torch native QA (macos-15)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 115728540414,
+        "name": "Torch native RPC E2E (${{ matrix.os }})",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115728540645,
+        "name": "Inference headless candidate (${{ matrix.target }})",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115728541011,
+        "name": "Headless archive (${{ matrix.headless_os }})",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115728541119,
+        "name": "Rust release (${{ matrix.os }})",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115730622921,
+        "name": "Desktop package without inference (win)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115730623293,
+        "name": "Desktop package (${{ matrix.platform }})",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115730623420,
+        "name": "Rust release (windows-2025)",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115730623574,
+        "name": "Linux release startup",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115730623753,
+        "name": "Desktop package without inference (${{ matrix.platform }})",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 115741444416,
+        "name": "Assemble release candidate",
+        "status": "completed",
+        "conclusion": "skipped"
+      }
+    ],
+    "headless_command_totals": {
+      "cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3 --test s3_reader --test s3_acquisition -- --test-threads=1": {
+        "passed": 58,
+        "failed": 0,
+        "ignored": 0
+      },
+      "cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3 --lib acquisition::s3:: -- --test-threads=1": {
+        "passed": 43,
+        "failed": 0,
+        "ignored": 2
+      },
+      "cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features": {
+        "passed": 2294,
+        "failed": 0,
+        "ignored": 29
+      },
+      "cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features platform::audio_read_boundary::tests::kernel_exec_denies_unselected_reads_and_ambient_descriptors -- --ignored --exact --nocapture": {
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      "cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features hf-client": {
+        "passed": 2294,
+        "failed": 0,
+        "ignored": 29
+      },
+      "cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features": {
+        "passed": 257,
+        "failed": 0,
+        "ignored": 13
+      }
+    },
+    "original_run": {
+      "run_id": 38522709859,
+      "status": "completed",
+      "conclusion": "failure",
+      "applicable_jobs_passed": 8,
+      "failing_job": 115716297437,
+      "failed_test": "pause_is_rejected_after_final_file_commit_and_during_cleanup",
+      "evidence": "ci-df53-terminal.json"
+    }
+  },
+  "local_repair": {
+    "toolchain": "Rust/Cargo 1.92.0; Linux x86_64",
+    "environment": "CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_TARGET_DIR=/tmp/pumas-v080-qualification-target",
+    "focused": {
+      "passed": 1,
+      "ignored": 0,
+      "seconds": 0.67
+    },
+    "full_units_sequential": {
+      "passed": 2070,
+      "failed": 0,
+      "ignored": 13,
+      "seconds": 41.56
+    },
+    "earlier_contended_run": {
+      "passed": 2067,
+      "failed": 3,
+      "ignored": 13,
+      "seconds": 147.74,
+      "disposition": "Ran concurrently with compilation/Clippy; three unrelated bounded fixtures timed out. Unchanged sequential cohort passed; no edits to those tests."
+    },
+    "clippy": "passed: cargo clippy --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --tests -- -D warnings",
+    "rustfmt": "passed"
+  },
+  "security": {
+    "cargo_audit_version": "0.22.2",
+    "advisory_database_commit": "6aed84668c23d7f535077a9fe918bf1fa0f6a5bc",
+    "cargo_lock_packages": 514,
+    "cargo_vulnerability_entries": 0,
+    "cargo_maintenance_notices": 3,
+    "cargo_unsoundness_notices": 1,
+    "lru_disposition": "RUSTSEC-2026-0253 retained. Shipping consumer AWS SDK S3 1.137.0 uses private CacheKey(String), no custom panicking Drop or pop access; inspected trigger absent, revisit on consumer change.",
+    "pnpm_production_advisories": 0,
+    "pnpm_all_advisories": {
+      "moderate": 1,
+      "advisory": "GHSA-hp3w-g68c-fv3c",
+      "package": "sprintf-js 1.1.3",
+      "disposition": "Existing build-only electron-builder dependency path; no suppression or major override."
+    },
+    "review": "dependency-review.md",
+    "raw": [
+      "cargo-audit.json",
+      "pnpm-audit-production.json",
+      "pnpm-audit-all.json"
+    ],
+    "notices": {
+      "default_entries": 378,
+      "s3_entries": 428,
+      "text_and_inventory_regenerated_byte_identically": true
+    }
+  },
+  "artifacts": {
+    "source": "Authenticated GitHub workflow metadata; hashes cover outer ZIP files.",
+    "items": [
+      {
+        "id": 11877010982,
+        "name": "review-inference-linux-x86_64",
+        "size_in_bytes": 30659584,
+        "github_zip_digest": "sha256:3dfdca18419edf3b1125f2ad6e6577c2d9b480caa293e3a612d979a7bbac4303",
+        "expires_at": "2026-10-21T07:26:29Z",
+        "source_revision": "aa40e155846cdac6cd94b6f5c2fd6a35cddce16e"
+      },
+      {
+        "id": 11876891933,
+        "name": "review-inference-evidence-linux-x86_64",
+        "size_in_bytes": 35263,
+        "github_zip_digest": "sha256:f321f82c812a3853be83dd87a03f29f52d93b7e016ad1d422ded7dfeb91b741c",
+        "expires_at": "2026-10-21T07:26:31Z",
+        "source_revision": "aa40e155846cdac6cd94b6f5c2fd6a35cddce16e"
+      },
+      {
+        "id": 11876861099,
+        "name": "review-audio-dependency-evidence-linux",
+        "size_in_bytes": 10686,
+        "github_zip_digest": "sha256:979d4b4928074b2734808b43a66fc70000d2258b23c3d24e1c5b10e2de4ccea3",
+        "expires_at": "2026-10-21T07:21:57Z",
+        "source_revision": "aa40e155846cdac6cd94b6f5c2fd6a35cddce16e"
+      }
+    ],
+    "ci_execution": "Exact-source optimized Linux inference archive, pinned official CPU ORT 1.24.2 native loader/API24, extraction/inventory, authenticated startup, actual untrained ONNX import/load/finite 256-dimensional embeddings/unload/packaged-runtime identity/graceful stop passed.",
+    "audio_scope": "Frozen dependency imports and CPU operation plus three controlled lifecycle tests; production_available=false, child_tree_drained=true; no ASR acceptance.",
+    "local_bytes": {
+      "status": "unavailable",
+      "attempted_artifacts": [
+        11875745665,
+        11874379748
+      ],
+      "connector_retrieval": "succeeded",
+      "executor_transfer": "denied by HTTP proxy tunnel 403; no bytes received",
+      "bypass_attempted": false,
+      "inner_archive_and_binary_hashes": null,
+      "local_replay": "not_run",
+      "current_aa40_byte_transfer": "not attempted after identical df53 transfer denials"
+    }
+  },
+  "consumer": {
+    "receipt": "https://github.com/MrScripty/Pantograph/blob/3649df2d3c4c718aa278e809f27cbc2a915f8c47/docs/plans/pumas-pr70-cpu-consumer/reports/consumer-compatibility.md",
+    "pantograph_source": "039cee079d273a8d4968df56a4b35e8eb8aacbbe",
+    "handoff": "3649df2d3c4c718aa278e809f27cbc2a915f8c47",
+    "pumas_pin": "df53db08e2ba224edfaf713522ddd410f7d4ac44",
+    "chrema": "508c8b8cb724b49c655dab8bc4c8336190e516c7",
+    "candle": "88ed7911de9e88196b1f55b199145d22647f415e",
+    "owner_reported_tests": {
+      "integration": 19,
+      "library_passed": 598,
+      "library_existing_ignored": 2,
+      "http": 4
+    },
+    "independent_consumer_review": "accepted; actual public Chrema/Pumas untrained CPU composition",
+    "scope": "Published owner evidence, not rerun here; does not silently accept aa40 pin or hosted/pretrained scopes."
+  },
+  "review": {
+    "github_reviews": 0,
+    "github_inline_threads": 0,
+    "independent_pumas_diff_report": "not supplied",
+    "consumer_report_inspected": true,
+    "final_source_acceptance_owner": "parent"
+  },
+  "remaining_release_gates": [
+    "Parent accepts source/review and actual consumer pin or explicit lineage disposition.",
+    "Ten desktop and six headless final native artifacts and required extraction/install/start/recovery/termination qualification.",
+    "Reviewed trained model/tokenizer fixture and real packaged-runtime inference on required Linux/Windows/macOS inference targets.",
+    "Final-file licenses/notices, per-artifact SPDX, aggregate in-toto provenance/checksums and maintainer review.",
+    "Separate aligned 0.8.0 version commit, affected verification/rebuild and parent promotion decision."
+  ],
+  "not_run": [
+    "trained/pretrained model inference",
+    "GPU/hardware inference qualification",
+    "Windows/macOS final packaged model execution",
+    "sixteen-file final artifact set and final-file metadata",
+    "live AWS/non-AWS/MinIO provider qualification",
+    "user library migration",
+    "tag or release publication"
+  ],
+  "migration": {
+    "authority": "../../../library-upgrade.md",
+    "schema": 7,
+    "mode": "explicit offline conversion with all readers/writers stopped and exact metadata-only backup",
+    "automatic_downgrade": false,
+    "user_models_touched": false
+  },
+  "promotion": {
+    "executed": false,
+    "owner": "parent/maintainer",
+    "source_pin_requires_tag": false,
+    "final_tag": "v0.8.0 only after separate aligned final-version commit and all accepted pre-tag QA; exact SHA selected by parent",
+    "candidate_tag": "v0.8.0-rc.1 only if parent selects the current prerelease cohort after its required gates"
+  },
+  "decision_report": "release-blockers.md"
+}

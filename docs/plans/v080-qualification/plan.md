@@ -1,10 +1,10 @@
 # v0.8 qualification continuation
 
-**Status:** Active. **Acceptance:** pending.
-**Current phase:** exact-candidate CI, dependency and package qualification.
-**Next slice:** complete the existing `df53db08` CI run, audit current locked
-dependencies/notices, inspect available exact-source packages, and resolve the
-review findings or name the missing review evidence.
+**Status:** Complete. **Acceptance:** Q1–Q4 evidence satisfied within stated scope;
+final source adoption and release approval remain parent-owned.
+**Current phase:** terminal qualification handoff.
+**Next slice:** parent selects the source pin and completes the remaining native
+artifact, trained-model, metadata and version/promotion gates in the decision report.
 
 ## Objective and admission
 
@@ -22,10 +22,10 @@ separately; coordinate findings through the parent, without changing its pin.
 
 | ID | Observable result | Kind / environment / mode | State |
 | --- | --- | --- | --- |
-| Q1 | Build 38522709859 reaches a recorded terminal status for `df53db08`; failed applicable jobs are dispositioned | integration / required-real GitHub CI / automated | pending |
-| Q2 | Current Cargo/pnpm audits and default/S3 notice collection have concrete results and shipped-versus-build dispositions | contract / representative Linux plus current advisory databases / automated and manual | pending |
-| Q3 | Available exact-source package identity, inventory, runtime and startup/inference evidence are inspected without overstating synthetic/pretrained or platform coverage | release-artifact / actual available target / automated and manual | pending |
-| Q4 | Independent review is inspected, or precisely recorded unavailable; only actual remaining release blockers are handed to parent | contract / real report and source evidence / manual | pending |
+| Q1 | Build 38522709859 reaches a recorded terminal status for `df53db08`; failed applicable jobs are dispositioned | integration / required-real GitHub CI / automated | satisfied: original failed; repaired aa40 Build 38526618039 succeeded |
+| Q2 | Current Cargo/pnpm audits and default/S3 notice collection have concrete results and shipped-versus-build dispositions | contract / representative Linux plus current advisory databases / automated and manual | satisfied: raw audits, exact closure triage and identical regenerated notices |
+| Q3 | Available exact-source package identity, inventory, runtime and startup/inference evidence are inspected without overstating synthetic/pretrained or platform coverage | release-artifact / actual available target / automated and manual | satisfied: exact aa40 Linux review CI; local bytes unavailable |
+| Q4 | Independent review is inspected, or precisely recorded unavailable; only actual remaining release blockers are handed to parent | contract / real report and source evidence / manual | satisfied: published consumer review inspected; separate Pumas diff review unavailable; final gates named |
 
 ## Scope and decisions
 
@@ -72,7 +72,7 @@ existing authorities/tools and changes evidence, not runtime composition.
 
 ## Milestone and gates
 
-**Milestone:** qualified candidate evidence. **State:** Active.
+**Milestone:** qualified candidate evidence. **State:** Complete within scope.
 Gate Q1–Q4: retain exact SHA/run/job/artifact identities, passed/failed/skipped and
 not-run results, authoritative advisories and actual closure; inspect staged and
 cumulative diffs, commit/push the coherent handoff, update draft PR70. Do not push
@@ -82,11 +82,11 @@ commit records its result. A source repair creates a separately named candidate.
 
 ## Blockers, assumptions and stopping conditions
 
-- Q1 is running: release and frontend/desktop jobs passed on first resumed read;
-  remaining native/source jobs are active. Wait through terminal status.
+- Both source cohorts reached terminal status. Original df53 failed one fixture;
+  repaired aa40 passed all nine applicable jobs. Tag-only jobs were skipped.
 - GitHub has no submitted reviews or inline threads for PR70; CodeRabbit states
-  drafts are not auto-reviewed. A report/link was requested from the parent.
-  Do not call a local self-review independent acceptance.
+  drafts are not auto-reviewed. The published Pantograph consumer report was
+  inspected; no separate PR70 diff review was supplied. Parent owns disposition.
 - Package verification depends on the actual downloadable artifact and native
   host compatibility. Inspect the existing CI-produced candidate first; do not
   rebuild/rename a different source or treat a development binary as the package.
@@ -95,4 +95,5 @@ commit records its result. A source repair creates a separately named candidate.
   remaining pre-tag/publication gates under the accepted release policy.
 
 [Ledger](execution-ledger.md) · [Issues](issues.md) ·
-[Prior preparation](../v080-readiness/plan.md)
+[Prior preparation](../v080-readiness/plan.md) ·
+[Final receipt](reports/qualification.json) · [Release gates](reports/release-blockers.md)

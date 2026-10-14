@@ -28,6 +28,9 @@ remain separate from download details resolved after selection. Managed models
 keep receipt-bound identities, including the selected GGUF primary/projector
 through owned library moves. These contracts do not promise arbitrary
 ONNX/Safetensors/Diffusers imports through the public S3 GGUF path.
+The current S3 checks use controlled HTTPS fixtures; they do not certify AWS,
+non-AWS providers or MinIO endpoint combinations. Those provider-specific claims
+retain their existing AQ-S3 acceptance gate.
 
 ## Existing libraries and migration
 

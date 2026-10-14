@@ -44,5 +44,13 @@ test('no-inference packaging config matches the artifact plan', () => {
   assert.equal(config.productName, base.productName);
   assert.equal(config.beforePack, base.beforePack);
   assert.deepEqual(config.files, base.files);
-  assert.deepEqual(config.extraResources, base.extraResources);
+  assert.deepEqual(
+    config.extraResources.filter(resource => resource.from !== 'resources/bin'),
+    base.extraResources.filter(resource => resource.from !== 'resources/bin'),
+  );
+  assert.deepEqual(config.extraResources.find(resource => resource.from === 'resources/bin').filter,
+    ['pumas-rpc', 'pumas-rpc.exe']);
+  const full = base.extraResources.find(resource => resource.from === 'resources/bin').filter;
+  assert.ok(full.includes('ONNX-LICENSE.txt'));
+  assert.ok(full.includes('ONNX-NOTICES.txt'));
 });

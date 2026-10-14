@@ -12,6 +12,9 @@ const base = require('./package.json').build;
 module.exports = {
   ...base,
   appId: 'com.pumas.library.no-inference',
+  extraResources: base.extraResources.map(resource => resource.from === 'resources/bin'
+    ? { ...resource, filter: ['pumas-rpc', 'pumas-rpc.exe'] }
+    : resource),
   appImage: {
     ...base.appImage,
     artifactName: 'Pumas.Library-no-inference-${version}.${ext}',

@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const workflow = fs.readFileSync(path.join(root, '.github/workflows/build.yml'), 'utf8');
-const versionTagGuard = "github.ref_type == 'tag' && startsWith(github.ref_name, 'v')";
+const versionTagGuard = "(github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)";
 const escapedVersionTagGuard = versionTagGuard.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 test('ONNX graph gate rejects transitive download unification and linked runtime mode', () => {
@@ -45,7 +45,7 @@ function job(name) {
   return workflow.slice(start, end);
 }
 
-test('release-producing jobs run only for version tags', () => {
+test('candidate-producing jobs require a version tag or explicit build-only dispatch', () => {
   for (const name of [
     'headless-rpc',
     'headless-inference',
@@ -61,6 +61,47 @@ test('release-producing jobs run only for version tags', () => {
   }
 });
 
+test('manual candidate dispatch is opt-in, source-pinned and cannot publish', () => {
+  assert.match(workflow, /build_candidates:\n        description: .*\n        type: boolean\n        default: false/);
+  assert.match(job('lint-workflows'), /EXPECTED_SOURCE: \$\{\{ inputs.expected_source \}\}/);
+  assert.match(job('lint-workflows'), /re.fullmatch\('\[0-9a-f\]\{40\}', expected\).*expected != actual/);
+  assert.match(workflow, /permissions:\n  contents: read/);
+  assert.doesNotMatch(workflow, /contents: write|gh release|git tag|git push|create-release|publish: always/);
+  assert.match(job('release-candidate'), /write-release-metadata.py release-candidate --build-id/);
+  for (const name of ['review-inference-linux', 'review-audio-dependencies', 'torch-native-e2e']) {
+    assert.ok(job(name).includes("github.event_name == 'workflow_dispatch' && !inputs.build_candidates"));
+  }
+});
+
+test('manual source guard accepts only its exact Git commit', () => {
+  const python = process.env.PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3');
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  const code = job('lint-workflows').match(/python - <<'PYTHON'\n([\s\S]*?)          PYTHON/)[1]
+    .replace(/^          /gm, '');
+  const different = (head[0] === 'a' ? 'b' : 'a') + head.slice(1);
+  for (const [source, accepted] of [[head, true], ['', false], ['not-a-commit', false], [different, false]]) {
+    const result = spawnSync(python, ['-c', code], {
+      cwd: root, encoding: 'utf8', timeout: 10_000, env: { ...process.env, EXPECTED_SOURCE: source },
+    });
+    assert.equal(result.status === 0, accepted, result.stderr);
+  }
+});
+
+test('full desktop native runtimes are provisioned and probed before staging', () => {
+  for (const name of ['build-rust', 'windows-release']) {
+    const block = job(name);
+    assert.ok(block.includes('onnx_runtime_stage.py'));
+    assert.ok(block.includes('onnx_runtime_probe.py'));
+    assert.ok(block.indexOf('onnx_runtime_probe.py') < block.indexOf('stage-rpc.py'));
+    assert.match(block, /stage-rpc.py --target .* --runtime-dir/);
+  }
+  const inference = job('headless-inference');
+  assert.match(inference, /binary: pumas-rpc.exe/);
+  assert.match(inference, /name: Verify packaged native untrained model lifecycle/);
+  assert.match(inference, /verify-packaged-onnx.py .*matrix.binary/);
+  assert.match(job('torch-quality'), /python -m unittest -v test_inference_release test_release_metadata/);
+});
+
 test('shared quality jobs remain available to pull requests and ordinary pushes', () => {
   for (const name of ['lint-workflows', 'rust-quality', 'headless', 'build-frontend', 'torch-quality']) {
     assert.doesNotMatch(job(name), /^    if:/m, `${name} must not be job-gated to version tags`);
@@ -69,7 +110,7 @@ test('shared quality jobs remain available to pull requests and ordinary pushes'
 
 test('review inference candidate is bounded, source-pinned and never publishes a release', () => {
   const review = job('review-inference-linux');
-  assert.match(review, /^    if: github\.event_name == 'pull_request' \|\| github\.event_name == 'workflow_dispatch'$/m);
+  assert.ok(review.includes("    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)\n"));
   assert.match(review, /^    needs: lint-workflows$/m);
   assert.match(review, /^    runs-on: ubuntu-24\.04$/m);
   assert.match(review, /^    timeout-minutes: 60$/m);
@@ -181,7 +222,7 @@ test('release build commands never enable test-support or all-features', () => {
 
 test('review audio dependency qualification requires bounded exact-source confinement', () => {
   const audio = job('review-audio-dependencies');
-  assert.match(audio, /if: github.event_name == 'pull_request' \|\| github.event_name == 'workflow_dispatch'/);
+  assert.ok(audio.includes("if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)"));
   assert.match(audio, /runs-on: ubuntu-24\.04/);
   assert.match(audio, /timeout-minutes: 60/);
   assert.match(audio, /persist-credentials: false/);

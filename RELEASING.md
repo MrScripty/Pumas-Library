@@ -3,13 +3,33 @@
 ## Prepare and rehearse before tagging
 
 The `Build` workflow runs on pull requests, `main`, version tags, and manual
-`workflow_dispatch`. Pull requests, ordinary branch pushes, and branch-targeted
-manual runs execute source quality and contract tests only. Fully optimized
-backends, renderer bundles, installers, archives, artifact uploads, startup
-smoke, and release-candidate assembly run only for a `v*` version tag (including
-a manual dispatch explicitly targeting that tag). Complete the local release QA
-before creating the tag; CI then qualifies the exact tagged commit and assembles
-its candidate artifacts.
+`workflow_dispatch`. Ordinary PR/main validation runs source/contract checks;
+PR/ordinary manual runs also produce a separately labeled Linux inference review
+archive.
+The complete optimized sixteen-artifact matrix runs for a `v*` version tag or an
+explicit manual `build_candidates=true` dispatch. Manual candidate builds require
+`expected_source` to equal the exact checked-out 40-character commit; a missing or
+moved source fails before packaging. The default is false. Candidate mode omits
+the separate review jobs and non-shipped Torch E2E; those retain their ordinary
+manual/tag behavior. All outputs remain
+unsigned, unverified candidates. The workflow has read-only contents permissions
+and never creates a tag or GitHub release.
+
+For a build-only rehearsal, first have the parent review the exact source and
+run action. Set `PUMAS_REHEARSAL_SHA` to that reviewed full commit, then dispatch
+this branch (or the accepted branch containing this workflow):
+
+```bash
+gh workflow run build.yml --repo MrScripty/Pumas-Library \
+  --ref release/v080-package-qualification-20261014 \
+  -F build_candidates=true -f expected_source="$PUMAS_REHEARSAL_SHA"
+```
+
+Do not dispatch this merely because a PR is green. Complete native artifact and
+trained-model acceptance before the maintainer's later tag/publication decision.
+The same existing package jobs and final inventory checker serve rehearsals and
+tags; branch rehearsal does not imply a prerelease or final release. A tag must
+match source manifests exactly. Current `0.8.0-rc.1` must never be tagged `v0.8.0`.
 
 1. Update `CHANGELOG.md` and the version's release notes. Keep an empty
    `Unreleased` section for subsequent changes.
@@ -67,7 +87,10 @@ python3 -m ruff check torch-server scripts/release
 python3 -m ruff format --check torch-server scripts/release
 python3 -m unittest discover -s torch-server/tests
 ./launcher.sh --build-release
-python3 scripts/release/stage-rpc.py
+pumas_ort_work=$(mktemp -d)
+python3 scripts/release/onnx_runtime_stage.py --target linux-x86_64 --download --output-dir "$pumas_ort_work/runtime"
+python3 scripts/release/onnx_runtime_probe.py --target linux-x86_64 --runtime-dir "$pumas_ort_work/runtime" --output "$pumas_ort_work/loader.json"
+python3 scripts/release/stage-rpc.py --target linux-x86_64 --runtime-dir "$pumas_ort_work/runtime"
 python3 scripts/release/smoke-rpc.py electron/resources/bin
 smoke_root=$(mktemp -d)
 mkdir -p "$smoke_root/library/shared-resources/models" "$smoke_root/config"
@@ -132,13 +155,15 @@ Electron/Chromium notices alongside the combined notice.
 For Linux, use `python3 scripts/release/verify-deb-install.py CANDIDATE_DEB` for
 isolated native install/remove checks. Run `scripts/release/verify-packaged-onnx.py` with the extracted RPC
 and a real local Nomic fixture to verify import, load, gateway embeddings and
-unload. Generate per-installer SPDX, local provenance and final checksums with
-`write-linux-metadata.py`; see its attribution report for scope and limitations.
+unload. `write-linux-metadata.py` remains a separate optional extracted-file
+inventory for the two full Linux installers. It does not generate the complete
+sixteen-artifact publication metadata; do not mix its output directory into a
+fresh final candidate assembly.
 CI-built releases must use the CI build identity and actual final files.
 
 ## Inference headless candidates
 
-The tag-only `headless-inference` matrix produces Linux x86_64, Windows x86_64
+The tag or explicit build-only `headless-inference` matrix produces Linux x86_64, Windows x86_64
 and macOS ARM64 archives through `headless_inference_ci.py` and the existing
 strict `headless_inference_build.py` producer. Candidate assembly requires all
 three in addition to the thirteen existing assets. A missing or failed native
@@ -148,7 +173,7 @@ Pull requests and manual workflow runs also run the bounded Linux-only
 the exact PR head (or manual run SHA), uses the same strict release producer,
 extracts the archive, and compares authenticated core/RPC startup identities.
 Review archives and diagnostic evidence are retained for seven days under
-separate `review-inference-*` artifact names; they cannot satisfy the tag
+separate `review-inference-*` artifact names; they cannot satisfy the full
 matrix's release-candidate inventory. This job grants neither pretrained-model
 acceptance nor Windows/macOS qualification, and publishes no tag or release.
 The Linux review job also imports, loads, executes and unloads a deterministic
@@ -203,12 +228,17 @@ archive, and runs authenticated owner startup/graceful shutdown. Archive artifac
 and diagnostic evidence are uploaded separately. These remain unsigned,
 `unverified_candidate` outputs; startup never qualifies model execution.
 
-For Linux real-model acceptance, `verify-packaged-onnx.py RPC NOMIC_DIRECTORY`
-now requires the pinned CPU ORT files beside RPC. The child receives an allowlist
+For native real-model acceptance, `verify-packaged-onnx.py RPC NOMIC_DIRECTORY`
+requires the selected target's pinned CPU ORT files beside RPC. The child receives an allowlist
 environment and isolated home/config/cache/registry/current directory, with no
-ambient ORT, loader, Pumas, Python or proxy overrides. After finite embedding
-inference, `/proc/PID/maps` must identify the packaged loader by path, device and
-inode, and current bytes must still match the reviewed pin. Missing runtime,
+ambient ORT, loader, Pumas, Python or proxy overrides. Windows retains the actual
+OS directory needed for system DLLs and uses a new process group plus graceful
+CTRL_BREAK shutdown; Unix uses SIGINT. Fixture copying uses Python on all hosts.
+After finite embedding inference, Linux `/proc/PID/maps` must identify the packaged
+loader by path, device and inode. Windows PSAPI and macOS lsof observe the actual
+process's native module paths; current packaged bytes must match the reviewed pin.
+Windows/macOS mapped-file-object identity is not established by these path
+observations. The receipt records that narrower scope and copied fixture hashes. Missing runtime,
 ambient mappings, model errors and forced shutdown fail acceptance. This observes
 the mapped ORT file; it is not a filesystem sandbox, protection against concurrent
 hostile same-user mutation, or a complete audit of every loaded system dependency.
@@ -223,6 +253,43 @@ That bounded untrained graph is not Pumas/Nomic or pretrained-model evidence.
 This development environment has not executed a v0.8 release build, pretrained ONNX model, native Windows/macOS
 startup, signing/notarization, final SBOM or security qualification. Preserve those
 gates before the maintainer's publication decision.
+
+## Complete candidate metadata
+
+After collecting the sixteen exact artifacts into a fresh directory, run:
+
+```bash
+node scripts/release/check-artifacts.mjs candidate-input required release-candidate
+python3 scripts/release/write-release-metadata.py release-candidate --build-id local-candidate-rehearsal
+```
+
+CI invokes the same generator with its actual run/attempt build identity. It
+requires unchanged tracked source and current default/S3 attribution inputs. It
+writes sixteen SPDX 2.3 package inventories, aggregate unsigned in-toto provenance,
+project license, combined default/S3/native notices, and SHA-256 checksums over
+all other final files. SPDX `filesAnalyzed=false` is intentional: these describe
+exact artifact bytes and referenced attribution/runtime inputs, not exhaustive
+extracted-file or native transitive component analysis. Native package inspection,
+current audits and maintainer license/notice acceptance remain separate gates.
+The aggregate disclosure includes every pinned native notice representation,
+including Windows CRLF bytes. Embedded notice identity continues to use each
+producer's accepted default/S3 collection and exact target runtime notice bytes;
+inspect those actual package contents separately.
+Reassemble a fresh set after changing artifacts or metadata; do not retain stale
+SPDX/provenance or treat installer-only checksums as final publication coverage.
+
+## Reviewed trained fixture
+
+The documented fixture is Nomic's public `nomic-ai/nomic-embed-text-v1.5`, using
+`onnx/model_fp16.onnx` plus its matching tokenizer/config files. The
+[fixture investigation](docs/plans/v080-packaging/reports/nomic-fixture.md) records
+the official revision, publisher license declaration, exact weight identity and
+remaining byte-verification limits. A provided directory is copied into an
+isolated library and never modified. The lifecycle receipt records the copied
+bytes; it does not itself authenticate their model provenance or establish model
+quality. No model is bundled in release artifacts or silently downloaded by this
+verifier. The inference matrix additionally executes an explicitly untrained
+fixture on each native target; that result cannot accept the trained fixture.
 
 ## macOS candidate verification
 
@@ -248,7 +315,9 @@ Before tagging or publishing, satisfy the remaining artifact-plan obligations:
 - Separately provision and verify ONNX Runtime for full inference packages.
   Cargo never downloads it. Stage the selected 1.24.2 distribution's native
   library closure beside RPC, with trusted archive/library hashes and notices;
-  `stage-rpc.py` copies already staged native inputs, not a build download.
+  `stage-rpc.py --target TARGET --runtime-dir DIRECTORY` accepts only named pinned
+  native members and notices from that explicitly provisioned directory; it never
+  searches ambient developer outputs for runtime libraries.
   Prove real ONNX execution from the extracted package with developer runtime
   paths removed. An SDK-free build/health check does not qualify inference.
 - Extract each exact installer and verify renderer, RPC, native dependencies,

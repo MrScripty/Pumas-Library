@@ -71,7 +71,9 @@
           "*.dll",
           "*.so",
           "*.so.*",
-          "*.dylib"
+          "*.dylib",
+          "ONNX-LICENSE.txt",
+          "ONNX-NOTICES.txt"
         ]
       },
       {

@@ -22,3 +22,10 @@ test('pinned native staging and packaged environment admission', () => {
     ['-m', 'unittest', '-v', 'test_inference_release'],
     { cwd: directory, stdio: 'pipe', timeout: 30_000 });
 });
+
+test('complete artifact metadata coverage and final-byte checksums', () => {
+  const directory = fileURLToPath(new URL('.', import.meta.url));
+  execFileSync(process.env.PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3'),
+    ['-m', 'unittest', '-v', 'test_release_metadata'],
+    { cwd: directory, stdio: 'pipe', timeout: 30_000 });
+});

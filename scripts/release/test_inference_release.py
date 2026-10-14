@@ -1,6 +1,7 @@
 """Synthetic archives and real subprocess environment checks; no model inference."""
 
 import hashlib
+import importlib.util
 import copy
 import io
 import json
@@ -21,8 +22,114 @@ import packaged_onnx_support as support
 import synthetic_onnx_fixture as synthetic
 import verify_synthetic_packaged_onnx as synthetic_check
 
+STAGE_SPEC = importlib.util.spec_from_file_location(
+    "desktop_stage", Path(__file__).with_name("stage-rpc.py")
+)
+desktop = importlib.util.module_from_spec(STAGE_SPEC)
+STAGE_SPEC.loader.exec_module(desktop)
+
 
 class ReleaseTests(unittest.TestCase):
+    def test_desktop_staging_uses_only_pinned_payloads_and_preserves_old_stage_on_refusal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, runtime, target = root / "source", root / "runtime", root / "stage"
+            source.mkdir()
+            runtime.mkdir()
+            target.mkdir()
+            binary = "pumas-rpc.exe" if os.name == "nt" else "pumas-rpc"
+            (source / binary).write_bytes(b"test RPC, not executable")
+            (source / "ambient.dll").write_bytes(b"must never copy")
+            payloads = {"native.dll": b"test native", "ONNX-LICENSE.txt": b"test notice"}
+            selected = {"files": {}, "notices": {}}
+            for name, data in payloads.items():
+                (runtime / name).write_bytes(data)
+                selected["notices" if name.endswith(".txt") else "files"][name] = {
+                    "bytes": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                }
+            pins = root / "pins.json"
+            pins.write_text(json.dumps({"targets": {"test-native": selected}}))
+            (target / "sentinel").write_bytes(b"prior usable stage")
+            with (
+                patch.object(desktop, "PINS", pins),
+                patch.object(desktop, "native_target", return_value="test-native"),
+            ):
+                (runtime / "native.dll").write_bytes(b"corrupt0000")
+                with self.assertRaises(ValueError):
+                    desktop.stage_rpc(source, target, runtime, "test-native")
+                self.assertEqual((target / "sentinel").read_bytes(), b"prior usable stage")
+                (runtime / "native.dll").write_bytes(payloads["native.dll"])
+                desktop.stage_rpc(source, target, runtime, "test-native")
+                self.assertEqual({p.name for p in target.iterdir()}, {binary, *payloads})
+                for name, data in payloads.items():
+                    self.assertEqual((target / name).read_bytes(), data)
+
+    def test_native_target_rejects_unsupported_host_instead_of_assuming_linux(self):
+        with (
+            patch.object(support.platform, "system", return_value="Linux"),
+            patch.object(support.platform, "machine", return_value="aarch64"),
+        ):
+            with self.assertRaisesRegex(ValueError, "supported native host"):
+                support.native_target()
+
+    @unittest.skipIf(sys.platform == "linux", "native Windows/macOS OS observer")
+    def test_real_native_module_observer_can_inspect_its_own_process(self):
+        paths = support.native_modules(os.getpid(), support.native_target())
+        self.assertTrue(paths)
+        self.assertTrue(any(path.is_file() for path in paths))
+
+    def test_nonlinux_observer_requires_packaged_runtime_and_refuses_ambient_runtime(self):
+        for target, name in (
+            ("windows-x86_64", "onnxruntime.dll"),
+            ("macos-arm64", "libonnxruntime.dylib"),
+        ):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                runtime = root / name
+                runtime.write_bytes(b"test-only observed mapping")
+                with (
+                    patch.object(support, "native_target", return_value=target),
+                    patch.object(support, "verify_runtime", return_value={"files": {name: {}}}),
+                ):
+                    for paths in (
+                        [],
+                        [Path("/ambient") / name],
+                        [runtime, Path("/ambient") / name],
+                    ):
+                        with patch.object(support, "native_modules", return_value=paths):
+                            with self.assertRaises(ValueError):
+                                support.loaded_runtime(123, root)
+                    with patch.object(support, "native_modules", return_value=[runtime]):
+                        observed = support.loaded_runtime(123, root)
+                        self.assertEqual(
+                            observed["loader_sha256"],
+                            hashlib.sha256(runtime.read_bytes()).hexdigest(),
+                        )
+                        self.assertEqual(
+                            observed["mapped_file_object_identity"], "unavailable on this platform"
+                        )
+                        self.assertEqual(observed["mapping"], "packaged-module-path-observed")
+
+    def test_forced_shutdown_and_nonzero_exit_never_pass(self):
+        process = Mock(returncode=-9)
+        process.poll.return_value = None
+        process.wait.side_effect = [subprocess.TimeoutExpired("owned RPC", 20), -9]
+        with self.assertRaisesRegex(RuntimeError, "forced shutdown"):
+            support.stop_process(process)
+        process.kill.assert_called_once()
+        process = Mock(returncode=1)
+        process.poll.return_value = 1
+        with self.assertRaisesRegex(ValueError, "shut down cleanly"):
+            support.stop_process(process)
+        process = Mock()
+        process.poll.return_value = None
+        process.send_signal.side_effect = OSError("test-only unavailable console")
+        with self.assertRaises(OSError):
+            support.stop_process(process)
+        process.kill.assert_called_once()
+        process.wait.assert_called_once_with(timeout=10)
+
     def test_synthetic_fixture_is_deterministic_untrained_and_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "fixture"

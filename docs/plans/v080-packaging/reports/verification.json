@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-14",
+  "scope": "release-tool preparation; not full native or trained-model acceptance",
+  "base_commit": "055222931100eeedc43307271dbf7c504787888d",
+  "branch": "release/v080-package-qualification-20261014",
+  "candidate_commit": "The containing commit is identified in the draft PR; this record does not self-reference its own Git SHA.",
+  "environment": {
+    "system": "Linux-6.18.44-x86_64-with-glibc2.41",
+    "python": "3.12.14",
+    "repository_python_pin": "3.12.3",
+    "node": "v24.19.0",
+    "repository_node_pin": "24.15.0",
+    "ruff": "0.15.2",
+    "actionlint": "1.7.8"
+  },
+  "checks": {
+    "node_release": {
+      "passed": 37,
+      "failed": 0,
+      "skipped": 0
+    },
+    "python_focused": {
+      "passed": 20,
+      "failed": 0,
+      "skipped": 1,
+      "skip": "required native Windows/macOS observer self-process test on Linux"
+    },
+    "ruff_check": "passed scripts/release",
+    "ruff_format": "passed scripts/release",
+    "actionlint": "passed; shellcheck/pyflakes plugins disabled locally, full CI gate unchanged",
+    "default_s3_attribution": "passed, regenerated inventories, source notice text unchanged",
+    "version_alignment": "passed 0.8.0-rc.1",
+    "dependency_ownership": "passed",
+    "git_diff_check": "passed"
+  },
+  "logs": {
+    "/tmp/pumas-v080-packaging-node-final.log": {
+      "sha256": "b294421536e68dd57840e6156ba63737f806b4de88109f09e7e5234ca7a0e344",
+      "bytes": 3319,
+      "retention": "task-local, not release assets"
+    },
+    "/tmp/pumas-v080-packaging-python-final.log": {
+      "sha256": "0bee95c5adbcf3e11286ea1a65e1a1ea5f5bf5a5a2558a5222b18b01109c9c36",
+      "bytes": 3686,
+      "retention": "task-local, not release assets"
+    },
+    "/tmp/pumas-v080-packaging-dispatch.log": {
+      "sha256": "bcaca246df52a2e7d3a6eb7ef4e802a9611b95cf3d525ec3a1226c20163c199a",
+      "bytes": 1614,
+      "retention": "task-local, not release assets"
+    },
+    "/tmp/pumas-v080-packaging-actionlint.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "retention": "task-local, not release assets"
+    },
+    "/tmp/pumas-v080-packaging-notices-default.log": {
+      "sha256": "b42e19964ae0229994d6d5b7f704e299d88d71f2e2bf818c0a3a8130f86c91d5",
+      "bytes": 84,
+      "retention": "task-local, not release assets"
+    },
+    "/tmp/pumas-v080-packaging-notices-s3.log": {
+      "sha256": "719c689e15128b44264d76555819239179e9ac435b65a2679ea059cdba628f87",
+      "bytes": 79,
+      "retention": "task-local, not release assets"
+    }
+  },
+  "preserved": {
+    "rust/Cargo.lock": "91fb9823de2f0346211b4f68ca400f03a628890e55dca90e0803e2dd7ad47e42",
+    "pnpm-lock.yaml": "78cac9b50e2f28d293420ffb8b9d57889a723669a3969b3a670dd3e6cbfdda18",
+    "docs/plans/v080-readiness/reports/candidate.json": "617b7fb1ec18c04274d7ad56d346d0a8e6d62b2b3358b1b1f18a139715fdb814",
+    "docs/plans/v080-qualification/reports/qualification.json": "12578a001da624a1a08819ae44efdcefb83a1b42f6059d9e1a1eed498345a0a6"
+  },
+  "notice_inventory": {
+    "": {
+      "sha256": "a2b59c47a02da0fe8720aa4b6e13f3c771bc1cd7bdf47c3d24f8a44ac2d3b1ad",
+      "notice_sha256": "5e5e273c6d4a24563d91de8d9d349413481da992d714438d80e884d61eb13dfc"
+    },
+    "-s3": {
+      "sha256": "0b61269264f6fd0cf24ab180a9f3f9fbcff3b92c39a79721359799bd32582183",
+      "notice_sha256": "abf171b832a35b70752979877aaab3b9ad3fdbf2e9cb2a034e2bce3a832134df"
+    }
+  },
+  "native_results": {
+    "linux_contracts": "passed controlled file/process assertions, not trained inference",
+    "windows_macos_observer": "not run in Linux; registered in existing native QA",
+    "native_packaged_untrained": "added to reused full inference matrix; not run here",
+    "native_packaged_trained": "not run"
+  },
+  "metadata": {
+    "controlled_fixture_artifacts": 16,
+    "spdx_documents": 16,
+    "provenance_subjects": 16,
+    "checksummed_final_files": 35,
+    "filesAnalyzed": false,
+    "assurance": "unsigned, unverified candidate; extracted/native component inspection separate",
+    "native_notice_variants": "Exact Unix LF and Windows CRLF bytes authenticated separately against all target/role pins; no notice role may be substituted or dropped."
+  },
+  "model": {
+    "repository": "nomic-ai/nomic-embed-text-v1.5",
+    "revision": "ac6fcd72429d86ff25c17895e47a9bfcfc50c1b2",
+    "file": "onnx/model_fp16.onnx",
+    "bytes": 273859028,
+    "upstream_pointer_sha256": "cf5b5a86edb00f895561803cfc04729090a958340b8ca2ad76c143f565f6bb04",
+    "license": "Apache-2.0 publisher declaration; model not redistributed",
+    "local_bytes": "not obtained",
+    "small_file_local_hashes": "unavailable",
+    "executor_transfer": "metadata request denied by proxy tunnel HTTP 403; no model bytes, retry or bypass",
+    "report": "nomic-fixture.md"
+  },
+  "dispatch": {
+    "manual_build_candidates_default": false,
+    "expected_source": "exact checked-out lowercase 40-character commit required",
+    "creates_tag": false,
+    "publishes_release": false,
+    "executed": false,
+    "owner": "parent reviews exact source/action first"
+  },
+  "independent_review": {
+    "state": "pending",
+    "owner": "parent cumulative material review; self-review not independent"
+  },
+  "ci": {
+    "state": "not yet observed; inspect draft PR exact-head run"
+  },
+  "remaining_release_gates": [
+    "Approved full native build-only rehearsal and artifact/user-workflow inspection",
+    "Reviewed trained fixture bytes and native packaged execution",
+    "Maintainer final notices/security/metadata acceptance",
+    "Separate final version alignment and parent tag/publication decision"
+  ],
+  "earlier_attempts": [
+    {
+      "kind": "node release suite",
+      "passed": 32,
+      "failed": 1,
+      "disposition": "Old no-inference full-resource inheritance assertion replaced with intended exact RPC-only filter and preservation of other resources.",
+      "log": "/tmp/pumas-v080-packaging-node.log",
+      "log_sha256": "00322acb2698f72dd68cd99676589e7dcce84e2ae516facacd37fd9df8e73f78"
+    },
+    {
+      "kind": "stronger native notice role check",
+      "passed": 18,
+      "failed": 1,
+      "skipped": 1,
+      "disposition": "Exposed Windows CRLF notice representations; now every target/role exact size and SHA-256 must be present in generated byte variants.",
+      "log": "/tmp/pumas-v080-packaging-python-windows-notice-gap.log",
+      "log_sha256": "4d50a8ae20dd306fc70de0abbaf6a889066a3f4e0dec6481a1589738f63c27b4"
+    },
+    {
+      "kind": "Ruff setup invocation",
+      "result": "failed before formatting/tests due wrong working directory",
+      "disposition": "Corrected root invocation passed."
+    }
+  ],
+  "environment_recheck": {
+    "time": "2026-10-14T09:23:29Z",
+    "actual_executor": "git/date/read check succeeded after disconnect notification; focused tests then completed successfully"
+  }
+}

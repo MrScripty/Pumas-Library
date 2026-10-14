@@ -7,6 +7,15 @@ on:
   # Qualify every review branch, including stacked acquisition repairs.
   pull_request: {}
   workflow_dispatch:
+    inputs:
+      build_candidates:
+        description: Build the sixteen unsigned candidate artifacts without creating a tag or release
+        type: boolean
+        default: false
+      expected_source:
+        description: Exact 40-character source commit required when build_candidates is true
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -33,6 +42,18 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
+      - name: Verify explicit build-only source selection
+        if: github.event_name == 'workflow_dispatch' && inputs.build_candidates
+        env:
+          EXPECTED_SOURCE: ${{ inputs.expected_source }}
+        run: |
+          python - <<'PYTHON'
+          import os, re, subprocess
+          expected = os.environ['EXPECTED_SOURCE']
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if re.fullmatch('[0-9a-f]{40}', expected) is None or expected != actual:
+              raise SystemExit('build-only dispatch requires the exact checked-out source commit')
+          PYTHON
       - name: Run checksum-pinned actionlint with shell and Python checks
         shell: bash
         run: |
@@ -105,16 +126,16 @@ jobs:
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features hf-client
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
       - name: Build inference-disabled release backend
-        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release --no-default-features
       - name: Verify inference-disabled release backend
-        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
         run: python3 scripts/release/smoke-rpc.py rust/target/release/pumas-rpc --inference-disabled
 
   headless-rpc:
     name: Headless archive (${{ matrix.headless_os }})
     needs: lint-workflows
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
     strategy:
       fail-fast: false
       matrix:
@@ -154,19 +175,22 @@ jobs:
   headless-inference:
     name: Inference headless candidate (${{ matrix.target }})
     needs: lint-workflows
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
             target: linux-x86_64
+            binary: pumas-rpc
             check: linux
           - os: windows-2025
             target: windows-x86_64
+            binary: pumas-rpc.exe
             check: windows
           - os: macos-15
             target: macos-arm64
+            binary: pumas-rpc
             check: macos
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
@@ -197,6 +221,11 @@ jobs:
           ORT_SKIP_DOWNLOAD: '1'
           CARGO_BUILD_JOBS: '1'
         run: python scripts/release/headless_inference_ci.py --target ${{ matrix.target }} --runtime-dir "${{ runner.temp }}/pumas-ort" --output-dir "${{ runner.temp }}/inference-candidate" --build-id "ci-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Create bounded untrained native fixture
+        run: python scripts/release/synthetic_onnx_fixture.py --output-dir "${{ runner.temp }}/native-synthetic-fixture"
+      - name: Verify packaged native untrained model lifecycle
+        timeout-minutes: 5
+        run: python scripts/release/verify-packaged-onnx.py "${{ runner.temp }}/inference-candidate/extracted/${{ matrix.binary }}" "${{ runner.temp }}/native-synthetic-fixture" > "${{ runner.temp }}/inference-candidate/native-synthetic-lifecycle.log"
       - name: Verify required inference archive
         run: node scripts/release/check-artifacts.mjs "${{ runner.temp }}/inference-candidate" headless-inference-${{ matrix.check }}
       - uses: actions/upload-artifact@v7.0.1
@@ -222,7 +251,7 @@ jobs:
   review-inference-linux:
     name: Review Linux inference candidate
     needs: lint-workflows
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -293,7 +322,7 @@ jobs:
   review-audio-dependencies:
     name: Review confined audio dependencies
     needs: lint-workflows
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -405,11 +434,11 @@ jobs:
       - run: pnpm --dir frontend check:types
       - run: pnpm --dir frontend test:run
       - name: Build library-only renderer
-        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
         run: pnpm --dir frontend build:library-only
       # Restore the default renderer before publishing the packaging input.
       - name: Build default renderer
-        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
         run: pnpm --dir frontend build
       - run: pnpm --dir electron lint
       - run: pnpm --dir electron validate
@@ -421,7 +450,7 @@ jobs:
       - run: pnpm --dir electron test:desktop-contract-conformance
       - run: pnpm --dir frontend test:desktop-contract
       - uses: actions/upload-artifact@v7.0.1
-        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
         with:
           name: frontend-dist
           path: frontend/dist/
@@ -454,6 +483,9 @@ jobs:
       - run: python -m pip install -r torch-server/requirements-dev.txt
       - run: python -m ruff check torch-server scripts/release
       - run: python -m ruff format --check torch-server scripts/release
+      - name: Test native packaged release contracts
+        working-directory: scripts/release
+        run: python -m unittest -v test_inference_release test_release_metadata
       - name: Test native headless owner root identity
         working-directory: scripts/release
         run: python -m unittest -v test_headless_inference.OwnerContractTests
@@ -578,7 +610,7 @@ jobs:
   torch-native-e2e:
     name: Torch native RPC E2E (${{ matrix.os }})
     needs: lint-workflows
-    if: github.event_name == 'workflow_dispatch' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+    if: (github.event_name == 'workflow_dispatch' && !inputs.build_candidates) || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
     strategy:
       fail-fast: false
       matrix:
@@ -615,11 +647,15 @@ jobs:
   build-rust:
     name: Rust release (${{ matrix.os }})
     needs: lint-workflows
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        include:
+          - os: ubuntu-24.04
+            ort_target: linux-x86_64
+          - os: macos-15
+            ort_target: macos-arm64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     steps:
@@ -634,6 +670,10 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets
+      - name: Provision official desktop CPU runtime
+        run: python scripts/release/onnx_runtime_stage.py --target ${{ matrix.ort_target }} --download --output-dir "${{ runner.temp }}/desktop-ort"
+      - name: Probe desktop native CPU runtime
+        run: python scripts/release/onnx_runtime_probe.py --target ${{ matrix.ort_target }} --runtime-dir "${{ runner.temp }}/desktop-ort" --output "${{ runner.temp }}/desktop-native-loader.json"
       - name: Build release backend
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
       - name: Test release workspace
@@ -641,7 +681,7 @@ jobs:
       - name: Verify backend startup from isolated staging
         shell: bash
         run: |
-          python scripts/release/stage-rpc.py
+          python scripts/release/stage-rpc.py --target ${{ matrix.ort_target }} --runtime-dir "${{ runner.temp }}/desktop-ort"
           python scripts/release/smoke-rpc.py electron/resources/bin
       - uses: actions/upload-artifact@v7.0.1
         with:
@@ -652,7 +692,7 @@ jobs:
   build-electron:
     name: Desktop package (${{ matrix.platform }})
     needs: [build-rust, build-frontend]
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
     strategy:
       fail-fast: false
       matrix:
@@ -716,7 +756,7 @@ jobs:
   build-electron-no-inference:
     name: Desktop package without inference (${{ matrix.platform }})
     needs: [headless-rpc, build-frontend]
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
     strategy:
       fail-fast: false
       matrix:
@@ -796,7 +836,7 @@ jobs:
   windows-release:
     name: Rust release (windows-2025)
     needs: [lint-workflows, build-frontend]
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
     runs-on: windows-2025
     timeout-minutes: 150
     steps:
@@ -837,9 +877,13 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets
+      - name: Provision official desktop CPU runtime
+        run: python scripts/release/onnx_runtime_stage.py --target windows-x86_64 --download --output-dir "${{ runner.temp }}/desktop-ort"
+      - name: Probe desktop native CPU runtime
+        run: python scripts/release/onnx_runtime_probe.py --target windows-x86_64 --runtime-dir "${{ runner.temp }}/desktop-ort" --output "${{ runner.temp }}/desktop-native-loader.json"
       - name: Build Windows backend
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
-      - run: python scripts/release/stage-rpc.py
+      - run: python scripts/release/stage-rpc.py --target windows-x86_64 --runtime-dir "${{ runner.temp }}/desktop-ort"
       - run: python scripts/release/smoke-rpc.py electron/resources/bin
       - name: Package Windows installers
         env:
@@ -860,7 +904,7 @@ jobs:
   windows-no-inference:
     name: Desktop package without inference (win)
     needs: [lint-workflows, build-frontend, headless-rpc]
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
@@ -920,7 +964,7 @@ jobs:
   verify-launcher:
     name: Linux release startup
     needs: [build-rust, build-frontend]
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -954,7 +998,7 @@ jobs:
   release-candidate:
     name: Assemble release candidate
     needs: [rust-quality, headless, headless-rpc, headless-inference, torch-quality, build-electron, build-electron-no-inference, windows-release, windows-no-inference, verify-launcher]
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    if: (github.ref_type == 'tag' && startsWith(github.ref_name, 'v')) || (github.event_name == 'workflow_dispatch' && inputs.build_candidates)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -971,10 +1015,15 @@ jobs:
           pattern: headless-*
           path: candidate-input
       - run: node scripts/release/check-artifacts.mjs candidate-input required release-candidate
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - name: Describe every final candidate artifact and metadata byte
+        run: python scripts/release/write-release-metadata.py release-candidate --build-id "github-${{ github.run_id }}-${{ github.run_attempt }}"
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: release-candidate
           path: release-candidate/
           if-no-files-found: error
-      # Publication is separate: installer behavior, notices, SBOMs and
-      # provenance remain release acceptance obligations in RELEASING.md.
+      # Metadata is an unsigned artifact-level inventory. Native workflows,
+      # trained models and maintainer license review remain acceptance gates.

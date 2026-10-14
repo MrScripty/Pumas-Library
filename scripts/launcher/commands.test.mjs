@@ -26,7 +26,8 @@ test('runBoundedCommand rejects when the process exits before the minimum smoke 
       process.execPath,
       ['-e', 'process.exit(0)'],
       {
-        minUptimeMs: 100,
+        // Node startup can exceed 100 ms on a loaded qualification host.
+        minUptimeMs: 1_000,
         maxUptimeMs: 2_000,
         processTree,
       }
@@ -226,7 +227,7 @@ test('command failures do not disclose forwarded argument values', async () => {
   );
 });
 
-test('runBoundedCommand removes a real descendant process with its owned tree', async () => {
+test('runBoundedCommand stops a real descendant process with its owned tree', async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pumas-launcher-tree-'));
   const descendantPidPath = path.join(tempRoot, 'descendant.pid');
   let descendantPid;
@@ -276,9 +277,19 @@ test('runBoundedCommand removes a real descendant process with its owned tree', 
 function isProcessAlive(pid) {
   try {
     process.kill(pid, 0);
+    if (process.platform === 'linux') {
+      // A container's PID 1 may retain an orphan zombie after group SIGKILL.
+      // It cannot execute; kill(pid, 0) alone would mistake it for live work.
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+      return state !== 'Z' && state !== 'X';
+    }
     return true;
   } catch (error) {
-    return error?.code !== 'ESRCH';
+    if (error?.code === 'ESRCH' || error?.code === 'ENOENT') {
+      return false;
+    }
+    throw error;
   }
 }
 

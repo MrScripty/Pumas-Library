@@ -348,6 +348,11 @@ mod custody_tests {
         );
         let state = api.catalog().unwrap().clone();
         let checkpoint = api.catalog_checkpoint().await.unwrap();
+        // Checkpoint delivery can precede its nested-task observer cleanup.
+        // Start from zero so the later nonzero count identifies the queued query.
+        while state.tasks.owned_task_count_for_catalog_test() != 0 {
+            tokio::task::yield_now().await;
+        }
         let index = state.index.clone();
         let (entered_tx, entered_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();

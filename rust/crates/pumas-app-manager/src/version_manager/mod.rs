@@ -1635,6 +1635,88 @@ mod tests {
     // Keep its bound separate from cancellation and shutdown assertions.
     const FIXTURE_READINESS_TIMEOUT: Duration = Duration::from_secs(10);
 
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    async fn reopen_after_fork_release(
+        root: &Path,
+    ) -> pumas_library::Result<pumas_library::PumasApi> {
+        // Positive post-shutdown fixtures only: a parallel fork can retain the
+        // old physical descriptor until exec even after our last handle drops.
+        let physical_root = std::fs::canonicalize(root)?;
+        let busy = format!(
+            "Pumas library instance is already running for physical store {}. Drop existing owner handles before constructing another owner.",
+            physical_root.display()
+        );
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match pumas_library::PumasApi::builder(root)
+                .with_hf_client(false)
+                .with_process_manager(false)
+                .build()
+                .await
+            {
+                Err(pumas_library::PumasError::InvalidParams { message })
+                    if message == busy && tokio::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                result => return result,
+            }
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_positive_reopen_waits_for_retained_physical_owner() {
+        let root = TempDir::new().unwrap();
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        api.shutdown_instance().await.unwrap();
+        // Retain the closed owner's physical share until the explicit release.
+        let (release, released) = tokio::sync::oneshot::channel();
+        let owner = tokio::spawn(async move {
+            released.await.unwrap();
+            drop(api);
+        });
+        let reopening = reopen_after_fork_release(root.path());
+        tokio::pin!(reopening);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut reopening)
+                .await
+                .is_err()
+        );
+        release.send(()).unwrap();
+        owner.await.unwrap();
+        let reopened = reopening.await.unwrap();
+        reopened.shutdown_instance().await.unwrap();
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test(start_paused = true)]
+    async fn native_positive_reopen_returns_other_builder_errors_without_retry() {
+        let root = TempDir::new().unwrap();
+        let file = root.path().join("not-a-directory");
+        std::fs::write(&file, b"retain").unwrap();
+        let expected = pumas_library::PumasApi::builder(&file)
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .err()
+            .expect("file must be refused");
+        let started = tokio::time::Instant::now();
+        let failure = reopen_after_fork_release(&file)
+            .await
+            .err()
+            .expect("file must remain refused");
+        assert_eq!(failure.to_string(), expected.to_string());
+        assert_eq!(tokio::time::Instant::now(), started);
+        assert_eq!(std::fs::read(file).unwrap(), b"retain");
+    }
+
     async fn create_test_manager() -> (VersionManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
 
@@ -2369,12 +2451,7 @@ mod tests {
             std::fs::write(&identity_path, serde_json::to_vec(&identity).unwrap()).unwrap();
             drop(manager);
             drop(api);
-            let reopened_api = pumas_library::PumasApi::builder(root.path())
-                .with_hf_client(false)
-                .with_process_manager(false)
-                .build()
-                .await
-                .unwrap();
+            let reopened_api = reopen_after_fork_release(root.path()).await.unwrap();
             let reopened = VersionManager::new_with_acquisition(
                 root.path(),
                 AppId::LlamaCpp,
@@ -2602,12 +2679,7 @@ mod tests {
         // A fresh service and manager must admit a new attempt for the same tag.
         let (retry_server, retry_observed, retry_release, retry_base_url) =
             native_archive_fixture(root.path()).await;
-        let reopened_api = pumas_library::PumasApi::builder(root.path())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .build()
-            .await
-            .unwrap();
+        let reopened_api = reopen_after_fork_release(root.path()).await.unwrap();
         let mut reopened = VersionManager::new_with_acquisition(
             root.path(),
             AppId::LlamaCpp,
@@ -2871,12 +2943,7 @@ mod tests {
         let source = tokio::net::TcpListener::bind(base_url.strip_prefix("http://").unwrap())
             .await
             .unwrap();
-        let reopened_api = pumas_library::PumasApi::builder(root.path())
-            .with_hf_client(false)
-            .with_process_manager(false)
-            .build()
-            .await
-            .unwrap();
+        let reopened_api = reopen_after_fork_release(root.path()).await.unwrap();
         let new_direct = || {
             VersionInstaller::new(
                 root.path().to_path_buf(),

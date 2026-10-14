@@ -1530,20 +1530,75 @@ mod tests {
         assert!(!rejected_marker.exists());
     }
 
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
-    async fn wait_for_descendant_marker(path: &Path) -> u32 {
-        tokio::time::timeout(Duration::from_secs(10), async {
+    // Allow native shell startup plus 5s for exact-handle acquisition while
+    // staying below the cancellation command's 30s provider deadline.
+    const DESCENDANT_STARTUP_BUDGET: Duration = Duration::from_secs(20);
+
+    async fn wait_for_descendant_marker(
+        path: &Path,
+        running: &mut tokio::task::JoinHandle<ProviderResult<Vec<u8>>>,
+    ) -> Result<u32, String> {
+        tokio::time::timeout(DESCENDANT_STARTUP_BUDGET, async {
             loop {
-                if let Ok(marker) = std::fs::read_to_string(path) {
-                    if let Ok(pid) = marker.trim().parse::<u32>() {
-                        return pid;
+                tokio::select! {
+                    biased;
+                    result = &mut *running => {
+                        return Err(format!(
+                            "provider command completed before descendant readiness: {result:?}"
+                        ));
+                    }
+                    _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                        if let Ok(marker) = std::fs::read_to_string(path) {
+                            if let Ok(pid) = marker.trim().parse::<u32>() {
+                                return Ok(pid);
+                            }
+                        }
                     }
                 }
-                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
         .await
-        .expect("provider descendant never started")
+        .map_err(|_| {
+            format!("provider descendant never started within {DESCENDANT_STARTUP_BUDGET:?}")
+        })?
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn descendant_readiness_reports_early_provider_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let mut running = tokio::spawn(async {
+            Err(ManagedPythonFailure::new(
+                ManagedPythonFailureKind::Inconclusive,
+                "controlled provider startup failure",
+            ))
+        });
+        let failure = wait_for_descendant_marker(&root.path().join("missing.pid"), &mut running)
+            .await
+            .unwrap_err();
+        assert!(failure.contains("controlled provider startup failure"));
+        assert!(failure.contains("completed before descendant readiness"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn descendant_readiness_allows_slow_start_without_completing_provider() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("delayed.pid");
+        let delayed_marker = marker.clone();
+        let writer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(12)).await;
+            std::fs::write(delayed_marker, "321\n").unwrap();
+        });
+        let mut running = tokio::spawn(std::future::pending::<ProviderResult<Vec<u8>>>());
+        assert_eq!(
+            wait_for_descendant_marker(&marker, &mut running)
+                .await
+                .unwrap(),
+            321
+        );
+        assert!(!running.is_finished());
+        writer.await.unwrap();
+        running.abort();
+        assert!(running.await.unwrap_err().is_cancelled());
     }
 
     #[cfg(target_os = "windows")]
@@ -1554,7 +1609,7 @@ mod tests {
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -LiteralPath $env:PUMAS_TEST_MARKER -Value $child.Id; Start-Sleep -Seconds 30",
+                "$ErrorActionPreference = 'Stop'; $child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -LiteralPath $env:PUMAS_TEST_MARKER -Value $child.Id; Start-Sleep -Seconds 30",
             ])
             .env("PUMAS_TEST_MARKER", marker);
         command
@@ -1628,12 +1683,14 @@ mod tests {
         let provider = Arc::new(ManagedPythonProvider::new(root.path(), cleanup.clone()).unwrap());
         let marker = root.path().join("cancelled-descendant.pid");
         let command = native_sleeping_tree_command(&marker);
-        let running = tokio::spawn(async move {
+        let mut running = tokio::spawn(async move {
             provider
                 .run_bounded(command, Duration::from_secs(30), 4096)
                 .await
         });
-        let descendant = wait_for_descendant_marker(&marker).await;
+        let descendant = wait_for_descendant_marker(&marker, &mut running)
+            .await
+            .expect("provider descendant readiness failed");
         #[cfg(target_os = "windows")]
         let descendant_handle = open_live_descendant_handle(descendant).await;
         #[cfg(target_os = "macos")]
@@ -1667,11 +1724,13 @@ mod tests {
         const DEADLINE: Duration = Duration::from_secs(60);
         let running_provider = provider.clone();
         let command = native_sleeping_tree_command(&marker);
-        let running =
+        let mut running =
             tokio::spawn(
                 async move { running_provider.run_bounded(command, DEADLINE, 4096).await },
             );
-        let descendant = wait_for_descendant_marker(&marker).await;
+        let descendant = wait_for_descendant_marker(&marker, &mut running)
+            .await
+            .expect("provider descendant readiness failed");
         #[cfg(target_os = "windows")]
         let descendant_handle = open_live_descendant_handle(descendant).await;
         #[cfg(target_os = "macos")]

@@ -16490,6 +16490,10 @@ mod tests {
 
     #[tokio::test]
     async fn pause_is_rejected_after_final_file_commit_and_during_cleanup() {
+        // These waits establish fixture cutpoints, not a download latency SLO.
+        // The worker owns a separate runtime and can be descheduled by parallel
+        // process/filesystem tests before it reaches the blocked cleanup phase.
+        let fixture_timeout = Duration::from_secs(10);
         for block_at in [
             "terminal-cleanup-committed",
             "remove ambient download marker",
@@ -16581,12 +16585,12 @@ mod tests {
                 }
             });
             let download_id = id_receiver
-                .recv_timeout(Duration::from_secs(1))
+                .recv_timeout(fixture_timeout)
                 .unwrap_or_else(|error| panic!("start must return its admitted ID: {error:?}; cleanup fixture={block_at}; {}", admission.describe(worker_runtime.is_finished())));
             drop(physical_guard);
             reached
-                .recv_timeout(Duration::from_secs(1))
-                .expect("Worker must reach terminal cleanup");
+                .recv_timeout(fixture_timeout)
+                .unwrap_or_else(|error| panic!("Worker must reach terminal cleanup: {error:?}; cleanup fixture={block_at}; {}", admission.describe(worker_runtime.is_finished())));
             assert!(!client.pause_download(&download_id).await.unwrap());
             assert_eq!(
                 client.downloads.read().await[&download_id].status,
@@ -16594,7 +16598,7 @@ mod tests {
             );
             release_sender.send(()).unwrap();
 
-            tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::time::timeout(fixture_timeout, async {
                 loop {
                     client.observe_finished_download_tasks().await;
                     if client.downloads.read().await[&download_id].status

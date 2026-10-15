@@ -1,206 +1,50 @@
 # Pumas Library
 
-![License](https://img.shields.io/badge/license-MIT-purple.svg)
-![Rust](https://img.shields.io/badge/rust-1.92.0-orange.svg)
-![Electron](https://img.shields.io/badge/electron-39-blue.svg)
+Share one local model library across your applications, without keeping duplicate copies of the same weights.
+
+Pumas Library combines a reusable Rust backend with an optional desktop app. Search Hugging Face, resume downloads, import existing files, and keep model metadata and runtime requirements alongside the files they describe. Applications can embed the Rust API or connect to the local HTTP/JSON-RPC server.
 
 ![Pumas Library](https://github.com/user-attachments/assets/be18cffc-b4fe-418b-a3b4-034ee0b35060)
 
-Pumas Library is a reusable Rust backend with an optional desktop GUI for keeping AI model files,
-metadata, downloads, and local-runtime configuration in one place.
+## Run the desktop app
 
-Its main capabilities are:
-
-- an SQLite-indexed local model library with full-text search;
-- Hugging Face search, metadata lookup, and resumable downloads;
-- local import, integrity reconciliation, and repair;
-- typed resolution of model artifacts and runtime requirements; and
-- optional local inference integrations for Ollama, llama.cpp, ONNX Runtime,
-  and Torch.
-
-## Repository Layout
-
-| Path | Responsibility |
-| --- | --- |
-| `rust/crates/pumas-core` | Model library, persistence, downloads, runtime profiles, and public Rust API |
-| `rust/crates/pumas-rpc` | Standalone local HTTP/JSON-RPC server, also used by the desktop app |
-| `rust/crates/pumas-app-manager` | Optional runtime installation and process integration |
-| `rust/crates/pumas-uniffi` | Experimental UniFFI adapter and generators |
-| `frontend` | React renderer |
-| `electron` | Desktop main process, preload boundary, and packaging |
-| `torch-server` | Optional Python Torch inference sidecar |
-
-See [Architecture](docs/ARCHITECTURE.md) for process and ownership details.
-
-## Desktop Quick Start
-
-For a saved library that needs attention after an upgrade, see
-[Opening an older library](docs/library-upgrade.md).
-
-The root launchers require Node and delegate every action to one shared
-implementation, so Bash and PowerShell use the same parsing, environment, and
-exit-code contract.
+Use Node.js 24.15.0, Rust 1.92.0 and Corepack, plus CMake and your platform's C/C++ build tools for native dependencies. The workspace pins pnpm in [package.json](package.json). From a checkout:
 
 ```bash
+git clone https://github.com/MrScripty/Pumas-Library.git
+cd Pumas-Library
 ./launcher.sh --install
 ./launcher.sh --build
 ./launcher.sh --run
 ```
 
-On Windows:
+On Windows, use `launcher.ps1` with the same flags. For a release build, use `--build-release` followed by `--run-release`. The launcher installs workspace packages; Rust, Node and Corepack must already be available. See [development setup](docs/DEVELOPMENT.md#setup) for platform details.
 
-```powershell
-.\launcher.ps1 --install
-.\launcher.ps1 --build
-.\launcher.ps1 --run
-```
+Your library root contains `launcher-data/` and `shared-resources/`; models live in `shared-resources/models/`. Set `PUMAS_LAUNCHER_ROOT` to choose a root. Read [the upgrade guide](docs/library-upgrade.md) before opening an older library.
 
-Release-mode local builds use `--build-release` followed by `--run-release`.
-Run either launcher with `--help` for the complete command and exit-code
-contract. Unsupported operating systems are rejected explicitly. The
-`--release-smoke` action owns its child process tree and treats a missed
-maximum/grace/force deadline as failure rather than leaving the smoke running.
+## Run just the backend
 
-Inference integrations are included in the default desktop build. Build the
-model-library-only variant with:
-
-```bash
-PUMAS_INFERENCE_PLUGINS=false ./launcher.sh --build-release
-```
-
-`PUMAS_LAUNCHER_ROOT=/path/to/root` selects a specific library root. A launcher
-root contains `launcher-data/` and `shared-resources/`; the model library itself
-lives under `shared-resources/models/`.
-
-## Standalone Backend
-
-Build and run without Node, Corepack, frontend assets or Electron:
+Use Rust 1.92.0, CMake and your platform's C/C++ build tools. No Node, frontend assets or Electron are needed:
 
 ```bash
 cargo build --manifest-path rust/Cargo.toml -p pumas-rpc --release
 ./rust/target/release/pumas-rpc --launcher-root /path/to/pumas --port 8080
 ```
 
-Use `--no-default-features` on the Cargo build to omit RPC inference-plugin
-integration. GUI selection does not disable backend model-library operations.
-The RPC listener accepts loopback addresses only; standalone does not imply
-remote-network exposure. Its port and root can be selected with `--help`.
+The listener is loopback-only. Add `--no-default-features` to the build to omit inference-plugin integration. Inference runtimes and their native libraries have separate setup requirements; a working model catalog does not require every runtime.
 
-Add `--features s3` when building the RPC backend to enable **Import from S3**
-in Model Manager. This optional dialog imports one pinned GGUF with optional
-explicitly selected data/text auxiliaries
-using an explicit HTTPS endpoint, bucket, region, addressing style, exact object
-key, immutable VersionId and expected SHA-256. It observes the backend-owned job
-and registered result; closing the dialog leaves admitted work running. The
-dialog defaults to anonymous access and accepts explicit one-use access key, secret
-and optional session token. Credential inputs clear on submit or close and are
-never saved or refreshed. See the [RPC contract](rust/crates/pumas-rpc/README.md#explicit-s3-model-import)
-for per-file pins, aggregate staging progress, cancellation and retained-work limits.
+## Integrate it
 
-The optional Rust reader also exposes `S3Reader::enumerate_prefix` with explicit
-`S3PrefixLimits`. It returns complete, ordered immutable object observations only
-after bounded pagination and conditional HEAD pinning. Missing/racing objects,
-ambiguous completion or exhausted limits return errors. These observations are
-not an atomic package snapshot: callers still choose logical paths, provide
-SHA-256 evidence and use the existing explicit manifest/import API. Discovery
-does not download or import content. See the [acquisition contract](docs/contracts/artifact-acquisition.md#6-s3-and-other-source-readers).
-S3-enabled distributions require the [S3 release notices](docs/release-attribution/0.7.0-s3/README.md).
+Use `pumas-library` from [pumas-core](rust/crates/pumas-core) for an embedded library, or [pumas-rpc](rust/crates/pumas-rpc/README.md) for a separate process. One `PumasApi` owns a library root; use `PumasLocalClient` to connect to an existing owner. Native bindings are experimental: check their [support status](docs/native-bindings.md) before choosing one.
 
-The optional Node launcher exposes the same backend-only selection:
+Linux x64 is the primary runtime target. Windows x64 and macOS arm64 build artifacts exist, with narrower runtime qualification. See [release guidance](RELEASING.md).
 
-```bash
-PUMAS_GUI=false ./launcher.sh --build-release
-PUMAS_GUI=false ./launcher.sh --run-release -- --launcher-root /path/to/pumas
-```
+## Go deeper
 
-`PUMAS_GUI` defaults to `true` and accepts only `true` or `false`. Select it
-for each launcher invocation. With `false`, build/install/test omit GUI packages
-and run requires only the selected existing backend binary; it never starts
-Electron or builds missing artifacts. `PUMAS_INFERENCE_PLUGINS` is independent
-and controls the backend build configuration. `--release-smoke` remains a
-GUI-only check and is explicitly unsupported in headless mode.
+- [Documentation](docs/README.md): APIs, runtime integrations, optional S3 import and contracts
+- [Architecture](docs/ARCHITECTURE.md)
+- [Development and verification](docs/DEVELOPMENT.md)
+- [Contributing](CONTRIBUTING.md) · [Security](docs/SECURITY.md)
 
-## Rust Usage
+[MIT License](LICENSE).
 
-The backend does not depend on React, Electron, or a running GUI. Applications
-can embed the Rust crate directly; separate processes can use the standalone
-RPC server. Native file dialogs and window controls belong only to the GUI,
-not to the reusable model-library contract.
-
-`PumasApi` is the owning API. Construction fails when another process already
-owns the same launcher root. Use `PumasLocalClient` to connect to a running
-owner, or `PumasReadOnlyLibrary` for indexed read-only access.
-
-```rust
-use pumas_library::{PumasApi, Result};
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    let api = PumasApi::builder("/path/to/pumas")
-        .auto_create_dirs(true)
-        .build()
-        .await?;
-
-    for model in api.list_models().await? {
-        println!("{}", model.official_name);
-    }
-
-    Ok(())
-}
-```
-
-The crate is currently consumed from this workspace:
-
-```toml
-[dependencies]
-pumas-library = { path = "rust/crates/pumas-core" }
-```
-
-Download mutations also acquire advisory exclusion on the physical model-library
-root. Independent HF clients contend even when using different destinations;
-one client's active downloads share the grant. Idle and paused clients release
-it. Contention returns `DownloadRootBusy` without automatic retry, including when
-startup requires download restoration. Read-only runtime progress remains
-available but may be stale. This does not lock unrelated imports or external
-writers; native root-exclusion behavior is verified on Linux only.
-
-## Verification
-
-```bash
-./scripts/rust/check.sh
-npm run -w frontend lint
-npm run -w frontend check:types
-npm run -w frontend test:run
-npm run -w electron lint
-npm run -w electron test
-npm run test:launcher
-python3 -m unittest discover -s torch-server/tests
-```
-
-Use `./launcher.sh --test` for the launcher-owned aggregate flow. A passing
-build or startup smoke is not evidence for every runtime or release contract;
-see [Development](docs/DEVELOPMENT.md) and [Releasing](RELEASING.md).
-
-## Platform and Binding Status
-
-Linux x64 is the primary development and runtime target. CI also compiles and
-packages Windows x64 and macOS arm64 artifacts, but runtime evidence on those
-platforms is narrower. Launcher process-tree behavior is verified locally on
-Linux; equivalent required-real Windows and macOS evidence remains pending.
-
-Binding generators exist for Python, Kotlin, Swift, Ruby, and C#, with a local
-C# smoke harness. These surfaces are not yet backed by a complete host/runtime
-support matrix. The Rustler crate is experimental and does not currently expose
-the core library API. See [Native bindings](docs/native-bindings.md).
-
-## Documentation
-
-- [Documentation index](docs/README.md)
-- [Contributing](CONTRIBUTING.md)
-- [Releasing](RELEASING.md)
-- [Security](docs/SECURITY.md)
-- [Current standards audit](docs/audits/current-standards-2026-09-03/README.md)
-
-## License
-
-Pumas Library is licensed under the [MIT License](LICENSE).

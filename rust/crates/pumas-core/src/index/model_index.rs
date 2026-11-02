@@ -755,6 +755,36 @@ impl ModelIndex {
         Ok(result)
     }
 
+    /// Bounded read for retained-download candidate discovery. Repository JSON
+    /// remains the existing catalog projection; this creates no extra authority.
+    pub(crate) fn retained_download_candidates(
+        &self,
+        repo_id: &str,
+        limit: u32,
+        metadata_limit: u64,
+    ) -> Result<Vec<ModelRecord>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".into(),
+            source: None,
+        })?;
+        let mut statement = conn.prepare(
+            "SELECT id, path, cleaned_name, official_name, model_type,
+            tags_json, hashes_json, metadata_json, updated_at FROM models
+            WHERE json_extract(metadata_json,'$.repo_id') = ?1 ORDER BY id LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![repo_id, limit], |row| {
+            let metadata: String = row.get(7)?;
+            if metadata.len() as u64 > metadata_limit {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "Candidate metadata exceeds the recovery limit".into(),
+                ));
+            }
+            Self::row_to_record(row)
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
     /// Return every model in stable order without applying a pagination cap.
     ///
     /// Unlike the search path, this complete-list contract propagates any row

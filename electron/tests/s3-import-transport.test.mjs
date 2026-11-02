@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import log from 'electron-log';
 import { PythonBridge } from '../dist/python-bridge.js';
 import { receiveS3ImportRpc, S3_RPC_FAILURE, S3_RPC_RESPONSE_LIMIT } from '../dist/s3-import-rpc.js';
@@ -89,7 +90,7 @@ test('S3 local transport stays direct despite a proxy-configured global agent an
     const http = require('node:http');
     const log = require('electron-log'); log.transports.file.level = false;
     http.globalAgent = new http.Agent({proxyEnv:{HTTP_PROXY:'http://127.0.0.1:${proxy.address().port}'}});
-    const {PythonBridge} = require(${JSON.stringify(new URL('../dist/python-bridge.js', import.meta.url).pathname)});
+    const {PythonBridge} = require(${JSON.stringify(fileURLToPath(new URL('../dist/python-bridge.js', import.meta.url)))});
     const bridge = new PythonBridge({port:${direct.address().port},debug:false,rustBinaryPath:process.execPath,launcherRoot:process.cwd()});
     bridge.port=${direct.address().port}; bridge.process={};
     (async () => {
@@ -98,9 +99,10 @@ test('S3 local transport stays direct despite a proxy-configured global agent an
     })().catch(() => {process.exitCode=1;});
   `;
   try {
-    const child = spawn(process.execPath, ['-e', script], { cwd: new URL('..', import.meta.url), stdio: ['ignore', 'ignore', 'ignore'] });
+    const child = spawn(process.execPath, ['-e', script], { cwd: new URL('..', import.meta.url), stdio: ['ignore', 'ignore', 'pipe'] });
+    let diagnostic = ''; child.stderr.on('data', chunk => { diagnostic += chunk; });
     const [code] = await once(child, 'close');
-    assert.equal(code, 0); assert.equal(calls, 2); assert.equal(forwarded, 0);
+    assert.equal(code, 0, diagnostic); assert.equal(calls, 2); assert.equal(forwarded, 0);
   } finally {
     direct.closeAllConnections(); proxy.closeAllConnections();
     await Promise.all([new Promise(resolve => direct.close(resolve)), new Promise(resolve => proxy.close(resolve))]);

@@ -83,6 +83,12 @@ struct HeldParent {
     binding: Identity,
 }
 
+#[derive(Clone)]
+struct VerifiedBinding {
+    identity: Identity,
+    receipt: VerifiedFile,
+}
+
 struct HeldWorkspace {
     directory: Dir,
     binding: Identity,
@@ -90,6 +96,9 @@ struct HeldWorkspace {
     _execution_lease: Arc<dyn Send + Sync>,
     parents: Arc<Mutex<BTreeMap<PathBuf, Arc<HeldParent>>>>,
     sealed: Mutex<bool>,
+    // First verification belongs to acquisition. Later handoffs retain that
+    // evidence and observe the binding; they never repeat the content check.
+    verified: Mutex<BTreeMap<(String, bool), VerifiedBinding>>,
 }
 
 /// Equality-only physical binding persisted by a reservation owner. Deserializing
@@ -438,6 +447,7 @@ impl AcquisitionWorkspace {
                 _execution_lease: execution_lease,
                 parents: Arc::new(Mutex::new(BTreeMap::new())),
                 sealed: Mutex::new(false),
+                verified: Mutex::new(BTreeMap::new()),
             }),
             locator,
         })
@@ -547,12 +557,29 @@ impl AcquisitionWorkspace {
     }
 
     pub(crate) fn open_part(&self, path: &str, append: bool) -> Result<std::fs::File> {
+        self.open_part_checked(path, append, false)
+    }
+
+    /// Start only an empty partial; append mode prevents destructive truncation
+    /// even if another writer changes it after the emptiness observation.
+    pub(crate) fn open_empty_part(&self, path: &str) -> Result<std::fs::File> {
+        self.open_part_checked(path, false, true)
+    }
+
+    fn open_part_checked(&self, path: &str, append: bool, preserve: bool) -> Result<std::fs::File> {
         self.require_writable()?;
         let (parent, name) = self.parent(path, true)?;
+        // Starting a new owned write invalidates evidence for the previous
+        // acquisition, even when truncation preserves the inode and length.
+        self.held
+            .verified
+            .lock()
+            .map_err(|_| changed())?
+            .remove(&(path.into(), true));
         let mut options = options();
         options.read(true);
-        if append {
-            options.append(true);
+        if append || preserve {
+            options.append(true).create(preserve);
         } else {
             options.write(true).create(true);
         }
@@ -560,7 +587,10 @@ impl AcquisitionWorkspace {
         if !file.metadata()?.is_file() {
             return Err(changed());
         }
-        if !append {
+        if preserve && file.metadata()?.len() != 0 {
+            return Err(changed());
+        }
+        if !append && !preserve {
             file.set_len(0)?;
         }
         self.validate()?;
@@ -651,6 +681,11 @@ impl AcquisitionWorkspace {
     pub(crate) fn remove_part(&self, path: &str) -> Result<()> {
         self.require_writable()?;
         let (parent, name) = self.parent(path, false)?;
+        self.held
+            .verified
+            .lock()
+            .map_err(|_| changed())?
+            .remove(&(path.into(), true));
         match parent.remove_file(staging_path(&name)) {
             Ok(()) => sync_directory(&parent)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -660,37 +695,62 @@ impl AcquisitionWorkspace {
     }
 
     pub(crate) fn verify_file(&self, file: &ArtifactFile, partial: bool) -> Result<VerifiedFile> {
-        self.observe_file(file, partial, true)
-    }
-
-    fn observe_file(
-        &self,
-        file: &ArtifactFile,
-        partial: bool,
-        enforce_manifest: bool,
-    ) -> Result<VerifiedFile> {
         let (parent, name) = self.parent(file.logical_path(), false)?;
         let name = if partial { staging_path(&name) } else { name };
         let mut read_options = options();
         read_options.read(true);
-        let mut verification_options = options();
-        verification_options.read(true);
-        // Windows FlushFileBuffers requires GENERIC_WRITE. Hash and flush the
-        // same held descriptor without creating/truncating or changing access
-        // policy; the later name-binding observation remains read-only.
-        #[cfg(windows)]
-        verification_options.write(true);
-        let mut handle = parent.open_with(&name, &verification_options)?.into_std();
+        let mut handle = parent.open_with(&name, &read_options)?.into_std();
         let before = Metadata::from_file(&handle)?;
         if !before.is_file()
-            || (enforce_manifest
-                && file
-                    .expected_size()
-                    .is_some_and(|size| size != before.len()))
+            || (file
+                .expected_size()
+                .is_some_and(|size| size != before.len()))
         {
             return Err(changed());
         }
         let binding = identity(&before)?;
+        let key = (file.logical_path().to_owned(), partial);
+        {
+            let cached = self
+                .held
+                .verified
+                .lock()
+                .map_err(|_| changed())?
+                .get(&key)
+                .cloned();
+            if let Some(VerifiedBinding {
+                identity: original,
+                receipt,
+            }) = cached
+            {
+                let current =
+                    Metadata::from_file(&parent.open_with(&name, &read_options)?.into_std())?;
+                if original != binding
+                    || identity(&current)? != binding
+                    || receipt.bytes != before.len()
+                    || current.len() != before.len()
+                    || file
+                        .expected_sha256()
+                        .is_some_and(|sha| sha.value() != receipt.sha256)
+                {
+                    return Err(changed());
+                }
+                self.validate()?;
+                return Ok(receipt);
+            }
+        }
+        #[cfg(windows)]
+        {
+            // Only first acquisition verification needs FlushFileBuffers and
+            // GENERIC_WRITE. Reusing a receipt requires read access alone.
+            let mut verification_options = options();
+            verification_options.read(true).write(true);
+            handle = parent.open_with(&name, &verification_options)?.into_std();
+            let current = Metadata::from_file(&handle)?;
+            if identity(&current)? != binding || current.len() != before.len() {
+                return Err(changed());
+            }
+        }
         let mut hash = Sha256::new();
         let mut buffer = [0_u8; 64 * 1024];
         loop {
@@ -714,7 +774,7 @@ impl AcquisitionWorkspace {
         {
             return Err(changed());
         }
-        if let Some(expected) = file.expected_sha256().filter(|_| enforce_manifest) {
+        if let Some(expected) = file.expected_sha256() {
             if expected.value() != digest {
                 return Err(PumasError::HashMismatch {
                     expected: expected.value().into(),
@@ -725,16 +785,24 @@ impl AcquisitionWorkspace {
         handle.sync_all()?;
         sync_directory(&parent)?;
         self.validate()?;
-        Ok(VerifiedFile {
+        let receipt = VerifiedFile {
             path: file.logical_path().into(),
             bytes: before.len(),
             sha256: digest,
-        })
+        };
+        self.held.verified.lock().map_err(|_| changed())?.insert(
+            key,
+            VerifiedBinding {
+                identity: binding,
+                receipt: receipt.clone(),
+            },
+        );
+        Ok(receipt)
     }
 
     /// Open the exact verified file through the held directory capability.
-    /// Hashing and identity checks use the returned file handle itself, so a
-    /// consumer can move it to a blocking worker without reopening a path.
+    /// Historical checksums are retained evidence; consumers observe regular
+    /// files, size and current physical bindings without content verification.
     pub(crate) fn open_verified_readonly(
         &self,
         file: &ArtifactFile,
@@ -747,38 +815,29 @@ impl AcquisitionWorkspace {
         let (parent, name) = self.parent(file.logical_path(), false)?;
         let mut open_options = options();
         open_options.read(true);
-        let mut handle = parent.open_with(&name, &open_options)?.into_std();
+        let handle = parent.open_with(&name, &open_options)?.into_std();
         let before = Metadata::from_file(&handle)?;
         if !before.is_file() || before.len() != expected.bytes {
             return Err(changed());
         }
         let binding = identity(&before)?;
-        let mut hasher = Sha256::new();
-        let mut buffer = [0_u8; 64 * 1024];
-        loop {
-            let read = handle.read(&mut buffer)?;
-            if read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..read]);
+        if self
+            .held
+            .verified
+            .lock()
+            .map_err(|_| changed())?
+            .get(&(file.logical_path().into(), false))
+            .is_some_and(|original| original.identity != binding)
+        {
+            return Err(changed());
         }
-        let digest = hex::encode(hasher.finalize());
-        let after = Metadata::from_file(&handle)?;
         let current = Metadata::from_file(&parent.open_with(&name, &open_options)?.into_std())?;
-        if digest != expected.sha256
-            || file
-                .expected_sha256()
-                .is_some_and(|selected| selected.value() != digest)
-            || identity(&after)? != binding
-            || identity(&current)? != binding
-            || before.len() != after.len()
+        if identity(&current)? != binding
             || before.len() != current.len()
-            || before.modified()? != after.modified()?
             || before.modified()? != current.modified()?
         {
             return Err(changed());
         }
-        handle.seek(SeekFrom::Start(0))?;
         self.validate()?;
         Ok(handle)
     }
@@ -786,28 +845,45 @@ impl AcquisitionWorkspace {
     pub(crate) fn publish_part(
         &self,
         file: &ArtifactFile,
-        compare_existing: bool,
+        existing_without_receipt: bool,
     ) -> Result<VerifiedFile> {
         self.require_writable()?;
         let staged = self.verify_file(file, true)?;
         let (parent, name) = self.parent(file.logical_path(), false)?;
-        if compare_existing {
-            let current = self.observe_file(file, false, false)?;
-            if current != staged {
-                return Err(PumasError::Validation {
-                    field: "download.integrity".into(),
-                    message: format!("Existing selected file {} differs from the immutable source artifact; preserving both files for reconciliation", file.logical_path()),
-                });
-            }
-            self.remove_part(file.logical_path())?;
-        } else {
-            if self.file_len(file.logical_path(), false)?.is_some() {
-                return Err(changed());
-            }
-            parent.rename(staging_path(&name), &parent, name)?;
-            sync_directory(&parent)?;
+        if existing_without_receipt {
+            return Err(PumasError::Validation {
+                field: "download.integrity".into(),
+                message: format!("Existing selected file {} has no verified receipt or supplied checksum; preserving both files for reconciliation", file.logical_path()),
+            });
         }
-        self.verify_file(file, false)
+        if self.file_len(file.logical_path(), false)?.is_some() {
+            return Err(changed());
+        }
+        parent.rename(staging_path(&name), &parent, &name)?;
+        sync_directory(&parent)?;
+        let mut read_options = options();
+        read_options.read(true);
+        let current = parent.open_with(&name, &read_options)?.into_std();
+        let binding = identity(&Metadata::from_file(&current)?)?;
+        if self
+            .held
+            .verified
+            .lock()
+            .map_err(|_| changed())?
+            .get(&(file.logical_path().into(), true))
+            .is_none_or(|original| original.identity != binding)
+        {
+            return Err(changed());
+        }
+        self.held.verified.lock().map_err(|_| changed())?.insert(
+            (file.logical_path().into(), false),
+            VerifiedBinding {
+                identity: binding,
+                receipt: staged.clone(),
+            },
+        );
+        self.validate()?;
+        Ok(staged)
     }
 
     pub(crate) fn seal(&self, manifest: &ArtifactManifest) -> Result<Vec<VerifiedFile>> {
@@ -825,13 +901,31 @@ impl AcquisitionWorkspace {
         manifest: &ArtifactManifest,
         receipts: &[VerifiedFile],
     ) -> Result<()> {
-        let observed: Vec<_> = manifest
-            .files()
-            .iter()
-            .map(|file| self.verify_file(file, false))
-            .collect::<Result<_>>()?;
-        if observed != receipts {
+        if manifest.files().len() != receipts.len() {
             return Err(changed());
+        }
+        for (selected, receipt) in manifest.files().iter().zip(receipts) {
+            if receipt.path != selected.logical_path()
+                || receipt.sha256.len() != 64
+                || !receipt.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+                || selected
+                    .expected_size()
+                    .is_some_and(|size| size != receipt.bytes)
+                || selected
+                    .expected_sha256()
+                    .is_some_and(|sha| sha.value() != receipt.sha256)
+            {
+                return Err(changed());
+            }
+            let handle = self.open_verified_readonly(selected, receipt)?;
+            let binding = identity(&Metadata::from_file(&handle)?)?;
+            self.held.verified.lock().map_err(|_| changed())?.insert(
+                (selected.logical_path().into(), false),
+                VerifiedBinding {
+                    identity: binding,
+                    receipt: receipt.clone(),
+                },
+            );
         }
         Ok(())
     }
@@ -958,17 +1052,15 @@ mod tests {
         workspace.verify_receipts(&manifest, &receipts).unwrap();
         assert!(workspace.open_part("payload.bin", false).is_err());
         assert!(!temp.path().join("payload.bin.part").exists());
-        // Reinspection keeps size/digest refusals; no overwrite or truncation is
+        // Reinspection keeps size/binding refusals; no overwrite or truncation is
         // permitted merely because the Windows descriptor can flush.
         std::fs::write(&path, b"WRONG-SIZE").unwrap();
         assert!(matches!(workspace.verify_receipts(&manifest, &receipts),
             Err(PumasError::Validation { ref field, .. }) if field == "acquisition.workspace"));
         assert_eq!(std::fs::read(&path).unwrap(), b"WRONG-SIZE");
         std::fs::write(&path, b"EVIL").unwrap();
-        assert!(matches!(
-            workspace.verify_receipts(&manifest, &receipts),
-            Err(PumasError::HashMismatch { .. })
-        ));
+        workspace.verify_receipts(&manifest, &receipts).unwrap();
+        assert_eq!(receipts[0].sha256, hex::encode(Sha256::digest(b"DATA")));
         assert_eq!(std::fs::read(&path).unwrap(), b"EVIL");
         std::fs::write(&path, b"DATA").unwrap();
         current.store(false, Ordering::Release);
@@ -1008,8 +1100,12 @@ mod tests {
     }
 
     #[test]
-    fn existing_file_mismatches_preserve_both_files_as_integrity_refusals() {
-        for existing in [b"EVIL".as_slice(), b"WRONG-SIZE".as_slice()] {
+    fn unverified_existing_files_preserve_both_files_for_reconciliation() {
+        for existing in [
+            b"DATA".as_slice(),
+            b"EVIL".as_slice(),
+            b"WRONG-SIZE".as_slice(),
+        ] {
             let temp = tempfile::tempdir().unwrap();
             let workspace = AcquisitionWorkspace::from_capability(
                 crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
@@ -1038,6 +1134,71 @@ mod tests {
                 b"DATA"
             );
         }
+    }
+
+    #[test]
+    fn rewriting_a_verified_partial_requires_new_download_verification() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = AcquisitionWorkspace::from_capability(
+            crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+            WorkspaceIdentity {
+                root_identity: "rewritten-partial".into(),
+                relative_target: "stage".into(),
+            },
+            Arc::new(()),
+            || Ok(()),
+        )
+        .unwrap();
+        let manifest = verification_manifest(b"DATA");
+        let selected = &manifest.files()[0];
+        let mut part = workspace.open_part("payload.bin", false).unwrap();
+        part.write_all(b"DATA").unwrap();
+        drop(part);
+        workspace.verify_file(selected, true).unwrap();
+        let mut part = workspace.open_part("payload.bin", false).unwrap();
+        part.write_all(b"EVIL").unwrap();
+        drop(part);
+        assert!(
+            matches!(workspace.publish_part(selected, false), Err(PumasError::HashMismatch { expected, actual })
+            if expected == hex::encode(Sha256::digest(b"DATA")) && actual == hex::encode(Sha256::digest(b"EVIL")))
+        );
+        assert!(!temp.path().join("payload.bin").exists());
+    }
+
+    #[test]
+    fn reopened_verified_handoff_keeps_checksum_without_rehashing() {
+        let temp = tempfile::tempdir().unwrap();
+        let manifest = verification_manifest(b"DATA");
+        let path = temp.path().join("payload.bin");
+        std::fs::write(&path, b"EVIL").unwrap();
+        let original_permissions = std::fs::metadata(&path).unwrap().permissions();
+        let mut readonly = original_permissions.clone();
+        readonly.set_readonly(true);
+        std::fs::set_permissions(&path, readonly).unwrap();
+        let receipts = vec![VerifiedFile {
+            path: "payload.bin".into(),
+            bytes: 4,
+            sha256: hex::encode(Sha256::digest(b"DATA")),
+        }];
+        let workspace = AcquisitionWorkspace::from_capability(
+            crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+            WorkspaceIdentity {
+                root_identity: "reopened-handoff".into(),
+                relative_target: "stage".into(),
+            },
+            Arc::new(()),
+            || Ok(()),
+        )
+        .unwrap();
+        let observed = workspace
+            .verify_receipts(&manifest, &receipts)
+            .and_then(|()| workspace.seal(&manifest));
+        std::fs::set_permissions(&path, original_permissions).unwrap();
+        assert_eq!(observed.unwrap(), receipts);
+        assert_eq!(
+            std::fs::read(temp.path().join("payload.bin")).unwrap(),
+            b"EVIL"
+        );
     }
 
     #[cfg(windows)]
@@ -1355,6 +1516,33 @@ mod tests {
         assert!(junction.exists());
         drop(grant);
         std::fs::remove_dir(junction).unwrap();
+    }
+
+    #[test]
+    fn fresh_remote_partial_never_truncates_existing_or_late_arriving_bytes() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let workspace = AcquisitionWorkspace::from_capability(
+            crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+            WorkspaceIdentity {
+                root_identity: "fixture".into(),
+                relative_target: "stage".into(),
+            },
+            Arc::new(()),
+            || Ok(()),
+        )
+        .unwrap();
+        let mut handle = workspace.open_empty_part("payload.bin").unwrap();
+        std::fs::write(temp.path().join("payload.bin.part"), b"DATA").unwrap();
+        assert!(workspace.open_empty_part("payload.bin").is_err());
+        assert_eq!(
+            std::fs::read(temp.path().join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+        std::io::Write::write_all(&mut handle, b"TAIL").unwrap();
+        assert_eq!(
+            std::fs::read(temp.path().join("payload.bin.part")).unwrap(),
+            b"DATATAIL"
+        );
     }
 
     #[test]

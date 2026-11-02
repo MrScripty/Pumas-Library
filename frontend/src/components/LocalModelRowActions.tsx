@@ -9,11 +9,12 @@ import type { LocalModelRowState } from './LocalModelRowState';
 interface LocalModelRowActionsProps {
   model: ModelInfo;
   isLoading: boolean;
+  isDeleting?: boolean;
   rowState: LocalModelRowState;
   selectedAppId: string | null;
   servedStatus: ServedModelStatus | null;
   onCancelDownload?: (downloadKey: string) => void;
-  onDeleteModel?: (modelId: string) => void;
+  onDeleteModel?: (modelId: string) => void | Promise<void>;
   onConvertModel?: (model: ModelInfo) => void;
   onPauseDownload?: (downloadKey: string) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
@@ -26,6 +27,7 @@ interface LocalModelRowActionsProps {
 export function LocalModelRowActions({
   model,
   isLoading,
+  isDeleting,
   rowState,
   selectedAppId,
   servedStatus,
@@ -60,6 +62,7 @@ export function LocalModelRowActions({
         />
       ) : (
         <LocalModelInstalledActions
+          isDeleting={isDeleting}
           model={model}
           isLoading={isLoading}
           rowState={rowState}

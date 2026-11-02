@@ -1,17 +1,17 @@
 # Download location and failed-attempt reconciliation
 
-- Status: **Planned**; implementation has not started.
+- Status: **Verifying**; the recovery implementation and Linux desktop path are complete; required composed/native evidence remains open.
 - Created: 2026-10-10.
 - Canonical identity: `docs/plans/download-location-reconciliation/plan.md`.
 - Admission operation for a subsequent implementation request: `start`.
-- Current phase: planning complete; awaiting implementation instruction.
-- Exactly one next slice: **M1 — usable recovery through the core and desktop**.
+- Current phase: verification and Linux review-candidate delivery.
+- Exactly one next slice: **M2 — remaining composed custody and interruption evidence**.
 - Objective acceptance: **pending**. Existing guard tests support the design;
   they do not satisfy this plan's new acceptance claims.
 - Responsible implementation and integration owner: the agent executing this
   selected plan, acting for the repository maintainer. Product owner: Jeremy.
-- Planning authority: the user's request to create this remediation plan.
-  This document neither starts implementation nor authorizes live-library repair.
+- Execution authority: the user's explicit “implement it” instruction on 2026-10-11.
+  Operation: `start`. Live-library repair remains an explicit application action, not a development test.
 
 ## Objective
 
@@ -92,14 +92,15 @@ branches. Each milestone's exact allowed files are in
 
 | Milestone | Coherent outcome | Required gate | State |
 | --- | --- | --- | --- |
-| M1 | A real desktop user can inspect a retained legacy Error, keep the existing local files, and resolve the obsolete attempt through one core owner and atomic persistence transaction. Includes the authoritative contract/ADR, scoped format upgrade, typed RPC/IPC, generated consumers and accessible UI. | C2/C3/C5/C7 plus local resolution portions of C4/C6: tiny authored fixtures through actual core/storage and desktop producer/consumer paths, immediate refresh, reopen, precise negative cases and publisher outcomes. Composed/process portions remain for M2. No production placeholder or UI-only success. | Planned |
-| M2 | The shared-workspace invariant holds across downloader, watcher, classification and sibling mutations; interrupted resolution converges without losing custody or files. | C1, C4, C6, C8: controlled multi-file transfer, real reconciliation, sibling checks, process interruption and supported-platform evidence. Preserve previously passing guard tests. | Planned |
-| M3 | Full applicable suites pass and a rebuilt Linux Debian package performs the complete recovery workflow. | C9–C10, all other claims satisfied, scoped standards review closed, release provenance and checksum recorded. | Planned |
+| M1 | A real desktop user can inspect a retained legacy Error, keep the existing local files, and resolve the obsolete attempt through one core owner and atomic persistence transaction. Includes the authoritative contract/ADR, scoped format upgrade, typed RPC/IPC, generated consumers and accessible UI. | C2/C3/C5/C7 plus local resolution portions of C4/C6: tiny authored fixtures through actual core/storage and desktop producer/consumer paths, immediate refresh, reopen, precise negative cases and publisher outcomes. Composed/process portions remain for M2. No production placeholder or UI-only success. | Verifying |
+| M2 | The shared-workspace invariant holds across downloader, watcher, classification and sibling mutations; interrupted resolution converges without losing custody or files. | C1, C4, C6, C8: controlled multi-file transfer, real reconciliation, sibling checks, process interruption and supported-platform evidence. Preserve previously passing guard tests. | Verifying |
+| M3 | Full applicable suites pass and a rebuilt Linux Debian package performs the complete recovery workflow. | C9–C10, all other claims satisfied, scoped standards review closed, release provenance and checksum recorded. | Verifying |
 
 M1 begins with the storage-version compatibility gate in C5, including actual
 older pinned consumers and the upgraded-server client path. Prove that gate
-before building or expanding the recovery UI. The review follow-up transfers and
-amends this plan only; M1 and C1–C10 remain Planned/pending.
+before building or expanding the recovery UI. Implementation evidence is recorded in [M1](reports/m1-evidence.md),
+[M2](reports/m2-evidence.md) and [M3](reports/m3-evidence.md). Missing composed or
+native results remain pending; implementation is not full objective acceptance.
 
 M1 is deliberately vertical because the observed gap is unusable product recovery.
 M2 adds independent concurrency/failure evidence after that path exists. M3 proves

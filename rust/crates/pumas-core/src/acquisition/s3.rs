@@ -491,7 +491,8 @@ impl S3ObjectSelection {
     }
 
     /// Project checked protocol bytes into the existing lifecycle's streaming
-    /// boundary. Continuation is supplied only by its live prefix owner.
+    /// boundary. A selected publisher digest permits reconstructed prefixes;
+    /// conditional/versioned reads still enforce this exact S3 selection.
     pub(crate) async fn open_acquisition(
         &self,
         resume: u64,
@@ -499,14 +500,18 @@ impl S3ObjectSelection {
         transfer_deadline: Option<tokio::time::Instant>,
     ) -> crate::Result<super::http::HttpArtifactResponse> {
         let resource = self.acquisition_identity();
-        if resume > 0
-            && !continuation.is_some_and(|proof| {
-                proof.resource == resource
-                    && proof.etag == self.etag
-                    && proof.total == Some(self.size)
-            })
-        {
-            return Err(acquisition_error(S3ReaderError::Changed));
+        if resume > 0 {
+            let admitted = match continuation {
+                Some(proof) => {
+                    proof.resource == resource
+                        && proof.etag == self.etag
+                        && proof.total == Some(self.size)
+                }
+                None => self.manifest.files()[0].expected_sha256().is_some(),
+            };
+            if !admitted {
+                return Err(acquisition_error(S3ReaderError::Changed));
+            }
         }
         let attempt_deadline = tokio::time::Instant::now()
             .checked_add(self.timeout)

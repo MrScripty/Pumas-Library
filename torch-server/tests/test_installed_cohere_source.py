@@ -52,15 +52,15 @@ class InstalledSourceTests(unittest.IsolatedAsyncioTestCase):
     def test_correlation_matches_rust_field_framing_and_original_labels(self):
         _, fd, members, manager = self.stage()
         owner = self.capture(fd, manager, "library/voix-é", "weights")
-        expected = hashlib.sha256(b"pumas-selected-artifact-bytes-v1\0")
+        expected = hashlib.sha256(b"pumas-selected-artifact-layout-v2\0")
         for label in ("library/voix-é", "weights"):
             raw = label.encode()
             expected.update(struct.pack(">Q", len(raw)) + raw)
         for name, raw in sorted(members.items()):
             encoded = name.encode()
             expected.update(struct.pack(">Q", len(encoded)) + encoded)
-            expected.update(struct.pack(">Q", len(raw)) + hashlib.sha256(raw).hexdigest().encode())
-        self.assertEqual(owner.source_id, "pumas-cohere-owned-v1:" + expected.hexdigest())
+            expected.update(struct.pack(">Q", len(raw)))
+        self.assertEqual(owner.source_id, "pumas-cohere-owned-v2:" + expected.hexdigest())
         changed = self.capture(fd, manager, "library/voix-é", "other-artifact")
         self.assertNotEqual(changed.source_id, owner.source_id)
         owner.validate()
@@ -74,6 +74,15 @@ class InstalledSourceTests(unittest.IsolatedAsyncioTestCase):
         manager.runtime_instance_id = "successor-runtime"
         with self.assertRaises(InstalledSourceRefusal):
             source.validate()
+
+    def test_source_correlation_does_not_verify_model_contents(self):
+        root, fd, members, manager = self.stage()
+        owner = self.capture(fd, manager)
+        name = "model.safetensors"
+        (root / name).write_bytes(b"x" * len(members[name]))
+        owner.validate()
+        changed = self.capture(fd, manager)
+        self.assertEqual(changed.source_id, owner.source_id)
 
     def test_retargeted_locator_does_not_select_successor(self):
         root, fd, _, manager = self.stage()
@@ -157,7 +166,7 @@ class InstalledSourceTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(InstalledSourceRefusal):
                 source.validate()
 
-    def test_mutate_and_restore_between_owner_validation_and_sealing_refuses(self):
+    def test_capture_does_not_recheck_historical_sha_and_sealed_view_is_retained(self):
         from loaders.owned_cohere_source import HeldCohereReadSource
 
         root, fd, members, manager = self.stage()
@@ -180,11 +189,13 @@ class InstalledSourceTests(unittest.IsolatedAsyncioTestCase):
 
             before = set(os.listdir("/proc/self/fd"))
             with patch.object(HeldCohereReadSource, "_from_members", side_effect=mutate):
-                with self.assertRaisesRegex(ValueError, "original selected bytes"):
-                    source.model_source(proof)
+                reader = source.model_source(proof)
+            with open(reader.weights_filename(), "rb") as file:
+                self.assertEqual(file.read(), b"x" * len(baseline))
+            self.assertEqual(weights.read_bytes(), baseline)
+            source.validate()
+            reader.close()
             self.assertEqual(set(os.listdir("/proc/self/fd")), before)
-            self.assertIsNone(source._reader)
-            source.validate()  # Restored originals cannot rescue the failed capture.
             source.release(proof)
 
     def test_unregistered_policy_and_direct_constructor_cannot_mint_source_proof(self):

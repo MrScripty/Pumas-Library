@@ -1417,7 +1417,7 @@ async fn unreadable_download_state_disables_downloads_without_blocking_startup()
     let _guard = RegistryTestGuard::new(temp_dir.path());
     let store = temp_dir.path().join("launcher-data").join("downloads.json");
     std::fs::create_dir_all(store.parent().unwrap()).unwrap();
-    let saved = br#"{"schema_version":7,"acquisitions":{},"consumer_receipts":{},"downloads":[],"recovery_revocations":{},"lifecycle_quarantines":{},"admission_attempts":{},"queue_admissions":{},"released_queue_admissions":{},"hf_model_partition_version":6}"#;
+    let saved = br#"{"schema_version":7,"acquisitions":{},"consumer_receipts":{},"downloads":[],"recovery_revocations":{},"lifecycle_quarantines":{},"admission_attempts":{},"queue_admissions":{},"released_queue_admissions":{},"field_from_a_future_pumas":1}"#;
     std::fs::write(&store, saved).unwrap();
 
     for _restart in 0..2 {
@@ -1430,7 +1430,7 @@ async fn unreadable_download_state_disables_downloads_without_blocking_startup()
         let status = api.get_status().await.unwrap();
         assert_eq!(status.notices.len(), 1, "{:?}", status.notices);
         assert!(status.notices[0].contains("Downloads are disabled"));
-        assert!(status.notices[0].contains("hf_model_partition_version"));
+        assert!(status.notices[0].contains("field_from_a_future_pumas"));
         // A clean shutdown retains no failed owner claim, so the next start works.
         api.shutdown_instance().await.unwrap();
         assert_eq!(std::fs::read(&store).unwrap(), saved);

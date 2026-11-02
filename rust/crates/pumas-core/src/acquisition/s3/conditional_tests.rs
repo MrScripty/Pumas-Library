@@ -483,8 +483,12 @@ async fn complete_digest_not_etag_controls_receipt_and_verified_handoff() {
 }
 
 #[tokio::test]
-async fn continuation_requires_exact_live_resource_validator_and_total() {
-    let (reader, state) = reader(vec![Reply::head(8, TAG), Reply::range(&BYTES[4..], 4, 8)]);
+async fn continuation_checks_live_evidence_and_allows_digest_qualified_recovery() {
+    let (reader, state) = reader(vec![
+        Reply::head(8, TAG),
+        Reply::range(&BYTES[4..], 4, 8),
+        Reply::range(&BYTES[4..], 4, 8),
+    ]);
     let selected = select(&reader, BYTES).await;
     let valid = super::super::http::HttpResumeEvidence {
         resource: selected.acquisition_identity(),
@@ -492,7 +496,6 @@ async fn continuation_requires_exact_live_resource_validator_and_total() {
         total: Some(8),
     };
     for bad in [
-        None,
         Some(super::super::http::HttpResumeEvidence {
             resource: "other".into(),
             ..valid.clone()
@@ -526,6 +529,24 @@ async fn continuation_requires_exact_live_resource_validator_and_total() {
             .collect::<Vec<_>>(),
         BYTES[4..]
     );
+    let recovered = selected.open_acquisition(4, None, None).await.unwrap();
+    assert!(recovered.resumed);
+    assert_eq!(
+        recovered
+            .body
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .flat_map(Result::unwrap)
+            .collect::<Vec<_>>(),
+        BYTES[4..]
+    );
+    let requests = &state.lock().unwrap().requests;
+    assert_eq!(requests.len(), 3);
+    for request in &requests[1..] {
+        assert_eq!(request.2["range"], "bytes=4-7");
+        assert_eq!(request.2["if-match"], TAG);
+    }
 }
 
 #[tokio::test]
@@ -604,7 +625,7 @@ async fn warm_pause_resumes_only_verified_prefix_and_cancellation_has_no_receipt
 }
 
 #[tokio::test]
-async fn cold_recovery_refuses_changed_manifest_and_restarts_identical_partial_at_zero() {
+async fn cold_recovery_refuses_changed_manifest_and_resumes_identical_partial_at_offset() {
     let state_dir = tempfile::tempdir().unwrap();
     let stage = tempfile::tempdir().unwrap();
     let ws = workspace(stage.path());
@@ -666,8 +687,10 @@ async fn cold_recovery_refuses_changed_manifest_and_restarts_identical_partial_a
             BYTES[..4]
         );
     }
-    let (reader, state) =
-        super::conditional_tests::reader(vec![Reply::head(8, TAG), Reply::range(BYTES, 0, 8)]);
+    let (reader, state) = super::conditional_tests::reader(vec![
+        Reply::head(8, TAG),
+        Reply::range(&BYTES[4..], 4, 8),
+    ]);
     let selected = select(&reader, BYTES).await;
     consumer
         .acquire_s3(
@@ -678,7 +701,7 @@ async fn cold_recovery_refuses_changed_manifest_and_restarts_identical_partial_a
         )
         .await
         .unwrap();
-    assert_eq!(state.lock().unwrap().requests[1].2["range"], "bytes=0-7");
+    assert_eq!(state.lock().unwrap().requests[1].2["range"], "bytes=4-7");
     assert_eq!(
         std::fs::read(stage.path().join("stage/object.data")).unwrap(),
         BYTES

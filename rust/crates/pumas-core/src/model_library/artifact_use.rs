@@ -233,6 +233,24 @@ impl PreparedArtifactUse {
         &self.manifest_sha256
     }
 
+    /// Correlate the selected layout across the child channel without turning
+    /// its historical content checksums into automatic verification gates.
+    /// This identifier grants no ownership; the original allocation does.
+    pub(crate) fn source_correlation_id(&self) -> String {
+        let mut digest = Sha256::new();
+        digest.update(b"pumas-selected-artifact-layout-v2\0");
+        for value in [&self.model_id, &self.selected_artifact_id] {
+            digest.update((value.len() as u64).to_be_bytes());
+            digest.update(value.as_bytes());
+        }
+        for member in &self.members {
+            digest.update((member.manifest.relative_path.len() as u64).to_be_bytes());
+            digest.update(member.manifest.relative_path.as_bytes());
+            digest.update(member.manifest.size_bytes.to_be_bytes());
+        }
+        format!("pumas-cohere-owned-v2:{}", hex::encode(digest.finalize()))
+    }
+
     pub(crate) fn manifest(&self) -> impl Iterator<Item = &SelectedByteManifestEntry> {
         self.members.iter().map(|member| &member.manifest)
     }
@@ -262,12 +280,11 @@ impl PreparedArtifactUse {
             return Err(refusal("copied read source member set changed"));
         }
         for member in &self.members {
-            let mut current = open_member(&self.directory, &member.manifest.relative_path)?;
+            let current = open_member(&self.directory, &member.manifest.relative_path)?;
             if !same_file_identity(&member.file, &current)?
                 || current.metadata()?.len() != member.manifest.size_bytes
-                || hash_reader(&mut current)?.1 != member.manifest.sha256
             {
-                return Err(refusal("copied read source bytes changed"));
+                return Err(refusal("copied read source identity or size changed"));
             }
         }
         Ok(())
@@ -419,23 +436,6 @@ fn open_member(directory: &Dir, name: &str) -> Result<File> {
         return Err(refusal("copied member is not a regular file"));
     }
     Ok(file)
-}
-
-fn hash_reader(reader: &mut impl Read) -> Result<(u64, String)> {
-    let mut digest = Sha256::new();
-    let mut size = 0u64;
-    let mut buffer = [0u8; 65_536];
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        size = size
-            .checked_add(count as u64)
-            .ok_or_else(|| refusal("selected member size overflow"))?;
-        digest.update(&buffer[..count]);
-    }
-    Ok((size, hex::encode(digest.finalize())))
 }
 
 fn validate_native_descriptors(directory: &Dir) -> Result<()> {
@@ -781,6 +781,7 @@ mod tests {
         let fixture = Fixture::new().await;
         let first = fixture.prepare().unwrap();
         let original_digest = first.manifest_sha256().to_owned();
+        let original_correlation = first.source_correlation_id();
         let weight = fixture.package.join("model.safetensors");
         let original = std::fs::read(&weight).unwrap();
         let modified = std::fs::metadata(&weight).unwrap().modified().unwrap();
@@ -799,6 +800,7 @@ mod tests {
         assert_eq!(first.manifest_sha256(), original_digest);
         drop(first);
         let changed = fixture.prepare().unwrap();
+        assert_eq!(changed.source_correlation_id(), original_correlation);
         assert_ne!(
             changed.manifest_sha256(),
             original_digest,
@@ -1083,7 +1085,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn copied_source_revalidation_refuses_changed_bytes_and_member_additions() {
+    async fn copied_source_observes_bindings_without_rechecking_historical_checksum() {
         let fixture = Fixture::new().await;
         let prepared = fixture.prepare().unwrap();
         let weight = prepared.read_source_path().join("model.safetensors");
@@ -1097,10 +1099,8 @@ mod tests {
             .unwrap()
             .set_times(std::fs::FileTimes::new().set_modified(modified))
             .unwrap();
-        assert!(
-            prepared.validate_read_source().is_err(),
-            "equal-size/mtime edit escaped SHA256 validation"
-        );
+        prepared.validate_read_source().unwrap();
+        assert_eq!(std::fs::read(&weight).unwrap(), vec![b'x'; length]);
         drop(prepared);
         let prepared = fixture.prepare().unwrap();
         make_held_directory_private_writable(&prepared.directory).unwrap();

@@ -334,8 +334,8 @@ async fn acquire(
                 match fault {
                     Fault::ChangedBytes => {
                         let mut bytes = std::fs::read(&primary_path)?;
-                        // Preserve a valid graph while substituting actual tensor
-                        // data. The verified descriptor handoff must refuse it.
+                        // Preserve a valid graph while substituting tensor data.
+                        // The verified receipt retains the original checksum.
                         let offset = bytes
                             .windows(4)
                             .position(|value| value == 1.0_f32.to_le_bytes())
@@ -417,7 +417,31 @@ async fn acquire(
                 Some(ImportState::Ready)
             );
             for (path, expected) in &files {
-                assert_eq!(std::fs::read(target.join(path)).unwrap(), *expected);
+                let mut current = expected.clone();
+                if matches!(fault, Fault::ChangedBytes) && path == primary {
+                    let offset = current
+                        .windows(4)
+                        .position(|value| value == 1.0_f32.to_le_bytes())
+                        .unwrap();
+                    current[offset] ^= 1;
+                }
+                assert_eq!(std::fs::read(target.join(path)).unwrap(), current);
+                let original = record.files.iter().find(|file| file.path == *path).unwrap();
+                assert_eq!(original.sha256, hex::encode(Sha256::digest(expected)));
+            }
+            if matches!(fault, Fault::ChangedBytes) {
+                let retained_sha = &record
+                    .files
+                    .iter()
+                    .find(|file| file.path == primary)
+                    .unwrap()
+                    .sha256;
+                assert_ne!(
+                    pumas_library::model_library::compute_dual_hash(target.join(primary))
+                        .unwrap()
+                        .sha256,
+                    *retained_sha
+                );
             }
             let checked_id = id.clone();
             let observed = consumer
@@ -893,8 +917,8 @@ async fn dynamic_types_and_duplicate_graph_type_and_opset_fields_refuse() {
 }
 
 #[tokio::test]
-async fn qualification_does_not_waive_receipt_or_copied_byte_custody() {
-    for fault in [Fault::WrongSpec, Fault::ChangedBytes, Fault::ReplacedPath] {
+async fn qualification_does_not_waive_receipt_or_physical_file_custody() {
+    for fault in [Fault::WrongSpec, Fault::ReplacedPath] {
         assert!(
             !import(vec![("model.onnx".into(), embedded())], "model.onnx", fault)
                 .await
@@ -902,6 +926,19 @@ async fn qualification_does_not_waive_receipt_or_copied_byte_custody() {
             "{fault:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn verified_tensor_content_changes_publish_and_reconcile_with_original_checksum() {
+    assert!(
+        import(
+            vec![("model.onnx".into(), embedded())],
+            "model.onnx",
+            Fault::ChangedBytes
+        )
+        .await
+        .0
+    );
 }
 
 #[tokio::test]

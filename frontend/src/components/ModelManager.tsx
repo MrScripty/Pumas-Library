@@ -21,6 +21,7 @@ import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import type { ModelLibraryLoadStatus } from '../hooks/useModels';
 import { ModelSearchBar } from './ModelSearchBar';
 import { LocalModelsList } from './LocalModelsList';
+import { RetainedDownloadFailures } from './RetainedDownloadFailures';
 import { RemoteModelsList } from './RemoteModelsList';
 import { S3ModelImportDialog } from './S3ModelImportDialog';
 import { ModelImportDialog } from './ModelImportDialog';
@@ -54,7 +55,7 @@ export interface ModelManagerProps {
   onOpenModelsRoot?: () => void;
   onServeModel?: (model: ModelInfo) => void;
   /** Callback when models are imported to refresh the list */
-  onModelsImported?: () => void;
+  onModelsImported?: () => Promise<void> | void;
   /** Active version tag for link health check */
   activeVersion?: string | null;
   onChooseExistingLibrary?: () => Promise<void> | void;
@@ -91,6 +92,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const {
     downloadStatusByRepo,
     downloadErrors,
+    refreshDownloads,
     hasActiveDownloads,
     startDownload,
     cancelDownload,
@@ -160,6 +162,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const { isOffline, isRateLimited, successRate, circuitBreakerRejections } = useNetworkStatus();
   const {
     expandedRelated,
+    deletionStateByModelId,
     handleDeleteModel,
     handleRecoverPartialDownload,
     handleToggleRelated,
@@ -275,7 +278,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       />
 
       {!isDownloadMode && <div className="px-4 py-2"><button type="button" onClick={() => setShowS3Import(true)}
-        className="rounded border border-[hsl(var(--launcher-border))] px-3 py-2 focus-visible:outline focus-visible:outline-2">
+        className="surface-interactive surface-interactive-hover text-[hsl(var(--text-primary))] rounded px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--launcher-accent-primary))]">
         Import from S3
       </button></div>}
 
@@ -317,7 +320,11 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
             />
           ) : (
             <>
-              {libraryLoadStatus !== 'ready' && (
+              <RetainedDownloadFailures downloads={downloadStatusByRepo} onResolved={async () => {
+                await refreshDownloads();
+                await onModelsImported?.();
+              }} />
+              {libraryLoadStatus !== 'ready'  && (
                 <div
                   role={libraryLoadStatus === 'unavailable' ? 'alert' : 'status'}
                   className="rounded border border-[hsl(var(--launcher-border))] px-3 py-2 text-sm text-[hsl(var(--text-secondary))]"
@@ -358,6 +365,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                   recoveringPartialModelIds={recoveringPartialModelIds}
                   downloadErrors={downloadErrors}
                   onDeleteModel={handleDeleteModel}
+                  deletionStateByModelId={deletionStateByModelId}
                   onConvertModel={setConversionModel}
                   onServeModel={onServeModel}
                   onChooseExistingLibrary={onChooseExistingLibrary ? chooseExistingLibrary : undefined}

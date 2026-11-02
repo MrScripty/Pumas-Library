@@ -143,7 +143,7 @@ fn official_cohort_retains_pinned_bytes_not_ambient_libraries() {
         hash.update((name.len() as u64).to_be_bytes());
         hash.update(name.as_bytes());
         hash.update(size.to_be_bytes());
-        hash.update(sha.as_bytes());
+        hash.update(sha.unwrap().as_bytes());
     }
     assert_eq!(
         format!("{:x}", hash.finalize()),

@@ -48,6 +48,9 @@ import {
   type QuantBackend,
   decodeDownloadListOutcome,
   decodeDownloadMutationOutcome,
+  decodeDownloadLocationReport,
+  decodeDownloadResolutionRequest,
+  type DownloadResolutionRequest,
   decodeDownloadStartedOutcome,
   decodeDownloadStatusOutcome,
   decodeModelIndexRefreshOutcome,
@@ -832,6 +835,11 @@ const electronAPI = {
     validatedApiCall('pause_model_download', decodeDownloadMutationOutcome, { download_id: downloadId }),
   resume_model_download: (downloadId: string) =>
     validatedApiCall('resume_model_download', decodeDownloadMutationOutcome, { download_id: downloadId }),
+  inspect_retained_download: (downloadId:string) =>
+    validatedApiCall('inspect_retained_download',decodeDownloadLocationReport,{download_id:downloadId}),
+  resolve_retained_download: (request:DownloadResolutionRequest) =>
+    validatedApiCall('resolve_retained_download',decodeDownloadLocationReport,
+      requireDecoded(decodeDownloadResolutionRequest(request),'resolve_retained_download request')),
   list_model_downloads: () =>
     validatedApiCall('list_model_downloads', decodeDownloadListOutcome),
   resume_partial_download: (modelId: string, recoveryToken: string) =>

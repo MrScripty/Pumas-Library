@@ -1,3 +1,4 @@
+import type { DownloadLocationReport, DownloadResolutionRequest } from '../generated/desktop-contract';
 import type { S3TransferRetryParams, S3TransferRetryState, S3PersistedImportsWire, S3DiscoveryParams, S3AuthenticatedDiscoveryParams, S3DiscoveryOutcome } from '../generated/desktop-contract';
 import type { S3BundleImportParams, S3AuthenticatedBundleImportParams, S3BundleImportObservation, S3ImportParams, S3AuthenticatedImportParams, S3ImportOutcome, S3ImportCancelOutcome } from '../generated/desktop-contract';
 import type { BaseResponse } from './api-common';
@@ -44,6 +45,8 @@ import type {
 } from './api-package-facts';
 
 export interface DesktopBridgeModelAPI {
+  inspect_retained_download(downloadId:string):Promise<DownloadLocationReport>;
+  resolve_retained_download(request:DownloadResolutionRequest):Promise<DownloadLocationReport>;
   get_s3_transfer_retry(operationId?: string): Promise<S3TransferRetryState>;
   retry_s3_model_transfer(request: S3TransferRetryParams): Promise<S3ImportOutcome>;
   inspect_persisted_s3_imports(): Promise<S3PersistedImportsWire>;

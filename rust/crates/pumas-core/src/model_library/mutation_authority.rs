@@ -123,6 +123,44 @@ impl DownloadCancellation {
 pub(crate) struct ModelFinalImportCapability(ModelImportProof);
 pub(crate) struct ModelPartialImportCapability(ModelImportProof);
 
+/// Primary-library deletion shares native exclusion with its HF owner, while
+/// retaining exact-destination effects and admission exclusion until settlement.
+pub(crate) struct ModelDeletionExecution {
+    grant: Arc<RootExecutionGrant>,
+    destination: PersistedDestinationIdentity,
+    _effects: tokio::sync::OwnedMutexGuard<()>,
+    _admission: tokio::sync::OwnedRwLockWriteGuard<()>,
+}
+
+impl ModelDeletionExecution {
+    pub(crate) fn new(
+        grant: Arc<RootExecutionGrant>,
+        destination: PersistedDestinationIdentity,
+        effects: tokio::sync::OwnedMutexGuard<()>,
+        admission: tokio::sync::OwnedRwLockWriteGuard<()>,
+    ) -> Self {
+        Self {
+            grant,
+            destination,
+            _effects: effects,
+            _admission: admission,
+        }
+    }
+
+    pub(crate) fn grant_for(
+        &self,
+        destination: &DownloadRecoveryDestination,
+    ) -> Result<Arc<RootExecutionGrant>> {
+        self.grant.validate_root(&destination.execution_root())?;
+        if self.destination != destination.persisted_identity()? {
+            return Err(import_invalid(
+                "Deletion execution does not identify its admitted destination",
+            ));
+        }
+        Ok(self.grant.clone())
+    }
+}
+
 struct ModelImportProof {
     acquisition: AcquisitionProof,
     grant: Arc<RootExecutionGrant>,
@@ -496,6 +534,7 @@ impl LibraryMutationAuthority {
             index: None,
             claims: Vec::new(),
             _grant: grant,
+            _deletion_execution: None,
             mutation_started: false,
         })
     }
@@ -548,6 +587,7 @@ impl LibraryMutationAuthority {
             index: Some(index.clone()),
             claims,
             _grant: grant,
+            _deletion_execution: None,
             mutation_started: false,
         })
     }
@@ -597,7 +637,15 @@ impl LibraryMutationAuthority {
         // Settled quarantine records do not retain a trustworthy destination
         // identity. Preserve all model bytes until explicit recovery resolves
         // that custody.
-        if queued || hidden || acquiring || !inventory.quarantines.is_empty() {
+        if queued
+            || hidden
+            || acquiring
+            || !inventory.quarantines.is_empty()
+            || inventory
+                .unconfirmed_resolution_targets
+                .iter()
+                .any(|target| targets.contains(target))
+        {
             return Err(PumasError::DownloadRootBusy);
         }
         Ok(())
@@ -808,10 +856,18 @@ pub(crate) struct LibraryMutationGuard {
     index: Option<ModelIndex>,
     claims: Vec<(String, Uuid)>,
     _grant: Arc<RootExecutionGrant>,
+    _deletion_execution: Option<Arc<ModelDeletionExecution>>,
     mutation_started: bool,
 }
 
 impl LibraryMutationGuard {
+    pub(crate) fn retain_deletion_execution(
+        &mut self,
+        execution: Option<Arc<ModelDeletionExecution>>,
+    ) {
+        self._deletion_execution = execution;
+    }
+
     pub(crate) fn mark_started(&mut self) {
         self.mutation_started = true;
     }

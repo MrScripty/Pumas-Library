@@ -812,6 +812,13 @@ pub struct ModelDownloadProgress {
     pub error: Option<String>,
 }
 
+impl ModelDownloadProgress {
+    /// Bounded public guidance for refused HTTP continuation. Raw source
+    /// diagnostics remain local and must not cross the RPC boundary.
+    pub const CONTINUATION_REFUSED_MESSAGE: &'static str =
+        "Download continuation was refused. Any partial download has been retained; retry when the source supports resume.";
+}
+
 /// Snapshot of all tracked HuggingFace model downloads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

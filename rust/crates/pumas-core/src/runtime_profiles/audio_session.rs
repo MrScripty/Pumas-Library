@@ -182,7 +182,7 @@ impl InstalledAudioSession {
         }
         // Correlation only: neither this digest nor the hello reply qualifies
         // bytes. The opaque runtime's installed spawn gate remains authoritative.
-        let source_id = format!("pumas-cohere-owned-v1:{}", selected.manifest_sha256());
+        let source_id = selected.source_correlation_id();
         let supervisor = control.0;
         let registry = supervisor.registry.clone();
         let mut startup = StartupGuard(Some(supervisor.clone()));

@@ -1,4 +1,5 @@
 import { Star } from 'lucide-react';
+import type { ModelDeletionState } from '../hooks/useModelLibraryActions';
 import type { ModelInfo, RelatedModelsState } from '../types/apps';
 import type { ServedModelStatus } from '../types/api-serving';
 import { IconButton, ListItem, ListItemContent } from './ui';
@@ -9,6 +10,7 @@ import { getLocalModelRowState } from './LocalModelRowState';
 import { RelatedModelsPanel } from './RelatedModelsPanel';
 
 interface LocalModelRowProps {
+  deletionState?: ModelDeletionState;
   downloadErrors?: Record<string, string>;
   excludedModels: Set<string>;
   expandedRelated: Set<string>;
@@ -21,7 +23,7 @@ interface LocalModelRowProps {
   servedStatus: ServedModelStatus | null;
   starredModels: Set<string>;
   onCancelDownload?: (repoId: string) => void;
-  onDeleteModel?: (modelId: string) => void;
+  onDeleteModel?: (modelId: string) => void | Promise<void>;
   onConvertModel?: (model: ModelInfo) => void;
   onOpenMetadata: (modelId: string, modelName: string) => void;
   onOpenRelatedUrl: (url: string) => void;
@@ -35,6 +37,7 @@ interface LocalModelRowProps {
 }
 
 export function LocalModelRow({
+  deletionState,
   downloadErrors,
   excludedModels,
   expandedRelated,
@@ -110,6 +113,17 @@ export function LocalModelRow({
               dependencyCount={model.dependencyCount}
               partialError={rowState.partialError}
             />}
+            {!isReadOnly && rowState.downloadError && (
+              <div role="alert" className="mt-1 text-xs text-[hsl(var(--accent-error))]">
+                {model.downloadStatus === 'error' ? 'Download failed: ' : 'Download action failed: '}
+                {rowState.downloadError}
+              </div>
+            )}
+            {!isReadOnly && deletionState?.status === 'error' && (
+              <div role="alert" className="mt-1 text-xs text-[hsl(var(--accent-error))]">
+                Could not delete model: {deletionState.message}
+              </div>
+            )}
             {!isReadOnly && (servedStatus || isLoading || isServingUnavailable) && (
               <div className="mt-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[hsl(var(--accent-success))]">
                 {servedStatus && <span className="rounded bg-[hsl(var(--accent-success)/0.14)] px-1.5 py-0.5">
@@ -129,6 +143,7 @@ export function LocalModelRow({
           </div>
         </div>
         {!isReadOnly && <LocalModelRowActions
+          isDeleting={deletionState?.status === 'deleting'}
           model={model}
           isLoading={isLoading}
           rowState={rowState}

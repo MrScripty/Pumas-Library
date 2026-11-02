@@ -15,8 +15,8 @@ use pumas_library::{
         QuantOption,
     },
     model_library::{
-        issue_download_recovery_ticket, DownloadRecoveryModelId, DownloadRecoveryTicket,
-        DownloadRecoveryToken,
+        issue_download_recovery_ticket, DownloadLocationReport, DownloadRecoveryModelId,
+        DownloadRecoveryTicket, DownloadRecoveryToken, DownloadResolutionRequest,
     },
     models::{
         BaseResponse, CleanBrokenLinksResponse, DeleteModelResponse, DiskSpaceResponse,
@@ -141,6 +141,13 @@ impl PublicError {
     }
 
     pub(crate) fn from_pumas(error: &PumasError) -> Self {
+        if matches!(error, PumasError::DownloadRootBusy) {
+            return Self {
+                code: error.to_rpc_error_code(),
+                class: PublicErrorClass::Conflict,
+                message: "A download or another operation is using this model library. Finish or cancel it, then try again.",
+            };
+        }
         if matches!(
             error,
             PumasError::Config { .. } | PumasError::DownloadLifecycleClosed
@@ -434,6 +441,12 @@ pub(crate) enum RpcCommand {
     ResumeModelDownload {
         download_id: String,
     },
+    InspectRetainedDownload {
+        download_id: String,
+    },
+    ResolveRetainedDownload {
+        request: DownloadResolutionRequest,
+    },
     ListModelDownloads,
     ResumePartialDownload {
         model_id: DownloadRecoveryModelId,
@@ -596,6 +609,8 @@ impl RpcCommand {
             Self::CancelModelDownload { .. } => "cancel_model_download",
             Self::PauseModelDownload { .. } => "pause_model_download",
             Self::ResumeModelDownload { .. } => "resume_model_download",
+            Self::InspectRetainedDownload { .. } => "inspect_retained_download",
+            Self::ResolveRetainedDownload { .. } => "resolve_retained_download",
             Self::ListModelDownloads => "list_model_downloads",
             Self::ResumePartialDownload { .. } => "resume_partial_download",
             Self::GetModels => "get_models",
@@ -731,6 +746,7 @@ pub(crate) enum RpcOutcome {
     DownloadStarted(DownloadStartedOutcome),
     DownloadStatus(Box<DownloadStatusOutcome>),
     DownloadMutation(DownloadMutationOutcome),
+    DownloadLocation(Box<DownloadLocationReport>),
     DownloadList(Box<DownloadListOutcome>),
     PartialDownload(Box<PartialDownloadOutcome>),
     Models(Box<ModelsOutcome>),
@@ -856,6 +872,7 @@ impl RpcOutcome {
             Self::DownloadStarted(value) => serde_json::to_value(value),
             Self::DownloadStatus(value) => serde_json::to_value(value),
             Self::DownloadMutation(value) => serde_json::to_value(value),
+            Self::DownloadLocation(value) => serde_json::to_value(value),
             Self::DownloadList(value) => serde_json::to_value(value),
             Self::PartialDownload(value) => serde_json::to_value(value),
             Self::Models(value) => serde_json::to_value(value),
@@ -1550,9 +1567,13 @@ impl DownloadProgressOutcome {
             retry_limit: progress.retry_limit,
             retrying: progress.retrying,
             next_retry_delay_seconds: progress.next_retry_delay_seconds,
-            error: progress
-                .error
-                .map(|_| "The model download did not complete successfully."),
+            error: progress.error.map(|error| {
+                if error == ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE {
+                    ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE
+                } else {
+                    "The model download did not complete successfully."
+                }
+            }),
         })
     }
 }
@@ -6543,6 +6564,20 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             validate_bounded_non_empty(params.download_id, MAX_IDENTIFIER_BYTES)
                 .map(|download_id| RpcCommand::ResumeModelDownload { download_id })
         }),
+        "inspect_retained_download" => {
+            parse_params::<DownloadIdParams>(params).and_then(|params| {
+                validate_bounded_non_empty(params.download_id, MAX_IDENTIFIER_BYTES)
+                    .map(|download_id| RpcCommand::InspectRetainedDownload { download_id })
+            })
+        }
+        "resolve_retained_download" => {
+            parse_params::<DownloadResolutionRequest>(params).and_then(|request| {
+                request
+                    .validate()
+                    .map_err(|_| PublicError::invalid_params())?;
+                Ok(RpcCommand::ResolveRetainedDownload { request })
+            })
+        }
         "list_model_downloads" => empty().map(|()| RpcCommand::ListModelDownloads),
         "list_interrupted_downloads" | "recover_download" => Err(PublicError::method_not_found()),
         "resume_partial_download" => {
@@ -7117,20 +7152,24 @@ mod tests {
         let in_progress = PublicError::from(&PumasError::ModelIndexRefreshInProgress);
         assert_eq!(in_progress.code, -32011);
         assert_eq!(in_progress.class, PublicErrorClass::Conflict);
+        assert_eq!(
+            in_progress.message,
+            "The request conflicts with the current library state."
+        );
 
         let root_busy = PublicError::from(&PumasError::DownloadRootBusy);
         assert_eq!(root_busy.code, -32011);
         assert_eq!(root_busy.class, PublicErrorClass::Conflict);
         assert_eq!(
             root_busy.message,
-            "The request conflicts with the current library state."
+            "A download or another operation is using this model library. Finish or cancel it, then try again."
         );
         assert_eq!(
             serde_json::to_value(root_busy).unwrap(),
             json!({
                 "code": -32011,
                 "class": "conflict",
-                "message": "The request conflicts with the current library state.",
+                "message": "A download or another operation is using this model library. Finish or cancel it, then try again.",
             })
         );
     }
@@ -8022,7 +8061,7 @@ mod tests {
             error: Some(format!("credential {SECRET} failed at {PRIVATE_PATH}")),
         };
         let encoded = RpcOutcome::DownloadStatus(Box::new(
-            DownloadStatusOutcome::new(Some(progress)).unwrap(),
+            DownloadStatusOutcome::new(Some(progress.clone())).unwrap(),
         ))
         .into_value()
         .unwrap();
@@ -8037,6 +8076,16 @@ mod tests {
         );
         assert!(!encoded.to_string().contains(SECRET));
         assert!(!encoded.to_string().contains(PRIVATE_PATH));
+
+        let mut refused = progress;
+        refused.error = Some(ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE.into());
+        let refused = RpcOutcome::DownloadStatus(Box::new(
+            DownloadStatusOutcome::new(Some(refused)).unwrap(),
+        ))
+        .into_value()
+        .unwrap();
+        assert_eq!(refused.get("error").and_then(Value::as_str),
+            Some("Download continuation was refused. Any partial download has been retained; retry when the source supports resume."));
 
         let partial = PartialDownloadAction {
             action: "none".to_string(),

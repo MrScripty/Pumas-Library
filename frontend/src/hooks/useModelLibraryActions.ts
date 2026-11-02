@@ -7,6 +7,10 @@ import { getLogger } from '../utils/logger';
 
 const logger = getLogger('useModelLibraryActions');
 
+export type ModelDeletionState =
+  | { status: 'deleting' }
+  | { status: 'error'; message: string };
+
 function formatPartialResumeError(reasonCode?: string | null, fallback?: string | null): string {
   switch (reasonCode) {
     case 'dest_dir_missing':
@@ -59,6 +63,8 @@ export function useModelLibraryActions({
   const [expandedRelated, setExpandedRelated] = useState<Set<string>>(new Set());
   const [recoveringPartialModelIds, setRecoveringPartialModelIds] = useState<Set<string>>(new Set());
   const pendingRecoveryModelIds = useRef(new Set<string>());
+  const pendingDeletionModelIds = useRef(new Set<string>());
+  const [deletionStateByModelId, setDeletionStateByModelId] = useState<Record<string, ModelDeletionState>>({});
   const [relatedModelsById, setRelatedModelsById] = useState<
     Record<string, RelatedModelsState>
   >({});
@@ -245,22 +251,35 @@ export function useModelLibraryActions({
   }, [setDownloadErrors, startDownload]);
 
   const handleDeleteModel = useCallback(async (modelId: string) => {
+    if (pendingDeletionModelIds.current.has(modelId)) return;
+    pendingDeletionModelIds.current.add(modelId);
+    setDeletionStateByModelId((prev) => ({ ...prev, [modelId]: { status: 'deleting' } }));
     try {
       const result = await modelsAPI.deleteModel(modelId);
       if (result.success) {
         logger.info('Model deleted', { modelId });
+        setDeletionStateByModelId((prev) => {
+          const next = { ...prev };
+          delete next[modelId];
+          return next;
+        });
         onModelsImported?.();
       } else {
-        logger.error('Failed to delete model', { modelId, error: result.error });
+        const message = result.error || 'The library refused the deletion.';
+        logger.error('Failed to delete model', { modelId, error: message });
+        setDeletionStateByModelId((prev) => ({ ...prev, [modelId]: { status: 'error', message } }));
       }
     } catch (error) {
-      if (error instanceof Error) {
-        logger.error('Error deleting model', { modelId, error: error.message });
-      }
+      const message = error instanceof Error ? error.message : 'The deletion request failed.';
+      logger.error('Error deleting model', { modelId, error: message });
+      setDeletionStateByModelId((prev) => ({ ...prev, [modelId]: { status: 'error', message } }));
+    } finally {
+      pendingDeletionModelIds.current.delete(modelId);
     }
   }, [onModelsImported]);
 
   return {
+    deletionStateByModelId,
     expandedRelated,
     handleDeleteModel,
     handleRecoverPartialDownload,

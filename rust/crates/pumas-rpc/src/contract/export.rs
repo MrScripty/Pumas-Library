@@ -803,6 +803,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         DownloadStatusOutcome,
         DownloadStartedOutcome,
         DownloadMutationOutcome,
+        DownloadLocationReport,
+        DownloadResolutionRequest,
         PartialDownloadOutcome,
         ModelIndexRefreshOutcome,
         RecoverDownloadParams,

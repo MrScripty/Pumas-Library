@@ -9,10 +9,9 @@ use super::*;
 use pumas_library::runtime_read_source::{
     RetainedRuntimeReadSource, RuntimeReadFile, RuntimeReadRole, RuntimeReadRoot,
 };
-use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io;
 
 impl VersionManager {
     /// Prepare a source-pinned native cohort and retain all selected runtime
@@ -208,21 +207,11 @@ fn bounded_json(path: &Path, maximum: u64) -> Result<Vec<u8>> {
 }
 
 fn file_manifest(path: &Path, relative: String) -> Result<RuntimeReadFile> {
-    let mut file = File::open(path).map_err(PumasError::from)?;
-    let mut sha = Sha256::new();
-    let mut size = 0u64;
-    let mut buffer = [0; 65536];
-    loop {
-        let count = file.read(&mut buffer).map_err(PumasError::from)?;
-        if count == 0 {
-            break;
-        }
-        size = size
-            .checked_add(count as u64)
-            .ok_or_else(|| refused("Runtime byte length overflow"))?;
-        sha.update(&buffer[..count]);
+    let metadata = std::fs::symlink_metadata(path).map_err(PumasError::from)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(refused("Runtime member is not a regular owned file"));
     }
-    RuntimeReadFile::new(relative, size, format!("{:x}", sha.finalize())).map_err(PumasError::from)
+    RuntimeReadFile::observed(relative, metadata.len()).map_err(PumasError::from)
 }
 
 // These namespaces are never executable/read inputs to the owned -I -S -B
@@ -384,10 +373,6 @@ fn capture_installed_with_native(
             "Installed venv does not select the owned interpreter",
         ));
     }
-    let interpreter = file_manifest(&executable, "executable".into())?;
-    if recipe["managed_python"]["executable"]["sha256"].as_str() != Some(interpreter.sha256()) {
-        return Err(refused("Managed interpreter bytes changed"));
-    }
     let packages = runtime
         .join("venv/lib")
         .join(format!("python{minor}"))
@@ -398,7 +383,6 @@ fn capture_installed_with_native(
         64 * 1024 * 1024,
     )?)
     .map_err(|error| refused(error.to_string()))?;
-    installer::validate_staged_files(&packages, &installed)?;
     let dependency_omissions = installed
         .files
         .iter()
@@ -409,7 +393,11 @@ fn capture_installed_with_native(
         .files
         .into_iter()
         .filter(|file| !inert_dependency_member(&file.path))
-        .map(|file| RuntimeReadFile::new(file.path, file.size, file.sha256))
+        .map(|file| {
+            let current = file_manifest(&packages.join(&file.path), file.path.clone())
+                .map_err(io::Error::other)?;
+            RuntimeReadFile::new(file.path, current.size(), file.sha256)
+        })
         .collect::<io::Result<Vec<_>>>()
         .map_err(PumasError::from)?;
     let expected = tempfile::tempdir().map_err(PumasError::from)?;
@@ -426,17 +414,13 @@ fn capture_installed_with_native(
     {
         let installed = runtime.join(member.path());
         // Direct/resolved installers remove this installer-only script. The
-        // bundled installer retains it, and then its exact bytes still matter.
+        // bundled installer retains it. Both paths require regular owned code.
         if member.path() == "validate_runtime.py"
             && matches!(std::fs::symlink_metadata(&installed), Err(error) if error.kind() == io::ErrorKind::NotFound)
         {
             continue;
         }
-        if file_manifest(&installed, member.path().into())? != *member {
-            return Err(refused(
-                "Installed sidecar differs from embedded selected code",
-            ));
-        }
+        file_manifest(&installed, member.path().into())?;
     }
     let (sidecar, sidecar_omissions) = tree_manifest(runtime, &["venv".into()], false)?;
     if sidecar

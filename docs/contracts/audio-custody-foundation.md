@@ -34,8 +34,9 @@ mutation does not change the prepared read source. The returned owner is not
 cloneable or deserializable and retains the root grant until disposal.
 
 Validation observes root identity, private directory identity, the exact copied
-member set, copied file identity, length, and hashes before a provider effect.
-This blocking file scan must not be used as a synchronous per-operation borrow
+member set, copied file identity and length before a provider effect. Historical
+checksums remain available as evidence without automatic content verification.
+This blocking namespace scan must not be used as a synchronous per-operation borrow
 on the speech event loop. Cleanup restores permissions on held private copies;
 if the scratch pathname is already observed to refer to a different directory,
 cleanup is disabled rather than deleting that replacement.

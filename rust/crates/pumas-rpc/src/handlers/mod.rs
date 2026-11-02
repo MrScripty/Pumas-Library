@@ -60,7 +60,7 @@ use axum::{
     http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
-        IntoResponse,
+        IntoResponse, Response,
     },
     Json,
 };
@@ -155,11 +155,21 @@ pub async fn handle_health() -> impl IntoResponse {
     Json(json!({"status": "ok"}))
 }
 
+/// Tag only the five read-only update producers. Inference and retention
+/// responses retain their operation and delivery obligations.
+fn observation_response(sse: Sse<BoxStream<'static, Result<Event, Infallible>>>) -> Response {
+    let mut response = sse.into_response();
+    response
+        .extensions_mut()
+        .insert(crate::http_transport::ObservationStream);
+    response
+}
+
 /// Server-sent model-library update notification stream.
 pub async fn handle_model_library_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ModelLibraryUpdateStreamQuery>,
-) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+) -> Response {
     let shutdown = state.shutdown_request.clone();
     let stream: BoxStream<'static, Result<Event, Infallible>> =
         match build_model_library_update_stream_state(state, query.cursor).await {
@@ -182,7 +192,9 @@ pub async fn handle_model_library_update_events(
             }
         };
 
-    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
+    observation_response(
+        Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default()),
+    )
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -257,7 +269,7 @@ async fn build_model_library_update_stream_state(
 pub async fn handle_model_download_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ModelDownloadUpdateStreamQuery>,
-) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+) -> Response {
     let shutdown = state.shutdown_request.clone();
     let stream: BoxStream<'static, Result<Event, Infallible>> =
         match build_model_download_update_stream_state(state, query.cursor).await {
@@ -280,7 +292,9 @@ pub async fn handle_model_download_update_events(
             }
         };
 
-    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
+    observation_response(
+        Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default()),
+    )
 }
 
 async fn build_model_download_update_stream_state(
@@ -311,12 +325,14 @@ async fn build_model_download_update_stream_state(
 pub async fn handle_runtime_profile_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<RuntimeProfileUpdateStreamQuery>,
-) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+) -> Response {
     let shutdown = state.shutdown_request.clone();
     let stream_state = build_runtime_profile_update_stream_state(state, query.cursor).await;
     let stream = stream::unfold(stream_state, next_runtime_profile_update_event).boxed();
 
-    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
+    observation_response(
+        Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default()),
+    )
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -362,12 +378,14 @@ async fn build_runtime_profile_update_stream_state(
 pub async fn handle_serving_status_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ServingStatusUpdateStreamQuery>,
-) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+) -> Response {
     let shutdown = state.shutdown_request.clone();
     let stream_state = build_serving_status_update_stream_state(state, query.cursor).await;
     let stream = stream::unfold(stream_state, next_serving_status_update_event).boxed();
 
-    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
+    observation_response(
+        Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default()),
+    )
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -412,7 +430,7 @@ async fn build_serving_status_update_stream_state(
 pub async fn handle_status_telemetry_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<StatusTelemetryUpdateStreamQuery>,
-) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+) -> Response {
     let shutdown = state.shutdown_request.clone();
     let stream: BoxStream<'static, Result<Event, Infallible>> =
         match build_status_telemetry_update_stream_state(state, query.cursor).await {
@@ -435,7 +453,9 @@ pub async fn handle_status_telemetry_update_events(
             }
         };
 
-    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
+    observation_response(
+        Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default()),
+    )
 }
 
 /// Main JSON-RPC handler.
@@ -987,6 +1007,18 @@ async fn dispatch_admitted_command(
                 .await
                 .map(RpcOutcome::DownloadMutation)
         }
+        RpcCommand::InspectRetainedDownload { download_id } => state
+            .api
+            .inspect_retained_download(&download_id)
+            .await
+            .map(Box::new)
+            .map(RpcOutcome::DownloadLocation),
+        RpcCommand::ResolveRetainedDownload { request } => state
+            .api
+            .resolve_retained_download(request)
+            .await
+            .map(Box::new)
+            .map(RpcOutcome::DownloadLocation),
         RpcCommand::ListModelDownloads => models::list_model_downloads(state)
             .await
             .map(Box::new)

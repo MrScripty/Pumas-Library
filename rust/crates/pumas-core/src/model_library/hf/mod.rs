@@ -68,6 +68,14 @@ pub(crate) struct IntentDownloadObservation {
     pub(crate) blocked: bool,
 }
 
+/// Transfer effects may be long-lived. Admission exclusion is separate so
+/// another download can queue without waiting for that transfer to finish.
+#[derive(Default)]
+pub(super) struct DestinationLocks {
+    effects: Arc<Mutex<()>>,
+    admission: Arc<RwLock<()>>,
+}
+
 /// Client for HuggingFace Hub API operations.
 pub struct HuggingFaceClient {
     pub(super) store_lifetime: crate::platform::store_lifetime::StoreLifetime,
@@ -95,10 +103,9 @@ pub struct HuggingFaceClient {
     owns_lifecycle: bool,
     /// Generation-scoped serialization of shared destination effects.
     destination_executions: Arc<DestinationExecutionOwner>,
-    /// Per-destination mutexes so downloads targeting the same model folder
-    /// execute sequentially instead of racing on shared files.
+    /// Per-destination transfer effects and deletion/admission exclusion.
     pub(super) dest_locks:
-        Arc<RwLock<HashMap<super::download_recovery::DestinationIdentity, Arc<Mutex<()>>>>>,
+        Arc<RwLock<HashMap<super::download_recovery::DestinationIdentity, Arc<DestinationLocks>>>>,
     /// SQLite search cache (optional)
     pub(super) search_cache: Option<Arc<HfSearchCache>>,
     /// Download persistence for crash recovery (optional)

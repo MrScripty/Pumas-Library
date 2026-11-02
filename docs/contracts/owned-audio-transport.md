@@ -82,9 +82,11 @@ real ASR and native macOS/Windows execution.
 existing `installed-files.json` package manifest and the existing Torch versions
 mutation lock. A matching shared managed-Python depot lease excludes cooperating
 provisioning for the retained interpreter tree. The returned core owner captures
-actual selected interpreter, dependency and sidecar member bytes, identities and
-held roots. Missing manifests, unreported package bytes, linked selected members,
-changed identities or hashes refuse capture. This is selected-byte custody;
+selected interpreter, dependency and sidecar member identities, lengths and
+held roots. Missing manifests, unreported members, linked selected members and
+changed physical bindings refuse capture. Historical SHA values remain in the
+installed metadata; capture does not read contents to compare those hashes. This
+is selected-byte custody;
 external system libraries and a complete real loader read set remain unqualified.
 The runtime owner can retain this byte owner through the exact child cleanup
 lease without changing audio qualification.
@@ -92,16 +94,19 @@ lease without changing audio qualification.
 Installer validation and all runtime probes suppress Python bytecode generation,
 including validation's sidecar subprocess. Isolated managed-Python, resolver and
 read-only probe commands also use explicit bytecode suppression because `-I`
-ignores Python environment flags. A fresh venv's bootstrap package bytes and
-directories are snapshotted before resolution. They are removed only after the
-entire bootstrap namespace is verified unchanged, before separately verified
+ignores Python environment flags. A fresh venv's bootstrap file descriptors,
+lengths and
+directories are retained before resolution. They are removed only after the
+entire bootstrap namespace and physical bindings are checked, before separately
+verified
 resolved packages are moved in. A resolved package may therefore reuse a bootstrap
 name without being removed or exempted from its dependency manifest. Existing
 runtimes with unreported bootstrap material continue to refuse capture.
 
 The installer-only `validate_runtime.py` member may be absent after direct or
-resolved installation; when a bundled runtime retains it, its bytes must still
-match the embedded source. Other required code remains mandatory. Capture still
+resolved installation; when a bundled runtime retains it, it must be a regular
+owned member. Other required code remains mandatory; installed code is not
+compared with embedded bytes. Capture still
 rejects bytecode and unreported members; successful import checks do not weaken
 the retained manifest.
 
@@ -179,6 +184,6 @@ These scopes must not be confused with last external caller loss.
 Poisoned bookkeeping deliberately retains root grants and scratch even after
 child drain and requires owning Pumas-process disposal/restart. Normal unknown
 transport/native cleanup can recover after exact-child-tree drain. Read-only
-copies and held identity/hash validation do not exclude hostile same-user races
+copies and held file-identity validation do not exclude hostile same-user races
 or catastrophic host exit. Test-only hang guards and process cleanup budgets are
 harness safeguards, not newly invented production timeout policy.

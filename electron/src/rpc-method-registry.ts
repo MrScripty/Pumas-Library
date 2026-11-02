@@ -90,6 +90,8 @@ export const RPC_METHOD_REGISTRY = {
     'cancel_model_download',
     'pause_model_download',
     'resume_model_download',
+    'inspect_retained_download',
+    'resolve_retained_download',
     'list_model_downloads',
     'resume_partial_download',
     'search_hf_models',
@@ -406,6 +408,11 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
   cancel_model_download: REQUIRED_DOWNLOAD_ID_SCHEMA,
   pause_model_download: REQUIRED_DOWNLOAD_ID_SCHEMA,
   resume_model_download: REQUIRED_DOWNLOAD_ID_SCHEMA,
+  inspect_retained_download: REQUIRED_DOWNLOAD_ID_SCHEMA,
+  resolve_retained_download: { required: {
+    downloadId:'string', attemptId:'string', candidateModelId:'string', expectedObservation:'string',
+    operationId:'string', acceptance:'string', acceptStorageUpgrade:'boolean',
+  } },
   resume_partial_download: {
     required: {
       modelId: 'string',

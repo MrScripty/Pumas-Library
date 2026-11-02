@@ -24,9 +24,9 @@ Sibling library aliases are copied as regular files from their pinned targets;
 archive links are never materialized into the filesystem.
 
 The selected files and provenance JSON occupy a fresh private staging root.
-The retained-source owner holds that root's lifetime. Every selected file is
-hashed again by the ordinary runtime read-source capture, and the root survives
-until its final custody owner is released. Failed staging/capture does not
+The retained-source owner holds that root's lifetime. Ordinary runtime read-source
+capture observes selected file identities and lengths without rehashing contents,
+and the root survives until its final custody owner is released. Failed staging/capture does not
 publish a partially admitted runtime. No ambient `/lib` or `/usr/lib` contents
 become selected through this procedure.
 
@@ -67,16 +67,17 @@ enforcement.
 
 Native preparation is restricted to the source-pinned candidate in
 `pumas-core/src/runtime_read_source/audio_candidate_recipe.json`: the managed CPython identity, all 68
-exact wheel artifacts, and framed hashes of the 3,487 interpreter and 23,588
-selected dependency members. Comparison follows actual byte capture and is
-followed by retained-source revalidation. Metadata alone cannot satisfy the
-selected-byte hashes. This fixes candidate identity; it does not register a
+exact wheel acquisition artifacts. Historical framed interpreter and dependency
+hashes remain in the recipe as retained evidence, but are not automatic admission
+gates. Staged installation validates artifact name, version, URL and supplied
+SHA against that recipe before publication; retained-source observation checks
+ownership, namespace and length. This fixes candidate identity; it does not register a
 production policy or prove native execution/lifecycle behavior.
 
 The private installed spawn primitive requires an already-qualified runtime
 owner bound to the exact prepared model allocation. It executes the held native
 loader and interpreter through inherited descriptors, inhibits the loader
-cache, streams only selected file/directory rules, and revalidates source bytes
+cache, streams only selected file/directory rules, and revalidates source ownership and lengths
 before spawn. The exact managed child immediately retains both runtime and
 model lifetime owners before diagnostic-pipe extraction can fail. Uncertain
 child drainage therefore retains those owners in the original custody slot.
@@ -89,19 +90,9 @@ remains empty, so this primitive cannot admit the installed candidate today.
 
 The `test-support`-only `qualify_audio_dependencies` example installs the existing
 managed CPU recipe into an explicit empty isolated root. A read-only kernel
-preflight refuses unsupported hosts before acquisition. Its explicit
-`preview_torch_audio_candidate` selection uses the normal owned installer but
-limits pip discovery to a private link page containing only the source recipe's
-wheel URLs and SHA-256 fragments, with public indexes disabled. The original
-named dependency roots are preserved: listing every transitive wheel as a
-direct requirement would change pip's `REQUESTED`, `direct_url.json` and
-`RECORD` bytes. Managed interpreter identity is checked before wheel acquisition;
-the complete resolved artifact set must match the recipe before staged packages
-are moved or executed. Normal user runtime selections remain unchanged.
-
-It then retains the
-fixed CPython, dependency and native selections, rehashes each against the
-source pin, and runs only a constant probe through the owned loader and actual
+preflight refuses unsupported hosts before acquisition. It then retains the
+fixed CPython, dependency and native selections, validates their ownership and
+acquisition identities without installed-content SHA comparisons, and runs only a constant probe through the owned loader and actual
 native read boundary. No caller program or model path is accepted.
 
 The probe requires denial of an unselected canary read/write and ambient socket,
@@ -133,21 +124,13 @@ retained namespace identity still apply, but content reads are not granted.
 All other dependency metadata remains selected. Both installations yield the
 same 23,588-member dependency selection after this treatment.
 
-The only differing selected interpreter member was the UV-relocated
-`_sysconfigdata__linux_x86_64-linux-gnu.py`. It remains selected with its actual
-bytes and actual hash. Recipe comparison replaces exactly 27 occurrences of the
-JSON-escaped prefix derived from the held interpreter directory capability, then
-requires a fixed normalized size/hash. Prefixes are restricted to ASCII letters,
-digits, slash, dot, underscore and hyphen; quotes, backslashes, controls and
-other path characters refuse. This narrows qualification scope and rejects otherwise
-legitimate roots with spaces/non-ASCII; it is not evidence of an exploit. The
-actual two-root test parses every affected value as a double-quoted JSON string
-and accounts for all 27 substitutions without executing the source. Every byte outside those precise prefix
-positions is fixed; arbitrary code normalization, receipt-supplied prefixes and
-omitting executable source are prohibited. Both independently installed
-3,487-member interpreter cohorts satisfy this comparison. This proves portable
-recipe comparison, not successful confined execution.
-
+The UV-relocated `_sysconfigdata__linux_x86_64-linux-gnu.py` may legitimately
+contain its installed path. Historical normalized hashes remain in the recipe,
+but the relocation-normalization helper and fixed tree digest gates are removed
+under the [acquisition checksum policy](artifact-acquisition.md#7-integrity-provenance-and-trust).
+Normal runtime capture no longer rejects spaces or non-ASCII paths merely to
+reproduce those historical bytes. Dependency identities and actual confined
+execution still require qualification.
 
 ### Kernel entropy input
 

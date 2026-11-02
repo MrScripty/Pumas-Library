@@ -582,16 +582,16 @@ impl ManagedPythonProvider {
                     "Private uv binary was a link",
                 ));
             }
-            if !same_binary(&extracted, &binary)? {
+            if !valid_installed_uv(&binary)? {
                 return Err(ManagedPythonFailure::new(
                     ManagedPythonFailureKind::ArtifactIntegrity,
-                    "Private uv binary differed from its pinned archive",
+                    "Private uv binary is not a supported regular executable",
                 ));
             }
         } else {
             match std::fs::rename(&extracted, &binary) {
                 Ok(()) => {}
-                Err(_) if binary.exists() && same_binary(&extracted, &binary)? => {}
+                Err(_) if binary.exists() && valid_installed_uv(&binary)? => {}
                 Err(_) => {
                     return Err(ManagedPythonFailure::new(
                         ManagedPythonFailureKind::Inconclusive,
@@ -677,39 +677,17 @@ struct StagedUv {
     cache: PathBuf,
 }
 
-fn same_binary(expected: &Path, current: &Path) -> ProviderResult<bool> {
-    let expected_len = std::fs::metadata(expected)
-        .map_err(|_| {
-            ManagedPythonFailure::new(
-                ManagedPythonFailureKind::Inconclusive,
-                "Extracted uv binary could not be inspected",
-            )
-        })?
-        .len();
-    let current_len = std::fs::metadata(current)
-        .map_err(|_| {
-            ManagedPythonFailure::new(
-                ManagedPythonFailureKind::Inconclusive,
-                "Private uv binary could not be inspected",
-            )
-        })?
-        .len();
-    if expected_len == 0 || expected_len > MAX_BINARY_BYTES || current_len != expected_len {
-        return Ok(false);
-    }
-    let expected = std::fs::read(expected).map_err(|_| {
+fn valid_installed_uv(current: &Path) -> ProviderResult<bool> {
+    let metadata = std::fs::symlink_metadata(current).map_err(|_| {
         ManagedPythonFailure::new(
             ManagedPythonFailureKind::Inconclusive,
-            "Extracted uv binary could not be read",
+            "Private uv binary could not be inspected",
         )
     })?;
-    let current = std::fs::read(current).map_err(|_| {
-        ManagedPythonFailure::new(
-            ManagedPythonFailureKind::Inconclusive,
-            "Private uv binary could not be read",
-        )
-    })?;
-    Ok(Sha256::digest(expected) == Sha256::digest(current))
+    Ok(metadata.is_file()
+        && !metadata.file_type().is_symlink()
+        && metadata.len() > 0
+        && metadata.len() <= MAX_BINARY_BYTES)
 }
 
 async fn download_archive(pin: UvPin) -> ProviderResult<Vec<u8>> {

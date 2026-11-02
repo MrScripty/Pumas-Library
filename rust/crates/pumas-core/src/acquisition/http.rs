@@ -182,13 +182,15 @@ pub(crate) async fn open_http_artifact(
         request = request.header(AUTHORIZATION, authorization);
     }
     if resume_from > 0 {
-        let evidence = continuation.ok_or_else(resume_identity_required)?;
-        if !is_strong_etag(&evidence.etag) {
+        request = request.header(RANGE, format!("bytes={resume_from}-"));
+        if let Some(evidence) = continuation {
+            if !is_strong_etag(&evidence.etag) {
+                return Err(resume_identity_required());
+            }
+            request = request.header(IF_MATCH, &evidence.etag);
+        } else if file.expected_sha256().is_none() {
             return Err(resume_identity_required());
         }
-        request = request
-            .header(RANGE, format!("bytes={resume_from}-"))
-            .header(IF_MATCH, &evidence.etag);
     }
     let response = request.send().await.map_err(|error| PumasError::Network {
         message: "HTTP artifact request failed".into(),
@@ -199,8 +201,9 @@ pub(crate) async fn open_http_artifact(
     let resource = response.url().as_str().to_owned();
     let strong_etag = strong_etag(&response);
     let status = response.status();
-    if resume_from > 0 && matches!(status, StatusCode::OK | StatusCode::PARTIAL_CONTENT) {
-        let evidence = continuation.ok_or_else(resume_identity_required)?;
+    if let Some(evidence) = continuation.filter(|_| {
+        resume_from > 0 && matches!(status, StatusCode::OK | StatusCode::PARTIAL_CONTENT)
+    }) {
         if !same_http_resource(manifest.source().provider(), &resource, &evidence.resource)
             || strong_etag.as_deref() != Some(evidence.etag.as_str())
         {
@@ -244,20 +247,11 @@ pub(crate) async fn open_http_artifact(
                 deadline: None,
             })
         }
+        (offset, StatusCode::OK) if offset > 0 => Err(invalid_response(
+            "HTTP source ignored the continuation range; the partial file has been retained",
+        )),
         (_, StatusCode::OK) => {
-            // A full response to Range is safe only when the consumer opens the
-            // partial file from zero and replaces its prior contents.
             let content_length = response.content_length();
-            if resume_from > 0
-                && continuation
-                    .and_then(|evidence| evidence.total)
-                    .zip(content_length)
-                    .is_some_and(|(expected, observed)| expected != observed)
-            {
-                return Err(invalid_response(
-                    "HTTP full continuation response changed total length",
-                ));
-            }
             if file
                 .expected_size()
                 .zip(content_length)
@@ -784,7 +778,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ignored_range_returns_full_body_for_replacement_from_zero() {
+    async fn ignored_range_refuses_continuation_without_replacement() {
         let (url, server) = serve_once(response("200 OK", "", "abcdef")).await;
         let reply = open_http_artifact(
             &reqwest::Client::new(),
@@ -795,9 +789,10 @@ mod tests {
             None,
         )
         .await
-        .unwrap();
-        assert!(!reply.resumed);
-        assert_eq!(body_bytes(reply.body).await.unwrap(), b"abcdef");
+        .expect_err("ignored range must refuse continuation");
+        assert!(matches!(reply, PumasError::Validation { field, message }
+            if field == "artifact.http.response"
+                && message == "HTTP source ignored the continuation range; the partial file has been retained"));
         assert!(server
             .await
             .unwrap()
@@ -1555,7 +1550,7 @@ mod tests {
 
     #[tokio::test]
     async fn single_strong_etag_preserves_fresh_and_continuation_admission() {
-        for (status, offset) in [("200 OK", 0), ("200 OK", 3), ("206 Partial Content", 3)] {
+        for (status, offset) in [("200 OK", 0), ("206 Partial Content", 3)] {
             let (url, server) = serve_once(response_with_etags(status, &["\"fixture-v1\""])).await;
             let opened = open_http_artifact(
                 &reqwest::Client::new(),

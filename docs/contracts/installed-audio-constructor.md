@@ -16,7 +16,7 @@ confirmed unload. Equal names or content cannot replace another prepared owner.
 
 The fixed positive Rust policy exists under `cfg(test)` only. It is absent from
 shipping builds, including builds using `test-support`. It validates a closed
-controlled interpreter/dependency/member set and embedded worker code; its
+controlled interpreter/dependency/member set and original file bindings; its
 synthetic bytes are not a real interpreter, recipe or model. The shipping
 constructor still refuses when no source-owned execution qualification exists.
 
@@ -57,24 +57,26 @@ source-owned policy, rather than a model directory. It requires a
 `HeldCohereReadSource` retaining that same original source object, validates the
 source before and after capture, and puts the reader in load custody before
 native construction. The reader retains original read-only regular member
-descriptors and observes their inode, size and streamed SHA-256. Each selected member is copied from its
-held descriptor to a Linux memfd, checked against the original owner's captured
-size and SHA-256 (never a rebased observation during capture), and sealed
-against writes, growth, shrinkage and seal removal before a read-only descriptor
-escapes. The original source is revalidated after capture. There is no mutable
-file fallback if memfd creation or sealing is unavailable. Its hashes observe
-bytes; they do not manufacture source ownership or qualification.
+descriptors and observes their inode and size. Historical SHA evidence remains
+optional; capture does not invent missing checksums. Each selected member is
+copied from its held descriptor to a Linux memfd, checked against the original
+owner's captured size and file binding, and sealed against writes, growth,
+shrinkage and seal removal before a read-only descriptor escapes. The original source is revalidated after capture. There is no mutable
+file fallback if memfd creation or sealing is unavailable. Retained checksums
+do not manufacture source ownership or qualification.
 
 The loader parses only these sealed descriptor snapshots and maps sealed weights.
 A later writer to the original file cannot change an existing model mapping.
 The original descriptors remain retained and revalidated, so this immutable view
-does not permit replacing the original allocation or ignoring source mutation.
+does not permit replacing the original allocation or ignoring namespace, length
+or file-binding changes.
 Capture failure closes partial copies; successful copies remain under native
 load custody until confirmed disposal. Kernel-backed regression tests exercise
 actual read mappings, denied writes/resizes/shared writable mappings, source
 mutation and partial-copy cleanup with synthetic bytes. A deterministic
-mutate-before-copy/restore-after-copy regression verifies that the original
-proof digest cannot be replaced during reader capture. They do not run ASR.
+mutate-before-copy/restore-after-copy regression verifies that the sealed view
+contains the actual captured bytes while the original checksum remains
+historical. They do not run ASR.
 
 Sealed snapshots add up to one full selected-model copy in shmem in addition to
 the existing prepared copies and native allocations. Capacity, memory pressure
@@ -179,7 +181,7 @@ original install/model ownership and mutation leases.
 
 The installed-owner spawn primitive now builds its command from the retained
 native loader, interpreter, dependency, copied-code and copied-model
-capabilities. It streams exact grants, revalidates current bytes before spawn,
+capabilities. It streams exact grants, revalidates current ownership and lengths before spawn,
 and attaches original runtime/model lifetime owners to the exact managed child
 before any fallible diagnostic-pipe extraction. It does not accept caller paths
 or permission receipts. Only an already-qualified `Installed` owner can reach
@@ -193,13 +195,18 @@ candidate identity and remaining gates.
 The owned launcher supplies the original prepared allocation's model and artifact
 labels alongside its inherited model directory. These labels grant no authority.
 The Python source owner opens only the closed Cohere read set as read-only,
-non-link regular files, retains directory/file identities, and rehashes actual
-held bytes. Directory enumeration is bounded by the nine supported member names.
+non-link regular files and retains directory/file identities and lengths. It
+performs no content hashing; directory enumeration is bounded by the nine
+supported member names. The child has no historical download SHA, so its held
+reader carries absent checksum evidence rather than inventing a checksum.
 
-Its correlation identifier is `pumas-cohere-owned-v1:` followed by the existing
-Rust prepared-manifest SHA-256: domain `pumas-selected-artifact-bytes-v1\0`, each
-UTF-8 model/artifact label framed by its u64 big-endian byte length, then sorted
-members framed by UTF-8 name length/name, u64 big-endian size and ASCII SHA-256.
+Its correlation identifier is `pumas-cohere-owned-v2:` followed by a SHA-256 of
+layout metadata: domain `pumas-selected-artifact-layout-v2\0`, each UTF-8
+model/artifact label framed by its u64 big-endian byte length, then sorted member
+UTF-8 name length/name and u64 big-endian size. File content hashes are excluded.
+The existing Rust prepared-content manifest and persisted acquisition checksums
+remain unchanged and are available separately. This coordinated internal
+Rust/Python replacement changes opaque source IDs without changing RPC shapes.
 The parent sends its independently owned identifier on load; the private gate
 compares it with the original source proof. Neither this ID nor CLI labels can
 satisfy qualification or substitute another prepared allocation.
@@ -215,10 +222,10 @@ these ownership/correlation steps without qualifying real inference or disposal.
 ## Explicit local experimental attempt
 
 The separate experimental constructor permits an attempted CPU Cohere execution
-from the original indexed selected allocation. It independently compares all
-interpreter, dependency and native-library bytes against the source-fixed recipe,
-requires the selected interpreter's exact digest, and preserves the existing
-sidecar identity, fixed model read set, held/sealed copies and Linux confinement.
+from the original indexed selected allocation. It requires the source-pinned
+package acquisition identities and preserves required sidecar members, the fixed
+model read set, held/sealed copies and Linux confinement. Installed interpreter,
+dependency and native-library bytes are not automatically compared with historical hashes.
 Local model hashes identify those retained bytes; they do not attest to an
 upstream revision, real transcription quality or completed native qualification.
 

@@ -3,7 +3,6 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::time::Instant;
@@ -733,46 +732,11 @@ mod tests {
             assert_eq!(selected.tag, tag);
             assert_eq!(selected.build, build);
             assert_eq!(selected.adapter, "cohere-asr");
-            assert!(!selected.audio_candidate_recipe);
             assert!(manager
                 .consume_torch_install_selection(&preview.preview_id, tag)
                 .await
                 .is_err());
         }
-        assert!(!root.path().join("launcher-data/managed-python").exists());
-    }
-
-    #[cfg(all(feature = "test-support", target_os = "linux", target_arch = "x86_64"))]
-    #[tokio::test]
-    async fn audio_qualification_selection_is_explicit_exact_unverified_and_one_use() {
-        let root = tempfile::tempdir().unwrap();
-        let manager = VersionManager::new(root.path(), AppId::Torch)
-            .await
-            .unwrap();
-        let TorchPreviewOutcome::Ready { preview } =
-            manager.preview_torch_audio_candidate().await.unwrap()
-        else {
-            panic!("candidate refused")
-        };
-        assert_eq!(preview.qualification, "unverified");
-        let selected = manager
-            .consume_torch_install_selection(&preview.preview_id, "v2.10.0")
-            .await
-            .unwrap();
-        assert!(selected.audio_candidate_recipe);
-        assert_eq!(
-            (
-                selected.tag.as_str(),
-                selected.build.as_str(),
-                selected.python.as_str(),
-                selected.adapter.as_str()
-            ),
-            ("v2.10.0", "cpu", "python3.12", "cohere-asr")
-        );
-        assert!(manager
-            .consume_torch_install_selection(&preview.preview_id, "v2.10.0")
-            .await
-            .is_err());
         assert!(!root.path().join("launcher-data/managed-python").exists());
     }
 
@@ -962,31 +926,16 @@ mod tests {
             "driver_version":["591.0"],
         });
         append_runtime_context_changes(&saved, &current, &mut reasons);
-        assert_eq!(reasons.len(), 6);
+        assert_eq!(reasons.len(), 5);
     }
 
     #[test]
-    fn runtime_source_hashes_track_sidecar_files_without_virtualenv_or_links() {
-        let root = tempfile::tempdir().unwrap();
-        for (name, contents) in [
-            ("serve.py", "first"),
-            ("loaders/image.py", "loader"),
-            ("venv/lib/site.py", "venv"),
-            (".venv/site.py", "other venv"),
-            ("__pycache__/cached.py", "cache"),
-        ] {
-            let path = root.path().join(name);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, contents).unwrap();
-        }
-        std::os::unix::fs::symlink(root.path().join("serve.py"), root.path().join("alias.py"))
-            .unwrap();
-        let original = runtime_source_hashes(root.path()).unwrap();
-        assert_eq!(original.len(), 2);
-        assert!(original.contains_key("serve.py"));
-        assert!(original.contains_key("loaders/image.py"));
-        std::fs::write(root.path().join("serve.py"), "changed").unwrap();
-        assert_ne!(original, runtime_source_hashes(root.path()).unwrap());
+    fn historical_file_checksums_do_not_make_probe_context_stale() {
+        let saved = serde_json::json!({"interpreter_sha256":"old", "runtime_files_sha256":{"serve.py":"old"}});
+        let current = serde_json::json!({"interpreter_sha256":"new", "runtime_files_sha256":{"serve.py":"new"}});
+        let mut reasons = Vec::new();
+        append_runtime_context_changes(&saved, &current, &mut reasons);
+        assert!(reasons.is_empty());
     }
 
     #[tokio::test]
@@ -1370,7 +1319,6 @@ pub(crate) struct TorchInstallSelection {
     pub build: String,
     pub python: String,
     pub adapter: String,
-    pub audio_candidate_recipe: bool,
     pub created: Instant,
 }
 
@@ -1419,34 +1367,6 @@ fn retained_managed_interpreter(
     Ok((path, hash))
 }
 
-fn runtime_source_hashes(root: &Path) -> Result<BTreeMap<String, String>> {
-    let mut hashes = BTreeMap::new();
-    for directory in [root.to_path_buf(), root.join("loaders")] {
-        if !directory.exists() {
-            continue;
-        }
-        for entry in std::fs::read_dir(&directory).map_err(PumasError::from)? {
-            let entry = entry.map_err(PumasError::from)?;
-            let kind = entry.file_type().map_err(PumasError::from)?;
-            if !kind.is_file()
-                || entry.path().extension().and_then(|value| value.to_str()) != Some("py")
-            {
-                continue;
-            }
-            let relative = entry
-                .path()
-                .strip_prefix(root)
-                .map_err(|e| failed(format!("Invalid runtime source path: {e}")))?
-                .to_str()
-                .ok_or_else(|| failed("Runtime source path is not UTF-8"))?
-                .replace(std::path::MAIN_SEPARATOR, "/");
-            let bytes = std::fs::read(entry.path()).map_err(PumasError::from)?;
-            hashes.insert(relative, format!("{:x}", Sha256::digest(bytes)));
-        }
-    }
-    Ok(hashes)
-}
-
 fn append_runtime_context_changes(
     saved: &serde_json::Value,
     current: &serde_json::Value,
@@ -1465,10 +1385,6 @@ fn append_runtime_context_changes(
         (
             "distributions_sha256",
             "Python distribution fingerprint changed since the probe",
-        ),
-        (
-            "interpreter_sha256",
-            "Python executable changed since the probe",
         ),
         ("driver_version", "Driver context changed since the probe"),
     ] {
@@ -1716,32 +1632,6 @@ impl VersionManager {
         python: &str,
         adapter: &str,
     ) -> Result<TorchPreviewOutcome> {
-        self.preview_torch_selection(tag, build, python, adapter, false)
-            .await
-    }
-
-    /// Select the existing frozen Linux CPU cohort for explicit non-model
-    /// qualification. This does not enable production audio or change normal
-    /// runtime selection. Installation still owns acquisition and cancellation.
-    #[cfg(feature = "test-support")]
-    pub async fn preview_torch_audio_candidate(&self) -> Result<TorchPreviewOutcome> {
-        if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-            return Err(failed(
-                "Audio candidate qualification requires Linux x86_64",
-            ));
-        }
-        self.preview_torch_selection("v2.10.0", "cpu", "python3.12", "cohere-asr", true)
-            .await
-    }
-
-    async fn preview_torch_selection(
-        &self,
-        tag: &str,
-        build: &str,
-        python: &str,
-        adapter: &str,
-        audio_candidate_recipe: bool,
-    ) -> Result<TorchPreviewOutcome> {
         if self.app_id != AppId::Torch
             || !(build == "auto" || supported_torch_build(build))
             || !(python == "auto" || is_python_selection(python))
@@ -1780,7 +1670,6 @@ impl VersionManager {
             build: build.to_owned(),
             python: python.to_owned(),
             adapter: adapter.to_owned(),
-            audio_candidate_recipe,
             created: Instant::now(),
         };
         {
@@ -2397,22 +2286,9 @@ impl VersionManager {
         let mut report: serde_json::Value = serde_json::from_slice(&bytes)
             .map_err(|e| failed(format!("Invalid installed Torch probe report: {e}")))?;
         let mut stale_reasons = Vec::new();
-        for (name, key) in [
-            ("resolution.json", "resolution_sha256"),
-            ("serve.py", "sidecar_sha256"),
-        ] {
-            let observed = fs::read(runtime.join(name))
-                .await
-                .map_err(PumasError::from)?;
-            let hash = format!("{:x}", Sha256::digest(&observed));
-            if report["context"][key].as_str() != Some(hash.as_str()) {
-                stale_reasons.push(format!("{name} changed since the probe"));
-            }
-        }
-        let sources = runtime_source_hashes(&runtime)?;
-        if report["context"]["runtime_files_sha256"] != serde_json::json!(sources) {
-            stale_reasons.push("Runtime Python sources changed since the probe".into());
-        }
+        // Retain historical checksums in the report without automatically
+        // comparing installed files. Staleness reflects actual package and
+        // hardware context, not post-download content integrity.
         let distribution_names: Vec<&str> = report["context"]["installed_distributions"]
             .as_object()
             .map(|values| values.keys().map(String::as_str).collect())
@@ -2422,7 +2298,6 @@ impl VersionManager {
         let mut hardware_command =
             Command::new(pumas_library::platform::paths::venv_python(&runtime));
         hardware_command.kill_on_drop(true).args(["-I", "-B"]).arg("-c").arg(r#"import hashlib,importlib.metadata,json,subprocess,sys
-from pathlib import Path
 import torch
 devices=[]
 if torch.cuda.is_available():
@@ -2445,7 +2320,7 @@ try:
     driver=subprocess.run(["nvidia-smi","--query-gpu=driver_version","--format=csv,noheader"],capture_output=True,text=True,timeout=5)
     driver_version=(sorted(set(line.strip() for line in driver.stdout.splitlines() if line.strip())) or None) if driver.returncode == 0 else None
 except (OSError,subprocess.TimeoutExpired): driver_version=None
-print(json.dumps({"hardware_fingerprint":hashlib.sha256(json.dumps(identity,sort_keys=True,separators=(",",":")).encode()).hexdigest(),"installed_distributions":versions,"all_installed_distributions":all_versions,"distributions_sha256":distributions_sha256,"interpreter_sha256":hashlib.sha256(Path(sys.executable).resolve().read_bytes()).hexdigest(),"driver_version":driver_version}))"#).arg(distribution_names);
+print(json.dumps({"hardware_fingerprint":hashlib.sha256(json.dumps(identity,sort_keys=True,separators=(",",":")).encode()).hexdigest(),"installed_distributions":versions,"all_installed_distributions":all_versions,"distributions_sha256":distributions_sha256,"driver_version":driver_version}))"#).arg(distribution_names);
         let hardware_check =
             tokio::time::timeout(Duration::from_secs(15), hardware_command.output()).await;
         match hardware_check {

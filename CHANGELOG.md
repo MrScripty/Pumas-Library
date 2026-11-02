@@ -25,6 +25,13 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
 - Pinned inference-enabled headless candidate assembly for Linux x86_64,
   Windows x86_64 and macOS ARM64. The release inventory now requires sixteen
   artifacts; assembly and startup do not qualify pretrained inference.
+- `GET /v1/served-models` lists every served model and profile with its
+  provider, context size and capabilities, so consumers discover models
+  instead of configuring profiles by hand.
+- `multimodal_embedding` capability: image and mixed text/image embeddings
+  for llama.cpp embedding models with a projector, such as EmbeddingGemma 2.
+- `decision` capability: typed choice/score/yes-no questions answered with
+  probabilities by llama.cpp native decision models such as Kev and OpenJev.
 
 ### Changed
 
@@ -34,9 +41,30 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
   discovery and live download authority remain distinguishable.
 - Installed speech has conditional custody and qualification plumbing;
   production Audio-to-Text remains unavailable until its admission gates pass.
+- Typed operation errors always carry a human-readable `message`, echo the
+  caller's `request_id` whenever it is readable, and use an HTTP status that
+  matches the error code. Provider failure reasons reach the caller with
+  credential-shaped text redacted.
+- `/v1/model-operations` has one request grammar: `capability`,
+  `semantic_task` and `options` are optional selectors, and every request
+  accepted before remains valid.
+- Responses may gain fields, capabilities and enum values within contract
+  version 1; consumers must ignore what they do not use.
+- Limits come from the serving runtime: `max_tokens` is bounded by the served
+  context, ONNX batch limits apply only to ONNX, and requested embedding
+  dimensions are applied by Matryoshka truncation when a provider ignores them.
+- `/v1/models` lists each model ID once, with its serving profiles.
 
 ### Fixed
 
+- Vision-language models published as `image-text-to-text` (Gemma, Qwen VL)
+  are available for chat and image-to-text instead of reporting a task mismatch.
+- A model directory's primary file is never its multimodal projector, which
+  had launched EmbeddingGemma 2's projector as the model and broke llama.cpp
+  router catalog generation.
+- llama.cpp embedding and reranking models launch in embedding/reranking mode
+  in dedicated profiles too, with a micro-batch that fits whole inputs; Ollama
+  embedding models load through `/api/embed`.
 - Desktop startup failures keep recovery and metadata upgrade actionable,
   including small windows and failed replacement startup attempts.
 - Startup preserves retained downloads whose destination folders are missing,

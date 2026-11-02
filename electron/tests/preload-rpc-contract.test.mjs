@@ -1041,7 +1041,16 @@ test('backend setup preload preserves selection and retry tokens without automat
   harness.respondWith({success:true, setup:null});
   assert.deepEqual(toPlainValue(await harness.api.get_backend_setup('nvfp4')), {success:true, setup:null});
   await assert.rejects(harness.api.start_backend_setup('nvfp4'), {status:'invalid'});
-  for (const response of [{success:false, setup}, {success:true, setup:{...setup, status:'failed', error:'/private/setup'}}, {success:true, setup:{...setup, status:'failed', error:null}}]) {
+  // A failed setup carries its public reason to the renderer.
+  const failed = {...setup, status:'failed', error:'llama.cpp build failed: cmake exited with status 1'};
+  harness.respondWith({success:true, setup:failed});
+  assert.deepEqual(toPlainValue(await harness.api.get_backend_setup('sherry')), {success:true, setup:failed});
+  for (const response of [
+    {success:false, setup},
+    {success:true, setup:{...setup, error:'completed setups have no failure reason'}},
+    {success:true, setup:{...setup, status:'failed', error:null}},
+    {success:true, setup:{...setup, status:'failed', error:'x'.repeat(1025)}},
+  ]) {
     harness.respondWith(response);
     const before = harness.invocations.length;
     await assert.rejects(harness.api.get_backend_setup('sherry'), {status:'invalid'});
@@ -1069,7 +1078,7 @@ test('model import selection crosses the bundled preload as a closed desktop out
   for (const native of [{canceled:true,filePaths:[]}, {canceled:false,filePaths:['/models/ e\u0301.gguf','/models/ e\u0301.gguf']}]) {
     const produced = await chooseModelImportPaths(async () => native);
     harness.respondWith(produced);
-    assert.deepEqual(toPlainValue(await harness.api.open_model_import_dialog()), produced);
+    assert.deepEqual(toPlainValue(await harness.api.open_model_import_dialog()), toPlainValue(produced));
   }
   harness.respondWith({status:'selected',paths:[]});
   assert.deepEqual(toPlainValue(await harness.api.open_model_import_dialog()), {status:'invalid'});

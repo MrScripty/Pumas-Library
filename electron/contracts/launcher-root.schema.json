@@ -2,7 +2,7 @@
   "format": "pumas-desktop-contract-1",
   "dialect": "http://json-schema.org/draft-07/schema#",
   "owner": "electron",
-  "description": "Launcher-root startup, selection and library-upgrade results that Electron main publishes to the renderer. These ship with their consumers, so objects are closed; add fields here and regenerate with `pnpm --dir electron generate:desktop-contract`.",
+  "description": "Launcher-root startup, selection and library-upgrade payloads exchanged between Electron main and the renderer. These ship with their consumers, so objects are closed; add fields here and regenerate with `pnpm --dir electron generate:desktop-contract`.",
   "schemas": {
     "LauncherRootStartupState": {
       "$schema": "http://json-schema.org/draft-07/schema#",
@@ -124,6 +124,18 @@
         "LauncherRootAuthorityState": {
           "enum": ["unchanged", "replacement-visibility-unknown", "published-durability-unavailable"]
         }
+      }
+    },
+    "LibraryUpgradeConfirmation": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "LibraryUpgradeConfirmation",
+      "description": "Both confirmations the user gives before the one-way metadata upgrade.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["oldWritersStopped", "noDowngradeAccepted"],
+      "properties": {
+        "oldWritersStopped": {"const": true},
+        "noDowngradeAccepted": {"const": true}
       }
     },
     "LibraryUpgradeResult": {

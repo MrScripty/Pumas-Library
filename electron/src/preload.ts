@@ -101,6 +101,7 @@ import {
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
+  decodeLibraryUpgradeConfirmation,
   decodeLauncherRootSelectionResult as decodeGeneratedLauncherRootSelectionResult,
   decodeLauncherRootStartupState as decodeGeneratedLauncherRootStartupState,
   decodeLibraryUpgradeResult as decodeGeneratedLibraryUpgradeResult,
@@ -144,19 +145,6 @@ function decodeLibraryUpgradeResult(value: unknown): LibraryUpgradeResult {
 
 function decodeLauncherRootSelectionResult(value: unknown): LauncherRootSelectionResult {
   return decodeOrThrow(decodeGeneratedLauncherRootSelectionResult(value), 'Invalid launcher-root selection result.');
-}
-
-function hasExactShape(
-  value: unknown,
-  expectedKeys: readonly string[]
-): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-
-  const actualKeys = Object.keys(value);
-  return actualKeys.length === expectedKeys.length &&
-    expectedKeys.every((key) => actualKeys.includes(key));
 }
 
 /**
@@ -1102,13 +1090,11 @@ const electronAPI = {
   },
 
   upgrade_launcher_library: async (confirmation: LibraryUpgradeConfirmation) => {
-    if (!hasExactShape(confirmation, ['oldWritersStopped', 'noDowngradeAccepted']) ||
-        confirmation.oldWritersStopped !== true || confirmation.noDowngradeAccepted !== true) {
-      throw new LauncherRootRecoveryContractError('Library upgrade requires both confirmations.');
-    }
-    return decodeLibraryUpgradeResult(await ipcRenderer.invoke('launcher:upgradeLibrary', {
-      oldWritersStopped: true, noDowngradeAccepted: true,
-    }));
+    const confirmed = decodeOrThrow(
+      decodeLibraryUpgradeConfirmation(confirmation),
+      'Library upgrade requires both confirmations.'
+    );
+    return decodeLibraryUpgradeResult(await ipcRenderer.invoke('launcher:upgradeLibrary', confirmed));
   },
 
   select_launcher_root: async () => {

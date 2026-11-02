@@ -1,12 +1,9 @@
-/** Path-free confirmation/result contract for the desktop metadata upgrade. */
-export type LibraryUpgradeConfirmation = {
-  oldWritersStopped: true;
-  noDowngradeAccepted: true;
-};
-
-// The result is published to the renderer; it is declared once in
-// electron/contracts and generated.
+/**
+ * Path-free confirmation/result contract for the desktop metadata upgrade,
+ * declared once in electron/contracts/launcher-root.schema.json.
+ */
 export type {
   LauncherRootReadyState as LibraryUpgradeReadyState,
+  LibraryUpgradeConfirmation,
   LibraryUpgradeResult,
 } from './generated/desktop-contract';

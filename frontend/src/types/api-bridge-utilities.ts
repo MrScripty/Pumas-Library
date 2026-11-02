@@ -1,6 +1,6 @@
 import type { LibraryUpgradeConfirmation, LibraryUpgradeResult } from '../../../electron/src/library-upgrade-contract';
 import type { BaseResponse } from './api-common';
-import type { ModelImportSelection } from '../../../electron/src/model-import-picker';
+import type { ModelImportSelection } from '../generated/desktop-contract';
 import type {
   AppStatusResponse,
   GetPluginResponse,

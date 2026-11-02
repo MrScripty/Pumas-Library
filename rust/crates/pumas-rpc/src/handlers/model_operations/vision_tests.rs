@@ -298,7 +298,7 @@ async fn seventh_descriptor_requires_selected_semantics_supported_profile_and_li
             state.api.upsert_runtime_profile(config).await.unwrap();
         }
         let value = caps(state).await;
-        assert_eq!(value["capabilities"].as_array().unwrap().len(), 7);
+        assert_eq!(value["capabilities"].as_array().unwrap().len(), 8);
         let descriptor = &value["capabilities"][6];
         assert_eq!(descriptor["capability"], "image_to_text");
         assert_eq!(descriptor["semantic_task"], "image_to_text");

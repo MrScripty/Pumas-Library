@@ -304,7 +304,14 @@ pub async fn handle_model_operations(
         Err(rejection) => return reject(id, rejection),
     };
     let body = match image_body {
-        Some(body) if request.capability == Capability::ImageToText => body,
+        Some(body)
+            if matches!(
+                request.capability,
+                Capability::ImageToText | Capability::MultimodalEmbedding
+            ) =>
+        {
+            body
+        }
         _ => match projection::provider_request(&request) {
             Ok(body) => body,
             Err(rejection) => return reject(id, rejection),
@@ -319,7 +326,10 @@ pub async fn handle_model_operations(
         marker: &admitted,
         expected: &served,
         cancellation: &cancellation,
-        vision: request.capability == Capability::ImageToText,
+        vision: matches!(
+            request.capability,
+            Capability::ImageToText | Capability::MultimodalEmbedding
+        ),
     };
     let provider_bytes = serde_json::to_vec(&body).expect("closed request is serializable");
     let path = OriginalUri(
@@ -440,7 +450,10 @@ async fn prepare_provider_request(
     state: &AppState,
     disconnect: Option<&Extension<RequestDisconnect>>,
 ) -> Result<serde_json::Value, Rejection> {
-    if request.capability != Capability::ImageToText {
+    if !matches!(
+        request.capability,
+        Capability::ImageToText | Capability::MultimodalEmbedding
+    ) {
         return projection::provider_request(request);
     }
     use std::sync::OnceLock;
@@ -608,6 +621,15 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
         && runtime_ready
         && semantic_match(Capability::ImageToText, task, model_type, served.provider) == Some(true)
         && vision::ready(state, served).await;
+    // Image embeddings need a dedicated llama.cpp session with its projector loaded.
+    let embedding_vision_ready = runtime_ready
+        && semantic_match(
+            Capability::MultimodalEmbedding,
+            task,
+            model_type,
+            served.provider,
+        ) == Some(true)
+        && vision::ready(state, served).await;
     [
         Capability::ChatGeneration,
         Capability::TextGeneration,
@@ -616,6 +638,7 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
         Capability::AudioTranscription,
         Capability::AudioClassification,
         Capability::ImageToText,
+        Capability::MultimodalEmbedding,
     ]
     .into_iter()
     .map(|capability| {
@@ -668,6 +691,22 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     None,
                     vec![],
                 ),
+                Capability::MultimodalEmbedding => (
+                    SemanticTask::MultimodalEmbedding,
+                    vec![
+                        InputFormat::PngBase64,
+                        InputFormat::JpegBase64,
+                        InputFormat::ContentBatch,
+                    ],
+                    vec![OutputFormat::EmbeddingsFloat32],
+                    Some(OpenAiGatewayEndpoint::Embeddings),
+                    vec![
+                        bound(OptionName::Dimensions, 1., u32::MAX as f64),
+                        bound(OptionName::ImageBytes, 1., (8 * 1024 * 1024) as f64),
+                        bound(OptionName::ImagePixels, 1., 4_194_304.),
+                        bound(OptionName::ImageCount, 1., 4.),
+                    ],
+                ),
                 Capability::ImageToText => (
                     SemanticTask::ImageToText,
                     vec![
@@ -718,7 +757,10 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
             Some(AvailabilityReason::ModelTaskMismatch)
         } else if semantics.is_none() {
             Some(AvailabilityReason::UnknownModelTask)
-        } else if !runtime_ready || (capability == Capability::ImageToText && !vision_ready) {
+        } else if !runtime_ready
+            || (capability == Capability::ImageToText && !vision_ready)
+            || (capability == Capability::MultimodalEmbedding && !embedding_vision_ready)
+        {
             Some(AvailabilityReason::RuntimeUnavailable)
         } else {
             None
@@ -750,6 +792,25 @@ fn semantic_task_evidence(metadata: &serde_json::Value) -> Option<&str> {
         })
 }
 
+fn text_embedding_task(task: &str) -> bool {
+    matches!(
+        task,
+        "feature-extraction"
+            | "feature_extraction"
+            | "text-embedding"
+            | "text_embedding"
+            | "sentence-similarity"
+            | "text->embedding"
+    )
+}
+/// Hugging Face and normalized task names for models that take text and
+/// images and produce text.
+fn vision_language_task(task: &str) -> bool {
+    matches!(
+        task,
+        "image-text-to-text" | "image_text_to_text" | "text+image->text" | "any-to-any"
+    )
+}
 fn semantic_match(
     capability: Capability,
     task: Option<&str>,
@@ -758,6 +819,8 @@ fn semantic_match(
 ) -> Option<bool> {
     if let Some(task) = task.filter(|task| !matches!(*task, "unknown" | "")) {
         return Some(match capability {
+            // Vision-language models (`image-text-to-text`) are chat models
+            // that also accept images; text-only requests are valid for them.
             Capability::ChatGeneration | Capability::TextGeneration => {
                 matches!(
                     task,
@@ -766,23 +829,23 @@ fn semantic_match(
                         | "text-to-text"
                         | "text2text-generation"
                         | "conversational"
-                ) || (task == "text->text"
-                    && matches!(model_type, Some("llm" | "language" | "text")))
+                ) || vision_language_task(task)
+                    || (task == "text->text"
+                        && matches!(model_type, Some("llm" | "language" | "text")))
             }
-            Capability::TextEmbedding => matches!(
-                task,
-                "feature-extraction"
-                    | "feature_extraction"
-                    | "text-embedding"
-                    | "text_embedding"
-                    | "sentence-similarity"
-                    | "text->embedding"
-            ),
+            Capability::TextEmbedding => text_embedding_task(task),
+            // Multimodal embedders (EmbeddingGemma 2) are published as
+            // feature-extraction models; the loaded projector decides images.
+            Capability::MultimodalEmbedding => {
+                text_embedding_task(task)
+                    || matches!(task, "image-feature-extraction" | "image->embedding")
+            }
             Capability::ImageGeneration => {
                 matches!(task, "text-to-image" | "text_to_image" | "text->image")
             }
             Capability::ImageToText => {
                 matches!(task, "image-to-text" | "image_to_text" | "image->text")
+                    || vision_language_task(task)
             }
             _ => false,
         });

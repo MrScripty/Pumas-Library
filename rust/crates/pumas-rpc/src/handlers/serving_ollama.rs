@@ -43,7 +43,7 @@ pub(super) async fn serve_ollama_model(
         }
     };
 
-    let Some((gguf_path, model_alias, known_sha256)) =
+    let Some((gguf_path, model_alias, known_sha256, embedding)) =
         resolve_ollama_model_inputs(state, &request).await?
     else {
         return non_critical_failure_response(
@@ -92,11 +92,16 @@ pub(super) async fn serve_ollama_model(
         .await;
     }
 
-    if client
-        .load_model_with_keep_alive(&model_alias, request.config.keep_loaded)
-        .await
-        .is_err()
-    {
+    let loaded = if embedding {
+        client
+            .load_embedding_model_with_keep_alive(&model_alias, request.config.keep_loaded)
+            .await
+    } else {
+        client
+            .load_model_with_keep_alive(&model_alias, request.config.keep_loaded)
+            .await
+    };
+    if loaded.is_err() {
         warn!("Ollama model load failed");
         return non_critical_failure_response(
             state,
@@ -212,7 +217,8 @@ pub(super) async fn unserve_ollama_model(
 async fn resolve_ollama_model_inputs(
     state: &AppState,
     request: &ServeModelRequest,
-) -> pumas_library::Result<Option<(std::path::PathBuf, String, Option<String>)>> {
+    // (GGUF path, Ollama model name, known SHA-256, is an embedding model)
+) -> pumas_library::Result<Option<(std::path::PathBuf, String, Option<String>, bool)>> {
     let library = state.api.model_library().clone();
     let model_id = request.model_id.clone();
     let primary_file = tokio::task::spawn_blocking({
@@ -246,6 +252,9 @@ async fn resolve_ollama_model_inputs(
         .as_ref()
         .and_then(|record| record.hashes.get("sha256"))
         .cloned();
+    let embedding = model_record
+        .as_ref()
+        .is_some_and(|record| record.model_type.eq_ignore_ascii_case("embedding"));
 
-    Ok(Some((gguf_path, model_alias, known_sha256)))
+    Ok(Some((gguf_path, model_alias, known_sha256, embedding)))
 }

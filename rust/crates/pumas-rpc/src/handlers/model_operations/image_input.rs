@@ -130,6 +130,49 @@ pub(super) fn provider_messages(input: &OperationInput) -> Result<Value, ErrorCo
     }
 }
 
+/// llama.cpp multimodal embedding input: one `{"content": [parts]}` object
+/// per vector. Images pass the same bounded validation as vision chat.
+pub(super) fn embedding_items(input: &OperationInput) -> Result<Value, ErrorCode> {
+    let mut budget = Budget::default();
+    let items: Vec<&[ImagePart]> = match input {
+        OperationInput::Image {
+            encoding,
+            data_base64,
+        } => {
+            let image = image_part(*encoding, data_base64, &mut budget)?;
+            return Ok(json!([{ "content": [image] }]));
+        }
+        OperationInput::ContentBatch { items } => {
+            items.iter().map(|item| item.parts.as_slice()).collect()
+        }
+        _ => return Err(ErrorCode::InvalidRequest),
+    };
+    if items.is_empty() {
+        return Err(ErrorCode::InvalidRequest);
+    }
+    let mut output = Vec::with_capacity(items.len());
+    for parts in items {
+        if parts.is_empty() {
+            return Err(ErrorCode::InvalidRequest);
+        }
+        let mut content = Vec::with_capacity(parts.len());
+        for part in parts {
+            content.push(match part {
+                ImagePart::Text { text } => {
+                    budget.text(text)?;
+                    json!({"type":"text", "text":text})
+                }
+                ImagePart::Image {
+                    encoding,
+                    data_base64,
+                } => image_part(*encoding, data_base64, &mut budget)?,
+            });
+        }
+        output.push(json!({ "content": content }));
+    }
+    Ok(Value::Array(output))
+}
+
 fn image_part(
     encoding: ImageEncoding,
     encoded: &str,

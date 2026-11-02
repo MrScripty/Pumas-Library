@@ -1492,6 +1492,15 @@ fn declared(capability: Capability, available: bool) -> CapabilityDescriptor {
             vec![InputFormat::PcmS16le, InputFormat::PcmF32le],
             vec![OutputFormat::Labels],
         ),
+        Capability::MultimodalEmbedding => (
+            SemanticTask::MultimodalEmbedding,
+            vec![
+                InputFormat::PngBase64,
+                InputFormat::JpegBase64,
+                InputFormat::ContentBatch,
+            ],
+            vec![OutputFormat::EmbeddingsFloat32],
+        ),
     };
     CapabilityDescriptor {
         capability,
@@ -2091,4 +2100,122 @@ fn embedding_validation_has_no_provider_independent_batch_cap() {
         "{}",
         rejection.message
     );
+}
+
+#[test]
+fn vision_language_models_support_chat_and_image_to_text() {
+    for task in ["image-text-to-text", "text+image->text", "any-to-any"] {
+        for capability in [
+            Capability::ChatGeneration,
+            Capability::TextGeneration,
+            Capability::ImageToText,
+        ] {
+            assert_eq!(
+                semantic_match(
+                    capability,
+                    Some(task),
+                    Some("vlm"),
+                    RuntimeProviderId::LlamaCpp
+                ),
+                Some(true),
+                "{task} / {capability:?}"
+            );
+        }
+        assert_eq!(
+            semantic_match(
+                Capability::TextEmbedding,
+                Some(task),
+                Some("vlm"),
+                RuntimeProviderId::LlamaCpp
+            ),
+            Some(false)
+        );
+    }
+    // Plain image captioners are not chat models.
+    assert_eq!(
+        semantic_match(
+            Capability::ChatGeneration,
+            Some("image-to-text"),
+            Some("vlm"),
+            RuntimeProviderId::LlamaCpp
+        ),
+        Some(false)
+    );
+}
+
+#[test]
+fn requested_dimensions_truncate_and_renormalize_provider_vectors() {
+    let mut r = request();
+    r.capability = Capability::TextEmbedding;
+    r.output = OutputFormat::EmbeddingsFloat32;
+    r.input = OperationInput::Text { text: "hi".into() };
+    r.options = OperationOptions::Embeddings {
+        dimensions: Some(2),
+    };
+    let provider = json!({"data":[{"index":0,"embedding":[0.6,0.0,0.8,0.0]}]});
+    let OperationResult::Embeddings { vectors } = projection::result(&r, provider).unwrap() else {
+        panic!("embedding result");
+    };
+    assert_eq!(vectors, vec![vec![1.0, 0.0]]);
+    // A provider that honored the dimension is passed through.
+    let exact = json!({"data":[{"index":0,"embedding":[0.6,0.8]}]});
+    assert!(projection::result(&r, exact).is_ok());
+    // More dimensions than the model produces cannot be invented.
+    r.options = OperationOptions::Embeddings {
+        dimensions: Some(8),
+    };
+    let short = json!({"data":[{"index":0,"embedding":[0.6,0.8]}]});
+    assert_eq!(
+        projection::result(&r, short),
+        Err(ErrorCode::InvalidProviderResult)
+    );
+}
+
+#[test]
+fn image_and_mixed_items_project_to_llama_cpp_multimodal_embeddings() {
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    let request: modality::ModalityRequest = serde_json::from_value(json!({
+        "contract_version": 1,
+        "request_id": "mm-embed-1",
+        "model": "embeddinggemma",
+        "input": {"kind": "content_batch", "items": [
+            {"parts": [{"kind": "text", "text": "title: none | text: a red square"}]},
+            {"parts": [{"kind": "image", "encoding": "png", "data_base64": png}]}
+        ]},
+        "output": "embeddings_float32"
+    }))
+    .unwrap();
+    request.validate().unwrap();
+    let prepared = request.image_preflight().unwrap().unwrap();
+    assert_eq!(prepared.capability, Capability::MultimodalEmbedding);
+    let body = projection::provider_request(&prepared).unwrap();
+    assert_eq!(body["encoding_format"], "float");
+    let items = body["input"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["content"][0]["type"], "text");
+    assert_eq!(items[1]["content"][0]["type"], "image_url");
+    assert!(items[1]["content"][0]["image_url"]["url"]
+        .as_str()
+        .unwrap()
+        .starts_with("data:image/png;base64,"));
+    // Text-only embedding requests still resolve to text_embedding, not ambiguity.
+    let text: modality::ModalityRequest = serde_json::from_value(json!({
+        "contract_version": 1, "request_id": "embed-1", "model": "embeddinggemma",
+        "input": {"kind": "text", "text": "hello"}, "output": "embeddings_float32"
+    }))
+    .unwrap();
+    let resolved = text
+        .resolve(&[
+            declared(Capability::TextEmbedding, true),
+            declared(Capability::MultimodalEmbedding, true),
+        ])
+        .unwrap();
+    assert_eq!(resolved.capability, Capability::TextEmbedding);
+    // Multimodal embedding counts each item in the provider result.
+    let result = projection::result(
+        &prepared,
+        json!({"data":[{"index":0,"embedding":[1.0,0.0]},{"index":1,"embedding":[0.0,1.0]}]}),
+    )
+    .unwrap();
+    assert!(matches!(result, OperationResult::Embeddings { ref vectors } if vectors.len() == 2));
 }

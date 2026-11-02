@@ -16,13 +16,16 @@ pub enum Capability {
     ImageToText,
     AudioTranscription,
     AudioClassification,
+    /// One embedding per image or per mixed text/image item, in the same
+    /// vector space as the model's text embeddings.
+    MultimodalEmbedding,
 }
 impl Capability {
     pub fn path(self) -> Option<&'static str> {
         Some(match self {
             Self::ChatGeneration | Self::ImageToText => "/v1/chat/completions",
             Self::TextGeneration => "/v1/completions",
-            Self::TextEmbedding => "/v1/embeddings",
+            Self::TextEmbedding | Self::MultimodalEmbedding => "/v1/embeddings",
             Self::ImageGeneration => "/v1/images/generations",
             Self::AudioTranscription | Self::AudioClassification => return None,
         })
@@ -74,6 +77,16 @@ pub enum OperationInput {
         sample_count: u64,
         data_base64: String,
     },
+    /// Items to embed; each item's text and image parts produce one vector.
+    ContentBatch {
+        items: Vec<ContentItem>,
+    },
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContentItem {
+    pub parts: Vec<ImagePart>,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -438,6 +451,7 @@ pub enum SemanticTask {
     SpeechToText,
     AudioClassification,
     ImageToText,
+    MultimodalEmbedding,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -451,6 +465,7 @@ pub enum InputFormat {
     TextBatch,
     PcmS16le,
     PcmF32le,
+    ContentBatch,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
@@ -609,8 +624,9 @@ mod image_to_text_schema_tests {
                 json!("image_to_text"),
                 json!("audio_transcription"),
                 json!("audio_classification"),
+                json!("multimodal_embedding"),
             ],
-            "closed consumers must adopt the complete producer capability vocabulary"
+            "new capabilities are appended; consumers ignore ones they do not use"
         );
         let input_schema = serde_json::to_value(schemars::schema_for!(InputFormat)).unwrap();
         let formats = input_schema["enum"].as_array().unwrap();

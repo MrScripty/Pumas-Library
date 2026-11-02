@@ -254,6 +254,61 @@ fn executable_artifact_for_record(
     Some((format, model_path))
 }
 
+/// How llama.cpp must serve a model, derived from its library model type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LlamaCppServingMode {
+    Generation,
+    Embedding,
+    Reranking,
+}
+
+/// Non-causal (pooled) models evaluate one whole input inside a single
+/// micro-batch, so the micro-batch must hold the longest accepted input.
+/// llama.cpp's default (512 tokens) rejects longer embedding inputs; this
+/// matches the 8K context of current embedding models such as EmbeddingGemma 2.
+pub(crate) const LLAMA_CPP_POOLED_BATCH_TOKENS: u32 = 8192;
+
+impl LlamaCppServingMode {
+    pub(crate) fn for_model_type(model_type: &str) -> Self {
+        if model_type.eq_ignore_ascii_case("embedding") {
+            Self::Embedding
+        } else if model_type.eq_ignore_ascii_case("reranker") {
+            Self::Reranking
+        } else {
+            Self::Generation
+        }
+    }
+
+    /// `(option, value)` pairs, written as `--option value` on the command
+    /// line or `option = value` in a router preset.
+    pub(crate) fn options(self) -> Vec<(&'static str, String)> {
+        let batch = LLAMA_CPP_POOLED_BATCH_TOKENS.to_string();
+        match self {
+            Self::Generation => Vec::new(),
+            Self::Embedding => vec![
+                ("embedding", "true".into()),
+                ("batch-size", batch.clone()),
+                ("ubatch-size", batch),
+            ],
+            Self::Reranking => vec![
+                ("reranking", "true".into()),
+                ("batch-size", batch.clone()),
+                ("ubatch-size", batch),
+            ],
+        }
+    }
+
+    pub(crate) fn cli_args(self) -> Vec<String> {
+        self.options()
+            .into_iter()
+            .flat_map(|(option, value)| match value.as_str() {
+                "true" => vec![format!("--{option}")],
+                _ => vec![format!("--{option}"), value],
+            })
+            .collect()
+    }
+}
+
 fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> Result<String> {
     let mut output = String::from("version = 1\n\n[*]\nload-on-startup = false\n\n");
     for entry in entries {
@@ -269,10 +324,8 @@ fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> 
         }
         output.push_str("\nalias = ");
         output.push_str(&sanitize_llama_cpp_preset_value(&entry.alias));
-        if entry.model_type.eq_ignore_ascii_case("embedding") {
-            output.push_str("\nembedding = true");
-        } else if entry.model_type.eq_ignore_ascii_case("reranker") {
-            output.push_str("\nreranking = true");
+        for (option, value) in LlamaCppServingMode::for_model_type(&entry.model_type).options() {
+            output.push_str(&format!("\n{option} = {value}"));
         }
         output.push_str("\n\n");
     }
@@ -1818,7 +1871,7 @@ mod tests {
         assert!(preset.contains("model = /models/alpha.gguf"));
         assert!(preset.contains("alias = llm/zeta/model"));
         assert!(preset.contains(
-            "[embedding/qwen/model]\nmodel = /models/embedding.gguf\nalias = embedding/qwen/model\nembedding = true"
+            "[embedding/qwen/model]\nmodel = /models/embedding.gguf\nalias = embedding/qwen/model\nembedding = true\nbatch-size = 8192\nubatch-size = 8192"
         ));
         assert!(preset.contains(
             "[reranker/qwen/model]\nmodel = /models/reranker.gguf\nalias = reranker/qwen/model\nreranking = true"

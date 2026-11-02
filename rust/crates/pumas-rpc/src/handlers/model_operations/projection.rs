@@ -87,6 +87,17 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
             body["input"] = json!(texts);
         }
         (
+            Capability::MultimodalEmbedding,
+            OperationInput::Image { .. } | OperationInput::ContentBatch { .. },
+            OperationOptions::Embeddings { dimensions },
+            OutputFormat::EmbeddingsFloat32,
+        ) => {
+            if *dimensions == Some(0) {
+                return Err(Rejection::invalid("options.dimensions must be at least 1"));
+            }
+            body["input"] = super::image_input::embedding_items(&request.input)?;
+        }
+        (
             Capability::ImageGeneration,
             OperationInput::Text { text },
             OperationOptions::ImageGeneration {
@@ -262,6 +273,7 @@ fn input_kind(input: &OperationInput) -> &'static str {
         OperationInput::Image { .. } => "image",
         OperationInput::ImageMessages { .. } => "image_messages",
         OperationInput::Audio { .. } => "audio",
+        OperationInput::ContentBatch { .. } => "content_batch",
     }
 }
 fn options_kind(options: &OperationOptions) -> &'static str {
@@ -295,6 +307,32 @@ fn validate_embedding(input: &[&str], dimensions: Option<usize>) -> Result<(), R
         return Err(Rejection::invalid("options.dimensions must be at least 1"));
     }
     Ok(())
+}
+
+/// Matryoshka truncation for providers that ignore a requested dimension
+/// (llama.cpp, Ollama): keep the leading `dimensions` values and renormalize.
+/// A provider that already returned `dimensions` values is passed through; a
+/// shorter vector than requested cannot be extended.
+fn truncate_embedding(mut vector: Vec<f32>, dimensions: usize) -> Option<Vec<f32>> {
+    if vector.len() == dimensions {
+        return Some(vector);
+    }
+    if vector.len() < dimensions {
+        return None;
+    }
+    vector.truncate(dimensions);
+    let norm = vector
+        .iter()
+        .map(|value| f64::from(*value) * f64::from(*value))
+        .sum::<f64>()
+        .sqrt();
+    if !norm.is_finite() || norm == 0.0 {
+        return None;
+    }
+    for value in &mut vector {
+        *value = (f64::from(*value) / norm) as f32;
+    }
+    Some(vector)
 }
 
 /// Extract only the public typed fields, validating coherence instead of forwarding provider JSON.
@@ -342,10 +380,11 @@ pub fn result(request: &OperationRequest, value: Value) -> Result<OperationResul
                 finish_reason,
             })
         }
-        Capability::TextEmbedding => {
+        Capability::TextEmbedding | Capability::MultimodalEmbedding => {
             let data = value.get("data").and_then(Value::as_array).ok_or(invalid)?;
             let count = match &request.input {
                 OperationInput::TextBatch { texts } => texts.len(),
+                OperationInput::ContentBatch { items } => items.len(),
                 _ => 1,
             };
             if data.len() != count {
@@ -369,20 +408,15 @@ pub fn result(request: &OperationRequest, value: Value) -> Result<OperationResul
                             .ok_or(invalid)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                if vector.is_empty()
-                    || vector.len() > 8192
-                    || width.is_some_and(|w| w != vector.len())
-                {
+                if vector.is_empty() || width.is_some_and(|w| w != vector.len()) {
                     return Err(invalid);
                 }
-                if let OperationOptions::Embeddings {
-                    dimensions: Some(d),
-                } = request.options
-                {
-                    if vector.len() != d {
-                        return Err(invalid);
-                    }
-                }
+                let vector = match request.options {
+                    OperationOptions::Embeddings {
+                        dimensions: Some(d),
+                    } => truncate_embedding(vector, d).ok_or(invalid)?,
+                    _ => vector,
+                };
                 width = Some(vector.len());
                 vectors.push(vector);
             }

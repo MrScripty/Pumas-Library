@@ -224,6 +224,16 @@ async fn prepare_runtime_profile_launch_spec(
             }
             launch_spec.extra_args =
                 append_llama_cpp_model_arg(&launch_spec.extra_args, &model_path, model_id)?;
+            let model_type = primary
+                .model_library
+                .get_model(model_id)
+                .await?
+                .map(|record| record.model_type)
+                .unwrap_or_default();
+            launch_spec.extra_args.extend(
+                crate::runtime_profiles::LlamaCppServingMode::for_model_type(&model_type)
+                    .cli_args(),
+            );
             selected_model_path = Some(model_path);
             if let Some(overrides) = overrides {
                 apply_llama_cpp_launch_overrides(&mut launch_spec, overrides);

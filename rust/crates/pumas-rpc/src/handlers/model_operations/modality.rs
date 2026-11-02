@@ -57,6 +57,10 @@ pub enum Input {
         sample_count: u64,
         data_base64: String,
     },
+    /// Items to embed together; each item produces one vector.
+    ContentBatch {
+        items: Vec<ContentItem>,
+    },
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Deserialize)]
@@ -132,11 +136,17 @@ impl Input {
             Self::ImageMessages { .. } => "image_messages",
             Self::Image { .. } => "image",
             Self::Audio { .. } => "audio",
+            Self::ContentBatch { .. } => "content_batch",
         }
     }
     fn has_image(&self) -> bool {
         match self {
             Self::Image { .. } | Self::ImageMessages { .. } => true,
+            Self::ContentBatch { items } => items.iter().any(|item| {
+                item.parts
+                    .iter()
+                    .any(|part| matches!(part, ImagePart::Image { .. }))
+            }),
             Self::Messages { messages } => messages.iter().any(|message| {
                 matches!(&message.content, Content::Parts(parts)
                     if parts.iter().any(|part| matches!(part, Part::Image { .. })))
@@ -254,6 +264,27 @@ impl ModalityRequest {
                 encoding,
                 data_base64,
             } => valid_image("input", encoding, data_base64)?,
+            Input::ContentBatch { items } => {
+                if items.is_empty() {
+                    return Err(Rejection::invalid("input.items must not be empty"));
+                }
+                for (index, item) in items.iter().enumerate() {
+                    let field = format!("input.items[{index}].parts");
+                    if item.parts.is_empty() {
+                        return Err(Rejection::invalid(format!("{field} must not be empty")));
+                    }
+                    for (part_index, part) in item.parts.iter().enumerate() {
+                        let field = format!("{field}[{part_index}]");
+                        match part {
+                            ImagePart::Text { text } => valid_text(&field, text)?,
+                            ImagePart::Image {
+                                encoding,
+                                data_base64,
+                            } => valid_image(&field, encoding, data_base64)?,
+                        }
+                    }
+                }
+            }
             Input::Audio {
                 encoding,
                 sample_rate_hz,
@@ -274,8 +305,11 @@ impl ModalityRequest {
     /// lookup. This validation value grants no selection or admission authority;
     /// resolve against the actual selected descriptors must still authorize it.
     pub fn image_preflight(&self) -> Result<Option<OperationRequest>, Rejection> {
-        if !self.input.has_image() {
+        if !self.input.has_image() && !matches!(self.input, Input::ContentBatch { .. }) {
             return Ok(None);
+        }
+        if matches!(self.output, Output::EmbeddingsFloat32) {
+            return self.multimodal_embedding_preflight().map(Some);
         }
         if !matches!(self.output, Output::Text) {
             return Err(Rejection::new(
@@ -316,6 +350,39 @@ impl ModalityRequest {
         let operation = self.operation(Capability::ImageToText, input, OutputFormat::Text, options);
         projection::validate_image_to_text_request(&operation)?;
         Ok(Some(operation))
+    }
+    fn multimodal_embedding_preflight(&self) -> Result<OperationRequest, Rejection> {
+        if self
+            .semantic_task
+            .is_some_and(|task| task != SemanticTask::MultimodalEmbedding)
+            || self
+                .capability
+                .is_some_and(|capability| capability != Capability::MultimodalEmbedding)
+        {
+            return Err(Rejection::new(
+                ErrorCode::UnsupportedModality,
+                "image embeddings use capability multimodal_embedding",
+            ));
+        }
+        if self.stream {
+            return Err(Rejection::invalid("stream is not supported for embeddings"));
+        }
+        if !matches!(self.input, Input::Image { .. } | Input::ContentBatch { .. }) {
+            return Err(Rejection::invalid(
+                "multimodal_embedding accepts input kind \"image\" or \"content_batch\"",
+            ));
+        }
+        let options = self
+            .options
+            .clone()
+            .unwrap_or(OperationOptions::Embeddings { dimensions: None });
+        let input = self.adapter_input()?;
+        Ok(self.operation(
+            Capability::MultimodalEmbedding,
+            input,
+            OutputFormat::EmbeddingsFloat32,
+            options,
+        ))
     }
     fn validate_audio(
         &self,
@@ -459,7 +526,9 @@ impl ModalityRequest {
                     temperature: None,
                     top_p: None,
                 },
-                Capability::TextEmbedding => OperationOptions::Embeddings { dimensions: None },
+                Capability::TextEmbedding | Capability::MultimodalEmbedding => {
+                    OperationOptions::Embeddings { dimensions: None }
+                }
                 Capability::AudioTranscription | Capability::AudioClassification => {
                     OperationOptions::Audio {
                         language: None,
@@ -485,10 +554,13 @@ impl ModalityRequest {
             (_, input) => input,
         };
         let operation = self.operation(capability, input, output, options);
-        if capability == Capability::ImageToText {
-            projection::validate_image_to_text_request(&operation)?;
-        } else {
-            projection::provider_request(&operation)?;
+        match capability {
+            Capability::ImageToText => projection::validate_image_to_text_request(&operation)?,
+            // Image bytes were already decoded and projected by the preflight.
+            Capability::MultimodalEmbedding => {}
+            _ => {
+                projection::provider_request(&operation)?;
+            }
         }
         Ok(operation)
     }
@@ -545,6 +617,9 @@ impl ModalityRequest {
             },
             Input::ImageMessages { messages } => OperationInput::ImageMessages {
                 messages: messages.clone(),
+            },
+            Input::ContentBatch { items } => OperationInput::ContentBatch {
+                items: items.clone(),
             },
             Input::Messages { messages } if self.input.has_image() => {
                 OperationInput::ImageMessages {
@@ -654,6 +729,7 @@ fn accepts(descriptor: &CapabilityDescriptor, input: &OperationInput) -> bool {
             ..
         } => InputFormat::JpegBase64,
         OperationInput::ImageMessages { .. } => InputFormat::MessagesImage,
+        OperationInput::ContentBatch { .. } => InputFormat::ContentBatch,
         OperationInput::Audio {
             encoding: AudioEncoding::PcmS16le,
             ..

@@ -1,7 +1,7 @@
 # v0.8.0 consumer API
 
 **Plan status:** Active. **Acceptance status:** not yet satisfied.
-**Current phase:** M3. **Next slice:** M3 — image-text-to-text and EmbeddingGemma 2.
+**Current phase:** M4. **Next slice:** M4 — decision capability for Kev and OpenJev.
 
 ## Objective and scope
 
@@ -35,8 +35,8 @@ speech, Torch text generation, crate restructuring.
 | C2 | One request grammar: `capability` and `options` optional; all requests accepted today remain accepted with identical results | existing + new model-operation tests | satisfied: existing suite unchanged in behavior; one-grammar test |
 | C3 | A served-model listing route returns each (model, profile) once with capabilities, availability and derived limits | RPC tests | satisfied: served-models and /v1/models tests |
 | C4 | No flat per-model limits remain on the typed path; advertised limits come from profile/runtime | tests + code inspection | satisfied for the typed path; the Torch image adapter keeps its 4,000-character prompt limit (adapter-specific) |
-| C5 | `image-text-to-text` models advertise chat and image-to-text | descriptor tests | pending |
-| C6 | EmbeddingGemma 2 (GGUF + mmproj) serves text and image embeddings via llama.cpp with MRL truncation | tests + live run on owner's library | pending |
+| C5 | `image-text-to-text` models advertise chat and image-to-text | descriptor tests | satisfied: descriptor tests |
+| C6 | EmbeddingGemma 2 (GGUF + mmproj) serves text and image embeddings via llama.cpp with MRL truncation | tests + live run on owner's library | implemented and unit-tested; live run on the owner library pending |
 | C7 | Kev/OpenJev serve a typed decision operation via llama.cpp `/v1/systemone` | tests + live run | pending |
 | C8 | Contract docs state the extensibility rule; consumers tolerate additions and show Pumas reasons | consumer test suites | pending |
 
@@ -46,7 +46,7 @@ speech, Torch text generation, crate restructuring.
 | --- | --- | --- | --- |
 | M1 | Rejection reasons, request-ID echo, single grammar (C1, C2) | `pumas-rpc/src/handlers/model_operations*`, `openai_gateway.rs` error projection, `docs/contracts/model-operations-v1.md` | done |
 | M2 | Served-model listing, derived limits, no duplicate IDs (C3, C4) | `model_operations*`, `openai_gateway.rs`, `server.rs`, `pumas-core` ONNX limits export | done |
-| M3 | Image-text-to-text and EmbeddingGemma 2 (C5, C6) | `model_operations*`, llama.cpp launch specs/router presets, Ollama load path, embedding projection, `pumas-core` primary-artifact selection (projector files) | active |
+| M3 | Image-text-to-text and EmbeddingGemma 2 (C5, C6) | `model_operations*`, llama.cpp launch specs/router presets, Ollama load path, embedding projection, `pumas-core` primary-artifact selection (projector files) | done |
 | M4 | Decision capability (C7) | `model_operations*`, gateway route for `/v1/systemone`, contract doc | planned |
 | M5 | Consumer updates and contract docs (C8) | phased-memory, Tuldok, Lanternwake, Pumas-Playground (separate repos) | planned |
 

@@ -7156,7 +7156,9 @@ fn render_migration_execution_markdown(report: &MigrationExecutionReport) -> Str
     output
 }
 
-/// Find the primary model file in a directory (the largest model file).
+/// Find the primary model file in a directory: the largest model file that is
+/// not a multimodal projector. A directory holding only a projector still
+/// returns it, so the caller can report what it found.
 ///
 /// This is used for hash verification - the hashes in metadata correspond to the
 /// primary (largest) model file in the directory.
@@ -7169,6 +7171,7 @@ fn find_primary_model_file_in_selection(
     selected_paths: Option<&std::collections::HashSet<PathBuf>>,
 ) -> Option<PathBuf> {
     let mut largest: Option<(PathBuf, u64)> = None;
+    let mut largest_projector: Option<(PathBuf, u64)> = None;
 
     for entry in WalkDir::new(model_dir)
         .min_depth(1)
@@ -7208,15 +7211,20 @@ fn find_primary_model_file_in_selection(
 
         if let Ok(meta) = entry.metadata() {
             let size = meta.len();
-            if largest.as_ref().is_none_or(|(path, previous_size)| {
+            let slot = if crate::runtime_profiles::mmproj::is_projector_file_name(&filename) {
+                &mut largest_projector
+            } else {
+                &mut largest
+            };
+            if slot.as_ref().is_none_or(|(path, previous_size)| {
                 size > *previous_size || (size == *previous_size && entry.path() < path.as_path())
             }) {
-                largest = Some((entry.path().to_path_buf(), size));
+                *slot = Some((entry.path().to_path_buf(), size));
             }
         }
     }
 
-    largest.map(|(path, _)| path)
+    largest.or(largest_projector).map(|(path, _)| path)
 }
 
 fn resolve_local_model_type_with_persisted_hints(
@@ -15068,6 +15076,24 @@ mod tests {
         assert_eq!(
             refreshed.validation_state,
             Some(AssetValidationState::Degraded)
+        );
+    }
+
+    #[test]
+    fn primary_model_file_is_never_a_larger_projector() {
+        let temp_dir = TempDir::new().unwrap();
+        let model_dir = temp_dir.path();
+        std::fs::write(model_dir.join("embeddinggemma-2-Q8_0.gguf"), vec![0u8; 16]).unwrap();
+        std::fs::write(model_dir.join("mmproj-Q8_0.gguf"), vec![0u8; 64]).unwrap();
+        assert_eq!(
+            find_primary_model_file(model_dir),
+            Some(model_dir.join("embeddinggemma-2-Q8_0.gguf"))
+        );
+        // A directory holding only a projector still reports it.
+        std::fs::remove_file(model_dir.join("embeddinggemma-2-Q8_0.gguf")).unwrap();
+        assert_eq!(
+            find_primary_model_file(model_dir),
+            Some(model_dir.join("mmproj-Q8_0.gguf"))
         );
     }
 }

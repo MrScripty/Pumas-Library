@@ -5,7 +5,7 @@ import { fileURLToPath, URL } from 'node:url';
 import { mkdtemp, mkdir, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { schemaType, generate } from './generate-desktop-contract.mjs';
+import { schemaType, generate, mergeOwnedContracts } from './generate-desktop-contract.mjs';
 
 test('bundled runtime helpers are identical across symlinked dependency workspaces', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'pumas-contract-workspace-'));
@@ -103,4 +103,12 @@ test('registered-link health refinement rejects contradictory counts and status'
   for (const value of [{...healthy,status:'degraded'},{...degraded,status:'healthy'},{...degraded,total_links:3},{...degraded,broken_links:null}]) {
     assert.equal(module.validateHealth(value),false);
   }
+});
+
+test('Electron-owned declarations merge with the backend export under one owner each', () => {
+  const contract = (schemas) => ({format:'pumas-desktop-contract-1',dialect:'http://json-schema.org/draft-07/schema#',schemas});
+  const merged = mergeOwnedContracts(contract({Backend:{type:'string'}}), [contract({Owned:{type:'boolean'}})]);
+  assert.deepEqual(Object.keys(merged.schemas).sort(), ['Backend', 'Owned']);
+  assert.throws(() => mergeOwnedContracts(contract({Same:{type:'string'}}), [contract({Same:{type:'string'}})]), /more than one owner/);
+  assert.throws(() => mergeOwnedContracts(contract({}), [{...contract({}), format:'other'}]), /format/);
 });

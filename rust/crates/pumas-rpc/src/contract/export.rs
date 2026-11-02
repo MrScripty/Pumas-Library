@@ -9,6 +9,7 @@ use super::*;
 // Matches the non-transforming relative identity policy in core and RPC admission.
 const MODEL_LOOKUP_ID_PATTERN: &str = r"^(?![A-Za-z]:)(?!.*(?:^|/)\.{1,2}(?:/|$))[^\\/\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+(?:/[^\\/\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+)*$";
 
+use crate::startup_failure::StartupFailureFrame;
 use pumas_library::models::RouterProfileSyncStatus;
 use schemars::{generate::SchemaSettings, JsonSchema};
 
@@ -755,6 +756,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         )+ };
     }
     export!(
+        StartupFailureFrame,
         S3PersistedImportsWire,
         S3TransferRetryParams,
         S3TransferRetryState,
@@ -896,6 +898,12 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
         for (name, definition) in definitions {
             refine_named(name, definition);
         }
+    }
+    // Desktop DTOs ship with their consumers and are closed. The startup frame
+    // is read from a backend that may come from another build, so its readers
+    // must ignore fields they do not know.
+    if T::schema_name() == "StartupFailureFrame" {
+        schema["additionalProperties"] = true.into();
     }
     constrain_representation(&mut schema);
     Ok(schema)

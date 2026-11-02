@@ -74,6 +74,21 @@ and frontend. `check:desktop-contract` regenerates from current Rust source
 and rejects any stale artifact; CI runs that command. Normal UI builds do not
 invoke Cargo or fetch generator dependencies.
 
+Payloads that Electron main publishes to the renderer (the launcher-root
+startup state, selection result and library-upgrade result) are owned by
+Electron and declared in `electron/contracts/*.schema.json`. The generator
+merges them with the Rust export, so main, preload and the frontend share one
+generated type and validator; a name declared by both sources is an error.
+These declarations ship with their consumers and stay closed.
+
+The backend's startup diagnostic is the exception to closed declarations. Rust
+writes one `PUMAS_STARTUP_FAILURE=` line holding a `StartupFailureFrame`
+(`pumas-rpc/src/startup_failure.rs`) for every fatal startup error, with a
+bounded `detail`. Electron may run a backend from another build, so the frame's
+schema is open: readers ignore unknown fields and treat an unknown `reason` as
+`backend-unavailable`. The detail reaches the recovery screen as the startup
+state's `detail`.
+
 Export/check uses `cargo --offline --locked` and cannot update dependency
 resolution. Provision missing locked Rust dependencies explicitly first with
 `cargo fetch --locked --manifest-path rust/Cargo.toml` (as CI does).

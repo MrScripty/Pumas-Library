@@ -1,3 +1,7 @@
+import type {
+  LauncherRootSelectionResult,
+  LauncherRootStartupState,
+} from './generated/desktop-contract';
 import {
   LauncherRootPersistenceError,
   LauncherRootSelectionError,
@@ -25,39 +29,8 @@ export type LauncherRootSelectionHandler = (
   startupState: LauncherRootStartupState
 ) => Promise<LauncherRootSelectionResult>;
 
-export type LauncherRootStartupState =
-  | { status: 'initializing' }
-  | {
-      status: 'ready';
-      selectionAction: 'select-library' | 'correct-launch-input';
-      libraryScopeId: string | null;
-    }
-  | {
-      status: 'recovery-required';
-      reason: 'invalid' | 'unavailable' | 'migration-required' | 'backend-unavailable';
-      authoritySource: 'persisted' | 'environment' | 'argument' | 'default';
-      action: 'select-library' | 'correct-launch-input';
-    };
-
-export type LauncherRootSelectionResult =
-  | { status: 'cancelled' }
-  | { status: 'restarting' }
-  | { status: 'not-selectable'; action: 'correct-launch-input' }
-  | {
-      status: 'recovery-required';
-      reason: 'invalid-selection' | 'chooser-unavailable';
-      authorityState: 'unchanged';
-    }
-  | {
-      status: 'recovery-required';
-      reason: 'persistence-unavailable';
-      authorityState: LauncherRootAuthorityState;
-    }
-  | {
-      status: 'recovery-required';
-      reason: 'restart-unavailable';
-      authorityState: 'published';
-    };
+// Renderer-facing results are declared once in electron/contracts and generated.
+export type { LauncherRootStartupState, LauncherRootSelectionResult };
 
 export function projectLauncherRootStartupState(
   resolution: Extract<LauncherRootResolution, { status: 'recovery-required' }>
@@ -81,14 +54,16 @@ export function projectLauncherRootStartupState(
     };
   }
 
-  return {
-    status: 'recovery-required',
-    reason: resolution.code === 'launcher_root_invalid' ? 'invalid' : 'unavailable',
-    authoritySource: resolution.authoritySource,
-    action: resolution.authoritySource === 'persisted'
-      ? 'select-library'
-      : 'correct-launch-input',
-  };
+  const reason = resolution.code === 'launcher_root_invalid' ? 'invalid' : 'unavailable';
+  // A saved root can be replaced by selection; explicit launch input must be corrected.
+  return resolution.authoritySource === 'persisted'
+    ? { status: 'recovery-required', reason, authoritySource: 'persisted', action: 'select-library' }
+    : {
+        status: 'recovery-required',
+        reason,
+        authoritySource: resolution.authoritySource,
+        action: 'correct-launch-input',
+      };
 }
 
 export function launcherRootSelectionInvalid(): LauncherRootSelectionResult {

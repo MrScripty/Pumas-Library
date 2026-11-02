@@ -98,6 +98,9 @@ import {
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
+  decodeLauncherRootSelectionResult as decodeGeneratedLauncherRootSelectionResult,
+  decodeLauncherRootStartupState as decodeGeneratedLauncherRootStartupState,
+  decodeLibraryUpgradeResult as decodeGeneratedLibraryUpgradeResult,
   type DecodeOutcome,
   type DownloadListOutcome,
   type RuntimeLaunchOutcome,
@@ -122,130 +125,22 @@ class LauncherRootRecoveryContractError extends Error {
   }
 }
 
+/** Decode a renderer-facing result with its generated validator, or throw the stable contract error. */
+function decodeOrThrow<T>(outcome: DecodeOutcome<T>, message: string): T {
+  if (outcome.status === 'valid') return outcome.value;
+  throw new LauncherRootRecoveryContractError(message);
+}
+
 function decodeLauncherRootStartupState(value: unknown): LauncherRootStartupState {
-  try {
-    if (hasExactShape(value, ['status']) && value['status'] === 'initializing') {
-      return { status: 'initializing' };
-    }
-
-    if (
-      hasExactShape(value, ['status', 'selectionAction', 'libraryScopeId']) &&
-      value['status'] === 'ready' &&
-      isLauncherRootSelectionAction(value['selectionAction']) &&
-      (value['libraryScopeId'] === null ||
-        (typeof value['libraryScopeId'] === 'string' && /^display-v1:[a-f0-9]{64}$/.test(value['libraryScopeId'])))
-    ) {
-      return {
-        status: value['status'],
-        selectionAction: value['selectionAction'],
-        libraryScopeId: value['libraryScopeId'],
-      };
-    }
-
-    if (
-      hasExactShape(value, ['status', 'reason', 'authoritySource', 'action']) &&
-      value['status'] === 'recovery-required' &&
-      (value['reason'] === 'invalid' || value['reason'] === 'unavailable' ||
-        value['reason'] === 'migration-required' || value['reason'] === 'backend-unavailable') &&
-      isLauncherRootAuthoritySource(value['authoritySource']) &&
-      isCorrelatedLauncherRootStartupAction(
-        value['authoritySource'],
-        value['action']
-      )
-    ) {
-      return {
-        status: value['status'],
-        reason: value['reason'],
-        authoritySource: value['authoritySource'],
-        action: value['action'],
-      };
-    }
-  } catch {
-    // Convert accessor/proxy failures to the same stable contract diagnostic.
-  }
-
-  throw new LauncherRootRecoveryContractError('Invalid launcher-root startup state.');
+  return decodeOrThrow(decodeGeneratedLauncherRootStartupState(value), 'Invalid launcher-root startup state.');
 }
 
 function decodeLibraryUpgradeResult(value: unknown): LibraryUpgradeResult {
-  if (hasExactShape(value, ['status']) &&
-      (value['status'] === 'upgraded' || value['status'] === 'unavailable')) return { status: value['status'] };
-  if (hasExactShape(value, ['status', 'stage']) && value['status'] === 'failed' &&
-      (value['stage'] === 'upgrade' || value['stage'] === 'open')) {
-    return { status: 'failed', stage: value['stage'] };
-  }
-  if (hasExactShape(value, ['status', 'state']) && value['status'] === 'ready') {
-    const state = decodeLauncherRootStartupState(value['state']);
-    if (state.status === 'ready') return { status: 'ready', state };
-  }
-  throw new LauncherRootRecoveryContractError('Invalid library upgrade result.');
+  return decodeOrThrow(decodeGeneratedLibraryUpgradeResult(value), 'Invalid library upgrade result.');
 }
 
-function decodeLauncherRootSelectionResult(
-  value: unknown
-): LauncherRootSelectionResult {
-  try {
-    if (hasExactShape(value, ['status'])) {
-      if (value['status'] === 'cancelled') {
-        return { status: 'cancelled' };
-      }
-      if (value['status'] === 'restarting') {
-        return { status: 'restarting' };
-      }
-    }
-
-    if (
-      hasExactShape(value, ['status', 'action']) &&
-      value['status'] === 'not-selectable' &&
-      value['action'] === 'correct-launch-input'
-    ) {
-      return {
-        status: value['status'],
-        action: value['action'],
-      };
-    }
-
-    if (
-      hasExactShape(value, ['status', 'reason', 'authorityState']) &&
-      value['status'] === 'recovery-required'
-    ) {
-      if (
-        (value['reason'] === 'invalid-selection' ||
-          value['reason'] === 'chooser-unavailable') &&
-        value['authorityState'] === 'unchanged'
-      ) {
-        return {
-          status: value['status'],
-          reason: value['reason'],
-          authorityState: value['authorityState'],
-        };
-      }
-      if (
-        value['reason'] === 'persistence-unavailable' &&
-        isLauncherRootPersistenceAuthorityState(value['authorityState'])
-      ) {
-        return {
-          status: value['status'],
-          reason: value['reason'],
-          authorityState: value['authorityState'],
-        };
-      }
-      if (
-        value['reason'] === 'restart-unavailable' &&
-        value['authorityState'] === 'published'
-      ) {
-        return {
-          status: value['status'],
-          reason: value['reason'],
-          authorityState: value['authorityState'],
-        };
-      }
-    }
-  } catch {
-    // Convert accessor/proxy failures to the same stable contract diagnostic.
-  }
-
-  throw new LauncherRootRecoveryContractError('Invalid launcher-root selection result.');
+function decodeLauncherRootSelectionResult(value: unknown): LauncherRootSelectionResult {
+  return decodeOrThrow(decodeGeneratedLauncherRootSelectionResult(value), 'Invalid launcher-root selection result.');
 }
 
 function hasExactShape(
@@ -259,37 +154,6 @@ function hasExactShape(
   const actualKeys = Object.keys(value);
   return actualKeys.length === expectedKeys.length &&
     expectedKeys.every((key) => actualKeys.includes(key));
-}
-
-function isLauncherRootSelectionAction(
-  value: unknown
-): value is 'select-library' | 'correct-launch-input' {
-  return value === 'select-library' || value === 'correct-launch-input';
-}
-
-function isLauncherRootAuthoritySource(
-  value: unknown
-): value is 'persisted' | 'environment' | 'argument' | 'default' {
-  return value === 'persisted' || value === 'environment' || value === 'argument' || value === 'default';
-}
-
-function isCorrelatedLauncherRootStartupAction(
-  authoritySource: 'persisted' | 'environment' | 'argument' | 'default',
-  action: unknown
-): action is 'select-library' | 'correct-launch-input' {
-  return authoritySource === 'persisted' || authoritySource === 'default'
-    ? action === 'select-library'
-    : action === 'correct-launch-input';
-}
-
-function isLauncherRootPersistenceAuthorityState(
-  value: unknown
-): value is 'unchanged' |
-  'replacement-visibility-unknown' |
-  'published-durability-unavailable' {
-  return value === 'unchanged' ||
-    value === 'replacement-visibility-unknown' ||
-    value === 'published-durability-unavailable';
 }
 
 /**

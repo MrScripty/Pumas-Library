@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 c2d3c7dfdc5f68a90f7e38c1e70540e4a768a73c986162735b174f01830dbaf3. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 cb152fd9bddadd4763476ce4b28a0ecbae7cc7887819a825cdcc94f9b5ca863d. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -34,7 +34,10 @@ export declare function validateInstallVersionOutcome(value: unknown): boolean;
 export declare function validateInstallVersionParams(value: unknown): boolean;
 export declare function validateInstallationProgressOutcome(value: unknown): boolean;
 export declare function validateInstalledVersionsOutcome(value: unknown): boolean;
+export declare function validateLauncherRootSelectionResult(value: unknown): boolean;
+export declare function validateLauncherRootStartupState(value: unknown): boolean;
 export declare function validateLibraryModelMetadataOutcome(value: unknown): boolean;
+export declare function validateLibraryUpgradeResult(value: unknown): boolean;
 export declare function validateLinkHealthOutcome(value: unknown): boolean;
 export declare function validateModelIndexRefreshOutcome(value: unknown): boolean;
 export declare function validateModelLookupOutcome(value: unknown): boolean;
@@ -76,6 +79,7 @@ export declare function validateSetDefaultVersionOutcome(value: unknown): boolea
 export declare function validateSetDefaultVersionParams(value: unknown): boolean;
 export declare function validateStartBackendSetupParams(value: unknown): boolean;
 export declare function validateStartConversionSetupParams(value: unknown): boolean;
+export declare function validateStartupFailureFrame(value: unknown): boolean;
 export declare function validateStopRuntimeProfileGenerationOutcome(value: unknown): boolean;
 export declare function validateStopRuntimeProfileGenerationParams(value: unknown): boolean;
 export declare function validateSuccessOutcome(value: unknown): boolean;

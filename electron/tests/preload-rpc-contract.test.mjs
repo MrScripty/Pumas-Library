@@ -731,6 +731,13 @@ const CLOSED_STARTUP_STATES = [
         : 'correct-launch-input',
     }))
   ),
+  {
+    status: 'recovery-required',
+    reason: 'backend-unavailable',
+    authoritySource: 'persisted',
+    action: 'select-library',
+    detail: 'unknown field `hf_model_partition_version`',
+  },
 ];
 const CLOSED_SELECTION_RESULTS = [
   { status: 'cancelled' },
@@ -770,6 +777,20 @@ const MALFORMED_STARTUP_STATES = [
     reason: 'invalid',
     authoritySource: 'environment',
     action: 'select-library',
+  },
+  ...['', 7, 'x'.repeat(1025)].map((detail) => ({
+    status: 'recovery-required',
+    reason: 'backend-unavailable',
+    authoritySource: 'persisted',
+    action: 'select-library',
+    detail,
+  })),
+  {
+    status: 'recovery-required',
+    reason: 'backend-unavailable',
+    authoritySource: 'persisted',
+    action: 'select-library',
+    launcherRoot: '/sensitive/library',
   },
 ];
 const MALFORMED_SELECTION_RESULTS = [

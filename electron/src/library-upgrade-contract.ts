@@ -3,13 +3,10 @@ export type LibraryUpgradeConfirmation = {
   oldWritersStopped: true;
   noDowngradeAccepted: true;
 };
-export type LibraryUpgradeReadyState = {
-  status: 'ready';
-  selectionAction: 'select-library' | 'correct-launch-input';
-  libraryScopeId: string | null;
-};
-export type LibraryUpgradeResult =
-  | { status: 'ready'; state: LibraryUpgradeReadyState }
-  | { status: 'upgraded' }
-  | { status: 'unavailable' }
-  | { status: 'failed'; stage: 'upgrade' | 'open' };
+
+// The result is published to the renderer; it is declared once in
+// electron/contracts and generated.
+export type {
+  LauncherRootReadyState as LibraryUpgradeReadyState,
+  LibraryUpgradeResult,
+} from './generated/desktop-contract';

@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath, URL } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -114,6 +114,29 @@ export function schemaType(schema) {
   }
 }
 
+/**
+ * Add contracts owned by Electron (payloads Electron main publishes to the
+ * renderer) to the backend's exported contract. Each declaration has exactly
+ * one owner, so a name defined by both sources is an error.
+ */
+export function mergeOwnedContracts(backend, owned) {
+  const schemas = {...backend.schemas};
+  for (const contract of owned) {
+    if (contract.format !== backend.format || contract.dialect !== backend.dialect) throw new Error('Unsupported owned contract format/dialect');
+    for (const [name, schema] of Object.entries(contract.schemas ?? {})) {
+      if (Object.hasOwn(schemas, name)) throw new Error(`Contract declaration ${name} has more than one owner`);
+      schemas[name] = schema;
+    }
+  }
+  return {...backend, schemas};
+}
+
+async function electronOwnedContracts() {
+  const directory = resolve(root, 'electron/contracts');
+  const names = (await readdir(directory)).filter(name => name.endsWith('.schema.json')).sort();
+  return Promise.all(names.map(async name => JSON.parse(await readFile(resolve(directory, name), 'utf8'))));
+}
+
 export async function generate(contract, { runtimeRoot = resolve(root, 'electron') } = {}) {
   if (contract.format !== 'pumas-desktop-contract-1' || contract.dialect !== 'http://json-schema.org/draft-07/schema#') throw new Error('Unsupported contract format/dialect');
   const ajv = new Ajv({strict: true, strictTypes: false, validateFormats: false, code: {source: true, esm: true}, allErrors: false});
@@ -154,7 +177,7 @@ export async function generate(contract, { runtimeRoot = resolve(root, 'electron
   };
   const compiled = await build({absWorkingDir:root, stdin:{contents:standaloneCode(ajv, exports), resolveDir:resolve(root,'electron'), sourcefile:'desktop-contract.validators.js'}, plugins:[runtimePlugin], bundle:true, platform:'browser', format:'esm', write:false, target:'es2022'});
   const hash = createHash('sha256').update(JSON.stringify(contract)).digest('hex');
-  const banner = `// Generated from pumas-rpc contract.rs; SHA256 ${hash}. DO NOT EDIT.\n`;
+  const banner = `// Generated from the pumas-rpc contract export and electron/contracts; SHA256 ${hash}. DO NOT EDIT.\n`;
   const names = Object.keys(contract.schemas).sort();
   const declarations = names.map(name => `export declare function validate${name}(value: unknown): boolean;`).join('\n');
   const wrappers = names.map(name => `export function decode${name}(input: unknown): DecodeOutcome<${name}> { return decode(input, validate${name}); }`).join('\n');
@@ -217,7 +240,7 @@ async function main() {
     if (exported.status !== 0) throw new Error(`Contract export failed: ${exported.stderr}`);
     raw = exported.stdout;
   }
-  const files = await generate(JSON.parse(raw));
+  const files = await generate(mergeOwnedContracts(JSON.parse(raw), await electronOwnedContracts()));
   for (const packageName of ['electron','frontend']) {
     for (const [name, content] of Object.entries(files)) {
       const path = resolve(root, packageName, 'src/generated', name);

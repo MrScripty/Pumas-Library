@@ -405,10 +405,16 @@ export function LauncherRootRecoveryProvider({ children }: { children: ReactNode
     const message = reason === 'migration-required'
       ? 'This library uses an older download database. Choose Upgrade Library to back up and upgrade its metadata, then open it. Model files stay in place.'
       : reason === 'backend-unavailable'
-        ? 'Pumas Library could not open this library. Another app may already be using it. ' +
-          (canSelectLibrary
-            ? 'Close other apps using the library and reopen Pumas Library, or select another library.'
-            : `Close other apps using the library or correct the ${presentation.state.authoritySource} launch input, then reopen Pumas Library.`)
+        ? presentation.state.detail
+          // The backend reported why; show it instead of guessing.
+          ? `Pumas Library could not open this library: ${presentation.state.detail} ` +
+            (canSelectLibrary
+              ? 'Resolve this and reopen Pumas Library, or select another library.'
+              : `Resolve this or correct the ${presentation.state.authoritySource} launch input, then reopen Pumas Library.`)
+          : 'Pumas Library could not open this library. Another app may already be using it. ' +
+            (canSelectLibrary
+              ? 'Close other apps using the library and reopen Pumas Library, or select another library.'
+              : `Close other apps using the library or correct the ${presentation.state.authoritySource} launch input, then reopen Pumas Library.`)
         : canSelectLibrary
           ? reason === 'invalid'
             ? 'The saved Pumas library is not valid. Select an existing library to continue.'

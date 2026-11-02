@@ -110,6 +110,18 @@ describe('LauncherRootRecoveryProvider', () => {
     expect(bridge.notify_launcher_root_presentation_committed).toHaveBeenCalledWith('recovery-required');
   });
 
+  it('shows the backend explanation instead of guessing why the library could not start', async () => {
+    installElectronBridge(async () => ({
+      status: 'recovery-required', reason: 'backend-unavailable', authoritySource: 'persisted',
+      action: 'select-library', detail: 'unknown field `hf_model_partition_version` in downloads.json',
+    }));
+    render(<LauncherRootRecoveryProvider><div>Library content</div></LauncherRootRecoveryProvider>);
+    expect(await screen.findByRole('heading', { name: 'Library could not start' })).toBeVisible();
+    expect(screen.getByText(/unknown field `hf_model_partition_version` in downloads\.json/)).toBeVisible();
+    expect(screen.queryByText(/Another app may already be using it/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select Library' })).toBeVisible();
+  });
+
   it('offers an in-app metadata upgrade for a legacy library', async () => {
     installElectronBridge(async () => ({
       status: 'recovery-required', reason: 'migration-required', authoritySource: 'persisted', action: 'select-library',

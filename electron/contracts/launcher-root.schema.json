@@ -1,0 +1,175 @@
+{
+  "format": "pumas-desktop-contract-1",
+  "dialect": "http://json-schema.org/draft-07/schema#",
+  "owner": "electron",
+  "description": "Launcher-root startup, selection and library-upgrade results that Electron main publishes to the renderer. These ship with their consumers, so objects are closed; add fields here and regenerate with `pnpm --dir electron generate:desktop-contract`.",
+  "schemas": {
+    "LauncherRootStartupState": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "LauncherRootStartupState",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {"status": {"const": "initializing"}}
+        },
+        {"$ref": "#/definitions/LauncherRootReadyState"},
+        {
+          "description": "Saved or default library root: the user can select another library.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason", "authoritySource", "action"],
+          "properties": {
+            "status": {"const": "recovery-required"},
+            "reason": {"$ref": "#/definitions/LauncherRootRecoveryReason"},
+            "authoritySource": {"enum": ["persisted", "default"]},
+            "action": {"const": "select-library"},
+            "detail": {"$ref": "#/definitions/LauncherRootRecoveryDetail"}
+          }
+        },
+        {
+          "description": "Library root chosen by an environment variable or argument: the user must correct that launch input.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason", "authoritySource", "action"],
+          "properties": {
+            "status": {"const": "recovery-required"},
+            "reason": {"$ref": "#/definitions/LauncherRootRecoveryReason"},
+            "authoritySource": {"enum": ["environment", "argument"]},
+            "action": {"const": "correct-launch-input"},
+            "detail": {"$ref": "#/definitions/LauncherRootRecoveryDetail"}
+          }
+        }
+      ],
+      "definitions": {
+        "LauncherRootSelectionAction": {"enum": ["select-library", "correct-launch-input"]},
+        "LauncherRootReadyState": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "selectionAction", "libraryScopeId"],
+          "properties": {
+            "status": {"const": "ready"},
+            "selectionAction": {"$ref": "#/definitions/LauncherRootSelectionAction"},
+            "libraryScopeId": {
+              "anyOf": [{"type": "null"}, {"type": "string", "pattern": "^display-v1:[a-f0-9]{64}$"}]
+            }
+          }
+        },
+        "LauncherRootRecoveryReason": {
+          "enum": ["invalid", "unavailable", "migration-required", "backend-unavailable"]
+        },
+        "LauncherRootRecoveryDetail": {
+          "description": "Why the library could not open, as reported by the backend.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      }
+    },
+    "LauncherRootSelectionResult": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "LauncherRootSelectionResult",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {"status": {"const": "cancelled"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {"status": {"const": "restarting"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "action"],
+          "properties": {"status": {"const": "not-selectable"}, "action": {"const": "correct-launch-input"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason", "authorityState"],
+          "properties": {
+            "status": {"const": "recovery-required"},
+            "reason": {"enum": ["invalid-selection", "chooser-unavailable"]},
+            "authorityState": {"const": "unchanged"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason", "authorityState"],
+          "properties": {
+            "status": {"const": "recovery-required"},
+            "reason": {"const": "persistence-unavailable"},
+            "authorityState": {"$ref": "#/definitions/LauncherRootAuthorityState"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason", "authorityState"],
+          "properties": {
+            "status": {"const": "recovery-required"},
+            "reason": {"const": "restart-unavailable"},
+            "authorityState": {"const": "published"}
+          }
+        }
+      ],
+      "definitions": {
+        "LauncherRootAuthorityState": {
+          "enum": ["unchanged", "replacement-visibility-unknown", "published-durability-unavailable"]
+        }
+      }
+    },
+    "LibraryUpgradeResult": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "LibraryUpgradeResult",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {"status": {"const": "upgraded"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {"status": {"const": "unavailable"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "stage"],
+          "properties": {"status": {"const": "failed"}, "stage": {"enum": ["upgrade", "open"]}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "state"],
+          "properties": {"status": {"const": "ready"}, "state": {"$ref": "#/definitions/LauncherRootReadyState"}}
+        }
+      ],
+      "definitions": {
+        "LauncherRootSelectionAction": {"enum": ["select-library", "correct-launch-input"]},
+        "LauncherRootReadyState": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "selectionAction", "libraryScopeId"],
+          "properties": {
+            "status": {"const": "ready"},
+            "selectionAction": {"$ref": "#/definitions/LauncherRootSelectionAction"},
+            "libraryScopeId": {
+              "anyOf": [{"type": "null"}, {"type": "string", "pattern": "^display-v1:[a-f0-9]{64}$"}]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -65,6 +65,13 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
 - llama.cpp embedding and reranking models launch in embedding/reranking mode
   in dedicated profiles too, with a micro-batch that fits whole inputs; Ollama
   embedding models load through `/api/embed`.
+- Saved download state that this version cannot read (for example, fields
+  written by a newer Pumas) no longer stops the backend. The library, models
+  and inference start, downloads are disabled without rewriting that state,
+  and the reason is shown in a status banner.
+- A backend that cannot start reports why, and the desktop recovery screen
+  shows that reason instead of guessing. The startup diagnostic is read across
+  builds, ignoring fields it does not know.
 - Desktop startup failures keep recovery and metadata upgrade actionable,
   including small windows and failed replacement startup attempts.
 - Startup preserves retained downloads whose destination folders are missing,

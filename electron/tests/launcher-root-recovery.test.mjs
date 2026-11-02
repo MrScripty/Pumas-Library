@@ -41,6 +41,26 @@ test('backend recovery preserves launcher authority and remains fatal to release
   }
 });
 
+test('backend recovery carries the backend explanation for unavailable startups only', () => {
+  const resolution = { status: 'resolved', launcherRoot: '/private/library', source: 'persisted', persistedState: 'valid' };
+  const unavailable = new BackendInitializationRecoveryRequiredError(
+    resolution,
+    new BackendStartupError('backend-unavailable', 'unknown field `hf_model_partition_version`'),
+  );
+  assert.deepEqual(unavailable.recoveryState, {
+    status: 'recovery-required', reason: 'backend-unavailable', authoritySource: 'persisted',
+    action: 'select-library', detail: 'unknown field `hf_model_partition_version`',
+  });
+  // Migration has its own explanation; no detail is attached.
+  const migration = new BackendInitializationRecoveryRequiredError(
+    resolution, new BackendStartupError('migration-required', 'ignored'),
+  );
+  assert.equal('detail' in migration.recoveryState, false);
+  // A failure without a backend frame still recovers, without inventing a reason.
+  const silent = new BackendInitializationRecoveryRequiredError(resolution, new Error('exited'));
+  assert.equal('detail' in silent.recoveryState, false);
+});
+
 test('startup projection strips paths and selects only valid recovery actions', () => {
   assert.deepEqual(projectLauncherRootStartupState({
     status: 'resolved',

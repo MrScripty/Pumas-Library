@@ -230,11 +230,91 @@ pub enum Outcome {
     NotAdmitted,
     Unknown,
 }
+impl ErrorCode {
+    /// Generic reason used when the rejecting site has no more specific fact.
+    pub fn default_message(self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "the request is not valid for this operation",
+            Self::UnsupportedContract => "the requested contract_version is not supported",
+            Self::ModelNotFound => "no served model matches the requested model and profile",
+            Self::AmbiguousModel => {
+                "the model alias is served by more than one profile; supply profile"
+            }
+            Self::AmbiguousOperation => {
+                "more than one capability accepts this input and output; supply capability"
+            }
+            Self::UnsupportedModality => {
+                "the selected model has no capability for this input and output"
+            }
+            Self::CapabilityUnavailable => "the capability is not currently available",
+            Self::ProviderFailure => "the inference provider reported a failure",
+            Self::InvalidProviderResult => "the inference provider returned an invalid result",
+            Self::RequestLimit => "the request exceeds the accepted size",
+            Self::ResponseLimit => "the provider response exceeds the accepted size",
+            Self::TransportLost => "the connection to the caller or provider was lost",
+        }
+    }
+}
+/// A rejected or failed operation and the reason reported to the caller.
+///
+/// Messages describe the caller's request or the provider's reported failure;
+/// they never carry credentials or provider envelopes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rejection {
+    pub code: ErrorCode,
+    pub message: String,
+}
+impl Rejection {
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: bounded_message(message.into()),
+        }
+    }
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::InvalidRequest, message)
+    }
+}
+impl From<ErrorCode> for Rejection {
+    fn from(code: ErrorCode) -> Self {
+        Self {
+            code,
+            message: code.default_message().to_owned(),
+        }
+    }
+}
+/// Upper bound on a reported reason, in bytes.
+pub const MAX_MESSAGE_BYTES: usize = 1024;
+fn bounded_message(mut message: String) -> String {
+    if message.len() > MAX_MESSAGE_BYTES {
+        let mut end = MAX_MESSAGE_BYTES;
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        message.truncate(end);
+    }
+    message
+}
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize)]
 pub struct OperationError {
     pub code: ErrorCode,
     pub outcome: Outcome,
+    /// Human-readable reason. Consumers display or log it; they branch on `code`.
+    pub message: String,
+}
+impl OperationError {
+    pub fn new(rejection: Rejection, admitted: bool) -> Self {
+        Self {
+            code: rejection.code,
+            outcome: if admitted {
+                Outcome::Unknown
+            } else {
+                Outcome::NotAdmitted
+            },
+            message: rejection.message,
+        }
+    }
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
@@ -301,6 +381,39 @@ pub struct CapabilitiesResponse {
     pub max_request_bytes: usize,
     pub max_response_bytes: usize,
     pub max_stream_event_bytes: usize,
+    /// Context window configured for this serving, when the runtime reports it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u32>,
+    pub capabilities: Vec<CapabilityDescriptor>,
+}
+/// `GET /v1/served-models`: every served (model, profile) pair exactly once.
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Serialize)]
+pub struct ServedModelsResponse {
+    pub supported_contract_versions: Vec<u32>,
+    pub max_request_bytes: usize,
+    pub max_response_bytes: usize,
+    pub max_stream_event_bytes: usize,
+    pub models: Vec<ServedModelEntry>,
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Serialize)]
+pub struct ServedModelEntry {
+    /// The served alias callers put in `model`.
+    pub model: String,
+    /// The exact profile callers put in `profile`.
+    pub profile: String,
+    /// The library model identifier behind the alias.
+    pub model_id: String,
+    /// Serving provider, for example `llama_cpp`, `ollama`, `onnx_runtime`, `torch`.
+    pub provider: String,
+    /// Serving load state, for example `loaded` or `loading`.
+    pub load_state: String,
+    /// Context window configured for this serving, when the runtime reports it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u32>,
+    /// True when the alias is also served by another profile; callers must send `profile`.
+    pub profile_required: bool,
     pub capabilities: Vec<CapabilityDescriptor>,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -349,6 +462,33 @@ pub enum Availability {
 impl Availability {
     pub fn available(&self) -> bool {
         matches!(self, Self::Available)
+    }
+    pub fn reason_text(&self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Unavailable { reason } => reason.description(),
+        }
+    }
+}
+impl AvailabilityReason {
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::UnsupportedAdapter => {
+                "unsupported_adapter: the serving provider has no adapter for this capability"
+            }
+            Self::UnqualifiedAudioRuntime => {
+                "unqualified_audio_runtime: no qualified audio runtime is serving this model"
+            }
+            Self::UnknownModelTask => {
+                "unknown_model_task: the model's library record does not state its task"
+            }
+            Self::ModelTaskMismatch => {
+                "model_task_mismatch: the model's recorded task does not support this capability"
+            }
+            Self::RuntimeUnavailable => {
+                "runtime_unavailable: the serving runtime is not ready for this model"
+            }
+        }
     }
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -494,11 +634,12 @@ mod image_to_text_schema_tests {
             if field == "stream" {
                 bad["stream"] = json!(true);
             } else {
-                bad["options"]["max_tokens"] = json!(2049);
+                bad["options"]["max_tokens"] = json!(0);
             }
             let parsed: OperationRequest = serde_json::from_value(bad).unwrap();
             assert_eq!(
-                projection::validate_image_to_text_request(&parsed),
+                projection::validate_image_to_text_request(&parsed)
+                    .map_err(|rejection| rejection.code),
                 Err(ErrorCode::InvalidRequest)
             );
         }

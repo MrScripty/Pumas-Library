@@ -58,6 +58,80 @@ production audio third. This document freezes the contract direction; endpoint
 availability must reflect the slice actually installed. No scheduler, model
 downloads, acquisition policy, or consumer UI is introduced here.
 
+## Compatibility rules
+
+These rules apply to every route in this contract.
+
+- **Responses grow additively.** Pumas may add response fields, capability
+  descriptors, enum values (capabilities, formats, option names, availability
+  reasons, error codes) and list entries within `contract_version` 1.
+  Consumers must ignore fields and values they do not use and must not reject
+  a response because it contains them. A consumer that only uses
+  `text_embedding` keeps working when Pumas adds a new capability.
+- **Existing operations do not change.** Changing the meaning, required fields
+  or result shape of an existing operation requires a new `contract_version`.
+  Pumas then advertises both versions in `supported_contract_versions` for an
+  announced overlap.
+- **Requests stay closed.** Pumas rejects unknown request fields, so a typo is
+  reported instead of silently ignored.
+
+## Request grammar
+
+`POST /v1/model-operations` has one request shape:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `contract_version` | yes | `1` |
+| `request_id` | yes | Caller correlation ID, 1–128 of `A-Za-z0-9-_.:`. Echoed in every response. |
+| `model` | yes | Served model alias. |
+| `profile` | no | Exact serving profile; needed only when the alias is served by more than one profile. |
+| `input` | yes | Tagged by `kind`: `text`, `text_batch`, `messages`, `image_messages`, `image`, `audio`. |
+| `output` | yes | `text`, `embeddings_float32`, `png_base64`, `labels`. |
+| `capability` | no | Selects one capability explicitly. |
+| `semantic_task` | no | Narrows resolution to one semantic task. |
+| `options` | no | Tagged options; defaults apply per capability. `image_generation` requires width and height. |
+| `stream` | no | `true` for streamed text generation. |
+
+Pumas resolves the operation from the selected model's current capability
+descriptors, the input kind and the output. `capability` and `semantic_task`
+narrow that resolution and must agree with the input and output. When several
+available capabilities accept the same request, Pumas returns
+`ambiguous_operation` and the caller adds `capability`. Message content may be
+a string or a list of `text`/`image` parts; `image_messages` is the same
+messages-with-parts shape.
+
+## Errors
+
+Every error response has the same shape:
+
+```json
+{
+  "contract_version": 1,
+  "request_id": "example:1",
+  "error": {
+    "code": "invalid_request",
+    "outcome": "not_admitted",
+    "message": "request does not match the contract: unknown field `optoins` ..."
+  }
+}
+```
+
+- `code` is the stable value consumers branch on.
+- `outcome` is `not_admitted` (no provider effect happened) or `unknown` (the
+  provider received the operation and its result cannot be established).
+- `message` is a human-readable reason for the caller or operator. It names
+  the field, limit, model, unavailable capability reason, or the provider's own
+  reported reason. Credential-shaped text is redacted. Its wording may change;
+  do not parse it.
+- `request_id` is the caller's ID whenever the body was JSON with a valid
+  `request_id`, including schema rejections; otherwise it is `null`.
+
+The HTTP status matches the code: `invalid_request`, `unsupported_contract` →
+400; `model_not_found` → 404; `ambiguous_model`, `ambiguous_operation` → 409;
+`request_limit` → 413; `unsupported_modality` → 422; `capability_unavailable`
+→ 503; `provider_failure`, `invalid_provider_result`, `response_limit`,
+`transport_lost` → 502.
+
 ## Typed HTTP slice
 
 `GET /v1/capabilities?model=<served-alias>&profile=<optional-exact-profile>`
@@ -125,13 +199,7 @@ checks a single text choice, embedding count/index/dimension coherence, and
 rejects incoherent provider results. Provider envelopes and internal errors are
 not exposed.
 
-An error has `contract_version`, `request_id` (null if no valid request was
-parsed), and `error` containing `code` and `outcome`. Codes are
-`invalid_request`, `unsupported_contract`, `model_not_found`, `ambiguous_model`,
-`capability_unavailable`, `provider_failure`, `invalid_provider_result`,
-`request_limit`, `response_limit`, and `transport_lost`. `not_admitted` means no
-provider effect occurred; `unknown` means the operation was handed off and its
-outcome cannot be established. A request ID is never forwarded as a provider
+Errors follow [Errors](#errors). A request ID is never forwarded as a provider
 idempotency key, and generation is never replayed.
 
 Only text generation accepts `stream: true`. SSE names are `started`, `delta`,

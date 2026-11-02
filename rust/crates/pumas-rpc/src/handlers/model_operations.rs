@@ -29,34 +29,53 @@ use std::sync::{
     Arc, Mutex,
 };
 
-fn error(status: StatusCode, id: Option<String>, code: ErrorCode, admitted: bool) -> Response {
+fn error(
+    status: StatusCode,
+    id: Option<String>,
+    rejection: impl Into<Rejection>,
+    admitted: bool,
+) -> Response {
     (
         status,
         Json(ErrorResponse {
             contract_version: CONTRACT_VERSION,
             request_id: id,
-            error: OperationError {
-                code,
-                outcome: if admitted {
-                    Outcome::Unknown
-                } else {
-                    Outcome::NotAdmitted
-                },
-            },
+            error: OperationError::new(rejection.into(), admitted),
         }),
     )
         .into_response()
+}
+/// Reject before admission with the status that matches the code.
+fn reject(id: Option<String>, rejection: impl Into<Rejection>) -> Response {
+    let rejection = rejection.into();
+    error(status_for(rejection.code), id, rejection, false)
 }
 async fn selected(
     state: &AppState,
     model: &str,
     profile: Option<&str>,
-) -> Result<Box<ServedModelStatus>, ErrorCode> {
+) -> Result<Box<ServedModelStatus>, Rejection> {
+    let target = match profile {
+        Some(profile) => format!("model \"{model}\" on profile \"{profile}\""),
+        None => format!("model \"{model}\""),
+    };
     match openai_gateway::find_selected_served_model(state, model, profile).await {
         Ok(OpenAiServedModelLookup::Found(model)) => Ok(model),
-        Ok(OpenAiServedModelLookup::NotFound) => Err(ErrorCode::ModelNotFound),
-        Ok(OpenAiServedModelLookup::Ambiguous { .. }) => Err(ErrorCode::AmbiguousModel),
-        _ => Err(ErrorCode::CapabilityUnavailable),
+        Ok(OpenAiServedModelLookup::NotFound) => Err(Rejection::new(
+            ErrorCode::ModelNotFound,
+            format!("no served {target}; list served models with GET /v1/served-models"),
+        )),
+        Ok(OpenAiServedModelLookup::Ambiguous { message, .. }) => {
+            Err(Rejection::new(ErrorCode::AmbiguousModel, message))
+        }
+        Ok(OpenAiServedModelLookup::Unavailable) => Err(Rejection::new(
+            ErrorCode::CapabilityUnavailable,
+            format!("serving status for {target} is unavailable"),
+        )),
+        Err(_) => Err(Rejection::new(
+            ErrorCode::CapabilityUnavailable,
+            format!("serving status for {target} could not be read"),
+        )),
     }
 }
 pub async fn handle_capabilities(
@@ -65,31 +84,20 @@ pub async fn handle_capabilities(
 ) -> Response {
     let query = match query {
         Ok(Query(query)) => query,
-        Err(_) => {
-            return error(
-                StatusCode::BAD_REQUEST,
-                None,
-                ErrorCode::InvalidRequest,
-                false,
-            )
-        }
+        Err(rejection) => return reject(None, Rejection::invalid(rejection.body_text())),
     };
-    if !projection::valid_model(&query.model)
-        || query
-            .profile
-            .as_ref()
-            .is_some_and(|p| pumas_library::models::RuntimeProfileId::parse(p).is_err())
-    {
-        return error(
-            StatusCode::BAD_REQUEST,
+    if !projection::valid_model(&query.model) {
+        return reject(
             None,
-            ErrorCode::InvalidRequest,
-            false,
+            Rejection::invalid("model is not a valid served alias"),
         );
+    }
+    if let Some(Err(rejection)) = query.profile.as_deref().map(projection::valid_profile) {
+        return reject(None, rejection);
     }
     let served = match selected(&state, &query.model, query.profile.as_deref()).await {
         Ok(model) => model,
-        Err(code) => return error(status_for(code), None, code, false),
+        Err(rejection) => return reject(None, rejection),
     };
     Json(CapabilitiesResponse {
         supported_contract_versions: vec![CONTRACT_VERSION],
@@ -98,10 +106,76 @@ pub async fn handle_capabilities(
         max_request_bytes: MAX_BYTES,
         max_response_bytes: MAX_BYTES,
         max_stream_event_bytes: MAX_EVENT_BYTES,
+        context_tokens: served.context_size,
         capabilities: descriptors(&state, &served).await,
     })
     .into_response()
 }
+
+/// List every served (model, profile) pair with its current capabilities.
+pub async fn handle_served_models(State(state): State<Arc<AppState>>) -> Response {
+    let snapshot = match state.api.get_serving_status().await {
+        Ok(response) => response.snapshot,
+        Err(_) => {
+            return reject(
+                None,
+                Rejection::new(
+                    ErrorCode::CapabilityUnavailable,
+                    "serving status could not be read",
+                ),
+            )
+        }
+    };
+    let mut served = snapshot.served_models;
+    served.sort_by(|left, right| {
+        served_alias(left)
+            .cmp(served_alias(right))
+            .then_with(|| left.profile_id.as_str().cmp(right.profile_id.as_str()))
+    });
+    served.dedup_by(|right, left| {
+        served_alias(left) == served_alias(right) && left.profile_id == right.profile_id
+    });
+    let mut alias_count = std::collections::HashMap::<String, usize>::new();
+    for model in &served {
+        *alias_count
+            .entry(served_alias(model).to_owned())
+            .or_default() += 1;
+    }
+    let capabilities =
+        futures::future::join_all(served.iter().map(|model| descriptors(&state, model))).await;
+    let models = served
+        .iter()
+        .zip(capabilities)
+        .map(|(model, capabilities)| ServedModelEntry {
+            model: served_alias(model).to_owned(),
+            profile: model.profile_id.as_str().to_owned(),
+            model_id: model.model_id.clone(),
+            provider: enum_name(&model.provider),
+            load_state: enum_name(&model.load_state),
+            context_tokens: model.context_size,
+            profile_required: alias_count[served_alias(model)] > 1,
+            capabilities,
+        })
+        .collect();
+    Json(ServedModelsResponse {
+        supported_contract_versions: vec![CONTRACT_VERSION],
+        max_request_bytes: MAX_BYTES,
+        max_response_bytes: MAX_BYTES,
+        max_stream_event_bytes: MAX_EVENT_BYTES,
+        models,
+    })
+    .into_response()
+}
+fn served_alias(model: &ServedModelStatus) -> &str {
+    model.model_alias.as_deref().unwrap_or(&model.model_id)
+}
+fn enum_name(value: &impl serde::Serialize) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
 fn status_for(code: ErrorCode) -> StatusCode {
     match code {
         ErrorCode::ModelNotFound => StatusCode::NOT_FOUND,
@@ -111,6 +185,38 @@ fn status_for(code: ErrorCode) -> StatusCode {
         ErrorCode::RequestLimit => StatusCode::PAYLOAD_TOO_LARGE,
         ErrorCode::TransportLost => StatusCode::BAD_GATEWAY,
         _ => StatusCode::BAD_REQUEST,
+    }
+}
+/// The caller's request ID, when the body is JSON and carries a valid one.
+fn readable_request_id(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("request_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| projection::valid_identifier(id, 128))
+        .map(str::to_owned)
+}
+/// Bounded reason from a gateway or provider error body (`{"error":{"message":..}}`).
+async fn error_body_message(response: Response) -> Option<String> {
+    const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
+    let bytes = to_bytes(response.into_body(), MAX_ERROR_BODY_BYTES)
+        .await
+        .ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let message = value
+        .pointer("/error/message")
+        .or_else(|| value.get("error"))
+        .or_else(|| value.get("message"))?
+        .as_str()?
+        .trim();
+    (!message.is_empty()).then(|| message.to_owned())
+}
+/// Classify a gateway refusal that happened before provider admission. The
+/// model was already selected, so a later lookup miss means the runtime lost it.
+fn not_admitted_code(status: StatusCode) -> ErrorCode {
+    match status {
+        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => ErrorCode::InvalidRequest,
+        StatusCode::PAYLOAD_TOO_LARGE => ErrorCode::RequestLimit,
+        _ => ErrorCode::CapabilityUnavailable,
     }
 }
 
@@ -123,140 +229,87 @@ pub async fn handle_model_operations(
         Ok(bytes) => bytes,
         Err(rejection) => {
             let status = rejection.status();
+            let code = if status == StatusCode::PAYLOAD_TOO_LARGE {
+                ErrorCode::RequestLimit
+            } else {
+                ErrorCode::InvalidRequest
+            };
             return error(
                 status,
                 None,
-                if status == StatusCode::PAYLOAD_TOO_LARGE {
-                    ErrorCode::RequestLimit
-                } else {
-                    ErrorCode::InvalidRequest
-                },
+                Rejection::new(code, rejection.body_text()),
                 false,
             );
         }
     };
     if bytes.len() > MAX_BYTES {
-        return error(
-            StatusCode::PAYLOAD_TOO_LARGE,
+        return reject(
             None,
-            ErrorCode::RequestLimit,
-            false,
+            Rejection::new(
+                ErrorCode::RequestLimit,
+                format!(
+                    "request body is {} bytes; the maximum is {MAX_BYTES}",
+                    bytes.len()
+                ),
+            ),
         );
     }
-    // A supplied capability selects the legacy parser even if malformed. This
-    // prevents a rejected legacy request from falling back to another contract.
-    // Deserialize the chosen DTO from the original bytes so duplicate fields
-    // remain invalid rather than being collapsed by the routing-only Value.
-    let capability_present = match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(value) => value.get("capability").is_some(),
-        Err(_) => {
-            return error(
-                StatusCode::BAD_REQUEST,
+    let value = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(value) => value,
+        Err(parse) => {
+            return reject(
                 None,
-                ErrorCode::InvalidRequest,
-                false,
+                Rejection::invalid(format!("request body is not valid JSON: {parse}")),
             )
         }
     };
-    let (request, served, body, declarations) = if capability_present {
-        let request: OperationRequest = match serde_json::from_slice(&bytes) {
-            Ok(request) => request,
-            Err(_) => {
-                return error(
-                    StatusCode::BAD_REQUEST,
-                    None,
-                    ErrorCode::InvalidRequest,
-                    false,
-                )
-            }
-        };
-        let id = Some(request.request_id.clone());
-        let body = match prepare_provider_request(&request, &state, disconnect.as_ref()).await {
-            Ok(body) => body,
-            Err(code) => return error(status_for(code), id, code, false),
-        };
-        let served = match selected(&state, &request.model, request.profile.as_deref()).await {
-            Ok(model) => model,
-            Err(code) => return error(status_for(code), id, code, false),
-        };
-        (request, served, body, None)
-    } else {
-        let request: modality::ModalityRequest = match serde_json::from_slice(&bytes) {
-            Ok(request) => request,
-            Err(_) => {
-                return error(
-                    StatusCode::BAD_REQUEST,
-                    None,
-                    ErrorCode::InvalidRequest,
-                    false,
-                )
-            }
-        };
-        let id = Some(request.request_id.clone());
-        if let Err(code) = request.validate() {
-            return error(status_for(code), id, code, false);
+    let id = readable_request_id(&value);
+    // Deserialize from the original bytes so duplicate fields remain invalid
+    // rather than being collapsed by the inspection Value above.
+    let request: modality::ModalityRequest = match serde_json::from_slice(&bytes) {
+        Ok(request) => request,
+        Err(schema) => {
+            return reject(
+                id,
+                Rejection::invalid(format!("request does not match the contract: {schema}")),
+            )
         }
-        // Decode image envelopes and check finite options before any backend
-        // discovery. Preparing a provider body never authorizes execution.
-        let image_body = match request.image_preflight() {
-            Ok(Some(image_request)) => {
-                match prepare_provider_request(&image_request, &state, disconnect.as_ref()).await {
-                    Ok(body) => Some(body),
-                    Err(code) => return error(status_for(code), id, code, false),
-                }
-            }
-            Ok(None) => None,
-            Err(code) => return error(status_for(code), id, code, false),
-        };
-        let served = match selected(&state, &request.model, request.profile.as_deref()).await {
-            Ok(model) => model,
-            Err(code) => return error(status_for(code), id, code, false),
-        };
-        let declarations = match operation_descriptors(&state, &served, disconnect.as_ref()).await {
-            Ok(declarations) => declarations,
-            Err(code) => return error(status_for(code), id, code, false),
-        };
-        let request = match request.resolve(&declarations) {
-            Ok(request) => request,
-            Err(code) => return error(status_for(code), id, code, false),
-        };
-        let body = match image_body {
-            Some(body) if request.capability == Capability::ImageToText => body,
-            _ => match projection::provider_request(&request) {
-                Ok(body) => body,
-                Err(code) => return error(status_for(code), id, code, false),
-            },
-        };
-        (request, served, body, Some(declarations))
     };
     let id = Some(request.request_id.clone());
-    let available = if request.capability == Capability::AudioTranscription {
-        served.provider == RuntimeProviderId::Torch
-            && state
-                .api
-                .owned_audio_endpoint(&served.profile_id, &served.model_id)
-                .is_some()
-    } else {
-        // Modality resolution already observed these declarations. Reuse that
-        // observation here; the gateway still performs its final live guard.
-        match declarations {
-            Some(declarations) => declarations,
-            None => match operation_descriptors(&state, &served, disconnect.as_ref()).await {
-                Ok(declarations) => declarations,
-                Err(code) => return error(status_for(code), id, code, false),
-            },
-        }
-        .into_iter()
-        .any(|d| d.capability == request.capability && d.availability.available())
-    };
-    if !available {
-        return error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            id,
-            ErrorCode::CapabilityUnavailable,
-            false,
-        );
+    if let Err(rejection) = request.validate() {
+        return reject(id, rejection);
     }
+    // Decode image envelopes and check finite options before any backend
+    // discovery. Preparing a provider body never authorizes execution.
+    let image_body = match request.image_preflight() {
+        Ok(Some(image_request)) => {
+            match prepare_provider_request(&image_request, &state, disconnect.as_ref()).await {
+                Ok(body) => Some(body),
+                Err(rejection) => return reject(id, rejection),
+            }
+        }
+        Ok(None) => None,
+        Err(rejection) => return reject(id, rejection),
+    };
+    let served = match selected(&state, &request.model, request.profile.as_deref()).await {
+        Ok(model) => model,
+        Err(rejection) => return reject(id, rejection),
+    };
+    let declarations = match operation_descriptors(&state, &served, disconnect.as_ref()).await {
+        Ok(declarations) => declarations,
+        Err(code) => return reject(id, code),
+    };
+    let request = match request.resolve(&declarations) {
+        Ok(request) => request,
+        Err(rejection) => return reject(id, rejection),
+    };
+    let body = match image_body {
+        Some(body) if request.capability == Capability::ImageToText => body,
+        _ => match projection::provider_request(&request) {
+            Ok(body) => body,
+            Err(rejection) => return reject(id, rejection),
+        },
+    };
     if request.capability == Capability::AudioTranscription {
         return dispatch_audio(state, disconnect, &request, &served, body).await;
     }
@@ -296,19 +349,27 @@ pub async fn handle_model_operations(
     };
     if !response.status().is_success() {
         let was_admitted = admitted.load(Ordering::Acquire);
-        return error(
-            if was_admitted {
-                StatusCode::BAD_GATEWAY
-            } else {
-                response.status()
-            },
+        let status = response.status();
+        let reported = error_body_message(response).await;
+        if was_admitted {
+            let message = match reported {
+                Some(reason) => format!("provider returned HTTP {}: {reason}", status.as_u16()),
+                None => format!("provider returned HTTP {}", status.as_u16()),
+            };
+            return error(
+                StatusCode::BAD_GATEWAY,
+                id,
+                Rejection::new(ErrorCode::ProviderFailure, message),
+                true,
+            );
+        }
+        let code = not_admitted_code(status);
+        return reject(
             id,
-            if was_admitted {
-                ErrorCode::ProviderFailure
-            } else {
-                ErrorCode::CapabilityUnavailable
+            match reported {
+                Some(reason) => Rejection::new(code, reason),
+                None => code.into(),
             },
-            was_admitted,
         );
     }
     if request.stream {
@@ -378,7 +439,7 @@ async fn prepare_provider_request(
     request: &OperationRequest,
     state: &AppState,
     disconnect: Option<&Extension<RequestDisconnect>>,
-) -> Result<serde_json::Value, ErrorCode> {
+) -> Result<serde_json::Value, Rejection> {
     if request.capability != Capability::ImageToText {
         return projection::provider_request(request);
     }
@@ -388,7 +449,12 @@ async fn prepare_provider_request(
         .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(2)))
         .clone()
         .try_acquire_owned()
-        .map_err(|_| ErrorCode::CapabilityUnavailable)?;
+        .map_err(|_| {
+            Rejection::new(
+                ErrorCode::CapabilityUnavailable,
+                "image decoding is at capacity; retry when an in-flight image request completes",
+            )
+        })?;
     let request = request.clone();
     let decode = tokio::task::spawn_blocking(move || {
         // A running codec cannot be asynchronously interrupted. It retains its
@@ -398,9 +464,9 @@ async fn prepare_provider_request(
     });
     tokio::select! {
         biased;
-        () = state.shutdown_request.clone().requested() => Err(ErrorCode::TransportLost),
-        () = async { match disconnect { Some(Extension(signal)) => signal.clone().disconnected().await, None => std::future::pending().await } } => Err(ErrorCode::TransportLost),
-        result = decode => result.map_err(|_| ErrorCode::InvalidRequest)?,
+        () = state.shutdown_request.clone().requested() => Err(ErrorCode::TransportLost.into()),
+        () = async { match disconnect { Some(Extension(signal)) => signal.clone().disconnected().await, None => std::future::pending().await } } => Err(ErrorCode::TransportLost.into()),
+        result = decode => result.map_err(|_| Rejection::invalid("image decoding failed"))?,
     }
 }
 
@@ -560,25 +626,21 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     vec![InputFormat::MessagesText],
                     vec![OutputFormat::Text],
                     Some(OpenAiGatewayEndpoint::ChatCompletions),
-                    text_bounds(),
+                    text_bounds(served.context_size),
                 ),
                 Capability::TextGeneration => (
                     SemanticTask::TextGeneration,
                     vec![InputFormat::Text],
                     vec![OutputFormat::Text],
                     Some(OpenAiGatewayEndpoint::Completions),
-                    text_bounds(),
+                    text_bounds(served.context_size),
                 ),
                 Capability::TextEmbedding => (
                     SemanticTask::TextEmbedding,
                     vec![InputFormat::Text, InputFormat::TextBatch],
                     vec![OutputFormat::EmbeddingsFloat32],
                     Some(OpenAiGatewayEndpoint::Embeddings),
-                    vec![
-                        bound(OptionName::Dimensions, 1., 8192.),
-                        bound(OptionName::InputCount, 1., 128.),
-                        bound(OptionName::InputCharacters, 0., 65536.),
-                    ],
+                    embedding_bounds(served.provider),
                 ),
                 Capability::ImageGeneration => (
                     SemanticTask::TextToImage,
@@ -616,7 +678,11 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     vec![OutputFormat::Text],
                     Some(OpenAiGatewayEndpoint::ChatCompletions),
                     vec![
-                        bound(OptionName::MaxTokens, 1., 2048.),
+                        bound(
+                            OptionName::MaxTokens,
+                            1.,
+                            f64::from(served.context_size.unwrap_or(u32::MAX)),
+                        ),
                         bound(OptionName::Temperature, 0., 2.),
                         bound(OptionName::TopP, 0., 1.),
                         bound(OptionName::ImageBytes, 1., (8 * 1024 * 1024) as f64),
@@ -734,6 +800,24 @@ fn semantic_match(
         None => None,
     }
 }
+/// The in-process ONNX runtime has fixed batch and tokenizer limits. Proxied
+/// providers enforce their own (context and batch size) and report violations.
+fn embedding_bounds(provider: RuntimeProviderId) -> Vec<OptionBound> {
+    if provider == RuntimeProviderId::OnnxRuntime {
+        let limits = pumas_library::OnnxEmbeddingRequest::LIMITS;
+        vec![
+            bound(OptionName::Dimensions, 1., limits.max_dimensions as f64),
+            bound(OptionName::InputCount, 1., limits.max_inputs as f64),
+            bound(
+                OptionName::InputCharacters,
+                0.,
+                limits.max_input_chars as f64,
+            ),
+        ]
+    } else {
+        vec![bound(OptionName::Dimensions, 1., u32::MAX as f64)]
+    }
+}
 fn bound(option: OptionName, minimum: f64, maximum: f64) -> OptionBound {
     OptionBound {
         option,
@@ -741,9 +825,15 @@ fn bound(option: OptionName, minimum: f64, maximum: f64) -> OptionBound {
         maximum,
     }
 }
-fn text_bounds() -> Vec<OptionBound> {
+/// Generation length is bounded by the served context window when the runtime
+/// reports one; Pumas adds no fixed cap of its own.
+fn text_bounds(context_tokens: Option<u32>) -> Vec<OptionBound> {
     vec![
-        bound(OptionName::MaxTokens, 1., u32::MAX as f64),
+        bound(
+            OptionName::MaxTokens,
+            1.,
+            f64::from(context_tokens.unwrap_or(u32::MAX)),
+        ),
         bound(OptionName::Temperature, 0., 2.),
         bound(OptionName::TopP, 0., 1.),
     ]

@@ -225,7 +225,21 @@ pub struct OnnxEmbeddingRequest {
     pub dimensions: Option<usize>,
 }
 
+/// Fixed limits of the in-process ONNX embedding adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OnnxEmbeddingLimits {
+    pub max_inputs: usize,
+    pub max_input_chars: usize,
+    pub max_dimensions: usize,
+}
+
 impl OnnxEmbeddingRequest {
+    pub const LIMITS: OnnxEmbeddingLimits = OnnxEmbeddingLimits {
+        max_inputs: MAX_EMBEDDING_INPUTS,
+        max_input_chars: MAX_EMBEDDING_INPUT_CHARS,
+        max_dimensions: MAX_EMBEDDING_DIMENSIONS,
+    };
+
     pub fn parse(
         model_id: impl AsRef<str>,
         input: Vec<String>,

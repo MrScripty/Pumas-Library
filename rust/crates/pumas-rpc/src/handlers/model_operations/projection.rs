@@ -2,22 +2,25 @@ use super::types::*;
 use serde_json::{json, Value};
 
 /// Closed typed admission precedes every provider-facing effect.
-pub fn provider_request(request: &OperationRequest) -> Result<Value, ErrorCode> {
+pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> {
     if request.contract_version != CONTRACT_VERSION {
-        return Err(ErrorCode::UnsupportedContract);
+        return Err(ErrorCode::UnsupportedContract.into());
     }
-    if !valid_identifier(&request.request_id, 128)
-        || !valid_model(&request.model)
-        || request.profile.as_ref().is_some_and(|p| {
-            p.len() > 128
-                || pumas_library::models::RuntimeProfileId::parse(p).is_err()
-                || p.trim() != p
-        })
-    {
-        return Err(ErrorCode::InvalidRequest);
+    if !valid_identifier(&request.request_id, 128) {
+        return Err(Rejection::invalid(
+            "request_id must be 1-128 ASCII letters, digits or '-', '_', '.', ':'",
+        ));
+    }
+    if !valid_model(&request.model) {
+        return Err(Rejection::invalid("model is not a valid served alias"));
+    }
+    if let Some(profile) = &request.profile {
+        valid_profile(profile)?;
     }
     if request.stream && !request.capability.text_generation() {
-        return Err(ErrorCode::InvalidRequest);
+        return Err(Rejection::invalid(
+            "stream is only supported for chat_generation and text_generation",
+        ));
     }
     if request.capability == Capability::ImageToText {
         validate_image_to_text_request(request)?;
@@ -35,8 +38,13 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, ErrorCode> 
             OperationOptions::TextGeneration { .. },
             OutputFormat::Text,
         ) => {
-            if messages.is_empty() || messages.iter().any(|m| m.content.trim().is_empty()) {
-                return Err(ErrorCode::InvalidRequest);
+            if messages.is_empty() {
+                return Err(Rejection::invalid("input.messages must not be empty"));
+            }
+            if let Some(index) = messages.iter().position(|m| m.content.trim().is_empty()) {
+                return Err(Rejection::invalid(format!(
+                    "input.messages[{index}].content must not be blank"
+                )));
             }
             body["messages"] = json!(messages
                 .iter()
@@ -92,8 +100,7 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, ErrorCode> 
             body["width"] = json!(width);
             body["height"] = json!(height);
             body["seed"] = json!(seed);
-            super::super::openai_gateway_images::parse(&body)
-                .map_err(|_| ErrorCode::InvalidRequest)?;
+            super::super::openai_gateway_images::parse(&body).map_err(Rejection::invalid)?;
         }
         (
             Capability::AudioTranscription | Capability::AudioClassification,
@@ -115,7 +122,9 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, ErrorCode> 
                 (Capability::AudioTranscription, OutputFormat::Text)
                     | (Capability::AudioClassification, OutputFormat::Labels)
             ) {
-                return Err(ErrorCode::InvalidRequest);
+                return Err(Rejection::invalid(
+                    "audio_transcription produces text and audio_classification produces labels",
+                ));
             }
             let bytes_per_sample = match encoding {
                 AudioEncoding::PcmS16le => 2,
@@ -132,14 +141,28 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, ErrorCode> 
                 || declared_bytes.is_none_or(|n| n > MAX_BYTES as u64)
                 || *max_output_tokens == Some(0)
             {
-                return Err(ErrorCode::InvalidRequest);
+                return Err(Rejection::invalid(
+                    "audio input requires 8000-192000 Hz, 1 or 2 channels, 1 to 30 seconds of samples, nonempty data and max_output_tokens above 0",
+                ));
             }
             // Byte decoding and normalization belong to the owned native bridge.
             // Returning this closed shape grants no runtime or model authority.
             let _declared_language = language;
-            return serde_json::to_value(request).map_err(|_| ErrorCode::InvalidRequest);
+            return serde_json::to_value(request)
+                .map_err(|_| Rejection::invalid("audio request could not be encoded"));
         }
-        _ => return Err(ErrorCode::InvalidRequest),
+        (Capability::TextGeneration, OperationInput::Text { .. }, _, OutputFormat::Text) => {
+            return Err(Rejection::invalid("input.text must not be blank"));
+        }
+        (capability, input, options, output) => {
+            return Err(Rejection::invalid(format!(
+                "{} does not accept input kind {:?}, options kind {:?} and output {:?}",
+                serde_json::to_value(capability).unwrap_or_default(),
+                input_kind(input),
+                options_kind(options),
+                serde_json::to_value(output).unwrap_or_default(),
+            )));
+        }
     }
     match request.options {
         OperationOptions::TextGeneration {
@@ -147,11 +170,16 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, ErrorCode> 
             temperature,
             top_p,
         } => {
-            if max_tokens == Some(0)
-                || temperature.is_some_and(|v| !v.is_finite() || !(0.0..=2.0).contains(&v))
-                || top_p.is_some_and(|v| !v.is_finite() || !(0.0..=1.0).contains(&v))
-            {
-                return Err(ErrorCode::InvalidRequest);
+            if max_tokens == Some(0) {
+                return Err(Rejection::invalid("options.max_tokens must be at least 1"));
+            }
+            if temperature.is_some_and(|v| !v.is_finite() || !(0.0..=2.0).contains(&v)) {
+                return Err(Rejection::invalid(
+                    "options.temperature must be within 0 to 2",
+                ));
+            }
+            if top_p.is_some_and(|v| !v.is_finite() || !(0.0..=1.0).contains(&v)) {
+                return Err(Rejection::invalid("options.top_p must be within 0 to 1"));
             }
             body["stream"] = json!(request.stream);
             if let Some(v) = max_tokens
@@ -179,7 +207,7 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, ErrorCode> 
 }
 /// Validate the finite vision contract without decoding image bytes. Resolver
 /// selection uses this; the handler performs the bounded image projection once.
-pub fn validate_image_to_text_request(request: &OperationRequest) -> Result<(), ErrorCode> {
+pub fn validate_image_to_text_request(request: &OperationRequest) -> Result<(), Rejection> {
     if request.capability != Capability::ImageToText
         || request.stream
         || request.output != OutputFormat::Text
@@ -188,20 +216,24 @@ pub fn validate_image_to_text_request(request: &OperationRequest) -> Result<(), 
             OperationInput::Image { .. } | OperationInput::ImageMessages { .. }
         )
     {
-        return Err(ErrorCode::InvalidRequest);
+        return Err(Rejection::invalid(
+            "image_to_text accepts image or image_messages input, text output and no stream",
+        ));
     }
     match request.options {
         OperationOptions::TextGeneration {
             max_tokens,
             temperature,
             top_p,
-        } if max_tokens.is_none_or(|v| (1..=2048).contains(&v))
+        } if max_tokens.is_none_or(|v| v >= 1)
             && temperature.is_none_or(|v| v.is_finite() && (0.0..=2.0).contains(&v))
             && top_p.is_none_or(|v| v.is_finite() && (0.0..=1.0).contains(&v)) =>
         {
             Ok(())
         }
-        _ => Err(ErrorCode::InvalidRequest),
+        _ => Err(Rejection::invalid(
+            "image_to_text options must be text_generation with max_tokens of at least 1, temperature 0-2 and top_p 0-1",
+        )),
     }
 }
 pub fn valid_identifier(value: &str, max: usize) -> bool {
@@ -211,21 +243,58 @@ pub fn valid_identifier(value: &str, max: usize) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'))
 }
+pub fn valid_profile(profile: &str) -> Result<(), Rejection> {
+    if profile.len() > 128
+        || profile.trim() != profile
+        || pumas_library::models::RuntimeProfileId::parse(profile).is_err()
+    {
+        return Err(Rejection::invalid(
+            "profile must be an exact runtime profile id of at most 128 bytes",
+        ));
+    }
+    Ok(())
+}
+fn input_kind(input: &OperationInput) -> &'static str {
+    match input {
+        OperationInput::Text { .. } => "text",
+        OperationInput::Messages { .. } => "messages",
+        OperationInput::TextBatch { .. } => "text_batch",
+        OperationInput::Image { .. } => "image",
+        OperationInput::ImageMessages { .. } => "image_messages",
+        OperationInput::Audio { .. } => "audio",
+    }
+}
+fn options_kind(options: &OperationOptions) -> &'static str {
+    match options {
+        OperationOptions::TextGeneration { .. } => "text_generation",
+        OperationOptions::Embeddings { .. } => "embeddings",
+        OperationOptions::ImageGeneration { .. } => "image_generation",
+        OperationOptions::Audio { .. } => "audio",
+    }
+}
 pub fn valid_model(value: &str) -> bool {
     !value.trim().is_empty()
         && value.len() <= 256
         && value.trim() == value
         && !value.chars().any(char::is_control)
 }
-fn validate_embedding(input: &[&str], dimensions: Option<usize>) -> Result<(), ErrorCode> {
-    // Reuse the native adapter's exact input and dimension bounds for every typed embedding provider.
-    pumas_library::OnnxEmbeddingRequest::parse(
-        "typed-validation",
-        input.iter().map(|v| v.to_string()).collect(),
-        dimensions,
-    )
-    .map(|_| ())
-    .map_err(|_| ErrorCode::InvalidRequest)
+/// Provider-independent embedding checks. Batch, length and dimension limits
+/// belong to the serving provider (the ONNX adapter checks its own).
+fn validate_embedding(input: &[&str], dimensions: Option<usize>) -> Result<(), Rejection> {
+    if input.is_empty() {
+        return Err(Rejection::invalid("input.texts must not be empty"));
+    }
+    if let Some(index) = input.iter().position(|text| text.trim().is_empty()) {
+        return Err(Rejection::invalid(if input.len() == 1 {
+            "input.text must not be blank".to_owned()
+        } else {
+            format!("input.texts[{index}] must not be blank")
+        }));
+    }
+    if dimensions == Some(0) {
+        return Err(Rejection::invalid("options.dimensions must be at least 1"));
+    }
+    Ok(())
 }
 
 /// Extract only the public typed fields, validating coherence instead of forwarding provider JSON.
@@ -372,22 +441,36 @@ mod image_to_text_projection_tests {
     fn lightweight_vision_validation_enforces_finite_options_before_decoding() {
         let mut r = request();
         validate_image_to_text_request(&r).unwrap();
-        for tokens in [0, 2049, u32::MAX] {
-            r.options = OperationOptions::TextGeneration {
-                max_tokens: Some(tokens),
-                temperature: None,
-                top_p: None,
-            };
-            assert_eq!(provider_request(&r), Err(ErrorCode::InvalidRequest));
-        }
+        // Only a zero length is invalid; the provider enforces its context window.
+        r.options = OperationOptions::TextGeneration {
+            max_tokens: Some(0),
+            temperature: None,
+            top_p: None,
+        };
+        assert_eq!(
+            provider_request(&r).map_err(|rejection| rejection.code),
+            Err(ErrorCode::InvalidRequest)
+        );
+        r.options = OperationOptions::TextGeneration {
+            max_tokens: Some(u32::MAX),
+            temperature: None,
+            top_p: None,
+        };
+        validate_image_to_text_request(&r).unwrap();
         r = request();
         r.stream = true;
-        assert_eq!(provider_request(&r), Err(ErrorCode::InvalidRequest));
+        assert_eq!(
+            provider_request(&r).map_err(|rejection| rejection.code),
+            Err(ErrorCode::InvalidRequest)
+        );
         r = request();
         r.input = OperationInput::Text {
             text: "pretend image".into(),
         };
-        assert_eq!(provider_request(&r), Err(ErrorCode::InvalidRequest));
+        assert_eq!(
+            provider_request(&r).map_err(|rejection| rejection.code),
+            Err(ErrorCode::InvalidRequest)
+        );
         // The new vision token cap does not narrow existing completion options.
         r.capability = Capability::TextGeneration;
         r.options = OperationOptions::TextGeneration {

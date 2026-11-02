@@ -631,7 +631,7 @@ async fn openai_proxy_rejects_malformed_json_before_provider_dispatch() {
 }
 
 #[tokio::test]
-async fn openai_proxy_redacts_provider_error_body_and_preserves_status() {
+async fn openai_proxy_forwards_redacted_provider_reason_and_preserves_status() {
     let endpoint = spawn_gateway_response_server(
         StatusCode::SERVICE_UNAVAILABLE,
         r#"{"error":{"message":"credential hf_test_provider_secret failed for https://example.invalid/private-provider-url","type":"provider_error"}}"#,
@@ -653,7 +653,7 @@ async fn openai_proxy_redacts_provider_error_body_and_preserves_status() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(
         body.pointer("/error/message").and_then(Value::as_str),
-        Some("A required operation is currently unavailable.")
+        Some("credential [redacted] failed for https://example.invalid/private-provider-url")
     );
     assert_eq!(
         body.pointer("/error/type").and_then(Value::as_str),
@@ -665,7 +665,21 @@ async fn openai_proxy_redacts_provider_error_body_and_preserves_status() {
     );
     let encoded = body.to_string();
     assert!(!encoded.contains("hf_test_provider_secret"));
-    assert!(!encoded.contains("private-provider-url"));
+    assert!(!encoded.contains("provider_error"));
+}
+
+#[test]
+fn provider_reasons_keep_context_but_not_credentials() {
+    assert_eq!(
+        redact_credentials("input is too large to process. increase the physical batch size"),
+        "input is too large to process. increase the physical batch size"
+    );
+    assert_eq!(
+        redact_credentials(
+            "auth failed: Bearer abc.def token=xyz https://user:pw@host/p sk-abcdefghij"
+        ),
+        "auth failed: Bearer [redacted] token=[redacted] https://[redacted]@host/p [redacted]"
+    );
 }
 
 #[tokio::test(start_paused = true)]

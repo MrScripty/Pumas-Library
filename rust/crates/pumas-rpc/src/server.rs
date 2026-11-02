@@ -4,7 +4,8 @@ use crate::catalog_projection::CatalogProjection;
 #[cfg(feature = "inference-plugins")]
 use crate::handlers::{
     handle_capabilities, handle_model_operations, handle_openai_models, handle_openai_proxy,
-    handle_runtime_profile_update_events, handle_serving_status_update_events,
+    handle_runtime_profile_update_events, handle_served_models,
+    handle_serving_status_update_events,
 };
 use crate::handlers::{
     handle_health, handle_model_download_update_events, handle_model_library_update_events,
@@ -457,6 +458,7 @@ pub(crate) async fn start_server_with_startup(
             "/events/serving-status-updates",
             get(handle_serving_status_update_events),
         )
+        .route("/v1/served-models", get(handle_served_models))
         .route("/v1/capabilities", get(handle_capabilities))
         .route("/v1/model-operations", post(handle_model_operations))
         .route("/v1/models", get(handle_openai_models))

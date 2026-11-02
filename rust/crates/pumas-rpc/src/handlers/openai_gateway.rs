@@ -206,12 +206,27 @@ fn openai_models_snapshot_response(snapshot: ServingStatusSnapshot) -> Response 
             .cmp(openai_model_id(right))
             .then_with(|| left.profile_id.as_str().cmp(right.profile_id.as_str()))
     });
+    // OpenAI model IDs are unique. An alias served by several profiles appears
+    // once, with every profile listed; typed callers select one with `profile`.
+    let mut data: Vec<Value> = Vec::new();
+    for model in served_models {
+        let profile = model.profile_id.as_str().to_owned();
+        match data.last_mut() {
+            Some(entry) if entry["id"] == openai_model_id(&model) => {
+                if let Some(profiles) = entry["profiles"].as_array_mut() {
+                    profiles.push(json!(profile));
+                }
+            }
+            _ => {
+                let mut entry = openai_model_entry(model);
+                entry["profiles"] = json!([profile]);
+                data.push(entry);
+            }
+        }
+    }
     Json(json!({
         "object": "list",
-        "data": served_models
-            .into_iter()
-            .map(openai_model_entry)
-            .collect::<Vec<_>>()
+        "data": data
     }))
     .into_response()
 }
@@ -906,7 +921,12 @@ fn resolve_openai_served_model(
 async fn proxy_response(response: reqwest::Response) -> Response {
     let status = response.status();
     if !status.is_success() {
-        return openai_public_error_response(status, PublicError::unavailable());
+        let reason = provider_error_reason(response).await;
+        return openai_public_error_response_with_reason(
+            status,
+            PublicError::unavailable(),
+            reason.as_deref(),
+        );
     }
     let content_type = response
         .headers()
@@ -960,12 +980,96 @@ pub(crate) fn openai_error_response_with_code(
     openai_error_response_body(status, message, Some(code))
 }
 
+/// Upper bounds for reading and reporting a provider's own error reason.
+const PROVIDER_ERROR_BODY_BYTES: usize = 64 * 1024;
+const PROVIDER_ERROR_REASON_BYTES: usize = 1024;
+
+/// The provider's `error.message` (OpenAI and llama.cpp shape) or a top-level
+/// string `error`/`message`, bounded. Other provider fields are not forwarded.
+async fn provider_error_reason(response: reqwest::Response) -> Option<String> {
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(Ok(chunk)) = stream.next().await {
+        if bytes.len().saturating_add(chunk.len()) > PROVIDER_ERROR_BODY_BYTES {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let value: Value = serde_json::from_slice(&bytes).ok()?;
+    let reason = value
+        .pointer("/error/message")
+        .or_else(|| value.get("error"))
+        .or_else(|| value.get("message"))?
+        .as_str()?
+        .trim();
+    if reason.is_empty() {
+        return None;
+    }
+    let reason = redact_credentials(reason);
+    let mut end = reason.len().min(PROVIDER_ERROR_REASON_BYTES);
+    while !reason.is_char_boundary(end) {
+        end -= 1;
+    }
+    Some(reason[..end].to_owned())
+}
+
+/// Replace credential-shaped words in a provider reason. Callers are local,
+/// but a provider may echo a token from its own configuration.
+pub(crate) fn redact_credentials(text: &str) -> String {
+    const SECRET_KEYS: [&str; 6] = ["token", "key", "secret", "password", "api_key", "apikey"];
+    let mut redact_next = false;
+    text.split(' ')
+        .map(|word| {
+            if std::mem::take(&mut redact_next) && !word.is_empty() {
+                return "[redacted]".to_owned();
+            }
+            let bare =
+                word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-');
+            if bare.eq_ignore_ascii_case("bearer") {
+                redact_next = true;
+                return word.to_owned();
+            }
+            let credential_prefix = ["hf_", "sk-", "ghp_", "github_pat_", "xoxb-"]
+                .iter()
+                .any(|prefix| bare.starts_with(prefix) && bare.len() >= prefix.len() + 6);
+            if credential_prefix {
+                return word.replace(bare, "[redacted]");
+            }
+            if let Some((name, _)) = word.split_once('=') {
+                let name = name.trim_start_matches(|c: char| !c.is_ascii_alphanumeric());
+                if SECRET_KEYS
+                    .iter()
+                    .any(|key| name.to_ascii_lowercase().ends_with(key))
+                {
+                    return format!("{name}=[redacted]");
+                }
+            }
+            match word.find("://").zip(word.find('@')) {
+                // scheme://user:password@host
+                Some((scheme, at)) if at > scheme => {
+                    format!("{}[redacted]{}", &word[..scheme + 3], &word[at..])
+                }
+                _ => word.to_owned(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn openai_public_error_response(status: StatusCode, error: PublicError) -> Response {
+    openai_public_error_response_with_reason(status, error, None)
+}
+
+fn openai_public_error_response_with_reason(
+    status: StatusCode,
+    error: PublicError,
+    reason: Option<&str>,
+) -> Response {
     (
         status,
         Json(json!({
             "error": {
-                "message": error.message,
+                "message": reason.unwrap_or(error.message),
                 "type": "pumas_error",
                 "code": error.code,
                 "class": error.class,

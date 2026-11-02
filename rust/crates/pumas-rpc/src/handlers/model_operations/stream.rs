@@ -299,10 +299,7 @@ pub fn response(
                 state.terminal = true;
                 StreamEvent::Failed {
                     request_id: state.request_id.clone(),
-                    error: OperationError {
-                        code,
-                        outcome: Outcome::Unknown,
-                    },
+                    error: OperationError::new(code.into(), true),
                 }
             }
         };
@@ -314,10 +311,7 @@ pub fn response(
             state.terminal = true;
             bytes = encode(&StreamEvent::Failed {
                 request_id: state.request_id.clone(),
-                error: OperationError {
-                    code: ErrorCode::ResponseLimit,
-                    outcome: Outcome::Unknown,
-                },
+                error: OperationError::new(ErrorCode::ResponseLimit.into(), true),
             });
         }
         if state.terminal {

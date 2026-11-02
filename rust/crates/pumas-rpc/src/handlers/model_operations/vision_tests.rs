@@ -349,7 +349,7 @@ async fn codec_format_count_and_option_errors_precede_every_backend_probe() {
         cases.push(request(named, count));
         for options in [
             json!({"kind":"text_generation","max_tokens":0}),
-            json!({"kind":"text_generation","max_tokens":2049}),
+            json!({"kind":"text_generation","temperature":-1}),
             json!({"kind":"text_generation","top_p":1.1}),
         ] {
             let mut value = request(named, image("png", PNG));

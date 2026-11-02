@@ -4,10 +4,12 @@ import { AppSidebar } from './AppSidebar';
 import { ModelImportDropZone } from './ModelImportDropZone';
 import { ModelImportDialog } from './ModelImportDialog';
 import { AppPanelRenderer } from './app-panels/AppPanelRenderer';
+import { StatusNoticesBanner } from './StatusNoticesBanner';
 
 interface AppShellProps {
   header: ComponentProps<typeof Header>;
   importPaths: string[];
+  notices: readonly string[];
   panels: ComponentProps<typeof AppPanelRenderer>;
   showImportDialog: boolean;
   showSidebar: boolean;
@@ -20,6 +22,7 @@ interface AppShellProps {
 export function AppShell({
   header,
   importPaths,
+  notices,
   panels,
   showImportDialog,
   showSidebar,
@@ -41,6 +44,7 @@ export function AppShell({
       )}
 
       <Header {...header} />
+      <StatusNoticesBanner notices={notices} />
 
       <div className="flex flex-1 relative z-10 overflow-hidden">
         {showSidebar && <AppSidebar {...sidebar} />}

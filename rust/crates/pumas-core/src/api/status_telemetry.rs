@@ -210,6 +210,7 @@ mod tests {
                 last_launch_error: None,
                 last_launch_log: None,
                 app_resources: None,
+                notices: Vec::new(),
             },
             resources: models::SystemResources {
                 cpu: models::CpuResources {

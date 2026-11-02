@@ -1407,3 +1407,32 @@ async fn test_resolve_pumas_model_ref_api_surface() {
         .iter()
         .any(|diagnostic| diagnostic.code == "unknown_model_id"));
 }
+
+/// A field this version does not know (for example one written by a newer
+/// Pumas) disables downloads with a reported reason instead of failing startup,
+/// and leaves the saved download state byte-for-byte untouched.
+#[tokio::test]
+async fn unreadable_download_state_disables_downloads_without_blocking_startup() {
+    let temp_dir = TempDir::new().unwrap();
+    let _guard = RegistryTestGuard::new(temp_dir.path());
+    let store = temp_dir.path().join("launcher-data").join("downloads.json");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    let saved = br#"{"schema_version":7,"acquisitions":{},"consumer_receipts":{},"downloads":[],"recovery_revocations":{},"lifecycle_quarantines":{},"admission_attempts":{},"queue_admissions":{},"released_queue_admissions":{},"hf_model_partition_version":6}"#;
+    std::fs::write(&store, saved).unwrap();
+
+    for _restart in 0..2 {
+        let api = PumasApi::builder(temp_dir.path())
+            .with_hf_client(true)
+            .with_process_manager(false)
+            .build()
+            .await
+            .expect("startup must not fail on unreadable download state");
+        let status = api.get_status().await.unwrap();
+        assert_eq!(status.notices.len(), 1, "{:?}", status.notices);
+        assert!(status.notices[0].contains("Downloads are disabled"));
+        assert!(status.notices[0].contains("hf_model_partition_version"));
+        // A clean shutdown retains no failed owner claim, so the next start works.
+        api.shutdown_instance().await.unwrap();
+        assert_eq!(std::fs::read(&store).unwrap(), saved);
+    }
+}

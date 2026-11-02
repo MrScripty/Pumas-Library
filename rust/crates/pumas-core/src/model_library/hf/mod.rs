@@ -111,6 +111,10 @@ pub struct HuggingFaceClient {
     pub(super) aux_complete_callback: Option<AuxFilesCompleteCallback>,
     /// Authentication token for accessing gated/private models.
     pub(super) auth_token: Arc<RwLock<Option<String>>>,
+    /// Why download mutations are refused, when persisted download state could
+    /// not be restored. Search, library and inference stay available; refusing
+    /// writes keeps state this version cannot interpret from being rewritten.
+    downloads_unavailable: Arc<std::sync::RwLock<Option<String>>>,
     #[cfg(any(test, feature = "test-support"))]
     download_base_url: Option<String>,
 }
@@ -210,6 +214,7 @@ impl HuggingFaceClient {
             completion_callback: self.completion_callback.clone(),
             aux_complete_callback: self.aux_complete_callback.clone(),
             auth_token: self.auth_token.clone(),
+            downloads_unavailable: self.downloads_unavailable.clone(),
             #[cfg(any(test, feature = "test-support"))]
             download_base_url: self.download_base_url.clone(),
         }
@@ -224,11 +229,32 @@ impl HuggingFaceClient {
         self.download_tasks.run_invocation(operation).await
     }
 
+    /// Refuse every later download mutation with `reason`. Used when persisted
+    /// download state could not be restored at startup.
+    pub fn disable_downloads(&self, reason: impl Into<String>) {
+        let mut guard = self
+            .downloads_unavailable
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = Some(reason.into());
+    }
+
+    /// Why downloads are disabled, if they are.
+    pub fn downloads_unavailable_reason(&self) -> Option<String> {
+        self.downloads_unavailable
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     /// Protect one download mutation phase without retaining exclusion in idle clients.
     pub(crate) async fn protect_download_mutation(
         &self,
         context: &DownloadInvocationContext,
     ) -> Result<DownloadInvocationContext> {
+        if let Some(reason) = self.downloads_unavailable_reason() {
+            return Err(crate::PumasError::Config { message: reason });
+        }
         match self.destination_root.clone() {
             Some(root) => context.with_root_grant(root).await,
             None => Err(crate::PumasError::Config {
@@ -385,6 +411,7 @@ impl HuggingFaceClient {
             completion_callback: None,
             aux_complete_callback: None,
             auth_token: Arc::new(RwLock::new(initial_token)),
+            downloads_unavailable: Arc::new(std::sync::RwLock::new(None)),
             #[cfg(any(test, feature = "test-support"))]
             download_base_url: None,
         })

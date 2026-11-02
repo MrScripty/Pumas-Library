@@ -107,6 +107,7 @@ impl PumasApi {
             last_launch_error,
             last_launch_log,
             app_resources,
+            notices: super::state_runtime::degraded_notices(self.primary()),
         })
     }
 

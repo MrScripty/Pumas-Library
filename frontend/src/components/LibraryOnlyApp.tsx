@@ -1,4 +1,5 @@
 import { Header } from './Header';
+import { StatusNoticesBanner } from './StatusNoticesBanner';
 import { ModelImportDialog } from './ModelImportDialog';
 import { ModelImportDropZone } from './ModelImportDropZone';
 import { ModelManager } from './ModelManager';
@@ -16,6 +17,7 @@ import { useStatus } from '../hooks/useStatus';
 /** The complete application when inference plugin support is compiled out. */
 export default function LibraryOnlyApp() {
   const {
+    status,
     systemResources,
     networkAvailable,
     modelLibraryLoaded,
@@ -77,6 +79,7 @@ export default function LibraryOnlyApp() {
         activeModelDownload={activeDownload}
         activeModelDownloadCount={activeDownloadCount}
       />
+      <StatusNoticesBanner notices={status?.notices ?? []} />
 
       <main className="relative z-10 flex flex-1 flex-col overflow-hidden p-6">
         <ModelManager

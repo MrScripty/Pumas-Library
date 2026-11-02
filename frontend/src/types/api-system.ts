@@ -19,6 +19,8 @@ export interface StatusResponse extends BaseResponse {
   torch_running: boolean;
   last_launch_error: string | null;
   last_launch_log: string | null;
+  /** Degraded-subsystem explanations; absent when everything is available. */
+  notices?: string[];
   app_resources?: {
     ollama?: {
       gpu_memory?: number;

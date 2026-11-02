@@ -136,6 +136,10 @@ pub struct StatusResponse {
     pub last_launch_log: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_resources: Option<AppResources>,
+    /// Degraded-subsystem reasons the user should see, for example disabled
+    /// downloads. The app is usable; these explain what is unavailable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notices: Vec<String>,
 }
 
 /// Models response.
@@ -539,6 +543,7 @@ mod tests {
             last_launch_error: None,
             last_launch_log: None,
             app_resources: None,
+            notices: Vec::new(),
         };
 
         let json = serde_json::to_string(&response).unwrap();

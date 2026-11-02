@@ -114,12 +114,14 @@ async fn status_diagnostics_preserve_closed_categories_and_public_errors_at_info
     .await;
 
     for response in responses {
-        assert_eq!(
-            response,
-            json!({"jsonrpc":"2.0","id":wire_id,"error":{
-                "code":-32603,"message":PublicError::internal().message,"data":{"class":"internal"}
-            }})
-        );
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["id"], wire_id);
+        assert_eq!(response["error"]["code"], -32603);
+        assert_eq!(response["error"]["data"]["class"], "internal");
+        // Each failure reports its own reason.
+        assert!(response["error"]["message"].as_str().is_some_and(
+            |message| !message.is_empty() && message != PublicError::internal().message
+        ));
     }
     let logs = capture.text();
     let stage_lines: Vec<_> = logs

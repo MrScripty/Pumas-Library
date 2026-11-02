@@ -1968,7 +1968,7 @@ mod tests {
         assert_eq!(
             wire,
             json!({"jsonrpc":"2.0","id":"switch-fixture","error":{
-                "code":-32000,"message":"A required operation is currently unavailable.","data":{"class":"unavailable"},
+                "code":-32000,"message":"Configuration error: Version manager not initialized for app: unregistered-runtime","data":{"class":"unavailable"},
             }})
         );
         #[cfg(not(feature = "inference-plugins"))]
@@ -1998,7 +1998,16 @@ mod tests {
             let wire: Value = serde_json::from_slice(&body).unwrap();
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
-                crate::contract::PublicError::unavailable()
+                crate::contract::PublicError::from(&pumas_library::PumasError::Config {
+                    message: format!(
+                        "Version manager not initialized for app: {}",
+                        params
+                            .get("app_id")
+                            .or_else(|| params.get("appId"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                    ),
+                })
             } else {
                 crate::contract::PublicError::invalid_params()
             };
@@ -2036,7 +2045,14 @@ mod tests {
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".into(),
+                    message: format!(
+                        "Version manager not initialized for app: {}",
+                        params
+                            .get("app_id")
+                            .or_else(|| params.get("appId"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                    ),
                 })
             } else {
                 crate::contract::PublicError::invalid_params()
@@ -2075,7 +2091,14 @@ mod tests {
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".into(),
+                    message: format!(
+                        "Version manager not initialized for app: {}",
+                        params
+                            .get("app_id")
+                            .or_else(|| params.get("appId"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                    ),
                 })
             } else {
                 crate::contract::PublicError::invalid_params()
@@ -2114,7 +2137,14 @@ mod tests {
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".into(),
+                    message: format!(
+                        "Version manager not initialized for app: {}",
+                        params
+                            .get("app_id")
+                            .or_else(|| params.get("appId"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                    ),
                 })
             } else {
                 crate::contract::PublicError::invalid_params()
@@ -2153,7 +2183,14 @@ mod tests {
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".into(),
+                    message: format!(
+                        "Version manager not initialized for app: {}",
+                        params
+                            .get("app_id")
+                            .or_else(|| params.get("appId"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                    ),
                 })
             } else {
                 crate::contract::PublicError::invalid_params()
@@ -2437,7 +2474,7 @@ mod tests {
         assert_eq!(
             wire,
             json!({"jsonrpc":"2.0","id":"remove-fixture","error":{
-                "code":-32000,"message":"A required operation is currently unavailable.","data":{"class":"unavailable"},
+                "code":-32000,"message":"Configuration error: Version manager not initialized for app: unregistered-runtime","data":{"class":"unavailable"},
             }})
         );
         #[cfg(not(feature = "inference-plugins"))]
@@ -2958,7 +2995,7 @@ mod tests {
                 assert_eq!(
                     wire,
                     json!({"jsonrpc":"2.0","id":"metadata-read","error":{
-                        "code":-32603,"message":"The request could not be completed due to an internal error.","data":{"class":"internal"},
+                        "code":-32603,"message":"invalid library model metadata returned by domain","data":{"class":"internal"},
                     }})
                 );
             }
@@ -2971,7 +3008,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inference_settings_rpc_reads_temporary_library_and_preserves_redacted_errors() {
+    async fn inference_settings_rpc_reads_temporary_library_and_reports_missing_models() {
         let temp = TempDir::new().unwrap();
         let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
         let model_id = "llm/fixture/Exact Model";
@@ -3026,10 +3063,10 @@ mod tests {
                 assert_eq!(
                     wire,
                     json!({"jsonrpc":"2.0","id":"inference-read","error":{
-                        "code":-32603,"message":"The request could not be completed due to an internal error.","data":{"class":"internal"},
+                        "code":-32603,"message":format!("Model not found: {selected}"),"data":{"class":"internal"},
                     }})
                 );
-                assert!(!wire.to_string().contains("private"));
+                // The error names the model the caller asked for.
             }
         }
         assert_eq!(
@@ -3247,15 +3284,27 @@ exit 9
             let request_id = format!("base-probe-{kind}");
             let response = check(&state, &request_id).await;
             let failed = matches!(kind, "invalid" | "directory" | "signal");
-            let expected = if failed {
-                json!({"jsonrpc":"2.0", "id":request_id, "error": {
-                    "code":-32003, "message":"The requested operation failed.",
-                    "data":{"class":"operation_failed"},
-                }})
+            if failed {
+                assert_eq!(response["id"], json!(request_id), "{kind}");
+                assert_eq!(response["error"]["code"], -32003, "{kind}");
+                assert_eq!(
+                    response["error"]["data"]["class"], "operation_failed",
+                    "{kind}"
+                );
+                // The reason names the failed conversion check.
+                assert!(
+                    response["error"]["message"]
+                        .as_str()
+                        .is_some_and(|message| message.starts_with("Model conversion failed")),
+                    "{kind}: {response}"
+                );
             } else {
-                json!({"jsonrpc":"2.0", "id":request_id, "result":{"success":true,"ready":false}})
-            };
-            assert_eq!(response, expected, "{kind}");
+                assert_eq!(
+                    response,
+                    json!({"jsonrpc":"2.0", "id":request_id, "result":{"success":true,"ready":false}}),
+                    "{kind}"
+                );
+            }
             assert!(!response.to_string().contains("private-"));
             assert!(!response
                 .to_string()
@@ -3276,7 +3325,7 @@ exit 9
                 check(&state, &closed_id).await,
                 json!({
                     "jsonrpc":"2.0", "id":closed_id, "error": {
-                        "code":-32004, "message":"The requested operation did not complete.",
+                        "code":-32004, "message":"Model conversion cancelled",
                         "data":{"class":"cancelled"},
                     },
                 })
@@ -3652,14 +3701,16 @@ exit 9
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["error"]["code"], -32603);
         assert!(value.get("result").is_none());
-        assert!(!String::from_utf8(bytes.to_vec())
-            .unwrap()
-            .contains("private-inspection-blocker"));
+        // The failure names what could not be inspected.
+        assert!(value["error"]["message"]
+            .as_str()
+            .is_some_and(|message| !message.is_empty()
+                && message != "The request could not be completed due to an internal error."));
         assert_eq!(std::fs::read(blocker).unwrap(), b"preserve");
     }
 
     #[tokio::test]
-    async fn download_push_validates_library_identity_and_redacts_diagnostics() {
+    async fn download_push_validates_library_identity_and_carries_download_reasons() {
         for (model_id, event_name) in [
             ("llm/acme/model", "model-download-update"),
             ("../outside", "model-download-error"),
@@ -3668,7 +3719,7 @@ exit 9
                 "cursor": "download:1",
                 "snapshot": {"cursor": "download:1", "revision": 1, "downloads": [{
                     "downloadId": "push-fixture", "libraryModelId": model_id,
-                    "status": "downloading", "error": "private diagnostic",
+                    "status": "downloading", "error": "No space left on device token=abc123",
                 }]},
                 "stale_cursor": false, "snapshot_required": true,
             }))
@@ -3680,10 +3731,14 @@ exit 9
                 .unwrap();
             let wire = std::str::from_utf8(&body).unwrap();
             assert!(wire.contains(event_name));
-            assert!(!wire.contains("private diagnostic"));
+            // The download's own reason reaches the desktop; credentials do not.
+            assert!(!wire.contains("abc123"));
             if event_name == "model-download-update" {
                 assert!(wire.contains("\"libraryModelId\":\"llm/acme/model\""));
+                assert!(wire.contains("No space left on device token=[redacted]"));
             } else {
+                // An invalid library identity rejects the whole row.
+                assert!(!wire.contains("No space left on device"));
                 assert!(!wire.contains("../outside"));
                 assert!(!wire.contains("model-download-update"));
             }
@@ -3741,7 +3796,7 @@ exit 9
             assert_eq!(error.class, crate::contract::PublicErrorClass::Unavailable);
             assert_eq!(
                 error.message,
-                "A required operation is currently unavailable."
+                "Configuration error: HuggingFace client not initialized"
             );
         }
 

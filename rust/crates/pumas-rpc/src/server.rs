@@ -1718,7 +1718,7 @@ mod tests {
                     "id": expected_id,
                     "error": {
                         "code": -32005,
-                        "message": "Request parameters are invalid.",
+                        "message": "Validation error for download.resume: Cannot resume a mutable source selection without a digest for every file; start a fresh selection to reacquire the current source",
                         "data": {"class": "invalid_request"}
                     }
                 })

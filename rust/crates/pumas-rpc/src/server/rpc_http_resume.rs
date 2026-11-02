@@ -341,7 +341,7 @@ async fn exercise_resume() {
     let failed = rpc.status("error", Some(12)).await;
     assert_eq!(
         failed["error"],
-        "The model download did not complete successfully."
+        "Download failed for artifact source: HTTP 403 Forbidden"
     );
     let failed_again = rpc.call("get_model_download_status").await;
     assert_eq!(failed_again, failed);

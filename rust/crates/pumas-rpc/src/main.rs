@@ -13,6 +13,7 @@ mod local_enumeration;
 mod owner_retention;
 #[cfg(feature = "inference-plugins")]
 mod provider_clients;
+mod public_text;
 #[cfg(feature = "s3")]
 mod s3_imports;
 mod server;

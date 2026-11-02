@@ -668,20 +668,6 @@ async fn openai_proxy_forwards_redacted_provider_reason_and_preserves_status() {
     assert!(!encoded.contains("provider_error"));
 }
 
-#[test]
-fn provider_reasons_keep_context_but_not_credentials() {
-    assert_eq!(
-        redact_credentials("input is too large to process. increase the physical batch size"),
-        "input is too large to process. increase the physical batch size"
-    );
-    assert_eq!(
-        redact_credentials(
-            "auth failed: Bearer abc.def token=xyz https://user:pw@host/p sk-abcdefghij"
-        ),
-        "auth failed: Bearer [redacted] token=[redacted] https://[redacted]@host/p [redacted]"
-    );
-}
-
 #[tokio::test(start_paused = true)]
 async fn openai_proxy_maps_provider_timeout_to_bounded_gateway_error() {
     let endpoint = spawn_hanging_gateway_server().await;

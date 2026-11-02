@@ -1389,7 +1389,9 @@ fn refine_named(name: &str, schema: &mut Value) {
                     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$".into();
                 properties["operationId"]["minLength"] = 36.into();
                 properties["operationId"]["maxLength"] = 36.into();
-                properties["error"]["enum"] = serde_json::json!([null, SETUP_FAILURE_MESSAGE]);
+                // A failed setup carries its public reason (see public_text).
+                properties["error"]["maxLength"] =
+                    crate::public_text::MAX_PUBLIC_REASON_CHARS.into();
             }
             "StartConversionSetupParams" | "StartBackendSetupParams" => {
                 properties["expected_previous_operation_id"]["pattern"] =
@@ -1400,10 +1402,9 @@ fn refine_named(name: &str, schema: &mut Value) {
             "ConversionProgressOutcome" => {
                 properties["progress"]["minimum"] = 0.into();
                 properties["progress"]["maximum"] = 1.into();
-                properties["error"]["enum"] = serde_json::json!([
-                    null,
-                    "The model conversion did not complete successfully."
-                ]);
+                // A failed conversion carries its public reason (see public_text).
+                properties["error"]["maxLength"] =
+                    crate::public_text::MAX_PUBLIC_REASON_CHARS.into();
             }
             "LinkHealthOutcome" | "LinkHealthResponse" => {
                 properties["success"]["const"] = true.into();

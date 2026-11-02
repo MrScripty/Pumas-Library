@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 592fb77c16e1f484d3146cb5a6f0c24ce07f5ac54314818141d0e0bdfbd0d04f. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 3770c2e32644691eb6bf87ba5b10b859b239640dfd0996f4a8fda90fe3f13cd8. DO NOT EDIT.
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -2775,7 +2775,7 @@ function validate27(data, { instancePath = "", parentData, parentDataProperty, r
   return errors === 0;
 }
 var validateConversionListOutcome = validate28;
-var schema32 = { "additionalProperties": false, "properties": { "bytesWritten": { "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "conversionId": { "type": "string" }, "currentTensor": { "type": ["string", "null"] }, "direction": { "$ref": "#/definitions/ConversionDirection" }, "error": { "enum": [null, "The model conversion did not complete successfully."], "type": ["string", "null"] }, "estimatedOutputSize": { "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "outputModelId": { "type": ["string", "null"] }, "pipelineStep": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "pipelineStepLabel": { "type": ["string", "null"] }, "pipelineStepsTotal": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "progress": { "maximum": 1, "minimum": 0, "type": ["number", "null"] }, "sourceModelId": { "type": "string" }, "status": { "$ref": "#/definitions/ConversionStatus" }, "targetQuant": { "type": ["string", "null"] }, "tensorsCompleted": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "tensorsTotal": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] } }, "required": ["conversionId", "sourceModelId", "direction", "status", "progress", "currentTensor", "tensorsCompleted", "tensorsTotal", "bytesWritten", "estimatedOutputSize", "targetQuant", "error", "outputModelId", "pipelineStep", "pipelineStepsTotal", "pipelineStepLabel"], "type": "object" };
+var schema32 = { "additionalProperties": false, "properties": { "bytesWritten": { "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "conversionId": { "type": "string" }, "currentTensor": { "type": ["string", "null"] }, "direction": { "$ref": "#/definitions/ConversionDirection" }, "error": { "maxLength": 1024, "type": ["string", "null"] }, "estimatedOutputSize": { "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "outputModelId": { "type": ["string", "null"] }, "pipelineStep": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "pipelineStepLabel": { "type": ["string", "null"] }, "pipelineStepsTotal": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "progress": { "maximum": 1, "minimum": 0, "type": ["number", "null"] }, "sourceModelId": { "type": "string" }, "status": { "$ref": "#/definitions/ConversionStatus" }, "targetQuant": { "type": ["string", "null"] }, "tensorsCompleted": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "tensorsTotal": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] } }, "required": ["conversionId", "sourceModelId", "direction", "status", "progress", "currentTensor", "tensorsCompleted", "tensorsTotal", "bytesWritten", "estimatedOutputSize", "targetQuant", "error", "outputModelId", "pipelineStep", "pipelineStepsTotal", "pipelineStepLabel"], "type": "object" };
 function validate29(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -3079,9 +3079,13 @@ function validate29(data, { instancePath = "", parentData, parentDataProperty, r
                       validate29.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/type", keyword: "type", params: { type: schema32.properties.error.type }, message: "must be string,null" }];
                       return false;
                     }
-                    if (!(data4 === null || data4 === "The model conversion did not complete successfully.")) {
-                      validate29.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/enum", keyword: "enum", params: { allowedValues: schema32.properties.error.enum }, message: "must be equal to one of the allowed values" }];
-                      return false;
+                    if (errors === _errs25) {
+                      if (typeof data4 === "string") {
+                        if (func5(data4) > 1024) {
+                          validate29.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
+                          return false;
+                        }
+                      }
                     }
                     var valid0 = _errs25 === errors;
                   } else {
@@ -3815,7 +3819,7 @@ function validate28(data, { instancePath = "", parentData, parentDataProperty, r
   return errors === 0;
 }
 var validateConversionProgressResponse = validate31;
-var schema36 = { "additionalProperties": false, "properties": { "bytesWritten": { "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "conversionId": { "type": "string" }, "currentTensor": { "type": ["string", "null"] }, "direction": { "$ref": "#/definitions/ConversionDirection" }, "error": { "enum": [null, "The model conversion did not complete successfully."], "type": ["string", "null"] }, "estimatedOutputSize": { "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "outputModelId": { "type": ["string", "null"] }, "pipelineStep": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "pipelineStepLabel": { "type": ["string", "null"] }, "pipelineStepsTotal": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "progress": { "maximum": 1, "minimum": 0, "type": ["number", "null"] }, "sourceModelId": { "type": "string" }, "status": { "$ref": "#/definitions/ConversionStatus" }, "targetQuant": { "type": ["string", "null"] }, "tensorsCompleted": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "tensorsTotal": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] } }, "required": ["conversionId", "sourceModelId", "direction", "status", "progress", "currentTensor", "tensorsCompleted", "tensorsTotal", "bytesWritten", "estimatedOutputSize", "targetQuant", "error", "outputModelId", "pipelineStep", "pipelineStepsTotal", "pipelineStepLabel"], "type": "object" };
+var schema36 = { "additionalProperties": false, "properties": { "bytesWritten": { "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "conversionId": { "type": "string" }, "currentTensor": { "type": ["string", "null"] }, "direction": { "$ref": "#/definitions/ConversionDirection" }, "error": { "maxLength": 1024, "type": ["string", "null"] }, "estimatedOutputSize": { "maximum": 9007199254740991, "minimum": 0, "type": ["integer", "null"] }, "outputModelId": { "type": ["string", "null"] }, "pipelineStep": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "pipelineStepLabel": { "type": ["string", "null"] }, "pipelineStepsTotal": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "progress": { "maximum": 1, "minimum": 0, "type": ["number", "null"] }, "sourceModelId": { "type": "string" }, "status": { "$ref": "#/definitions/ConversionStatus" }, "targetQuant": { "type": ["string", "null"] }, "tensorsCompleted": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "tensorsTotal": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] } }, "required": ["conversionId", "sourceModelId", "direction", "status", "progress", "currentTensor", "tensorsCompleted", "tensorsTotal", "bytesWritten", "estimatedOutputSize", "targetQuant", "error", "outputModelId", "pipelineStep", "pipelineStepsTotal", "pipelineStepLabel"], "type": "object" };
 function validate32(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -4119,9 +4123,13 @@ function validate32(data, { instancePath = "", parentData, parentDataProperty, r
                       validate32.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/type", keyword: "type", params: { type: schema36.properties.error.type }, message: "must be string,null" }];
                       return false;
                     }
-                    if (!(data4 === null || data4 === "The model conversion did not complete successfully.")) {
-                      validate32.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/enum", keyword: "enum", params: { allowedValues: schema36.properties.error.enum }, message: "must be equal to one of the allowed values" }];
-                      return false;
+                    if (errors === _errs25) {
+                      if (typeof data4 === "string") {
+                        if (func5(data4) > 1024) {
+                          validate32.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
+                          return false;
+                        }
+                      }
                     }
                     var valid0 = _errs25 === errors;
                   } else {
@@ -4878,7 +4886,7 @@ function validate31(data, { instancePath = "", parentData, parentDataProperty, r
   return errors === 0;
 }
 var validateConversionSetupStartedOutcome = validate34;
-var schema40 = { "additionalProperties": false, "properties": { "error": { "enum": [null, "Conversion environment setup did not complete successfully."], "type": ["string", "null"] }, "operationId": { "maxLength": 36, "minLength": 36, "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "status": { "$ref": "#/definitions/ConversionSetupStatus" } }, "pumasConversionSetup": true, "required": ["operationId", "status", "error"], "type": "object" };
+var schema40 = { "additionalProperties": false, "properties": { "error": { "maxLength": 1024, "type": ["string", "null"] }, "operationId": { "maxLength": 36, "minLength": 36, "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "status": { "$ref": "#/definitions/ConversionSetupStatus" } }, "pumasConversionSetup": true, "required": ["operationId", "status", "error"], "type": "object" };
 var pattern12 = new RegExp("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "u");
 function validate35(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
@@ -4906,9 +4914,13 @@ function validate35(data, { instancePath = "", parentData, parentDataProperty, r
               validate35.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/type", keyword: "type", params: { type: schema40.properties.error.type }, message: "must be string,null" }];
               return false;
             }
-            if (!(data0 === null || data0 === "Conversion environment setup did not complete successfully.")) {
-              validate35.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/enum", keyword: "enum", params: { allowedValues: schema40.properties.error.enum }, message: "must be equal to one of the allowed values" }];
-              return false;
+            if (errors === _errs2) {
+              if (typeof data0 === "string") {
+                if (func5(data0) > 1024) {
+                  validate35.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
+                  return false;
+                }
+              }
             }
             var valid0 = _errs2 === errors;
           } else {
@@ -5160,7 +5172,7 @@ function validate34(data, { instancePath = "", parentData, parentDataProperty, r
   return errors === 0;
 }
 var validateConversionSetupStatusOutcome = validate37;
-var schema43 = { "additionalProperties": false, "properties": { "error": { "enum": [null, "Conversion environment setup did not complete successfully."], "type": ["string", "null"] }, "operationId": { "maxLength": 36, "minLength": 36, "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "status": { "$ref": "#/definitions/ConversionSetupStatus" } }, "pumasConversionSetup": true, "required": ["operationId", "status", "error"], "type": "object" };
+var schema43 = { "additionalProperties": false, "properties": { "error": { "maxLength": 1024, "type": ["string", "null"] }, "operationId": { "maxLength": 36, "minLength": 36, "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "type": "string" }, "status": { "$ref": "#/definitions/ConversionSetupStatus" } }, "pumasConversionSetup": true, "required": ["operationId", "status", "error"], "type": "object" };
 function validate38(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -5187,9 +5199,13 @@ function validate38(data, { instancePath = "", parentData, parentDataProperty, r
               validate38.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/type", keyword: "type", params: { type: schema43.properties.error.type }, message: "must be string,null" }];
               return false;
             }
-            if (!(data0 === null || data0 === "Conversion environment setup did not complete successfully.")) {
-              validate38.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/enum", keyword: "enum", params: { allowedValues: schema43.properties.error.enum }, message: "must be equal to one of the allowed values" }];
-              return false;
+            if (errors === _errs2) {
+              if (typeof data0 === "string") {
+                if (func5(data0) > 1024) {
+                  validate38.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
+                  return false;
+                }
+              }
             }
             var valid0 = _errs2 === errors;
           } else {

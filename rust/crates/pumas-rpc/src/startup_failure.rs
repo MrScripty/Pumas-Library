@@ -68,26 +68,17 @@ pub(crate) fn write(error: &anyhow::Error, output: &mut impl Write) -> std::io::
 }
 
 fn detail(error: &anyhow::Error) -> String {
-    let mut text = error
+    let text = error
         .chain()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(": ");
-    if let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty()) {
-        text = text.replace(home.to_string_lossy().as_ref(), "~");
-    }
-    let mut detail: String = text
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .take(MAX_DETAIL_CHARS)
-        .collect();
-    if text.chars().count() > MAX_DETAIL_CHARS {
-        detail.push('…');
-    }
+    let detail = crate::public_text::public_reason_within(&text, MAX_DETAIL_CHARS);
     if detail.trim().is_empty() {
-        detail = "The backend stopped before it was ready.".into();
+        "The backend stopped before it was ready.".into()
+    } else {
+        detail
     }
-    detail
 }
 
 #[cfg(test)]

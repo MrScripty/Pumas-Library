@@ -525,8 +525,10 @@ test('conversion decoder rejects old field names and unsafe numeric evidence', (
   const valid = fixtures.conversion_progress[0];
   for (const patch of [{progress:-0.1},{progress:1.1},{bytesWritten:9007199254740992},
     {tensorsCompleted:-1},{tensorsTotal:0.5},{status:'unknown'},{direction:'unknown'},
-    {conversion_id:'legacy'},{extra:true},{error:'/private/diagnostic'},
+    {conversion_id:'legacy'},{extra:true},{error:'x'.repeat(1025)},
   ]) assert.equal(contract.decodeConversionProgressResponse({...valid,progress:{...valid.progress,...patch}}).status, 'invalid');
+  // A failed conversion carries its public reason.
+  assert.equal(contract.decodeConversionProgressResponse({...valid,progress:{...valid.progress,error:'Disk full writing model.gguf'}}).status, 'valid');
   const missingNull = structuredClone(valid);
   delete missingNull.progress.currentTensor;
   assert.equal(contract.decodeConversionProgressResponse(missingNull).status, 'invalid');
@@ -541,20 +543,23 @@ test('setup snapshots preserve all producer states, identities and explicit idle
       assert.equal(result.status, 'valid');
       assert.deepEqual(JSON.parse(JSON.stringify(result.value)), response);
       assert.equal(Object.isFrozen(result.value.setup), true);
-      assert.equal(JSON.stringify(result.value).includes('/secret/'), false);
+      // A failed setup reports the producer's reason unchanged.
+      if (response.setup?.status === 'failed') assert.equal(result.value.setup.error, response.setup.error);
     }
   }
   assert.deepEqual(JSON.parse(JSON.stringify(contract.decodeConversionSetupStatusOutcome(fixtures.conversion_setup_idle).value)), {success:true,setup:null});
   assert.equal(contract.decodeConversionSetupStartedOutcome(fixtures.conversion_setup_idle).status, 'invalid');
 });
 
-test('setup decoders reject contradictory status, malformed identity and raw diagnostics', () => {
+test('setup decoders reject contradictory status, malformed identity and unbounded reasons', () => {
   const active = fixtures.conversion_setup_started[0];
   for (const patch of [{operationId:''}, {operationId:'old-id'}, {operationId:active.setup.operationId.toUpperCase()},
     {operationId:`${active.setup.operationId}\n`}, {operation_id:active.setup.operationId}, {status:'ready'},
-    {status:'failed',error:null}, {error:'Conversion environment setup did not complete successfully.'},
-    {status:'failed',error:'/private/diagnostic'}, {extra:true},
+    {status:'failed',error:null}, {error:'Setup failed while installing a dependency.'},
+    {status:'failed',error:'x'.repeat(1025)}, {extra:true},
   ]) assert.equal(contract.decodeConversionSetupStartedOutcome({...active,setup:{...active.setup,...patch}}).status, 'invalid');
+  // A failed setup with a bounded reason is valid.
+  assert.equal(contract.decodeConversionSetupStartedOutcome({...active,setup:{...active.setup,status:'failed',error:'pip exited with status 1'}}).status, 'valid');
   const missing = structuredClone(active);
   delete missing.setup.error;
   assert.equal(contract.decodeConversionSetupStartedOutcome(missing).status, 'invalid');

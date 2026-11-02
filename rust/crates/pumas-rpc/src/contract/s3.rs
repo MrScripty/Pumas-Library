@@ -103,7 +103,9 @@ pub(crate) fn require_versioned_set(mode: S3ReadMode) -> Result<(), PublicError>
         return Err(PublicError {
             code: -32000,
             class: PublicErrorClass::Unavailable,
-            message: "Conditional S3 mode is unsupported for prefix discovery.",
+            message: std::borrow::Cow::Borrowed(
+                "Conditional S3 mode is unsupported for prefix discovery.",
+            ),
         });
     }
     Ok(())
@@ -741,7 +743,9 @@ pub(crate) fn s3_conflict() -> PublicError {
     PublicError {
         code: -32003,
         class: PublicErrorClass::Conflict,
-        message: "S3 import needs its existing result or retained-work reconciliation.",
+        message: std::borrow::Cow::Borrowed(
+            "S3 import needs its existing result or retained-work reconciliation.",
+        ),
     }
 }
 

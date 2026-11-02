@@ -47,7 +47,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     void api.get_torch_runtime_options().then((options) => {
       if (active) {
         setRuntimeOptions(options);
-        setBuildChoice(options.defaultBuild || 'auto');
+        setBuildChoice(options.defaultBuild);
         setAdapterChoice(options.adapters.includes(options.defaultAdapter) ? options.defaultAdapter : 'none');
       }
     }).catch((cause: unknown) => {

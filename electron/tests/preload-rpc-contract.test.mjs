@@ -89,7 +89,7 @@ test('compiled preload forwards exact anonymous S3 pins and runtime-decodes obse
 test('Torch runtime options require manager preset capability and an offered default adapter', async () => {
   const harness = loadCompiledPreload();
   const options = {
-    builds: ['cpu'], pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
+    builds: ['cpu'], defaultBuild: 'auto', pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
     adapters: ['none', 'flux2'], bundledPresetAvailable: true, defaultAdapter: 'flux2',
     preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
     installed: [],
@@ -104,10 +104,13 @@ test('Torch runtime options require manager preset capability and an offered def
     { ...options, defaultAdapter: undefined },
     { ...options, defaultAdapter: 'bundled' },
     { ...options, adapters: ['none'], defaultAdapter: 'flux2' },
+    { ...options, defaultBuild: undefined },
+    { ...options, installed: [{ tag: 'v2.10.0', build: null, python: null, adapter: null, qualification: 'unknown' }] },
+    { ...options, extra: true },
   ]) {
     harness.respondWith(invalid);
     await assert.rejects(harness.api.get_torch_runtime_options(), {
-      name: 'TypeError', message: 'Invalid get_torch_runtime_options response',
+      name: 'DesktopContractError', status: 'invalid',
     });
   }
 });

@@ -1,5 +1,9 @@
 //! Server-owned Torch wheel resolution retained until installation or expiry.
 
+use super::torch_inspection::{
+    TorchInstalledProbeReport, TorchInstalledRuntime, TorchPythonChoice, TorchRuntimeOptions,
+    TorchRuntimeSelection,
+};
 use super::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1589,18 +1593,12 @@ impl VersionManager {
         Ok(())
     }
 
-    pub async fn torch_runtime_options(&self) -> Result<serde_json::Value> {
+    pub async fn torch_runtime_options(&self) -> Result<TorchRuntimeOptions> {
         if self.app_id != AppId::Torch {
             return Err(failed("Torch manager required"));
         }
         let linux_x64 = cfg!(all(target_os = "linux", target_arch = "x86_64"));
-        let bundled_preset_available = linux_x64;
         let adapters: &[&str] = if linux_x64 { ADAPTERS } else { &["none"] };
-        let builds: Vec<&str> = BUILDS
-            .iter()
-            .copied()
-            .filter(|build| supported_torch_build(build))
-            .collect();
         let mut installed = Vec::new();
         for tag in self.get_installed_versions().await? {
             let recipe_path = self.versions_dir().join(&tag).join("runtime.json");
@@ -1609,20 +1607,48 @@ impl VersionManager {
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
                 .unwrap_or(serde_json::Value::Null);
-            let preset = recipe["recipe_id"] == "torch-upstream-2.9.1-r1";
-            installed.push(serde_json::json!({"tag":tag,
-                "build": if preset { Some("cu130") } else { recipe["build"].as_str() },
-                "python": if preset { Some("python3.12") } else { recipe["python"].as_str() },
-                "adapter": if preset { Some("bundled") } else { recipe["adapter"].as_str() },
-                "qualification": if preset { "qualified" } else { "unverified" } }));
+            let recorded = |key: &str| recipe[key].as_str().map(str::to_owned);
+            installed.push(if recipe["recipe_id"] == "torch-upstream-2.9.1-r1" {
+                TorchInstalledRuntime {
+                    tag,
+                    build: Some("cu130".into()),
+                    python: Some("python3.12".into()),
+                    adapter: Some("bundled".into()),
+                    qualified: true,
+                }
+            } else {
+                TorchInstalledRuntime {
+                    tag,
+                    build: recorded("build"),
+                    python: recorded("python"),
+                    adapter: recorded("adapter"),
+                    qualified: false,
+                }
+            });
         }
-        Ok(
-            serde_json::json!({"builds": builds, "defaultBuild":"auto", "pythons": [{"id":"auto", "label":"Select automatically"}], "adapters": adapters,
-            "bundledPresetAvailable": bundled_preset_available,
-            "defaultAdapter": "none",
-            "preset": {"tag":"v2.9.1", "build":"cu130", "python":"python3.12", "adapter":"bundled"},
-            "installed": installed}),
-        )
+        Ok(TorchRuntimeOptions {
+            builds: BUILDS
+                .iter()
+                .copied()
+                .filter(|build| supported_torch_build(build))
+                .map(str::to_owned)
+                .collect(),
+            default_build: "auto".into(),
+            pythons: vec![TorchPythonChoice {
+                id: "auto".into(),
+                label: "Select automatically".into(),
+            }],
+            adapters: adapters.iter().copied().map(str::to_owned).collect(),
+            bundled_preset_available: linux_x64,
+            default_adapter: "none".into(),
+            preset: TorchRuntimeSelection {
+                tag: "v2.9.1".into(),
+                build: "cu130".into(),
+                python: "python3.12".into(),
+                adapter: "bundled".into(),
+            },
+            installed,
+        })
     }
 
     pub async fn preview_torch_runtime(
@@ -2271,7 +2297,10 @@ impl VersionManager {
         }
     }
 
-    pub async fn torch_installed_probe_report(&self, tag: &str) -> Result<serde_json::Value> {
+    pub async fn torch_installed_probe_report(
+        &self,
+        tag: &str,
+    ) -> Result<TorchInstalledProbeReport> {
         if self.app_id != AppId::Torch
             || !safe_torch_tag(tag)
             || !self.state.read().await.is_installed(tag)
@@ -2283,7 +2312,7 @@ impl VersionManager {
         let bytes = fs::read(&report_path)
             .await
             .map_err(|e| failed(format!("Installed Torch probe report is unavailable: {e}")))?;
-        let mut report: serde_json::Value = serde_json::from_slice(&bytes)
+        let report: serde_json::Value = serde_json::from_slice(&bytes)
             .map_err(|e| failed(format!("Invalid installed Torch probe report: {e}")))?;
         let mut stale_reasons = Vec::new();
         // Retain historical checksums in the report without automatically
@@ -2337,10 +2366,9 @@ print(json.dumps({"hardware_fingerprint":hashlib.sha256(json.dumps(identity,sort
             }
             _ => stale_reasons.push("Current runtime context could not be checked".into()),
         }
-        if let Some(object) = report.as_object_mut() {
-            object.insert("stale".into(), (!stale_reasons.is_empty()).into());
-            object.insert("staleReasons".into(), serde_json::json!(stale_reasons));
-        }
+        let mut report: TorchInstalledProbeReport = serde_json::from_value(report)
+            .map_err(|e| failed(format!("Invalid installed Torch probe report: {e}")))?;
+        report.stale_reasons = stale_reasons;
         Ok(report)
     }
 }

@@ -86,7 +86,7 @@ export function InstallDialog({
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [torchPreviewTag, setTorchPreviewTag] = useState<string | null>(null);
   const [torchProbeTag, setTorchProbeTag] = useState<string | null>(null);
-  const [torchInstalledConfigs, setTorchInstalledConfigs] = useState<TorchInstalledConfig[]>([]);
+  const [torchInstalledConfigs, setTorchInstalledConfigs] = useState<readonly TorchInstalledConfig[]>([]);
   const cancellationRef = useRef(false);
   const installedKey = installedVersions.join('\0');
 

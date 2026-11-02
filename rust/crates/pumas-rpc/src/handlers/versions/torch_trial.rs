@@ -1,7 +1,10 @@
 //! Explicit basic Torch startup trial for one selected managed profile.
 
-use crate::contract::TrialTorchRuntimeOutcome;
+use crate::contract::{
+    TorchTrialCleanup, TorchTrialHealthStatus, TorchTrialStartupStatus, TrialTorchRuntimeOutcome,
+};
 use crate::handlers::require_version_manager;
+use crate::public_text::public_reason;
 use crate::server::AppState;
 use pumas_app_manager::torch_client::{TorchClient, SUPPORTED_TORCH_PROTOCOL};
 use pumas_library::models::{
@@ -19,14 +22,25 @@ fn failed(
         success: false,
         tag: tag.into(),
         profile_id: profile_id.as_str().into(),
-        startup_status: "failed".into(),
-        health_status: "not_checked".into(),
+        startup_status: TorchTrialStartupStatus::Failed,
+        health_status: TorchTrialHealthStatus::NotChecked,
         protocol: None,
         capabilities: Vec::new(),
         generation: None,
         started_by_trial: false,
         error: Some(message.into()),
-        cleanup: "not_needed".into(),
+        cleanup: TorchTrialCleanup::NotNeeded,
+    }
+}
+
+/// The launch failure the user sees, with its public reason when one exists.
+fn launch_failure(reason: Option<&str>) -> String {
+    match reason
+        .map(public_reason)
+        .filter(|reason| !reason.is_empty())
+    {
+        Some(reason) => format!("Managed Torch launch failed: {reason}"),
+        None => "Managed Torch launch failed".into(),
     }
 }
 
@@ -109,14 +123,22 @@ pub async fn trial_torch_runtime(
         Ok(receipt) => receipt,
         Err(error) => {
             tracing::warn!(%error, %tag, "Managed Torch launch failed during trial");
-            return Ok(failed(tag, &profile_id, "Managed Torch launch failed"));
+            return Ok(failed(
+                tag,
+                &profile_id,
+                launch_failure(Some(&error.to_string())),
+            ));
         }
     };
     // Binary launch failures currently have no observation, but keep the failure
     // path safe if a future launch strategy reports a failed owned generation.
     if !receipt.response.success {
         tracing::warn!(error = ?receipt.response.error, %tag, "Managed Torch launch returned a failed receipt during trial");
-        let mut outcome = failed(tag, &profile_id, "Managed Torch launch failed");
+        let mut outcome = failed(
+            tag,
+            &profile_id,
+            launch_failure(receipt.response.error.as_deref()),
+        );
         if let Some(owned) = receipt.observation {
             let mut cleanup_ticket = state
                 .api
@@ -130,18 +152,17 @@ pub async fn trial_torch_runtime(
             {
                 Ok(true) => {
                     cleanup_ticket.disarm();
-                    "stopped_owned_generation"
+                    TorchTrialCleanup::StoppedOwnedGeneration
                 }
                 Ok(false) => {
                     cleanup_ticket.disarm();
-                    "not_needed"
+                    TorchTrialCleanup::NotNeeded
                 }
                 Err(error) => {
                     tracing::warn!(%error, "Could not clean failed owned Torch launch");
-                    "manual_stop_required"
+                    TorchTrialCleanup::ManualStopRequired
                 }
-            }
-            .into();
+            };
         }
         return Ok(outcome);
     }
@@ -160,14 +181,14 @@ pub async fn trial_torch_runtime(
         success: false,
         tag: tag.into(),
         profile_id: profile_id.as_str().into(),
-        startup_status: "passed".into(),
-        health_status: "not_checked".into(),
+        startup_status: TorchTrialStartupStatus::Passed,
+        health_status: TorchTrialHealthStatus::NotChecked,
         protocol: None,
         capabilities: Vec::new(),
         generation: Some(owned.generation.to_string()),
         started_by_trial: true,
         error: None,
-        cleanup: "not_needed".into(),
+        cleanup: TorchTrialCleanup::NotNeeded,
     };
     let client = TorchClient::new(Some(owned.endpoint_url.as_str()));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
@@ -211,7 +232,7 @@ pub async fn trial_torch_runtime(
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        outcome.health_status = "passed".into();
+        outcome.health_status = TorchTrialHealthStatus::Passed;
         let handshake = client
             .handshake()
             .await
@@ -251,8 +272,8 @@ pub async fn trial_torch_runtime(
         }
         Err(error) => {
             outcome.error = Some(error);
-            if outcome.health_status != "passed" {
-                outcome.health_status = "failed".into();
+            if outcome.health_status != TorchTrialHealthStatus::Passed {
+                outcome.health_status = TorchTrialHealthStatus::Failed;
             }
             outcome.cleanup = match state
                 .api
@@ -261,18 +282,17 @@ pub async fn trial_torch_runtime(
             {
                 Ok(true) => {
                     cleanup_ticket.disarm();
-                    "stopped_owned_generation"
+                    TorchTrialCleanup::StoppedOwnedGeneration
                 }
                 Ok(false) => {
                     cleanup_ticket.disarm();
-                    "not_needed"
+                    TorchTrialCleanup::NotNeeded
                 }
                 Err(error) => {
                     tracing::warn!(%error, "Could not clean failed owned Torch trial");
-                    "manual_stop_required"
+                    TorchTrialCleanup::ManualStopRequired
                 }
-            }
-            .into();
+            };
         }
     }
     Ok(outcome)

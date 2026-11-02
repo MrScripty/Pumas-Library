@@ -13,7 +13,7 @@ const unconditionalStop = vi.fn<(profileId: string) => Promise<unknown>>();
 const getProfiles = vi.fn<() => Promise<unknown>>().mockResolvedValue({ success: true, snapshot: { profiles: [] } });
 const baseOptions: TorchRuntimeOptions = {
   builds: ['cpu'], pythons: [], adapters: ['none'],
-  bundledPresetAvailable: false, defaultAdapter: 'none',
+  bundledPresetAvailable: false, defaultAdapter: 'none', defaultBuild: 'auto',
   preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
   installed: [],
 };
@@ -32,7 +32,7 @@ describe('TorchRuntimeProbePanel', () => {
   it('attributes an earlier trial to its release while a different release is inspected', async () => {
     getOptions.mockResolvedValue(baseOptions);
     getProbe.mockResolvedValue({
-      status: 'passed', core_status: 'passed', adapter_status: 'not selected', capabilities: {},
+      status: 'passed', core_status: 'passed', adapter_status: 'not selected', recorded_at: null, stale: false, staleReasons: [], capabilities: {},
     });
     getProfiles.mockResolvedValue({ success: true, snapshot: { profiles: [{
       profile_id: 'managed-torch', name: 'Managed Torch', provider: 'torch',
@@ -61,7 +61,7 @@ describe('TorchRuntimeProbePanel', () => {
       finishTrial({
         success: true, tag: 'v2.10.0', profileId: 'managed-torch', startupStatus: 'passed',
         healthStatus: 'passed', protocol: 3, capabilities: [], generation: 'generation-42',
-        startedByTrial: true, cleanup: 'not_needed',
+        startedByTrial: true, error: null, cleanup: 'not_needed',
       });
     });
     expect(screen.getByText(/trial profile for v2.10.0 is still running/)).toBeInTheDocument();
@@ -79,7 +79,7 @@ describe('TorchRuntimeProbePanel', () => {
   it('keeps a successful trial stop available after the probe panel remounts', async () => {
     getOptions.mockResolvedValue(baseOptions);
     getProbe.mockResolvedValue({
-      status: 'passed', core_status: 'passed', adapter_status: 'not selected', capabilities: {},
+      status: 'passed', core_status: 'passed', adapter_status: 'not selected', recorded_at: null, stale: false, staleReasons: [], capabilities: {},
     });
     getProfiles.mockResolvedValue({ success: true, snapshot: { profiles: [{
       profile_id: 'managed-torch', name: 'Managed Torch', provider: 'torch',
@@ -88,7 +88,7 @@ describe('TorchRuntimeProbePanel', () => {
     trial.mockResolvedValue({
       success: true, tag: 'v2.10.0', profileId: 'managed-torch', startupStatus: 'passed',
       healthStatus: 'passed', protocol: 3, capabilities: [], generation: 'generation-42',
-      startedByTrial: true, cleanup: 'not_needed',
+      startedByTrial: true, error: null, cleanup: 'not_needed',
     });
     conditionalStop.mockResolvedValue({ success: true, stopped: true });
     const store = createTorchTrialLifecycleStore();
@@ -125,9 +125,9 @@ describe('TorchRuntimeProbePanel', () => {
       status: 'partial', core_status: 'passed', adapter_status: 'unavailable',
       recorded_at: '2026-09-23T12:00:00Z', stale: true, staleReasons: ['sidecar changed'],
       capabilities: {
-        torch_import: { status: 'passed' },
-        flux2_klein: { status: 'unavailable', scope: 'adapter imports', error: 'Pipeline symbol missing' },
-        sidecar_startup: { status: 'not tested', scope: 'socket startup requires an explicit trial' },
+        torch_import: { status: 'passed', scope: null, reason: null, error: null, version: null },
+        flux2_klein: { status: 'unavailable', scope: 'adapter imports', error: 'Pipeline symbol missing', reason: null, version: null },
+        sidecar_startup: { status: 'not tested', scope: 'socket startup requires an explicit trial', reason: null, error: null, version: null },
       },
     });
     render(<TorchRuntimeProbePanel tag="v2.10.0" />);
@@ -143,8 +143,8 @@ describe('TorchRuntimeProbePanel', () => {
   it('shows a saved startup failure distinctly from installed state', async () => {
     getOptions.mockResolvedValue(baseOptions);
     getProbe.mockResolvedValue({
-      status: 'passed', core_status: 'passed', adapter_status: 'not selected',
-      capabilities: { sidecar_startup: { status: 'failed', error: 'Socket bind failed' } },
+      status: 'passed', core_status: 'passed', adapter_status: 'not selected', recorded_at: null, stale: false, staleReasons: [],
+      capabilities: { sidecar_startup: { status: 'failed', error: 'Socket bind failed', scope: null, reason: null, version: null } },
     });
     render(<TorchRuntimeProbePanel tag="v2.9.1" />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Startup failed: Socket bind failed');

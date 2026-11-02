@@ -518,6 +518,13 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             message: reason.message(),
         })?;
     }
+    for (key, value) in super::torch_runtime_fixtures()?
+        .as_object()
+        .into_iter()
+        .flatten()
+    {
+        fixtures[key] = value.clone();
+    }
     for key in ["version_status_empty", "version_status_no_manager"] {
         fixtures[key] =
             serde_json::to_value(VersionStatusOutcome::new(RuntimeVersionStatus::default())?)?;
@@ -848,7 +855,22 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         GetTorchRuntimeProbeParams,
         TrialTorchRuntimeParams,
         TrialTorchRuntimeOutcome,
+        TorchTrialStartupStatus,
+        TorchTrialHealthStatus,
+        TorchTrialCleanup,
+        TorchRuntimeOptionsOutcome,
+        TorchPythonChoice,
+        TorchRuntimeSelection,
+        TorchInstalledRuntime,
+        TorchRuntimeProbeOutcome,
+        TorchProbeStatus,
+        TorchProbeCoreStatus,
+        TorchProbeAdapterStatus,
+        TorchCapabilityProbe,
         FindTorchAlternativesParams,
+        TorchAlternativesOutcome,
+        TorchAlternativesStatus,
+        TorchAlternativeMatch,
         StopRuntimeProfileGenerationParams,
         StopRuntimeProfileGenerationOutcome,
         InstallVersionOutcome,
@@ -1361,6 +1383,9 @@ fn refine_named(name: &str, schema: &mut Value) {
         "ConversionSetupSnapshotOutcome" => {
             object.insert("pumasConversionSetup".into(), true.into());
         }
+        "TorchRuntimeOptionsOutcome" => {
+            object.insert("pumasTorchDefaultAdapter".into(), true.into());
+        }
         _ => {}
     }
     if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
@@ -1383,6 +1408,10 @@ fn refine_named(name: &str, schema: &mut Value) {
             }
             "QuantOption" => {
                 properties["bitsPerWeight"]["minimum"] = 0.into();
+            }
+            "TorchAlternativesOutcome" => {
+                properties["incomplete"]["const"] = true.into();
+                properties["dependenciesNotChecked"]["const"] = true.into();
             }
             "ConversionSetupSnapshotOutcome" => {
                 properties["operationId"]["pattern"] =

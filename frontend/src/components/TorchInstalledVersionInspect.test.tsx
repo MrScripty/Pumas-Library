@@ -7,14 +7,14 @@ afterEach(() => vi.unstubAllGlobals());
 describe('installed Torch version review', () => {
   it('shows each saved build and inspects a nonactive version without selecting it', async () => {
     const probe = vi.fn().mockResolvedValue({
-      status: 'partial', core_status: 'passed', adapter_status: 'unavailable',
-      capabilities: { sidecar_startup: { status: 'not tested' } },
+      status: 'partial', core_status: 'passed', adapter_status: 'unavailable', recorded_at: null, stale: false, staleReasons: [],
+      capabilities: { sidecar_startup: { status: 'not tested', scope: null, reason: null, error: null, version: null } },
     });
     const switchVersion = vi.fn();
     vi.stubGlobal('electronAPI', {
       get_torch_runtime_options: vi.fn().mockResolvedValue({
         builds: ['cpu', 'cu130'], pythons: [], adapters: ['none', 'flux2'],
-        bundledPresetAvailable: false, defaultAdapter: 'flux2',
+        bundledPresetAvailable: false, defaultAdapter: 'flux2', defaultBuild: 'auto',
         preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
         installed: [
           { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled', qualification: 'qualified' },

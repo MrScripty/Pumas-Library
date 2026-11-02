@@ -215,7 +215,7 @@ describe('TorchPanel shared version controls', () => {
         },
       }),
       get_torch_runtime_probe: vi.fn().mockResolvedValue({
-        status: 'passed', core_status: 'passed', adapter_status: 'not selected', capabilities: {},
+        status: 'passed', core_status: 'passed', adapter_status: 'not selected', recorded_at: null, stale: false, staleReasons: [], capabilities: {},
       }),
       get_runtime_profiles_snapshot: vi.fn().mockResolvedValue({ success: true, snapshot: { profiles: [] } }),
     });

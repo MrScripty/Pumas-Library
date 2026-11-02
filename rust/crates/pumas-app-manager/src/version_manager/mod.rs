@@ -57,6 +57,7 @@ mod progress;
 pub mod size_calculator;
 mod state;
 mod torch_alternatives;
+mod torch_inspection;
 mod torch_preview;
 mod torch_read_source;
 mod torch_workspace;
@@ -73,6 +74,11 @@ pub use torch_alternatives::{
     TorchAlternativeDiscovery, TorchAlternativeMatch, TorchReleaseCombination,
     TorchReleaseDriverAvailability, TorchReleaseDriverStatus, TorchReleaseOptionsDiscovery,
     TorchReleaseOptionsStatus, TorchReleaseRecommendation,
+};
+pub use torch_inspection::{
+    TorchCapabilityProbe, TorchInstalledProbeReport, TorchInstalledRuntime,
+    TorchProbeAdapterStatus, TorchProbeCoreStatus, TorchProbeStatus, TorchPythonChoice,
+    TorchRuntimeOptions, TorchRuntimeSelection,
 };
 pub use torch_preview::{
     TorchArtifact, TorchPreview, TorchPreviewOutcome, TorchPreviewRejectionReason,
@@ -5582,8 +5588,8 @@ mod tests {
             .await
             .expect("local Torch options must return promptly")
             .unwrap();
-        assert_eq!(options["defaultBuild"], "auto");
-        assert_eq!(options["pythons"][0]["id"], "auto");
+        assert_eq!(options.default_build, "auto");
+        assert_eq!(options.pythons[0].id, "auto");
         assert!(!root.path().join("launcher-data/managed-python").exists());
         let release_options = tokio::time::timeout(
             Duration::from_secs(2),
@@ -6349,10 +6355,10 @@ mod tests {
             .unwrap();
         register_test_version(&owner, "v2.14.0").await;
         let options = observer.torch_runtime_options().await.unwrap();
-        assert_eq!(options["installed"][0]["tag"], "v2.14.0");
+        assert_eq!(options.installed[0].tag, "v2.14.0");
         owner.remove_version("v2.14.0").await.unwrap();
         let options = observer.torch_runtime_options().await.unwrap();
-        assert_eq!(options["installed"], serde_json::json!([]));
+        assert!(options.installed.is_empty());
     }
 
     #[tokio::test]

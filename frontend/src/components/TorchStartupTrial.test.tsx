@@ -38,7 +38,7 @@ describe('TorchStartupTrial', () => {
     trial.mockResolvedValue({
       success: true, tag: 'v2.10.0', profileId: 'torch-managed', startupStatus: 'passed',
       healthStatus: 'passed', protocol: 3, capabilities: ['torch_serve'], generation: '42',
-      startedByTrial: true, cleanup: 'not_needed',
+      startedByTrial: true, error: null, cleanup: 'not_needed',
     });
     conditionalStop.mockResolvedValue({ success: true, stopped: true });
     render(<TorchStartupTrial tag="v2.10.0" store={store} />);

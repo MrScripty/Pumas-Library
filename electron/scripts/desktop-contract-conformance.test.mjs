@@ -739,3 +739,35 @@ test('actual model lookup producer reports cross the versioned migration decoder
     assert.equal(contract.decodeModelLookupParams({model_id}).status, 'invalid');
   }
 });
+
+test('Torch inspection outcomes made by Rust decode exactly and reject contradictions', () => {
+  const decoders = {
+    torch_runtime_options: contract.decodeTorchRuntimeOptionsOutcome,
+    torch_runtime_probe: contract.decodeTorchRuntimeProbeOutcome,
+    torch_alternatives: contract.decodeTorchAlternativesOutcome,
+    torch_trial_failed: contract.decodeTrialTorchRuntimeOutcome,
+  };
+  for (const [key, decode] of Object.entries(decoders)) {
+    const result = decode(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+    assert.equal(decode({...fixtures[key], extra: true}).status, 'invalid', `${key} is closed`);
+  }
+  const options = fixtures.torch_runtime_options;
+  const probe = fixtures.torch_runtime_probe;
+  const alternatives = fixtures.torch_alternatives;
+  const trial = fixtures.torch_trial_failed;
+  for (const [decode, value] of [
+    [decoders.torch_runtime_options, {...options, defaultAdapter: 'cohere-asr'}],
+    [decoders.torch_runtime_options, {...options, installed: [{...options.installed[0], qualification: 'maybe'}]}],
+    [decoders.torch_runtime_probe, {...probe, adapter_status: 'passed'}],
+    [decoders.torch_runtime_probe, {...probe, staleReasons: undefined}],
+    [decoders.torch_runtime_probe, {...probe, capabilities: {torch_import: {status: 'passed'}}}],
+    [decoders.torch_alternatives, {...alternatives, incomplete: false}],
+    [decoders.torch_alternatives, {...alternatives, status: 'complete'}],
+    [decoders.torch_trial_failed, {...trial, cleanup: 'unknown'}],
+    [decoders.torch_trial_failed, {...trial, healthStatus: 'skipped'}],
+  ]) {
+    assert.equal(decode(value).status, 'invalid', JSON.stringify(value));
+  }
+});

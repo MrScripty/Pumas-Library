@@ -11,7 +11,7 @@ import { build } from 'esbuild';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const supported = new Set(['$schema', '$id', '$ref', 'title', 'description', 'definitions', 'type', 'properties', 'required', 'additionalProperties', 'items', 'anyOf', 'oneOf', 'allOf', 'enum', 'const', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', 'uniqueItems', 'minProperties', 'maxProperties', 'default', 'format']);
-for (const keyword of ['pumasUtf8Max', 'pumasCatalogMap', 'pumasCatalogRow', 'pumasPartialOutcome', 'pumasCatalogSearch', 'pumasMutation', 'pumasStarted', 'pumasPortablePath', 'pumasCanonicalText', 'pumasLinkHealth', 'pumasConversionSetup']) supported.add(keyword);
+for (const keyword of ['pumasUtf8Max', 'pumasCatalogMap', 'pumasCatalogRow', 'pumasPartialOutcome', 'pumasCatalogSearch', 'pumasMutation', 'pumasStarted', 'pumasPortablePath', 'pumasCanonicalText', 'pumasLinkHealth', 'pumasConversionSetup', 'pumasTorchDefaultAdapter']) supported.add(keyword);
 
 // Product wire refinements selected explicitly by the Rust export. AJV still
 // owns all standard Draft7 behavior; none of these reinterpret schema keywords.
@@ -19,6 +19,10 @@ function addWireRefinements(ajv) {
   ajv.addKeyword({keyword:'pumasConversionSetup', type:'object', schemaType:'boolean', code(context) {
     const {data} = context;
     context.fail(_`(${data}.status === "failed") !== (${data}.error !== null)`);
+  }});
+  ajv.addKeyword({keyword:'pumasTorchDefaultAdapter', type:'object', schemaType:'boolean', code(context) {
+    const {data} = context;
+    context.fail(_`!Array.isArray(${data}.adapters) || !${data}.adapters.includes(${data}.defaultAdapter)`);
   }});
   ajv.addKeyword({keyword:'pumasLinkHealth', type:'object', schemaType:'boolean', code(context) {
     const {data} = context;

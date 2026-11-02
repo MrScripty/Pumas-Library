@@ -17,7 +17,7 @@ interface InstallDialogContentProps {
   hoveredTag: string | null;
   installNetworkStatus: 'idle' | 'downloading' | 'stalled' | 'failed';
   installedVersions: string[];
-  torchInstalledConfigs?: TorchInstalledConfig[];
+  torchInstalledConfigs?: readonly TorchInstalledConfig[];
   installingVersion: string | null;
   isLoading: boolean;
   isRateLimited: boolean;

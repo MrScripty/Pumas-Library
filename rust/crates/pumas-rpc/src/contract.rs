@@ -40,8 +40,12 @@ pub(crate) use s3::*;
 #[cfg_attr(not(feature = "s3"), allow(dead_code))]
 mod s3_discovery;
 mod s3_persisted;
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+mod torch_runtime;
 pub(crate) use s3_discovery::*;
 pub(crate) use s3_persisted::*;
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+pub(crate) use torch_runtime::*;
 
 const MAX_METHOD_BYTES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 4 * 1024;
@@ -725,7 +729,7 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     InstallVersion(InstallVersionOutcome),
     #[cfg(feature = "inference-plugins")]
-    TorchRuntimeOptions(Value),
+    TorchRuntimeOptions(TorchRuntimeOptionsOutcome),
     #[cfg(feature = "inference-plugins")]
     TorchReleaseOptions(TorchReleaseOptionsOutcome),
     #[cfg(feature = "inference-plugins")]
@@ -733,11 +737,11 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     TorchPreviewReport(Value),
     #[cfg(feature = "inference-plugins")]
-    TorchRuntimeProbe(Value),
+    TorchRuntimeProbe(TorchRuntimeProbeOutcome),
     #[cfg(feature = "inference-plugins")]
     TorchRuntimeTrial(TrialTorchRuntimeOutcome),
     #[cfg(feature = "inference-plugins")]
-    TorchAlternatives(Value),
+    TorchAlternatives(TorchAlternativesOutcome),
     #[cfg(feature = "inference-plugins")]
     RuntimeProfileGenerationStop(StopRuntimeProfileGenerationOutcome),
     #[cfg(feature = "inference-plugins")]
@@ -854,10 +858,13 @@ impl RpcOutcome {
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
-            Self::TorchRuntimeOptions(value)
-            | Self::TorchPreviewReport(value)
-            | Self::TorchRuntimeProbe(value)
-            | Self::TorchAlternatives(value) => Ok(value),
+            Self::TorchPreviewReport(value) => Ok(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::TorchRuntimeOptions(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::TorchRuntimeProbe(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::TorchAlternatives(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::TorchReleaseOptions(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
@@ -4731,14 +4738,15 @@ pub(crate) struct TrialTorchRuntimeOutcome {
     pub(crate) success: bool,
     pub(crate) tag: String,
     pub(crate) profile_id: String,
-    pub(crate) startup_status: String,
-    pub(crate) health_status: String,
+    pub(crate) startup_status: TorchTrialStartupStatus,
+    pub(crate) health_status: TorchTrialHealthStatus,
     pub(crate) protocol: Option<u32>,
     pub(crate) capabilities: Vec<String>,
     pub(crate) generation: Option<String>,
     pub(crate) started_by_trial: bool,
+    /// Public reason the trial failed; null on success.
     pub(crate) error: Option<String>,
-    pub(crate) cleanup: String,
+    pub(crate) cleanup: TorchTrialCleanup,
 }
 
 #[cfg(all(test, feature = "inference-plugins"))]
@@ -4778,14 +4786,14 @@ mod torch_trial_contract_tests {
             success: false,
             tag: "v2.10.0".into(),
             profile_id: "torch.profile".into(),
-            startup_status: "passed".into(),
-            health_status: "failed".into(),
+            startup_status: TorchTrialStartupStatus::Passed,
+            health_status: TorchTrialHealthStatus::Failed,
             protocol: Some(3),
             capabilities: vec!["image-generation".into()],
             generation: Some("42".into()),
             started_by_trial: true,
             error: Some("health check failed".into()),
-            cleanup: "stopped_owned_generation".into(),
+            cleanup: TorchTrialCleanup::StoppedOwnedGeneration,
         };
         let wire = serde_json::to_value(outcome).unwrap();
         assert_eq!(wire["profileId"], "torch.profile");

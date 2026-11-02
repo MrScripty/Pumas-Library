@@ -54,6 +54,9 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
   context, ONNX batch limits apply only to ONNX, and requested embedding
   dimensions are applied by Matryoshka truncation when a provider ignores them.
 - `/v1/models` lists each model ID once, with its serving profiles.
+- Desktop Torch install choices, saved probe results, startup trials and
+  alternative wheels are declared once by the backend and validated from that
+  declaration. The saved probe result carries only the checks the desktop shows.
 
 ### Fixed
 
@@ -83,6 +86,7 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
 - Receipt-bound GGUF selection survives owned library moves, and explicit
   headless legacy-schema preflight avoids creating a new failed owner claim.
 - Candidate packaging selects notices matching the current source version.
+- A failed Torch startup trial reports why the managed launch failed.
 
 ## [0.7.0] - Unreleased candidate
 

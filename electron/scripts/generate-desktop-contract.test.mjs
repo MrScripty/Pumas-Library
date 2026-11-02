@@ -88,6 +88,18 @@ test('canonical text uses Unicode White_Space rather than JavaScript trim', asyn
   assert.equal(module.validateText('\ufeffName'), true);
 });
 
+test('Torch default-adapter refinement requires the default to be offered', async () => {
+  const files = await generate({format:'pumas-desktop-contract-1',dialect:'http://json-schema.org/draft-07/schema#',schemas:{Options:{
+    type:'object', pumasTorchDefaultAdapter:true,
+    properties:{adapters:{type:'array',items:{type:'string'}},defaultAdapter:{type:'string'}},
+    required:['adapters','defaultAdapter'],additionalProperties:false,
+  }}});
+  const module = await import(`data:text/javascript;base64,${Buffer.from(files['desktop-contract.validators.js']).toString('base64')}`);
+  assert.equal(module.validateOptions({adapters:['none','flux2'],defaultAdapter:'flux2'}), true);
+  assert.equal(module.validateOptions({adapters:['none'],defaultAdapter:'flux2'}), false);
+  assert.equal(module.validateOptions({adapters:[],defaultAdapter:'none'}), false);
+});
+
 test('registered-link health refinement rejects contradictory counts and status', async () => {
   // Product invariant: every registered entry is classified exactly once.
   const files = await generate({format:'pumas-desktop-contract-1',dialect:'http://json-schema.org/draft-07/schema#',schemas:{Health:{

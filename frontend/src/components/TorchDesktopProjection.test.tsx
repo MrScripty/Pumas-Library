@@ -96,13 +96,13 @@ describe('Torch desktop projection', () => {
       },
     });
     const probe = vi.fn().mockResolvedValue({
-      status: 'partial', core_status: 'passed', adapter_status: 'unavailable',
-      capabilities: { sidecar_startup: { status: 'not tested' } },
+      status: 'partial', core_status: 'passed', adapter_status: 'unavailable', recorded_at: null, stale: false, staleReasons: [],
+      capabilities: { sidecar_startup: { status: 'not tested', scope: null, reason: null, error: null, version: null } },
     });
     const trial = vi.fn().mockResolvedValue({
       success: true, tag: releaseTag, profileId: 'managed-torch', startupStatus: 'passed',
       healthStatus: 'passed', protocol: 3, capabilities: ['torch_serve'],
-      generation: 'owned-generation-42', startedByTrial: true, cleanup: 'not_needed',
+      generation: 'owned-generation-42', startedByTrial: true, error: null, cleanup: 'not_needed',
     });
     const stopIfGeneration = vi.fn().mockResolvedValue({ success: true, stopped: true });
     const unconditionalStop = vi.fn();

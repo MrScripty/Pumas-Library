@@ -210,22 +210,6 @@ describe('TorchInstallPreview', () => {
     expect(onInstall).toHaveBeenCalledWith('selection-token');
   });
 
-  it('falls back to automatic build when the quick options omit defaultBuild', async () => {
-    let resolveOptions!: (value: TorchRuntimeOptions) => void;
-    getOptions.mockImplementation(() => new Promise((resolve) => {
-      resolveOptions = resolve;
-    }));
-    const onInstall = vi.fn();
-    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
-    expect(screen.getByRole('button', { name: 'Install Torch' })).toBeDisabled();
-    await act(async () => { resolveOptions({ ...options, defaultBuild: undefined }); });
-    const installButton = screen.getByRole('button', { name: 'Install Torch' });
-    expect(installButton).toBeEnabled();
-    fireEvent.click(installButton);
-    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
-    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
-  });
-
   it('preserves an explicit CUDA build and Linux image dependencies without pre-install discovery', async () => {
     getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'] });
     const onInstall = vi.fn();

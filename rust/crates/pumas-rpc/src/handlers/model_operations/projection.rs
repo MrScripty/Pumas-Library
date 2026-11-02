@@ -87,6 +87,22 @@ pub fn provider_request(request: &OperationRequest) -> Result<Value, Rejection> 
             body["input"] = json!(texts);
         }
         (
+            Capability::Decision,
+            OperationInput::Decision {
+                state,
+                questions,
+                images,
+            },
+            OperationOptions::Decision {},
+            OutputFormat::Decisions,
+        ) => {
+            body["state"] = state.clone();
+            body["questions"] = json!(questions);
+            if !images.is_empty() {
+                body["images"] = json!(super::image_input::decision_images(images)?);
+            }
+        }
+        (
             Capability::MultimodalEmbedding,
             OperationInput::Image { .. } | OperationInput::ContentBatch { .. },
             OperationOptions::Embeddings { dimensions },
@@ -274,6 +290,7 @@ fn input_kind(input: &OperationInput) -> &'static str {
         OperationInput::ImageMessages { .. } => "image_messages",
         OperationInput::Audio { .. } => "audio",
         OperationInput::ContentBatch { .. } => "content_batch",
+        OperationInput::Decision { .. } => "decision",
     }
 }
 fn options_kind(options: &OperationOptions) -> &'static str {
@@ -282,6 +299,7 @@ fn options_kind(options: &OperationOptions) -> &'static str {
         OperationOptions::Embeddings { .. } => "embeddings",
         OperationOptions::ImageGeneration { .. } => "image_generation",
         OperationOptions::Audio { .. } => "audio",
+        OperationOptions::Decision { .. } => "decision",
     }
 }
 pub fn valid_model(value: &str) -> bool {
@@ -307,6 +325,75 @@ fn validate_embedding(input: &[&str], dimensions: Option<usize>) -> Result<(), R
         return Err(Rejection::invalid("options.dimensions must be at least 1"));
     }
     Ok(())
+}
+
+/// Validate a `/v1/systemone` response: one answer of the asked type for every
+/// question, with finite probabilities. Provider extras are not forwarded.
+fn decision_result(request: &OperationRequest, value: &Value) -> Option<OperationResult> {
+    let OperationInput::Decision { questions, .. } = &request.input else {
+        return None;
+    };
+    let answers = value.get("answers")?.as_object()?;
+    if answers.len() != questions.len() {
+        return None;
+    }
+    let probability = |value: &Value| {
+        value
+            .as_f64()
+            .filter(|p| p.is_finite() && (0.0..=1.0).contains(p))
+    };
+    let probabilities = |value: &Value| -> Option<std::collections::BTreeMap<String, f64>> {
+        value
+            .as_object()?
+            .iter()
+            .map(|(key, p)| probability(p).map(|p| (key.clone(), p)))
+            .collect()
+    };
+    let mut typed = std::collections::BTreeMap::new();
+    for (id, question) in questions {
+        let answer = answers.get(id)?;
+        let answer = match question.kind {
+            DecisionType::Choice => {
+                if answer.get("type").and_then(Value::as_str) != Some("choice") {
+                    return None;
+                }
+                DecisionAnswer::Choice {
+                    choice: answer.get("choice")?.as_str()?.to_owned(),
+                    probabilities: probabilities(answer.get("probabilities")?)?,
+                    confidence: probability(answer.get("confidence")?)?,
+                }
+            }
+            DecisionType::Score => {
+                if answer.get("type").and_then(Value::as_str) != Some("score") {
+                    return None;
+                }
+                DecisionAnswer::Score {
+                    score: answer.get("score")?.as_f64().filter(|s| s.is_finite())?,
+                    legend: answer
+                        .get("legend")?
+                        .as_object()?
+                        .iter()
+                        .map(|(level, text)| text.as_str().map(|t| (level.clone(), t.to_owned())))
+                        .collect::<Option<_>>()?,
+                    probabilities: probabilities(answer.get("probabilities")?)?,
+                    confidence: probability(answer.get("confidence")?)?,
+                }
+            }
+            DecisionType::Noul => {
+                if answer.get("type").and_then(Value::as_str) != Some("noul") {
+                    return None;
+                }
+                DecisionAnswer::Noul {
+                    noul: probability(answer.get("noul")?)?,
+                }
+            }
+        };
+        typed.insert(id.clone(), answer);
+    }
+    Some(OperationResult::Decisions {
+        answers: typed,
+        input_tokens: value.pointer("/usage/input_tokens").and_then(Value::as_u64),
+    })
 }
 
 /// Matryoshka truncation for providers that ignore a requested dimension
@@ -422,6 +509,7 @@ pub fn result(request: &OperationRequest, value: Value) -> Result<OperationResul
             }
             Ok(OperationResult::Embeddings { vectors })
         }
+        Capability::Decision => decision_result(request, &value).ok_or(invalid),
         Capability::ImageGeneration => {
             let data = value.get("data").and_then(Value::as_array).ok_or(invalid)?;
             if data.len() != 1 {

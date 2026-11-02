@@ -61,6 +61,13 @@ pub enum Input {
     ContentBatch {
         items: Vec<ContentItem>,
     },
+    /// A state and typed questions for a native decision model.
+    Decision {
+        state: serde_json::Value,
+        questions: std::collections::BTreeMap<String, DecisionQuestion>,
+        #[serde(default)]
+        images: Vec<DecisionImage>,
+    },
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Deserialize)]
@@ -105,6 +112,7 @@ pub enum Output {
     Labels,
     PcmS16le,
     PcmF32le,
+    Decisions,
 }
 impl Output {
     fn adapter_format(self) -> Option<OutputFormat> {
@@ -113,6 +121,7 @@ impl Output {
             Self::EmbeddingsFloat32 => OutputFormat::EmbeddingsFloat32,
             Self::PngBase64 => OutputFormat::PngBase64,
             Self::Labels => OutputFormat::Labels,
+            Self::Decisions => OutputFormat::Decisions,
             Self::PcmS16le | Self::PcmF32le => return None,
         })
     }
@@ -122,6 +131,7 @@ impl Output {
             Self::EmbeddingsFloat32 => "embeddings_float32",
             Self::PngBase64 => "png_base64",
             Self::Labels => "labels",
+            Self::Decisions => "decisions",
             Self::PcmS16le => "pcm_s16le",
             Self::PcmF32le => "pcm_f32le",
         }
@@ -137,6 +147,7 @@ impl Input {
             Self::Image { .. } => "image",
             Self::Audio { .. } => "audio",
             Self::ContentBatch { .. } => "content_batch",
+            Self::Decision { .. } => "decision",
         }
     }
     fn has_image(&self) -> bool {
@@ -264,6 +275,18 @@ impl ModalityRequest {
                 encoding,
                 data_base64,
             } => valid_image("input", encoding, data_base64)?,
+            Input::Decision {
+                questions, images, ..
+            } => {
+                validate_decision_questions(questions)?;
+                for (index, image) in images.iter().enumerate() {
+                    valid_image(
+                        &format!("input.images[{index}]"),
+                        &image.encoding,
+                        &image.data_base64,
+                    )?;
+                }
+            }
             Input::ContentBatch { items } => {
                 if items.is_empty() {
                     return Err(Rejection::invalid("input.items must not be empty"));
@@ -535,6 +558,7 @@ impl ModalityRequest {
                         max_output_tokens: None,
                     }
                 }
+                Capability::Decision => OperationOptions::Decision {},
                 Capability::ImageGeneration => {
                     return Err(Rejection::invalid(
                         "image_generation requires options {\"kind\":\"image_generation\",\"width\":...,\"height\":...}",
@@ -556,8 +580,9 @@ impl ModalityRequest {
         let operation = self.operation(capability, input, output, options);
         match capability {
             Capability::ImageToText => projection::validate_image_to_text_request(&operation)?,
-            // Image bytes were already decoded and projected by the preflight.
-            Capability::MultimodalEmbedding => {}
+            // Image bytes were already decoded and projected by the preflight;
+            // decision images are decoded once, off the async runtime, by the handler.
+            Capability::MultimodalEmbedding | Capability::Decision => {}
             _ => {
                 projection::provider_request(&operation)?;
             }
@@ -621,6 +646,15 @@ impl ModalityRequest {
             Input::ContentBatch { items } => OperationInput::ContentBatch {
                 items: items.clone(),
             },
+            Input::Decision {
+                state,
+                questions,
+                images,
+            } => OperationInput::Decision {
+                state: state.clone(),
+                questions: questions.clone(),
+                images: images.clone(),
+            },
             Input::Messages { messages } if self.input.has_image() => {
                 OperationInput::ImageMessages {
                     messages: messages
@@ -680,6 +714,58 @@ impl ModalityRequest {
         })
     }
 }
+/// Shape checks for decision questions. Option counts and score levels are
+/// model limits enforced and reported by the decision runtime.
+fn validate_decision_questions(
+    questions: &std::collections::BTreeMap<String, DecisionQuestion>,
+) -> Result<(), Rejection> {
+    if questions.is_empty() {
+        return Err(Rejection::invalid("input.questions must not be empty"));
+    }
+    for (id, question) in questions {
+        let field = format!("input.questions.{id}");
+        if id.trim().is_empty() {
+            return Err(Rejection::invalid("question ids must not be blank"));
+        }
+        if question.instructions.is_null()
+            || question
+                .instructions
+                .as_str()
+                .is_some_and(|text| text.trim().is_empty())
+        {
+            return Err(Rejection::invalid(format!(
+                "{field}.instructions must not be empty"
+            )));
+        }
+        let criteria = question.criteria.as_ref();
+        let valid = match question.kind {
+            DecisionType::Choice => {
+                criteria
+                    .and_then(serde_json::Value::as_object)
+                    .is_some_and(|options| {
+                        !options.is_empty()
+                            && options.values().all(|v| v.is_string() || v.is_null())
+                    })
+            }
+            DecisionType::Score => criteria
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|levels| !levels.is_empty() && levels.iter().all(|v| v.is_string())),
+            DecisionType::Noul => criteria.is_none_or(|criteria| {
+                criteria.as_object().is_some_and(|object| {
+                    object.iter().all(|(key, value)| {
+                        matches!(key.as_str(), "true" | "false") && value.is_string()
+                    })
+                })
+            }),
+        };
+        if !valid {
+            return Err(Rejection::invalid(format!(
+                "{field}.criteria is invalid: choice needs an object of option to description or null, score needs a list of level descriptions, noul accepts an optional object with \"true\"/\"false\" descriptions"
+            )));
+        }
+    }
+    Ok(())
+}
 fn capability_name(capability: Capability) -> String {
     serde_json::to_value(capability)
         .ok()
@@ -730,6 +816,7 @@ fn accepts(descriptor: &CapabilityDescriptor, input: &OperationInput) -> bool {
         } => InputFormat::JpegBase64,
         OperationInput::ImageMessages { .. } => InputFormat::MessagesImage,
         OperationInput::ContentBatch { .. } => InputFormat::ContentBatch,
+        OperationInput::Decision { .. } => InputFormat::Decision,
         OperationInput::Audio {
             encoding: AudioEncoding::PcmS16le,
             ..

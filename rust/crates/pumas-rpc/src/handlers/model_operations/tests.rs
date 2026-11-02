@@ -1501,6 +1501,11 @@ fn declared(capability: Capability, available: bool) -> CapabilityDescriptor {
             ],
             vec![OutputFormat::EmbeddingsFloat32],
         ),
+        Capability::Decision => (
+            SemanticTask::Decision,
+            vec![InputFormat::Decision],
+            vec![OutputFormat::Decisions],
+        ),
     };
     CapabilityDescriptor {
         capability,
@@ -2218,4 +2223,126 @@ fn image_and_mixed_items_project_to_llama_cpp_multimodal_embeddings() {
     )
     .unwrap();
     assert!(matches!(result, OperationResult::Embeddings { ref vectors } if vectors.len() == 2));
+}
+
+/// A llama.cpp-shaped decision server: `/v1/models` reports `decisions`,
+/// `/v1/systemone` answers with `answer`, and every systemone body is recorded.
+async fn decision_backend(
+    answer: Value,
+) -> (
+    String,
+    Arc<std::sync::Mutex<Vec<Value>>>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = seen.clone();
+    let app = Router::new()
+        .route(
+            "/v1/models",
+            get(|| async {
+                axum::Json(json!({"object":"list","data":[{"id":"models/llama","object":"model",
+                    "architecture":{"input_modalities":["text"],"output_modalities":["decisions"]}}]}))
+            }),
+        )
+        .route(
+            "/v1/systemone",
+            post(move |axum::Json(body): axum::Json<Value>| {
+                let recorded = recorded.clone();
+                let answer = answer.clone();
+                async move {
+                    recorded.lock().unwrap().push(body);
+                    axum::Json(answer)
+                }
+            }),
+        );
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (endpoint, seen, task)
+}
+fn decision_request() -> Value {
+    json!({"contract_version":1,"request_id":"decide-1","model":"llama",
+        "input":{"kind":"decision","state":{"message":"I was charged twice"},
+            "questions":{
+                "intent":{"type":"choice","instructions":"What does the customer want?",
+                    "criteria":{"refund":"wants money back","other":null}},
+                "urgent":{"type":"noul","instructions":"Needs a human within the hour?"},
+                "anger":{"type":"score","instructions":"How angry?","criteria":["calm","annoyed","angry"]}}},
+        "output":"decisions"})
+}
+fn decision_answer() -> Value {
+    json!({"model":"kev","answers":{
+        "intent":{"type":"choice","choice":"refund","probabilities":{"refund":0.9,"other":0.1},"confidence":0.8},
+        "urgent":{"type":"noul","noul":0.3},
+        "anger":{"type":"score","score":1.2,"legend":{"0":"calm","1":"annoyed","2":"angry"},
+            "probabilities":{"0":0.1,"1":0.6,"2":0.3},"confidence":0.5}},
+        "usage":{"input_tokens":120,"output_tokens":0}})
+}
+
+#[tokio::test]
+async fn decision_models_answer_typed_questions_and_only_advertise_decision() {
+    let (endpoint, seen, backend) = decision_backend(decision_answer()).await;
+    let (_root, state) = fixture(&endpoint, Some("text-classification")).await;
+
+    let caps = json_body(
+        handle_capabilities(
+            State(state.clone()),
+            Ok(Query(CapabilityQuery {
+                model: "llama".into(),
+                profile: None,
+            })),
+        )
+        .await,
+    )
+    .await;
+    let available: Vec<_> = caps["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["availability"]["state"] == "available")
+        .map(|d| d["capability"].as_str().unwrap())
+        .collect();
+    assert_eq!(available, vec!["decision"], "{caps}");
+
+    let body = json_body(operation(state.clone(), decision_request()).await).await;
+    assert_eq!(body["request_id"], "decide-1", "{body}");
+    assert_eq!(body["result"]["kind"], "decisions");
+    let answers = &body["result"]["answers"];
+    assert_eq!(answers["intent"]["type"], "choice");
+    assert_eq!(answers["intent"]["choice"], "refund");
+    assert_eq!(answers["urgent"]["noul"], 0.3);
+    assert_eq!(answers["anger"]["legend"]["2"], "angry");
+    assert_eq!(body["result"]["input_tokens"], 120);
+    let sent = seen.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["state"]["message"], "I was charged twice");
+    assert_eq!(sent[0]["questions"]["intent"]["type"], "choice");
+    assert!(sent[0].get("images").is_none());
+
+    // Malformed criteria are rejected with a reason before any provider call.
+    let mut bad = decision_request();
+    bad["input"]["questions"]["anger"]["criteria"] = json!({"calm": null});
+    let body = json_body(operation(state.clone(), bad).await).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("questions.anger.criteria"));
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    backend.abort();
+}
+
+#[tokio::test]
+async fn decision_answers_of_the_wrong_type_are_invalid_provider_results() {
+    let mut answer = decision_answer();
+    answer["answers"]["urgent"] =
+        json!({"type":"choice","choice":"yes","probabilities":{"yes":1.0},"confidence":1.0});
+    let (endpoint, _seen, backend) = decision_backend(answer).await;
+    let (_root, state) = fixture(&endpoint, Some("text-classification")).await;
+    let body = json_body(operation(state, decision_request()).await).await;
+    assert_eq!(body["error"]["code"], "invalid_provider_result", "{body}");
+    assert_eq!(body["error"]["outcome"], "unknown");
+    backend.abort();
 }

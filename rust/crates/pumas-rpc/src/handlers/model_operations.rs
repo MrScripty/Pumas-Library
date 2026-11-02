@@ -1,4 +1,5 @@
 //! Additive selected-model capabilities and closed typed operations.
+mod decision;
 mod image_input;
 mod modality;
 mod projection;
@@ -312,6 +313,13 @@ pub async fn handle_model_operations(
         {
             body
         }
+        // Decision images are decoded off the async runtime.
+        _ if request.capability == Capability::Decision => {
+            match prepare_provider_request(&request, &state, disconnect.as_ref()).await {
+                Ok(body) => body,
+                Err(rejection) => return reject(id, rejection),
+            }
+        }
         _ => match projection::provider_request(&request) {
             Ok(body) => body,
             Err(rejection) => return reject(id, rejection),
@@ -326,10 +334,13 @@ pub async fn handle_model_operations(
         marker: &admitted,
         expected: &served,
         cancellation: &cancellation,
-        vision: matches!(
-            request.capability,
-            Capability::ImageToText | Capability::MultimodalEmbedding
-        ),
+        vision: match &request.input {
+            OperationInput::Decision { images, .. } => !images.is_empty(),
+            _ => matches!(
+                request.capability,
+                Capability::ImageToText | Capability::MultimodalEmbedding
+            ),
+        },
     };
     let provider_bytes = serde_json::to_vec(&body).expect("closed request is serializable");
     let path = OriginalUri(
@@ -452,7 +463,7 @@ async fn prepare_provider_request(
 ) -> Result<serde_json::Value, Rejection> {
     if !matches!(
         request.capability,
-        Capability::ImageToText | Capability::MultimodalEmbedding
+        Capability::ImageToText | Capability::MultimodalEmbedding | Capability::Decision
     ) {
         return projection::provider_request(request);
     }
@@ -621,6 +632,10 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
         && runtime_ready
         && semantic_match(Capability::ImageToText, task, model_type, served.provider) == Some(true)
         && vision::ready(state, served).await;
+    // Native decision models are a runtime fact; they answer only `decision`.
+    let decision_model = decision::candidate_task(task)
+        && runtime_ready
+        && decision::is_decision_model(state, served).await;
     // Image embeddings need a dedicated llama.cpp session with its projector loaded.
     let embedding_vision_ready = runtime_ready
         && semantic_match(
@@ -639,6 +654,7 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
         Capability::AudioClassification,
         Capability::ImageToText,
         Capability::MultimodalEmbedding,
+        Capability::Decision,
     ]
     .into_iter()
     .map(|capability| {
@@ -691,6 +707,17 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     None,
                     vec![],
                 ),
+                Capability::Decision => (
+                    SemanticTask::Decision,
+                    vec![InputFormat::Decision],
+                    vec![OutputFormat::Decisions],
+                    Some(OpenAiGatewayEndpoint::SystemOne),
+                    vec![
+                        bound(OptionName::ImageBytes, 1., (8 * 1024 * 1024) as f64),
+                        bound(OptionName::ImagePixels, 1., 4_194_304.),
+                        bound(OptionName::ImageCount, 0., 4.),
+                    ],
+                ),
                 Capability::MultimodalEmbedding => (
                     SemanticTask::MultimodalEmbedding,
                     vec![
@@ -738,7 +765,13 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                 .get(served.provider)
                 .is_some_and(|provider| provider.supports_openai_endpoint(endpoint))
         });
-        let semantics = semantic_match(capability, task, model_type, served.provider);
+        let semantics = match capability {
+            // Unprobed while the runtime is down, so report readiness, not task.
+            Capability::Decision if decision::candidate_task(task) && !runtime_ready => Some(true),
+            Capability::Decision => Some(decision_model),
+            _ if decision_model => Some(false),
+            _ => semantic_match(capability, task, model_type, served.provider),
+        };
         let reason = if capability == Capability::AudioClassification {
             Some(AvailabilityReason::UnsupportedAdapter)
         } else if capability == Capability::AudioTranscription

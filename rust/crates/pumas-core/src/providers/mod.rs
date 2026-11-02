@@ -42,6 +42,8 @@ pub enum ServingTask {
     Completion,
     Embedding,
     Reranking,
+    /// Native decision models (llama.cpp `/v1/systemone`).
+    Decision,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -52,6 +54,8 @@ pub enum OpenAiGatewayEndpoint {
     ChatCompletions,
     Completions,
     Embeddings,
+    /// llama.cpp's TypeSafe-compatible decision API, `/v1/systemone`.
+    SystemOne,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -232,12 +236,14 @@ impl ProviderBehavior {
                 ServingTask::Embedding,
                 ServingTask::Reranking,
                 ServingTask::ImageToText,
+                ServingTask::Decision,
             ],
             openai_endpoints: vec![
                 OpenAiGatewayEndpoint::Models,
                 OpenAiGatewayEndpoint::ChatCompletions,
                 OpenAiGatewayEndpoint::Completions,
                 OpenAiGatewayEndpoint::Embeddings,
+                OpenAiGatewayEndpoint::SystemOne,
             ],
             launch_kinds: vec![
                 ProviderLaunchKind::BinaryProcess,

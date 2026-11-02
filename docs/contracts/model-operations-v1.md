@@ -134,10 +134,21 @@ The HTTP status matches the code: `invalid_request`, `unsupported_contract` →
 
 ## Typed HTTP slice
 
+`GET /v1/served-models` is the discovery entry point. It returns
+`supported_contract_versions`, the byte bounds, and `models`: one entry per
+served (model, profile) pair with `model` (the alias to send), `profile`,
+`model_id` (library identifier), `provider`, `load_state`, optional
+`context_tokens`, `profile_required` (the alias is served by more than one
+profile, so requests must name `profile`), and `capabilities` (the same
+descriptors as below). Consumers select models from this list instead of
+configuring aliases or profiles by hand. `/v1/models` remains the
+OpenAI-compatible list: each ID appears once, with its `profiles`.
+
 `GET /v1/capabilities?model=<served-alias>&profile=<optional-exact-profile>`
 requires an explicitly selected serving identity. It returns
 `supported_contract_versions`, `model`, `profile`, `max_request_bytes`,
-`max_response_bytes`, `max_stream_event_bytes`, and `capabilities`. Each capability
+`max_response_bytes`, `max_stream_event_bytes`, optional `context_tokens`, and
+`capabilities`. Each capability
 has `capability`, `semantic_task`, `input_formats`, `output_formats`, `streaming`,
 `availability`, and `option_bounds`. Availability is tagged as
 `{"state":"available"}` or `{"state":"unavailable","reason":"..."}`.
@@ -147,10 +158,15 @@ actual adapter/readiness checks. It is a current observation; admission checks
 the same serving identity again before handing work to a provider.
 
 The implemented capabilities are `chat_generation`, `text_generation`,
-`text_embedding`, and `image_generation` through the existing qualified adapters.
-`audio_transcription` and `audio_classification` are explicitly unavailable with
-`unqualified_audio_runtime` until the production custody bridge and installed
-runtime are qualified. The shared build/protocol identity is a separate
+`text_embedding`, `image_generation`, `image_to_text`, `multimodal_embedding`
+and `decision`. Vision-language models (`image-text-to-text`) offer chat,
+text generation and image-to-text. `multimodal_embedding` and image input to
+`decision` need a dedicated llama.cpp session with its projector loaded.
+`decision` is offered only when llama.cpp reports the model as a native
+decision model (`decisions` output modality); such models offer no text
+generation. `audio_transcription` and `audio_classification` are explicitly
+unavailable with `unqualified_audio_runtime` until the production custody
+bridge and installed runtime are qualified. The shared build/protocol identity is a separate
 integration dependency; this endpoint does not invent an identity DTO.
 
 For example, a finite text operation is:
@@ -174,22 +190,50 @@ tagged options reject unknown fields. `request_id` is 1–128 ASCII letters,
 digits, or `-_.:`; `model` is a nonempty, trimmed serving alias of at most 256
 bytes with no control characters. Request and response bounds are 32 MiB.
 
-The capability combinations are closed:
+Capability inputs and outputs:
 
 | Capability | Input `kind` | Output | Options `kind` |
 | --- | --- | --- | --- |
-| `chat_generation` | `messages` with text `system`, `user`, or `assistant` messages | `text` | `text_generation` |
+| `chat_generation` | `messages` (or `text`, sent as one user message) | `text` | `text_generation` |
 | `text_generation` | `text` | `text` | `text_generation` |
 | `text_embedding` | `text` or `text_batch` | `embeddings_float32` | `embeddings` |
+| `multimodal_embedding` | `image` or `content_batch` | `embeddings_float32` | `embeddings` |
 | `image_generation` | `text` | `png_base64` | `image_generation` |
+| `image_to_text` | `image`, `image_messages`, or `messages` with image parts | `text` | `text_generation` |
+| `decision` | `decision` | `decisions` | `decision` (optional) |
 
-Text options are optional positive `max_tokens`, `temperature` in [0, 2], and
-`top_p` in [0, 1]. Embedding options accept optional `dimensions` in [1, 8192]
-and reuse the native adapter's input bounds (at most 128 texts and 65,536
-characters). Image options require positive `width` and `height` and optional
-unsigned 32-bit `seed`; the existing image adapter also validates the selected
-runtime's supported dimensions and the returned PNG. Image prompt length is
-bounded by the existing 4,000-character validator.
+Limits come from the serving runtime, not from Pumas. Each descriptor's
+`option_bounds` reports them: `max_tokens` is bounded by the served context
+window when the runtime reports one. Text options are optional positive
+`max_tokens`, `temperature` in [0, 2], and `top_p` in [0, 1]. Embedding options
+accept optional positive `dimensions`; when the provider ignores it (llama.cpp,
+Ollama), Pumas keeps the leading values and renormalizes (Matryoshka
+truncation), and a request for more dimensions than the model produces fails.
+The in-process ONNX adapter has fixed batch, length and dimension limits,
+which its descriptor reports. Proxied providers enforce their own context and
+batch limits and their reported reason reaches the caller. Image inputs share
+decode-safety bounds (8 MiB per image, 4 images, 4096 px, 4 megapixels per
+request). The Torch image adapter bounds prompts at 4,000 characters and
+validates its supported dimensions and the returned PNG.
+
+`content_batch` is `{"kind":"content_batch","items":[{"parts":[...]}]}`: each
+item's `text` and `image` parts produce one vector, in the same space as the
+model's text embeddings. Task prefixes recommended by a model (for example
+EmbeddingGemma's `task: search result | query: `) are part of the caller's text.
+
+`decision` input is `{"kind":"decision","state":...,"questions":{...},
+"images":[...]}`. `state` is a string or any JSON value. Each question has
+`type` (`choice`, `score` or `noul`), `instructions`, and `criteria`: an
+object of option to description (or `null`) for `choice`, a list of level
+descriptions (lowest first) for `score`, and optional `true`/`false`
+descriptions for `noul`. Option and level counts are model limits reported by
+the runtime. The result is `{"kind":"decisions","answers":{...},
+"input_tokens":...}`; each answer has the question's `type`: `choice` with
+`choice`, `probabilities` and `confidence`; `score` with `score` (a
+probability-weighted level index), `legend`, `probabilities` and
+`confidence`; `noul` with `noul`, the probability that the answer is true.
+Probabilities are scaled by the model's stored temperatures and are not
+calibrated for any particular data.
 
 A finite success has `contract_version`, the original `request_id`, and a
 tagged `result`: `text` with `text` and `finish_reason`; `embeddings` with finite

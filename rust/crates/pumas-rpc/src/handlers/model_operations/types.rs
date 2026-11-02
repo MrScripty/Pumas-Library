@@ -1,5 +1,6 @@
 //! Closed public types. Provider envelopes never cross this boundary.
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub const CONTRACT_VERSION: u32 = 1;
 pub const MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -19,6 +20,9 @@ pub enum Capability {
     /// One embedding per image or per mixed text/image item, in the same
     /// vector space as the model's text embeddings.
     MultimodalEmbedding,
+    /// Typed questions about a state answered with probabilities by a native
+    /// decision model (llama.cpp `/v1/systemone`, e.g. Kev, OpenJev).
+    Decision,
 }
 impl Capability {
     pub fn path(self) -> Option<&'static str> {
@@ -26,6 +30,7 @@ impl Capability {
             Self::ChatGeneration | Self::ImageToText => "/v1/chat/completions",
             Self::TextGeneration => "/v1/completions",
             Self::TextEmbedding | Self::MultimodalEmbedding => "/v1/embeddings",
+            Self::Decision => "/v1/systemone",
             Self::ImageGeneration => "/v1/images/generations",
             Self::AudioTranscription | Self::AudioClassification => return None,
         })
@@ -81,6 +86,45 @@ pub enum OperationInput {
     ContentBatch {
         items: Vec<ContentItem>,
     },
+    /// A state and typed questions for a decision model.
+    Decision {
+        /// Content to evaluate: a string, or JSON given to the model as text.
+        state: serde_json::Value,
+        /// Question id to question. Each question is answered independently.
+        questions: BTreeMap<String, DecisionQuestion>,
+        /// Optional images, for decision models with a loaded projector.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<DecisionImage>,
+    },
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionType {
+    /// Pick one option; `criteria` maps option to description (or null).
+    Choice,
+    /// Rate on a scale; `criteria` lists level descriptions, lowest first.
+    Score,
+    /// Probability that the answer is true; optional `criteria` describes
+    /// `true` and `false`.
+    Noul,
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecisionQuestion {
+    #[serde(rename = "type")]
+    pub kind: DecisionType,
+    pub instructions: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub criteria: Option<serde_json::Value>,
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecisionImage {
+    pub encoding: ImageEncoding,
+    pub data_base64: String,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,6 +188,7 @@ pub enum OutputFormat {
     EmbeddingsFloat32,
     PngBase64,
     Labels,
+    Decisions,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +218,7 @@ pub enum OperationOptions {
         #[serde(default)]
         max_output_tokens: Option<u32>,
     },
+    Decision {},
 }
 /// The existing private speech owner's closed language vocabulary.
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -217,6 +263,33 @@ pub enum OperationResult {
     Image {
         png_base64: String,
         seed: u32,
+    },
+    Decisions {
+        answers: BTreeMap<String, DecisionAnswer>,
+        /// Prompt tokens evaluated across all questions, when reported.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input_tokens: Option<u64>,
+    },
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DecisionAnswer {
+    Choice {
+        choice: String,
+        probabilities: BTreeMap<String, f64>,
+        confidence: f64,
+    },
+    Score {
+        /// Probability-weighted level index; may fall between levels.
+        score: f64,
+        legend: BTreeMap<String, String>,
+        probabilities: BTreeMap<String, f64>,
+        confidence: f64,
+    },
+    Noul {
+        /// Probability that the answer is true.
+        noul: f64,
     },
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -452,6 +525,7 @@ pub enum SemanticTask {
     AudioClassification,
     ImageToText,
     MultimodalEmbedding,
+    Decision,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -466,6 +540,7 @@ pub enum InputFormat {
     PcmS16le,
     PcmF32le,
     ContentBatch,
+    Decision,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
@@ -613,9 +688,23 @@ mod image_to_text_schema_tests {
             ),
         ];
         let capability_schema = serde_json::to_value(schemars::schema_for!(Capability)).unwrap();
-        let capabilities = capability_schema["enum"].as_array().unwrap();
+        // Documented variants are emitted as `oneOf` entries instead of `enum`.
+        let capabilities: Vec<Value> = match capability_schema["enum"].as_array() {
+            Some(values) => values.clone(),
+            None => capability_schema["oneOf"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|variant| {
+                    variant["enum"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_else(|| vec![variant["const"].clone()])
+                })
+                .collect(),
+        };
         assert_eq!(
-            capabilities,
+            &capabilities,
             &vec![
                 json!("chat_generation"),
                 json!("text_generation"),
@@ -625,6 +714,7 @@ mod image_to_text_schema_tests {
                 json!("audio_transcription"),
                 json!("audio_classification"),
                 json!("multimodal_embedding"),
+                json!("decision"),
             ],
             "new capabilities are appended; consumers ignore ones they do not use"
         );

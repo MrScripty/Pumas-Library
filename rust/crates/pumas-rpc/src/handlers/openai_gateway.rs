@@ -777,6 +777,13 @@ fn openai_gateway_policy_for_path(path: &str) -> Option<OpenAiGatewayEndpointPol
             generation: false,
             request_timeout: Some(OPENAI_GATEWAY_REQUEST_TIMEOUT),
         }),
+        // Reached only through typed `decision` operations; not a public route.
+        "/v1/systemone" => Some(OpenAiGatewayEndpointPolicy {
+            endpoint: OpenAiGatewayEndpoint::SystemOne,
+            max_request_body_bytes: OPENAI_EMBEDDINGS_BODY_BYTES,
+            generation: false,
+            request_timeout: Some(OPENAI_GATEWAY_REQUEST_TIMEOUT),
+        }),
         _ => None,
     }
 }
@@ -805,7 +812,10 @@ fn openai_model_entry(model: ServedModelStatus) -> Value {
     entry
 }
 
-fn provider_request_model_id(model: &ServedModelStatus, registry: &ProviderRegistry) -> String {
+pub(super) fn provider_request_model_id(
+    model: &ServedModelStatus,
+    registry: &ProviderRegistry,
+) -> String {
     registry
         .get(model.provider)
         .map(|behavior| {

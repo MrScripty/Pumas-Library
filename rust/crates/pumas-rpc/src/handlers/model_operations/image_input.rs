@@ -173,6 +173,23 @@ pub(super) fn embedding_items(input: &OperationInput) -> Result<Value, ErrorCode
     Ok(Value::Array(output))
 }
 
+/// Data URLs for decision-model images, after the same bounded validation.
+pub(super) fn decision_images(
+    images: &[super::types::DecisionImage],
+) -> Result<Vec<String>, ErrorCode> {
+    let mut budget = Budget::default();
+    images
+        .iter()
+        .map(|image| {
+            let part = image_part(image.encoding, &image.data_base64, &mut budget)?;
+            part.pointer("/image_url/url")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or(ErrorCode::InvalidRequest)
+        })
+        .collect()
+}
+
 fn image_part(
     encoding: ImageEncoding,
     encoded: &str,

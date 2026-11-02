@@ -869,9 +869,9 @@ function loadCompiledPreload() {
 
   return {
     api: exposedApi,
-    emit: (channel) => {
+    emit: (channel, payload) => {
       for (const listener of listeners.get(channel) ?? []) {
-        listener({}, undefined);
+        listener({}, payload);
       }
     },
     invocations,
@@ -1707,4 +1707,35 @@ test('compiled preload preserves every retained-download outcome and closes requ
   assert.equal(seen.length, count);
   outcome = { ...outcome, status: 'invented_success' };
   await assert.rejects(harness.api.inspect_retained_download(request.downloadId));
+});
+
+test('update streams deliver decoded payloads and report undeliverable ones', () => {
+  const harness = loadCompiledPreload();
+  const delivered = [];
+  const errors = [];
+  const feed = {cursor:'serving:4', events:[{cursor:'serving:4', event_kind:'load_failed', model_id:'llm/example/model', provider:'llama_cpp'}], stale_cursor:false, snapshot_required:false};
+  const unsubscribe = harness.api.onServingStatusUpdate((value) => delivered.push(toPlainValue(value)), (message) => errors.push(message));
+  harness.emit('serving-status:update', feed);
+  assert.deepEqual(delivered, [feed]);
+
+  harness.emit('serving-status:update', {...feed, events:[{...feed.events[0], event_kind:'model_evicted'}]});
+  harness.emit('serving-status:update', {...feed, extra:true});
+  harness.emit('serving-status:error', {message:'Serving status stream ended'});
+  harness.emit('serving-status:error', {message:''});
+  assert.equal(delivered.length, 1, 'undeliverable payloads never reach the callback');
+  assert.deepEqual(errors, [
+    'Desktop contract invalid for serving-status update: Invalid desktop contract payload at /events/0/event_kind: must be equal to one of the allowed values.',
+    'Desktop contract invalid for serving-status update: Invalid desktop contract payload at /: unexpected field "extra".',
+    'Serving status stream ended',
+    'Desktop contract invalid for serving-status error update: Invalid desktop contract payload at /message: must NOT have fewer than 1 characters.',
+  ]);
+  unsubscribe();
+  harness.emit('serving-status:update', feed);
+  assert.equal(delivered.length, 1);
+
+  const libraryErrors = [];
+  harness.api.onModelLibraryUpdate(() => assert.fail('invalid notification delivered'), (message) => libraryErrors.push(message));
+  harness.emit('model-library:update', {cursor:'model-library-updates:1', stale_cursor:false});
+  assert.equal(libraryErrors.length, 1);
+  assert.match(libraryErrors[0], /^Desktop contract invalid for model-library update: /);
 });

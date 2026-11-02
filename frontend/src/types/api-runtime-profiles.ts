@@ -1,3 +1,8 @@
+import type {
+  RuntimeProfileEvent as DesktopRuntimeProfileEvent,
+  RuntimeProfileEventKind as DesktopRuntimeProfileEventKind,
+  RuntimeProfileUpdateFeed as DesktopRuntimeProfileUpdateFeed,
+} from '../generated/desktop-contract';
 import type { BaseResponse } from './api-common';
 
 export type RuntimeProviderId = 'ollama' | 'llama_cpp' | 'onnx_runtime' | 'torch';
@@ -75,30 +80,10 @@ export interface RuntimeProfilesSnapshot {
   default_profile_id?: string | null;
 }
 
-export type RuntimeProfileEventKind =
-  | 'profile_created'
-  | 'profile_updated'
-  | 'profile_deleted'
-  | 'route_updated'
-  | 'route_deleted'
-  | 'status_changed'
-  | 'snapshot_required';
-
-export interface RuntimeProfileEvent {
-  cursor: string;
-  event_kind: RuntimeProfileEventKind;
-  profile_id?: string | null;
-  provider?: RuntimeProviderId | null;
-  model_id?: string | null;
-  producer_revision?: string | null;
-}
-
-export interface RuntimeProfileUpdateFeed {
-  cursor: string;
-  events: RuntimeProfileEvent[];
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-}
+// Declared once by the backend (`/events/runtime-profile-updates`) and generated.
+export type RuntimeProfileEventKind = DesktopRuntimeProfileEventKind;
+export type RuntimeProfileEvent = DesktopRuntimeProfileEvent;
+export type RuntimeProfileUpdateFeed = DesktopRuntimeProfileUpdateFeed;
 
 export interface RuntimeProfilesSnapshotResponse extends BaseResponse {
   snapshot: RuntimeProfilesSnapshot;
@@ -111,18 +96,4 @@ export interface RuntimeProfileUpdateFeedResponse extends BaseResponse {
 export interface RuntimeProfileMutationResponse extends BaseResponse {
   profile_id?: string | null;
   snapshot_required: boolean;
-}
-
-export function isRuntimeProfileUpdateFeed(value: unknown): value is RuntimeProfileUpdateFeed {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const candidate = value as Partial<RuntimeProfileUpdateFeed>;
-  return (
-    typeof candidate.cursor === 'string' &&
-    Array.isArray(candidate.events) &&
-    typeof candidate.stale_cursor === 'boolean' &&
-    typeof candidate.snapshot_required === 'boolean'
-  );
 }

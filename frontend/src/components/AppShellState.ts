@@ -128,8 +128,8 @@ export function buildManagedAppsState({
     ollama: {
       ...ollama,
       isRunning: running.ollamaRunning,
-      ramMemory: appResources?.ollama?.ram_memory,
-      gpuMemory: appResources?.ollama?.gpu_memory,
+      ramMemory: appResources?.ollama?.ram_memory ?? undefined,
+      gpuMemory: appResources?.ollama?.gpu_memory ?? undefined,
     },
     llamaCpp: {
       ...llamaCpp,

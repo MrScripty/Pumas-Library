@@ -8067,6 +8067,7 @@ pub struct DeepScanResult {
 
 /// Progress update for deep scan.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct DeepScanProgress {
     /// Current model number (1-indexed)
     pub current: usize,

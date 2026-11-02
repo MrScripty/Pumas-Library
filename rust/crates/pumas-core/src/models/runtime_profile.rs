@@ -81,6 +81,7 @@ impl RuntimePort {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeProviderId {
     Torch,
@@ -321,6 +322,7 @@ impl RuntimeProfilesConfigFile {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeProfileEventKind {
     ProfileCreated,
@@ -333,6 +335,7 @@ pub enum RuntimeProfileEventKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct RuntimeProfileEvent {
     pub cursor: String,
@@ -348,6 +351,7 @@ pub struct RuntimeProfileEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct RuntimeProfileUpdateFeed {
     pub cursor: String,

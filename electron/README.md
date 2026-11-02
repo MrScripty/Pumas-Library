@@ -74,12 +74,19 @@ and frontend. `check:desktop-contract` regenerates from current Rust source
 and rejects any stale artifact; CI runs that command. Normal UI builds do not
 invoke Cargo or fetch generator dependencies.
 
-Payloads that Electron main publishes to the renderer (the launcher-root
-startup state, selection result and library-upgrade result) are owned by
-Electron and declared in `electron/contracts/*.schema.json`. The generator
+Payloads that Electron owns (the launcher-root startup state, selection and
+library-upgrade payloads, the model-import selection and update-stream errors)
+are declared in `electron/contracts/*.schema.json`. The generator
 merges them with the Rust export, so main, preload and the frontend share one
 generated type and validator; a name declared by both sources is an error.
 These declarations ship with their consumers and stay closed.
+
+Update streams (model library, downloads, runtime profiles, serving status and
+status telemetry) are declared by the backend and decoded in preload. Each
+subscription takes a required `onError`: a payload that fails its contract is
+never dropped silently. Its reason, naming the failed rule and location, goes
+to `onError`, and the renderer reloads from the RPC snapshot. Decoders never
+put a field's value in a rejection reason.
 
 The backend's startup diagnostic is the exception to closed declarations. Rust
 writes one `PUMAS_STARTUP_FAILURE=` line holding a `StartupFailureFrame`
@@ -103,8 +110,8 @@ the command, rather than checking in or normalizing recovery tickets.
 AJV 8.20.0 owns Draft 7 validation and compiles standalone validators. The thin
 type generator rejects unsupported reachable constructs and format vocabulary.
 Named Pumas refinements preserve product-specific wire consistency, not JSON
-Schema semantics. Generated wrappers return typed diagnostics or copied,
-frozen values. Preload is bundled with esbuild while retaining Electron's
+Schema semantics. Generated wrappers return copied, frozen values, or a
+diagnostic naming the failed rule and its location. Preload is bundled with esbuild while retaining Electron's
 sandbox; validators require neither runtime code generation nor Node imports.
 
 The older cached Schemars 0.8 candidate was rejected because its default

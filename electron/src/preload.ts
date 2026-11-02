@@ -47,6 +47,12 @@ import {
   type ConversionDirection,
   type QuantBackend,
   decodeDownloadListOutcome,
+  decodeModelDownloadUpdateOutcome,
+  decodeModelLibraryUpdateNotification,
+  decodeRuntimeProfileUpdateFeed,
+  decodeServingStatusUpdateFeed,
+  decodeStatusTelemetryUpdateNotification,
+  decodeUpdateStreamError,
   decodeDownloadMutationOutcome,
   decodeDownloadLocationReport,
   decodeDownloadResolutionRequest,
@@ -109,7 +115,11 @@ import {
   decodeLauncherRootStartupState as decodeGeneratedLauncherRootStartupState,
   decodeLibraryUpgradeResult as decodeGeneratedLibraryUpgradeResult,
   type DecodeOutcome,
-  type DownloadListOutcome,
+  type ModelDownloadUpdateOutcome,
+  type ModelLibraryUpdateNotification,
+  type RuntimeProfileUpdateFeed,
+  type ServingStatusUpdateFeed,
+  type StatusTelemetryUpdateNotification,
   type RuntimeLaunchOutcome,
 } from './generated/desktop-contract';
 
@@ -186,187 +196,29 @@ type BaseRpcResponse = {
   error?: string;
 };
 
-type ModelLibraryUpdateNotificationPayload = {
-  cursor: string;
-  events?: unknown[];
-  stale_cursor: boolean;
-  snapshot_required: boolean;
+type UpdateCallbacks<T> = {
+  callback: (notification: T) => void;
+  onError: (message: string) => void;
 };
 
-type ModelDownloadUpdateNotificationPayload = {
-  cursor: string;
-  snapshot: {
-    cursor: string;
-    revision: number;
-    downloads: DownloadListOutcome['downloads'];
+/**
+ * Deliver decoded update-stream payloads. A payload that fails its contract is
+ * never dropped silently: its reason goes to `onError`, and the renderer
+ * resynchronizes from its RPC snapshot.
+ */
+function updateListener<T>(
+  stream: string,
+  decode: (value: unknown) => DecodeOutcome<T>,
+  { callback, onError }: UpdateCallbacks<T>
+): (event: IpcRendererEvent, payload: unknown) => void {
+  return (_event, payload) => {
+    const decoded = decode(payload);
+    if (decoded.status === 'valid') {
+      callback(decoded.value);
+      return;
+    }
+    onError(`Desktop contract ${decoded.status} for ${stream} update: ${decoded.message}`);
   };
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-};
-
-type RuntimeProfileUpdateNotificationPayload = {
-  cursor: string;
-  events?: unknown[];
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-};
-
-type ServingStatusUpdateNotificationPayload = {
-  cursor: string;
-  events: unknown[];
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-};
-
-type ServingStatusErrorNotificationPayload = {
-  message: string;
-};
-
-type StatusTelemetryUpdateNotificationPayload = {
-  cursor: string;
-  snapshot: unknown;
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-};
-
-const MODEL_LIBRARY_CHANGE_KINDS = new Set([
-  'model_added',
-  'model_removed',
-  'metadata_modified',
-  'package_facts_modified',
-  'stale_facts_invalidated',
-  'dependency_binding_modified',
-]);
-
-const MODEL_FACT_FAMILIES = new Set([
-  'model_record',
-  'metadata',
-  'package_facts',
-  'dependency_bindings',
-  'validation',
-  'search_index',
-]);
-
-const MODEL_LIBRARY_REFRESH_SCOPES = new Set(['summary', 'detail', 'summary_and_detail']);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isNullableString(value: unknown): boolean {
-  return value === undefined || value === null || typeof value === 'string';
-}
-
-function isModelLibraryUpdateEventPayload(value: unknown): boolean {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  return (
-    typeof value['cursor'] === 'string' &&
-    typeof value['model_id'] === 'string' &&
-    MODEL_LIBRARY_CHANGE_KINDS.has(String(value['change_kind'])) &&
-    MODEL_FACT_FAMILIES.has(String(value['fact_family'])) &&
-    MODEL_LIBRARY_REFRESH_SCOPES.has(String(value['refresh_scope'])) &&
-    isNullableString(value['selected_artifact_id']) &&
-    isNullableString(value['producer_revision'])
-  );
-}
-
-function isModelLibraryUpdateNotificationPayload(
-  value: unknown
-): value is ModelLibraryUpdateNotificationPayload {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const events = value['events'];
-  return (
-    typeof value['cursor'] === 'string' &&
-    typeof value['stale_cursor'] === 'boolean' &&
-    typeof value['snapshot_required'] === 'boolean' &&
-    (events === undefined ||
-      (Array.isArray(events) && events.every(isModelLibraryUpdateEventPayload)))
-  );
-}
-
-function isRuntimeProfileUpdateNotificationPayload(
-  value: unknown
-): value is RuntimeProfileUpdateNotificationPayload {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const events = value['events'];
-  return (
-    typeof value['cursor'] === 'string' &&
-    typeof value['stale_cursor'] === 'boolean' &&
-    typeof value['snapshot_required'] === 'boolean' &&
-    (events === undefined || Array.isArray(events))
-  );
-}
-
-function isServingStatusUpdateNotificationPayload(
-  value: unknown
-): value is ServingStatusUpdateNotificationPayload {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const events = value['events'];
-  return (
-    typeof value['cursor'] === 'string' &&
-    typeof value['stale_cursor'] === 'boolean' &&
-    typeof value['snapshot_required'] === 'boolean' &&
-    Array.isArray(events)
-  );
-}
-
-function isServingStatusErrorNotificationPayload(
-  value: unknown
-): value is ServingStatusErrorNotificationPayload {
-  return isRecord(value) && typeof value['message'] === 'string';
-}
-
-function decodeModelDownloadUpdateNotificationPayload(
-  value: unknown
-): ModelDownloadUpdateNotificationPayload | null {
-  if (!isRecord(value) || !isRecord(value['snapshot'])) {
-    return null;
-  }
-
-  const snapshot = value['snapshot'];
-  if (typeof value['cursor'] !== 'string' ||
-      typeof value['stale_cursor'] !== 'boolean' ||
-      typeof value['snapshot_required'] !== 'boolean' ||
-      typeof snapshot['cursor'] !== 'string' ||
-      typeof snapshot['revision'] !== 'number' ||
-      !Number.isSafeInteger(snapshot['revision']) || snapshot['revision'] < 0) return null;
-  const decoded = decodeDownloadListOutcome({ success: true, downloads: snapshot['downloads'] });
-  if (decoded.status !== 'valid') return null;
-  return {
-    cursor: value['cursor'],
-    stale_cursor: value['stale_cursor'],
-    snapshot_required: value['snapshot_required'],
-    snapshot: { cursor: snapshot['cursor'], revision: snapshot['revision'], downloads: decoded.value.downloads },
-  };
-}
-
-function isStatusTelemetryUpdateNotificationPayload(
-  value: unknown
-): value is StatusTelemetryUpdateNotificationPayload {
-  if (!isRecord(value) || !isRecord(value['snapshot'])) {
-    return false;
-  }
-
-  const snapshot = value['snapshot'];
-  return (
-    typeof value['cursor'] === 'string' &&
-    typeof value['stale_cursor'] === 'boolean' &&
-    typeof value['snapshot_required'] === 'boolean' &&
-    typeof snapshot['cursor'] === 'string' &&
-    typeof snapshot['revision'] === 'number'
-  );
 }
 
 async function launchAppVersion(
@@ -1078,29 +930,20 @@ const electronAPI = {
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
   getTheme: () => ipcRenderer.invoke('theme:get'),
   onModelLibraryUpdate: (
-    callback: (notification: ModelLibraryUpdateNotificationPayload) => void
+    callback: (notification: ModelLibraryUpdateNotification) => void,
+    onError: (message: string) => void
   ): (() => void) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      if (isModelLibraryUpdateNotificationPayload(payload)) {
-        callback(payload);
-      }
-    };
-
+    const listener = updateListener('model-library', decodeModelLibraryUpdateNotification, { callback, onError });
     ipcRenderer.on('model-library:update', listener);
     return () => {
       ipcRenderer.removeListener('model-library:update', listener);
     };
   },
   onModelDownloadUpdate: (
-    callback: (notification: ModelDownloadUpdateNotificationPayload) => void
+    callback: (notification: ModelDownloadUpdateOutcome) => void,
+    onError: (message: string) => void
   ): (() => void) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      const decoded = decodeModelDownloadUpdateNotificationPayload(payload);
-      if (decoded) {
-        callback(decoded);
-      }
-    };
-
+    const listener = updateListener('model-download', decodeModelDownloadUpdateOutcome, { callback, onError });
     ipcRenderer.on('model-download:update', listener);
     void ipcRenderer.invoke('model-download:subscribe');
     return () => {
@@ -1109,14 +952,10 @@ const electronAPI = {
     };
   },
   onRuntimeProfileUpdate: (
-    callback: (notification: RuntimeProfileUpdateNotificationPayload) => void
+    callback: (notification: RuntimeProfileUpdateFeed) => void,
+    onError: (message: string) => void
   ): (() => void) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      if (isRuntimeProfileUpdateNotificationPayload(payload)) {
-        callback(payload);
-      }
-    };
-
+    const listener = updateListener('runtime-profile', decodeRuntimeProfileUpdateFeed, { callback, onError });
     ipcRenderer.on('runtime-profile:update', listener);
     void ipcRenderer.invoke('runtime-profile:subscribe');
     return () => {
@@ -1125,19 +964,14 @@ const electronAPI = {
     };
   },
   onServingStatusUpdate: (
-    callback: (notification: ServingStatusUpdateNotificationPayload) => void,
-    onError?: (message: string) => void
+    callback: (notification: ServingStatusUpdateFeed) => void,
+    onError: (message: string) => void
   ): (() => void) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      if (isServingStatusUpdateNotificationPayload(payload)) {
-        callback(payload);
-      }
-    };
-    const errorListener = (_event: IpcRendererEvent, payload: unknown) => {
-      if (isServingStatusErrorNotificationPayload(payload)) {
-        onError?.(payload.message);
-      }
-    };
+    const listener = updateListener('serving-status', decodeServingStatusUpdateFeed, { callback, onError });
+    const errorListener = updateListener('serving-status error', decodeUpdateStreamError, {
+      callback: (error) => onError(error.message),
+      onError,
+    });
 
     ipcRenderer.on('serving-status:update', listener);
     ipcRenderer.on('serving-status:error', errorListener);
@@ -1145,7 +979,7 @@ const electronAPI = {
       const message = error instanceof Error
         ? error.message
         : 'Failed to subscribe to serving status updates';
-      onError?.(message);
+      onError(message);
     });
     return () => {
       ipcRenderer.removeListener('serving-status:update', listener);
@@ -1154,14 +988,10 @@ const electronAPI = {
     };
   },
   onStatusTelemetryUpdate: (
-    callback: (notification: StatusTelemetryUpdateNotificationPayload) => void
+    callback: (notification: StatusTelemetryUpdateNotification) => void,
+    onError: (message: string) => void
   ): (() => void) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      if (isStatusTelemetryUpdateNotificationPayload(payload)) {
-        callback(payload);
-      }
-    };
-
+    const listener = updateListener('status-telemetry', decodeStatusTelemetryUpdateNotification, { callback, onError });
     ipcRenderer.on('status-telemetry:update', listener);
     void ipcRenderer.invoke('status-telemetry:subscribe');
     return () => {

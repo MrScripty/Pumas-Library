@@ -210,14 +210,29 @@ function copyJson(value: unknown, ancestors: Set<object>, budget: { remaining: n
   return Object.freeze(result);
 }
 
+type ValidationError = { readonly instancePath?: string; readonly keyword?: string; readonly message?: string; readonly params?: { readonly additionalProperty?: unknown } };
+
+// The reason names the failed rule, its location and any unexpected field
+// name. It never includes a field's value.
+function rejectionReason(validate: (value: unknown) => boolean): string {
+  const error = (validate as { errors?: ReadonlyArray<ValidationError> | null }).errors?.[0];
+  if (!error) return 'Invalid desktop contract payload.';
+  const field = error.params?.additionalProperty;
+  const rule = error.keyword === 'additionalProperties' && typeof field === 'string'
+    ? \`unexpected field \${JSON.stringify(field.slice(0, 64))}\`
+    : error.message ?? error.keyword ?? 'rejected';
+  return \`Invalid desktop contract payload at \${error.instancePath || '/'}: \${rule}.\`.slice(0, 512);
+}
+
 function decode<T>(input: unknown, validate: (value: unknown) => boolean): DecodeOutcome<T> {
   try {
     const value = copyJson(input, new Set(), {remaining: 1_000_000});
-    if (!validate(value)) return {status:'invalid', message:'Invalid desktop contract payload.'};
+    if (!validate(value)) return {status:'invalid', message:rejectionReason(validate)};
     // The generated complete validator establishes this representation.
     return {status:'valid', value:value as T};
-  } catch {
-    return {status:'invalid', message:'Invalid desktop contract payload.'};
+  } catch (error) {
+    const reason = error instanceof InvalidJsonRepresentation ? \`: \${error.message}\` : '';
+    return {status:'invalid', message:\`Invalid desktop contract payload\${reason}.\`};
   }
 }
 ${wrappers}\n`;

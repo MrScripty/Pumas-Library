@@ -46,7 +46,8 @@ export function OllamaModelSection({
   const [deletingModel, setDeletingModel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [runtimeProfileCursor, setRuntimeProfileCursor] = useState<string | null>(null);
+  // Bumped when runtime profiles change, to refetch Ollama state.
+  const [runtimeProfileRevision, setRuntimeProfileRevision] = useState(0);
 
   // Extract GGUF models from library model groups
   const ggufModels: GgufLibraryModel[] = [];
@@ -110,9 +111,13 @@ export function OllamaModelSection({
   }, [connectionUrl, isRunning]);
 
   useRuntimeProfileUpdateSubscription(
-    useCallback((notification) => {
-      if (notification.snapshot_required || notification.events.length > 0) {
-        setRuntimeProfileCursor(notification.cursor);
+    useCallback((delivery) => {
+      if (
+        delivery.kind === 'resync' ||
+        delivery.notification.snapshot_required ||
+        delivery.notification.events.length > 0
+      ) {
+        setRuntimeProfileRevision((revision) => revision + 1);
       }
     }, [])
   );
@@ -125,7 +130,7 @@ export function OllamaModelSection({
     setOllamaModels([]);
     setRunningModels([]);
     return undefined;
-  }, [fetchOllamaState, isRunning, runtimeProfileCursor]);
+  }, [fetchOllamaState, isRunning, runtimeProfileRevision]);
 
   const handleCreate = async (model: GgufLibraryModel) => {
     if (!isAPIAvailable()) return;

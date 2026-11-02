@@ -113,11 +113,22 @@ export function useModelDownloads() {
 
     void restoreDownloads();
 
-    const unsubscribe = getElectronAPI()?.onModelDownloadUpdate((notification) => {
-      if (cancelled) return;
-      startupSuperseded = true;
-      applyDownloadSnapshot(notification.snapshot.downloads.map(projectDownloadProgress));
-    });
+    const unsubscribe = getElectronAPI()?.onModelDownloadUpdate(
+      (notification) => {
+        if (cancelled) return;
+        startupSuperseded = true;
+        applyDownloadSnapshot(notification.snapshot.downloads.map(projectDownloadProgress));
+      },
+      (reason) => {
+        if (cancelled) return;
+        logger.warn('Download update not delivered; reloading', { reason });
+        void api.list_model_downloads().then((result) => {
+          if (!cancelled) applyDownloadSnapshot(result.downloads.map(projectDownloadProgress));
+        }).catch((error: unknown) => {
+          logger.warn('Failed to reload downloads after an undelivered update', { error });
+        });
+      }
+    );
 
     return () => {
       cancelled = true;

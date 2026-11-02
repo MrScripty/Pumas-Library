@@ -1642,21 +1642,39 @@ pub(crate) struct DownloadListOutcome {
     downloads: Vec<DownloadProgressOutcome>,
 }
 
+/// Pushed download state (`/events/model-download-updates`).
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct ModelDownloadUpdateOutcome {
+    cursor: String,
+    snapshot: ModelDownloadSnapshotOutcome,
+    stale_cursor: bool,
+    snapshot_required: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct ModelDownloadSnapshotOutcome {
+    cursor: String,
+    revision: u64,
+    downloads: Vec<DownloadProgressOutcome>,
+}
+
 /// Push delivery uses the same validated and redacted progress as polling.
 pub(crate) fn project_download_notification(
     notification: &pumas_library::models::ModelDownloadUpdateNotification,
-) -> Result<Value, PumasError> {
+) -> Result<ModelDownloadUpdateOutcome, PumasError> {
     let downloads = DownloadListOutcome::new(notification.snapshot.downloads.clone())?;
-    Ok(serde_json::json!({
-        "cursor": notification.cursor,
-        "snapshot": {
-            "cursor": notification.snapshot.cursor,
-            "revision": notification.snapshot.revision,
-            "downloads": downloads.downloads,
+    Ok(ModelDownloadUpdateOutcome {
+        cursor: notification.cursor.clone(),
+        snapshot: ModelDownloadSnapshotOutcome {
+            cursor: notification.snapshot.cursor.clone(),
+            revision: notification.snapshot.revision,
+            downloads: downloads.downloads,
         },
-        "stale_cursor": notification.stale_cursor,
-        "snapshot_required": notification.snapshot_required,
-    }))
+        stale_cursor: notification.stale_cursor,
+        snapshot_required: notification.snapshot_required,
+    })
 }
 
 impl DownloadListOutcome {
@@ -8340,7 +8358,9 @@ mod tests {
             let item = progress(model_id);
             let poll = serde_json::to_value(DownloadListOutcome::new(vec![item.clone()]).unwrap())
                 .unwrap();
-            let push = project_download_notification(&notification(item)).unwrap();
+            let push =
+                serde_json::to_value(project_download_notification(&notification(item)).unwrap())
+                    .unwrap();
             assert_eq!(poll["downloads"], push["snapshot"]["downloads"]);
             assert_eq!(
                 push["snapshot"]["downloads"][0]["libraryModelId"],

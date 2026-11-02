@@ -1,6 +1,6 @@
 import type { BaseResponse } from './api-common';
 import type {
-  DownloadListOutcome, DownloadProgressOutcome, DownloadStartedOutcome, DownloadStatusOutcome, HfDownloadDetailsOutcome, InferenceSettingsOutcome, ModelsOutcome, PartialDownloadOutcome, UpdateInferenceSettingsOutcome, UpdateModelNotesOutcome,
+  DownloadListOutcome, DownloadStartedOutcome, DownloadStatusOutcome, HfDownloadDetailsOutcome, InferenceSettingsOutcome, ModelDownloadSnapshotOutcome as DesktopModelDownloadSnapshotOutcome, ModelDownloadUpdateOutcome as DesktopModelDownloadUpdateOutcome, ModelsOutcome, PartialDownloadOutcome, UpdateInferenceSettingsOutcome, UpdateModelNotesOutcome,
 } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -162,18 +162,9 @@ export interface ModelDownloadSnapshotEntry {
   error?: string;
 }
 
-export interface ModelDownloadSnapshot {
-  cursor: string;
-  revision: number;
-  downloads: DownloadProgressOutcome[];
-}
-
-export interface ModelDownloadUpdateNotification {
-  cursor: string;
-  snapshot: ModelDownloadSnapshot;
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-}
+// Declared once by the backend (`/events/model-download-updates`) and generated.
+export type ModelDownloadSnapshot = DesktopModelDownloadSnapshotOutcome;
+export type ModelDownloadUpdateNotification = DesktopModelDownloadUpdateOutcome;
 
 export type ResumePartialDownloadResponse = PartialDownloadOutcome;
 

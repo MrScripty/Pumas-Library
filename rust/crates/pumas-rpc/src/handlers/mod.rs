@@ -1496,7 +1496,7 @@ async fn next_model_download_update_event(
 
 fn model_download_update_sse_event(notification: &ModelDownloadUpdateNotification) -> Event {
     match crate::contract::project_download_notification(notification)
-        .and_then(|value| serde_json::to_string(&value).map_err(Into::into))
+        .and_then(|outcome| serde_json::to_string(&outcome).map_err(Into::into))
     {
         Ok(payload) => Event::default()
             .event("model-download-update")

@@ -771,3 +771,31 @@ test('Torch inspection outcomes made by Rust decode exactly and reject contradic
     assert.equal(decode(value).status, 'invalid', JSON.stringify(value));
   }
 });
+
+test('update-stream payloads made by Rust decode exactly and stay closed', () => {
+  const decoders = {
+    model_library_update: contract.decodeModelLibraryUpdateNotification,
+    model_library_update_resync: contract.decodeModelLibraryUpdateNotification,
+    runtime_profile_update: contract.decodeRuntimeProfileUpdateFeed,
+    serving_status_update: contract.decodeServingStatusUpdateFeed,
+    status_telemetry_update: contract.decodeStatusTelemetryUpdateNotification,
+    download_push: contract.decodeModelDownloadUpdateOutcome,
+  };
+  for (const [key, decode] of Object.entries(decoders)) {
+    const result = decode(fixtures[key]);
+    assert.equal(result.status, 'valid', `${key}: ${result.message}`);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+    const invalid = decode({...fixtures[key], extra: true});
+    assert.equal(invalid.status, 'invalid', `${key} is closed`);
+    assert.match(invalid.message, /unexpected field "extra"/);
+  }
+  const telemetry = fixtures.status_telemetry_update;
+  for (const value of [
+    {...telemetry, snapshot: {...telemetry.snapshot, revision: -1}},
+    {...telemetry, snapshot: {...telemetry.snapshot, status: {...telemetry.snapshot.status, notices: [42]}}},
+    {...fixtures.runtime_profile_update, events: [{...fixtures.runtime_profile_update.events[0], provider: 'unknown'}]},
+  ]) {
+    const decode = value.snapshot ? decoders.status_telemetry_update : decoders.runtime_profile_update;
+    assert.equal(decode(value).status, 'invalid', JSON.stringify(value).slice(0, 120));
+  }
+});

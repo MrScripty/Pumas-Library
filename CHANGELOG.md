@@ -57,6 +57,9 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
 - Desktop Torch install choices, saved probe results, startup trials and
   alternative wheels are declared once by the backend and validated from that
   declaration. The saved probe result carries only the checks the desktop shows.
+- Desktop update streams (model library, downloads, runtime profiles, serving
+  status and status telemetry) are validated against the backend's declaration.
+  A rejected desktop payload says which field and rule failed.
 
 ### Fixed
 
@@ -87,6 +90,8 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
   headless legacy-schema preflight avoids creating a new failed owner claim.
 - Candidate packaging selects notices matching the current source version.
 - A failed Torch startup trial reports why the managed launch failed.
+- A desktop update that fails validation is no longer dropped silently, which
+  had left views stale; the reason is reported and the view reloads.
 
 ## [0.7.0] - Unreleased candidate
 

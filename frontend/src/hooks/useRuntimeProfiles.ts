@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getElectronAPI } from '../api/adapter';
-import {
-  isRuntimeProfileUpdateFeed,
-  type RuntimeProfileUpdateFeed,
-  type RuntimeProfilesSnapshot,
+import type {
+  RuntimeProfileUpdateFeed,
+  RuntimeProfilesSnapshot,
 } from '../types/api-runtime-profiles';
 import { getLogger } from '../utils/logger';
+import type { UpdateStreamDelivery } from './updateStreamDelivery';
 
 const logger = getLogger('useRuntimeProfiles');
 
 export const RUNTIME_PROFILE_UPDATE_REFRESH_DEBOUNCE_MS = 250;
 
 export function useRuntimeProfileUpdateSubscription(
-  onUpdate: (notification: RuntimeProfileUpdateFeed) => void,
+  onUpdate: (delivery: UpdateStreamDelivery<RuntimeProfileUpdateFeed>) => void,
   debounceMs = RUNTIME_PROFILE_UPDATE_REFRESH_DEBOUNCE_MS
 ): void {
   const onUpdateRef = useRef(onUpdate);
@@ -27,7 +27,7 @@ export function useRuntimeProfileUpdateSubscription(
       return undefined;
     }
 
-    let latestNotification: RuntimeProfileUpdateFeed | null = null;
+    let latestDelivery: UpdateStreamDelivery<RuntimeProfileUpdateFeed> | null = null;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
     const clearRefreshTimer = () => {
@@ -37,21 +37,25 @@ export function useRuntimeProfileUpdateSubscription(
       }
     };
 
-    const unsubscribe = electronAPI.onRuntimeProfileUpdate((notification) => {
-      if (!isRuntimeProfileUpdateFeed(notification)) {
-        logger.warn('Ignoring invalid runtime-profile update notification');
-        return;
-      }
-
-      latestNotification = notification;
+    const deliver = (delivery: UpdateStreamDelivery<RuntimeProfileUpdateFeed>) => {
+      // A pending resync is never replaced by a later notification.
+      if (latestDelivery?.kind !== 'resync') latestDelivery = delivery;
       clearRefreshTimer();
       refreshTimer = setTimeout(() => {
         refreshTimer = null;
-        if (latestNotification) {
-          onUpdateRef.current(latestNotification);
-        }
+        const pending = latestDelivery;
+        latestDelivery = null;
+        if (pending) onUpdateRef.current(pending);
       }, debounceMs);
-    });
+    };
+
+    const unsubscribe = electronAPI.onRuntimeProfileUpdate(
+      (notification) => deliver({ kind: 'notification', notification }),
+      (reason) => {
+        logger.warn('Runtime-profile update not delivered; reloading', { reason });
+        deliver({ kind: 'resync', reason });
+      }
+    );
 
     return () => {
       clearRefreshTimer();
@@ -107,8 +111,12 @@ export function useRuntimeProfiles() {
 
   useRuntimeProfileUpdateSubscription(
     useCallback(
-      (notification) => {
-        if (notification.snapshot_required || notification.events.length > 0) {
+      (delivery) => {
+        if (
+          delivery.kind === 'resync' ||
+          delivery.notification.snapshot_required ||
+          delivery.notification.events.length > 0
+        ) {
           void refreshRuntimeProfiles();
         }
       },

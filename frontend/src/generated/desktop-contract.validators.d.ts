@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 b7e485fe591a6611971137de606474ccb7f2626712014c675da544238510956b. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 6565e5785ec312399caf4db0d8659735a397b7188ab0aa065918873ec7727119. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -42,8 +42,10 @@ export declare function validateLibraryModelMetadataOutcome(value: unknown): boo
 export declare function validateLibraryUpgradeConfirmation(value: unknown): boolean;
 export declare function validateLibraryUpgradeResult(value: unknown): boolean;
 export declare function validateLinkHealthOutcome(value: unknown): boolean;
+export declare function validateModelDownloadUpdateOutcome(value: unknown): boolean;
 export declare function validateModelImportSelection(value: unknown): boolean;
 export declare function validateModelIndexRefreshOutcome(value: unknown): boolean;
+export declare function validateModelLibraryUpdateNotification(value: unknown): boolean;
 export declare function validateModelLookupOutcome(value: unknown): boolean;
 export declare function validateModelLookupParams(value: unknown): boolean;
 export declare function validateModelsOutcome(value: unknown): boolean;
@@ -55,6 +57,7 @@ export declare function validateRemoveVersionOutcome(value: unknown): boolean;
 export declare function validateRouterProfileSyncStatus(value: unknown): boolean;
 export declare function validateRuntimeLaunchOutcome(value: unknown): boolean;
 export declare function validateRuntimeLaunchParams(value: unknown): boolean;
+export declare function validateRuntimeProfileUpdateFeed(value: unknown): boolean;
 export declare function validateRuntimeRunningOutcome(value: unknown): boolean;
 export declare function validateRuntimeStopOutcome(value: unknown): boolean;
 export declare function validateS3AuthenticatedBundleImportParams(value: unknown): boolean;
@@ -79,11 +82,13 @@ export declare function validateS3TransferRetryParams(value: unknown): boolean;
 export declare function validateS3TransferRetryState(value: unknown): boolean;
 export declare function validateSearchCatalogParams(value: unknown): boolean;
 export declare function validateSelectedVersionOutcome(value: unknown): boolean;
+export declare function validateServingStatusUpdateFeed(value: unknown): boolean;
 export declare function validateSetDefaultVersionOutcome(value: unknown): boolean;
 export declare function validateSetDefaultVersionParams(value: unknown): boolean;
 export declare function validateStartBackendSetupParams(value: unknown): boolean;
 export declare function validateStartConversionSetupParams(value: unknown): boolean;
 export declare function validateStartupFailureFrame(value: unknown): boolean;
+export declare function validateStatusTelemetryUpdateNotification(value: unknown): boolean;
 export declare function validateStopRuntimeProfileGenerationOutcome(value: unknown): boolean;
 export declare function validateStopRuntimeProfileGenerationParams(value: unknown): boolean;
 export declare function validateSuccessOutcome(value: unknown): boolean;
@@ -123,6 +128,7 @@ export declare function validateUpdateInferenceSettingsOutcome(value: unknown): 
 export declare function validateUpdateInferenceSettingsParams(value: unknown): boolean;
 export declare function validateUpdateModelNotesOutcome(value: unknown): boolean;
 export declare function validateUpdateModelNotesParams(value: unknown): boolean;
+export declare function validateUpdateStreamError(value: unknown): boolean;
 export declare function validateValidateInstallationsOutcome(value: unknown): boolean;
 export declare function validateVersionInfoOutcome(value: unknown): boolean;
 export declare function validateVersionStatusOutcome(value: unknown): boolean;

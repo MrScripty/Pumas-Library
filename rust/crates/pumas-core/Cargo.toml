@@ -93,7 +93,7 @@ governor = { workspace = true }
 uuid = { workspace = true }
 
 # Random number generation
-rand = "0.9"
+rand = "0.10"
 
 # Directory utilities (home dir, etc.)
 dirs = { workspace = true }

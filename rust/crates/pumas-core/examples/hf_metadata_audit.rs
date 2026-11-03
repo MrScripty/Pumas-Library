@@ -14,7 +14,7 @@ use pumas_library::model_library::{
 };
 use pumas_library::models::{HuggingFaceEvidence, ModelMetadata};
 use rand::prelude::{IndexedRandom, SliceRandom};
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};

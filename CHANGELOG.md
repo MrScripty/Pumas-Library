@@ -60,6 +60,8 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
 - Desktop update streams (model library, downloads, runtime profiles, serving
   status and status telemetry) are validated against the backend's declaration.
   A rejected desktop payload says which field and rule failed.
+- Updated Electron to 43.8.1, Vite to 6.4.5, undici to 6.29.1 and 7.30.1,
+  `zip` to 2.6.1, `rustls` to 0.23.46 and `rand` to 0.10.
 
 ### Fixed
 

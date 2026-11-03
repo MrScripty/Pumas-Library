@@ -1,7 +1,7 @@
 # v0.8.0 model categories and modalities
 
 **Plan status:** Active. **Acceptance status:** not yet satisfied.
-**Current phase:** implementation. **Next slice:** M1 taxonomy and evidence rules.
+**Current phase:** verification. **Next slice:** M5 live re-scan of the owner library.
 
 ## Objective and scope
 
@@ -59,8 +59,8 @@ composition at serve time.
 
 | ID | Result | Evidence | State |
 | --- | --- | --- | --- |
-| M1 | `video` and `decision` categories; evidence precedence; task signatures; decision GGUF signal; `…ForASR`; adapter detection | resolver/identifier unit tests reproducing each observed case | pending |
-| M2 | Category changes never move folders or change IDs; ID-prefix readers use metadata; user override honored by re-scan | library/reconcile/migration tests | pending |
-| M3 | Desktop catalog carries category, input/output modalities and adapter role; `set_model_category` RPC | contract export, conformance, RPC tests | pending |
-| M4 | UI groups by category (with Video and Decision), shows modality and adapter badges, lets the user set a category | frontend tests | pending |
+| M1 | `video` and `decision` categories; evidence precedence; task signatures; decision GGUF signal; `…ForASR`; adapter detection | resolver/identifier unit tests reproducing each observed case | done: resolver/identifier/category unit tests (`library/category_tests.rs`, identifier and governance tests) |
+| M2 | Category changes never move folders or change IDs; ID-prefix readers use metadata; user override honored by re-scan | library/reconcile/migration tests | done: reclassification/migration tests rewritten to the rule; `user` source honored in the shared resolver |
+| M3 | Desktop catalog carries category, input/output modalities and adapter role; `set_model_category` RPC | contract export, conformance, RPC tests | done: catalog DTO, `set_model_category` admission tests, regenerated contract, conformance fixture |
+| M4 | UI groups by category (with Video and Decision), shows modality and adapter badges, lets the user set a category | frontend tests | done: frontend grouping/header/badge/picker tests |
 | M5 | Owner library re-scanned: Kev/Laya → decision, LTX → video (LoRA as adapter), Granite nar → audio, without moving folders | live check on the owner library; CHANGELOG/release notes; candidate rehearsal | pending |

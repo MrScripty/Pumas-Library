@@ -32,9 +32,20 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
   for llama.cpp embedding models with a projector, such as EmbeddingGemma 2.
 - `decision` capability: typed choice/score/yes-no questions answered with
   probabilities by llama.cpp native decision models such as Kev and OpenJev.
+- Models are grouped by what they are used for, with new **Decision and
+  evaluation** and **Video generation** categories. Each row shows the inputs
+  and outputs the model handles and marks LoRA/PEFT adapters. A "Used as"
+  choice in the model's metadata window overrides detection and survives
+  re-scans (`set_model_category` RPC).
 
 ### Changed
 
+- A model's category is metadata: re-detection never moves a model or changes
+  its ID for a category change (only a family change still moves it).
+  Detection prefers file facts and architectures over task tags: a GGUF
+  decision head makes a decision model, `...ForASR` architectures are audio,
+  video tasks are video, and a disagreeing task tag requests review instead of
+  overruling. The library's rule tables are updated in place on open.
 - Older download metadata requires an explicit offline schema-7 upgrade with
   stopped-reader/writer confirmation and an exact metadata-only backup.
 - Hugging Face detail resolution follows explicit model selection; cached

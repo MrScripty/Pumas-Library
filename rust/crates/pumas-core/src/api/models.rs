@@ -916,8 +916,10 @@ mod tests {
         use crate::models::ModelLookupResolution;
         let root = TempDir::new().unwrap();
         let api = super::super::hf::tests::recovery_api_fixture(root.path(), None).await;
-        let old = "llm/fixture/lookup";
-        let replacement = "unknown/fixture/lookup";
+        // The category is metadata and never changes an ID: only the stale path
+        // family (metadata records `fixture`) moves the model within its bucket.
+        let old = "llm/old-family/lookup";
+        let replacement = "llm/fixture/lookup";
         let bytes = lookup_fixture(&api, old).await;
         let report = api.lookup_model(old).await.unwrap();
         assert_eq!(report.contract_version, 1);

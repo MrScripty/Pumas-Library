@@ -1283,7 +1283,7 @@ mod tests {
     }
 
     #[test]
-    fn conflicting_medium_signal_can_drop_below_threshold() {
+    fn conflicting_medium_signal_lowers_confidence_without_outvoting_hard_signal() {
         let (_tmp, index) = create_test_index();
         let model_dir = TempDir::new().unwrap();
         write_config(
@@ -1301,9 +1301,17 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(resolved.model_type, ModelType::Unknown);
-        assert_eq!(resolved.confidence, 0.0);
+        // The architecture rule wins; the disagreeing task tag only lowers
+        // confidence (clamped at 0.60) and requests review.
+        assert_eq!(resolved.model_type, ModelType::Diffusion);
+        assert_eq!(resolved.confidence, 0.60);
         assert!(resolved
+            .review_reasons
+            .contains(&"model-type-hint-conflict".to_string()));
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-low-confidence".to_string()));
+        assert!(!resolved
             .review_reasons
             .contains(&"model-type-unresolved".to_string()));
     }

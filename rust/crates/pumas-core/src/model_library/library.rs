@@ -7,6 +7,8 @@
 //! - SQLite indexing with FTS5 full-text search
 //! - Model enumeration and querying
 
+#[cfg(test)]
+mod category_tests;
 mod migration;
 mod projection;
 mod publication_observation;
@@ -4317,6 +4319,84 @@ impl ModelLibrary {
             .clone()
     }
 
+    /// Record a person's choice of category for a model, or clear it.
+    ///
+    /// A chosen category is kept by every later re-detection (reclassify,
+    /// redetect, migration). Clearing it re-detects the category. The model
+    /// never moves and keeps its ID. Returns the category now recorded.
+    pub async fn set_model_category(
+        &self,
+        model_id: &str,
+        category: Option<ModelType>,
+    ) -> Result<ModelType> {
+        if category == Some(ModelType::Unknown) {
+            return Err(PumasError::InvalidParams {
+                message: "Choose a category, or clear the choice to re-detect it".into(),
+            });
+        }
+        let model_dir = self.library_root.join(model_id);
+        let authority = self.mutation_authority()?;
+        let destination = authority.root().resolve(&model_dir)?;
+        let metadata = self
+            .store_lifetime
+            .spawn_blocking(move || destination.read_model_metadata())
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!("Failed to join model category read: {error}"))
+            })??
+            .ok_or_else(|| PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            })?;
+        self.require_finalized_import_edit(&model_dir, Some(&metadata))?;
+
+        let Some(category) = category else {
+            if user_chosen_category(&metadata).is_none() {
+                return Ok(metadata
+                    .model_type
+                    .as_deref()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(ModelType::Unknown));
+            }
+            let original_metadata = metadata.clone();
+            let mut cleared = metadata;
+            cleared.model_type_resolution_source = None;
+            cleared.model_type_resolution_confidence = None;
+            cleared.updated_date = Some(chrono::Utc::now().to_rfc3339());
+            self.write_reclassification_metadata_owned(
+                model_id.to_string(),
+                model_dir,
+                original_metadata,
+                cleared,
+                None,
+            )
+            .await?;
+            self.reclassify_model(model_id).await?;
+            let detected = self
+                .load_metadata(&self.library_root.join(model_id))?
+                .and_then(|metadata| metadata.model_type)
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(ModelType::Unknown);
+            return Ok(detected);
+        };
+
+        let original_metadata = metadata.clone();
+        let mut chosen = metadata;
+        chosen.model_type = Some(category.as_str().to_string());
+        chosen.model_type_resolution_source = Some(USER_CATEGORY_SOURCE.to_string());
+        chosen.model_type_resolution_confidence = Some(1.0);
+        chosen.updated_date = Some(chrono::Utc::now().to_rfc3339());
+        validate_metadata_v2_with_index(&chosen, self.index())?;
+        self.write_reclassification_metadata_owned(
+            model_id.to_string(),
+            model_dir,
+            original_metadata,
+            chosen,
+            None,
+        )
+        .await?;
+        Ok(category)
+    }
+
     /// Reclassify a model: re-detect its category and family.
     ///
     /// The category is metadata and never moves the model: it keeps its
@@ -4362,11 +4442,6 @@ impl ModelLibrary {
         let current_type = metadata.model_type.clone().unwrap_or_default();
         let current_family = metadata.family.clone().unwrap_or_default();
         let model_id_parts: Vec<&str> = model_id.split('/').collect();
-        let current_path_type = model_id_parts
-            .first()
-            .copied()
-            .unwrap_or_default()
-            .to_string();
         let current_path_family = model_id_parts
             .get(1)
             .copied()
@@ -4442,7 +4517,9 @@ impl ModelLibrary {
         metadata.subtype = new_subtype;
         let resolution_changed = apply_model_type_resolution(&mut metadata, &resolved);
 
-        let identity_changed = normalize_name(&new_type_str) != normalize_name(&current_path_type)
+        // The category is compared with the recorded category, never with the
+        // storage bucket, so a model filed under another bucket stays settled.
+        let identity_changed = normalize_name(&new_type_str) != normalize_name(&current_type)
             || normalize_name(&new_family) != normalize_name(&current_path_family)
             || metadata.subtype != current_subtype;
         if !identity_changed
@@ -7276,6 +7353,16 @@ fn resolve_local_model_type_with_persisted_hints(
     metadata: &ModelMetadata,
     file_type_info: Option<&ModelTypeInfo>,
 ) -> Result<ModelTypeResolution> {
+    // A person's explicit category survives every re-detection: reclassify,
+    // redetect and migration all resolve through here.
+    if let Some(chosen) = user_chosen_category(metadata) {
+        return Ok(ModelTypeResolution {
+            model_type: chosen,
+            source: USER_CATEGORY_SOURCE.to_string(),
+            confidence: 1.0,
+            review_reasons: Vec::new(),
+        });
+    }
     let (pipeline_tag, spec_model_type, huggingface_evidence) =
         classification_hints_from_persisted_sources(model_dir, metadata);
 
@@ -7605,6 +7692,21 @@ fn detect_model_type_from_directory_layout(model_dir: &Path) -> Option<ModelType
     }
 
     None
+}
+
+/// `model_type_resolution_source` recorded when a person chose the category.
+pub(crate) const USER_CATEGORY_SOURCE: &str = "user";
+
+/// The category a person chose for this model, if any.
+pub(crate) fn user_chosen_category(metadata: &ModelMetadata) -> Option<ModelType> {
+    if metadata.model_type_resolution_source.as_deref() != Some(USER_CATEGORY_SOURCE) {
+        return None;
+    }
+    metadata
+        .model_type
+        .as_deref()
+        .and_then(|value| value.parse::<ModelType>().ok())
+        .filter(|category| *category != ModelType::Unknown)
 }
 
 /// The category named by a model's storage bucket (its first library-relative

@@ -840,7 +840,23 @@ impl PumasApi {
         Ok(self.primary().model_importer.adopt_orphans(false).await)
     }
 
-    /// Reclassify a single model (re-detect type and relocate directory if needed).
+    /// Record a person's choice of category for a model (`None` clears it and
+    /// re-detects). The model keeps its folder and ID; later re-detection
+    /// keeps a chosen category. Returns the category now recorded.
+    pub async fn set_model_category(
+        &self,
+        model_id: &str,
+        category: Option<model_library::ModelType>,
+    ) -> Result<model_library::ModelType> {
+        self.try_primary()?;
+        self.primary()
+            .model_library
+            .set_model_category(model_id, category)
+            .await
+    }
+
+    /// Reclassify a single model: re-detect its category and family. The
+    /// category is metadata; only a family change moves the model.
     pub async fn reclassify_model(&self, model_id: &str) -> Result<Option<String>> {
         self.try_primary()?;
         self.primary()

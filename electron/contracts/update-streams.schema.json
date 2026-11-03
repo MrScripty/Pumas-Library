@@ -1,0 +1,17 @@
+{
+  "format": "pumas-desktop-contract-1",
+  "dialect": "http://json-schema.org/draft-07/schema#",
+  "owner": "electron",
+  "description": "Update-stream failures that Electron main reports to the renderer. Closed; the payloads themselves are declared by the backend export.",
+  "schemas": {
+    "UpdateStreamError": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "UpdateStreamError",
+      "description": "Why an update stream stopped delivering; the renderer resynchronizes from its snapshot.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": {"message": {"type": "string", "minLength": 1, "maxLength": 1024}}
+    }
+  }
+}

@@ -1,5 +1,6 @@
 /** Explicit metadata-only upgrade of the main process's selected library. */
 import { spawn, type ChildProcess } from 'child_process';
+import { decodeLibraryUpgradeConfirmation } from './generated/desktop-contract';
 import type { LibraryUpgradeConfirmation, LibraryUpgradeResult, LibraryUpgradeReadyState } from './library-upgrade-contract';
 export type { LibraryUpgradeConfirmation, LibraryUpgradeResult } from './library-upgrade-contract';
 type ReadyState = LibraryUpgradeReadyState;
@@ -9,13 +10,9 @@ export interface LibraryUpgradeTarget {
 }
 
 export function validateLibraryUpgradeConfirmation(value: unknown): LibraryUpgradeConfirmation {
-  if (!value || typeof value !== 'object' || Array.isArray(value) ||
-      Object.keys(value).length !== 2 || !('oldWritersStopped' in value) ||
-      value.oldWritersStopped !== true || !('noDowngradeAccepted' in value) ||
-      value.noDowngradeAccepted !== true) {
-    throw new Error('Library upgrade requires both confirmations.');
-  }
-  return { oldWritersStopped: true, noDowngradeAccepted: true };
+  const decoded = decodeLibraryUpgradeConfirmation(value);
+  if (decoded.status !== 'valid') throw new Error('Library upgrade requires both confirmations.');
+  return decoded.value;
 }
 
 export interface LibraryUpgradeAdapter {

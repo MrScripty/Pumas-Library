@@ -85,12 +85,12 @@ pub use models::{
 #[cfg(feature = "onnx-runtime")]
 pub use onnx_runtime::{
     FakeOnnxEmbeddingBackend, OnnxEmbedding, OnnxEmbeddingBackend, OnnxEmbeddingBackendKind,
-    OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor,
-    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxEmbeddingUsage, OnnxExecutionProvider,
-    OnnxLoadOptions, OnnxLoadRequest, OnnxModelId, OnnxModelPath, OnnxOutputTensorSelection,
-    OnnxRuntimeError, OnnxRuntimeErrorCode, OnnxRuntimeSession, OnnxSessionManager,
-    OnnxSessionState, OnnxSessionStatus, OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer,
-    RealOnnxEmbeddingBackend,
+    OnnxEmbeddingLimits, OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig,
+    OnnxEmbeddingPostprocessor, OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxEmbeddingUsage,
+    OnnxExecutionProvider, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId, OnnxModelPath,
+    OnnxOutputTensorSelection, OnnxRuntimeError, OnnxRuntimeErrorCode, OnnxRuntimeSession,
+    OnnxSessionManager, OnnxSessionState, OnnxSessionStatus, OnnxTokenizedBatch,
+    OnnxTokenizedInput, OnnxTokenizer, RealOnnxEmbeddingBackend,
 };
 pub use plugins::{PluginConfig, PluginLoader};
 pub use process::ProcessManager;

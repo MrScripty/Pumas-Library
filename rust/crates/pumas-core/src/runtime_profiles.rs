@@ -254,6 +254,78 @@ fn executable_artifact_for_record(
     Some((format, model_path))
 }
 
+/// How llama.cpp must serve a model, derived from its library model type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LlamaCppServingMode {
+    Generation,
+    Embedding,
+    Reranking,
+}
+
+/// Pooled-session input length used when the profile serves no explicit
+/// context. It is a startup default, not a request limit: a served context
+/// replaces it. The trained context cannot be the default, because llama.cpp
+/// reserves compute memory for the whole micro-batch at startup and current
+/// embedders train on 256K tokens (a 202 GB reservation for a 4B model).
+const LLAMA_CPP_DEFAULT_POOLED_INPUT_TOKENS: u64 = 8192;
+
+/// Tokens one pooled (non-causal) input may span. llama.cpp evaluates a whole
+/// embedding or reranking input inside one micro-batch, so the micro-batch must
+/// hold the longest input the session accepts: the served context when one is
+/// set, otherwise the default above, never more than the model's trained
+/// context from its GGUF header. A longer input is refused by llama.cpp with a
+/// reason that reaches the caller.
+fn pooled_batch_tokens(model_path: &Path, served_context: Option<u32>) -> u64 {
+    let wanted = served_context
+        .map(u64::from)
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or(LLAMA_CPP_DEFAULT_POOLED_INPUT_TOKENS);
+    crate::model_library::gguf_trained_context_length(model_path)
+        .map_or(wanted, |trained| wanted.min(trained))
+}
+
+impl LlamaCppServingMode {
+    pub(crate) fn for_model_type(model_type: &str) -> Self {
+        if model_type.eq_ignore_ascii_case("embedding") {
+            Self::Embedding
+        } else if model_type.eq_ignore_ascii_case("reranker") {
+            Self::Reranking
+        } else {
+            Self::Generation
+        }
+    }
+
+    /// `(option, value)` pairs, written as `--option value` on the command
+    /// line or `option = value` in a router preset.
+    pub(crate) fn options(
+        self,
+        model_path: &Path,
+        served_context: Option<u32>,
+    ) -> Vec<(&'static str, String)> {
+        let mode = match self {
+            Self::Generation => return Vec::new(),
+            Self::Embedding => "embedding",
+            Self::Reranking => "reranking",
+        };
+        let tokens = pooled_batch_tokens(model_path, served_context).to_string();
+        vec![
+            (mode, "true".to_owned()),
+            ("batch-size", tokens.clone()),
+            ("ubatch-size", tokens),
+        ]
+    }
+
+    pub(crate) fn cli_args(self, model_path: &Path, served_context: Option<u32>) -> Vec<String> {
+        self.options(model_path, served_context)
+            .into_iter()
+            .flat_map(|(option, value)| match value.as_str() {
+                "true" => vec![format!("--{option}")],
+                _ => vec![format!("--{option}"), value],
+            })
+            .collect()
+    }
+}
+
 fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> Result<String> {
     let mut output = String::from("version = 1\n\n[*]\nload-on-startup = false\n\n");
     for entry in entries {
@@ -269,10 +341,10 @@ fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> 
         }
         output.push_str("\nalias = ");
         output.push_str(&sanitize_llama_cpp_preset_value(&entry.alias));
-        if entry.model_type.eq_ignore_ascii_case("embedding") {
-            output.push_str("\nembedding = true");
-        } else if entry.model_type.eq_ignore_ascii_case("reranker") {
-            output.push_str("\nreranking = true");
+        for (option, value) in
+            LlamaCppServingMode::for_model_type(&entry.model_type).options(&entry.model_path, None)
+        {
+            output.push_str(&format!("\n{option} = {value}"));
         }
         output.push_str("\n\n");
     }
@@ -1772,9 +1844,63 @@ mod tests {
             .contains("multiple mmproj"));
     }
 
+    /// A GGUF header carrying only a trained context length.
+    fn write_gguf_with_context(path: &Path, tokens: u64) {
+        let key = b"gemma-embedding2.context_length";
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes());
+        bytes.extend_from_slice(&1_u64.to_le_bytes());
+        bytes.extend_from_slice(&(key.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(key);
+        bytes.extend_from_slice(&10_u32.to_le_bytes());
+        bytes.extend_from_slice(&tokens.to_le_bytes());
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn pooled_batches_follow_the_served_and_trained_context() {
+        let root = tempfile::TempDir::new().unwrap();
+        let batch = |trained: Option<u64>, served| {
+            let model = root.path().join(format!("{trained:?}-{served:?}.gguf"));
+            if let Some(tokens) = trained {
+                write_gguf_with_context(&model, tokens);
+            }
+            LlamaCppServingMode::Embedding
+                .options(&model, served)
+                .into_iter()
+                .find(|(option, _)| *option == "ubatch-size")
+                .map(|(_, value)| value)
+                .unwrap()
+        };
+        // The served context sets the input length, capped by the trained context.
+        assert_eq!(batch(Some(262_144), Some(32_768)), "32768");
+        assert_eq!(batch(Some(2048), Some(32_768)), "2048");
+        // Without one, the startup default applies; never the 256K trained
+        // context, and never more than a short-context model was trained for.
+        assert_eq!(batch(Some(262_144), None), "8192");
+        assert_eq!(batch(Some(512), None), "512");
+        assert_eq!(batch(None, Some(4096)), "4096");
+        let unknown = root.path().join("missing.gguf");
+        assert_eq!(
+            LlamaCppServingMode::Reranking.cli_args(&unknown, None),
+            [
+                "--reranking",
+                "--batch-size",
+                "8192",
+                "--ubatch-size",
+                "8192"
+            ]
+        );
+        assert!(LlamaCppServingMode::Generation
+            .options(&unknown, None)
+            .is_empty());
+    }
+
     #[test]
     fn llama_cpp_router_catalog_sorts_and_writes_preset_entries() {
         let root = tempfile::TempDir::new().unwrap();
+        write_gguf_with_context(&root.path().join("embedding.gguf"), 2048);
         let catalog = LlamaCppRouterCatalog::from_entries(vec![
             LlamaCppRouterCatalogEntry {
                 model_id: "llm/zeta/model".to_string(),
@@ -1818,10 +1944,10 @@ mod tests {
         assert!(preset.contains("model = /models/alpha.gguf"));
         assert!(preset.contains("alias = llm/zeta/model"));
         assert!(preset.contains(
-            "[embedding/qwen/model]\nmodel = /models/embedding.gguf\nalias = embedding/qwen/model\nembedding = true"
+            "[embedding/qwen/model]\nmodel = /models/embedding.gguf\nalias = embedding/qwen/model\nembedding = true\nbatch-size = 2048\nubatch-size = 2048\n"
         ));
         assert!(preset.contains(
-            "[reranker/qwen/model]\nmodel = /models/reranker.gguf\nalias = reranker/qwen/model\nreranking = true"
+            "[reranker/qwen/model]\nmodel = /models/reranker.gguf\nalias = reranker/qwen/model\nreranking = true\nbatch-size = 8192\nubatch-size = 8192"
         ));
     }
 

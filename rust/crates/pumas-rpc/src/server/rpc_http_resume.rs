@@ -37,20 +37,28 @@ impl Rpc {
     }
 
     async fn call(&mut self, method: &str) -> Value {
-        let request_id = self.next_id;
-        self.next_id += 1;
-        let response: Value = tokio::time::timeout(WATCHDOG, async {
-            self.client.post(format!("http://{}/rpc", self.address))
-                .json(&json!({"jsonrpc":"2.0", "id":request_id, "method":method, "params":{"downloadId":ID}}))
-                .send().await.unwrap().error_for_status().unwrap().json().await.unwrap()
-        }).await.expect("public RPC response watchdog");
-        assert_eq!(response["jsonrpc"], "2.0");
-        assert_eq!(response["id"], request_id);
+        let response = self.envelope(method, json!({"downloadId": ID})).await;
         assert!(
             response.get("error").is_none(),
             "unexpected RPC error: {response}"
         );
         response["result"].clone()
+    }
+
+    async fn envelope(&mut self, method: &str, params: Value) -> Value {
+        let request_id = self.next_id;
+        self.next_id += 1;
+        let response: Value =
+            tokio::time::timeout(WATCHDOG, async {
+                self.client.post(format!("http://{}/rpc", self.address))
+                .json(&json!({"jsonrpc":"2.0", "id":request_id, "method":method, "params":params}))
+                .send().await.unwrap().error_for_status().unwrap().json().await.unwrap()
+            })
+            .await
+            .expect("public RPC response watchdog");
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["id"], request_id);
+        response
     }
 
     async fn status(&mut self, status: &str, bytes: Option<u64>) -> Value {
@@ -104,7 +112,10 @@ async fn request(socket: &mut tokio::net::TcpStream) -> String {
             headers.push(socket.read_u8().await.unwrap());
         }
         let request = String::from_utf8(headers).unwrap().to_ascii_lowercase();
-        assert!(request.starts_with("get /acme/model/resolve/main/weights.gguf http/1.1"));
+        assert!(
+            request.starts_with("get /acme/model/resolve/main/weights.gguf http/1.1"),
+            "unexpected fixture request: {request}"
+        );
         assert!(
             !request.contains("authorization:"),
             "fixture must never load ambient credentials"
@@ -158,7 +169,10 @@ async fn retained_partial_rpc_http_resume_interrupts_retries_and_awaits_durable_
 
 async fn exercise_resume() {
     let temp = TempDir::new().unwrap();
-    let root = temp.path();
+    // Pumas persists download paths under its canonical root (on macOS
+    // /var is /private/var), so the fixture's paths must use it too.
+    let canonical_root = temp.path().canonicalize().unwrap();
+    let root = canonical_root.as_path();
     std::fs::create_dir_all(root.join("launcher-data")).unwrap();
     let destination = root.join("shared-resources/models/llm/acme/http-resume-model");
     std::fs::create_dir_all(&destination).unwrap();
@@ -177,6 +191,18 @@ async fn exercise_resume() {
     )
     .unwrap();
     std::fs::write(&sentinel, b"unrelated retained bytes").unwrap();
+    let delete_id = "reranker/clm-v0_1/weights-original";
+    let delete_target = root.join("shared-resources/models").join(delete_id);
+    std::fs::create_dir_all(&delete_target).unwrap();
+    std::fs::write(
+        delete_target.join("metadata.json"),
+        serde_json::to_vec(&json!({
+            "model_id": delete_id, "model_type": "reranker", "family": "clm-v0_1",
+            "official_name": "CLM-v0.1-8B-GGUF", "cleaned_name": "weights-original"
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let snapshot: PersistedDownload = serde_json::from_value(json!({
         "download_id":ID, "repo_id":"acme/model", "revision":null, "filename":"weights.gguf",
         "filenames":["weights.gguf"], "dest_dir":destination, "total_bytes":24, "status":"paused",
@@ -208,12 +234,12 @@ async fn exercise_resume() {
             .unwrap()
             .unwrap();
         let headers = request(&mut first).await;
-        // A cold partial has no live representation checkpoint: never append
-        // merely because a digest-backed selection authorizes explicit resume.
-        assert!(!headers.contains("range:"));
+        // The selected publisher SHA verifies the assembled acquisition;
+        // retained bytes determine the requested offset even on a cold owner.
+        assert!(headers.contains("range: bytes=8-"));
         requests.push(headers);
-        first.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
-        first.write_all(&source_bytes[..12]).await.unwrap();
+        first.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 16\r\nContent-Range: bytes 8-23/24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
+        first.write_all(&source_bytes[8..12]).await.unwrap();
         first_requested.send(()).unwrap();
         tokio::time::timeout(WATCHDOG, interrupted)
             .await
@@ -241,12 +267,12 @@ async fn exercise_resume() {
             .unwrap();
         let headers = request(&mut cold).await;
         assert!(
-            !headers.contains("range:"),
-            "fresh owner must reacquire representation evidence"
+            headers.contains("range: bytes=12-"),
+            "fresh owner must preserve the retained bytes"
         );
         requests.push(headers);
-        cold.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
-        cold.write_all(&source_bytes[..18]).await.unwrap();
+        cold.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 12\r\nContent-Range: bytes 12-23/24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
+        cold.write_all(&source_bytes[12..18]).await.unwrap();
         cold_requested.send(()).unwrap();
         tokio::time::timeout(WATCHDOG, cold_held)
             .await
@@ -259,13 +285,11 @@ async fn exercise_resume() {
             .unwrap()
             .unwrap();
         let headers = request(&mut successor).await;
-        // RPC resume reconstructs its workspace grant. The retained prefix is
-        // progress, not authority to reuse the predecessor's HTTP checkpoint.
-        assert!(!headers.contains("range:"));
+        // A paused RPC successor also retains all 18 received bytes.
+        assert!(headers.contains("range: bytes=18-"));
         assert!(!headers.contains("if-match:"));
         requests.push(headers);
-        successor.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
-        successor.write_all(&source_bytes[..18]).await.unwrap();
+        successor.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 6\r\nContent-Range: bytes 18-23/24\r\nETag: \"rpc-v1\"\r\nConnection: close\r\n\r\n").await.unwrap();
         successor.shutdown().await.unwrap();
         drop(successor);
 
@@ -295,6 +319,27 @@ async fn exercise_resume() {
         .unwrap()
         .unwrap();
     rpc.status("downloading", Some(12)).await;
+    let retained = document(root);
+    let deleted = rpc
+        .envelope("delete_model_with_cascade", json!({"model_id":delete_id}))
+        .await;
+    assert!(deleted.get("error").is_none(), "{deleted}");
+    assert_eq!(deleted["result"]["success"], true);
+    assert!(!delete_target.exists());
+    assert_eq!(std::fs::read(&partial).unwrap(), bytes[..12]);
+    assert_eq!(
+        document(root),
+        retained,
+        "another destination's download custody must not change"
+    );
+    let protected = rpc
+        .envelope("delete_model_with_cascade", json!({"model_id":MODEL_ID}))
+        .await;
+    assert_eq!(protected["error"]["code"], -32011, "{protected}");
+    assert_eq!(protected["error"]["message"], "A download or another operation is using this model library. Finish or cancel it, then try again.");
+    assert_eq!(std::fs::read(&partial).unwrap(), bytes[..12]);
+    assert_eq!(document(root), retained);
+    rpc.status("downloading", Some(12)).await;
     assert_eq!(rpc.call("resume_model_download").await["success"], false);
     assert_eq!(std::fs::read(&partial).unwrap(), bytes[..12]);
     assert!(!payload.exists());
@@ -302,7 +347,7 @@ async fn exercise_resume() {
     let failed = rpc.status("error", Some(12)).await;
     assert_eq!(
         failed["error"],
-        "The model download did not complete successfully."
+        "Download failed for artifact source: HTTP 403 Forbidden"
     );
     let failed_again = rpc.call("get_model_download_status").await;
     assert_eq!(failed_again, failed);

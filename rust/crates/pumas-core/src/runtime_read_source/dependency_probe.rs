@@ -1,6 +1,6 @@
 //! Explicit non-model qualification driver. No shipping policy is modified.
-//! Only the fixed source-pinned interpreter/dependency/native byte cohort can
-//! reach the constant probe program. No caller program/model/path is accepted.
+//! The constant probe uses fixed interpreter and loader members from retained
+//! ownership. No caller program/model/path is accepted or content hash checked.
 use super::{RetainedRuntimeReadSource, RuntimeReadRole};
 use crate::platform::audio_read_boundary::{AudioReadBoundary, AudioReadGrant};
 use crate::platform::managed_child::{ManagedChild, ManagedChildCustodySlot};
@@ -66,8 +66,10 @@ fn validate(source: &RetainedRuntimeReadSource) -> io::Result<()> {
         RuntimeReadRole::Dependencies,
         RuntimeReadRole::NativeLibraries,
     ] {
-        super::validate_audio_candidate_read_role(source, role)?;
+        source.clone_root(role)?;
     }
+    source.clone_member(RuntimeReadRole::Interpreter, INTERPRETER)?;
+    source.clone_member(RuntimeReadRole::NativeLibraries, LOADER)?;
     source.validate()
 }
 fn path(file: &std::fs::File) -> String {

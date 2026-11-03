@@ -1,5 +1,10 @@
 import type { BaseResponse } from './api-common';
-import type { CatalogSearchOutcome, LibraryModelMetadataOutcome } from '../generated/desktop-contract';
+import type {
+  CatalogSearchOutcome,
+  LibraryModelMetadataOutcome,
+  LibraryStatusResponse as DesktopLibraryStatusResponse,
+  NetworkStatusResponse as DesktopNetworkStatusResponse,
+} from '../generated/desktop-contract';
 
 // ============================================================================
 // Model Library Types (Phase 1A - Part 6)
@@ -178,18 +183,7 @@ export interface ImportBatchResponse extends BaseResponse {
 /**
  * Network status including circuit breaker state
  */
-export interface NetworkStatusResponse extends BaseResponse {
-  total_requests: number;
-  successful_requests: number;
-  failed_requests: number;
-  circuit_breaker_rejections: number;
-  retries: number;
-  success_rate: number;
-  /** Map of domain to circuit state (CLOSED, OPEN, HALF_OPEN) */
-  circuit_states: Record<string, string>;
-  /** Whether any circuit breaker is currently open (offline indicator) */
-  is_offline: boolean;
-}
+export type NetworkStatusResponse = DesktopNetworkStatusResponse;
 
 /**
  * FTS5 search response for local model library
@@ -283,17 +277,7 @@ export interface EmbeddedMetadataResponse extends BaseResponse {
 /**
  * Library status response
  */
-export interface GetLibraryStatusResponse extends BaseResponse {
-  indexing: boolean;
-  deep_scan_in_progress: boolean;
-  model_count: number;
-  pending_lookups?: number;
-  deep_scan_progress?: {
-    current: number;
-    total: number;
-    stage: string;
-  };
-}
+export type GetLibraryStatusResponse = DesktopLibraryStatusResponse;
 
 /**
  * Check files writable response

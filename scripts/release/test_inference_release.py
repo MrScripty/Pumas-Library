@@ -65,6 +65,18 @@ class ReleaseTests(unittest.TestCase):
                 for name, data in payloads.items():
                     self.assertEqual((target / name).read_bytes(), data)
 
+    def test_windows_module_paths_drop_the_verbatim_prefix(self):
+        # A module loaded through a canonical path is reported as \\?\D:\...
+        self.assertEqual(
+            support.without_verbatim_prefix("\\\\?\\D:\\a\\onnxruntime.dll"),
+            "D:\\a\\onnxruntime.dll",
+        )
+        self.assertEqual(
+            support.without_verbatim_prefix("\\\\?\\UNC\\host\\share\\ort.dll"),
+            "\\\\host\\share\\ort.dll",
+        )
+        self.assertEqual(support.without_verbatim_prefix("D:\\a\\ort.dll"), "D:\\a\\ort.dll")
+
     def test_native_target_rejects_unsupported_host_instead_of_assuming_linux(self):
         with (
             patch.object(support.platform, "system", return_value="Linux"),

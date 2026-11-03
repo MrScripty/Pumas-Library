@@ -1,7 +1,7 @@
 {
   "name": "pumas-library-frontend",
   "private": true,
-  "version": "0.8.0-rc.1",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -45,7 +45,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "~5.8.3",
     "typescript-eslint": "8.58.1",
-    "vite": "6.4.3",
+    "vite": "6.4.5",
     "vitest": "4.1.11"
   }
 }

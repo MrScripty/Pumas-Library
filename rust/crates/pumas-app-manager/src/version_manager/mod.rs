@@ -57,6 +57,7 @@ mod progress;
 pub mod size_calculator;
 mod state;
 mod torch_alternatives;
+mod torch_inspection;
 mod torch_preview;
 mod torch_read_source;
 mod torch_workspace;
@@ -73,6 +74,11 @@ pub use torch_alternatives::{
     TorchAlternativeDiscovery, TorchAlternativeMatch, TorchReleaseCombination,
     TorchReleaseDriverAvailability, TorchReleaseDriverStatus, TorchReleaseOptionsDiscovery,
     TorchReleaseOptionsStatus, TorchReleaseRecommendation,
+};
+pub use torch_inspection::{
+    TorchCapabilityProbe, TorchInstalledProbeReport, TorchInstalledRuntime,
+    TorchProbeAdapterStatus, TorchProbeCoreStatus, TorchProbeStatus, TorchPythonChoice,
+    TorchRuntimeOptions, TorchRuntimeSelection,
 };
 pub use torch_preview::{
     TorchArtifact, TorchPreview, TorchPreviewOutcome, TorchPreviewRejectionReason,
@@ -1093,7 +1099,6 @@ impl VersionManager {
                         build: "auto".to_owned(),
                         python: "auto".to_owned(),
                         adapter: "none".to_owned(),
-                        audio_candidate_recipe: false,
                         created: std::time::Instant::now(),
                     },
                 })
@@ -1106,7 +1111,6 @@ impl VersionManager {
                     build: "auto".to_owned(),
                     python: "auto".to_owned(),
                     adapter: "none".to_owned(),
-                    audio_candidate_recipe: false,
                     created: std::time::Instant::now(),
                 },
             })
@@ -3533,8 +3537,7 @@ mod tests {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
-    async fn native_receipt_post_rename_interruption_service_restart_refuses_changed_output_and_settles(
-    ) {
+    async fn native_receipt_post_rename_restart_refuses_empty_launcher_and_settles() {
         use sha2::Digest;
         use std::os::unix::fs::MetadataExt;
 
@@ -3730,7 +3733,7 @@ mod tests {
         drop(acquisition);
 
         // Alter only this fixture's receipt-bound launcher, preserving its inode.
-        std::fs::write(&launcher, b"altered receipt-bound launcher").unwrap();
+        std::fs::write(&launcher, b"").unwrap();
         let altered = snapshot(&destination);
         // The fixture source server is already closed. This does not directly
         // observe whether recovery attempts a request.
@@ -3749,9 +3752,9 @@ mod tests {
             Err(error) => error,
         };
         assert!(
-            error.to_string().contains(
-                "Native output differs from its durable llama.cpp receipt; recovery required"
-            ),
+            error
+                .to_string()
+                .contains("Native output has invalid owned paths or launcher; recovery required"),
             "{error}"
         );
         assert!(blocked_acquisition.shutdown().await.is_err());
@@ -4125,7 +4128,10 @@ mod tests {
                 Err(PumasError::InvalidParams { message })
                     if message == format!(
                         "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
-                        root.path().display(), child_pid
+                        pumas_library::platform::platform_display_path(
+                            &root.path().canonicalize().unwrap()
+                        ),
+                        child_pid
                     )
             ));
             assert_eq!(
@@ -4342,9 +4348,9 @@ mod tests {
             Err(error) => error,
         };
         assert!(
-            error.to_string().contains(
-                "Native output differs from its durable llama.cpp receipt; recovery required"
-            ),
+            error
+                .to_string()
+                .contains("Both staged and published llama.cpp output exist"),
             "{error}"
         );
         assert!(blocked_acquisition.shutdown().await.is_err());
@@ -5585,8 +5591,8 @@ mod tests {
             .await
             .expect("local Torch options must return promptly")
             .unwrap();
-        assert_eq!(options["defaultBuild"], "auto");
-        assert_eq!(options["pythons"][0]["id"], "auto");
+        assert_eq!(options.default_build, "auto");
+        assert_eq!(options.pythons[0].id, "auto");
         assert!(!root.path().join("launcher-data/managed-python").exists());
         let release_options = tokio::time::timeout(
             Duration::from_secs(2),
@@ -5643,7 +5649,6 @@ mod tests {
                 build: "auto".into(),
                 python: "auto".into(),
                 adapter: "none".into(),
-                audio_candidate_recipe: false,
                 created: std::time::Instant::now()
                     - torch_preview::PREVIEW_TTL
                     - Duration::from_secs(1),
@@ -6353,10 +6358,10 @@ mod tests {
             .unwrap();
         register_test_version(&owner, "v2.14.0").await;
         let options = observer.torch_runtime_options().await.unwrap();
-        assert_eq!(options["installed"][0]["tag"], "v2.14.0");
+        assert_eq!(options.installed[0].tag, "v2.14.0");
         owner.remove_version("v2.14.0").await.unwrap();
         let options = observer.torch_runtime_options().await.unwrap();
-        assert_eq!(options["installed"], serde_json::json!([]));
+        assert!(options.installed.is_empty());
     }
 
     #[tokio::test]

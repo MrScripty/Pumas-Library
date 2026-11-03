@@ -297,8 +297,9 @@ async fn seventh_descriptor_requires_selected_semantics_supported_profile_and_li
         if case != "unsupported_provider" {
             state.api.upsert_runtime_profile(config).await.unwrap();
         }
+        let before_capability_query = calls.lock().unwrap().clone();
         let value = caps(state).await;
-        assert_eq!(value["capabilities"].as_array().unwrap().len(), 7);
+        assert_eq!(value["capabilities"].as_array().unwrap().len(), 9);
         let descriptor = &value["capabilities"][6];
         assert_eq!(descriptor["capability"], "image_to_text");
         assert_eq!(descriptor["semantic_task"], "image_to_text");
@@ -324,7 +325,8 @@ async fn seventh_descriptor_requires_selected_semantics_supported_profile_and_li
                 descriptor["availability"]["reason"], reason,
                 "{case}: {value}"
             );
-            assert!(calls.lock().unwrap().is_empty(), "{case} reached backend");
+            let observed = calls.lock().unwrap().clone();
+            assert!(observed.is_empty(), "{case} reached backend: before_query={before_capability_query:?}, after_query={observed:?}");
         }
         backend.abort();
         let _ = backend.await;
@@ -349,7 +351,7 @@ async fn codec_format_count_and_option_errors_precede_every_backend_probe() {
         cases.push(request(named, count));
         for options in [
             json!({"kind":"text_generation","max_tokens":0}),
-            json!({"kind":"text_generation","max_tokens":2049}),
+            json!({"kind":"text_generation","temperature":-1}),
             json!({"kind":"text_generation","top_p":1.1}),
         ] {
             let mut value = request(named, image("png", PNG));

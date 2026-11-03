@@ -131,7 +131,18 @@ pub(super) async fn status_response(
         last_launch_error,
         last_launch_log,
         app_resources,
+        notices: degraded_notices(primary),
     })
+}
+
+/// Reasons for degraded subsystems that the user should see in status.
+pub(super) fn degraded_notices(primary: &PrimaryState) -> Vec<String> {
+    primary
+        .hf_client
+        .as_ref()
+        .and_then(|client| client.downloads_unavailable_reason())
+        .into_iter()
+        .collect()
 }
 
 pub(super) async fn system_resources_response(

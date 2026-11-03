@@ -74,10 +74,20 @@ with tempfile.TemporaryDirectory(prefix="pumas-packaged-inference-") as tmp:
                     return json.load(r)
 
             def rpc(method, params={}):
-                x = post("/rpc", {"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
-                if "error" in x:
-                    raise RuntimeError((method, x))
-                return x["result"]
+                # Startup reconciliation can briefly hold the library; Pumas
+                # reports that as a retryable conflict ("try again").
+                deadline = time.monotonic() + 120
+                while True:
+                    x = post(
+                        "/rpc", {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+                    )
+                    error = x.get("error")
+                    if error is None:
+                        return x["result"]
+                    conflict = (error.get("data") or {}).get("class") == "conflict"
+                    if not conflict or time.monotonic() >= deadline:
+                        raise RuntimeError((method, x))
+                    time.sleep(0.5)
 
             result = rpc(
                 "import_model_in_place",

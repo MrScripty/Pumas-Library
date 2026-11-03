@@ -3,7 +3,6 @@
 //! ambient pathname authority or permits adopting a replacement after release.
 
 use super::*;
-use crate::model_library::hashing::compute_dual_hash_reader;
 
 pub(crate) const IMPORT_DOCUMENT_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -151,13 +150,13 @@ impl DownloadRecoveryDestination {
     }
 
     /// Compare copy-time descriptor evidence with the complete held namespace.
-    /// No payload bytes are reread here; only the final publication proof hashes.
+    /// Historical copy-time hashes are retained without rereading payload bytes.
     pub(crate) fn capture_copied_import_payload(
         &self,
         files: BTreeMap<String, ImportFileIdentity>,
     ) -> Result<ImportPayloadIdentity> {
         self.validate_import_stage_bindings()?;
-        let (mut identity, _) = self.observe_import_payload(false)?;
+        let (mut identity, _) = self.observe_import_payload()?;
         let mut expected = identity.clone();
         expected.files = files;
         if !expected.same_bindings(&identity) {
@@ -176,7 +175,13 @@ impl DownloadRecoveryDestination {
 
     #[cfg(test)]
     pub(crate) fn capture_import_payload(&self, files: &[String]) -> Result<ImportPayloadIdentity> {
-        let (identity, _) = self.observe_import_payload(true)?;
+        let (mut identity, _) = self.observe_import_payload()?;
+        for (path, member) in &mut identity.files {
+            member.sha256 = crate::model_library::hashing::compute_dual_hash_reader(
+                &mut self.open_import_file(path)?,
+            )?
+            .sha256;
+        }
         if identity.files.keys().cloned().collect::<BTreeSet<_>>()
             != files.iter().cloned().collect()
         {
@@ -187,7 +192,7 @@ impl DownloadRecoveryDestination {
 
     pub(crate) fn verify_import_bindings(&self, expected: &ImportPayloadIdentity) -> Result<()> {
         self.require_import_bound()?;
-        let (observed, _) = self.observe_import_payload(false)?;
+        let (observed, _) = self.observe_import_payload()?;
         if !expected.same_bindings(&observed) {
             return Err(invalid_capability_path().into());
         }
@@ -205,18 +210,6 @@ impl DownloadRecoveryDestination {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(error) => Err(error.into()),
         }
-    }
-
-    pub(crate) fn verify_import_payload(&self, expected: &ImportPayloadIdentity) -> Result<()> {
-        self.verify_import_bindings(expected)?;
-        let (observed, _) = self.observe_import_payload(true)?;
-        if &observed != expected {
-            return Err(io::Error::other(
-                "Copied import payload identity, contents or completeness changed",
-            )
-            .into());
-        }
-        Ok(())
     }
 
     /// Called only by the finite import producer after its last callback and
@@ -241,7 +234,7 @@ impl DownloadRecoveryDestination {
             .import_released
             .lock()
             .map_err(|_| io::Error::other("Import custody lock poisoned"))? = true;
-        let (observed, children) = self.observe_import_payload(false)?;
+        let (observed, children) = self.observe_import_payload()?;
         if !expected.same_bindings(&observed) {
             return Err(io::Error::other(
                 "Copied import payload changed across descendant handle release; custody unknown",
@@ -268,21 +261,7 @@ impl DownloadRecoveryDestination {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn import_hash_pass_count(&self) -> usize {
-        self.import_hash_passes
-            .load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn observe_import_payload(
-        &self,
-        hash_contents: bool,
-    ) -> Result<(ImportPayloadIdentity, HeldChildren)> {
-        #[cfg(test)]
-        if hash_contents {
-            self.import_hash_passes
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        }
+    fn observe_import_payload(&self) -> Result<(ImportPayloadIdentity, HeldChildren)> {
         let root = self.directory(false)?;
         let mut identity = ImportPayloadIdentity {
             library_root: self.authority.root_identity,
@@ -291,13 +270,7 @@ impl DownloadRecoveryDestination {
             files: BTreeMap::new(),
         };
         let mut children = BTreeMap::new();
-        observe_directory(
-            &root,
-            Path::new(""),
-            &mut identity,
-            &mut children,
-            hash_contents,
-        )?;
+        observe_directory(&root, Path::new(""), &mut identity, &mut children)?;
         // Confirm the bound root again, without reacquiring ambient authority.
         if directory_identity(&self.directory(false)?)? != identity.stage {
             return Err(invalid_capability_path().into());
@@ -354,7 +327,6 @@ fn observe_directory(
     relative: &Path,
     identity: &mut ImportPayloadIdentity,
     children: &mut HeldChildren,
-    hash_contents: bool,
 ) -> Result<()> {
     for entry in directory.entries()? {
         let name = entry?.file_name();
@@ -371,7 +343,7 @@ fn observe_directory(
             let child = open_directory_chain(directory, Path::new(&name), false)?;
             let child_identity = directory_identity(&child)?;
             identity.directories.insert(portable, child_identity);
-            observe_directory(&child, &path, identity, children, hash_contents)?;
+            observe_directory(&child, &path, identity, children)?;
             children.insert(
                 path,
                 Arc::new(HeldDestination {
@@ -396,17 +368,12 @@ fn observe_directory(
                 return Err(invalid_capability_path().into());
             }
             let physical = filesystem_identity(&metadata).ok_or_else(invalid_capability_path)?;
-            let sha256 = if hash_contents {
-                compute_dual_hash_reader(&mut file.into_std())?.sha256
-            } else {
-                String::new()
-            };
             identity.files.insert(
                 portable,
                 ImportFileIdentity {
                     identity: physical,
                     size: metadata.len(),
-                    sha256,
+                    sha256: String::new(),
                 },
             );
         } else {
@@ -461,7 +428,7 @@ mod tests {
         target.rebind_import_payload(&proof).unwrap();
         assert!(target.import_component_exists("empty").unwrap());
         assert_eq!(target.file_len("component/weights").unwrap(), Some(7));
-        target.verify_import_payload(&proof).unwrap();
+        target.verify_import_bindings(&proof).unwrap();
     }
 
     #[test]

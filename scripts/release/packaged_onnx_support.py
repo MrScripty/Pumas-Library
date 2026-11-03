@@ -76,6 +76,15 @@ def child_environment(root):
     return environment
 
 
+def without_verbatim_prefix(path):
+    """Windows reports modules loaded through a canonical path as `\\\\?\\C:\\...`."""
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[len("\\\\?\\UNC\\") :]
+    if path.startswith("\\\\?\\"):
+        return path[len("\\\\?\\") :]
+    return path
+
+
 def windows_modules(pid):
     """Enumerate the owned process's mapped modules through the native PSAPI ABI."""
     from ctypes import wintypes
@@ -115,7 +124,7 @@ def windows_modules(pid):
             name = ctypes.create_unicode_buffer(32768)
             length = kernel.K32GetModuleFileNameExW(handle, module, name, len(name))
             package.require(0 < length < len(name) - 1, "mapped module path unavailable")
-            paths.append(Path(name.value).resolve())
+            paths.append(Path(without_verbatim_prefix(name.value)).resolve())
         return paths
     finally:
         kernel.CloseHandle(handle)
@@ -171,12 +180,16 @@ def loaded_runtime(pid, directory):
             for path in native_modules(pid, target)
             if path.name.lower().startswith(("onnxruntime", "libonnxruntime"))
         ]
-        package.require(expected in observed, "packaged ONNX runtime was not observed loaded")
+        package.require(
+            expected in observed,
+            f"packaged ONNX runtime was not observed loaded: expected {expected}, "
+            f"observed {[str(path) for path in observed]}",
+        )
         for path in observed:
             package.require(
                 path.parent == directory
                 and path.name.casefold() in {name.casefold() for name in selected["files"]},
-                "ambient ONNX runtime mapping detected",
+                f"ambient ONNX runtime mapping detected: {path}",
             )
         verify_runtime(directory, target)
         return {

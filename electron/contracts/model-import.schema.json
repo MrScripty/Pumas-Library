@@ -1,0 +1,46 @@
+{
+  "format": "pumas-desktop-contract-1",
+  "dialect": "http://json-schema.org/draft-07/schema#",
+  "owner": "electron",
+  "description": "Native model-import picker result that Electron main returns to the renderer. Closed; preserve native path spelling, order and duplicates.",
+  "schemas": {
+    "ModelImportSelection": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "ModelImportSelection",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {"status": {"const": "cancelled"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {"status": {"const": "invalid"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {"status": {"const": "unavailable"}}
+        },
+        {
+          "description": "Native paths exactly as the picker returned them.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "paths"],
+          "properties": {
+            "status": {"const": "selected"},
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "minLength": 1, "pattern": "^[^\\u0000]*$"}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

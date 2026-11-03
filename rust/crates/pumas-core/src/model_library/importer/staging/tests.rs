@@ -1188,7 +1188,8 @@ async fn copied_import_notifier_empty_component_changes_refuse_publication_and_r
 }
 
 #[tokio::test]
-async fn copied_import_notifier_valid_same_size_index_rewrite_is_refused_and_retained() {
+async fn copied_import_notifier_valid_same_size_index_rewrite_refuses_metadata_and_cleans_owned_stage(
+) {
     let mut fixture = Fixture::new().await;
     let bundle = crate::model_library::importer::tests::create_external_diffusers_bundle(
         fixture.temp.path(),
@@ -1225,16 +1226,12 @@ async fn copied_import_notifier_valid_same_size_index_rewrite_is_refused_and_ret
                 "a still-valid index can disagree with prepared runtime metadata"
             );
         })));
-    let error = fixture
-        .importer
-        .import(&fixture.spec)
-        .await
-        .unwrap_err()
-        .to_string();
+    let result = fixture.importer.import(&fixture.spec).await.unwrap();
+    assert!(!result.success);
+    let error = result.error.unwrap();
     assert!(error.contains("model_index.json changed after metadata preparation"));
-    assert!(error.contains("cleanup failed"));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert_eq!(fixture.stages().len(), 1);
+    assert!(fixture.stages().is_empty());
     assert!(!fixture
         .library
         .build_model_path("diffusion", "fixture", "Owned Import")
@@ -1242,7 +1239,7 @@ async fn copied_import_notifier_valid_same_size_index_rewrite_is_refused_and_ret
     assert_eq!(std::fs::read(index_path).unwrap(), source_index);
     assert_eq!(fixture.library.model_dirs().count(), 0);
     assert_eq!(fixture.library.model_count().unwrap(), 0);
-    assert!(fixture.tasks.shutdown_owned().await.is_err());
+    fixture.tasks.shutdown_owned().await.unwrap();
 }
 mod publication;
 

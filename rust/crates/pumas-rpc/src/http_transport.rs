@@ -12,6 +12,10 @@ use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::future::Future;
 use std::io;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -20,6 +24,24 @@ use tokio::time::Instant;
 use tower::ServiceExt;
 
 const REQUEST_QUEUE_CAPACITY: usize = 64;
+/// Producer-only classification for a response that owns observations, never
+/// an unfinished operation. Content type and caller headers cannot issue it.
+#[derive(Clone)]
+pub(crate) struct ObservationStream;
+
+/// Only a sole, completed observation response has no delivery obligation.
+/// A second or pending request conservatively restores normal custody rules.
+#[derive(Default)]
+struct ConnectionResponses {
+    requests: AtomicUsize,
+    observations: AtomicUsize,
+}
+
+impl ConnectionResponses {
+    fn observation_only(&self) -> bool {
+        self.requests.load(Ordering::SeqCst) == 1 && self.observations.load(Ordering::SeqCst) == 1
+    }
+}
 // Transport recovery cadence, not an admitted-request or shutdown deadline.
 const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 pub(crate) const DEFAULT_HTTP_SHUTDOWN_GRACE_MS: u64 = 10_000;
@@ -111,8 +133,12 @@ async fn serve_connection(
     mut stopping: watch::Receiver<Option<Instant>>,
     shutdown: ShutdownRequest,
 ) -> Result<(), &'static str> {
+    let responses = Arc::new(ConnectionResponses::default());
+    let service_responses = responses.clone();
     let service = hyper::service::service_fn(move |request| {
         let requests = requests.clone();
+        let responses = service_responses.clone();
+        responses.requests.fetch_add(1, Ordering::SeqCst);
         async move {
             let (response, received) = oneshot::channel();
             let response = if requests
@@ -126,6 +152,9 @@ async fn serve_connection(
             } else {
                 StatusCode::SERVICE_UNAVAILABLE.into_response()
             };
+            if response.extensions().get::<ObservationStream>().is_some() {
+                responses.observations.fetch_add(1, Ordering::SeqCst);
+            }
             Ok::<_, Infallible>(response)
         }
     });
@@ -137,7 +166,7 @@ async fn serve_connection(
             break deadline;
         }
         tokio::select! {
-            result = &mut connection => return if result.is_err() && shutdown.is_requested() {
+            result = &mut connection => return if result.is_err() && shutdown.is_requested() && !responses.observation_only() {
                 Err("HTTP response transport failed during shutdown; completion unconfirmed")
             } else {
                 Ok(())
@@ -153,6 +182,9 @@ async fn serve_connection(
     // tasks remain in the supervisor's JoinSet and must still be observed.
     match tokio::time::timeout_at(deadline, &mut connection).await {
         Ok(Ok(())) => Ok(()),
+        // The exact producer has already returned; transport loss here only
+        // drops observations. Supervised handlers still drain independently.
+        _ if responses.observation_only() => Ok(()),
         Ok(Err(_)) => Err("HTTP response transport failed during shutdown; completion unconfirmed"),
         Err(_) => Err("HTTP shutdown grace expired; forcibly closed connection; response completion unconfirmed"),
     }
@@ -318,6 +350,55 @@ mod tests {
     };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::Notify;
+
+    #[test]
+    fn observation_classification_requires_one_completed_marked_response() {
+        for (requests, observations, expected) in [
+            (0, 0, false),
+            (1, 0, false),
+            (1, 1, true),
+            (2, 1, false),
+            (2, 2, false),
+        ] {
+            let responses = ConnectionResponses {
+                requests: AtomicUsize::new(requests),
+                observations: AtomicUsize::new(observations),
+            };
+            assert_eq!(responses.observation_only(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn sole_observation_stream_transport_close_is_a_clean_shutdown() {
+        let app = Router::new().route(
+            "/observe",
+            get(|| async {
+                let mut response = Body::from_stream(futures::stream::repeat(Ok::<_, Infallible>(
+                    Bytes::from(vec![b'x'; 1024 * 1024]),
+                )))
+                .into_response();
+                response.extensions_mut().insert(ObservationStream);
+                response
+            }),
+        );
+        let (address, shutdown, owner) = start(app).await;
+        let response = reqwest::Client::new()
+            .get(format!("http://{address}/observe"))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        shutdown.request();
+        // Preserve unread observation bytes: closing its transport has no
+        // operation acknowledgement obligation. The adjacent unmarked writer
+        // test must continue to fail its exact grace/receipt boundary.
+        tokio::time::timeout(Duration::from_secs(5), owner)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        drop(response);
+    }
 
     async fn start(
         app: Router,

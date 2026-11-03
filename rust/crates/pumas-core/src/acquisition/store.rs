@@ -752,7 +752,7 @@ fn document_with_partition(
     value: Value,
 ) -> Result<AcquisitionDocument> {
     let mut legacy = value.as_object().cloned().ok_or_else(invalid_schema)?;
-    if schema(&value) != Some(5) || legacy.contains_key("acquisitions") {
+    if !matches!(schema(&value), Some(5 | 6)) || legacy.contains_key("acquisitions") {
         return Err(invalid_schema());
     }
     legacy.remove("schema_version");
@@ -791,7 +791,11 @@ impl AcquisitionTransaction<'_> {
             None
         } else {
             let mut value: serde_json::Map<String, Value> = document.legacy.into_iter().collect();
-            value.insert("schema_version".into(), 5.into());
+            let version = value
+                .get("hf_model_partition_version")
+                .cloned()
+                .unwrap_or(5.into());
+            value.insert("schema_version".into(), version);
             Some(Value::Object(value))
         };
         Ok((partition, document.acquisitions))
@@ -833,7 +837,11 @@ impl AcquisitionTransaction<'_> {
             return Ok(None);
         }
         let mut value: serde_json::Map<String, Value> = document.legacy.into_iter().collect();
-        value.insert("schema_version".into(), 5.into());
+        let version = value
+            .get("hf_model_partition_version")
+            .cloned()
+            .unwrap_or(5.into());
+        value.insert("schema_version".into(), version);
         Ok(Some(Value::Object(value)))
     }
 

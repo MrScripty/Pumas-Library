@@ -6,7 +6,7 @@ function passedTrial(tag: string, generation: string): TorchStartupTrialOutcome 
   return {
     success: true, tag, profileId: 'managed-torch', startupStatus: 'passed',
     healthStatus: 'passed', protocol: 3, capabilities: [], generation,
-    startedByTrial: true, cleanup: 'not_needed',
+    startedByTrial: true, error: null, cleanup: 'not_needed',
   };
 }
 

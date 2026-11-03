@@ -449,13 +449,15 @@ describe('useModels', () => {
     expect(result.current.modelGroups).toEqual(grouped(['beta']));
   });
 
-  it('ignores invalid model-library update notifications', async () => {
-    let notifyModelLibraryUpdate: ((notification: unknown) => void) | null = null;
+  it('reloads models when a model-library update could not be delivered', async () => {
+    let reportUndelivered: ((reason: string) => void) | null = null;
 
     getElectronAPIMock.mockReturnValue({
-      onModelLibraryUpdate: vi.fn((callback: (notification: ModelLibraryUpdateNotification) => void) => {
-        notifyModelLibraryUpdate = (notification) =>
-          callback(notification as ModelLibraryUpdateNotification);
+      onModelLibraryUpdate: vi.fn((
+        _callback: (notification: ModelLibraryUpdateNotification) => void,
+        onError: (reason: string) => void,
+      ) => {
+        reportUndelivered = onError;
         return vi.fn();
       }),
     });
@@ -463,16 +465,15 @@ describe('useModels', () => {
     renderModelsHook();
 
     await flushMicrotasks();
+    expect(getModelsMock).toHaveBeenCalledTimes(1);
 
     act(() => {
-      notifyModelLibraryUpdate?.({
-        cursor: 'model-library-updates:2',
-        stale_cursor: false,
-      });
+      reportUndelivered?.('Desktop contract invalid for model-library update: Invalid desktop contract payload at /: unexpected field "extra".');
       vi.advanceTimersByTime(250);
     });
+    await flushMicrotasks();
 
-    expect(getModelsMock).toHaveBeenCalledTimes(1);
+    expect(getModelsMock).toHaveBeenCalledTimes(2);
   });
 
   it('cleans up model-library update subscriptions and pending debounce timers on unmount', async () => {

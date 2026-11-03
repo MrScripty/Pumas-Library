@@ -1,5 +1,6 @@
 //! Closed public types. Provider envelopes never cross this boundary.
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub const CONTRACT_VERSION: u32 = 1;
 pub const MAX_BYTES: usize = 32 * 1024 * 1024;
@@ -16,13 +17,20 @@ pub enum Capability {
     ImageToText,
     AudioTranscription,
     AudioClassification,
+    /// One embedding per image or per mixed text/image item, in the same
+    /// vector space as the model's text embeddings.
+    MultimodalEmbedding,
+    /// Typed questions about a state answered with probabilities by a native
+    /// decision model (llama.cpp `/v1/systemone`, e.g. Kev, OpenJev).
+    Decision,
 }
 impl Capability {
     pub fn path(self) -> Option<&'static str> {
         Some(match self {
             Self::ChatGeneration | Self::ImageToText => "/v1/chat/completions",
             Self::TextGeneration => "/v1/completions",
-            Self::TextEmbedding => "/v1/embeddings",
+            Self::TextEmbedding | Self::MultimodalEmbedding => "/v1/embeddings",
+            Self::Decision => "/v1/systemone",
             Self::ImageGeneration => "/v1/images/generations",
             Self::AudioTranscription | Self::AudioClassification => return None,
         })
@@ -74,6 +82,55 @@ pub enum OperationInput {
         sample_count: u64,
         data_base64: String,
     },
+    /// Items to embed; each item's text and image parts produce one vector.
+    ContentBatch {
+        items: Vec<ContentItem>,
+    },
+    /// A state and typed questions for a decision model.
+    Decision {
+        /// Content to evaluate: a string, or JSON given to the model as text.
+        state: serde_json::Value,
+        /// Question id to question. Each question is answered independently.
+        questions: BTreeMap<String, DecisionQuestion>,
+        /// Optional images, for decision models with a loaded projector.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<DecisionImage>,
+    },
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionType {
+    /// Pick one option; `criteria` maps option to description (or null).
+    Choice,
+    /// Rate on a scale; `criteria` lists level descriptions, lowest first.
+    Score,
+    /// Probability that the answer is true; optional `criteria` describes
+    /// `true` and `false`.
+    Noul,
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecisionQuestion {
+    #[serde(rename = "type")]
+    pub kind: DecisionType,
+    pub instructions: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub criteria: Option<serde_json::Value>,
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecisionImage {
+    pub encoding: ImageEncoding,
+    pub data_base64: String,
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContentItem {
+    pub parts: Vec<ImagePart>,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +188,7 @@ pub enum OutputFormat {
     EmbeddingsFloat32,
     PngBase64,
     Labels,
+    Decisions,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,6 +218,7 @@ pub enum OperationOptions {
         #[serde(default)]
         max_output_tokens: Option<u32>,
     },
+    Decision {},
 }
 /// The existing private speech owner's closed language vocabulary.
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -205,6 +264,33 @@ pub enum OperationResult {
         png_base64: String,
         seed: u32,
     },
+    Decisions {
+        answers: BTreeMap<String, DecisionAnswer>,
+        /// Prompt tokens evaluated across all questions, when reported.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input_tokens: Option<u64>,
+    },
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DecisionAnswer {
+    Choice {
+        choice: String,
+        probabilities: BTreeMap<String, f64>,
+        confidence: f64,
+    },
+    Score {
+        /// Probability-weighted level index; may fall between levels.
+        score: f64,
+        legend: BTreeMap<String, String>,
+        probabilities: BTreeMap<String, f64>,
+        confidence: f64,
+    },
+    Noul {
+        /// Probability that the answer is true.
+        noul: f64,
+    },
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -230,11 +316,91 @@ pub enum Outcome {
     NotAdmitted,
     Unknown,
 }
+impl ErrorCode {
+    /// Generic reason used when the rejecting site has no more specific fact.
+    pub fn default_message(self) -> &'static str {
+        match self {
+            Self::InvalidRequest => "the request is not valid for this operation",
+            Self::UnsupportedContract => "the requested contract_version is not supported",
+            Self::ModelNotFound => "no served model matches the requested model and profile",
+            Self::AmbiguousModel => {
+                "the model alias is served by more than one profile; supply profile"
+            }
+            Self::AmbiguousOperation => {
+                "more than one capability accepts this input and output; supply capability"
+            }
+            Self::UnsupportedModality => {
+                "the selected model has no capability for this input and output"
+            }
+            Self::CapabilityUnavailable => "the capability is not currently available",
+            Self::ProviderFailure => "the inference provider reported a failure",
+            Self::InvalidProviderResult => "the inference provider returned an invalid result",
+            Self::RequestLimit => "the request exceeds the accepted size",
+            Self::ResponseLimit => "the provider response exceeds the accepted size",
+            Self::TransportLost => "the connection to the caller or provider was lost",
+        }
+    }
+}
+/// A rejected or failed operation and the reason reported to the caller.
+///
+/// Messages describe the caller's request or the provider's reported failure;
+/// they never carry credentials or provider envelopes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rejection {
+    pub code: ErrorCode,
+    pub message: String,
+}
+impl Rejection {
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: bounded_message(message.into()),
+        }
+    }
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::InvalidRequest, message)
+    }
+}
+impl From<ErrorCode> for Rejection {
+    fn from(code: ErrorCode) -> Self {
+        Self {
+            code,
+            message: code.default_message().to_owned(),
+        }
+    }
+}
+/// Upper bound on a reported reason, in bytes.
+pub const MAX_MESSAGE_BYTES: usize = 1024;
+fn bounded_message(mut message: String) -> String {
+    if message.len() > MAX_MESSAGE_BYTES {
+        let mut end = MAX_MESSAGE_BYTES;
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        message.truncate(end);
+    }
+    message
+}
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize)]
 pub struct OperationError {
     pub code: ErrorCode,
     pub outcome: Outcome,
+    /// Human-readable reason. Consumers display or log it; they branch on `code`.
+    pub message: String,
+}
+impl OperationError {
+    pub fn new(rejection: Rejection, admitted: bool) -> Self {
+        Self {
+            code: rejection.code,
+            outcome: if admitted {
+                Outcome::Unknown
+            } else {
+                Outcome::NotAdmitted
+            },
+            message: rejection.message,
+        }
+    }
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
@@ -301,6 +467,39 @@ pub struct CapabilitiesResponse {
     pub max_request_bytes: usize,
     pub max_response_bytes: usize,
     pub max_stream_event_bytes: usize,
+    /// Context window configured for this serving, when the runtime reports it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u32>,
+    pub capabilities: Vec<CapabilityDescriptor>,
+}
+/// `GET /v1/served-models`: every served (model, profile) pair exactly once.
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Serialize)]
+pub struct ServedModelsResponse {
+    pub supported_contract_versions: Vec<u32>,
+    pub max_request_bytes: usize,
+    pub max_response_bytes: usize,
+    pub max_stream_event_bytes: usize,
+    pub models: Vec<ServedModelEntry>,
+}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+#[derive(Debug, Serialize)]
+pub struct ServedModelEntry {
+    /// The served alias callers put in `model`.
+    pub model: String,
+    /// The exact profile callers put in `profile`.
+    pub profile: String,
+    /// The library model identifier behind the alias.
+    pub model_id: String,
+    /// Serving provider, for example `llama_cpp`, `ollama`, `onnx_runtime`, `torch`.
+    pub provider: String,
+    /// Serving load state, for example `loaded` or `loading`.
+    pub load_state: String,
+    /// Context window configured for this serving, when the runtime reports it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u32>,
+    /// True when the alias is also served by another profile; callers must send `profile`.
+    pub profile_required: bool,
     pub capabilities: Vec<CapabilityDescriptor>,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -325,6 +524,8 @@ pub enum SemanticTask {
     SpeechToText,
     AudioClassification,
     ImageToText,
+    MultimodalEmbedding,
+    Decision,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -338,6 +539,8 @@ pub enum InputFormat {
     TextBatch,
     PcmS16le,
     PcmF32le,
+    ContentBatch,
+    Decision,
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 #[derive(Debug, Serialize)]
@@ -349,6 +552,33 @@ pub enum Availability {
 impl Availability {
     pub fn available(&self) -> bool {
         matches!(self, Self::Available)
+    }
+    pub fn reason_text(&self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Unavailable { reason } => reason.description(),
+        }
+    }
+}
+impl AvailabilityReason {
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::UnsupportedAdapter => {
+                "unsupported_adapter: the serving provider has no adapter for this capability"
+            }
+            Self::UnqualifiedAudioRuntime => {
+                "unqualified_audio_runtime: no qualified audio runtime is serving this model"
+            }
+            Self::UnknownModelTask => {
+                "unknown_model_task: the model's library record does not state its task"
+            }
+            Self::ModelTaskMismatch => {
+                "model_task_mismatch: the model's recorded task does not support this capability"
+            }
+            Self::RuntimeUnavailable => {
+                "runtime_unavailable: the serving runtime is not ready for this model"
+            }
+        }
     }
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -458,9 +688,23 @@ mod image_to_text_schema_tests {
             ),
         ];
         let capability_schema = serde_json::to_value(schemars::schema_for!(Capability)).unwrap();
-        let capabilities = capability_schema["enum"].as_array().unwrap();
+        // Documented variants are emitted as `oneOf` entries instead of `enum`.
+        let capabilities: Vec<Value> = match capability_schema["enum"].as_array() {
+            Some(values) => values.clone(),
+            None => capability_schema["oneOf"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|variant| {
+                    variant["enum"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_else(|| vec![variant["const"].clone()])
+                })
+                .collect(),
+        };
         assert_eq!(
-            capabilities,
+            &capabilities,
             &vec![
                 json!("chat_generation"),
                 json!("text_generation"),
@@ -469,8 +713,10 @@ mod image_to_text_schema_tests {
                 json!("image_to_text"),
                 json!("audio_transcription"),
                 json!("audio_classification"),
+                json!("multimodal_embedding"),
+                json!("decision"),
             ],
-            "closed consumers must adopt the complete producer capability vocabulary"
+            "new capabilities are appended; consumers ignore ones they do not use"
         );
         let input_schema = serde_json::to_value(schemars::schema_for!(InputFormat)).unwrap();
         let formats = input_schema["enum"].as_array().unwrap();
@@ -494,11 +740,12 @@ mod image_to_text_schema_tests {
             if field == "stream" {
                 bad["stream"] = json!(true);
             } else {
-                bad["options"]["max_tokens"] = json!(2049);
+                bad["options"]["max_tokens"] = json!(0);
             }
             let parsed: OperationRequest = serde_json::from_value(bad).unwrap();
             assert_eq!(
-                projection::validate_image_to_text_request(&parsed),
+                projection::validate_image_to_text_request(&parsed)
+                    .map_err(|rejection| rejection.code),
                 Err(ErrorCode::InvalidRequest)
             );
         }

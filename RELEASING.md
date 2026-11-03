@@ -29,7 +29,7 @@ Do not dispatch this merely because a PR is green. Complete native artifact and
 trained-model acceptance before the maintainer's later tag/publication decision.
 The same existing package jobs and final inventory checker serve rehearsals and
 tags; branch rehearsal does not imply a prerelease or final release. A tag must
-match source manifests exactly. Current `0.8.0-rc.1` must never be tagged `v0.8.0`.
+match source manifests exactly; the manifests identify `0.8.0`.
 
 1. Update `CHANGELOG.md` and the version's release notes. Keep an empty
    `Unreleased` section for subsequent changes.
@@ -62,7 +62,7 @@ failures.
 ```bash
 pnpm install --frozen-lockfile
 npm run check:dependency-ownership
-npm run check:release-versions -- v0.8.0-rc.1
+npm run check:release-versions -- v0.8.0
 node --test scripts/release/*.test.mjs
 ./scripts/rust/check.sh
 cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --profile ci-test
@@ -146,7 +146,7 @@ crate archives and host-binding bundles are not release assets.
 
 ## Attribution and artifact metadata
 
-The checked-in [attribution collection](docs/release-attribution/0.8.0-rc.1/README.md)
+The checked-in [attribution collection](docs/release-attribution/0.8.0/README.md)
 is embedded in desktop packages. After dependency or manifest changes, run
 `python3 scripts/release/generate-notices.py` and review the source-text inventory.
 CI and Electron beforePack reject missing or stale attribution. Preserve
@@ -181,8 +181,8 @@ untrained ONNX graph through its own extracted Pumas binary, observes the pinned
 native runtime mapping, and requires graceful shutdown. Its separately labeled
 fixture hashes and lifecycle log are execution evidence, not pretrained Nomic
 acceptance or embedding-quality evidence. No model weights are downloaded.
-The integrated candidate identity is `0.8.0-rc.1`. This source-version preparation
-does not publish a tag or release and does not qualify native model execution.
+The source version is `0.8.0`. Setting it does not publish a tag or release and
+does not qualify native model execution.
 The producer requires source version 0.8; older 0.7 sources fail before compilation.
 After manifest or dependency changes, regenerate/review the matching `<version>`
 and `<version>-s3` attribution directories. The generator and inference producer

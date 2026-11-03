@@ -207,6 +207,18 @@ def sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def checksum_inventory(directory, names):
+    """`SHA256SUMS` bytes for `names` in `directory`.
+
+    Names are ordered as code points and lines end in LF on every host:
+    Windows paths sort case-insensitively and text mode writes CRLF, which
+    made a Windows-built inventory disagree with its own verification.
+    """
+    return "".join(f"{sha256(directory / name)}  {name}\n" for name in sorted(names)).encode(
+        "utf-8"
+    )
+
+
 def unique_object(pairs):
     result = {}
     for key, value in pairs:
@@ -496,8 +508,9 @@ def assemble(inputs, build_record, runtime_record, contract, schema, output):
         check_manifest(manifest)
         (stage / target["binary"]).chmod(0o755)
         (stage / "manifest.json").write_bytes(canonical(manifest))
-        sums = "".join(f"{sha256(member)}  {member.name}\n" for member in sorted(stage.iterdir()))
-        (stage / "SHA256SUMS").write_text(sums)
+        (stage / "SHA256SUMS").write_bytes(
+            checksum_inventory(stage, [member.name for member in stage.iterdir()])
+        )
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary_output = output.with_name(output.name + ".partial")
         require(not temporary_output.exists(), "partial output already exists")
@@ -667,13 +680,11 @@ def extract_verified(archive_path, expected_sha256, destination):
                         sha256(destination / name) == manifest["files"][name]["sha256"],
                         "payload hash mismatch",
                     )
-            expected_sums = "".join(
-                f"{sha256(destination / name)}  {name}\n"
-                for name in sorted(entries)
-                if name != "SHA256SUMS"
-            )
             require(
-                (destination / "SHA256SUMS").read_text() == expected_sums,
+                (destination / "SHA256SUMS").read_bytes()
+                == checksum_inventory(
+                    destination, [name for name in entries if name != "SHA256SUMS"]
+                ),
                 "inner checksum inventory mismatch",
             )
             require(

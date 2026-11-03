@@ -88,12 +88,18 @@ function startTelemetry(loadInitial: boolean) {
 
   const electronAPI = getElectronAPI();
   if (!unsubscribeTelemetry && electronAPI?.onStatusTelemetryUpdate) {
-    unsubscribeTelemetry = electronAPI.onStatusTelemetryUpdate((notification) => {
-      applySnapshot(notification.snapshot, { preserveEnrichedStatusFields: true });
-      if (notification.snapshot_required) {
+    unsubscribeTelemetry = electronAPI.onStatusTelemetryUpdate(
+      (notification) => {
+        applySnapshot(notification.snapshot, { preserveEnrichedStatusFields: true });
+        if (notification.snapshot_required) {
+          void fetchStatusTelemetrySnapshot({ queueIfInFlight: true });
+        }
+      },
+      (reason) => {
+        logger.warn('Status telemetry update not delivered; reloading', { reason });
         void fetchStatusTelemetrySnapshot({ queueIfInFlight: true });
       }
-    });
+    );
   }
 
   if (loadInitial && !hasLoadedSnapshot) {

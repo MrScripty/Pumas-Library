@@ -284,7 +284,7 @@ pub(crate) fn confirmed_receipt_matches(
     library_root: &Path,
     model_dir: &Path,
     metadata: &ModelMetadata,
-    verify_payload: bool,
+    verify_bindings: bool,
 ) -> Result<bool> {
     if metadata.import_publication.is_none() {
         return Ok(true);
@@ -294,13 +294,13 @@ pub(crate) fn confirmed_receipt_matches(
     }
     let root = crate::model_library::DownloadDestinationRoot::open_import_read_only(library_root)?;
     let destination = root.resolve(model_dir)?;
-    held_confirmed_receipt_matches(&destination, metadata, verify_payload)
+    held_confirmed_receipt_matches(&destination, metadata, verify_bindings)
 }
 
 pub(crate) fn held_confirmed_receipt_matches(
     destination: &DownloadRecoveryDestination,
     metadata: &ModelMetadata,
-    verify_payload: bool,
+    verify_bindings: bool,
 ) -> Result<bool> {
     let Some(identity) = metadata.import_publication.as_ref() else {
         return Ok(true);
@@ -312,8 +312,10 @@ pub(crate) fn held_confirmed_receipt_matches(
     let matches = receipt.id == identity.id
         && receipt.state == ReceiptState::Confirmed
         && destination.import_payload_root_matches(&receipt.payload)?;
-    if matches && verify_payload {
-        destination.verify_import_payload(&receipt.payload)?;
+    if matches && verify_bindings {
+        // Confirmed checksums remain acquisition evidence. Normal readiness
+        // observes names, sizes and physical ownership without rehashing.
+        destination.verify_import_bindings(&receipt.payload)?;
     }
     Ok(matches)
 }
@@ -402,7 +404,7 @@ impl ImportPublication {
             ));
         }
         self.verify_receipt(&destination)?;
-        destination.verify_import_payload(&self.receipt.payload)?;
+        destination.verify_import_bindings(&self.receipt.payload)?;
         Ok(VerifiedPublication {
             publication: self,
             destination,

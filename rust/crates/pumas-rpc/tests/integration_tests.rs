@@ -135,7 +135,9 @@ fn create_tracked_partial_test_model(root: &std::path::Path, status: &str) -> &'
         "revision": null,
         "filename": "weights.gguf",
         "filenames": ["weights.gguf"],
-        "dest_dir": root.join("shared-resources/models").join(model_id),
+        // The server persists download paths under its canonical root (on
+        // macOS /var is /private/var).
+        "dest_dir": root.canonicalize().unwrap().join("shared-resources/models").join(model_id),
         "total_bytes": 100,
         "status": status,
         "download_request": {
@@ -1516,7 +1518,7 @@ mod tests {
         assert_eq!(error.get("code").and_then(|v| v.as_i64()), Some(-32602));
         assert_eq!(
             error.get("message").and_then(Value::as_str),
-            Some("Request parameters are invalid.")
+            Some("Invalid parameters: keep_latest must be >= 0")
         );
         assert_eq!(
             error.pointer("/data/class").and_then(Value::as_str),
@@ -2215,7 +2217,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn debug_rpc_process_does_not_disclose_credentials_or_private_locators() {
+    async fn debug_rpc_process_does_not_log_locators_or_disclose_credentials() {
         const SENTINEL_TOKEN: &str = "hf_test_rpc_secret_do_not_disclose";
         const SENTINEL_PATH_FRAGMENT: &str = "private-rpc-path-sentinel";
         const SENTINEL_URL_FRAGMENT: &str = "private-rpc-url-sentinel";
@@ -2284,9 +2286,8 @@ mod tests {
         assert!(!diagnostics.contains(SENTINEL_TOKEN));
         assert!(!diagnostics.contains(SENTINEL_PATH_FRAGMENT));
         assert!(!diagnostics.contains(SENTINEL_URL_FRAGMENT));
+        // Errors explain the caller's own rejected input but never credentials.
         assert!(!responses.contains(SENTINEL_TOKEN));
-        assert!(!responses.contains(SENTINEL_PATH_FRAGMENT));
-        assert!(!responses.contains(SENTINEL_URL_FRAGMENT));
 
         server.stop().await;
     }

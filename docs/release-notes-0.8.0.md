@@ -1,8 +1,7 @@
-# Pumas Library 0.8.0 candidate
+# Pumas Library 0.8.0
 
-Status: source checkpoint preparation. Current manifests are `0.8.0-rc.1`.
-There is no final v0.8.0 tag, accepted installer set or publication decision in
-this change. [Release QA](release-qa-0.8.0.md) owns candidate identity, observed
+Status: source manifests identify `0.8.0`; the release is not yet tagged or
+published. [Release QA](release-qa-0.8.0.md) owns candidate identity, observed
 consumer revisions, evidence and remaining gates.
 
 ## Consumer-visible changes
@@ -31,6 +30,21 @@ ONNX/Safetensors/Diffusers imports through the public S3 GGUF path.
 The current S3 checks use controlled HTTPS fixtures; they do not certify AWS,
 non-AWS providers or MinIO endpoint combinations. Those provider-specific claims
 retain their existing AQ-S3 acceptance gate.
+
+### Typed API for consumers
+
+Start from `GET /v1/served-models`: it lists each served model and profile with
+its capabilities and runtime limits. A request needs only `model`, `input` and
+`output`; add `capability` when Pumas reports `ambiguous_operation`, and
+`profile` when `profile_required` is true. Every error has a stable `code`, an
+`outcome` and a human-readable `message`. Responses grow additively within
+contract version 1, so consumers must ignore fields, capabilities and enum
+values they do not use. New capabilities: `multimodal_embedding` (EmbeddingGemma
+2 and other projector-backed embedders; EmbeddingGemma 2 needs llama.cpp b11454
+or newer, the first published build with its `gemma-embedding2` architecture)
+and `decision` (llama.cpp decision models such as Kev and OpenJev, which need
+llama.cpp b11429 or newer). See the
+[model operations contract](contracts/model-operations-v1.md).
 
 ## Existing libraries and migration
 

@@ -525,8 +525,10 @@ test('conversion decoder rejects old field names and unsafe numeric evidence', (
   const valid = fixtures.conversion_progress[0];
   for (const patch of [{progress:-0.1},{progress:1.1},{bytesWritten:9007199254740992},
     {tensorsCompleted:-1},{tensorsTotal:0.5},{status:'unknown'},{direction:'unknown'},
-    {conversion_id:'legacy'},{extra:true},{error:'/private/diagnostic'},
+    {conversion_id:'legacy'},{extra:true},{error:'x'.repeat(1025)},
   ]) assert.equal(contract.decodeConversionProgressResponse({...valid,progress:{...valid.progress,...patch}}).status, 'invalid');
+  // A failed conversion carries its public reason.
+  assert.equal(contract.decodeConversionProgressResponse({...valid,progress:{...valid.progress,error:'Disk full writing model.gguf'}}).status, 'valid');
   const missingNull = structuredClone(valid);
   delete missingNull.progress.currentTensor;
   assert.equal(contract.decodeConversionProgressResponse(missingNull).status, 'invalid');
@@ -541,20 +543,23 @@ test('setup snapshots preserve all producer states, identities and explicit idle
       assert.equal(result.status, 'valid');
       assert.deepEqual(JSON.parse(JSON.stringify(result.value)), response);
       assert.equal(Object.isFrozen(result.value.setup), true);
-      assert.equal(JSON.stringify(result.value).includes('/secret/'), false);
+      // A failed setup reports the producer's reason unchanged.
+      if (response.setup?.status === 'failed') assert.equal(result.value.setup.error, response.setup.error);
     }
   }
   assert.deepEqual(JSON.parse(JSON.stringify(contract.decodeConversionSetupStatusOutcome(fixtures.conversion_setup_idle).value)), {success:true,setup:null});
   assert.equal(contract.decodeConversionSetupStartedOutcome(fixtures.conversion_setup_idle).status, 'invalid');
 });
 
-test('setup decoders reject contradictory status, malformed identity and raw diagnostics', () => {
+test('setup decoders reject contradictory status, malformed identity and unbounded reasons', () => {
   const active = fixtures.conversion_setup_started[0];
   for (const patch of [{operationId:''}, {operationId:'old-id'}, {operationId:active.setup.operationId.toUpperCase()},
     {operationId:`${active.setup.operationId}\n`}, {operation_id:active.setup.operationId}, {status:'ready'},
-    {status:'failed',error:null}, {error:'Conversion environment setup did not complete successfully.'},
-    {status:'failed',error:'/private/diagnostic'}, {extra:true},
+    {status:'failed',error:null}, {error:'Setup failed while installing a dependency.'},
+    {status:'failed',error:'x'.repeat(1025)}, {extra:true},
   ]) assert.equal(contract.decodeConversionSetupStartedOutcome({...active,setup:{...active.setup,...patch}}).status, 'invalid');
+  // A failed setup with a bounded reason is valid.
+  assert.equal(contract.decodeConversionSetupStartedOutcome({...active,setup:{...active.setup,status:'failed',error:'pip exited with status 1'}}).status, 'valid');
   const missing = structuredClone(active);
   delete missing.setup.error;
   assert.equal(contract.decodeConversionSetupStartedOutcome(missing).status, 'invalid');
@@ -732,5 +737,65 @@ test('actual model lookup producer reports cross the versioned migration decoder
   assert.equal(contract.decodeModelLookupParams({model_id:'llm/fixture/lookup'}).status, 'valid');
   for (const model_id of ['', ' a/b', 'a/b ', 'a/x y', 'C:/a/b', 'a/../b', 'a/./b', 'a//b', 'a/b/', 'a\\b', 'a\nb', 'x'.repeat(4097)]) {
     assert.equal(contract.decodeModelLookupParams({model_id}).status, 'invalid');
+  }
+});
+
+test('Torch inspection outcomes made by Rust decode exactly and reject contradictions', () => {
+  const decoders = {
+    torch_runtime_options: contract.decodeTorchRuntimeOptionsOutcome,
+    torch_runtime_probe: contract.decodeTorchRuntimeProbeOutcome,
+    torch_alternatives: contract.decodeTorchAlternativesOutcome,
+    torch_trial_failed: contract.decodeTrialTorchRuntimeOutcome,
+  };
+  for (const [key, decode] of Object.entries(decoders)) {
+    const result = decode(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+    assert.equal(decode({...fixtures[key], extra: true}).status, 'invalid', `${key} is closed`);
+  }
+  const options = fixtures.torch_runtime_options;
+  const probe = fixtures.torch_runtime_probe;
+  const alternatives = fixtures.torch_alternatives;
+  const trial = fixtures.torch_trial_failed;
+  for (const [decode, value] of [
+    [decoders.torch_runtime_options, {...options, defaultAdapter: 'cohere-asr'}],
+    [decoders.torch_runtime_options, {...options, installed: [{...options.installed[0], qualification: 'maybe'}]}],
+    [decoders.torch_runtime_probe, {...probe, adapter_status: 'passed'}],
+    [decoders.torch_runtime_probe, {...probe, staleReasons: undefined}],
+    [decoders.torch_runtime_probe, {...probe, capabilities: {torch_import: {status: 'passed'}}}],
+    [decoders.torch_alternatives, {...alternatives, incomplete: false}],
+    [decoders.torch_alternatives, {...alternatives, status: 'complete'}],
+    [decoders.torch_trial_failed, {...trial, cleanup: 'unknown'}],
+    [decoders.torch_trial_failed, {...trial, healthStatus: 'skipped'}],
+  ]) {
+    assert.equal(decode(value).status, 'invalid', JSON.stringify(value));
+  }
+});
+
+test('update-stream payloads made by Rust decode exactly and stay closed', () => {
+  const decoders = {
+    model_library_update: contract.decodeModelLibraryUpdateNotification,
+    model_library_update_resync: contract.decodeModelLibraryUpdateNotification,
+    runtime_profile_update: contract.decodeRuntimeProfileUpdateFeed,
+    serving_status_update: contract.decodeServingStatusUpdateFeed,
+    status_telemetry_update: contract.decodeStatusTelemetryUpdateNotification,
+    download_push: contract.decodeModelDownloadUpdateOutcome,
+  };
+  for (const [key, decode] of Object.entries(decoders)) {
+    const result = decode(fixtures[key]);
+    assert.equal(result.status, 'valid', `${key}: ${result.message}`);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+    const invalid = decode({...fixtures[key], extra: true});
+    assert.equal(invalid.status, 'invalid', `${key} is closed`);
+    assert.match(invalid.message, /unexpected field "extra"/);
+  }
+  const telemetry = fixtures.status_telemetry_update;
+  for (const value of [
+    {...telemetry, snapshot: {...telemetry.snapshot, revision: -1}},
+    {...telemetry, snapshot: {...telemetry.snapshot, status: {...telemetry.snapshot.status, notices: [42]}}},
+    {...fixtures.runtime_profile_update, events: [{...fixtures.runtime_profile_update.events[0], provider: 'unknown'}]},
+  ]) {
+    const decode = value.snapshot ? decoders.status_telemetry_update : decoders.runtime_profile_update;
+    assert.equal(decode(value).status, 'invalid', JSON.stringify(value).slice(0, 120));
   }
 });

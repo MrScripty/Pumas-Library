@@ -238,7 +238,7 @@ async fn candidate_requires_every_runtime_role_and_a_retained_interpreter_member
 }
 
 #[tokio::test]
-async fn candidate_rejects_self_consistent_but_unshipped_worker_bytes() {
+async fn candidate_accepts_installed_code_changes_without_claiming_qualification() {
     let model = ModelFixture::new().await;
     let runtime = RuntimeFixture::new();
     runtime.write(
@@ -247,12 +247,13 @@ async fn candidate_rejects_self_consistent_but_unshipped_worker_bytes() {
         b"untrusted replacement\n",
     );
     let installed = runtime.capture(None);
-    // A manifest that accurately describes those bytes still cannot select code.
     installed.validate().unwrap();
-    assert!(
-        InstalledAudioRuntimeCandidate::capture(installed, "bin/python3.12", model.prepare())
-            .is_err()
-    );
+    let selected = model.prepare();
+    let candidate =
+        InstalledAudioRuntimeCandidate::capture(installed, "bin/python3.12", selected.clone())
+            .unwrap();
+    assert!(!candidate.qualification_gaps().is_empty());
+    assert!(AudioRuntimeOwner::for_installed_runtime(candidate, &selected).is_err());
 }
 
 #[tokio::test]
@@ -517,7 +518,7 @@ async fn fixed_policy_refuses_self_consistent_unknown_interpreter_dependency_and
 }
 
 #[tokio::test]
-async fn installed_constructor_revalidates_actual_custody_before_any_ownership_transfer() {
+async fn installed_constructor_revalidates_file_bindings_before_ownership_transfer() {
     for (role, member) in [
         (RuntimeReadRole::Interpreter, "bin/python3.12"),
         (RuntimeReadRole::Dependencies, "controlled_dependency.py"),
@@ -532,7 +533,10 @@ async fn installed_constructor_revalidates_actual_custody_before_any_ownership_t
             selected.clone(),
         )
         .unwrap();
-        runtime.write(role, member, b"drift after candidate capture");
+        let path = runtime.path(role, member);
+        let successor = path.with_extension("successor");
+        std::fs::write(&successor, std::fs::read(&path).unwrap()).unwrap();
+        std::fs::rename(successor, path).unwrap();
         assert!(matches!(
             AudioRuntimeOwner::for_fixed_installed_fixture(candidate, &selected),
             Err(AudioCustodyError::Unavailable)
@@ -637,18 +641,11 @@ async fn experimental_attempt_does_not_accept_fixture_recipe_or_retarget_allocat
     let selected = model.prepare();
     let foreign = other.prepare();
     let installed = runtime.capture(None);
-    // Each executable role has its own source-fixed comparison. Coherent dummy
-    // bytes and the absence of a native cohort are never an opt-in bypass.
-    for role in [
-        RuntimeReadRole::Interpreter,
-        RuntimeReadRole::Dependencies,
-        RuntimeReadRole::NativeLibraries,
-    ] {
-        assert!(
-            crate::runtime_read_source::validate_audio_candidate_read_role(&installed, role)
-                .is_err()
-        );
-    }
+    // A missing native role remains unavailable without manufacturing runtime
+    // qualification from historical checksums or caller-supplied metadata.
+    assert!(installed
+        .clone_root(RuntimeReadRole::NativeLibraries)
+        .is_err());
     let candidate = InstalledAudioRuntimeCandidate::capture(
         installed.clone(),
         "bin/python3.12",

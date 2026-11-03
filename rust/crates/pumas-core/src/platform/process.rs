@@ -9,12 +9,9 @@ use crate::error::{PumasError, Result};
 use std::process::Command;
 use tracing::{debug, warn};
 
-/// Compare open file identities before deleting owned process metadata.
+/// Compare the physical identities of two open files without reading contents.
 #[allow(unsafe_code)]
-pub(crate) fn same_file_identity(
-    left: &std::fs::File,
-    right: &std::fs::File,
-) -> std::io::Result<bool> {
+pub fn same_file_identity(left: &std::fs::File, right: &std::fs::File) -> std::io::Result<bool> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;

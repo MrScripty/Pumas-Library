@@ -124,3 +124,55 @@ Planning review disposition: ready for implementation selection; **no code
 compliance or objective acceptance is claimed**. At start, current state or
 standards changes can require replanning. Final scoped code compliance requires
 actual implementation review and all C1–C10 evidence, not this planning result.
+
+## Implementation review, 2026-10-12
+
+Rerouted expanded scope: `snapshot:v1:f4fcbbd8-2656-401a-8a4d-d015d4faa168`,
+43 policies, zero unresolved fact categories. All exact selected content acquired.
+This is scoped source review with the evidence limits in M1–M3, not universal
+repository certification or acceptance of missing native/composed claims.
+
+- Ownership/architecture/code-design/library/persistence/API: the deep internal
+  resolution operation hides matching, physical authority, transaction and queue
+  settlement. The facade returns exact typed identities and results. One existing
+  store publication preserves original Error and exact released admission; no SQL
+  authority, second journal, global registry or payload operation was added.
+- Concurrency/async/resilience/security: acquire the existing native grant and
+  sorted destination exclusions, hold download state exclusion through an owned
+  drained blocking publication, then settle live custody before success. Strict
+  inventory retains both targets during uncertainty. Generation fences prevent
+  stale reconstruction. Pure observers have explicit producer-only transport
+  classification; pending/multiple/operation streams retain their failure receipt.
+- Contracts/evolution/schemas/generated-contract/IPC: core owns domain admission;
+  Rust RPC owns representation. The existing draft-07 exporter/AJV generator owns
+  wire validation. No keyword, vocabulary or custom interpreter was added. Six
+  outputs are freshly derived; actual-producer conformance, compiled-preload shape
+  closure and all eleven outcomes, real HTTP and desktop consumers are exercised.
+  HF-6 scopes only persisted HF meaning; envelope 7 and old RPC responses stay
+  separately owned. Exact older direct readers and an actual older RPC client
+  were tested independently; no compatibility promise was inferred from projection.
+- Frontend/TypeScript/accessibility/diagnostics: recovery is driven by exact raw
+  failed download identity independently of catalog joins/filters; ambiguity needs
+  explicit selection, Cancel is read-only, lost acknowledgement retries one UUID,
+  stale/busy results allow inspection again. Modal focus, status/alert, warning,
+  disabled in-flight controls and native keyboard confirmation are verified.
+- Dependencies/build/tooling/licensing/release/Rust release: frozen dependency
+  inputs, existing toolchains and standard-library helpers; no new application
+  dependency/license obligation. Preserve existing notice inventory and normal
+  optimized release profile. Distinct review package and provenance are required
+  before claiming delivery, without push/tag/host-install authority.
+- Commit/planning/documentation/proportionality: exact admitted files only; separate
+  transport and harness repairs; active hooks; original dirty checkout preserved.
+  Durable contract, ADR, runbook and release notes own lasting meaning. Explicit
+  M2 re-plan records the discovered shutdown issue and limits the producer family.
+- Cross-platform/Rust cross-platform/platform verification/GUI/oracles/verification:
+  stat/capability mechanics reuse existing native implementations. Linux real
+  desktop and independent file/store/producer observations are available. New
+  macOS/Windows CI results, complete watcher interleaving and controlled interruption
+  evidence are unavailable, explicitly preventing full C1–C10 acceptance.
+
+Source review found and closed: whole-catalog materialization (bounded candidate
+query), transport error for deleted preview candidate (typed StaleObservation),
+pre-write refusal confused with publication uncertainty, weak persisted file-stat
+shape validation, and observation disconnect poisoning instance shutdown. These
+fixes preserve original files and existing acquisition/download guards.

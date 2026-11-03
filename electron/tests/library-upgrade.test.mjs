@@ -26,7 +26,7 @@ test('upgrade requires both acknowledgments and rejects renderer-selected paths'
     assert.throws(() => coordinator.run(input), /both confirmations/);
   }
   assert.deepEqual(calls, []);
-  assert.deepEqual(validateLibraryUpgradeConfirmation(confirmation), confirmation);
+  assert.deepEqual({ ...validateLibraryUpgradeConfirmation(confirmation) }, confirmation);
 });
 
 test('unavailable targets and application close start no migration', async () => {

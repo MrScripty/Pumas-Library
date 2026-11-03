@@ -60,7 +60,7 @@ use axum::{
     http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
-        IntoResponse,
+        IntoResponse, Response,
     },
     Json,
 };
@@ -84,7 +84,7 @@ use tracing::{debug, error, warn, Instrument};
 const MODEL_LIBRARY_UPDATE_STREAM_LIMIT: usize = 250;
 
 #[cfg(feature = "inference-plugins")]
-pub use model_operations::{handle_capabilities, handle_model_operations};
+pub use model_operations::{handle_capabilities, handle_model_operations, handle_served_models};
 #[cfg(feature = "inference-plugins")]
 pub use openai_gateway::{handle_openai_models, handle_openai_proxy};
 
@@ -155,11 +155,21 @@ pub async fn handle_health() -> impl IntoResponse {
     Json(json!({"status": "ok"}))
 }
 
+/// Tag only the five read-only update producers. Inference and retention
+/// responses retain their operation and delivery obligations.
+fn observation_response(sse: Sse<BoxStream<'static, Result<Event, Infallible>>>) -> Response {
+    let mut response = sse.into_response();
+    response
+        .extensions_mut()
+        .insert(crate::http_transport::ObservationStream);
+    response
+}
+
 /// Server-sent model-library update notification stream.
 pub async fn handle_model_library_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ModelLibraryUpdateStreamQuery>,
-) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+) -> Response {
     let shutdown = state.shutdown_request.clone();
     let stream: BoxStream<'static, Result<Event, Infallible>> =
         match build_model_library_update_stream_state(state, query.cursor).await {
@@ -182,7 +192,9 @@ pub async fn handle_model_library_update_events(
             }
         };
 
-    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
+    observation_response(
+        Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default()),
+    )
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -257,7 +269,7 @@ async fn build_model_library_update_stream_state(
 pub async fn handle_model_download_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ModelDownloadUpdateStreamQuery>,
-) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+) -> Response {
     let shutdown = state.shutdown_request.clone();
     let stream: BoxStream<'static, Result<Event, Infallible>> =
         match build_model_download_update_stream_state(state, query.cursor).await {
@@ -280,7 +292,9 @@ pub async fn handle_model_download_update_events(
             }
         };
 
-    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
+    observation_response(
+        Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default()),
+    )
 }
 
 async fn build_model_download_update_stream_state(
@@ -311,12 +325,14 @@ async fn build_model_download_update_stream_state(
 pub async fn handle_runtime_profile_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<RuntimeProfileUpdateStreamQuery>,
-) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+) -> Response {
     let shutdown = state.shutdown_request.clone();
     let stream_state = build_runtime_profile_update_stream_state(state, query.cursor).await;
     let stream = stream::unfold(stream_state, next_runtime_profile_update_event).boxed();
 
-    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
+    observation_response(
+        Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default()),
+    )
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -362,12 +378,14 @@ async fn build_runtime_profile_update_stream_state(
 pub async fn handle_serving_status_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ServingStatusUpdateStreamQuery>,
-) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+) -> Response {
     let shutdown = state.shutdown_request.clone();
     let stream_state = build_serving_status_update_stream_state(state, query.cursor).await;
     let stream = stream::unfold(stream_state, next_serving_status_update_event).boxed();
 
-    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
+    observation_response(
+        Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default()),
+    )
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -412,7 +430,7 @@ async fn build_serving_status_update_stream_state(
 pub async fn handle_status_telemetry_update_events(
     State(state): State<Arc<AppState>>,
     Query(query): Query<StatusTelemetryUpdateStreamQuery>,
-) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+) -> Response {
     let shutdown = state.shutdown_request.clone();
     let stream: BoxStream<'static, Result<Event, Infallible>> =
         match build_status_telemetry_update_stream_state(state, query.cursor).await {
@@ -435,7 +453,9 @@ pub async fn handle_status_telemetry_update_events(
             }
         };
 
-    Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default())
+    observation_response(
+        Sse::new(stream.take_until(shutdown.requested()).boxed()).keep_alive(KeepAlive::default()),
+    )
 }
 
 /// Main JSON-RPC handler.
@@ -987,6 +1007,18 @@ async fn dispatch_admitted_command(
                 .await
                 .map(RpcOutcome::DownloadMutation)
         }
+        RpcCommand::InspectRetainedDownload { download_id } => state
+            .api
+            .inspect_retained_download(&download_id)
+            .await
+            .map(Box::new)
+            .map(RpcOutcome::DownloadLocation),
+        RpcCommand::ResolveRetainedDownload { request } => state
+            .api
+            .resolve_retained_download(request)
+            .await
+            .map(Box::new)
+            .map(RpcOutcome::DownloadLocation),
         RpcCommand::ListModelDownloads => models::list_model_downloads(state)
             .await
             .map(Box::new)
@@ -1087,9 +1119,8 @@ async fn dispatch_admitted_command(
         #[cfg(feature = "inference-plugins")]
         RpcCommand::GetTorchRuntimeOptions => {
             let vm = require_version_manager(state, "torch").await?;
-            vm.torch_runtime_options()
-                .await
-                .map(RpcOutcome::TorchRuntimeOptions)
+            let options = vm.torch_runtime_options().await?;
+            Ok(RpcOutcome::TorchRuntimeOptions(options.try_into()?))
         }
         #[cfg(feature = "inference-plugins")]
         RpcCommand::GetTorchReleaseOptions { tag } => {
@@ -1131,9 +1162,8 @@ async fn dispatch_admitted_command(
         #[cfg(feature = "inference-plugins")]
         RpcCommand::GetTorchRuntimeProbe { tag } => {
             let vm = require_version_manager(state, "torch").await?;
-            vm.torch_installed_probe_report(&tag)
-                .await
-                .map(RpcOutcome::TorchRuntimeProbe)
+            let report = vm.torch_installed_probe_report(&tag).await?;
+            Ok(RpcOutcome::TorchRuntimeProbe(report.into()))
         }
         #[cfg(feature = "inference-plugins")]
         RpcCommand::TrialTorchRuntime { tag, profile_id } => {
@@ -1147,9 +1177,7 @@ async fn dispatch_admitted_command(
             let discovery = vm
                 .discover_torch_alternatives(&tag, &build, &python)
                 .await?;
-            serde_json::to_value(discovery)
-                .map(RpcOutcome::TorchAlternatives)
-                .map_err(|e| pumas_library::PumasError::Other(e.to_string()))
+            Ok(RpcOutcome::TorchAlternatives(discovery.try_into()?))
         }
         #[cfg(feature = "inference-plugins")]
         RpcCommand::StopRuntimeProfileIfGeneration {
@@ -1468,7 +1496,7 @@ async fn next_model_download_update_event(
 
 fn model_download_update_sse_event(notification: &ModelDownloadUpdateNotification) -> Event {
     match crate::contract::project_download_notification(notification)
-        .and_then(|value| serde_json::to_string(&value).map_err(Into::into))
+        .and_then(|outcome| serde_json::to_string(&outcome).map_err(Into::into))
     {
         Ok(payload) => Event::default()
             .event("model-download-update")
@@ -1936,7 +1964,7 @@ mod tests {
         assert_eq!(
             wire,
             json!({"jsonrpc":"2.0","id":"switch-fixture","error":{
-                "code":-32000,"message":"A required operation is currently unavailable.","data":{"class":"unavailable"},
+                "code":-32000,"message":"Configuration error: Version manager not initialized for app: unregistered-runtime","data":{"class":"unavailable"},
             }})
         );
         #[cfg(not(feature = "inference-plugins"))]
@@ -1966,7 +1994,16 @@ mod tests {
             let wire: Value = serde_json::from_slice(&body).unwrap();
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
-                crate::contract::PublicError::unavailable()
+                crate::contract::PublicError::from(&pumas_library::PumasError::Config {
+                    message: format!(
+                        "Version manager not initialized for app: {}",
+                        params
+                            .get("app_id")
+                            .or_else(|| params.get("appId"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                    ),
+                })
             } else {
                 crate::contract::PublicError::invalid_params()
             };
@@ -2004,7 +2041,14 @@ mod tests {
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".into(),
+                    message: format!(
+                        "Version manager not initialized for app: {}",
+                        params
+                            .get("app_id")
+                            .or_else(|| params.get("appId"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                    ),
                 })
             } else {
                 crate::contract::PublicError::invalid_params()
@@ -2043,7 +2087,14 @@ mod tests {
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".into(),
+                    message: format!(
+                        "Version manager not initialized for app: {}",
+                        params
+                            .get("app_id")
+                            .or_else(|| params.get("appId"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                    ),
                 })
             } else {
                 crate::contract::PublicError::invalid_params()
@@ -2082,7 +2133,14 @@ mod tests {
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".into(),
+                    message: format!(
+                        "Version manager not initialized for app: {}",
+                        params
+                            .get("app_id")
+                            .or_else(|| params.get("appId"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                    ),
                 })
             } else {
                 crate::contract::PublicError::invalid_params()
@@ -2121,7 +2179,14 @@ mod tests {
             #[cfg(feature = "inference-plugins")]
             let error = if accepted {
                 crate::contract::PublicError::from(&pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".into(),
+                    message: format!(
+                        "Version manager not initialized for app: {}",
+                        params
+                            .get("app_id")
+                            .or_else(|| params.get("appId"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                    ),
                 })
             } else {
                 crate::contract::PublicError::invalid_params()
@@ -2405,7 +2470,7 @@ mod tests {
         assert_eq!(
             wire,
             json!({"jsonrpc":"2.0","id":"remove-fixture","error":{
-                "code":-32000,"message":"A required operation is currently unavailable.","data":{"class":"unavailable"},
+                "code":-32000,"message":"Configuration error: Version manager not initialized for app: unregistered-runtime","data":{"class":"unavailable"},
             }})
         );
         #[cfg(not(feature = "inference-plugins"))]
@@ -2926,7 +2991,7 @@ mod tests {
                 assert_eq!(
                     wire,
                     json!({"jsonrpc":"2.0","id":"metadata-read","error":{
-                        "code":-32603,"message":"The request could not be completed due to an internal error.","data":{"class":"internal"},
+                        "code":-32603,"message":"invalid library model metadata returned by domain","data":{"class":"internal"},
                     }})
                 );
             }
@@ -2939,7 +3004,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inference_settings_rpc_reads_temporary_library_and_preserves_redacted_errors() {
+    async fn inference_settings_rpc_reads_temporary_library_and_reports_missing_models() {
         let temp = TempDir::new().unwrap();
         let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
         let model_id = "llm/fixture/Exact Model";
@@ -2994,10 +3059,10 @@ mod tests {
                 assert_eq!(
                     wire,
                     json!({"jsonrpc":"2.0","id":"inference-read","error":{
-                        "code":-32603,"message":"The request could not be completed due to an internal error.","data":{"class":"internal"},
+                        "code":-32603,"message":format!("Model not found: {selected}"),"data":{"class":"internal"},
                     }})
                 );
-                assert!(!wire.to_string().contains("private"));
+                // The error names the model the caller asked for.
             }
         }
         assert_eq!(
@@ -3215,15 +3280,27 @@ exit 9
             let request_id = format!("base-probe-{kind}");
             let response = check(&state, &request_id).await;
             let failed = matches!(kind, "invalid" | "directory" | "signal");
-            let expected = if failed {
-                json!({"jsonrpc":"2.0", "id":request_id, "error": {
-                    "code":-32003, "message":"The requested operation failed.",
-                    "data":{"class":"operation_failed"},
-                }})
+            if failed {
+                assert_eq!(response["id"], json!(request_id), "{kind}");
+                assert_eq!(response["error"]["code"], -32003, "{kind}");
+                assert_eq!(
+                    response["error"]["data"]["class"], "operation_failed",
+                    "{kind}"
+                );
+                // The reason names the failed conversion check.
+                assert!(
+                    response["error"]["message"]
+                        .as_str()
+                        .is_some_and(|message| message.starts_with("Model conversion failed")),
+                    "{kind}: {response}"
+                );
             } else {
-                json!({"jsonrpc":"2.0", "id":request_id, "result":{"success":true,"ready":false}})
-            };
-            assert_eq!(response, expected, "{kind}");
+                assert_eq!(
+                    response,
+                    json!({"jsonrpc":"2.0", "id":request_id, "result":{"success":true,"ready":false}}),
+                    "{kind}"
+                );
+            }
             assert!(!response.to_string().contains("private-"));
             assert!(!response
                 .to_string()
@@ -3244,7 +3321,7 @@ exit 9
                 check(&state, &closed_id).await,
                 json!({
                     "jsonrpc":"2.0", "id":closed_id, "error": {
-                        "code":-32004, "message":"The requested operation did not complete.",
+                        "code":-32004, "message":"Model conversion cancelled",
                         "data":{"class":"cancelled"},
                     },
                 })
@@ -3620,14 +3697,16 @@ exit 9
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["error"]["code"], -32603);
         assert!(value.get("result").is_none());
-        assert!(!String::from_utf8(bytes.to_vec())
-            .unwrap()
-            .contains("private-inspection-blocker"));
+        // The failure names what could not be inspected.
+        assert!(value["error"]["message"]
+            .as_str()
+            .is_some_and(|message| !message.is_empty()
+                && message != "The request could not be completed due to an internal error."));
         assert_eq!(std::fs::read(blocker).unwrap(), b"preserve");
     }
 
     #[tokio::test]
-    async fn download_push_validates_library_identity_and_redacts_diagnostics() {
+    async fn download_push_validates_library_identity_and_carries_download_reasons() {
         for (model_id, event_name) in [
             ("llm/acme/model", "model-download-update"),
             ("../outside", "model-download-error"),
@@ -3636,7 +3715,7 @@ exit 9
                 "cursor": "download:1",
                 "snapshot": {"cursor": "download:1", "revision": 1, "downloads": [{
                     "downloadId": "push-fixture", "libraryModelId": model_id,
-                    "status": "downloading", "error": "private diagnostic",
+                    "status": "downloading", "error": "No space left on device token=abc123",
                 }]},
                 "stale_cursor": false, "snapshot_required": true,
             }))
@@ -3648,10 +3727,14 @@ exit 9
                 .unwrap();
             let wire = std::str::from_utf8(&body).unwrap();
             assert!(wire.contains(event_name));
-            assert!(!wire.contains("private diagnostic"));
+            // The download's own reason reaches the desktop; credentials do not.
+            assert!(!wire.contains("abc123"));
             if event_name == "model-download-update" {
                 assert!(wire.contains("\"libraryModelId\":\"llm/acme/model\""));
+                assert!(wire.contains("No space left on device token=[redacted]"));
             } else {
+                // An invalid library identity rejects the whole row.
+                assert!(!wire.contains("No space left on device"));
                 assert!(!wire.contains("../outside"));
                 assert!(!wire.contains("model-download-update"));
             }
@@ -3709,7 +3792,7 @@ exit 9
             assert_eq!(error.class, crate::contract::PublicErrorClass::Unavailable);
             assert_eq!(
                 error.message,
-                "A required operation is currently unavailable."
+                "Configuration error: HuggingFace client not initialized"
             );
         }
 

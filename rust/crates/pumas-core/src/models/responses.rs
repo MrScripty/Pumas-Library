@@ -46,6 +46,7 @@ pub struct DiskSpaceResponse {
 
 /// CPU resources.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct CpuResources {
     pub usage: f32,
@@ -55,6 +56,7 @@ pub struct CpuResources {
 
 /// GPU resources.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct GpuResources {
     pub usage: f32,
@@ -66,6 +68,7 @@ pub struct GpuResources {
 
 /// RAM resources.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct RamResources {
     pub usage: f32,
@@ -74,6 +77,7 @@ pub struct RamResources {
 
 /// Disk resources.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct DiskResources {
     pub usage: f32,
@@ -83,6 +87,7 @@ pub struct DiskResources {
 
 /// System resources container.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct SystemResources {
     pub cpu: CpuResources,
@@ -103,6 +108,7 @@ pub struct SystemResourcesResponse {
 
 /// App-specific resource usage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct AppResourceUsage {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -113,6 +119,7 @@ pub struct AppResourceUsage {
 
 /// App resources container.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct AppResources {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -121,6 +128,7 @@ pub struct AppResources {
 
 /// Status response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct StatusResponse {
     pub success: bool,
@@ -136,6 +144,10 @@ pub struct StatusResponse {
     pub last_launch_log: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_resources: Option<AppResources>,
+    /// Degraded-subsystem reasons the user should see, for example disabled
+    /// downloads. The app is usable; these explain what is unavailable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notices: Vec<String>,
 }
 
 /// Models response.
@@ -243,6 +255,7 @@ pub struct UpdateModelNotesResponse {
 
 /// Network status response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct NetworkStatusResponse {
     pub success: bool,
@@ -260,6 +273,7 @@ pub struct NetworkStatusResponse {
 
 /// Library status response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct LibraryStatusResponse {
@@ -277,6 +291,7 @@ pub struct LibraryStatusResponse {
 
 /// Backend-owned status/resource telemetry snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct StatusTelemetrySnapshot {
     pub cursor: String,
@@ -292,6 +307,7 @@ pub struct StatusTelemetrySnapshot {
 
 /// Status/resource telemetry notification delivered to local GUI clients.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct StatusTelemetryUpdateNotification {
     pub cursor: String,
@@ -314,6 +330,7 @@ pub struct FileTypeValidationResponse {
 
 /// Deep scan progress.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct DeepScanProgress {
     pub current: u32,
@@ -539,6 +556,7 @@ mod tests {
             last_launch_error: None,
             last_launch_log: None,
             app_resources: None,
+            notices: Vec::new(),
         };
 
         let json = serde_json::to_string(&response).unwrap();

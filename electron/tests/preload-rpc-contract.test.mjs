@@ -89,7 +89,7 @@ test('compiled preload forwards exact anonymous S3 pins and runtime-decodes obse
 test('Torch runtime options require manager preset capability and an offered default adapter', async () => {
   const harness = loadCompiledPreload();
   const options = {
-    builds: ['cpu'], pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
+    builds: ['cpu'], defaultBuild: 'auto', pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
     adapters: ['none', 'flux2'], bundledPresetAvailable: true, defaultAdapter: 'flux2',
     preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
     installed: [],
@@ -104,10 +104,13 @@ test('Torch runtime options require manager preset capability and an offered def
     { ...options, defaultAdapter: undefined },
     { ...options, defaultAdapter: 'bundled' },
     { ...options, adapters: ['none'], defaultAdapter: 'flux2' },
+    { ...options, defaultBuild: undefined },
+    { ...options, installed: [{ tag: 'v2.10.0', build: null, python: null, adapter: null, qualification: 'unknown' }] },
+    { ...options, extra: true },
   ]) {
     harness.respondWith(invalid);
     await assert.rejects(harness.api.get_torch_runtime_options(), {
-      name: 'TypeError', message: 'Invalid get_torch_runtime_options response',
+      name: 'DesktopContractError', status: 'invalid',
     });
   }
 });
@@ -731,6 +734,13 @@ const CLOSED_STARTUP_STATES = [
         : 'correct-launch-input',
     }))
   ),
+  {
+    status: 'recovery-required',
+    reason: 'backend-unavailable',
+    authoritySource: 'persisted',
+    action: 'select-library',
+    detail: 'unknown field `hf_model_partition_version`',
+  },
 ];
 const CLOSED_SELECTION_RESULTS = [
   { status: 'cancelled' },
@@ -770,6 +780,20 @@ const MALFORMED_STARTUP_STATES = [
     reason: 'invalid',
     authoritySource: 'environment',
     action: 'select-library',
+  },
+  ...['', 7, 'x'.repeat(1025)].map((detail) => ({
+    status: 'recovery-required',
+    reason: 'backend-unavailable',
+    authoritySource: 'persisted',
+    action: 'select-library',
+    detail,
+  })),
+  {
+    status: 'recovery-required',
+    reason: 'backend-unavailable',
+    authoritySource: 'persisted',
+    action: 'select-library',
+    launcherRoot: '/sensitive/library',
   },
 ];
 const MALFORMED_SELECTION_RESULTS = [
@@ -845,9 +869,9 @@ function loadCompiledPreload() {
 
   return {
     api: exposedApi,
-    emit: (channel) => {
+    emit: (channel, payload) => {
       for (const listener of listeners.get(channel) ?? []) {
-        listener({}, undefined);
+        listener({}, payload);
       }
     },
     invocations,
@@ -1020,7 +1044,16 @@ test('backend setup preload preserves selection and retry tokens without automat
   harness.respondWith({success:true, setup:null});
   assert.deepEqual(toPlainValue(await harness.api.get_backend_setup('nvfp4')), {success:true, setup:null});
   await assert.rejects(harness.api.start_backend_setup('nvfp4'), {status:'invalid'});
-  for (const response of [{success:false, setup}, {success:true, setup:{...setup, status:'failed', error:'/private/setup'}}, {success:true, setup:{...setup, status:'failed', error:null}}]) {
+  // A failed setup carries its public reason to the renderer.
+  const failed = {...setup, status:'failed', error:'llama.cpp build failed: cmake exited with status 1'};
+  harness.respondWith({success:true, setup:failed});
+  assert.deepEqual(toPlainValue(await harness.api.get_backend_setup('sherry')), {success:true, setup:failed});
+  for (const response of [
+    {success:false, setup},
+    {success:true, setup:{...setup, error:'completed setups have no failure reason'}},
+    {success:true, setup:{...setup, status:'failed', error:null}},
+    {success:true, setup:{...setup, status:'failed', error:'x'.repeat(1025)}},
+  ]) {
     harness.respondWith(response);
     const before = harness.invocations.length;
     await assert.rejects(harness.api.get_backend_setup('sherry'), {status:'invalid'});
@@ -1048,7 +1081,7 @@ test('model import selection crosses the bundled preload as a closed desktop out
   for (const native of [{canceled:true,filePaths:[]}, {canceled:false,filePaths:['/models/ e\u0301.gguf','/models/ e\u0301.gguf']}]) {
     const produced = await chooseModelImportPaths(async () => native);
     harness.respondWith(produced);
-    assert.deepEqual(toPlainValue(await harness.api.open_model_import_dialog()), produced);
+    assert.deepEqual(toPlainValue(await harness.api.open_model_import_dialog()), toPlainValue(produced));
   }
   harness.respondWith({status:'selected',paths:[]});
   assert.deepEqual(toPlainValue(await harness.api.open_model_import_dialog()), {status:'invalid'});
@@ -1644,4 +1677,65 @@ test('library upgrade requires both confirmations and sends no renderer-supplied
     harness.respondWith(result);
     await assert.rejects(harness.api.upgrade_launcher_library(confirmation), error => error.name === 'LauncherRootRecoveryContractError' && !error.message.includes('/private'));
   }
+});
+
+test('compiled preload preserves every retained-download outcome and closes request shapes', async () => {
+  const harness = loadCompiledPreload();
+  const request = { downloadId: 'legacy-fixture', attemptId: 'c3f7d104-1234-4321-abcd-aaaaaaaaaaaa',
+    candidateModelId: 'diffusion/vit/exact-weight', expectedObservation: 'a'.repeat(64),
+    operationId: 'c3f7d104-1234-4321-abcd-bbbbbbbbbbbb',
+    acceptance: 'keep_existing_local_files', acceptStorageUpgrade: true };
+  let outcome;
+  const seen = [];
+  harness.respondWith((channel, method, params) => {
+    assert.equal(channel, 'api:call');
+    seen.push(toPlainValue(validateApiCallPayload(method, params)));
+    return outcome;
+  });
+  for (const status of ['not_applicable', 'existing_local_candidate', 'missing_files', 'ambiguous_candidates',
+    'busy', 'stale_observation', 'unsupported_history', 'invalid_metadata', 'unavailable_capability',
+    'publication_uncertain', 'resolved']) {
+    outcome = { status, downloadId: request.downloadId, attemptId: null, originalDestination: null,
+      resolutionRequest: null, candidates: [], requiresFormatUpgrade: true, message: status };
+    assert.deepEqual(toPlainValue(await harness.api.inspect_retained_download(request.downloadId)), outcome);
+    assert.deepEqual(toPlainValue(await harness.api.resolve_retained_download(request)), outcome);
+  }
+  assert.deepEqual(seen[1], { method: 'resolve_retained_download', params: request });
+  const count = seen.length;
+  assert.throws(() => harness.api.resolve_retained_download({ ...request, acceptance: 'trust_upstream' }));
+  assert.throws(() => harness.api.resolve_retained_download({ ...request, root: '/untrusted' }));
+  assert.equal(seen.length, count);
+  outcome = { ...outcome, status: 'invented_success' };
+  await assert.rejects(harness.api.inspect_retained_download(request.downloadId));
+});
+
+test('update streams deliver decoded payloads and report undeliverable ones', () => {
+  const harness = loadCompiledPreload();
+  const delivered = [];
+  const errors = [];
+  const feed = {cursor:'serving:4', events:[{cursor:'serving:4', event_kind:'load_failed', model_id:'llm/example/model', provider:'llama_cpp'}], stale_cursor:false, snapshot_required:false};
+  const unsubscribe = harness.api.onServingStatusUpdate((value) => delivered.push(toPlainValue(value)), (message) => errors.push(message));
+  harness.emit('serving-status:update', feed);
+  assert.deepEqual(delivered, [feed]);
+
+  harness.emit('serving-status:update', {...feed, events:[{...feed.events[0], event_kind:'model_evicted'}]});
+  harness.emit('serving-status:update', {...feed, extra:true});
+  harness.emit('serving-status:error', {message:'Serving status stream ended'});
+  harness.emit('serving-status:error', {message:''});
+  assert.equal(delivered.length, 1, 'undeliverable payloads never reach the callback');
+  assert.deepEqual(errors, [
+    'Desktop contract invalid for serving-status update: Invalid desktop contract payload at /events/0/event_kind: must be equal to one of the allowed values.',
+    'Desktop contract invalid for serving-status update: Invalid desktop contract payload at /: unexpected field "extra".',
+    'Serving status stream ended',
+    'Desktop contract invalid for serving-status error update: Invalid desktop contract payload at /message: must NOT have fewer than 1 characters.',
+  ]);
+  unsubscribe();
+  harness.emit('serving-status:update', feed);
+  assert.equal(delivered.length, 1);
+
+  const libraryErrors = [];
+  harness.api.onModelLibraryUpdate(() => assert.fail('invalid notification delivered'), (message) => libraryErrors.push(message));
+  harness.emit('model-library:update', {cursor:'model-library-updates:1', stale_cursor:false});
+  assert.equal(libraryErrors.length, 1);
+  assert.match(libraryErrors[0], /^Desktop contract invalid for model-library update: /);
 });

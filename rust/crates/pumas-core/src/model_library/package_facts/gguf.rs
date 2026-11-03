@@ -21,6 +21,14 @@ pub(crate) fn gguf_package_evidence(
     read_gguf_package_evidence(&mut file, path, companion_artifacts)
 }
 
+/// The trained context length recorded in a GGUF header, when it is readable.
+pub(crate) fn gguf_trained_context_length(path: &Path) -> Option<u64> {
+    gguf_package_evidence(path, &[])
+        .ok()
+        .and_then(|evidence| evidence.context_length)
+        .filter(|tokens| *tokens > 0)
+}
+
 pub(crate) fn invalid_gguf_package_evidence(companion_artifacts: &[String]) -> GgufPackageEvidence {
     GgufPackageEvidence {
         status: PackageFactStatus::Invalid,

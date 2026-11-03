@@ -60,7 +60,9 @@ impl S3Imports {
                 error: PublicError {
                     code: -32009,
                     class: PublicErrorClass::Conflict,
-                    message: "Observe the existing S3 operation before starting discovery.",
+                    message: std::borrow::Cow::Borrowed(
+                        "Observe the existing S3 operation before starting discovery.",
+                    ),
                 },
             });
         }

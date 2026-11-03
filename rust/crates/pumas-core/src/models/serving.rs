@@ -378,6 +378,7 @@ impl ServingStatusResponse {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ServingStatusEventKind {
     ModelLoaded,
@@ -387,6 +388,7 @@ pub enum ServingStatusEventKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct ServingStatusEvent {
     pub cursor: String,
@@ -400,6 +402,7 @@ pub struct ServingStatusEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct ServingStatusUpdateFeed {
     pub cursor: String,

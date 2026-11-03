@@ -343,4 +343,55 @@ describe('useModelLibraryActions', () => {
     expect(deleteModelMock).toHaveBeenCalledWith('llm/org/model');
     expect(onModelsImported).toHaveBeenCalledTimes(1);
   });
+
+  it('owns pending deletion per exact model and allows retry after failure', async () => {
+    const first = createDeferred<{ success: boolean; error?: string }>();
+    const other = createDeferred<{ success: boolean; error?: string }>();
+    deleteModelMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(other.promise);
+    const { result, onModelsImported } = renderLibraryActions();
+    let pending!: Promise<void>;
+    let otherPending!: Promise<void>;
+    act(() => {
+      pending = result.current.handleDeleteModel('weights-original');
+      void result.current.handleDeleteModel('weights-original');
+      otherPending = result.current.handleDeleteModel('weights-outq2');
+    });
+    expect(deleteModelMock.mock.calls).toEqual([['weights-original'], ['weights-outq2']]);
+    expect(result.current.deletionStateByModelId).toEqual({
+      'weights-original': { status: 'deleting' },
+      'weights-outq2': { status: 'deleting' },
+    });
+    await act(async () => {
+      first.resolve({ success: false, error: 'Download library root is busy' });
+      await pending;
+    });
+    expect(result.current.deletionStateByModelId['weights-original']).toEqual({
+      status: 'error', message: 'Download library root is busy',
+    });
+    expect(result.current.deletionStateByModelId['weights-outq2']).toEqual({ status: 'deleting' });
+    expect(onModelsImported).not.toHaveBeenCalled();
+    await act(async () => {
+      await result.current.handleDeleteModel('weights-original');
+    });
+    expect(result.current.deletionStateByModelId['weights-original']).toBeUndefined();
+    expect(onModelsImported).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      other.resolve({ success: true });
+      await otherPending;
+    });
+    expect(result.current.deletionStateByModelId).toEqual({});
+    expect(onModelsImported).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { outcome: { success: false }, message: 'The library refused the deletion.' },
+    { rejection: 'unexpected transport failure', message: 'The deletion request failed.' },
+  ])('reports unavailable failure detail without fabricating success: $message', async ({ outcome, rejection, message }) => {
+    if (outcome) deleteModelMock.mockResolvedValueOnce(outcome);
+    else deleteModelMock.mockRejectedValueOnce(rejection);
+    const { result, onModelsImported } = renderLibraryActions();
+    await act(async () => { await result.current.handleDeleteModel('model-1'); });
+    expect(result.current.deletionStateByModelId['model-1']).toEqual({ status: 'error', message });
+    expect(onModelsImported).not.toHaveBeenCalled();
+  });
 });

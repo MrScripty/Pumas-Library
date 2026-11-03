@@ -15,8 +15,8 @@ use pumas_library::{
         QuantOption,
     },
     model_library::{
-        issue_download_recovery_ticket, DownloadRecoveryModelId, DownloadRecoveryTicket,
-        DownloadRecoveryToken,
+        issue_download_recovery_ticket, DownloadLocationReport, DownloadRecoveryModelId,
+        DownloadRecoveryTicket, DownloadRecoveryToken, DownloadResolutionRequest,
     },
     models::{
         BaseResponse, CleanBrokenLinksResponse, DeleteModelResponse, DiskSpaceResponse,
@@ -29,6 +29,7 @@ use pumas_library::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -39,8 +40,12 @@ pub(crate) use s3::*;
 #[cfg_attr(not(feature = "s3"), allow(dead_code))]
 mod s3_discovery;
 mod s3_persisted;
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+mod torch_runtime;
 pub(crate) use s3_discovery::*;
 pub(crate) use s3_persisted::*;
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+pub(crate) use torch_runtime::*;
 
 const MAX_METHOD_BYTES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 4 * 1024;
@@ -82,13 +87,19 @@ impl PublicErrorClass {
     }
 }
 
-/// Bounded, deny-by-default representation safe to expose outside the process.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// Error representation that leaves the process.
+///
+/// `code` and `class` are stable and are what callers branch on. `message`
+/// explains the failure to a person: for library errors it is the actual
+/// reason, prepared by [`crate::public_text::public_reason`] (credentials
+/// redacted, home directory abbreviated, bounded); protocol errors keep a
+/// fixed sentence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct PublicError {
     pub(crate) code: i32,
     pub(crate) class: PublicErrorClass,
-    pub(crate) message: &'static str,
+    pub(crate) message: Cow<'static, str>,
 }
 
 impl PublicError {
@@ -96,7 +107,7 @@ impl PublicError {
         Self {
             code: -32700,
             class: PublicErrorClass::InvalidRequest,
-            message: "The request body is not valid JSON.",
+            message: Cow::Borrowed("The request body is not valid JSON."),
         }
     }
 
@@ -104,7 +115,7 @@ impl PublicError {
         Self {
             code: -32600,
             class: PublicErrorClass::InvalidRequest,
-            message: "The JSON-RPC request is invalid.",
+            message: Cow::Borrowed("The JSON-RPC request is invalid."),
         }
     }
 
@@ -112,7 +123,7 @@ impl PublicError {
         Self {
             code: -32601,
             class: PublicErrorClass::NotFound,
-            message: "The requested method is not supported.",
+            message: Cow::Borrowed("The requested method is not supported."),
         }
     }
 
@@ -120,7 +131,7 @@ impl PublicError {
         Self {
             code: -32602,
             class: PublicErrorClass::InvalidRequest,
-            message: "Request parameters are invalid.",
+            message: Cow::Borrowed("Request parameters are invalid."),
         }
     }
 
@@ -128,7 +139,7 @@ impl PublicError {
         Self {
             code: -32603,
             class: PublicErrorClass::Internal,
-            message: "The request could not be completed due to an internal error.",
+            message: Cow::Borrowed("The request could not be completed due to an internal error."),
         }
     }
 
@@ -136,11 +147,35 @@ impl PublicError {
         Self {
             code: -32000,
             class: PublicErrorClass::Unavailable,
-            message: "A required operation is currently unavailable.",
+            message: Cow::Borrowed("A required operation is currently unavailable."),
         }
     }
 
     pub(crate) fn from_pumas(error: &PumasError) -> Self {
+        let public = Self::classify_pumas(error);
+        if matches!(error, PumasError::DownloadRootBusy) {
+            return public;
+        }
+        let reason = crate::public_text::public_reason(&error.to_string());
+        if reason.trim().is_empty() {
+            public
+        } else {
+            Self {
+                message: Cow::Owned(reason),
+                ..public
+            }
+        }
+    }
+
+    /// Stable code and class (with a fallback sentence) for a library error.
+    fn classify_pumas(error: &PumasError) -> Self {
+        if matches!(error, PumasError::DownloadRootBusy) {
+            return Self {
+                code: error.to_rpc_error_code(),
+                class: PublicErrorClass::Conflict,
+                message: Cow::Borrowed("A download or another operation is using this model library. Finish or cancel it, then try again."),
+            };
+        }
         if matches!(
             error,
             PumasError::Config { .. } | PumasError::DownloadLifecycleClosed
@@ -155,32 +190,32 @@ impl PublicError {
             -32602 | -32005 => Self {
                 code: error.to_rpc_error_code(),
                 class: PublicErrorClass::InvalidRequest,
-                message: "Request parameters are invalid.",
+                message: Cow::Borrowed("Request parameters are invalid."),
             },
             -32001 | -32002 | -32009 => Self {
                 code: error.to_rpc_error_code(),
                 class: PublicErrorClass::NotFound,
-                message: "The requested resource was not found.",
+                message: Cow::Borrowed("The requested resource was not found."),
             },
             -32004 => Self {
                 code: error.to_rpc_error_code(),
                 class: PublicErrorClass::Cancelled,
-                message: "The requested operation did not complete.",
+                message: Cow::Borrowed("The requested operation did not complete."),
             },
             -32011 => Self {
                 code: error.to_rpc_error_code(),
                 class: PublicErrorClass::Conflict,
-                message: "The request conflicts with the current library state.",
+                message: Cow::Borrowed("The request conflicts with the current library state."),
             },
             -32000 | -32006 | -32007 | -32010 | -32012 => Self {
                 code: error.to_rpc_error_code(),
                 class: PublicErrorClass::Unavailable,
-                message: "A required operation is currently unavailable.",
+                message: Cow::Borrowed("A required operation is currently unavailable."),
             },
             -32003 | -32008 => Self {
                 code: error.to_rpc_error_code(),
                 class: PublicErrorClass::OperationFailed,
-                message: "The requested operation failed.",
+                message: Cow::Borrowed("The requested operation failed."),
             },
             _ => Self::internal(),
         }
@@ -434,6 +469,12 @@ pub(crate) enum RpcCommand {
     ResumeModelDownload {
         download_id: String,
     },
+    InspectRetainedDownload {
+        download_id: String,
+    },
+    ResolveRetainedDownload {
+        request: DownloadResolutionRequest,
+    },
     ListModelDownloads,
     ResumePartialDownload {
         model_id: DownloadRecoveryModelId,
@@ -596,6 +637,8 @@ impl RpcCommand {
             Self::CancelModelDownload { .. } => "cancel_model_download",
             Self::PauseModelDownload { .. } => "pause_model_download",
             Self::ResumeModelDownload { .. } => "resume_model_download",
+            Self::InspectRetainedDownload { .. } => "inspect_retained_download",
+            Self::ResolveRetainedDownload { .. } => "resolve_retained_download",
             Self::ListModelDownloads => "list_model_downloads",
             Self::ResumePartialDownload { .. } => "resume_partial_download",
             Self::GetModels => "get_models",
@@ -686,7 +729,7 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     InstallVersion(InstallVersionOutcome),
     #[cfg(feature = "inference-plugins")]
-    TorchRuntimeOptions(Value),
+    TorchRuntimeOptions(TorchRuntimeOptionsOutcome),
     #[cfg(feature = "inference-plugins")]
     TorchReleaseOptions(TorchReleaseOptionsOutcome),
     #[cfg(feature = "inference-plugins")]
@@ -694,11 +737,11 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     TorchPreviewReport(Value),
     #[cfg(feature = "inference-plugins")]
-    TorchRuntimeProbe(Value),
+    TorchRuntimeProbe(TorchRuntimeProbeOutcome),
     #[cfg(feature = "inference-plugins")]
     TorchRuntimeTrial(TrialTorchRuntimeOutcome),
     #[cfg(feature = "inference-plugins")]
-    TorchAlternatives(Value),
+    TorchAlternatives(TorchAlternativesOutcome),
     #[cfg(feature = "inference-plugins")]
     RuntimeProfileGenerationStop(StopRuntimeProfileGenerationOutcome),
     #[cfg(feature = "inference-plugins")]
@@ -731,6 +774,7 @@ pub(crate) enum RpcOutcome {
     DownloadStarted(DownloadStartedOutcome),
     DownloadStatus(Box<DownloadStatusOutcome>),
     DownloadMutation(DownloadMutationOutcome),
+    DownloadLocation(Box<DownloadLocationReport>),
     DownloadList(Box<DownloadListOutcome>),
     PartialDownload(Box<PartialDownloadOutcome>),
     Models(Box<ModelsOutcome>),
@@ -814,10 +858,13 @@ impl RpcOutcome {
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
-            Self::TorchRuntimeOptions(value)
-            | Self::TorchPreviewReport(value)
-            | Self::TorchRuntimeProbe(value)
-            | Self::TorchAlternatives(value) => Ok(value),
+            Self::TorchPreviewReport(value) => Ok(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::TorchRuntimeOptions(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::TorchRuntimeProbe(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::TorchAlternatives(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::TorchReleaseOptions(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
@@ -856,6 +903,7 @@ impl RpcOutcome {
             Self::DownloadStarted(value) => serde_json::to_value(value),
             Self::DownloadStatus(value) => serde_json::to_value(value),
             Self::DownloadMutation(value) => serde_json::to_value(value),
+            Self::DownloadLocation(value) => serde_json::to_value(value),
             Self::DownloadList(value) => serde_json::to_value(value),
             Self::PartialDownload(value) => serde_json::to_value(value),
             Self::Models(value) => serde_json::to_value(value),
@@ -934,7 +982,7 @@ impl LauncherVersionOutcome {
 pub(crate) struct OperationStatusOutcome {
     success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<&'static str>,
+    error: Option<Cow<'static, str>>,
 }
 
 impl OperationStatusOutcome {
@@ -948,7 +996,7 @@ impl OperationStatusOutcome {
     pub(crate) const fn failed() -> Self {
         Self {
             success: false,
-            error: Some("The requested operation failed."),
+            error: Some(Cow::Borrowed("The requested operation failed.")),
         }
     }
 }
@@ -1136,8 +1184,6 @@ pub(crate) struct ConversionProgressResponse {
     progress: Option<ConversionProgressOutcome>,
 }
 
-const SETUP_FAILURE_MESSAGE: &str = "Conversion environment setup did not complete successfully.";
-
 // Lexical projection of the core's canonical hyphenated UUID identity. No UUID
 // version or provenance is inferred here; operation ownership stays in core.
 fn canonical_setup_id(value: &str) -> bool {
@@ -1157,7 +1203,7 @@ fn canonical_setup_id(value: &str) -> bool {
 struct ConversionSetupSnapshotOutcome {
     operation_id: String,
     status: ConversionSetupStatus,
-    error: Option<&'static str>,
+    error: Option<Cow<'static, str>>,
 }
 
 impl TryFrom<ConversionSetupSnapshot> for ConversionSetupSnapshotOutcome {
@@ -1172,7 +1218,9 @@ impl TryFrom<ConversionSetupSnapshot> for ConversionSetupSnapshotOutcome {
         Ok(Self {
             operation_id: snapshot.operation_id,
             status: snapshot.status,
-            error: snapshot.error.map(|_| SETUP_FAILURE_MESSAGE),
+            error: snapshot
+                .error
+                .map(|error| Cow::Owned(crate::public_text::public_reason(&error.to_string()))),
         })
     }
 }
@@ -1237,7 +1285,7 @@ struct ConversionProgressOutcome {
     bytes_written: Option<u64>,
     estimated_output_size: Option<u64>,
     target_quant: Option<String>,
-    error: Option<&'static str>,
+    error: Option<Cow<'static, str>>,
     output_model_id: Option<String>,
     pipeline_step: Option<u32>,
     pipeline_steps_total: Option<u32>,
@@ -1274,7 +1322,7 @@ impl TryFrom<ConversionProgress> for ConversionProgressOutcome {
             target_quant: progress.target_quant,
             error: progress
                 .error
-                .map(|_| "The model conversion did not complete successfully."),
+                .map(|error| Cow::Owned(crate::public_text::public_reason(&error))),
             output_model_id: progress.output_model_id,
             pipeline_step: progress.pipeline_step,
             pipeline_steps_total: progress.pipeline_steps_total,
@@ -1395,7 +1443,7 @@ pub(crate) struct DownloadStartedSuccess {
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct DownloadStartedFailure {
     success: bool,
-    error: &'static str,
+    error: Cow<'static, str>,
 }
 
 impl DownloadStartedOutcome {
@@ -1440,7 +1488,7 @@ impl DownloadStatusOutcome {
             })),
             None => Self::Missing(DownloadStatusMissingOutcome {
                 success: false,
-                error: "Download not found",
+                error: Cow::Borrowed("Download not found"),
             }),
         })
     }
@@ -1458,7 +1506,7 @@ pub(crate) struct DownloadStatusFoundOutcome {
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct DownloadStatusMissingOutcome {
     success: bool,
-    error: &'static str,
+    error: Cow<'static, str>,
 }
 
 #[derive(Serialize)]
@@ -1481,7 +1529,7 @@ struct DownloadProgressOutcome {
     retry_limit: Option<u32>,
     retrying: Option<bool>,
     next_retry_delay_seconds: Option<f64>,
-    error: Option<&'static str>,
+    error: Option<Cow<'static, str>>,
 }
 
 /// Private, closed diagnostics; no domain values or messages reach logs or wire.
@@ -1552,7 +1600,7 @@ impl DownloadProgressOutcome {
             next_retry_delay_seconds: progress.next_retry_delay_seconds,
             error: progress
                 .error
-                .map(|_| "The model download did not complete successfully."),
+                .map(|error| Cow::Owned(crate::public_text::public_reason(&error))),
         })
     }
 }
@@ -1571,7 +1619,7 @@ pub(crate) struct DownloadMutationOutcome {
     success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "export-contract", schemars(with = "String"))]
-    error: Option<&'static str>,
+    error: Option<Cow<'static, str>>,
 }
 
 impl DownloadMutationOutcome {
@@ -1581,7 +1629,7 @@ impl DownloadMutationOutcome {
             error: if success {
                 None
             } else {
-                Some("Download not found")
+                Some(Cow::Borrowed("Download not found"))
             },
         }
     }
@@ -1594,21 +1642,39 @@ pub(crate) struct DownloadListOutcome {
     downloads: Vec<DownloadProgressOutcome>,
 }
 
+/// Pushed download state (`/events/model-download-updates`).
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct ModelDownloadUpdateOutcome {
+    cursor: String,
+    snapshot: ModelDownloadSnapshotOutcome,
+    stale_cursor: bool,
+    snapshot_required: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct ModelDownloadSnapshotOutcome {
+    cursor: String,
+    revision: u64,
+    downloads: Vec<DownloadProgressOutcome>,
+}
+
 /// Push delivery uses the same validated and redacted progress as polling.
 pub(crate) fn project_download_notification(
     notification: &pumas_library::models::ModelDownloadUpdateNotification,
-) -> Result<Value, PumasError> {
+) -> Result<ModelDownloadUpdateOutcome, PumasError> {
     let downloads = DownloadListOutcome::new(notification.snapshot.downloads.clone())?;
-    Ok(serde_json::json!({
-        "cursor": notification.cursor,
-        "snapshot": {
-            "cursor": notification.snapshot.cursor,
-            "revision": notification.snapshot.revision,
-            "downloads": downloads.downloads,
+    Ok(ModelDownloadUpdateOutcome {
+        cursor: notification.cursor.clone(),
+        snapshot: ModelDownloadSnapshotOutcome {
+            cursor: notification.snapshot.cursor.clone(),
+            revision: notification.snapshot.revision,
+            downloads: downloads.downloads,
         },
-        "stale_cursor": notification.stale_cursor,
-        "snapshot_required": notification.snapshot_required,
-    }))
+        stale_cursor: notification.stale_cursor,
+        snapshot_required: notification.snapshot_required,
+    })
 }
 
 impl DownloadListOutcome {
@@ -2551,7 +2617,7 @@ pub(crate) struct AvailableVersionsSuccess {
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct AvailableVersionsRateLimited {
     success: bool,
-    error: &'static str,
+    error: Cow<'static, str>,
     rate_limited: bool,
     retry_after_secs: Option<u64>,
 }
@@ -2588,7 +2654,7 @@ impl AvailableVersionsOutcome {
         }
         Ok(Self::RateLimited(AvailableVersionsRateLimited {
             success: false,
-            error: "A required operation is currently unavailable.",
+            error: Cow::Borrowed("A required operation is currently unavailable."),
             rate_limited: true,
             retry_after_secs,
         }))
@@ -2717,7 +2783,7 @@ pub(crate) struct UpdateModelNotesSuccess {
 pub(crate) struct UpdateModelNotesFailure {
     success: bool,
     model_id: String,
-    error: &'static str,
+    error: Cow<'static, str>,
 }
 
 impl UpdateModelNotesOutcome {
@@ -2737,7 +2803,7 @@ impl UpdateModelNotesOutcome {
             (false, Some(_), None) => Ok(Self::Failed(UpdateModelNotesFailure {
                 success: false,
                 model_id: response.model_id,
-                error: "The requested operation failed.",
+                error: Cow::Borrowed("The requested operation failed."),
             })),
             _ => Err(invalid_domain_outcome("updated model notes")),
         }
@@ -3083,7 +3149,7 @@ pub(crate) struct HfDownloadDetailsSuccess {
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct HfDownloadDetailsFailure {
     success: bool,
-    error: &'static str,
+    error: Cow<'static, str>,
 }
 
 impl HfDownloadDetailsOutcome {
@@ -3749,7 +3815,7 @@ pub(crate) struct PartialDownloadOutcome {
     download_id: Option<String>,
     status: Option<DownloadStatus>,
     reason_code: Option<PartialDownloadReason>,
-    error: Option<&'static str>,
+    error: Option<Cow<'static, str>>,
 }
 
 impl TryFrom<PartialDownloadAction> for PartialDownloadOutcome {
@@ -3834,7 +3900,8 @@ impl TryFrom<PartialDownloadAction> for PartialDownloadOutcome {
             download_id,
             status: action.status,
             reason_code,
-            error: (!success).then_some("The partial download could not be resumed."),
+            error: (!success)
+                .then_some(Cow::Borrowed("The partial download could not be resumed.")),
         })
     }
 }
@@ -4689,14 +4756,15 @@ pub(crate) struct TrialTorchRuntimeOutcome {
     pub(crate) success: bool,
     pub(crate) tag: String,
     pub(crate) profile_id: String,
-    pub(crate) startup_status: String,
-    pub(crate) health_status: String,
+    pub(crate) startup_status: TorchTrialStartupStatus,
+    pub(crate) health_status: TorchTrialHealthStatus,
     pub(crate) protocol: Option<u32>,
     pub(crate) capabilities: Vec<String>,
     pub(crate) generation: Option<String>,
     pub(crate) started_by_trial: bool,
+    /// Public reason the trial failed; null on success.
     pub(crate) error: Option<String>,
-    pub(crate) cleanup: String,
+    pub(crate) cleanup: TorchTrialCleanup,
 }
 
 #[cfg(all(test, feature = "inference-plugins"))]
@@ -4736,14 +4804,14 @@ mod torch_trial_contract_tests {
             success: false,
             tag: "v2.10.0".into(),
             profile_id: "torch.profile".into(),
-            startup_status: "passed".into(),
-            health_status: "failed".into(),
+            startup_status: TorchTrialStartupStatus::Passed,
+            health_status: TorchTrialHealthStatus::Failed,
             protocol: Some(3),
             capabilities: vec!["image-generation".into()],
             generation: Some("42".into()),
             started_by_trial: true,
             error: Some("health check failed".into()),
-            cleanup: "stopped_owned_generation".into(),
+            cleanup: TorchTrialCleanup::StoppedOwnedGeneration,
         };
         let wire = serde_json::to_value(outcome).unwrap();
         assert_eq!(wire["profileId"], "torch.profile");
@@ -5415,7 +5483,7 @@ mod install_version_tests {
                 InstallVersionOutcome::failed(&PumasError::Config {
                     message: "secret /private/path https://token@example.com".into(),
                 }),
-                json!({"success":false,"error":"A required operation is currently unavailable."}),
+                json!({"success":false,"error":"Configuration error: secret /private/path https://[redacted]@example.com"}),
             ),
         ] {
             assert_eq!(serde_json::to_value(&outcome).unwrap(), expected);
@@ -6543,6 +6611,20 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             validate_bounded_non_empty(params.download_id, MAX_IDENTIFIER_BYTES)
                 .map(|download_id| RpcCommand::ResumeModelDownload { download_id })
         }),
+        "inspect_retained_download" => {
+            parse_params::<DownloadIdParams>(params).and_then(|params| {
+                validate_bounded_non_empty(params.download_id, MAX_IDENTIFIER_BYTES)
+                    .map(|download_id| RpcCommand::InspectRetainedDownload { download_id })
+            })
+        }
+        "resolve_retained_download" => {
+            parse_params::<DownloadResolutionRequest>(params).and_then(|request| {
+                request
+                    .validate()
+                    .map_err(|_| PublicError::invalid_params())?;
+                Ok(RpcCommand::ResolveRetainedDownload { request })
+            })
+        }
         "list_model_downloads" => empty().map(|()| RpcCommand::ListModelDownloads),
         "list_interrupted_downloads" | "recover_download" => Err(PublicError::method_not_found()),
         "resume_partial_download" => {
@@ -7004,14 +7086,17 @@ mod tests {
         let encoded = serde_json::to_string(&projected).expect("public error must serialize");
 
         assert_eq!(projected.code, expected_code);
+        // The reason is carried; credentials and URL queries/user info are not.
         assert!(!encoded.contains(SECRET));
-        assert!(!encoded.contains(PRIVATE_PATH));
-        assert!(!encoded.contains(PRIVATE_URL));
-        assert!(encoded.len() < 256, "public error must remain bounded");
+        assert!(!projected.message.is_empty());
+        assert!(
+            projected.message.chars().count() <= crate::public_text::MAX_PUBLIC_REASON_CHARS,
+            "public error must remain bounded"
+        );
     }
 
     #[test]
-    fn public_error_projection_redacts_secrets_and_private_locators() {
+    fn public_error_projection_explains_failures_without_secrets() {
         assert_projection_is_bounded(
             PumasError::Config {
                 message: format!("credential {SECRET} is invalid"),
@@ -7095,7 +7180,7 @@ mod tests {
         let shutdown = PublicError::from(&PumasError::DownloadShutdownFailed { failures: 17 });
         assert_eq!(shutdown.code, -32603);
         assert_eq!(shutdown.class, PublicErrorClass::Internal);
-        assert!(!shutdown.message.contains("17"));
+        assert!(shutdown.message.contains("17 failure"));
         let unavailable = PublicError::from(&PumasError::Config {
             message: format!("disabled credential {SECRET}"),
         });
@@ -7117,20 +7202,24 @@ mod tests {
         let in_progress = PublicError::from(&PumasError::ModelIndexRefreshInProgress);
         assert_eq!(in_progress.code, -32011);
         assert_eq!(in_progress.class, PublicErrorClass::Conflict);
+        assert_eq!(
+            in_progress.message,
+            "Model index refresh is already in progress"
+        );
 
         let root_busy = PublicError::from(&PumasError::DownloadRootBusy);
         assert_eq!(root_busy.code, -32011);
         assert_eq!(root_busy.class, PublicErrorClass::Conflict);
         assert_eq!(
             root_busy.message,
-            "The request conflicts with the current library state."
+            "A download or another operation is using this model library. Finish or cancel it, then try again."
         );
         assert_eq!(
             serde_json::to_value(root_busy).unwrap(),
             json!({
                 "code": -32011,
                 "class": "conflict",
-                "message": "The request conflicts with the current library state.",
+                "message": "A download or another operation is using this model library. Finish or cancel it, then try again.",
             })
         );
     }
@@ -7586,10 +7675,14 @@ mod tests {
                 value["setup"]["status"],
                 serde_json::to_value(status).unwrap()
             );
-            assert!(!value.to_string().contains("/private/"));
+            // A failed setup reports its reason.
             assert_eq!(
-                value["setup"]["error"].is_null(),
-                status != ConversionSetupStatus::Failed
+                value["setup"]["error"],
+                if status == ConversionSetupStatus::Failed {
+                    json!("/private/installer/token")
+                } else {
+                    Value::Null
+                }
             );
             let mut contradictory = snapshot;
             contradictory.error = if contradictory.error.is_some() {
@@ -7741,10 +7834,9 @@ mod tests {
         );
         assert_eq!(
             encoded.pointer("/progress/error").and_then(Value::as_str),
-            Some("The model conversion did not complete successfully.")
+            Some("credential [redacted] failed at /private/rpc-sentinel/model.gguf")
         );
         assert!(!encoded.to_string().contains(SECRET));
-        assert!(!encoded.to_string().contains(PRIVATE_PATH));
     }
 
     #[test]
@@ -7972,7 +8064,7 @@ mod tests {
     }
 
     #[test]
-    fn download_outcomes_are_typed_and_redact_internal_failure_text() {
+    fn download_outcomes_are_typed_and_carry_reasons_without_secrets() {
         let started = RpcOutcome::DownloadStarted(DownloadStartedOutcome::started(
             "download-1".to_string(),
             None,
@@ -7997,7 +8089,7 @@ mod tests {
             unavailable,
             json!({
                 "success": false,
-                "error": "A required operation is currently unavailable.",
+                "error": "Configuration error: credential [redacted] is disabled",
             })
         );
         assert!(!unavailable.to_string().contains(SECRET));
@@ -8022,7 +8114,7 @@ mod tests {
             error: Some(format!("credential {SECRET} failed at {PRIVATE_PATH}")),
         };
         let encoded = RpcOutcome::DownloadStatus(Box::new(
-            DownloadStatusOutcome::new(Some(progress)).unwrap(),
+            DownloadStatusOutcome::new(Some(progress.clone())).unwrap(),
         ))
         .into_value()
         .unwrap();
@@ -8033,10 +8125,19 @@ mod tests {
         );
         assert_eq!(
             encoded.get("error").and_then(Value::as_str),
-            Some("The model download did not complete successfully.")
+            Some("credential [redacted] failed at /private/rpc-sentinel/model.gguf")
         );
         assert!(!encoded.to_string().contains(SECRET));
-        assert!(!encoded.to_string().contains(PRIVATE_PATH));
+
+        let mut refused = progress;
+        refused.error = Some(ModelDownloadProgress::CONTINUATION_REFUSED_MESSAGE.into());
+        let refused = RpcOutcome::DownloadStatus(Box::new(
+            DownloadStatusOutcome::new(Some(refused)).unwrap(),
+        ))
+        .into_value()
+        .unwrap();
+        assert_eq!(refused.get("error").and_then(Value::as_str),
+            Some("Download continuation was refused. Any partial download has been retained; retry when the source supports resume."));
 
         let partial = PartialDownloadAction {
             action: "none".to_string(),
@@ -8257,13 +8358,16 @@ mod tests {
             let item = progress(model_id);
             let poll = serde_json::to_value(DownloadListOutcome::new(vec![item.clone()]).unwrap())
                 .unwrap();
-            let push = project_download_notification(&notification(item)).unwrap();
+            let push =
+                serde_json::to_value(project_download_notification(&notification(item)).unwrap())
+                    .unwrap();
             assert_eq!(poll["downloads"], push["snapshot"]["downloads"]);
             assert_eq!(
                 push["snapshot"]["downloads"][0]["libraryModelId"],
                 json!(model_id)
             );
-            assert!(!push.to_string().contains("private diagnostic"));
+            // The download's own reason is carried to the desktop.
+            assert!(push.to_string().contains("private diagnostic"));
         }
         for invalid in ["", "../model", "/llm/model", "llm\\model", "llm/CON/model"] {
             assert!(DownloadListOutcome::new(vec![progress(Some(invalid))]).is_err());

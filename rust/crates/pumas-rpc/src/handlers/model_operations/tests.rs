@@ -76,7 +76,7 @@ fn closed_requests_reject_unknown_fields_and_incoherent_formats() {
     let mut r = request();
     r.output = OutputFormat::PngBase64;
     assert_eq!(
-        projection::provider_request(&r),
+        projection::provider_request(&r).map_err(|rejection| rejection.code),
         Err(ErrorCode::InvalidRequest)
     );
     for options in [
@@ -87,23 +87,24 @@ fn closed_requests_reject_unknown_fields_and_incoherent_formats() {
         let mut value = request_value();
         value["options"] = options;
         assert_eq!(
-            projection::provider_request(&serde_json::from_value(value).unwrap()),
+            projection::provider_request(&serde_json::from_value(value).unwrap())
+                .map_err(|rejection| rejection.code),
             Err(ErrorCode::InvalidRequest)
         );
     }
 }
 #[test]
-fn request_ids_are_correlation_and_embedding_bounds_use_native_validator() {
+fn request_ids_are_correlation_and_embedding_bounds_belong_to_the_provider() {
     let mut r = request();
     r.request_id = " ".into();
     assert_eq!(
-        projection::provider_request(&r),
+        projection::provider_request(&r).map_err(|rejection| rejection.code),
         Err(ErrorCode::InvalidRequest)
     );
     r = request();
     r.contract_version = 2;
     assert_eq!(
-        projection::provider_request(&r),
+        projection::provider_request(&r).map_err(|rejection| rejection.code),
         Err(ErrorCode::UnsupportedContract)
     );
     r = request();
@@ -115,11 +116,16 @@ fn request_ids_are_correlation_and_embedding_bounds_use_native_validator() {
         text: "hello".into(),
     };
     r.output = OutputFormat::EmbeddingsFloat32;
+    // Dimension limits belong to the serving provider (ONNX checks its own).
     r.options = OperationOptions::Embeddings {
         dimensions: Some(8193),
     };
+    assert!(projection::provider_request(&r).is_ok());
+    r.options = OperationOptions::Embeddings {
+        dimensions: Some(0),
+    };
     assert_eq!(
-        projection::provider_request(&r),
+        projection::provider_request(&r).map_err(|rejection| rejection.code),
         Err(ErrorCode::InvalidRequest)
     );
     r.options = OperationOptions::Embeddings {
@@ -128,7 +134,7 @@ fn request_ids_are_correlation_and_embedding_bounds_use_native_validator() {
     assert!(projection::provider_request(&r).is_ok());
     r.stream = true;
     assert_eq!(
-        projection::provider_request(&r),
+        projection::provider_request(&r).map_err(|rejection| rejection.code),
         Err(ErrorCode::InvalidRequest)
     );
 }
@@ -1112,10 +1118,11 @@ async fn typed_onnx_embedding_cancelled_in_operation_queue_is_not_admitted() {
         drop(held.lock().unwrap().take());
         assert_eq!(state.onnx_session_manager.list().await.unwrap().len(), 1);
         assert_eq!(status, StatusCode::BAD_GATEWAY);
-        assert_eq!(
-            body["error"],
-            json!({"code":"transport_lost","outcome":"not_admitted"})
-        );
+        assert_eq!(body["error"]["code"], "transport_lost");
+        assert_eq!(body["error"]["outcome"], "not_admitted");
+        assert!(body["error"]["message"]
+            .as_str()
+            .is_some_and(|m| !m.is_empty()));
         assert_eq!(body["request_id"], "request-17");
     })
     .await
@@ -1155,11 +1162,12 @@ async fn typed_onnx_embedding_unloaded_after_availability_is_not_admitted() {
         let status = response.status();
         let body = json_body(response).await;
         assert!(state.onnx_session_manager.list().await.unwrap().is_empty());
-        assert_eq!(status, StatusCode::NOT_FOUND);
-        assert_eq!(
-            body["error"],
-            json!({"code":"capability_unavailable","outcome":"not_admitted"})
-        );
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "capability_unavailable");
+        assert_eq!(body["error"]["outcome"], "not_admitted");
+        assert!(body["error"]["message"]
+            .as_str()
+            .is_some_and(|m| !m.is_empty()));
         assert_eq!(body["request_id"], "request-17");
     })
     .await
@@ -1186,10 +1194,11 @@ async fn body_extractor_limit_returns_the_fixed_typed_not_admitted_error() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     let value = json_body(response).await;
-    assert_eq!(
-        value["error"],
-        json!({"code":"request_limit","outcome":"not_admitted"})
-    );
+    assert_eq!(value["error"]["code"], "request_limit");
+    assert_eq!(value["error"]["outcome"], "not_admitted");
+    assert!(value["error"]["message"]
+        .as_str()
+        .is_some_and(|m| !m.is_empty()));
 }
 
 #[tokio::test]
@@ -1483,6 +1492,20 @@ fn declared(capability: Capability, available: bool) -> CapabilityDescriptor {
             vec![InputFormat::PcmS16le, InputFormat::PcmF32le],
             vec![OutputFormat::Labels],
         ),
+        Capability::MultimodalEmbedding => (
+            SemanticTask::MultimodalEmbedding,
+            vec![
+                InputFormat::PngBase64,
+                InputFormat::JpegBase64,
+                InputFormat::ContentBatch,
+            ],
+            vec![OutputFormat::EmbeddingsFloat32],
+        ),
+        Capability::Decision => (
+            SemanticTask::Decision,
+            vec![InputFormat::Decision],
+            vec![OutputFormat::Decisions],
+        ),
     };
     CapabilityDescriptor {
         capability,
@@ -1514,18 +1537,24 @@ fn modality_facade_resolves_embedding_and_image_only_from_declared_available_pai
         json!(["a", "b"])
     );
     assert!(matches!(
-        facade(value.clone()).resolve(&[declared(Capability::TextEmbedding, false)]),
+        facade(value.clone())
+            .resolve(&[declared(Capability::TextEmbedding, false)])
+            .map_err(|rejection| rejection.code),
         Err(ErrorCode::CapabilityUnavailable)
     ));
     value["semantic_task"] = json!("text_generation");
     assert!(matches!(
-        facade(value).resolve(&[declared(Capability::TextEmbedding, true)]),
+        facade(value)
+            .resolve(&[declared(Capability::TextEmbedding, true)])
+            .map_err(|rejection| rejection.code),
         Err(ErrorCode::UnsupportedModality)
     ));
     let mut value = modality_request();
     value["output"] = json!("png_base64");
     assert!(matches!(
-        facade(value.clone()).resolve(&[declared(Capability::ImageGeneration, true)]),
+        facade(value.clone())
+            .resolve(&[declared(Capability::ImageGeneration, true)])
+            .map_err(|rejection| rejection.code),
         Err(ErrorCode::InvalidRequest)
     ));
     value["options"] = json!({"kind":"image_generation","width":512,"height":512,"seed":17});
@@ -1547,7 +1576,9 @@ fn modality_facade_semantic_hints_and_options_cannot_override_declarations() {
     let mut value = modality_request();
     value["options"] = json!({"kind":"text_generation","max_tokens":10});
     assert!(matches!(
-        facade(value.clone()).resolve(&declarations),
+        facade(value.clone())
+            .resolve(&declarations)
+            .map_err(|rejection| rejection.code),
         Err(ErrorCode::AmbiguousOperation)
     ));
     value["semantic_task"] = json!("text_generation");
@@ -1560,7 +1591,9 @@ fn modality_facade_semantic_hints_and_options_cannot_override_declarations() {
     );
     value["options"] = json!({"kind":"embeddings"});
     assert!(matches!(
-        facade(value).resolve(&declarations),
+        facade(value)
+            .resolve(&declarations)
+            .map_err(|rejection| rejection.code),
         Err(ErrorCode::InvalidRequest)
     ));
     let operation = facade(modality_request())
@@ -1577,7 +1610,9 @@ fn modality_facade_semantic_hints_and_options_cannot_override_declarations() {
     assert_eq!(body["messages"][0]["role"], "system");
     assert_eq!(body["messages"][1]["content"], "hello");
     assert!(matches!(
-        facade(value).resolve(&[declared(Capability::TextGeneration, true)]),
+        facade(value)
+            .resolve(&[declared(Capability::TextGeneration, true)])
+            .map_err(|rejection| rejection.code),
         Err(ErrorCode::UnsupportedModality)
     ));
 }
@@ -1598,12 +1633,13 @@ async fn modality_facade_closed_shapes_and_legacy_discriminator_reject_without_e
             "invalid_request"
         );
     }
+    // Selectors are optional and combinable, but must agree.
     let mut value = request_value();
-    value["semantic_task"] = json!("chat_generation");
+    value["semantic_task"] = json!("text_embedding");
     let response = operation(state.clone(), value).await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let mut value = modality_request();
-    value["capability"] = Value::Null;
+    value["capability"] = json!("not_a_capability");
     let response = operation(state.clone(), value).await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
@@ -1843,4 +1879,470 @@ async fn unavailable_streaming_preserves_nontext_refusal_and_available_text_ambi
         "unsupported_modality"
     );
     assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
+}
+
+#[tokio::test]
+async fn rejections_explain_the_problem_and_echo_a_readable_request_id() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (_root, state) = fixture(&endpoint, Some("text-generation")).await;
+
+    // A misspelled field names the field and keeps the caller's request_id.
+    let mut misspelled = request_value();
+    misspelled["optoins"] = json!({});
+    let response = operation(state.clone(), misspelled).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = json_body(response).await;
+    assert_eq!(body["request_id"], "request-17");
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert_eq!(body["error"]["outcome"], "not_admitted");
+    let message = body["error"]["message"].as_str().unwrap();
+    assert!(message.contains("optoins"), "{message}");
+
+    // Invalid JSON still returns a reason, with a null request_id.
+    let response = handle_model_operations(
+        State(state.clone()),
+        None,
+        Ok(Bytes::from_static(b"{\"request_id\":")),
+    )
+    .await;
+    let body = json_body(response).await;
+    assert!(body["request_id"].is_null());
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("not valid JSON"));
+
+    // An unknown model points the caller at discovery.
+    let mut unknown = request_value();
+    unknown["model"] = json!("missing-model");
+    let response = operation(state.clone(), unknown).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = json_body(response).await;
+    assert_eq!(body["error"]["code"], "model_not_found");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("missing-model"));
+
+    // Unavailable capabilities state why.
+    let mut audio = request_value();
+    audio["capability"] = json!("audio_transcription");
+    audio["input"] = json!({"kind":"audio","encoding":"pcm_s16le","sample_rate_hz":16000,"channels":1,"sample_count":1,"data_base64":"AAA="});
+    audio["options"] = json!({"kind":"audio"});
+    let body = json_body(operation(state, audio).await).await;
+    assert_eq!(body["error"]["code"], "capability_unavailable");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("unqualified_audio_runtime"));
+    assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
+}
+
+#[tokio::test]
+async fn provider_failure_reason_reaches_the_caller() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (_root, state) = fixture(&endpoint, Some("text-generation")).await;
+    let backend = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        backend_request(&mut socket).await;
+        let body = br#"{"error":{"code":400,"message":"input is too large to process. increase the physical batch size","type":"invalid_request_error"}}"#;
+        socket
+            .write_all(
+                format!(
+                    "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        socket.write_all(body).await.unwrap();
+    });
+    let response = operation(state, request_value()).await;
+    let body = json_body(response).await;
+    backend.await.unwrap();
+    assert_eq!(body["error"]["code"], "provider_failure");
+    assert_eq!(body["error"]["outcome"], "unknown");
+    let message = body["error"]["message"].as_str().unwrap();
+    assert!(message.contains("HTTP 400"), "{message}");
+    assert!(
+        message.contains("increase the physical batch size"),
+        "{message}"
+    );
+}
+
+#[tokio::test]
+async fn one_grammar_accepts_requests_with_and_without_capability() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (_root, state) = fixture(&endpoint, Some("text-generation")).await;
+    let backend = tokio::spawn(async move {
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = backend_request(&mut socket).await;
+            let body = request.split("\r\n\r\n").nth(1).unwrap().to_owned();
+            seen.push(serde_json::from_str::<Value>(&body).unwrap());
+            let reply = br#"{"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}"#;
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                        reply.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(reply).await.unwrap();
+        }
+        seen
+    });
+    // Explicit capability with required options (the original form).
+    let explicit = json_body(operation(state.clone(), request_value()).await).await;
+    // No capability and no options: resolved from the model's descriptors.
+    let mut implicit = request_value();
+    implicit.as_object_mut().unwrap().remove("capability");
+    implicit.as_object_mut().unwrap().remove("options");
+    let implicit = json_body(operation(state, implicit).await).await;
+    assert_eq!(explicit["result"]["text"], "hi");
+    assert_eq!(implicit["result"]["text"], "hi");
+    let seen = backend.await.unwrap();
+    assert_eq!(seen[0]["messages"], seen[1]["messages"]);
+}
+
+#[tokio::test]
+async fn served_models_lists_each_alias_profile_pair_once_with_capabilities() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (_root, state) = fixture(&endpoint, Some("text-generation")).await;
+    // The same alias on a second profile must be listed separately and flagged.
+    record(&state, &endpoint, "llama-gpu", "llama").await;
+    let body = json_body(handle_served_models(State(state.clone())).await).await;
+    assert_eq!(body["supported_contract_versions"], json!([1]));
+    let models = body["models"].as_array().unwrap();
+    let pairs: Vec<_> = models
+        .iter()
+        .map(|m| (m["model"].as_str().unwrap(), m["profile"].as_str().unwrap()))
+        .collect();
+    assert_eq!(pairs, vec![("llama", "llama-cpu"), ("llama", "llama-gpu")]);
+    for model in models {
+        assert_eq!(model["model_id"], "models/llama");
+        assert_eq!(model["provider"], "llama_cpp");
+        assert_eq!(model["load_state"], "loaded");
+        assert_eq!(model["profile_required"], true);
+        assert_eq!(model["context_tokens"], 8);
+        let chat = model["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["capability"] == "chat_generation")
+            .unwrap();
+        assert_eq!(chat["availability"]["state"], "available");
+        // max_tokens is bounded by the served context, not a fixed constant.
+        let max_tokens = chat["option_bounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["option"] == "max_tokens")
+            .unwrap();
+        assert_eq!(max_tokens["maximum"], 8.0);
+    }
+    // Proxied embedding providers advertise no Pumas-imposed batch or length caps.
+    let embedding = models[0]["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["capability"] == "text_embedding")
+        .unwrap();
+    let options: Vec<_> = embedding["option_bounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["option"].as_str().unwrap())
+        .collect();
+    assert_eq!(options, vec!["dimensions"]);
+    assert!(futures::poll!(Box::pin(listener.accept())).is_pending());
+}
+
+#[tokio::test]
+async fn openai_model_list_has_unique_ids_with_their_profiles() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (_root, state) = fixture(&endpoint, Some("text-generation")).await;
+    record(&state, &endpoint, "llama-gpu", "llama").await;
+    let body = json_body(
+        openai_gateway::handle_openai_models(State(state))
+            .await
+            .into_response(),
+    )
+    .await;
+    let data = body["data"].as_array().unwrap();
+    assert_eq!(data.len(), 1, "{body}");
+    assert_eq!(data[0]["id"], "llama");
+    assert_eq!(data[0]["profiles"], json!(["llama-cpu", "llama-gpu"]));
+}
+
+#[test]
+fn embedding_validation_has_no_provider_independent_batch_cap() {
+    let mut r = request();
+    r.capability = Capability::TextEmbedding;
+    r.output = OutputFormat::EmbeddingsFloat32;
+    r.options = OperationOptions::Embeddings { dimensions: None };
+    r.input = OperationInput::TextBatch {
+        texts: (0..500).map(|i| format!("text {i}")).collect(),
+    };
+    assert!(projection::provider_request(&r).is_ok());
+    r.input = OperationInput::TextBatch {
+        texts: vec!["ok".into(), " ".into()],
+    };
+    let rejection = projection::provider_request(&r).unwrap_err();
+    assert_eq!(rejection.code, ErrorCode::InvalidRequest);
+    assert!(
+        rejection.message.contains("input.texts[1]"),
+        "{}",
+        rejection.message
+    );
+}
+
+#[test]
+fn vision_language_models_support_chat_and_image_to_text() {
+    for task in ["image-text-to-text", "text+image->text", "any-to-any"] {
+        for capability in [
+            Capability::ChatGeneration,
+            Capability::TextGeneration,
+            Capability::ImageToText,
+        ] {
+            assert_eq!(
+                semantic_match(
+                    capability,
+                    Some(task),
+                    Some("vlm"),
+                    RuntimeProviderId::LlamaCpp
+                ),
+                Some(true),
+                "{task} / {capability:?}"
+            );
+        }
+        assert_eq!(
+            semantic_match(
+                Capability::TextEmbedding,
+                Some(task),
+                Some("vlm"),
+                RuntimeProviderId::LlamaCpp
+            ),
+            Some(false)
+        );
+    }
+    // Plain image captioners are not chat models.
+    assert_eq!(
+        semantic_match(
+            Capability::ChatGeneration,
+            Some("image-to-text"),
+            Some("vlm"),
+            RuntimeProviderId::LlamaCpp
+        ),
+        Some(false)
+    );
+}
+
+#[test]
+fn requested_dimensions_truncate_and_renormalize_provider_vectors() {
+    let mut r = request();
+    r.capability = Capability::TextEmbedding;
+    r.output = OutputFormat::EmbeddingsFloat32;
+    r.input = OperationInput::Text { text: "hi".into() };
+    r.options = OperationOptions::Embeddings {
+        dimensions: Some(2),
+    };
+    let provider = json!({"data":[{"index":0,"embedding":[0.6,0.0,0.8,0.0]}]});
+    let OperationResult::Embeddings { vectors } = projection::result(&r, provider).unwrap() else {
+        panic!("embedding result");
+    };
+    assert_eq!(vectors, vec![vec![1.0, 0.0]]);
+    // A provider that honored the dimension is passed through.
+    let exact = json!({"data":[{"index":0,"embedding":[0.6,0.8]}]});
+    assert!(projection::result(&r, exact).is_ok());
+    // More dimensions than the model produces cannot be invented.
+    r.options = OperationOptions::Embeddings {
+        dimensions: Some(8),
+    };
+    let short = json!({"data":[{"index":0,"embedding":[0.6,0.8]}]});
+    assert_eq!(
+        projection::result(&r, short),
+        Err(ErrorCode::InvalidProviderResult)
+    );
+}
+
+#[test]
+fn image_and_mixed_items_project_to_llama_cpp_multimodal_embeddings() {
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    let request: modality::ModalityRequest = serde_json::from_value(json!({
+        "contract_version": 1,
+        "request_id": "mm-embed-1",
+        "model": "embeddinggemma",
+        "input": {"kind": "content_batch", "items": [
+            {"parts": [{"kind": "text", "text": "title: none | text: a red square"}]},
+            {"parts": [{"kind": "image", "encoding": "png", "data_base64": png}]}
+        ]},
+        "output": "embeddings_float32"
+    }))
+    .unwrap();
+    request.validate().unwrap();
+    let prepared = request.image_preflight().unwrap().unwrap();
+    assert_eq!(prepared.capability, Capability::MultimodalEmbedding);
+    let body = projection::provider_request(&prepared).unwrap();
+    assert_eq!(body["encoding_format"], "float");
+    let items = body["input"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["content"][0]["type"], "text");
+    assert_eq!(items[1]["content"][0]["type"], "image_url");
+    assert!(items[1]["content"][0]["image_url"]["url"]
+        .as_str()
+        .unwrap()
+        .starts_with("data:image/png;base64,"));
+    // Text-only embedding requests still resolve to text_embedding, not ambiguity.
+    let text: modality::ModalityRequest = serde_json::from_value(json!({
+        "contract_version": 1, "request_id": "embed-1", "model": "embeddinggemma",
+        "input": {"kind": "text", "text": "hello"}, "output": "embeddings_float32"
+    }))
+    .unwrap();
+    let resolved = text
+        .resolve(&[
+            declared(Capability::TextEmbedding, true),
+            declared(Capability::MultimodalEmbedding, true),
+        ])
+        .unwrap();
+    assert_eq!(resolved.capability, Capability::TextEmbedding);
+    // Multimodal embedding counts each item in the provider result.
+    let result = projection::result(
+        &prepared,
+        json!({"data":[{"index":0,"embedding":[1.0,0.0]},{"index":1,"embedding":[0.0,1.0]}]}),
+    )
+    .unwrap();
+    assert!(matches!(result, OperationResult::Embeddings { ref vectors } if vectors.len() == 2));
+}
+
+/// A llama.cpp-shaped decision server: `/v1/models` reports `decisions`,
+/// `/v1/systemone` answers with `answer`, and every systemone body is recorded.
+async fn decision_backend(
+    answer: Value,
+) -> (
+    String,
+    Arc<std::sync::Mutex<Vec<Value>>>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = seen.clone();
+    let app = Router::new()
+        .route(
+            "/v1/models",
+            get(|| async {
+                axum::Json(json!({"object":"list","data":[{"id":"models/llama","object":"model",
+                    "architecture":{"input_modalities":["text"],"output_modalities":["decisions"]}}]}))
+            }),
+        )
+        .route(
+            "/v1/systemone",
+            post(move |axum::Json(body): axum::Json<Value>| {
+                let recorded = recorded.clone();
+                let answer = answer.clone();
+                async move {
+                    recorded.lock().unwrap().push(body);
+                    axum::Json(answer)
+                }
+            }),
+        );
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (endpoint, seen, task)
+}
+fn decision_request() -> Value {
+    json!({"contract_version":1,"request_id":"decide-1","model":"llama",
+        "input":{"kind":"decision","state":{"message":"I was charged twice"},
+            "questions":{
+                "intent":{"type":"choice","instructions":"What does the customer want?",
+                    "criteria":{"refund":"wants money back","other":null}},
+                "urgent":{"type":"noul","instructions":"Needs a human within the hour?"},
+                "anger":{"type":"score","instructions":"How angry?","criteria":["calm","annoyed","angry"]}}},
+        "output":"decisions"})
+}
+fn decision_answer() -> Value {
+    json!({"model":"kev","answers":{
+        "intent":{"type":"choice","choice":"refund","probabilities":{"refund":0.9,"other":0.1},"confidence":0.8},
+        "urgent":{"type":"noul","noul":0.3},
+        "anger":{"type":"score","score":1.2,"legend":{"0":"calm","1":"annoyed","2":"angry"},
+            "probabilities":{"0":0.1,"1":0.6,"2":0.3},"confidence":0.5}},
+        "usage":{"input_tokens":120,"output_tokens":0}})
+}
+
+#[tokio::test]
+async fn decision_models_answer_typed_questions_and_only_advertise_decision() {
+    let (endpoint, seen, backend) = decision_backend(decision_answer()).await;
+    let (_root, state) = fixture(&endpoint, Some("text-classification")).await;
+
+    let caps = json_body(
+        handle_capabilities(
+            State(state.clone()),
+            Ok(Query(CapabilityQuery {
+                model: "llama".into(),
+                profile: None,
+            })),
+        )
+        .await,
+    )
+    .await;
+    let available: Vec<_> = caps["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["availability"]["state"] == "available")
+        .map(|d| d["capability"].as_str().unwrap())
+        .collect();
+    assert_eq!(available, vec!["decision"], "{caps}");
+
+    let body = json_body(operation(state.clone(), decision_request()).await).await;
+    assert_eq!(body["request_id"], "decide-1", "{body}");
+    assert_eq!(body["result"]["kind"], "decisions");
+    let answers = &body["result"]["answers"];
+    assert_eq!(answers["intent"]["type"], "choice");
+    assert_eq!(answers["intent"]["choice"], "refund");
+    assert_eq!(answers["urgent"]["noul"], 0.3);
+    assert_eq!(answers["anger"]["legend"]["2"], "angry");
+    assert_eq!(body["result"]["input_tokens"], 120);
+    let sent = seen.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["state"]["message"], "I was charged twice");
+    assert_eq!(sent[0]["questions"]["intent"]["type"], "choice");
+    assert!(sent[0].get("images").is_none());
+
+    // Malformed criteria are rejected with a reason before any provider call.
+    let mut bad = decision_request();
+    bad["input"]["questions"]["anger"]["criteria"] = json!({"calm": null});
+    let body = json_body(operation(state.clone(), bad).await).await;
+    assert_eq!(body["error"]["code"], "invalid_request");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("questions.anger.criteria"));
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    backend.abort();
+}
+
+#[tokio::test]
+async fn decision_answers_of_the_wrong_type_are_invalid_provider_results() {
+    let mut answer = decision_answer();
+    answer["answers"]["urgent"] =
+        json!({"type":"choice","choice":"yes","probabilities":{"yes":1.0},"confidence":1.0});
+    let (endpoint, _seen, backend) = decision_backend(answer).await;
+    let (_root, state) = fixture(&endpoint, Some("text-classification")).await;
+    let body = json_body(operation(state, decision_request()).await).await;
+    assert_eq!(body["error"]["code"], "invalid_provider_result", "{body}");
+    assert_eq!(body["error"]["outcome"], "unknown");
+    backend.abort();
 }

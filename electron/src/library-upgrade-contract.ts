@@ -1,15 +1,9 @@
-/** Path-free confirmation/result contract for the desktop metadata upgrade. */
-export type LibraryUpgradeConfirmation = {
-  oldWritersStopped: true;
-  noDowngradeAccepted: true;
-};
-export type LibraryUpgradeReadyState = {
-  status: 'ready';
-  selectionAction: 'select-library' | 'correct-launch-input';
-  libraryScopeId: string | null;
-};
-export type LibraryUpgradeResult =
-  | { status: 'ready'; state: LibraryUpgradeReadyState }
-  | { status: 'upgraded' }
-  | { status: 'unavailable' }
-  | { status: 'failed'; stage: 'upgrade' | 'open' };
+/**
+ * Path-free confirmation/result contract for the desktop metadata upgrade,
+ * declared once in electron/contracts/launcher-root.schema.json.
+ */
+export type {
+  LauncherRootReadyState as LibraryUpgradeReadyState,
+  LibraryUpgradeConfirmation,
+  LibraryUpgradeResult,
+} from './generated/desktop-contract';

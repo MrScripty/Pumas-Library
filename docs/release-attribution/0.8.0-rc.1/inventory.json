@@ -121,7 +121,7 @@
     },
     {
       "name": "bytes",
-      "version": "1.11.1"
+      "version": "1.12.1"
     },
     {
       "name": "bzip2",
@@ -154,6 +154,10 @@
     {
       "name": "cfg_aliases",
       "version": "0.2.1"
+    },
+    {
+      "name": "chacha20",
+      "version": "0.10.2"
     },
     {
       "name": "chrono",
@@ -202,6 +206,10 @@
     {
       "name": "cpufeatures",
       "version": "0.2.17"
+    },
+    {
+      "name": "cpufeatures",
+      "version": "0.3.1"
     },
     {
       "name": "crc",
@@ -434,6 +442,10 @@
     {
       "name": "getrandom",
       "version": "0.3.4"
+    },
+    {
+      "name": "getrandom",
+      "version": "0.4.3"
     },
     {
       "name": "governor",
@@ -869,11 +881,15 @@
     },
     {
       "name": "rand",
+      "version": "0.10.3"
+    },
+    {
+      "name": "rand",
       "version": "0.8.6"
     },
     {
       "name": "rand",
-      "version": "0.9.3"
+      "version": "0.9.5"
     },
     {
       "name": "rand_chacha",
@@ -882,6 +898,10 @@
     {
       "name": "rand_chacha",
       "version": "0.9.0"
+    },
+    {
+      "name": "rand_core",
+      "version": "0.10.1"
     },
     {
       "name": "rand_core",
@@ -1397,7 +1417,7 @@
     },
     {
       "name": "zip",
-      "version": "2.4.2"
+      "version": "2.6.1"
     },
     {
       "name": "zmij",
@@ -1894,9 +1914,9 @@
     },
     {
       "name": "bytes",
-      "version": "1.11.1",
+      "version": "1.12.1",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/bytes/1.11.1/download",
+      "source": "https://crates.io/api/v1/crates/bytes/1.12.1/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -2050,6 +2070,23 @@
         {
           "path": "LICENSE",
           "sha256": "31b94860253d8ec7b4529f51901044d3b459d6292d996504a36b1bae3a36a812"
+        }
+      ]
+    },
+    {
+      "name": "chacha20",
+      "version": "0.10.2",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/chacha20/0.10.2/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "b8c6939380a400f53e11923d50fcc4dd2fa1ba8339fd9d04cda38a0251b6c9b0"
         }
       ]
     },
@@ -2250,6 +2287,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985"
+        }
+      ]
+    },
+    {
+      "name": "cpufeatures",
+      "version": "0.3.1",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/cpufeatures/0.3.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "73b9dc2e79c7308998dd30296e073aefaefb944a68fb89aa412c23c0edcabcaa"
         }
       ]
     },
@@ -3216,6 +3270,23 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "29e9fe5074bd27e0e5d5d110394fbbcd841baee2651a3c4b4560a632702cede4"
+        }
+      ]
+    },
+    {
+      "name": "getrandom",
+      "version": "0.4.3",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/getrandom/0.4.3/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "523a42c25d245dde9c015f882cec7f4555aad883382a6cf19b4b7d9b2cd5419b"
         }
       ]
     },
@@ -4985,6 +5056,27 @@
     },
     {
       "name": "rand",
+      "version": "0.10.3",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/rand/0.10.3/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "COPYRIGHT",
+          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5"
+        },
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
+        }
+      ]
+    },
+    {
+      "name": "rand",
       "version": "0.8.6",
       "license_declared": "MIT OR Apache-2.0",
       "source": "https://crates.io/api/v1/crates/rand/0.8.6/download",
@@ -5006,9 +5098,9 @@
     },
     {
       "name": "rand",
-      "version": "0.9.3",
+      "version": "0.9.5",
       "license_declared": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/rand/0.9.3/download",
+      "source": "https://crates.io/api/v1/crates/rand/0.9.5/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -5064,6 +5156,27 @@
         {
           "path": "LICENSE-MIT",
           "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b"
+        }
+      ]
+    },
+    {
+      "name": "rand_core",
+      "version": "0.10.1",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/rand_core/0.10.1/download",
+      "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
+      "texts": [
+        {
+          "path": "COPYRIGHT",
+          "sha256": "92b81db30f7ab6d693e0af5661a40d273ca1947e891123ed823924192c10cbc7"
+        },
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "8b6e9feec03e7c9a5facb26855cecd31662bf989b636bcfe79521bdf8ac863f0"
         }
       ]
     },
@@ -7185,9 +7298,9 @@
     },
     {
       "name": "zip",
-      "version": "2.4.2",
+      "version": "2.6.1",
       "license_declared": "MIT",
-      "source": "https://crates.io/api/v1/crates/zip/2.4.2/download",
+      "source": "https://crates.io/api/v1/crates/zip/2.6.1/download",
       "scope": "Rust normal/build dependency, all desktop targets; conservative superset",
       "texts": [
         {
@@ -7852,9 +7965,9 @@
     },
     {
       "name": "Electron",
-      "version": "43.7.0",
+      "version": "43.8.1",
       "license_declared": "MIT",
-      "source": "https://github.com/electron/electron/tree/v43.7.0",
+      "source": "https://github.com/electron/electron/tree/v43.8.1",
       "scope": "Desktop runtime; bundled Chromium notices remain adjacent to executable",
       "texts": [
         {
@@ -8273,18 +8386,18 @@
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-restart-acceptance/runtime.json": "d8b9826efc0aa5fedd0353f5227b1001cfe6bda96287ff3136b81b513c71e104",
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-macos-cpu-rpc-restart-acceptance/runtime.json": "a280a955f040983398474af0c34f92e9172fc3c69ef22f7422ac990ed0554e26",
     "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-windows-cpu-rpc-restart-acceptance/runtime.json": "3e2f6e67e3a4492c01232778191871e9f39543f02996349f055272f2d19fbb89",
-    "electron/package.json": "d22363bc876a8abcf8eb459bd8e1fb169e5e717baa391db7f4ddce896297327b",
-    "frontend/package.json": "8e24aa7eceed7cdb9279a77d42a18e7183abefae32586ea4cdcac48a042729ae",
-    "pnpm-lock.yaml": "78cac9b50e2f28d293420ffb8b9d57889a723669a3969b3a670dd3e6cbfdda18",
-    "rust/Cargo.lock": "91fb9823de2f0346211b4f68ca400f03a628890e55dca90e0803e2dd7ad47e42",
+    "electron/package.json": "e83063f1d4f4cf3c228c04cc71929601ab112a8d668097cec6b26dfd43118c36",
+    "frontend/package.json": "07469934735080237eca0d8e38ef9266c608b5d5f7f3a40df46b2179f8e76000",
+    "pnpm-lock.yaml": "763c53bd7e66215ca650aca51e496a1e3813bdc204fe4eb7dc75138db7c12571",
+    "rust/Cargo.lock": "5d4cf951d0b13e0e3c222b4e61aae478d273286d56d3d8f05421c7301e71c0e3",
     "rust/Cargo.toml": "4b30d577dea5f46bb7eb459a2b66a22b534f9671d561207a0a23749d29872fec",
     "rust/crates/pumas-app-manager/Cargo.toml": "f344b89815164c0acc2f6758ad8313a2b8cccba1004354046d542ca5a3d22a73",
-    "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "9ce7243a0989bdf49d45d024f4ecbe69fc0964e0cb3feeffaf3e2cb4708f0c0e",
-    "rust/crates/pumas-core/Cargo.toml": "d4403c6e15b9d2c3540473253835ed51bb2f0f82339141054636602450ad9c55",
+    "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "6173a4bc74b3c5e20227ac429b82f25cd2864bfb9624539af5000c901e8a9bac",
+    "rust/crates/pumas-core/Cargo.toml": "ca00941517b30862fa2cd221a12536c3509ca35713519623fcbbe87df2f6c7ee",
     "rust/crates/pumas-rpc/Cargo.toml": "92b67b71767f6f495895c6d35a7c72107cfccc1cb60dedc400dd7f301a3a97f8",
     "scripts/release/artifact-plan.json": "66348a507f00ffdc74741fc7d70eab02f4a0eed4d3655354784cea2971662064",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
     "scripts/release/torch-managed-python-acceptance.py": "b0486387627d6ae98b4b6533adcceed93e93ebf868385626f3b13f1fb949893b"
   },
-  "notices_sha256": "5e5e273c6d4a24563d91de8d9d349413481da992d714438d80e884d61eb13dfc"
+  "notices_sha256": "b51f40d4092dcad86e0cfc6081e7c3e4e548820cb62ec2325005612ca0b624fb"
 }

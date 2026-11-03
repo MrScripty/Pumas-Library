@@ -107,12 +107,20 @@ export function useActiveModelDownload() {
 
     void loadSnapshot();
 
-    const unsubscribe = getElectronAPI()?.onModelDownloadUpdate((notification) => {
-      if (!cancelled) {
-        startupSuperseded = true;
-        applyDownloads(notification.snapshot.downloads.map(projectDownloadProgress));
+    const unsubscribe = getElectronAPI()?.onModelDownloadUpdate(
+      (notification) => {
+        if (!cancelled) {
+          startupSuperseded = true;
+          applyDownloads(notification.snapshot.downloads.map(projectDownloadProgress));
+        }
+      },
+      (reason) => {
+        if (cancelled) return;
+        logger.debug('Download update not delivered; reloading', { reason });
+        startupSuperseded = false;
+        void loadSnapshot();
       }
-    });
+    );
 
     return () => {
       cancelled = true;

@@ -464,6 +464,7 @@ pub struct ModelPackageDiagnostic {
 
 /// Top-level fact family that changed or needs refresh.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ModelFactFamily {
     ModelRecord,
@@ -476,6 +477,7 @@ pub enum ModelFactFamily {
 
 /// Model-library change kind for host cache invalidation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ModelLibraryChangeKind {
     ModelAdded,
@@ -488,6 +490,7 @@ pub enum ModelLibraryChangeKind {
 
 /// Consumer refresh scope implied by a model-library change event.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ModelLibraryRefreshScope {
     Summary,
@@ -497,6 +500,7 @@ pub enum ModelLibraryRefreshScope {
 
 /// Host-agnostic model-library update event for cache invalidation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct ModelLibraryUpdateEvent {
     pub cursor: String,
@@ -523,6 +527,7 @@ pub struct ModelLibraryUpdateFeed {
 
 /// Realtime notification that the durable model-library update feed advanced.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct ModelLibraryUpdateNotification {
     pub cursor: String,

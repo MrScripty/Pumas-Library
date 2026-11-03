@@ -239,6 +239,9 @@ class NamedSseStreamOwner {
       port: this.runtime.getPort(),
       path: `${this.spec.path}${cursorQuery}`,
       method: 'GET',
+      // Each observation stream owns a single-request connection. Sharing a
+      // pooled RPC connection would mix observation and operation custody.
+      agent: false,
       headers: {
         Accept: 'text/event-stream',
       },
@@ -538,7 +541,7 @@ export class PythonBridge {
     // close follows stdout drain; exit can arrive before the diagnostic frame.
     let startupClosed!: () => void;
     const closedBeforeReady = new Promise<never>((_resolve, reject) => {
-      startupClosed = () => reject(new BackendStartupError(startupFailure.reason));
+      startupClosed = () => reject(new BackendStartupError(startupFailure.reason, startupFailure.detail));
       child.once('close', startupClosed);
     });
     void closedBeforeReady.catch(() => {});

@@ -38,6 +38,7 @@ export function useModelDownloads() {
 
   // Ref keeps command handlers independent from render timing.
   const downloadStatusRef = useRef(downloadStatusByRepo);
+  const snapshotGenerationRef = useRef(0);
   const downloadKeysRef = useRef(new Map<string, string>());
   const downloadCommandsRef = useRef(new WeakMap<DownloadStatus, DownloadCommand>());
 
@@ -51,6 +52,7 @@ export function useModelDownloads() {
     downloads: ModelDownloadSnapshotEntry[],
     options: { preserveExisting?: boolean } = {}
   ) => {
+    snapshotGenerationRef.current += 1;
     const { statuses, errors } = selectDownloadsByRepo(downloads);
     // Pushes can arrive in the same React batch as command settlement.
     // Record presentation ownership before either state update is rendered.
@@ -111,16 +113,36 @@ export function useModelDownloads() {
 
     void restoreDownloads();
 
-    const unsubscribe = getElectronAPI()?.onModelDownloadUpdate((notification) => {
-      if (cancelled) return;
-      startupSuperseded = true;
-      applyDownloadSnapshot(notification.snapshot.downloads.map(projectDownloadProgress));
-    });
+    const unsubscribe = getElectronAPI()?.onModelDownloadUpdate(
+      (notification) => {
+        if (cancelled) return;
+        startupSuperseded = true;
+        applyDownloadSnapshot(notification.snapshot.downloads.map(projectDownloadProgress));
+      },
+      (reason) => {
+        if (cancelled) return;
+        logger.warn('Download update not delivered; reloading', { reason });
+        void api.list_model_downloads().then((result) => {
+          if (!cancelled) applyDownloadSnapshot(result.downloads.map(projectDownloadProgress));
+        }).catch((error: unknown) => {
+          logger.warn('Failed to reload downloads after an undelivered update', { error });
+        });
+      }
+    );
 
     return () => {
       cancelled = true;
       unsubscribe?.();
     };
+  }, [applyDownloadSnapshot]);
+
+  const refreshDownloads = useCallback(async () => {
+    if (!isAPIAvailable()) throw new APIError('API not available');
+    const generation = snapshotGenerationRef.current;
+    const result = await api.list_model_downloads();
+    if (snapshotGenerationRef.current === generation) {
+      applyDownloadSnapshot(result.downloads.map(projectDownloadProgress));
+    }
   }, [applyDownloadSnapshot]);
 
   const startDownload = useCallback((
@@ -303,6 +325,7 @@ export function useModelDownloads() {
   return {
     downloadStatusByRepo,
     downloadErrors,
+    refreshDownloads,
     hasActiveDownloads,
     startDownload,
     cancelDownload,

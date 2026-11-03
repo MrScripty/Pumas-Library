@@ -369,14 +369,38 @@ impl OllamaClient {
 
     /// Load a model into Ollama memory, optionally pinning it until explicit unload.
     pub async fn load_model_with_keep_alive(&self, name: &str, keep_loaded: bool) -> Result<()> {
-        let url = format!("{}/api/generate", self.base_url);
-        info!("Loading Ollama model '{}' into memory", name);
+        self.load_with_keep_alive(name, keep_loaded, false).await
+    }
 
-        let mut body = serde_json::json!({
-            "model": name,
-            "prompt": "",
-            "stream": false
-        });
+    /// Load an embedding model. Ollama refuses `/api/generate` for models that
+    /// cannot generate, so embedding models are loaded through `/api/embed`.
+    pub async fn load_embedding_model_with_keep_alive(
+        &self,
+        name: &str,
+        keep_loaded: bool,
+    ) -> Result<()> {
+        self.load_with_keep_alive(name, keep_loaded, true).await
+    }
+
+    async fn load_with_keep_alive(
+        &self,
+        name: &str,
+        keep_loaded: bool,
+        embedding: bool,
+    ) -> Result<()> {
+        let (url, mut body) = if embedding {
+            (
+                format!("{}/api/embed", self.base_url),
+                // A short input makes Ollama start the runner; the vector is discarded.
+                serde_json::json!({ "model": name, "input": "load" }),
+            )
+        } else {
+            (
+                format!("{}/api/generate", self.base_url),
+                serde_json::json!({ "model": name, "prompt": "", "stream": false }),
+            )
+        };
+        info!("Loading Ollama model '{}' into memory", name);
         if keep_loaded {
             body["keep_alive"] = serde_json::json!(-1);
         }

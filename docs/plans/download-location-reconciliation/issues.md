@@ -22,3 +22,14 @@ Record new findings with the responsible owner, affected claim/slice, precise
 blocking condition and concrete next action. Resolve contradictory authority at
 its owner. Do not hide a required finding as an advisory note or accept it merely
 because unrelated tests pass.
+
+## Implementation dispositions, 2026-10-12
+
+I3/I10: HF-6 discriminator and exact pinned-reader tests passed before UI expansion;
+see M1 evidence. I11: exact dormant settlement, immediate transfer and stale fences
+are implemented and tested; its interruption proof remains in C6. I12: audio cold
+and warm installs reproduced all 68 artifact identities and passed confinement as
+recorded in `docs/investigations/pr69-audio-ci-followup-2026-10-10.md`; the user's
+checksum policy supersedes automatic installed-byte checks. Inference is untested.
+I2 and the remaining C3/C4/C6/C8 composed evidence remain open. Required native
+macOS/Windows results require the maintainer's push; no new result is claimed here.

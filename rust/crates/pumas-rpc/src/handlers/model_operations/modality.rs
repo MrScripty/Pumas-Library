@@ -1,5 +1,9 @@
-//! Modality-first admission resolves only the selected model's declared adapters.
-//! Conversion into a legacy operation does not grant runtime or model authority.
+//! The single public request grammar for `/v1/model-operations`.
+//!
+//! A request names a served model, its input and the output it wants. Pumas
+//! resolves the operation from the selected model's current capability
+//! descriptors. `capability` and `semantic_task` are optional selectors that
+//! narrow resolution; they never grant runtime or model authority.
 use super::{projection, types::*};
 use serde::Deserialize;
 
@@ -12,6 +16,9 @@ pub struct ModalityRequest {
     pub model: String,
     #[serde(default)]
     pub profile: Option<String>,
+    /// Optional explicit capability. When present, resolution only considers it.
+    #[serde(default)]
+    pub capability: Option<Capability>,
     pub input: Input,
     pub output: Output,
     #[serde(default)]
@@ -35,6 +42,10 @@ pub enum Input {
     Messages {
         messages: Vec<ModalityMessage>,
     },
+    /// Messages whose content is a list of text and image parts.
+    ImageMessages {
+        messages: Vec<ImageMessage>,
+    },
     Image {
         encoding: ImageEncoding,
         data_base64: String,
@@ -45,6 +56,17 @@ pub enum Input {
         channels: u16,
         sample_count: u64,
         data_base64: String,
+    },
+    /// Items to embed together; each item produces one vector.
+    ContentBatch {
+        items: Vec<ContentItem>,
+    },
+    /// A state and typed questions for a native decision model.
+    Decision {
+        state: serde_json::Value,
+        questions: std::collections::BTreeMap<String, DecisionQuestion>,
+        #[serde(default)]
+        images: Vec<DecisionImage>,
     },
 }
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -90,6 +112,7 @@ pub enum Output {
     Labels,
     PcmS16le,
     PcmF32le,
+    Decisions,
 }
 impl Output {
     fn adapter_format(self) -> Option<OutputFormat> {
@@ -98,53 +121,116 @@ impl Output {
             Self::EmbeddingsFloat32 => OutputFormat::EmbeddingsFloat32,
             Self::PngBase64 => OutputFormat::PngBase64,
             Self::Labels => OutputFormat::Labels,
+            Self::Decisions => OutputFormat::Decisions,
             Self::PcmS16le | Self::PcmF32le => return None,
         })
     }
+    fn name(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::EmbeddingsFloat32 => "embeddings_float32",
+            Self::PngBase64 => "png_base64",
+            Self::Labels => "labels",
+            Self::Decisions => "decisions",
+            Self::PcmS16le => "pcm_s16le",
+            Self::PcmF32le => "pcm_f32le",
+        }
+    }
+}
+impl Input {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Text { .. } => "text",
+            Self::TextBatch { .. } => "text_batch",
+            Self::Messages { .. } => "messages",
+            Self::ImageMessages { .. } => "image_messages",
+            Self::Image { .. } => "image",
+            Self::Audio { .. } => "audio",
+            Self::ContentBatch { .. } => "content_batch",
+            Self::Decision { .. } => "decision",
+        }
+    }
+    fn has_image(&self) -> bool {
+        match self {
+            Self::Image { .. } | Self::ImageMessages { .. } => true,
+            Self::ContentBatch { items } => items.iter().any(|item| {
+                item.parts
+                    .iter()
+                    .any(|part| matches!(part, ImagePart::Image { .. }))
+            }),
+            Self::Messages { messages } => messages.iter().any(|message| {
+                matches!(&message.content, Content::Parts(parts)
+                    if parts.iter().any(|part| matches!(part, Part::Image { .. })))
+            }),
+            _ => false,
+        }
+    }
 }
 impl ModalityRequest {
-    pub fn validate(&self) -> Result<(), ErrorCode> {
+    pub fn validate(&self) -> Result<(), Rejection> {
         if self.contract_version != CONTRACT_VERSION {
-            return Err(ErrorCode::UnsupportedContract);
+            return Err(Rejection::new(
+                ErrorCode::UnsupportedContract,
+                format!(
+                    "contract_version {} is not supported; supported versions: [{}]",
+                    self.contract_version, CONTRACT_VERSION
+                ),
+            ));
         }
-        if !projection::valid_identifier(&self.request_id, 128)
-            || !projection::valid_model(&self.model)
-            || self.profile.as_ref().is_some_and(|profile| {
-                profile.len() > 128
-                    || profile.trim() != profile
-                    || pumas_library::models::RuntimeProfileId::parse(profile).is_err()
-            })
+        if !projection::valid_identifier(&self.request_id, 128) {
+            return Err(Rejection::invalid(
+                "request_id must be 1-128 ASCII letters, digits or '-', '_', '.', ':'",
+            ));
+        }
+        if !projection::valid_model(&self.model) {
+            return Err(Rejection::invalid(
+                "model must be a nonempty served alias of at most 256 bytes without surrounding whitespace or control characters",
+            ));
+        }
+        if let Some(profile) = &self.profile {
+            projection::valid_profile(profile)?;
+        }
+        if self.stream
+            && self
+                .capability
+                .is_some_and(|capability| !capability.text_generation())
         {
-            return Err(ErrorCode::InvalidRequest);
+            return Err(Rejection::invalid(
+                "stream is only supported for chat_generation and text_generation",
+            ));
         }
         match &self.input {
-            Input::Text { text } => valid_text(text)?,
+            Input::Text { text } => valid_text("input.text", text)?,
             Input::TextBatch { texts } => {
-                if texts.is_empty() || texts.len() > 128 {
-                    return Err(ErrorCode::InvalidRequest);
+                if texts.is_empty() {
+                    return Err(Rejection::invalid("input.texts must not be empty"));
                 }
-                for text in texts {
-                    valid_text(text)?;
+                for (index, text) in texts.iter().enumerate() {
+                    valid_text(&format!("input.texts[{index}]"), text)?;
                 }
             }
             Input::Messages { messages } => {
-                if messages.is_empty() || messages.len() > 128 {
-                    return Err(ErrorCode::InvalidRequest);
+                if messages.is_empty() {
+                    return Err(Rejection::invalid("input.messages must not be empty"));
                 }
-                for message in messages {
+                for (index, message) in messages.iter().enumerate() {
+                    let field = format!("input.messages[{index}].content");
                     match &message.content {
-                        Content::Text(text) => valid_text(text)?,
+                        Content::Text(text) => valid_text(&field, text)?,
                         Content::Parts(parts) => {
-                            if parts.is_empty() || parts.len() > 128 {
-                                return Err(ErrorCode::InvalidRequest);
+                            if parts.is_empty() {
+                                return Err(Rejection::invalid(format!(
+                                    "{field} must not be empty"
+                                )));
                             }
-                            for part in parts {
+                            for (part_index, part) in parts.iter().enumerate() {
+                                let field = format!("{field}[{part_index}]");
                                 match part {
-                                    Part::Text { text } => valid_text(text)?,
+                                    Part::Text { text } => valid_text(&field, text)?,
                                     Part::Image {
                                         encoding,
                                         data_base64,
-                                    } => valid_image(encoding, data_base64)?,
+                                    } => valid_image(&field, encoding, data_base64)?,
                                     Part::Audio {
                                         encoding,
                                         sample_rate_hz,
@@ -164,10 +250,64 @@ impl ModalityRequest {
                     }
                 }
             }
+            Input::ImageMessages { messages } => {
+                if messages.is_empty() {
+                    return Err(Rejection::invalid("input.messages must not be empty"));
+                }
+                for (index, message) in messages.iter().enumerate() {
+                    let field = format!("input.messages[{index}].content");
+                    if message.content.is_empty() {
+                        return Err(Rejection::invalid(format!("{field} must not be empty")));
+                    }
+                    for (part_index, part) in message.content.iter().enumerate() {
+                        let field = format!("{field}[{part_index}]");
+                        match part {
+                            ImagePart::Text { text } => valid_text(&field, text)?,
+                            ImagePart::Image {
+                                encoding,
+                                data_base64,
+                            } => valid_image(&field, encoding, data_base64)?,
+                        }
+                    }
+                }
+            }
             Input::Image {
                 encoding,
                 data_base64,
-            } => valid_image(encoding, data_base64)?,
+            } => valid_image("input", encoding, data_base64)?,
+            Input::Decision {
+                questions, images, ..
+            } => {
+                validate_decision_questions(questions)?;
+                for (index, image) in images.iter().enumerate() {
+                    valid_image(
+                        &format!("input.images[{index}]"),
+                        &image.encoding,
+                        &image.data_base64,
+                    )?;
+                }
+            }
+            Input::ContentBatch { items } => {
+                if items.is_empty() {
+                    return Err(Rejection::invalid("input.items must not be empty"));
+                }
+                for (index, item) in items.iter().enumerate() {
+                    let field = format!("input.items[{index}].parts");
+                    if item.parts.is_empty() {
+                        return Err(Rejection::invalid(format!("{field} must not be empty")));
+                    }
+                    for (part_index, part) in item.parts.iter().enumerate() {
+                        let field = format!("{field}[{part_index}]");
+                        match part {
+                            ImagePart::Text { text } => valid_text(&field, text)?,
+                            ImagePart::Image {
+                                encoding,
+                                data_base64,
+                            } => valid_image(&field, encoding, data_base64)?,
+                        }
+                    }
+                }
+            }
             Input::Audio {
                 encoding,
                 sample_rate_hz,
@@ -187,22 +327,39 @@ impl ModalityRequest {
     /// Prepare only image-bearing input for bounded projection before model
     /// lookup. This validation value grants no selection or admission authority;
     /// resolve against the actual selected descriptors must still authorize it.
-    pub fn image_preflight(&self) -> Result<Option<OperationRequest>, ErrorCode> {
-        let has_image = matches!(self.input, Input::Image { .. })
-            || matches!(&self.input, Input::Messages { messages } if messages.iter().any(|message| {
-                matches!(&message.content, Content::Parts(parts)
-                    if parts.iter().any(|part| matches!(part, Part::Image { .. })))
-            }));
-        if !has_image {
+    pub fn image_preflight(&self) -> Result<Option<OperationRequest>, Rejection> {
+        if !self.input.has_image() && !matches!(self.input, Input::ContentBatch { .. }) {
             return Ok(None);
         }
-        if !matches!(self.output, Output::Text)
+        if matches!(self.output, Output::EmbeddingsFloat32) {
+            return self.multimodal_embedding_preflight().map(Some);
+        }
+        if !matches!(self.output, Output::Text) {
+            return Err(Rejection::new(
+                ErrorCode::UnsupportedModality,
+                format!(
+                    "image input supports output \"text\", not \"{}\"",
+                    self.output.name()
+                ),
+            ));
+        }
+        if self
+            .semantic_task
+            .is_some_and(|task| task != SemanticTask::ImageToText)
             || self
-                .semantic_task
-                .is_some_and(|task| task != SemanticTask::ImageToText)
-            || self.stream
+                .capability
+                .is_some_and(|capability| capability != Capability::ImageToText)
         {
-            return Err(ErrorCode::UnsupportedModality);
+            return Err(Rejection::new(
+                ErrorCode::UnsupportedModality,
+                "image input is only accepted by image_to_text",
+            ));
+        }
+        if self.stream {
+            return Err(Rejection::new(
+                ErrorCode::UnsupportedModality,
+                "stream is not supported for image_to_text",
+            ));
         }
         let input = self.adapter_input()?;
         let options = self
@@ -217,6 +374,39 @@ impl ModalityRequest {
         projection::validate_image_to_text_request(&operation)?;
         Ok(Some(operation))
     }
+    fn multimodal_embedding_preflight(&self) -> Result<OperationRequest, Rejection> {
+        if self
+            .semantic_task
+            .is_some_and(|task| task != SemanticTask::MultimodalEmbedding)
+            || self
+                .capability
+                .is_some_and(|capability| capability != Capability::MultimodalEmbedding)
+        {
+            return Err(Rejection::new(
+                ErrorCode::UnsupportedModality,
+                "image embeddings use capability multimodal_embedding",
+            ));
+        }
+        if self.stream {
+            return Err(Rejection::invalid("stream is not supported for embeddings"));
+        }
+        if !matches!(self.input, Input::Image { .. } | Input::ContentBatch { .. }) {
+            return Err(Rejection::invalid(
+                "multimodal_embedding accepts input kind \"image\" or \"content_batch\"",
+            ));
+        }
+        let options = self
+            .options
+            .clone()
+            .unwrap_or(OperationOptions::Embeddings { dimensions: None });
+        let input = self.adapter_input()?;
+        Ok(self.operation(
+            Capability::MultimodalEmbedding,
+            input,
+            OutputFormat::EmbeddingsFloat32,
+            options,
+        ))
+    }
     fn validate_audio(
         &self,
         encoding: AudioEncoding,
@@ -224,7 +414,7 @@ impl ModalityRequest {
         channels: u16,
         sample_count: u64,
         data_base64: &str,
-    ) -> Result<(), ErrorCode> {
+    ) -> Result<(), Rejection> {
         // Reuse the established PCM envelope bounds. Byte decoding remains with
         // the owned bridge; even a valid envelope is not runtime qualification.
         let operation = self.operation(
@@ -247,19 +437,31 @@ impl ModalityRequest {
     pub fn resolve(
         self,
         declarations: &[CapabilityDescriptor],
-    ) -> Result<OperationRequest, ErrorCode> {
-        let output = self
-            .output
-            .adapter_format()
-            .ok_or(ErrorCode::UnsupportedModality)?;
+    ) -> Result<OperationRequest, Rejection> {
+        let output = self.output.adapter_format().ok_or_else(|| {
+            Rejection::new(
+                ErrorCode::UnsupportedModality,
+                format!(
+                    "output \"{}\" is not produced by any capability",
+                    self.output.name()
+                ),
+            )
+        })?;
         let input = self.adapter_input()?;
-        let candidates: Vec<_> = declarations
+        let selected: Vec<_> = declarations
             .iter()
             .filter(|descriptor| {
-                descriptor.output_formats.contains(&output)
+                self.capability
+                    .is_none_or(|capability| capability == descriptor.capability)
                     && self
                         .semantic_task
                         .is_none_or(|task| task == descriptor.semantic_task)
+            })
+            .collect();
+        let candidates: Vec<_> = selected
+            .iter()
+            .filter(|descriptor| {
+                descriptor.output_formats.contains(&output)
                     && accepts(descriptor, &input)
                     // streaming includes readiness, so false alone cannot
                     // erase a declared but unavailable text-stream operation.
@@ -275,11 +477,60 @@ impl ModalityRequest {
             .iter()
             .filter(|descriptor| descriptor.availability.available())
             .collect();
-        let capability = match available.as_slice() {
-            [] if candidates.is_empty() => return Err(ErrorCode::UnsupportedModality),
-            [] => return Err(ErrorCode::CapabilityUnavailable),
-            [descriptor] => descriptor.capability,
-            _ => return Err(ErrorCode::AmbiguousOperation),
+        let capability = match (available.as_slice(), candidates.as_slice()) {
+            ([descriptor], _) => descriptor.capability,
+            ([], []) => {
+                let what = format!(
+                    "input \"{}\" with output \"{}\"{}",
+                    self.input.kind(),
+                    self.output.name(),
+                    if self.stream { " and stream" } else { "" }
+                );
+                return Err(match self.capability {
+                    // An explicit capability with a mismatched shape is a request error.
+                    Some(capability) => Rejection::invalid(format!(
+                        "{} does not accept {what}",
+                        capability_name(capability)
+                    )),
+                    None => Rejection::new(
+                        ErrorCode::UnsupportedModality,
+                        format!("model \"{}\" has no capability for {what}", self.model),
+                    ),
+                });
+            }
+            ([], unavailable) => {
+                let reasons = unavailable
+                    .iter()
+                    .map(|descriptor| {
+                        format!(
+                            "{}: {}",
+                            capability_name(descriptor.capability),
+                            descriptor.availability.reason_text()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(Rejection::new(
+                    ErrorCode::CapabilityUnavailable,
+                    format!(
+                        "model \"{}\" cannot run this request now ({reasons})",
+                        self.model
+                    ),
+                ));
+            }
+            (several, _) => {
+                let names = several
+                    .iter()
+                    .map(|descriptor| capability_name(descriptor.capability))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(Rejection::new(
+                    ErrorCode::AmbiguousOperation,
+                    format!(
+                        "several capabilities accept this request ({names}); supply capability"
+                    ),
+                ));
+            }
         };
         // Option shape never participates in task selection. Image size must be
         // explicit; other named adapters already define their default options.
@@ -298,14 +549,21 @@ impl ModalityRequest {
                     temperature: None,
                     top_p: None,
                 },
-                Capability::TextEmbedding => OperationOptions::Embeddings { dimensions: None },
+                Capability::TextEmbedding | Capability::MultimodalEmbedding => {
+                    OperationOptions::Embeddings { dimensions: None }
+                }
                 Capability::AudioTranscription | Capability::AudioClassification => {
                     OperationOptions::Audio {
                         language: None,
                         max_output_tokens: None,
                     }
                 }
-                Capability::ImageGeneration => return Err(ErrorCode::InvalidRequest),
+                Capability::Decision => OperationOptions::Decision {},
+                Capability::ImageGeneration => {
+                    return Err(Rejection::invalid(
+                        "image_generation requires options {\"kind\":\"image_generation\",\"width\":...,\"height\":...}",
+                    ))
+                }
             },
         };
         let input = match (capability, input) {
@@ -320,10 +578,14 @@ impl ModalityRequest {
             (_, input) => input,
         };
         let operation = self.operation(capability, input, output, options);
-        if capability == Capability::ImageToText {
-            projection::validate_image_to_text_request(&operation)?;
-        } else {
-            projection::provider_request(&operation)?;
+        match capability {
+            Capability::ImageToText => projection::validate_image_to_text_request(&operation)?,
+            // Image bytes were already decoded and projected by the preflight;
+            // decision images are decoded once, off the async runtime, by the handler.
+            Capability::MultimodalEmbedding | Capability::Decision => {}
+            _ => {
+                projection::provider_request(&operation)?;
+            }
         }
         Ok(operation)
     }
@@ -346,7 +608,13 @@ impl ModalityRequest {
             stream: self.stream,
         }
     }
-    fn adapter_input(&self) -> Result<OperationInput, ErrorCode> {
+    fn adapter_input(&self) -> Result<OperationInput, Rejection> {
+        let audio_in_messages = || {
+            Rejection::new(
+                ErrorCode::UnsupportedModality,
+                "audio parts inside messages are not supported; send audio as input kind \"audio\"",
+            )
+        };
         Ok(match &self.input {
             Input::Text { text } => OperationInput::Text { text: text.clone() },
             Input::TextBatch { texts } => OperationInput::TextBatch {
@@ -372,12 +640,22 @@ impl ModalityRequest {
                 encoding: *encoding,
                 data_base64: data_base64.clone(),
             },
-            Input::Messages { messages }
-                if messages.iter().any(|message| {
-                    matches!(&message.content, Content::Parts(parts)
-                        if parts.iter().any(|part| matches!(part, Part::Image { .. })))
-                }) =>
-            {
+            Input::ImageMessages { messages } => OperationInput::ImageMessages {
+                messages: messages.clone(),
+            },
+            Input::ContentBatch { items } => OperationInput::ContentBatch {
+                items: items.clone(),
+            },
+            Input::Decision {
+                state,
+                questions,
+                images,
+            } => OperationInput::Decision {
+                state: state.clone(),
+                questions: questions.clone(),
+                images: images.clone(),
+            },
+            Input::Messages { messages } if self.input.has_image() => {
                 OperationInput::ImageMessages {
                     messages: messages
                         .iter()
@@ -397,7 +675,7 @@ impl ModalityRequest {
                                             encoding: *encoding,
                                             data_base64: data_base64.clone(),
                                         }),
-                                        Part::Audio { .. } => Err(ErrorCode::UnsupportedModality),
+                                        Part::Audio { .. } => Err(audio_in_messages()),
                                     })
                                     .collect::<Result<Vec<_>, _>>()?,
                             };
@@ -406,7 +684,7 @@ impl ModalityRequest {
                                 content,
                             })
                         })
-                        .collect::<Result<Vec<_>, ErrorCode>>()?,
+                        .collect::<Result<Vec<_>, Rejection>>()?,
                 }
             }
             Input::Messages { messages } => OperationInput::Messages {
@@ -420,7 +698,7 @@ impl ModalityRequest {
                                 for part in parts {
                                     match part {
                                         Part::Text { text: part } => text.push_str(part),
-                                        _ => return Err(ErrorCode::UnsupportedModality),
+                                        _ => return Err(audio_in_messages()),
                                     }
                                 }
                                 text
@@ -431,19 +709,77 @@ impl ModalityRequest {
                             content,
                         })
                     })
-                    .collect::<Result<Vec<_>, ErrorCode>>()?,
+                    .collect::<Result<Vec<_>, Rejection>>()?,
             },
         })
     }
 }
-fn valid_text(text: &str) -> Result<(), ErrorCode> {
+/// Shape checks for decision questions. Option counts and score levels are
+/// model limits enforced and reported by the decision runtime.
+fn validate_decision_questions(
+    questions: &std::collections::BTreeMap<String, DecisionQuestion>,
+) -> Result<(), Rejection> {
+    if questions.is_empty() {
+        return Err(Rejection::invalid("input.questions must not be empty"));
+    }
+    for (id, question) in questions {
+        let field = format!("input.questions.{id}");
+        if id.trim().is_empty() {
+            return Err(Rejection::invalid("question ids must not be blank"));
+        }
+        if question.instructions.is_null()
+            || question
+                .instructions
+                .as_str()
+                .is_some_and(|text| text.trim().is_empty())
+        {
+            return Err(Rejection::invalid(format!(
+                "{field}.instructions must not be empty"
+            )));
+        }
+        let criteria = question.criteria.as_ref();
+        let valid = match question.kind {
+            DecisionType::Choice => {
+                criteria
+                    .and_then(serde_json::Value::as_object)
+                    .is_some_and(|options| {
+                        !options.is_empty()
+                            && options.values().all(|v| v.is_string() || v.is_null())
+                    })
+            }
+            DecisionType::Score => criteria
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|levels| !levels.is_empty() && levels.iter().all(|v| v.is_string())),
+            DecisionType::Noul => criteria.is_none_or(|criteria| {
+                criteria.as_object().is_some_and(|object| {
+                    object.iter().all(|(key, value)| {
+                        matches!(key.as_str(), "true" | "false") && value.is_string()
+                    })
+                })
+            }),
+        };
+        if !valid {
+            return Err(Rejection::invalid(format!(
+                "{field}.criteria is invalid: choice needs an object of option to description or null, score needs a list of level descriptions, noul accepts an optional object with \"true\"/\"false\" descriptions"
+            )));
+        }
+    }
+    Ok(())
+}
+fn capability_name(capability: Capability) -> String {
+    serde_json::to_value(capability)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+fn valid_text(field: &str, text: &str) -> Result<(), Rejection> {
     if text.trim().is_empty() {
-        Err(ErrorCode::InvalidRequest)
+        Err(Rejection::invalid(format!("{field} must not be blank")))
     } else {
         Ok(())
     }
 }
-fn valid_image(_encoding: &ImageEncoding, data: &str) -> Result<(), ErrorCode> {
+fn valid_image(field: &str, _encoding: &ImageEncoding, data: &str) -> Result<(), Rejection> {
     // Bound the transport grammar here. Decoded image validation belongs to
     // image_input before projection; this check alone grants no runtime authority.
     let padding = data.bytes().rev().take_while(|byte| *byte == b'=').count();
@@ -455,7 +791,9 @@ fn valid_image(_encoding: &ImageEncoding, data: &str) -> Result<(), ErrorCode> {
             .iter()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'+' | b'/'))
     {
-        Err(ErrorCode::InvalidRequest)
+        Err(Rejection::invalid(format!(
+            "{field}.data_base64 must be nonempty standard padded base64"
+        )))
     } else {
         Ok(())
     }
@@ -477,6 +815,8 @@ fn accepts(descriptor: &CapabilityDescriptor, input: &OperationInput) -> bool {
             ..
         } => InputFormat::JpegBase64,
         OperationInput::ImageMessages { .. } => InputFormat::MessagesImage,
+        OperationInput::ContentBatch { .. } => InputFormat::ContentBatch,
+        OperationInput::Decision { .. } => InputFormat::Decision,
         OperationInput::Audio {
             encoding: AudioEncoding::PcmS16le,
             ..
@@ -537,7 +877,7 @@ mod image_to_text_resolver_tests {
             }
         ));
         assert_eq!(
-            request(image()).resolve(&[]).unwrap_err(),
+            request(image()).resolve(&[]).unwrap_err().code,
             ErrorCode::UnsupportedModality
         );
         for input in [
@@ -568,27 +908,30 @@ mod image_to_text_resolver_tests {
             r.semantic_task = semantic_task;
             r.stream = stream;
             assert_eq!(
-                r.image_preflight().unwrap_err(),
+                r.image_preflight().unwrap_err().code,
                 ErrorCode::UnsupportedModality
             );
         }
         for options in [
             OperationOptions::Embeddings { dimensions: None },
             OperationOptions::TextGeneration {
-                max_tokens: Some(2049),
+                max_tokens: Some(0),
                 temperature: None,
                 top_p: None,
             },
         ] {
             let mut r = request(image());
             r.options = Some(options);
-            assert_eq!(r.image_preflight().unwrap_err(), ErrorCode::InvalidRequest);
+            assert_eq!(
+                r.image_preflight().unwrap_err().code,
+                ErrorCode::InvalidRequest
+            );
         }
         let mixed = request(
             json!({"kind":"messages","messages":[{"role":"user","content":[{"kind":"image","encoding":"png","data_base64":"AA=="},{"kind":"audio","encoding":"pcm_s16le","sample_rate_hz":16000,"channels":1,"sample_count":1,"data_base64":"AAA="}]}]}),
         );
         assert_eq!(
-            mixed.image_preflight().unwrap_err(),
+            mixed.image_preflight().unwrap_err().code,
             ErrorCode::UnsupportedModality
         );
     }
@@ -607,17 +950,20 @@ mod image_to_text_resolver_tests {
             }
         ));
         assert_eq!(
-            request(image()).resolve(&[]).unwrap_err(),
+            request(image()).resolve(&[]).unwrap_err().code,
             ErrorCode::UnsupportedModality
         );
         assert_eq!(
-            request(image()).resolve(&[declaration(false)]).unwrap_err(),
+            request(image())
+                .resolve(&[declaration(false)])
+                .unwrap_err()
+                .code,
             ErrorCode::CapabilityUnavailable
         );
         let mut descriptor = declaration(true);
         descriptor.input_formats = vec![InputFormat::JpegBase64];
         assert_eq!(
-            request(image()).resolve(&[descriptor]).unwrap_err(),
+            request(image()).resolve(&[descriptor]).unwrap_err().code,
             ErrorCode::UnsupportedModality
         );
     }
@@ -652,7 +998,7 @@ mod image_to_text_resolver_tests {
                 request(json!({"kind":"messages","messages":[{"role":"user","content":parts}]}));
             r.validate().unwrap();
             assert_eq!(
-                r.resolve(&[declaration(true)]).unwrap_err(),
+                r.resolve(&[declaration(true)]).unwrap_err().code,
                 ErrorCode::UnsupportedModality
             );
         }
@@ -665,19 +1011,19 @@ mod image_to_text_resolver_tests {
         let mut streaming = request(image());
         streaming.stream = true;
         assert_eq!(
-            streaming.resolve(&[descriptor]).unwrap_err(),
+            streaming.resolve(&[descriptor]).unwrap_err().code,
             ErrorCode::UnsupportedModality
         );
         let mut hint = request(image());
         hint.semantic_task = Some(SemanticTask::ChatGeneration);
         assert_eq!(
-            hint.resolve(&[declaration(true)]).unwrap_err(),
+            hint.resolve(&[declaration(true)]).unwrap_err().code,
             ErrorCode::UnsupportedModality
         );
         let mut output = request(image());
         output.output = Output::PngBase64;
         assert_eq!(
-            output.resolve(&[declaration(true)]).unwrap_err(),
+            output.resolve(&[declaration(true)]).unwrap_err().code,
             ErrorCode::UnsupportedModality
         );
         for options in [
@@ -685,7 +1031,7 @@ mod image_to_text_resolver_tests {
                 dimensions: Some(4),
             },
             OperationOptions::TextGeneration {
-                max_tokens: Some(2049),
+                max_tokens: Some(0),
                 temperature: None,
                 top_p: None,
             },
@@ -698,7 +1044,7 @@ mod image_to_text_resolver_tests {
             let mut r = request(image());
             r.options = Some(options);
             assert_eq!(
-                r.resolve(&[declaration(true)]).unwrap_err(),
+                r.resolve(&[declaration(true)]).unwrap_err().code,
                 ErrorCode::InvalidRequest
             );
         }

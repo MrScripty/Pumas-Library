@@ -1,13 +1,11 @@
 import { BicepsFlexed, Cpu, Gpu } from 'lucide-react';
+import type { AppResourceUsage } from '../generated/desktop-contract';
 import type { SystemResources } from '../types/apps';
 import { formatBytes } from '../utils/formatters';
 import { Tooltip } from './ui';
 
 interface HeaderResourceStripProps {
-  appResources?: {
-    gpu_memory?: number;
-    ram_memory?: number;
-  };
+  appResources?: AppResourceUsage | null;
   systemResources?: SystemResources;
 }
 

@@ -1,3 +1,8 @@
+import type {
+  ServingStatusEvent as DesktopServingStatusEvent,
+  ServingStatusEventKind as DesktopServingStatusEventKind,
+  ServingStatusUpdateFeed as DesktopServingStatusUpdateFeed,
+} from '../generated/desktop-contract';
 import type { BaseResponse } from './api-common';
 import type { RuntimeDeviceMode, RuntimeProviderId } from './api-runtime-profiles';
 import type { RouterProfileSyncStatus } from '../generated/desktop-contract';
@@ -111,26 +116,10 @@ export interface ServingStatusResponse extends BaseResponse {
   snapshot: ServingStatusSnapshot;
 }
 
-export type ServingStatusEventKind =
-  | 'model_loaded'
-  | 'model_unloaded'
-  | 'load_failed'
-  | 'snapshot_required';
-
-export interface ServingStatusEvent {
-  cursor: string;
-  event_kind: ServingStatusEventKind;
-  model_id?: string | null;
-  profile_id?: string | null;
-  provider?: RuntimeProviderId | null;
-}
-
-export interface ServingStatusUpdateFeed {
-  cursor: string;
-  events: ServingStatusEvent[];
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-}
+// Declared once by the backend (`/events/serving-status-updates`) and generated.
+export type ServingStatusEventKind = DesktopServingStatusEventKind;
+export type ServingStatusEvent = DesktopServingStatusEvent;
+export type ServingStatusUpdateFeed = DesktopServingStatusUpdateFeed;
 
 export interface ServingStatusUpdateFeedResponse extends BaseResponse {
   feed: ServingStatusUpdateFeed;

@@ -308,7 +308,11 @@ async fn test_api_paths() {
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Test path methods
-    assert_eq!(api.launcher_root(), temp_dir.path());
+    // The owner works from the canonical root (on macOS /var is /private/var).
+    assert_eq!(
+        api.launcher_root(),
+        &temp_dir.path().canonicalize().unwrap()
+    );
     assert!(api.launcher_data_dir().ends_with("launcher-data"));
     assert!(api.metadata_dir().ends_with("metadata"));
     assert!(api.cache_dir().ends_with("cache"));
@@ -355,8 +359,8 @@ async fn test_runtime_profile_snapshot_preserves_singleton_ollama_status() {
     assert_eq!(status.ollama_running, singleton_ollama_running);
 }
 
-// Linux owns binary runtime processes. Other platforms must reject the launch
-// explicitly; their in-process runtime profile tests still run normally.
+// Linux owns every binary runtime process; macOS and Windows launch only Torch
+// and must reject other providers explicitly. In-process profiles still run.
 fn expect_binary_launch_result(
     result: pumas_library::Result<pumas_library::models::LaunchResponse>,
 ) -> Option<pumas_library::models::LaunchResponse> {
@@ -365,7 +369,7 @@ fn expect_binary_launch_result(
     } else {
         assert!(
             matches!(&result, Err(PumasError::Other(message))
-                if message == "Owned binary runtime profiles are currently supported only on Linux"),
+                if message == "Only Torch binary profiles are supported on this platform"),
             "expected unsupported binary launch, got {result:?}"
         );
         None
@@ -924,9 +928,12 @@ async fn test_resolve_model_package_facts_is_lazy_api_surface() {
     let facts = api.resolve_model_package_facts(model_id).await.unwrap();
 
     assert_eq!(facts.model_ref.model_id, model_id);
+    // Package facts report the entry path in display form (no Windows \\?\).
     assert_eq!(
         std::path::Path::new(&facts.artifact.entry_path),
-        model_dir.canonicalize().unwrap()
+        std::path::PathBuf::from(pumas_library::platform::platform_display_path(
+            &model_dir.canonicalize().unwrap()
+        ))
     );
     assert_eq!(
         facts.artifact.artifact_kind,
@@ -1406,4 +1413,33 @@ async fn test_resolve_pumas_model_ref_api_surface() {
         .migration_diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "unknown_model_id"));
+}
+
+/// A field this version does not know (for example one written by a newer
+/// Pumas) disables downloads with a reported reason instead of failing startup,
+/// and leaves the saved download state byte-for-byte untouched.
+#[tokio::test]
+async fn unreadable_download_state_disables_downloads_without_blocking_startup() {
+    let temp_dir = TempDir::new().unwrap();
+    let _guard = RegistryTestGuard::new(temp_dir.path());
+    let store = temp_dir.path().join("launcher-data").join("downloads.json");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    let saved = br#"{"schema_version":7,"acquisitions":{},"consumer_receipts":{},"downloads":[],"recovery_revocations":{},"lifecycle_quarantines":{},"admission_attempts":{},"queue_admissions":{},"released_queue_admissions":{},"field_from_a_future_pumas":1}"#;
+    std::fs::write(&store, saved).unwrap();
+
+    for _restart in 0..2 {
+        let api = PumasApi::builder(temp_dir.path())
+            .with_hf_client(true)
+            .with_process_manager(false)
+            .build()
+            .await
+            .expect("startup must not fail on unreadable download state");
+        let status = api.get_status().await.unwrap();
+        assert_eq!(status.notices.len(), 1, "{:?}", status.notices);
+        assert!(status.notices[0].contains("Downloads are disabled"));
+        assert!(status.notices[0].contains("field_from_a_future_pumas"));
+        // A clean shutdown retains no failed owner claim, so the next start works.
+        api.shutdown_instance().await.unwrap();
+        assert_eq!(std::fs::read(&store).unwrap(), saved);
+    }
 }

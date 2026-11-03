@@ -478,7 +478,8 @@ async fn bundle_publication_and_cold_proof_with_aux(
         std::fs::read(stage.path().join("stage").join(AUX_PATH)).unwrap(),
         aux
     );
-    if fault != "none" {
+    let allowed_content_change = fault == "auxiliary" && auxiliary_before.len() == aux.len();
+    if fault != "none" && !allowed_content_change {
         if fault.contains("identity") {
             assert!(
                 matches!(proof, Err(PumasError::Validation { ref field, .. })
@@ -529,6 +530,20 @@ async fn bundle_publication_and_cold_proof_with_aux(
             .unwrap();
         assert!(matches!(adopted.phase, AcquisitionPhase::Adopted { .. }));
         assert_eq!(consumer.completion_receipt(&adopted).unwrap(), Some(issued));
+        if allowed_content_change {
+            let retained = adopted
+                .files
+                .iter()
+                .find(|file| file.path == AUX_PATH)
+                .unwrap();
+            assert_eq!(retained.sha256, hex::encode(Sha256::digest(aux)));
+            assert_ne!(
+                pumas_library::model_library::compute_dual_hash(target.join(AUX_PATH))
+                    .unwrap()
+                    .sha256,
+                retained.sha256
+            );
+        }
         let readonly = PumasReadOnlyLibrary::open(cold.model_library().library_root()).unwrap();
         assert_eq!(
             readonly
@@ -560,7 +575,7 @@ async fn interrupted_confirmed_bundle_cold_settles_without_transfer_or_import_re
     bundle_publication_and_cold_proof(true, "none").await;
 }
 #[tokio::test]
-async fn changed_auxiliary_retains_the_exact_interrupted_bundle_use() {
+async fn same_size_auxiliary_changes_reconcile_with_original_receipt() {
     bundle_publication_and_cold_proof(true, "auxiliary").await;
 }
 #[tokio::test]

@@ -205,7 +205,9 @@ async fn builder_requires_download_restore_grant_but_no_client_reads_do_not() {
         Err(PumasError::InvalidParams { message })
             if message == format!(
                 "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
-                temp.path().display(), std::process::id()
+                // The owner reports its canonical root in display form.
+                crate::platform::platform_display_path(&temp.path().canonicalize().unwrap()),
+                std::process::id()
             )
     ));
     assert_eq!(
@@ -635,7 +637,11 @@ async fn test_api_creation() {
     let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::new(temp_dir.path()).await.unwrap();
 
-    assert_eq!(api.launcher_root(), temp_dir.path());
+    // The owner works from the canonical root (on macOS /var is /private/var).
+    assert_eq!(
+        api.launcher_root(),
+        &temp_dir.path().canonicalize().unwrap()
+    );
 }
 
 #[tokio::test]

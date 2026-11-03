@@ -4,6 +4,13 @@ use std::path::{Path, PathBuf};
 
 use crate::{PumasError, Result};
 
+/// llama.cpp names multimodal projector files `*mmproj*.gguf`. A projector is
+/// a companion of model weights and is never itself the model to serve.
+pub(crate) fn is_projector_file_name(file_name: &str) -> bool {
+    let name = file_name.to_ascii_lowercase();
+    name.contains("mmproj") && name.ends_with(".gguf")
+}
+
 /// Only associate a projector in the selected weights' directory. Never borrow
 /// a projector from another model package or guess between quantizations.
 pub(crate) fn resolve_sibling_mmproj(model_path: &Path) -> Result<Option<PathBuf>> {
@@ -17,8 +24,7 @@ pub(crate) fn resolve_sibling_mmproj(model_path: &Path) -> Result<Option<PathBuf
         std::fs::read_dir(directory).map_err(|error| PumasError::io_with_path(error, directory))?
     {
         let entry = entry.map_err(|error| PumasError::io_with_path(error, directory))?;
-        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-        if !name.contains("mmproj") || !name.ends_with(".gguf") {
+        if !is_projector_file_name(&entry.file_name().to_string_lossy()) {
             continue;
         }
         let path = entry.path();

@@ -232,10 +232,9 @@ impl AudioRuntimeOwner {
             }
         }
         for member in &self.members {
-            let mut current = open_relative_file(&self.copied_root, &member.path)?;
+            let current = open_relative_file(&self.copied_root, &member.path)?;
             if !same_file_identity(&member.file, &current)?
                 || current.metadata()?.len() != member.size
-                || hash_reader(&mut current)? != (member.size, member.sha256.clone())
             {
                 return Err(refusal("runtime copied bytes changed"));
             }
@@ -583,23 +582,6 @@ fn same_directory(first: &Dir, second: &Dir) -> std::io::Result<bool> {
     )
 }
 
-fn hash_reader(reader: &mut impl Read) -> Result<(u64, String)> {
-    let mut digest = Sha256::new();
-    let mut size = 0u64;
-    let mut buffer = [0u8; 65_536];
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        size = size
-            .checked_add(count as u64)
-            .ok_or_else(|| refusal("runtime size overflow"))?;
-        digest.update(&buffer[..count]);
-    }
-    Ok((size, hex::encode(digest.finalize())))
-}
-
 fn set_directory_mode(directory: &Dir, writable: bool) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -713,7 +695,7 @@ mod tests {
     }
 
     #[test]
-    fn changed_copied_bytes_with_restored_timestamp_fail_actual_hash_validation() {
+    fn copied_runtime_validation_observes_ownership_without_checksum_rechecking() {
         let root = source();
         let owner = prepare(&root);
         let copy = owner.read_source_path().join("fixture.py");
@@ -734,7 +716,7 @@ mod tests {
             .unwrap()
             .set_times(std::fs::FileTimes::new().set_modified(metadata.modified().unwrap()))
             .unwrap();
-        assert!(owner.validate_source().is_err());
+        owner.validate_source().unwrap();
     }
 
     #[cfg(unix)]
@@ -769,6 +751,11 @@ mod tests {
         set_directory_mode(&owner.copied_root, true).unwrap();
         let original = owner.read_source_path().join("support");
         let held = owner.read_source_path().join("held-support");
+        // macOS also requires write permission on a directory being renamed.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&original, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         std::fs::rename(&original, &held).unwrap();
         std::fs::create_dir(&original).unwrap();
         std::fs::write(original.join("keep.txt"), b"not our directory").unwrap();

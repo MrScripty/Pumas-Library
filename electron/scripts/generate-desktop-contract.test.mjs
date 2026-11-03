@@ -2,10 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
-import { mkdtemp, mkdir, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, symlink, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { schemaType, generate } from './generate-desktop-contract.mjs';
+import { build } from 'esbuild';
+import { schemaType, generate, mergeOwnedContracts } from './generate-desktop-contract.mjs';
+
+/** Bundle generated decoders with their validators and import the module. */
+async function importGeneratedContract(files) {
+  const directory = await mkdtemp(join(tmpdir(), 'pumas-contract-decoders-'));
+  try {
+    for (const [name, text] of Object.entries(files)) await writeFile(join(directory, name), text);
+    const bundled = await build({entryPoints:[join(directory, 'desktop-contract.ts')], bundle:true, format:'esm', platform:'browser', write:false});
+    return await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+  } finally { await rm(directory, {recursive:true,force:true}); }
+}
 
 test('bundled runtime helpers are identical across symlinked dependency workspaces', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'pumas-contract-workspace-'));
@@ -88,6 +99,29 @@ test('canonical text uses Unicode White_Space rather than JavaScript trim', asyn
   assert.equal(module.validateText('\ufeffName'), true);
 });
 
+test('rejections report the failed rule and location without field values', async () => {
+  const files = await generate({format:'pumas-desktop-contract-1',dialect:'http://json-schema.org/draft-07/schema#',schemas:{Feed:{
+    type:'object', additionalProperties:false, required:['events'],
+    properties:{events:{type:'array',items:{type:'object',additionalProperties:false,required:['kind'],properties:{kind:{enum:['a','b']}}}}},
+  }}});
+  const contract = await importGeneratedContract(files);
+  assert.deepEqual(contract.decodeFeed({events:[{kind:'secret-value'}]}), {status:'invalid', message:'Invalid desktop contract payload at /events/0/kind: must be equal to one of the allowed values.'});
+  assert.deepEqual(contract.decodeFeed({events:[], extra_field:'secret-value'}), {status:'invalid', message:'Invalid desktop contract payload at /: unexpected field "extra_field".'});
+  assert.deepEqual(contract.decodeFeed({events:[{kind:'a', get other() { return 1; }}]}), {status:'invalid', message:'Invalid desktop contract payload: Invalid property.'});
+});
+
+test('Torch default-adapter refinement requires the default to be offered', async () => {
+  const files = await generate({format:'pumas-desktop-contract-1',dialect:'http://json-schema.org/draft-07/schema#',schemas:{Options:{
+    type:'object', pumasTorchDefaultAdapter:true,
+    properties:{adapters:{type:'array',items:{type:'string'}},defaultAdapter:{type:'string'}},
+    required:['adapters','defaultAdapter'],additionalProperties:false,
+  }}});
+  const module = await import(`data:text/javascript;base64,${Buffer.from(files['desktop-contract.validators.js']).toString('base64')}`);
+  assert.equal(module.validateOptions({adapters:['none','flux2'],defaultAdapter:'flux2'}), true);
+  assert.equal(module.validateOptions({adapters:['none'],defaultAdapter:'flux2'}), false);
+  assert.equal(module.validateOptions({adapters:[],defaultAdapter:'none'}), false);
+});
+
 test('registered-link health refinement rejects contradictory counts and status', async () => {
   // Product invariant: every registered entry is classified exactly once.
   const files = await generate({format:'pumas-desktop-contract-1',dialect:'http://json-schema.org/draft-07/schema#',schemas:{Health:{
@@ -103,4 +137,12 @@ test('registered-link health refinement rejects contradictory counts and status'
   for (const value of [{...healthy,status:'degraded'},{...degraded,status:'healthy'},{...degraded,total_links:3},{...degraded,broken_links:null}]) {
     assert.equal(module.validateHealth(value),false);
   }
+});
+
+test('Electron-owned declarations merge with the backend export under one owner each', () => {
+  const contract = (schemas) => ({format:'pumas-desktop-contract-1',dialect:'http://json-schema.org/draft-07/schema#',schemas});
+  const merged = mergeOwnedContracts(contract({Backend:{type:'string'}}), [contract({Owned:{type:'boolean'}})]);
+  assert.deepEqual(Object.keys(merged.schemas).sort(), ['Backend', 'Owned']);
+  assert.throws(() => mergeOwnedContracts(contract({Same:{type:'string'}}), [contract({Same:{type:'string'}})]), /more than one owner/);
+  assert.throws(() => mergeOwnedContracts(contract({}), [{...contract({}), format:'other'}]), /format/);
 });

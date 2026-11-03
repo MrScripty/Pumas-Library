@@ -1,5 +1,7 @@
-// Generated from pumas-rpc contract.rs; SHA256 c2d3c7dfdc5f68a90f7e38c1e70540e4a768a73c986162735b174f01830dbaf3. DO NOT EDIT.
-import { validateAvailableVersionsOutcome, validateBackendStatusOutcome, validateCancelInstallationOutcome, validateCatalogSearchOutcome, validateCheckVersionDependenciesOutcome, validateCheckVersionDependenciesParams, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateFindTorchAlternativesParams, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateGetReleaseDependenciesOutcome, validateGetReleaseDependenciesParams, validateGetTorchPreviewReportParams, validateGetTorchReleaseOptionsParams, validateGetTorchRuntimeProbeParams, validateGithubCacheStatusOutcome, validateHfDownloadDetailsOutcome, validateInferenceSettingsOutcome, validateInstallVersionDependenciesOutcome, validateInstallVersionDependenciesParams, validateInstallVersionOutcome, validateInstallVersionParams, validateInstallationProgressOutcome, validateInstalledVersionsOutcome, validateLibraryModelMetadataOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelLookupOutcome, validateModelLookupParams, validateModelsOutcome, validatePartialDownloadOutcome, validatePreviewTorchRuntimeParams, validatePublicError, validateRecoverDownloadParams, validateRemoveVersionOutcome, validateRouterProfileSyncStatus, validateRuntimeLaunchOutcome, validateRuntimeLaunchParams, validateRuntimeRunningOutcome, validateRuntimeStopOutcome, validateS3AuthenticatedBundleImportParams, validateS3AuthenticatedDiscoveryParams, validateS3AuthenticatedImportParams, validateS3BundleImportObservation, validateS3BundleImportParams, validateS3ConditionalFileParams, validateS3CredentialParams, validateS3DiscoveryOutcome, validateS3DiscoveryParams, validateS3ImportCancelOutcome, validateS3ImportCancelParams, validateS3ImportOutcome, validateS3ImportParams, validateS3ImportStatusParams, validateS3PersistedImportsWire, validateS3PinnedFileParams, validateS3ReadMode, validateS3SelectedFileParams, validateS3TransferRetryParams, validateS3TransferRetryState, validateSearchCatalogParams, validateSelectedVersionOutcome, validateSetDefaultVersionOutcome, validateSetDefaultVersionParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateStopRuntimeProfileGenerationOutcome, validateStopRuntimeProfileGenerationParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome, validateSwitchVersionOutcome, validateSwitchVersionParams, validateTorchDriverAvailability, validateTorchGpuVendor, validateTorchReleaseCombination, validateTorchReleaseDriverStatus, validateTorchReleaseOptionsOutcome, validateTorchReleaseOptionsStatus, validateTorchReleaseRecommendation, validateTorchRuntimePreview, validateTorchRuntimePreviewArtifact, validateTorchRuntimePreviewOutcome, validateTorchRuntimePreviewQualification, validateTorchRuntimePreviewRejectionReason, validateTrialTorchRuntimeOutcome, validateTrialTorchRuntimeParams, validateUpdateInferenceSettingsOutcome, validateUpdateInferenceSettingsParams, validateUpdateModelNotesOutcome, validateUpdateModelNotesParams, validateValidateInstallationsOutcome, validateVersionInfoOutcome, validateVersionStatusOutcome } from './desktop-contract.validators.js';
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 6565e5785ec312399caf4db0d8659735a397b7188ab0aa065918873ec7727119. DO NOT EDIT.
+import { validateAvailableVersionsOutcome, validateBackendStatusOutcome, validateCancelInstallationOutcome, validateCatalogSearchOutcome, validateCheckVersionDependenciesOutcome, validateCheckVersionDependenciesParams, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadLocationReport, validateDownloadMutationOutcome, validateDownloadResolutionRequest, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateFindTorchAlternativesParams, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateGetReleaseDependenciesOutcome, validateGetReleaseDependenciesParams, validateGetTorchPreviewReportParams, validateGetTorchReleaseOptionsParams, validateGetTorchRuntimeProbeParams, validateGithubCacheStatusOutcome, validateHfDownloadDetailsOutcome, validateInferenceSettingsOutcome, validateInstallVersionDependenciesOutcome, validateInstallVersionDependenciesParams, validateInstallVersionOutcome, validateInstallVersionParams, validateInstallationProgressOutcome, validateInstalledVersionsOutcome, validateLauncherRootSelectionResult, validateLauncherRootStartupState, validateLibraryModelMetadataOutcome, validateLibraryUpgradeConfirmation, validateLibraryUpgradeResult, validateLinkHealthOutcome, validateModelDownloadUpdateOutcome, validateModelImportSelection, validateModelIndexRefreshOutcome, validateModelLibraryUpdateNotification, validateModelLookupOutcome, validateModelLookupParams, validateModelsOutcome, validatePartialDownloadOutcome, validatePreviewTorchRuntimeParams, validatePublicError, validateRecoverDownloadParams, validateRemoveVersionOutcome, validateRouterProfileSyncStatus, validateRuntimeLaunchOutcome, validateRuntimeLaunchParams, validateRuntimeProfileUpdateFeed, validateRuntimeRunningOutcome, validateRuntimeStopOutcome, validateS3AuthenticatedBundleImportParams, validateS3AuthenticatedDiscoveryParams, validateS3AuthenticatedImportParams, validateS3BundleImportObservation, validateS3BundleImportParams, validateS3ConditionalFileParams, validateS3CredentialParams, validateS3DiscoveryOutcome, validateS3DiscoveryParams, validateS3ImportCancelOutcome, validateS3ImportCancelParams, validateS3ImportOutcome, validateS3ImportParams, validateS3ImportStatusParams, validateS3PersistedImportsWire, validateS3PinnedFileParams, validateS3ReadMode, validateS3SelectedFileParams, validateS3TransferRetryParams, validateS3TransferRetryState, validateSearchCatalogParams, validateSelectedVersionOutcome, validateServingStatusUpdateFeed, validateSetDefaultVersionOutcome, validateSetDefaultVersionParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateStartupFailureFrame, validateStatusTelemetryUpdateNotification, validateStopRuntimeProfileGenerationOutcome, validateStopRuntimeProfileGenerationParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome, validateSwitchVersionOutcome, validateSwitchVersionParams, validateTorchAlternativeMatch, validateTorchAlternativesOutcome, validateTorchAlternativesStatus, validateTorchCapabilityProbe, validateTorchDriverAvailability, validateTorchGpuVendor, validateTorchInstalledRuntime, validateTorchProbeAdapterStatus, validateTorchProbeCoreStatus, validateTorchProbeStatus, validateTorchPythonChoice, validateTorchReleaseCombination, validateTorchReleaseDriverStatus, validateTorchReleaseOptionsOutcome, validateTorchReleaseOptionsStatus, validateTorchReleaseRecommendation, validateTorchRuntimeOptionsOutcome, validateTorchRuntimePreview, validateTorchRuntimePreviewArtifact, validateTorchRuntimePreviewOutcome, validateTorchRuntimePreviewQualification, validateTorchRuntimePreviewRejectionReason, validateTorchRuntimeProbeOutcome, validateTorchRuntimeSelection, validateTorchTrialCleanup, validateTorchTrialHealthStatus, validateTorchTrialStartupStatus, validateTrialTorchRuntimeOutcome, validateTrialTorchRuntimeParams, validateUpdateInferenceSettingsOutcome, validateUpdateInferenceSettingsParams, validateUpdateModelNotesOutcome, validateUpdateModelNotesParams, validateUpdateStreamError, validateValidateInstallationsOutcome, validateVersionInfoOutcome, validateVersionStatusOutcome } from './desktop-contract.validators.js';
+export type AppResources = { "ollama"?: (AppResourceUsage) | (null) };
+export type AppResourceUsage = { "gpu_memory"?: number | null; "ram_memory"?: number | null };
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
 export type AvailableVersionsRateLimited = { "error": string; "rate_limited": true; "retry_after_secs": number | null; "success": false };
 export type AvailableVersionsSuccess = { "success": true; "versions": ReadonlyArray<VersionReleaseInfo> };
@@ -21,20 +23,28 @@ export type ConversionCancelledOutcome = { "cancelled": boolean; "success": true
 export type ConversionDirection = ("gguf_to_safetensors") | ("safetensors_to_gguf") | ("safetensors_to_quantized_gguf") | ("gguf_to_quantized_gguf") | ("safetensors_to_nvfp4") | ("safetensors_to_fp8") | ("safetensors_to_sherry_qat");
 export type ConversionEnvironmentOutcome = { "ready": boolean; "success": true };
 export type ConversionListOutcome = { "conversions": ReadonlyArray<ConversionProgressOutcome>; "success": true };
-export type ConversionProgressOutcome = { "bytesWritten": number | null; "conversionId": string; "currentTensor": string | null; "direction": ConversionDirection; "error": null | "The model conversion did not complete successfully."; "estimatedOutputSize": number | null; "outputModelId": string | null; "pipelineStep": number | null; "pipelineStepLabel": string | null; "pipelineStepsTotal": number | null; "progress": number | null; "sourceModelId": string; "status": ConversionStatus; "targetQuant": string | null; "tensorsCompleted": number | null; "tensorsTotal": number | null };
+export type ConversionProgressOutcome = { "bytesWritten": number | null; "conversionId": string; "currentTensor": string | null; "direction": ConversionDirection; "error": string | null; "estimatedOutputSize": number | null; "outputModelId": string | null; "pipelineStep": number | null; "pipelineStepLabel": string | null; "pipelineStepsTotal": number | null; "progress": number | null; "sourceModelId": string; "status": ConversionStatus; "targetQuant": string | null; "tensorsCompleted": number | null; "tensorsTotal": number | null };
 export type ConversionProgressResponse = { "progress": (ConversionProgressOutcome) | (null); "success": true };
-export type ConversionSetupSnapshotOutcome = { "error": null | "Conversion environment setup did not complete successfully."; "operationId": string; "status": ConversionSetupStatus };
+export type ConversionSetupSnapshotOutcome = { "error": string | null; "operationId": string; "status": ConversionSetupStatus };
 export type ConversionSetupStartedOutcome = { "setup": ConversionSetupSnapshotOutcome; "success": true };
 export type ConversionSetupStatus = ("in_progress") | ("completed") | ("failed") | ("cancelled");
 export type ConversionSetupStatusOutcome = { "setup": (ConversionSetupSnapshotOutcome) | (null); "success": true };
 export type ConversionStartedOutcome = { "conversion_id": string; "success": true };
 export type ConversionStatus = ("setting_up") | ("validating") | ("converting") | ("writing") | ("importing") | ("completed") | ("cancelled") | ("error") | ("building_toolchain") | ("generating_f16_gguf") | ("computing_imatrix") | ("quantizing") | ("calibrating") | ("training");
+export type CpuResources = { "temp"?: number | null; "usage": number };
+export type DeepScanProgress = { "current": number; "stage": string; "total": number };
 export type DesktopJsonValue = (null) | (boolean) | (string) | (number) | (ReadonlyArray<DesktopJsonValue>) | ({ readonly [key: string]: DesktopJsonValue });
+export type DiskResources = { "free": number; "total": number; "usage": number };
 export type DownloadIdParams = { "download_id": string };
 export type DownloadListOutcome = { "downloads": ReadonlyArray<DownloadProgressOutcome>; "success": true };
+export type DownloadLocalAcceptance = "keep_existing_local_files";
+export type DownloadLocalCandidate = { "displayName": string; "modelId": string; "observation": string; "relativeDestination": string; "selectedFileCount": number; "sizeBytes": number };
+export type DownloadLocationReport = { "attemptId": string | null; "candidates": ReadonlyArray<DownloadLocalCandidate>; "downloadId": string; "message": string; "originalDestination": string | null; "requiresFormatUpgrade": boolean; "resolutionRequest": (DownloadResolutionRequest) | (null); "status": DownloadLocationStatus };
+export type DownloadLocationStatus = "not_applicable" | "existing_local_candidate" | "missing_files" | "ambiguous_candidates" | "busy" | "stale_observation" | "unsupported_history" | "invalid_metadata" | "unavailable_capability" | "publication_uncertain" | "resolved";
 export type DownloadMutationOutcome = { "error"?: string; "success": boolean };
 export type DownloadOption = { "fileGroup"?: FileGroup; "quant": string; "sizeBytes": number | null };
 export type DownloadProgressOutcome = { "downloadId": string; "downloadedBytes": number | null; "error": string | null; "etaSeconds": number | null; "libraryModelId": string | null; "modelName": string | null; "modelType": string | null; "nextRetryDelaySeconds": number | null; "progress": number | null; "repoId": string | null; "retryAttempt": number | null; "retryLimit": number | null; "retrying": boolean | null; "selectedArtifactId": string | null; "speed": number | null; "status": DownloadStatus; "totalBytes": number | null };
+export type DownloadResolutionRequest = { "acceptStorageUpgrade": boolean; "acceptance": DownloadLocalAcceptance; "attemptId": string; "candidateModelId": string; "downloadId": string; "expectedObservation": string; "operationId": string };
 export type DownloadStartedFailure = { "error": string; "success": false };
 export type DownloadStartedOutcome = (DownloadStartedSuccess) | (DownloadStartedFailure);
 export type DownloadStartedSuccess = { "artifactId": string | null; "download_id": string; "selectedArtifactId": string | null; "success": true };
@@ -55,6 +65,7 @@ export type GetTorchRuntimeProbeParams = { "tag": string };
 export type GithubCacheStatusNoManager = { "has_cache": false; "is_fetching": false; "is_valid": false };
 export type GithubCacheStatusOutcome = (GithubCacheStatusSnapshot) | (GithubCacheStatusNoManager);
 export type GithubCacheStatusSnapshot = { "age_seconds": number | null; "has_cache": boolean; "is_fetching": boolean; "is_valid": boolean; "last_fetched": string | null; "releases_count": number | null };
+export type GpuResources = { "memory": number; "memory_total": number; "temp"?: number | null; "usage": number };
 export type HfDownloadDetails = { "downloadOptions": ReadonlyArray<DownloadOption>; "repoId": string; "totalSizeBytes": number | null };
 export type HfDownloadDetailsFailure = { "error": string; "success": false };
 export type HfDownloadDetailsOutcome = (HfDownloadDetailsSuccess) | (HfDownloadDetailsFailure);
@@ -71,14 +82,33 @@ export type InstallVersionFailed = { "error": string; "success": false };
 export type InstallVersionOutcome = (InstallVersionStarted) | (InstallVersionFailed);
 export type InstallVersionParams = ({ "app_id": string; "preview_id"?: string | null; "tag": string }) | ({ "app_id": string; "previewId"?: string | null; "tag": string }) | ({ "appId": string; "preview_id"?: string | null; "tag": string }) | ({ "appId": string; "previewId"?: string | null; "tag": string });
 export type InstallVersionStarted = { "message": string; "success": true };
+export type LauncherRootAuthorityState = "unchanged" | "replacement-visibility-unknown" | "published-durability-unavailable";
+export type LauncherRootReadyState = { "status": "ready"; "selectionAction": LauncherRootSelectionAction; "libraryScopeId": (null) | (string) };
+export type LauncherRootRecoveryDetail = string;
+export type LauncherRootRecoveryReason = "invalid" | "unavailable" | "migration-required" | "backend-unavailable";
+export type LauncherRootSelectionAction = "select-library" | "correct-launch-input";
+export type LauncherRootSelectionResult = ({ "status": "cancelled" }) | ({ "status": "restarting" }) | ({ "status": "not-selectable"; "action": "correct-launch-input" }) | ({ "status": "recovery-required"; "reason": "invalid-selection" | "chooser-unavailable"; "authorityState": "unchanged" }) | ({ "status": "recovery-required"; "reason": "persistence-unavailable"; "authorityState": LauncherRootAuthorityState }) | ({ "status": "recovery-required"; "reason": "restart-unavailable"; "authorityState": "published" });
+export type LauncherRootStartupState = ({ "status": "initializing" }) | (LauncherRootReadyState) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "persisted" | "default"; "action": "select-library"; "detail"?: LauncherRootRecoveryDetail }) | ({ "status": "recovery-required"; "reason": LauncherRootRecoveryReason; "authoritySource": "environment" | "argument"; "action": "correct-launch-input"; "detail"?: LauncherRootRecoveryDetail });
 export type LibraryModelMetadataOutcome = { "component_manifest"?: ReadonlyArray<BundleComponentManifestEntry>; "effective_metadata"?: { readonly [key: string]: DesktopJsonValue }; "embedded_metadata"?: EmbeddedMetadataResponse; "model_id": string; "primary_file"?: string; "stored_metadata"?: { readonly [key: string]: DesktopJsonValue }; "success": true };
+export type LibraryStatusResponse = { "deep_scan_in_progress": boolean; "deep_scan_progress"?: (DeepScanProgress) | (null); "error"?: string | null; "indexing": boolean; "model_count": number; "pending_lookups"?: number | null; "success": boolean };
+export type LibraryUpgradeConfirmation = { "oldWritersStopped": true; "noDowngradeAccepted": true };
+export type LibraryUpgradeResult = ({ "status": "upgraded" }) | ({ "status": "unavailable" }) | ({ "status": "failed"; "stage": "upgrade" | "open" }) | ({ "status": "ready"; "state": LauncherRootReadyState });
 export type LinkHealthOutcome = (LinkHealthResponse);
 export type LinkHealthResponse = { "broken_links": ReadonlyArray<string>; "error"?: null; "errors": ReadonlyArray<string>; "healthy_links": number; "orphaned_links": ReadonlyArray<string>; "status": "healthy" | "degraded"; "success": true; "total_links": number; "warnings": ReadonlyArray<string> };
+export type ModelDownloadSnapshotOutcome = { "cursor": string; "downloads": ReadonlyArray<DownloadProgressOutcome>; "revision": number };
+export type ModelDownloadUpdateOutcome = { "cursor": string; "snapshot": ModelDownloadSnapshotOutcome; "snapshot_required": boolean; "stale_cursor": boolean };
+export type ModelFactFamily = "model_record" | "metadata" | "package_facts" | "dependency_bindings" | "validation" | "search_index";
+export type ModelImportSelection = ({ "status": "cancelled" }) | ({ "status": "invalid" }) | ({ "status": "unavailable" }) | ({ "status": "selected"; "paths": ReadonlyArray<string> });
 export type ModelIndexRefreshOutcome = { "indexed_count": number; "success": true };
+export type ModelLibraryChangeKind = "model_added" | "model_removed" | "metadata_modified" | "package_facts_modified" | "stale_facts_invalidated" | "dependency_binding_modified";
+export type ModelLibraryRefreshScope = "summary" | "detail" | "summary_and_detail";
+export type ModelLibraryUpdateEvent = { "change_kind": ModelLibraryChangeKind; "cursor": string; "fact_family": ModelFactFamily; "model_id": string; "producer_revision"?: string | null; "refresh_scope": ModelLibraryRefreshScope; "selected_artifact_id"?: string | null };
+export type ModelLibraryUpdateNotification = { "cursor": string; "events"?: ReadonlyArray<ModelLibraryUpdateEvent>; "snapshot_required": boolean; "stale_cursor": boolean };
 export type ModelLookupOutcome = { "contract_version": 1; "requested_model_id": string; "resolution": ModelLookupResolutionWire };
 export type ModelLookupParams = { "model_id": string };
 export type ModelLookupResolutionWire = ({ "status": "found" }) | ({ "replacement_model_id": string; "status": "reclassified" }) | ({ "status": "missing" });
 export type ModelsOutcome = { "models": { readonly [key: string]: CatalogModel }; "success": true };
+export type NetworkStatusResponse = { "circuit_breaker_rejections": number; "circuit_states": { readonly [key: string]: string }; "error"?: string | null; "failed_requests": number; "is_offline": boolean; "retries": number; "success": boolean; "success_rate": number; "successful_requests": number; "total_requests": number };
 export type ParamConstraints = { "allowed_values": (null) | (ReadonlyArray<DesktopJsonValue>); "max": number | null; "min": number | null };
 export type ParamType = "Number" | "Integer" | "String" | "Boolean";
 export type PartialDownloadActionName = "resume" | "recover" | "attach" | "none";
@@ -89,6 +119,7 @@ export type PublicError = { "class": PublicErrorClass; "code": number; "message"
 export type PublicErrorClass = "invalid_request" | "not_found" | "conflict" | "cancelled" | "unavailable" | "operation_failed" | "internal";
 export type QuantBackend = ("python_conversion") | ("llama_cpp") | ("nvfp4") | ("fp8") | ("sherry");
 export type QuantOption = { "backend": (QuantBackend) | (null); "bitsPerWeight": number; "description": string; "imatrixRecommended": boolean; "name": string; "recommended": boolean };
+export type RamResources = { "total": number; "usage": number };
 export type RecoverDownloadParams = { "modelId": string; "recoveryToken": string };
 export type RemoveVersionOutcome = { "success": boolean };
 export type RouterCatalogState = "current" | "pending" | "uncertain";
@@ -99,6 +130,10 @@ export type RuntimeInstallationProgressItem = { "completedAt": string; "name": s
 export type RuntimeInstallationStage = "resolving" | "download" | "extract" | "venv" | "dependencies" | "setup";
 export type RuntimeLaunchOutcome = { "error"?: string; "log_path"?: string; "ready"?: boolean; "success": boolean };
 export type RuntimeLaunchParams = Readonly<Record<string, never>>;
+export type RuntimeProfileEvent = { "cursor": string; "event_kind": RuntimeProfileEventKind; "model_id"?: string | null; "producer_revision"?: string | null; "profile_id"?: string | null; "provider"?: (RuntimeProviderId) | (null) };
+export type RuntimeProfileEventKind = "profile_created" | "profile_updated" | "profile_deleted" | "route_updated" | "route_deleted" | "status_changed" | "snapshot_required";
+export type RuntimeProfileUpdateFeed = { "cursor": string; "events": ReadonlyArray<RuntimeProfileEvent>; "snapshot_required": boolean; "stale_cursor": boolean };
+export type RuntimeProviderId = "torch" | "ollama" | "llama_cpp" | "onnx_runtime";
 export type RuntimeRunningOutcome = boolean;
 export type RuntimeStopOutcome = { "success": boolean };
 export type RuntimeVersionDependencies = { "installed": ReadonlyArray<string>; "missing": ReadonlyArray<string> };
@@ -138,29 +173,52 @@ export type S3TransferRetryReason = "no_live_custody" | "busy" | "not_retryable"
 export type S3TransferRetryState = ({ "authentication_required": boolean; "operation_id": string; "status": "ready" }) | ({ "reason": S3TransferRetryReason; "status": "unavailable" });
 export type SearchCatalogParams = { "limit"?: number | null; "offset"?: number | null; "query": string };
 export type SelectedVersionOutcome = { "success": true; "version": string };
+export type ServingStatusEvent = { "cursor": string; "event_kind": ServingStatusEventKind; "model_id"?: string | null; "profile_id"?: string | null; "provider"?: (RuntimeProviderId) | (null) };
+export type ServingStatusEventKind = "model_loaded" | "model_unloaded" | "load_failed" | "snapshot_required";
+export type ServingStatusUpdateFeed = { "cursor": string; "events": ReadonlyArray<ServingStatusEvent>; "snapshot_required": boolean; "stale_cursor": boolean };
 export type SetDefaultVersionOutcome = { "success": boolean };
 export type SetDefaultVersionParams = ({ "app_id": string; "tag"?: string | null }) | ({ "appId": string; "tag"?: string | null });
 export type StartBackendSetupParams = { "backend": QuantBackend; "expected_previous_operation_id"?: string | null };
 export type StartConversionSetupParams = { "expected_previous_operation_id"?: string | null };
+export type StartupFailureFrame = { "detail"?: string | null; "reason": string; "version": number };
+export type StatusResponse = { "app_resources"?: (AppResources) | (null); "error"?: string | null; "last_launch_error"?: string | null; "last_launch_log"?: string | null; "message": string; "notices"?: ReadonlyArray<string>; "ollama_running": boolean; "success": boolean; "torch_running": boolean; "version": string };
+export type StatusTelemetrySnapshot = { "cursor": string; "library": LibraryStatusResponse; "model_library_loaded": boolean; "network": NetworkStatusResponse; "resources": SystemResources; "revision": number; "sampled_at": string; "source_state": string; "status": StatusResponse };
+export type StatusTelemetryUpdateNotification = { "cursor": string; "snapshot": StatusTelemetrySnapshot; "snapshot_required": boolean; "stale_cursor": boolean };
 export type StopRuntimeProfileGenerationOutcome = { "stopped": boolean; "success": boolean };
 export type StopRuntimeProfileGenerationParams = ({ "generation": string; "profile_id": string }) | ({ "generation": string; "profileId": string });
 export type SuccessOutcome = { "success": true };
 export type SupportedQuantTypesOutcome = { "quant_types": ReadonlyArray<QuantOption>; "success": true };
 export type SwitchVersionOutcome = { "success": boolean };
 export type SwitchVersionParams = ({ "app_id": string; "tag": string }) | ({ "appId": string; "tag": string });
+export type SystemResources = { "cpu": CpuResources; "disk": DiskResources; "gpu": GpuResources; "ram": RamResources };
+export type TorchAlternativeMatch = { "build": string; "python": string; "sha256": string | null; "tag": string; "wheelUrl": string | null };
+export type TorchAlternativesOutcome = { "checkedBuilds": ReadonlyArray<string>; "dependenciesNotChecked": true; "incomplete": true; "issues": ReadonlyArray<string>; "matches": ReadonlyArray<TorchAlternativeMatch>; "selectedBuild": string; "selectedPython": string; "selectedTag": string; "status": TorchAlternativesStatus };
+export type TorchAlternativesStatus = "matches" | "none" | "inconclusive";
+export type TorchCapabilityProbe = { "error": string | null; "reason": string | null; "scope": string | null; "status": string; "version": string | null };
 export type TorchDriverAvailability = "available" | "unavailable" | "not_present" | "unknown";
 export type TorchGpuVendor = "nvidia" | "amd" | "intel";
+export type TorchInstalledRuntime = { "adapter": string | null; "build": string | null; "python": string | null; "qualification": TorchRuntimePreviewQualification; "tag": string };
+export type TorchProbeAdapterStatus = "not selected" | "unavailable" | "inconclusive";
+export type TorchProbeCoreStatus = "passed" | "failed";
+export type TorchProbeStatus = "passed" | "partial" | "failed";
+export type TorchPythonChoice = { "id": string; "label": string };
 export type TorchReleaseCombination = { "build": string; "python": string; "sha256"?: string | null; "wheelUrl": string };
 export type TorchReleaseDriverStatus = { "amd": TorchDriverAvailability; "nvidia": TorchDriverAvailability };
 export type TorchReleaseOptionsOutcome = { "checkedChannels": ReadonlyArray<string>; "combinations": ReadonlyArray<TorchReleaseCombination>; "completeScan": boolean; "detectedGpuVendors": ReadonlyArray<TorchGpuVendor>; "driverStatus": TorchReleaseDriverStatus; "issues": ReadonlyArray<string>; "recommendationNote": string | null; "recommended": (TorchReleaseRecommendation) | (null); "status": TorchReleaseOptionsStatus; "tag": string };
 export type TorchReleaseOptionsStatus = "matches" | "none" | "inconclusive";
 export type TorchReleaseRecommendation = { "build": string; "python": string };
+export type TorchRuntimeOptionsOutcome = { "adapters": ReadonlyArray<string>; "builds": ReadonlyArray<string>; "bundledPresetAvailable": boolean; "defaultAdapter": string; "defaultBuild": string; "installed": ReadonlyArray<TorchInstalledRuntime>; "preset": TorchRuntimeSelection; "pythons": ReadonlyArray<TorchPythonChoice> };
 export type TorchRuntimePreview = { "adapter": string; "artifacts": ReadonlyArray<TorchRuntimePreviewArtifact>; "build": string; "expiresInSeconds": number; "previewId": string; "python": string; "qualification": TorchRuntimePreviewQualification; "tag": string };
 export type TorchRuntimePreviewArtifact = { "name": string; "sha256": string; "url": string; "version": string };
 export type TorchRuntimePreviewOutcome = ({ "preview": TorchRuntimePreview; "status": "ready" }) | ({ "preview": TorchRuntimePreview; "status": "resolved" }) | ({ "message": string; "reason": TorchRuntimePreviewRejectionReason; "status": "rejected" });
 export type TorchRuntimePreviewQualification = "qualified" | "unverified";
 export type TorchRuntimePreviewRejectionReason = "unsupported" | "validation_failed" | "network_inconclusive" | "inconclusive";
-export type TrialTorchRuntimeOutcome = { "capabilities": ReadonlyArray<string>; "cleanup": string; "error": string | null; "generation": string | null; "healthStatus": string; "profileId": string; "protocol": number | null; "startedByTrial": boolean; "startupStatus": string; "success": boolean; "tag": string };
+export type TorchRuntimeProbeOutcome = { "adapter_status": TorchProbeAdapterStatus; "capabilities": { readonly [key: string]: TorchCapabilityProbe }; "core_status": TorchProbeCoreStatus; "recorded_at": string | null; "stale": boolean; "staleReasons": ReadonlyArray<string>; "status": TorchProbeStatus };
+export type TorchRuntimeSelection = { "adapter": string; "build": string; "python": string; "tag": string };
+export type TorchTrialCleanup = "not_needed" | "stopped_owned_generation" | "manual_stop_required";
+export type TorchTrialHealthStatus = "passed" | "failed" | "not_checked";
+export type TorchTrialStartupStatus = "passed" | "failed";
+export type TrialTorchRuntimeOutcome = { "capabilities": ReadonlyArray<string>; "cleanup": TorchTrialCleanup; "error": string | null; "generation": string | null; "healthStatus": TorchTrialHealthStatus; "profileId": string; "protocol": number | null; "startedByTrial": boolean; "startupStatus": TorchTrialStartupStatus; "success": boolean; "tag": string };
 export type TrialTorchRuntimeParams = ({ "profile_id": string; "tag": string }) | ({ "profileId": string; "tag": string });
 export type UpdateInferenceSettingsOutcome = { "model_id": string; "success": true };
 export type UpdateInferenceSettingsParams = ({ "model_id": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "modelId": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "modelId": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "modelId": string });
@@ -168,6 +226,7 @@ export type UpdateModelNotesFailure = { "error": string; "model_id": string; "su
 export type UpdateModelNotesOutcome = (UpdateModelNotesSuccess) | (UpdateModelNotesFailure);
 export type UpdateModelNotesParams = ({ "model_id": string; "notes"?: string | null }) | ({ "model_id": string; "model_notes"?: string | null }) | ({ "modelId": string; "notes"?: string | null }) | ({ "modelId": string; "model_notes"?: string | null });
 export type UpdateModelNotesSuccess = { "model_id": string; "notes"?: string; "success": true };
+export type UpdateStreamError = { "message": string };
 export type ValidateInstallationsOutcome = { "orphaned_dirs": ReadonlyArray<string>; "removed_tags": ReadonlyArray<string>; "valid_count": number };
 export type VersionInfoOutcome = { "info": RuntimeVersionInfo; "success": true };
 export type VersionReleaseAsset = { "downloadUrl": string; "name": string; "size": number };
@@ -197,14 +256,29 @@ function copyJson(value: unknown, ancestors: Set<object>, budget: { remaining: n
   return Object.freeze(result);
 }
 
+type ValidationError = { readonly instancePath?: string; readonly keyword?: string; readonly message?: string; readonly params?: { readonly additionalProperty?: unknown } };
+
+// The reason names the failed rule, its location and any unexpected field
+// name. It never includes a field's value.
+function rejectionReason(validate: (value: unknown) => boolean): string {
+  const error = (validate as { errors?: ReadonlyArray<ValidationError> | null }).errors?.[0];
+  if (!error) return 'Invalid desktop contract payload.';
+  const field = error.params?.additionalProperty;
+  const rule = error.keyword === 'additionalProperties' && typeof field === 'string'
+    ? `unexpected field ${JSON.stringify(field.slice(0, 64))}`
+    : error.message ?? error.keyword ?? 'rejected';
+  return `Invalid desktop contract payload at ${error.instancePath || '/'}: ${rule}.`.slice(0, 512);
+}
+
 function decode<T>(input: unknown, validate: (value: unknown) => boolean): DecodeOutcome<T> {
   try {
     const value = copyJson(input, new Set(), {remaining: 1_000_000});
-    if (!validate(value)) return {status:'invalid', message:'Invalid desktop contract payload.'};
+    if (!validate(value)) return {status:'invalid', message:rejectionReason(validate)};
     // The generated complete validator establishes this representation.
     return {status:'valid', value:value as T};
-  } catch {
-    return {status:'invalid', message:'Invalid desktop contract payload.'};
+  } catch (error) {
+    const reason = error instanceof InvalidJsonRepresentation ? `: ${error.message}` : '';
+    return {status:'invalid', message:`Invalid desktop contract payload${reason}.`};
   }
 }
 export function decodeAvailableVersionsOutcome(input: unknown): DecodeOutcome<AvailableVersionsOutcome> { return decode(input, validateAvailableVersionsOutcome); }
@@ -222,7 +296,9 @@ export function decodeConversionSetupStatusOutcome(input: unknown): DecodeOutcom
 export function decodeConversionStartedOutcome(input: unknown): DecodeOutcome<ConversionStartedOutcome> { return decode(input, validateConversionStartedOutcome); }
 export function decodeDownloadIdParams(input: unknown): DecodeOutcome<DownloadIdParams> { return decode(input, validateDownloadIdParams); }
 export function decodeDownloadListOutcome(input: unknown): DecodeOutcome<DownloadListOutcome> { return decode(input, validateDownloadListOutcome); }
+export function decodeDownloadLocationReport(input: unknown): DecodeOutcome<DownloadLocationReport> { return decode(input, validateDownloadLocationReport); }
 export function decodeDownloadMutationOutcome(input: unknown): DecodeOutcome<DownloadMutationOutcome> { return decode(input, validateDownloadMutationOutcome); }
+export function decodeDownloadResolutionRequest(input: unknown): DecodeOutcome<DownloadResolutionRequest> { return decode(input, validateDownloadResolutionRequest); }
 export function decodeDownloadStartedOutcome(input: unknown): DecodeOutcome<DownloadStartedOutcome> { return decode(input, validateDownloadStartedOutcome); }
 export function decodeDownloadStatusOutcome(input: unknown): DecodeOutcome<DownloadStatusOutcome> { return decode(input, validateDownloadStatusOutcome); }
 export function decodeFindTorchAlternativesParams(input: unknown): DecodeOutcome<FindTorchAlternativesParams> { return decode(input, validateFindTorchAlternativesParams); }
@@ -242,9 +318,16 @@ export function decodeInstallVersionOutcome(input: unknown): DecodeOutcome<Insta
 export function decodeInstallVersionParams(input: unknown): DecodeOutcome<InstallVersionParams> { return decode(input, validateInstallVersionParams); }
 export function decodeInstallationProgressOutcome(input: unknown): DecodeOutcome<InstallationProgressOutcome> { return decode(input, validateInstallationProgressOutcome); }
 export function decodeInstalledVersionsOutcome(input: unknown): DecodeOutcome<InstalledVersionsOutcome> { return decode(input, validateInstalledVersionsOutcome); }
+export function decodeLauncherRootSelectionResult(input: unknown): DecodeOutcome<LauncherRootSelectionResult> { return decode(input, validateLauncherRootSelectionResult); }
+export function decodeLauncherRootStartupState(input: unknown): DecodeOutcome<LauncherRootStartupState> { return decode(input, validateLauncherRootStartupState); }
 export function decodeLibraryModelMetadataOutcome(input: unknown): DecodeOutcome<LibraryModelMetadataOutcome> { return decode(input, validateLibraryModelMetadataOutcome); }
+export function decodeLibraryUpgradeConfirmation(input: unknown): DecodeOutcome<LibraryUpgradeConfirmation> { return decode(input, validateLibraryUpgradeConfirmation); }
+export function decodeLibraryUpgradeResult(input: unknown): DecodeOutcome<LibraryUpgradeResult> { return decode(input, validateLibraryUpgradeResult); }
 export function decodeLinkHealthOutcome(input: unknown): DecodeOutcome<LinkHealthOutcome> { return decode(input, validateLinkHealthOutcome); }
+export function decodeModelDownloadUpdateOutcome(input: unknown): DecodeOutcome<ModelDownloadUpdateOutcome> { return decode(input, validateModelDownloadUpdateOutcome); }
+export function decodeModelImportSelection(input: unknown): DecodeOutcome<ModelImportSelection> { return decode(input, validateModelImportSelection); }
 export function decodeModelIndexRefreshOutcome(input: unknown): DecodeOutcome<ModelIndexRefreshOutcome> { return decode(input, validateModelIndexRefreshOutcome); }
+export function decodeModelLibraryUpdateNotification(input: unknown): DecodeOutcome<ModelLibraryUpdateNotification> { return decode(input, validateModelLibraryUpdateNotification); }
 export function decodeModelLookupOutcome(input: unknown): DecodeOutcome<ModelLookupOutcome> { return decode(input, validateModelLookupOutcome); }
 export function decodeModelLookupParams(input: unknown): DecodeOutcome<ModelLookupParams> { return decode(input, validateModelLookupParams); }
 export function decodeModelsOutcome(input: unknown): DecodeOutcome<ModelsOutcome> { return decode(input, validateModelsOutcome); }
@@ -256,6 +339,7 @@ export function decodeRemoveVersionOutcome(input: unknown): DecodeOutcome<Remove
 export function decodeRouterProfileSyncStatus(input: unknown): DecodeOutcome<RouterProfileSyncStatus> { return decode(input, validateRouterProfileSyncStatus); }
 export function decodeRuntimeLaunchOutcome(input: unknown): DecodeOutcome<RuntimeLaunchOutcome> { return decode(input, validateRuntimeLaunchOutcome); }
 export function decodeRuntimeLaunchParams(input: unknown): DecodeOutcome<RuntimeLaunchParams> { return decode(input, validateRuntimeLaunchParams); }
+export function decodeRuntimeProfileUpdateFeed(input: unknown): DecodeOutcome<RuntimeProfileUpdateFeed> { return decode(input, validateRuntimeProfileUpdateFeed); }
 export function decodeRuntimeRunningOutcome(input: unknown): DecodeOutcome<RuntimeRunningOutcome> { return decode(input, validateRuntimeRunningOutcome); }
 export function decodeRuntimeStopOutcome(input: unknown): DecodeOutcome<RuntimeStopOutcome> { return decode(input, validateRuntimeStopOutcome); }
 export function decodeS3AuthenticatedBundleImportParams(input: unknown): DecodeOutcome<S3AuthenticatedBundleImportParams> { return decode(input, validateS3AuthenticatedBundleImportParams); }
@@ -280,34 +364,53 @@ export function decodeS3TransferRetryParams(input: unknown): DecodeOutcome<S3Tra
 export function decodeS3TransferRetryState(input: unknown): DecodeOutcome<S3TransferRetryState> { return decode(input, validateS3TransferRetryState); }
 export function decodeSearchCatalogParams(input: unknown): DecodeOutcome<SearchCatalogParams> { return decode(input, validateSearchCatalogParams); }
 export function decodeSelectedVersionOutcome(input: unknown): DecodeOutcome<SelectedVersionOutcome> { return decode(input, validateSelectedVersionOutcome); }
+export function decodeServingStatusUpdateFeed(input: unknown): DecodeOutcome<ServingStatusUpdateFeed> { return decode(input, validateServingStatusUpdateFeed); }
 export function decodeSetDefaultVersionOutcome(input: unknown): DecodeOutcome<SetDefaultVersionOutcome> { return decode(input, validateSetDefaultVersionOutcome); }
 export function decodeSetDefaultVersionParams(input: unknown): DecodeOutcome<SetDefaultVersionParams> { return decode(input, validateSetDefaultVersionParams); }
 export function decodeStartBackendSetupParams(input: unknown): DecodeOutcome<StartBackendSetupParams> { return decode(input, validateStartBackendSetupParams); }
 export function decodeStartConversionSetupParams(input: unknown): DecodeOutcome<StartConversionSetupParams> { return decode(input, validateStartConversionSetupParams); }
+export function decodeStartupFailureFrame(input: unknown): DecodeOutcome<StartupFailureFrame> { return decode(input, validateStartupFailureFrame); }
+export function decodeStatusTelemetryUpdateNotification(input: unknown): DecodeOutcome<StatusTelemetryUpdateNotification> { return decode(input, validateStatusTelemetryUpdateNotification); }
 export function decodeStopRuntimeProfileGenerationOutcome(input: unknown): DecodeOutcome<StopRuntimeProfileGenerationOutcome> { return decode(input, validateStopRuntimeProfileGenerationOutcome); }
 export function decodeStopRuntimeProfileGenerationParams(input: unknown): DecodeOutcome<StopRuntimeProfileGenerationParams> { return decode(input, validateStopRuntimeProfileGenerationParams); }
 export function decodeSuccessOutcome(input: unknown): DecodeOutcome<SuccessOutcome> { return decode(input, validateSuccessOutcome); }
 export function decodeSupportedQuantTypesOutcome(input: unknown): DecodeOutcome<SupportedQuantTypesOutcome> { return decode(input, validateSupportedQuantTypesOutcome); }
 export function decodeSwitchVersionOutcome(input: unknown): DecodeOutcome<SwitchVersionOutcome> { return decode(input, validateSwitchVersionOutcome); }
 export function decodeSwitchVersionParams(input: unknown): DecodeOutcome<SwitchVersionParams> { return decode(input, validateSwitchVersionParams); }
+export function decodeTorchAlternativeMatch(input: unknown): DecodeOutcome<TorchAlternativeMatch> { return decode(input, validateTorchAlternativeMatch); }
+export function decodeTorchAlternativesOutcome(input: unknown): DecodeOutcome<TorchAlternativesOutcome> { return decode(input, validateTorchAlternativesOutcome); }
+export function decodeTorchAlternativesStatus(input: unknown): DecodeOutcome<TorchAlternativesStatus> { return decode(input, validateTorchAlternativesStatus); }
+export function decodeTorchCapabilityProbe(input: unknown): DecodeOutcome<TorchCapabilityProbe> { return decode(input, validateTorchCapabilityProbe); }
 export function decodeTorchDriverAvailability(input: unknown): DecodeOutcome<TorchDriverAvailability> { return decode(input, validateTorchDriverAvailability); }
 export function decodeTorchGpuVendor(input: unknown): DecodeOutcome<TorchGpuVendor> { return decode(input, validateTorchGpuVendor); }
+export function decodeTorchInstalledRuntime(input: unknown): DecodeOutcome<TorchInstalledRuntime> { return decode(input, validateTorchInstalledRuntime); }
+export function decodeTorchProbeAdapterStatus(input: unknown): DecodeOutcome<TorchProbeAdapterStatus> { return decode(input, validateTorchProbeAdapterStatus); }
+export function decodeTorchProbeCoreStatus(input: unknown): DecodeOutcome<TorchProbeCoreStatus> { return decode(input, validateTorchProbeCoreStatus); }
+export function decodeTorchProbeStatus(input: unknown): DecodeOutcome<TorchProbeStatus> { return decode(input, validateTorchProbeStatus); }
+export function decodeTorchPythonChoice(input: unknown): DecodeOutcome<TorchPythonChoice> { return decode(input, validateTorchPythonChoice); }
 export function decodeTorchReleaseCombination(input: unknown): DecodeOutcome<TorchReleaseCombination> { return decode(input, validateTorchReleaseCombination); }
 export function decodeTorchReleaseDriverStatus(input: unknown): DecodeOutcome<TorchReleaseDriverStatus> { return decode(input, validateTorchReleaseDriverStatus); }
 export function decodeTorchReleaseOptionsOutcome(input: unknown): DecodeOutcome<TorchReleaseOptionsOutcome> { return decode(input, validateTorchReleaseOptionsOutcome); }
 export function decodeTorchReleaseOptionsStatus(input: unknown): DecodeOutcome<TorchReleaseOptionsStatus> { return decode(input, validateTorchReleaseOptionsStatus); }
 export function decodeTorchReleaseRecommendation(input: unknown): DecodeOutcome<TorchReleaseRecommendation> { return decode(input, validateTorchReleaseRecommendation); }
+export function decodeTorchRuntimeOptionsOutcome(input: unknown): DecodeOutcome<TorchRuntimeOptionsOutcome> { return decode(input, validateTorchRuntimeOptionsOutcome); }
 export function decodeTorchRuntimePreview(input: unknown): DecodeOutcome<TorchRuntimePreview> { return decode(input, validateTorchRuntimePreview); }
 export function decodeTorchRuntimePreviewArtifact(input: unknown): DecodeOutcome<TorchRuntimePreviewArtifact> { return decode(input, validateTorchRuntimePreviewArtifact); }
 export function decodeTorchRuntimePreviewOutcome(input: unknown): DecodeOutcome<TorchRuntimePreviewOutcome> { return decode(input, validateTorchRuntimePreviewOutcome); }
 export function decodeTorchRuntimePreviewQualification(input: unknown): DecodeOutcome<TorchRuntimePreviewQualification> { return decode(input, validateTorchRuntimePreviewQualification); }
 export function decodeTorchRuntimePreviewRejectionReason(input: unknown): DecodeOutcome<TorchRuntimePreviewRejectionReason> { return decode(input, validateTorchRuntimePreviewRejectionReason); }
+export function decodeTorchRuntimeProbeOutcome(input: unknown): DecodeOutcome<TorchRuntimeProbeOutcome> { return decode(input, validateTorchRuntimeProbeOutcome); }
+export function decodeTorchRuntimeSelection(input: unknown): DecodeOutcome<TorchRuntimeSelection> { return decode(input, validateTorchRuntimeSelection); }
+export function decodeTorchTrialCleanup(input: unknown): DecodeOutcome<TorchTrialCleanup> { return decode(input, validateTorchTrialCleanup); }
+export function decodeTorchTrialHealthStatus(input: unknown): DecodeOutcome<TorchTrialHealthStatus> { return decode(input, validateTorchTrialHealthStatus); }
+export function decodeTorchTrialStartupStatus(input: unknown): DecodeOutcome<TorchTrialStartupStatus> { return decode(input, validateTorchTrialStartupStatus); }
 export function decodeTrialTorchRuntimeOutcome(input: unknown): DecodeOutcome<TrialTorchRuntimeOutcome> { return decode(input, validateTrialTorchRuntimeOutcome); }
 export function decodeTrialTorchRuntimeParams(input: unknown): DecodeOutcome<TrialTorchRuntimeParams> { return decode(input, validateTrialTorchRuntimeParams); }
 export function decodeUpdateInferenceSettingsOutcome(input: unknown): DecodeOutcome<UpdateInferenceSettingsOutcome> { return decode(input, validateUpdateInferenceSettingsOutcome); }
 export function decodeUpdateInferenceSettingsParams(input: unknown): DecodeOutcome<UpdateInferenceSettingsParams> { return decode(input, validateUpdateInferenceSettingsParams); }
 export function decodeUpdateModelNotesOutcome(input: unknown): DecodeOutcome<UpdateModelNotesOutcome> { return decode(input, validateUpdateModelNotesOutcome); }
 export function decodeUpdateModelNotesParams(input: unknown): DecodeOutcome<UpdateModelNotesParams> { return decode(input, validateUpdateModelNotesParams); }
+export function decodeUpdateStreamError(input: unknown): DecodeOutcome<UpdateStreamError> { return decode(input, validateUpdateStreamError); }
 export function decodeValidateInstallationsOutcome(input: unknown): DecodeOutcome<ValidateInstallationsOutcome> { return decode(input, validateValidateInstallationsOutcome); }
 export function decodeVersionInfoOutcome(input: unknown): DecodeOutcome<VersionInfoOutcome> { return decode(input, validateVersionInfoOutcome); }
 export function decodeVersionStatusOutcome(input: unknown): DecodeOutcome<VersionStatusOutcome> { return decode(input, validateVersionStatusOutcome); }

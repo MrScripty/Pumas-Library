@@ -38,11 +38,17 @@ or diagnostics. `pumas-rpc` does not log request parameter values, including in
 debug mode. Request diagnostics use an allowlisted method label, a numeric
 request ID when present, and a stable outcome class/code.
 
-JSON-RPC and RPC-owned event errors pass through the Rust producer's stable
-public error projection. Its messages are bounded and deny disclosure of raw
-internal path, URL, credential, dependency, and upstream error text. Internal
-errors must not be serialized through `Display` or `Debug`; new transports must
-reuse the same projection.
+JSON-RPC, typed HTTP and RPC-owned event errors pass through the Rust
+producer's public error projection (`pumas-rpc/src/public_text.rs`). Callers
+branch on its stable code and class. Its message carries the failure reason so
+the local user and consuming applications can act on it (owner decision,
+2026-11-02). Messages are bounded to 1,024 characters and single-line;
+credential-shaped words, secret `key=value` pairs, URL user info and URL query
+strings (which can hold signatures) are redacted; and the home directory is
+shown as `~`. Messages may include other local paths and query-free URLs, which
+the receiving boundary already restricts to loopback clients of the same user.
+Raw subprocess output is not forwarded. New transports must reuse the same
+projection rather than serializing errors directly.
 
 ## Dependency and Release Evidence
 

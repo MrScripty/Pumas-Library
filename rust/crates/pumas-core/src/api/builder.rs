@@ -431,7 +431,7 @@ impl PumasApiBuilder {
                     return Err(PumasError::InvalidParams {
                     message: format!(
                         "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
-                        self.launcher_root.display(),
+                        crate::platform::platform_display_path(&self.launcher_root),
                         instance.pid
                     ),
                 });
@@ -632,7 +632,33 @@ impl PumasApiBuilder {
         if let Some(ref mut client) = hf_client {
             client.set_acquisition_service(acquisition.clone())?;
             client.set_download_importer(Arc::new(model_importer.clone()));
-            client.restore_persisted_downloads().await?;
+            // Download state is one subsystem. Check that it is readable with a
+            // plain read before the custody-owned restore: if it is not (for
+            // example, fields written by a newer Pumas), keep the library,
+            // models and inference available, refuse download changes so the
+            // state is not rewritten, and report why through status. A failure
+            // inside an admitted restore keeps its fatal custody semantics.
+            let store = download_persistence.clone();
+            let readable = tokio::task::spawn_blocking(move || {
+                store.load_lifecycle_inventory_strict().map(|_| ())
+            })
+            .await
+            .map_err(|error| PumasError::Other(format!("download store check failed: {error}")))?;
+            match readable {
+                Ok(()) => {
+                    client.restore_persisted_downloads().await?;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        "Downloads disabled: saved download state is not readable: {error}"
+                    );
+                    client.disable_downloads(format!(
+                        "Downloads are disabled because saved download state could not be read: {error}. \
+                         The library, models and inference are available. If this library was opened by a \
+                         newer Pumas Library version, use that version or upgrade this one."
+                    ));
+                }
+            }
         }
 
         // Initialize conversion manager

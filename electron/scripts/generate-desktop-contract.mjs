@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath, URL } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -11,7 +11,7 @@ import { build } from 'esbuild';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const supported = new Set(['$schema', '$id', '$ref', 'title', 'description', 'definitions', 'type', 'properties', 'required', 'additionalProperties', 'items', 'anyOf', 'oneOf', 'allOf', 'enum', 'const', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems', 'uniqueItems', 'minProperties', 'maxProperties', 'default', 'format']);
-for (const keyword of ['pumasUtf8Max', 'pumasCatalogMap', 'pumasCatalogRow', 'pumasPartialOutcome', 'pumasCatalogSearch', 'pumasMutation', 'pumasStarted', 'pumasPortablePath', 'pumasCanonicalText', 'pumasLinkHealth', 'pumasConversionSetup']) supported.add(keyword);
+for (const keyword of ['pumasUtf8Max', 'pumasCatalogMap', 'pumasCatalogRow', 'pumasPartialOutcome', 'pumasCatalogSearch', 'pumasMutation', 'pumasStarted', 'pumasPortablePath', 'pumasCanonicalText', 'pumasLinkHealth', 'pumasConversionSetup', 'pumasTorchDefaultAdapter']) supported.add(keyword);
 
 // Product wire refinements selected explicitly by the Rust export. AJV still
 // owns all standard Draft7 behavior; none of these reinterpret schema keywords.
@@ -19,6 +19,10 @@ function addWireRefinements(ajv) {
   ajv.addKeyword({keyword:'pumasConversionSetup', type:'object', schemaType:'boolean', code(context) {
     const {data} = context;
     context.fail(_`(${data}.status === "failed") !== (${data}.error !== null)`);
+  }});
+  ajv.addKeyword({keyword:'pumasTorchDefaultAdapter', type:'object', schemaType:'boolean', code(context) {
+    const {data} = context;
+    context.fail(_`!Array.isArray(${data}.adapters) || !${data}.adapters.includes(${data}.defaultAdapter)`);
   }});
   ajv.addKeyword({keyword:'pumasLinkHealth', type:'object', schemaType:'boolean', code(context) {
     const {data} = context;
@@ -114,6 +118,29 @@ export function schemaType(schema) {
   }
 }
 
+/**
+ * Add contracts owned by Electron (payloads Electron main publishes to the
+ * renderer) to the backend's exported contract. Each declaration has exactly
+ * one owner, so a name defined by both sources is an error.
+ */
+export function mergeOwnedContracts(backend, owned) {
+  const schemas = {...backend.schemas};
+  for (const contract of owned) {
+    if (contract.format !== backend.format || contract.dialect !== backend.dialect) throw new Error('Unsupported owned contract format/dialect');
+    for (const [name, schema] of Object.entries(contract.schemas ?? {})) {
+      if (Object.hasOwn(schemas, name)) throw new Error(`Contract declaration ${name} has more than one owner`);
+      schemas[name] = schema;
+    }
+  }
+  return {...backend, schemas};
+}
+
+async function electronOwnedContracts() {
+  const directory = resolve(root, 'electron/contracts');
+  const names = (await readdir(directory)).filter(name => name.endsWith('.schema.json')).sort();
+  return Promise.all(names.map(async name => JSON.parse(await readFile(resolve(directory, name), 'utf8'))));
+}
+
 export async function generate(contract, { runtimeRoot = resolve(root, 'electron') } = {}) {
   if (contract.format !== 'pumas-desktop-contract-1' || contract.dialect !== 'http://json-schema.org/draft-07/schema#') throw new Error('Unsupported contract format/dialect');
   const ajv = new Ajv({strict: true, strictTypes: false, validateFormats: false, code: {source: true, esm: true}, allErrors: false});
@@ -154,7 +181,7 @@ export async function generate(contract, { runtimeRoot = resolve(root, 'electron
   };
   const compiled = await build({absWorkingDir:root, stdin:{contents:standaloneCode(ajv, exports), resolveDir:resolve(root,'electron'), sourcefile:'desktop-contract.validators.js'}, plugins:[runtimePlugin], bundle:true, platform:'browser', format:'esm', write:false, target:'es2022'});
   const hash = createHash('sha256').update(JSON.stringify(contract)).digest('hex');
-  const banner = `// Generated from pumas-rpc contract.rs; SHA256 ${hash}. DO NOT EDIT.\n`;
+  const banner = `// Generated from the pumas-rpc contract export and electron/contracts; SHA256 ${hash}. DO NOT EDIT.\n`;
   const names = Object.keys(contract.schemas).sort();
   const declarations = names.map(name => `export declare function validate${name}(value: unknown): boolean;`).join('\n');
   const wrappers = names.map(name => `export function decode${name}(input: unknown): DecodeOutcome<${name}> { return decode(input, validate${name}); }`).join('\n');
@@ -183,14 +210,29 @@ function copyJson(value: unknown, ancestors: Set<object>, budget: { remaining: n
   return Object.freeze(result);
 }
 
+type ValidationError = { readonly instancePath?: string; readonly keyword?: string; readonly message?: string; readonly params?: { readonly additionalProperty?: unknown } };
+
+// The reason names the failed rule, its location and any unexpected field
+// name. It never includes a field's value.
+function rejectionReason(validate: (value: unknown) => boolean): string {
+  const error = (validate as { errors?: ReadonlyArray<ValidationError> | null }).errors?.[0];
+  if (!error) return 'Invalid desktop contract payload.';
+  const field = error.params?.additionalProperty;
+  const rule = error.keyword === 'additionalProperties' && typeof field === 'string'
+    ? \`unexpected field \${JSON.stringify(field.slice(0, 64))}\`
+    : error.message ?? error.keyword ?? 'rejected';
+  return \`Invalid desktop contract payload at \${error.instancePath || '/'}: \${rule}.\`.slice(0, 512);
+}
+
 function decode<T>(input: unknown, validate: (value: unknown) => boolean): DecodeOutcome<T> {
   try {
     const value = copyJson(input, new Set(), {remaining: 1_000_000});
-    if (!validate(value)) return {status:'invalid', message:'Invalid desktop contract payload.'};
+    if (!validate(value)) return {status:'invalid', message:rejectionReason(validate)};
     // The generated complete validator establishes this representation.
     return {status:'valid', value:value as T};
-  } catch {
-    return {status:'invalid', message:'Invalid desktop contract payload.'};
+  } catch (error) {
+    const reason = error instanceof InvalidJsonRepresentation ? \`: \${error.message}\` : '';
+    return {status:'invalid', message:\`Invalid desktop contract payload\${reason}.\`};
   }
 }
 ${wrappers}\n`;
@@ -217,7 +259,7 @@ async function main() {
     if (exported.status !== 0) throw new Error(`Contract export failed: ${exported.stderr}`);
     raw = exported.stdout;
   }
-  const files = await generate(JSON.parse(raw));
+  const files = await generate(mergeOwnedContracts(JSON.parse(raw), await electronOwnedContracts()));
   for (const packageName of ['electron','frontend']) {
     for (const [name, content] of Object.entries(files)) {
       const path = resolve(root, packageName, 'src/generated', name);

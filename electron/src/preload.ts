@@ -47,7 +47,16 @@ import {
   type ConversionDirection,
   type QuantBackend,
   decodeDownloadListOutcome,
+  decodeModelDownloadUpdateOutcome,
+  decodeModelLibraryUpdateNotification,
+  decodeRuntimeProfileUpdateFeed,
+  decodeServingStatusUpdateFeed,
+  decodeStatusTelemetryUpdateNotification,
+  decodeUpdateStreamError,
   decodeDownloadMutationOutcome,
+  decodeDownloadLocationReport,
+  decodeDownloadResolutionRequest,
+  type DownloadResolutionRequest,
   decodeDownloadStartedOutcome,
   decodeDownloadStatusOutcome,
   decodeModelIndexRefreshOutcome,
@@ -93,13 +102,24 @@ import {
   decodeTrialTorchRuntimeParams,
   decodeTrialTorchRuntimeOutcome,
   decodeFindTorchAlternativesParams,
+  decodeTorchAlternativesOutcome,
+  decodeTorchRuntimeOptionsOutcome,
+  decodeTorchRuntimeProbeOutcome,
   decodeStopRuntimeProfileGenerationParams,
   decodeStopRuntimeProfileGenerationOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
+  decodeLibraryUpgradeConfirmation,
+  decodeLauncherRootSelectionResult as decodeGeneratedLauncherRootSelectionResult,
+  decodeLauncherRootStartupState as decodeGeneratedLauncherRootStartupState,
+  decodeLibraryUpgradeResult as decodeGeneratedLibraryUpgradeResult,
   type DecodeOutcome,
-  type DownloadListOutcome,
+  type ModelDownloadUpdateOutcome,
+  type ModelLibraryUpdateNotification,
+  type RuntimeProfileUpdateFeed,
+  type ServingStatusUpdateFeed,
+  type StatusTelemetryUpdateNotification,
   type RuntimeLaunchOutcome,
 } from './generated/desktop-contract';
 
@@ -122,174 +142,22 @@ class LauncherRootRecoveryContractError extends Error {
   }
 }
 
+/** Decode a renderer-facing result with its generated validator, or throw the stable contract error. */
+function decodeOrThrow<T>(outcome: DecodeOutcome<T>, message: string): T {
+  if (outcome.status === 'valid') return outcome.value;
+  throw new LauncherRootRecoveryContractError(message);
+}
+
 function decodeLauncherRootStartupState(value: unknown): LauncherRootStartupState {
-  try {
-    if (hasExactShape(value, ['status']) && value['status'] === 'initializing') {
-      return { status: 'initializing' };
-    }
-
-    if (
-      hasExactShape(value, ['status', 'selectionAction', 'libraryScopeId']) &&
-      value['status'] === 'ready' &&
-      isLauncherRootSelectionAction(value['selectionAction']) &&
-      (value['libraryScopeId'] === null ||
-        (typeof value['libraryScopeId'] === 'string' && /^display-v1:[a-f0-9]{64}$/.test(value['libraryScopeId'])))
-    ) {
-      return {
-        status: value['status'],
-        selectionAction: value['selectionAction'],
-        libraryScopeId: value['libraryScopeId'],
-      };
-    }
-
-    if (
-      hasExactShape(value, ['status', 'reason', 'authoritySource', 'action']) &&
-      value['status'] === 'recovery-required' &&
-      (value['reason'] === 'invalid' || value['reason'] === 'unavailable' ||
-        value['reason'] === 'migration-required' || value['reason'] === 'backend-unavailable') &&
-      isLauncherRootAuthoritySource(value['authoritySource']) &&
-      isCorrelatedLauncherRootStartupAction(
-        value['authoritySource'],
-        value['action']
-      )
-    ) {
-      return {
-        status: value['status'],
-        reason: value['reason'],
-        authoritySource: value['authoritySource'],
-        action: value['action'],
-      };
-    }
-  } catch {
-    // Convert accessor/proxy failures to the same stable contract diagnostic.
-  }
-
-  throw new LauncherRootRecoveryContractError('Invalid launcher-root startup state.');
+  return decodeOrThrow(decodeGeneratedLauncherRootStartupState(value), 'Invalid launcher-root startup state.');
 }
 
 function decodeLibraryUpgradeResult(value: unknown): LibraryUpgradeResult {
-  if (hasExactShape(value, ['status']) &&
-      (value['status'] === 'upgraded' || value['status'] === 'unavailable')) return { status: value['status'] };
-  if (hasExactShape(value, ['status', 'stage']) && value['status'] === 'failed' &&
-      (value['stage'] === 'upgrade' || value['stage'] === 'open')) {
-    return { status: 'failed', stage: value['stage'] };
-  }
-  if (hasExactShape(value, ['status', 'state']) && value['status'] === 'ready') {
-    const state = decodeLauncherRootStartupState(value['state']);
-    if (state.status === 'ready') return { status: 'ready', state };
-  }
-  throw new LauncherRootRecoveryContractError('Invalid library upgrade result.');
+  return decodeOrThrow(decodeGeneratedLibraryUpgradeResult(value), 'Invalid library upgrade result.');
 }
 
-function decodeLauncherRootSelectionResult(
-  value: unknown
-): LauncherRootSelectionResult {
-  try {
-    if (hasExactShape(value, ['status'])) {
-      if (value['status'] === 'cancelled') {
-        return { status: 'cancelled' };
-      }
-      if (value['status'] === 'restarting') {
-        return { status: 'restarting' };
-      }
-    }
-
-    if (
-      hasExactShape(value, ['status', 'action']) &&
-      value['status'] === 'not-selectable' &&
-      value['action'] === 'correct-launch-input'
-    ) {
-      return {
-        status: value['status'],
-        action: value['action'],
-      };
-    }
-
-    if (
-      hasExactShape(value, ['status', 'reason', 'authorityState']) &&
-      value['status'] === 'recovery-required'
-    ) {
-      if (
-        (value['reason'] === 'invalid-selection' ||
-          value['reason'] === 'chooser-unavailable') &&
-        value['authorityState'] === 'unchanged'
-      ) {
-        return {
-          status: value['status'],
-          reason: value['reason'],
-          authorityState: value['authorityState'],
-        };
-      }
-      if (
-        value['reason'] === 'persistence-unavailable' &&
-        isLauncherRootPersistenceAuthorityState(value['authorityState'])
-      ) {
-        return {
-          status: value['status'],
-          reason: value['reason'],
-          authorityState: value['authorityState'],
-        };
-      }
-      if (
-        value['reason'] === 'restart-unavailable' &&
-        value['authorityState'] === 'published'
-      ) {
-        return {
-          status: value['status'],
-          reason: value['reason'],
-          authorityState: value['authorityState'],
-        };
-      }
-    }
-  } catch {
-    // Convert accessor/proxy failures to the same stable contract diagnostic.
-  }
-
-  throw new LauncherRootRecoveryContractError('Invalid launcher-root selection result.');
-}
-
-function hasExactShape(
-  value: unknown,
-  expectedKeys: readonly string[]
-): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-
-  const actualKeys = Object.keys(value);
-  return actualKeys.length === expectedKeys.length &&
-    expectedKeys.every((key) => actualKeys.includes(key));
-}
-
-function isLauncherRootSelectionAction(
-  value: unknown
-): value is 'select-library' | 'correct-launch-input' {
-  return value === 'select-library' || value === 'correct-launch-input';
-}
-
-function isLauncherRootAuthoritySource(
-  value: unknown
-): value is 'persisted' | 'environment' | 'argument' | 'default' {
-  return value === 'persisted' || value === 'environment' || value === 'argument' || value === 'default';
-}
-
-function isCorrelatedLauncherRootStartupAction(
-  authoritySource: 'persisted' | 'environment' | 'argument' | 'default',
-  action: unknown
-): action is 'select-library' | 'correct-launch-input' {
-  return authoritySource === 'persisted' || authoritySource === 'default'
-    ? action === 'select-library'
-    : action === 'correct-launch-input';
-}
-
-function isLauncherRootPersistenceAuthorityState(
-  value: unknown
-): value is 'unchanged' |
-  'replacement-visibility-unknown' |
-  'published-durability-unavailable' {
-  return value === 'unchanged' ||
-    value === 'replacement-visibility-unknown' ||
-    value === 'published-durability-unavailable';
+function decodeLauncherRootSelectionResult(value: unknown): LauncherRootSelectionResult {
+  return decodeOrThrow(decodeGeneratedLauncherRootSelectionResult(value), 'Invalid launcher-root selection result.');
 }
 
 /**
@@ -328,262 +196,29 @@ type BaseRpcResponse = {
   error?: string;
 };
 
-type ModelLibraryUpdateNotificationPayload = {
-  cursor: string;
-  events?: unknown[];
-  stale_cursor: boolean;
-  snapshot_required: boolean;
+type UpdateCallbacks<T> = {
+  callback: (notification: T) => void;
+  onError: (message: string) => void;
 };
 
-type ModelDownloadUpdateNotificationPayload = {
-  cursor: string;
-  snapshot: {
-    cursor: string;
-    revision: number;
-    downloads: DownloadListOutcome['downloads'];
+/**
+ * Deliver decoded update-stream payloads. A payload that fails its contract is
+ * never dropped silently: its reason goes to `onError`, and the renderer
+ * resynchronizes from its RPC snapshot.
+ */
+function updateListener<T>(
+  stream: string,
+  decode: (value: unknown) => DecodeOutcome<T>,
+  { callback, onError }: UpdateCallbacks<T>
+): (event: IpcRendererEvent, payload: unknown) => void {
+  return (_event, payload) => {
+    const decoded = decode(payload);
+    if (decoded.status === 'valid') {
+      callback(decoded.value);
+      return;
+    }
+    onError(`Desktop contract ${decoded.status} for ${stream} update: ${decoded.message}`);
   };
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-};
-
-type RuntimeProfileUpdateNotificationPayload = {
-  cursor: string;
-  events?: unknown[];
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-};
-
-type ServingStatusUpdateNotificationPayload = {
-  cursor: string;
-  events: unknown[];
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-};
-
-type ServingStatusErrorNotificationPayload = {
-  message: string;
-};
-
-type StatusTelemetryUpdateNotificationPayload = {
-  cursor: string;
-  snapshot: unknown;
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-};
-
-const MODEL_LIBRARY_CHANGE_KINDS = new Set([
-  'model_added',
-  'model_removed',
-  'metadata_modified',
-  'package_facts_modified',
-  'stale_facts_invalidated',
-  'dependency_binding_modified',
-]);
-
-const MODEL_FACT_FAMILIES = new Set([
-  'model_record',
-  'metadata',
-  'package_facts',
-  'dependency_bindings',
-  'validation',
-  'search_index',
-]);
-
-const MODEL_LIBRARY_REFRESH_SCOPES = new Set(['summary', 'detail', 'summary_and_detail']);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isNullableString(value: unknown): boolean {
-  return value === undefined || value === null || typeof value === 'string';
-}
-
-function requireTorchPayload(value: unknown, method: string): Record<string, unknown> {
-  if (!isRecord(value)) throw new TypeError(`Invalid ${method} response`);
-  return value;
-}
-
-function validateTorchOptions(value: unknown): unknown {
-  const result = requireTorchPayload(value, 'get_torch_runtime_options');
-  const preset = result['preset'];
-  if (!Array.isArray(result['builds']) || !result['builds'].every((item) => typeof item === 'string')
-    || !Array.isArray(result['adapters']) || !result['adapters'].every((item) => typeof item === 'string')
-    || typeof result['bundledPresetAvailable'] !== 'boolean'
-    || !['none', 'flux2'].includes(String(result['defaultAdapter']))
-    || !result['adapters'].some((item) => item === result['defaultAdapter'])
-    || !Array.isArray(result['pythons']) || !result['pythons'].every((item) => isRecord(item)
-      && typeof item['id'] === 'string' && typeof item['label'] === 'string')
-    || !Array.isArray(result['installed']) || !result['installed'].every((item) => isRecord(item)
-      && typeof item['tag'] === 'string'
-      && ['build', 'python', 'adapter'].every((key) => item[key] === null || typeof item[key] === 'string')
-      && ['qualified', 'unverified'].includes(String(item['qualification'])))
-    || !isRecord(preset) || !['tag', 'build', 'python', 'adapter'].every((key) => typeof preset[key] === 'string')) {
-    throw new TypeError('Invalid get_torch_runtime_options response');
-  }
-  return result;
-}
-
-function validateTorchProbe(value: unknown): unknown {
-  const result = requireTorchPayload(value, 'get_torch_runtime_probe');
-  const capabilities = result['capabilities'];
-  if (!['passed', 'partial', 'failed'].includes(String(result['status']))
-    || !['passed', 'failed'].includes(String(result['core_status']))
-    || !['not selected', 'unavailable', 'inconclusive'].includes(String(result['adapter_status']))
-    || (result['recorded_at'] !== undefined && typeof result['recorded_at'] !== 'string')
-    || (result['stale'] !== undefined && typeof result['stale'] !== 'boolean')
-    || (result['staleReasons'] !== undefined && (!Array.isArray(result['staleReasons'])
-      || !result['staleReasons'].every((item) => typeof item === 'string')))
-    || !isRecord(capabilities) || !Object.values(capabilities).every((item) => isRecord(item)
-      && typeof item['status'] === 'string')) {
-    throw new TypeError('Invalid get_torch_runtime_probe response');
-  }
-  return result;
-}
-
-function validateTorchTrial(value: unknown): unknown {
-  const result = requireTorchPayload(value, 'trial_torch_runtime');
-  if (typeof result['success'] !== 'boolean' || typeof result['tag'] !== 'string'
-    || typeof result['profileId'] !== 'string'
-    || !['passed', 'failed'].includes(String(result['startupStatus']))
-    || !['passed', 'failed', 'not_checked'].includes(String(result['healthStatus']))
-    || (result['protocol'] !== null && typeof result['protocol'] !== 'number')
-    || (result['generation'] !== null && typeof result['generation'] !== 'string')
-    || !Array.isArray(result['capabilities']) || !result['capabilities'].every((item) => typeof item === 'string')
-    || typeof result['startedByTrial'] !== 'boolean'
-    || (result['error'] !== undefined && result['error'] !== null && typeof result['error'] !== 'string')
-    || !['not_needed', 'stopped_owned_generation', 'manual_stop_required'].includes(String(result['cleanup']))) {
-    throw new TypeError('Invalid trial_torch_runtime response');
-  }
-  return result;
-}
-
-function validateTorchAlternatives(value: unknown): unknown {
-  const result = requireTorchPayload(value, 'find_torch_alternatives');
-  if (!['selectedTag', 'selectedBuild', 'selectedPython'].every((key) => typeof result[key] === 'string')
-    || !['matches', 'none', 'inconclusive'].includes(String(result['status']))
-    || result['incomplete'] !== true || result['dependenciesNotChecked'] !== true
-    || !Array.isArray(result['checkedBuilds']) || !result['checkedBuilds'].every((item) => typeof item === 'string')
-    || !Array.isArray(result['issues']) || !result['issues'].every((item) => typeof item === 'string')
-    || !Array.isArray(result['matches']) || !result['matches'].every((item) => isRecord(item)
-      && ['tag', 'build', 'python'].every((key) => typeof item[key] === 'string')
-      && (item['wheelUrl'] === undefined || typeof item['wheelUrl'] === 'string')
-      && (item['sha256'] === undefined || typeof item['sha256'] === 'string'))) {
-    throw new TypeError('Invalid find_torch_alternatives response');
-  }
-  return result;
-}
-
-function isModelLibraryUpdateEventPayload(value: unknown): boolean {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  return (
-    typeof value['cursor'] === 'string' &&
-    typeof value['model_id'] === 'string' &&
-    MODEL_LIBRARY_CHANGE_KINDS.has(String(value['change_kind'])) &&
-    MODEL_FACT_FAMILIES.has(String(value['fact_family'])) &&
-    MODEL_LIBRARY_REFRESH_SCOPES.has(String(value['refresh_scope'])) &&
-    isNullableString(value['selected_artifact_id']) &&
-    isNullableString(value['producer_revision'])
-  );
-}
-
-function isModelLibraryUpdateNotificationPayload(
-  value: unknown
-): value is ModelLibraryUpdateNotificationPayload {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const events = value['events'];
-  return (
-    typeof value['cursor'] === 'string' &&
-    typeof value['stale_cursor'] === 'boolean' &&
-    typeof value['snapshot_required'] === 'boolean' &&
-    (events === undefined ||
-      (Array.isArray(events) && events.every(isModelLibraryUpdateEventPayload)))
-  );
-}
-
-function isRuntimeProfileUpdateNotificationPayload(
-  value: unknown
-): value is RuntimeProfileUpdateNotificationPayload {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const events = value['events'];
-  return (
-    typeof value['cursor'] === 'string' &&
-    typeof value['stale_cursor'] === 'boolean' &&
-    typeof value['snapshot_required'] === 'boolean' &&
-    (events === undefined || Array.isArray(events))
-  );
-}
-
-function isServingStatusUpdateNotificationPayload(
-  value: unknown
-): value is ServingStatusUpdateNotificationPayload {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const events = value['events'];
-  return (
-    typeof value['cursor'] === 'string' &&
-    typeof value['stale_cursor'] === 'boolean' &&
-    typeof value['snapshot_required'] === 'boolean' &&
-    Array.isArray(events)
-  );
-}
-
-function isServingStatusErrorNotificationPayload(
-  value: unknown
-): value is ServingStatusErrorNotificationPayload {
-  return isRecord(value) && typeof value['message'] === 'string';
-}
-
-function decodeModelDownloadUpdateNotificationPayload(
-  value: unknown
-): ModelDownloadUpdateNotificationPayload | null {
-  if (!isRecord(value) || !isRecord(value['snapshot'])) {
-    return null;
-  }
-
-  const snapshot = value['snapshot'];
-  if (typeof value['cursor'] !== 'string' ||
-      typeof value['stale_cursor'] !== 'boolean' ||
-      typeof value['snapshot_required'] !== 'boolean' ||
-      typeof snapshot['cursor'] !== 'string' ||
-      typeof snapshot['revision'] !== 'number' ||
-      !Number.isSafeInteger(snapshot['revision']) || snapshot['revision'] < 0) return null;
-  const decoded = decodeDownloadListOutcome({ success: true, downloads: snapshot['downloads'] });
-  if (decoded.status !== 'valid') return null;
-  return {
-    cursor: value['cursor'],
-    stale_cursor: value['stale_cursor'],
-    snapshot_required: value['snapshot_required'],
-    snapshot: { cursor: snapshot['cursor'], revision: snapshot['revision'], downloads: decoded.value.downloads },
-  };
-}
-
-function isStatusTelemetryUpdateNotificationPayload(
-  value: unknown
-): value is StatusTelemetryUpdateNotificationPayload {
-  if (!isRecord(value) || !isRecord(value['snapshot'])) {
-    return false;
-  }
-
-  const snapshot = value['snapshot'];
-  return (
-    typeof value['cursor'] === 'string' &&
-    typeof value['stale_cursor'] === 'boolean' &&
-    typeof value['snapshot_required'] === 'boolean' &&
-    typeof snapshot['cursor'] === 'string' &&
-    typeof snapshot['revision'] === 'number'
-  );
 }
 
 async function launchAppVersion(
@@ -681,7 +316,7 @@ const electronAPI = {
     }
     return validatedApiCall('install_version', decodeInstallVersionOutcome, params);
   },
-  get_torch_runtime_options: async () => validateTorchOptions(await apiCall('get_torch_runtime_options')),
+  get_torch_runtime_options: () => validatedApiCall('get_torch_runtime_options', decodeTorchRuntimeOptionsOutcome),
   get_torch_release_options: (tag: string) => {
     const params = requireDecoded(decodeGetTorchReleaseOptionsParams({ tag }), 'get_torch_release_options request');
     return validatedApiCall('get_torch_release_options', decodeTorchReleaseOptionsOutcome, params);
@@ -692,11 +327,11 @@ const electronAPI = {
   },
   get_torch_runtime_probe: async (tag: string) => {
     const params = requireDecoded(decodeGetTorchRuntimeProbeParams({ tag }), 'get_torch_runtime_probe request');
-    return validateTorchProbe(await apiCall('get_torch_runtime_probe', params));
+    return validatedApiCall('get_torch_runtime_probe', decodeTorchRuntimeProbeOutcome, params);
   },
   trial_torch_runtime: async (tag: string, profileId: string) => {
     const params = requireDecoded(decodeTrialTorchRuntimeParams({ tag, profileId }), 'trial_torch_runtime request');
-    return validateTorchTrial(await validatedApiCall('trial_torch_runtime', decodeTrialTorchRuntimeOutcome, params));
+    return validatedApiCall('trial_torch_runtime', decodeTrialTorchRuntimeOutcome, params);
   },
   stop_runtime_profile_if_generation: (profileId: string, generation: string) => {
     if (!profileId || !/^[1-9]\d*$/.test(generation)) {
@@ -707,7 +342,7 @@ const electronAPI = {
   },
   find_torch_alternatives: async (tag: string, build: string, python: string) => {
     const params = requireDecoded(decodeFindTorchAlternativesParams({ tag, build, python }), 'find_torch_alternatives request');
-    return validateTorchAlternatives(await apiCall('find_torch_alternatives', params));
+    return validatedApiCall('find_torch_alternatives', decodeTorchAlternativesOutcome, params);
   },
   remove_version: (tag: string, appId?: string) =>
     validatedApiCall('remove_version', decodeRemoveVersionOutcome, { tag, app_id: appId }),
@@ -968,6 +603,11 @@ const electronAPI = {
     validatedApiCall('pause_model_download', decodeDownloadMutationOutcome, { download_id: downloadId }),
   resume_model_download: (downloadId: string) =>
     validatedApiCall('resume_model_download', decodeDownloadMutationOutcome, { download_id: downloadId }),
+  inspect_retained_download: (downloadId:string) =>
+    validatedApiCall('inspect_retained_download',decodeDownloadLocationReport,{download_id:downloadId}),
+  resolve_retained_download: (request:DownloadResolutionRequest) =>
+    validatedApiCall('resolve_retained_download',decodeDownloadLocationReport,
+      requireDecoded(decodeDownloadResolutionRequest(request),'resolve_retained_download request')),
   list_model_downloads: () =>
     validatedApiCall('list_model_downloads', decodeDownloadListOutcome),
   resume_partial_download: (modelId: string, recoveryToken: string) =>
@@ -1230,13 +870,11 @@ const electronAPI = {
   },
 
   upgrade_launcher_library: async (confirmation: LibraryUpgradeConfirmation) => {
-    if (!hasExactShape(confirmation, ['oldWritersStopped', 'noDowngradeAccepted']) ||
-        confirmation.oldWritersStopped !== true || confirmation.noDowngradeAccepted !== true) {
-      throw new LauncherRootRecoveryContractError('Library upgrade requires both confirmations.');
-    }
-    return decodeLibraryUpgradeResult(await ipcRenderer.invoke('launcher:upgradeLibrary', {
-      oldWritersStopped: true, noDowngradeAccepted: true,
-    }));
+    const confirmed = decodeOrThrow(
+      decodeLibraryUpgradeConfirmation(confirmation),
+      'Library upgrade requires both confirmations.'
+    );
+    return decodeLibraryUpgradeResult(await ipcRenderer.invoke('launcher:upgradeLibrary', confirmed));
   },
 
   select_launcher_root: async () => {
@@ -1292,29 +930,20 @@ const electronAPI = {
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
   getTheme: () => ipcRenderer.invoke('theme:get'),
   onModelLibraryUpdate: (
-    callback: (notification: ModelLibraryUpdateNotificationPayload) => void
+    callback: (notification: ModelLibraryUpdateNotification) => void,
+    onError: (message: string) => void
   ): (() => void) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      if (isModelLibraryUpdateNotificationPayload(payload)) {
-        callback(payload);
-      }
-    };
-
+    const listener = updateListener('model-library', decodeModelLibraryUpdateNotification, { callback, onError });
     ipcRenderer.on('model-library:update', listener);
     return () => {
       ipcRenderer.removeListener('model-library:update', listener);
     };
   },
   onModelDownloadUpdate: (
-    callback: (notification: ModelDownloadUpdateNotificationPayload) => void
+    callback: (notification: ModelDownloadUpdateOutcome) => void,
+    onError: (message: string) => void
   ): (() => void) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      const decoded = decodeModelDownloadUpdateNotificationPayload(payload);
-      if (decoded) {
-        callback(decoded);
-      }
-    };
-
+    const listener = updateListener('model-download', decodeModelDownloadUpdateOutcome, { callback, onError });
     ipcRenderer.on('model-download:update', listener);
     void ipcRenderer.invoke('model-download:subscribe');
     return () => {
@@ -1323,14 +952,10 @@ const electronAPI = {
     };
   },
   onRuntimeProfileUpdate: (
-    callback: (notification: RuntimeProfileUpdateNotificationPayload) => void
+    callback: (notification: RuntimeProfileUpdateFeed) => void,
+    onError: (message: string) => void
   ): (() => void) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      if (isRuntimeProfileUpdateNotificationPayload(payload)) {
-        callback(payload);
-      }
-    };
-
+    const listener = updateListener('runtime-profile', decodeRuntimeProfileUpdateFeed, { callback, onError });
     ipcRenderer.on('runtime-profile:update', listener);
     void ipcRenderer.invoke('runtime-profile:subscribe');
     return () => {
@@ -1339,19 +964,14 @@ const electronAPI = {
     };
   },
   onServingStatusUpdate: (
-    callback: (notification: ServingStatusUpdateNotificationPayload) => void,
-    onError?: (message: string) => void
+    callback: (notification: ServingStatusUpdateFeed) => void,
+    onError: (message: string) => void
   ): (() => void) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      if (isServingStatusUpdateNotificationPayload(payload)) {
-        callback(payload);
-      }
-    };
-    const errorListener = (_event: IpcRendererEvent, payload: unknown) => {
-      if (isServingStatusErrorNotificationPayload(payload)) {
-        onError?.(payload.message);
-      }
-    };
+    const listener = updateListener('serving-status', decodeServingStatusUpdateFeed, { callback, onError });
+    const errorListener = updateListener('serving-status error', decodeUpdateStreamError, {
+      callback: (error) => onError(error.message),
+      onError,
+    });
 
     ipcRenderer.on('serving-status:update', listener);
     ipcRenderer.on('serving-status:error', errorListener);
@@ -1359,7 +979,7 @@ const electronAPI = {
       const message = error instanceof Error
         ? error.message
         : 'Failed to subscribe to serving status updates';
-      onError?.(message);
+      onError(message);
     });
     return () => {
       ipcRenderer.removeListener('serving-status:update', listener);
@@ -1368,14 +988,10 @@ const electronAPI = {
     };
   },
   onStatusTelemetryUpdate: (
-    callback: (notification: StatusTelemetryUpdateNotificationPayload) => void
+    callback: (notification: StatusTelemetryUpdateNotification) => void,
+    onError: (message: string) => void
   ): (() => void) => {
-    const listener = (_event: IpcRendererEvent, payload: unknown) => {
-      if (isStatusTelemetryUpdateNotificationPayload(payload)) {
-        callback(payload);
-      }
-    };
-
+    const listener = updateListener('status-telemetry', decodeStatusTelemetryUpdateNotification, { callback, onError });
     ipcRenderer.on('status-telemetry:update', listener);
     void ipcRenderer.invoke('status-telemetry:subscribe');
     return () => {

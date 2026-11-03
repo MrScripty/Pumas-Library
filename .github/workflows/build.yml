@@ -367,7 +367,7 @@ jobs:
         run: |
           set -euo pipefail
           PUMAS_AUDIO_SESSION_PYTHON="$(python - <<'PY'
-          import hashlib, json, os
+          import json, os
           from pathlib import Path
           root = Path(os.environ['QUALIFICATION_ROOT']).resolve(strict=True)
           record = json.loads((root / 'torch-versions/v2.10.0/runtime.json').read_text())['managed_python']
@@ -376,9 +376,6 @@ jobs:
           executable = Path(record['executable']['path'])
           assert executable.is_absolute() and executable.resolve(strict=True) == executable
           assert executable.is_relative_to(root) and '\n' not in str(executable) and '\r' not in str(executable)
-          assert record['executable']['sha256'] == pin['interpreter_executable_sha256']
-          with executable.open('rb') as source:
-              assert hashlib.file_digest(source, 'sha256').hexdigest() == pin['interpreter_executable_sha256']
           print(executable)
           PY
           )"
@@ -392,6 +389,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          for phase in cold warm; do
+            for kind in runtime confined-dependency-probe; do
+              evidence="$QUALIFICATION_ROOT/audio-$phase-$kind.json"
+              if test -f "$evidence"; then
+                cp "$evidence" "$EVIDENCE_DIR/"
+              fi
+            done
+          done
           selection="$QUALIFICATION_ROOT/torch-versions/v2.10.0/runtime.json"
           if test -f "$selection"; then
             mkdir -p "$EVIDENCE_DIR"
@@ -407,6 +413,10 @@ jobs:
             ${{ runner.temp }}/review-audio-evidence/probe.log
             ${{ runner.temp }}/review-audio-evidence/installed-runtime.json
             ${{ runner.temp }}/review-audio-evidence/audio-confined-dependency-probe.json
+            ${{ runner.temp }}/review-audio-evidence/audio-cold-runtime.json
+            ${{ runner.temp }}/review-audio-evidence/audio-warm-runtime.json
+            ${{ runner.temp }}/review-audio-evidence/audio-cold-confined-dependency-probe.json
+            ${{ runner.temp }}/review-audio-evidence/audio-warm-confined-dependency-probe.json
             ${{ runner.temp }}/review-audio-evidence/controlled-session-protocol.log
           if-no-files-found: ignore
           retention-days: 7
@@ -532,6 +542,10 @@ jobs:
         run: python scripts/release/test-acquisition-integration.py --package pumas-rpc --features test-support --minimum 2
       - name: Test cross-owner inference-disabled RPC shutdown
         run: python scripts/release/test-acquisition-integration.py --package pumas-rpc --no-default-features --features test-support --minimum 1
+      - name: Test native retained-download reconciliation
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library retained_location
+      - name: Test inference-disabled retained-download reconciliation
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features retained_location
       - name: Test inference-disabled native HTTP drainage
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features http_transport::tests
       - name: Test reserved acquisition workspace custody

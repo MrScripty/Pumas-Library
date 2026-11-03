@@ -28,6 +28,11 @@ mod dependencies;
 pub(crate) mod dependency_pins;
 mod directory_import;
 mod download_recovery;
+mod download_resolution;
+pub use download_resolution::{
+    DownloadLocalAcceptance, DownloadLocalCandidate, DownloadLocationReport,
+    DownloadLocationStatus, DownloadResolutionRequest,
+};
 pub mod download_store;
 mod external_assets;
 mod hashing;
@@ -116,6 +121,7 @@ pub use model_type_resolver::{
     ModelTypeResolution,
 };
 pub use naming::normalize_name;
+pub(crate) use package_facts::gguf::gguf_trained_context_length;
 pub use read_only::PumasReadOnlyLibrary;
 pub use task_signature::{
     normalize_task_signature, NormalizedTaskSignature, TaskNormalizationStatus,

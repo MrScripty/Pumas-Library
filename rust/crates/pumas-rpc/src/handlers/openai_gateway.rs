@@ -206,12 +206,27 @@ fn openai_models_snapshot_response(snapshot: ServingStatusSnapshot) -> Response 
             .cmp(openai_model_id(right))
             .then_with(|| left.profile_id.as_str().cmp(right.profile_id.as_str()))
     });
+    // OpenAI model IDs are unique. An alias served by several profiles appears
+    // once, with every profile listed; typed callers select one with `profile`.
+    let mut data: Vec<Value> = Vec::new();
+    for model in served_models {
+        let profile = model.profile_id.as_str().to_owned();
+        match data.last_mut() {
+            Some(entry) if entry["id"] == openai_model_id(&model) => {
+                if let Some(profiles) = entry["profiles"].as_array_mut() {
+                    profiles.push(json!(profile));
+                }
+            }
+            _ => {
+                let mut entry = openai_model_entry(model);
+                entry["profiles"] = json!([profile]);
+                data.push(entry);
+            }
+        }
+    }
     Json(json!({
         "object": "list",
-        "data": served_models
-            .into_iter()
-            .map(openai_model_entry)
-            .collect::<Vec<_>>()
+        "data": data
     }))
     .into_response()
 }
@@ -762,6 +777,13 @@ fn openai_gateway_policy_for_path(path: &str) -> Option<OpenAiGatewayEndpointPol
             generation: false,
             request_timeout: Some(OPENAI_GATEWAY_REQUEST_TIMEOUT),
         }),
+        // Reached only through typed `decision` operations; not a public route.
+        "/v1/systemone" => Some(OpenAiGatewayEndpointPolicy {
+            endpoint: OpenAiGatewayEndpoint::SystemOne,
+            max_request_body_bytes: OPENAI_EMBEDDINGS_BODY_BYTES,
+            generation: false,
+            request_timeout: Some(OPENAI_GATEWAY_REQUEST_TIMEOUT),
+        }),
         _ => None,
     }
 }
@@ -790,7 +812,10 @@ fn openai_model_entry(model: ServedModelStatus) -> Value {
     entry
 }
 
-fn provider_request_model_id(model: &ServedModelStatus, registry: &ProviderRegistry) -> String {
+pub(super) fn provider_request_model_id(
+    model: &ServedModelStatus,
+    registry: &ProviderRegistry,
+) -> String {
     registry
         .get(model.provider)
         .map(|behavior| {
@@ -906,7 +931,12 @@ fn resolve_openai_served_model(
 async fn proxy_response(response: reqwest::Response) -> Response {
     let status = response.status();
     if !status.is_success() {
-        return openai_public_error_response(status, PublicError::unavailable());
+        let reason = provider_error_reason(response).await;
+        return openai_public_error_response_with_reason(
+            status,
+            PublicError::unavailable(),
+            reason.as_deref(),
+        );
     }
     let content_type = response
         .headers()
@@ -960,12 +990,47 @@ pub(crate) fn openai_error_response_with_code(
     openai_error_response_body(status, message, Some(code))
 }
 
+/// Upper bound for reading a provider's own error reason.
+const PROVIDER_ERROR_BODY_BYTES: usize = 64 * 1024;
+
+/// The provider's `error.message` (OpenAI and llama.cpp shape) or a top-level
+/// string `error`/`message`, bounded. Other provider fields are not forwarded.
+async fn provider_error_reason(response: reqwest::Response) -> Option<String> {
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(Ok(chunk)) = stream.next().await {
+        if bytes.len().saturating_add(chunk.len()) > PROVIDER_ERROR_BODY_BYTES {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let value: Value = serde_json::from_slice(&bytes).ok()?;
+    let reason = value
+        .pointer("/error/message")
+        .or_else(|| value.get("error"))
+        .or_else(|| value.get("message"))?
+        .as_str()?
+        .trim();
+    if reason.is_empty() {
+        return None;
+    }
+    Some(crate::public_text::public_reason(reason))
+}
+
 fn openai_public_error_response(status: StatusCode, error: PublicError) -> Response {
+    openai_public_error_response_with_reason(status, error, None)
+}
+
+fn openai_public_error_response_with_reason(
+    status: StatusCode,
+    error: PublicError,
+    reason: Option<&str>,
+) -> Response {
     (
         status,
         Json(json!({
             "error": {
-                "message": error.message,
+                "message": reason.unwrap_or(&error.message),
                 "type": "pumas_error",
                 "code": error.code,
                 "class": error.class,

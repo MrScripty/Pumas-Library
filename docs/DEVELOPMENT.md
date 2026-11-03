@@ -237,3 +237,16 @@ READMEs, duplicate command guides, or permanent implementation diaries.
 Plans are temporary execution authority. Once complete or abandoned, preserve
 durable decisions in an ADR/current guide and remove the plan. Audits are dated
 snapshots and must name their code and standards baselines.
+
+## Retained-download recovery qualification
+
+The [contract](contracts/download-location-reconciliation.md) owns local acceptance;
+[the runbook](runbooks/download-location-reconciliation.md) describes the user action.
+Run `cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library retained_location`
+with default features and `--no-default-features`. The native CI matrix runs both.
+`scripts/acceptance/download_location_reconciliation.py RPC --temporary-parent PATH`
+qualifies actual RPC and reopen using tiny authored fixtures. The companion
+`download_location_reconciliation_ui.mjs ELECTRON FIXTURE [SOURCE_ELECTRON_DIRECTORY]`
+requires that helper's authored marker and uses the actual renderer/preload/IPC/RPC
+in the normal Electron sandbox. Qualify display/session and process isolation;
+never direct these helpers at a real library.

@@ -48,11 +48,12 @@ survives failed process-tree drainage with `ManagedChild`'s parked custody.
 non-admitting ownership preparation. It requires actual retained interpreter,
 dependency and sidecar role capabilities, retains their cooperative mutation
 leases, and owns the exact `PreparedArtifactUse` allocation and its selected
-member set. It refuses a missing retained interpreter member, missing or changed
-required worker code, import hooks and bytecode, and revalidates actual runtime
-and copied model bytes before any later provider effect. Worker code identity is
-checked against bytes embedded in this source build; equality does not establish
-a complete executable read closure. Equal model manifests cannot retarget the
+member set. It refuses a missing retained interpreter member, missing or linked
+required worker code, import hooks and bytecode, and revalidates runtime and
+copied-model file identities and lengths before any later provider effect.
+Historical hashes are retained without automatic content checks. Required worker
+code is no longer compared with embedded source bytes. Equal model manifests
+cannot retarget the
 candidate to another prepared allocation. Dropping the candidate releases its
 last custody references only when no other owner remains.
 
@@ -61,7 +62,8 @@ admitted runtime. The shipping `AudioRuntimeOwner::for_installed_runtime`
 constructor remains unimplemented and refuses. The fixed remaining requirements
 are a trusted interpreter/dependency recipe, complete native loader read closure,
 complete model read containment, and pinned native execution/lifecycle
-acceptance. Captured selected trees and sidecar equality discharge none of these
+acceptance. Captured selected trees and required sidecar presence discharge none
+of these
 requirements. Controlled candidate tests use dummy interpreter/dependency bytes
 and synthetic unparsed weights; they establish custody and refusal behavior,
 not an installed Cohere runtime or real transcription.

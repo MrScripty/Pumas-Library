@@ -1,5 +1,10 @@
+import type {
+  StatusResponse as DesktopStatusResponse,
+  StatusTelemetrySnapshot as DesktopStatusTelemetrySnapshot,
+  SystemResources as DesktopSystemResources,
+  StatusTelemetryUpdateNotification as DesktopStatusTelemetryUpdateNotification,
+} from '../generated/desktop-contract';
 import type { BaseResponse } from './api-common';
-import type { GetLibraryStatusResponse, NetworkStatusResponse } from './api-import';
 
 // ============================================================================
 // System & Status Types
@@ -12,62 +17,14 @@ export interface DiskSpaceResponse extends BaseResponse {
   percent: number;
 }
 
-export interface StatusResponse extends BaseResponse {
-  version: string;
-  message: string;
-  ollama_running: boolean;
-  torch_running: boolean;
-  last_launch_error: string | null;
-  last_launch_log: string | null;
-  app_resources?: {
-    ollama?: {
-      gpu_memory?: number;
-      ram_memory?: number;
-    };
-  };
-}
+// The backend's status and resource types, generated from its declaration.
+export type StatusResponse = DesktopStatusResponse;
+export type SystemResources = DesktopSystemResources;
 
 export interface SystemResourcesResponse extends BaseResponse {
-  resources: {
-    cpu: {
-      usage: number;
-      temp?: number;
-    };
-    gpu: {
-      usage: number;
-      memory: number;
-      memory_total: number;
-      temp?: number;
-    };
-    ram: {
-      usage: number;
-      total: number;
-    };
-    disk: {
-      usage: number;
-      total: number;
-      free: number;
-    };
-  };
-}
-
-export type SystemResources = SystemResourcesResponse['resources'];
-
-export interface StatusTelemetrySnapshot {
-  cursor: string;
-  revision: number;
-  sampled_at: string;
-  source_state: string;
-  status: StatusResponse;
   resources: SystemResources;
-  network: NetworkStatusResponse;
-  library: GetLibraryStatusResponse;
-  model_library_loaded: boolean;
 }
 
-export interface StatusTelemetryUpdateNotification {
-  cursor: string;
-  snapshot: StatusTelemetrySnapshot;
-  stale_cursor: boolean;
-  snapshot_required: boolean;
-}
+// Declared once by the backend (`/events/status-telemetry-updates`) and generated.
+export type StatusTelemetrySnapshot = DesktopStatusTelemetrySnapshot;
+export type StatusTelemetryUpdateNotification = DesktopStatusTelemetryUpdateNotification;

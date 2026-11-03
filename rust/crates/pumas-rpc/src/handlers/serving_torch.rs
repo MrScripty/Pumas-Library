@@ -579,7 +579,13 @@ mod tests {
         let package = tempfile::tempdir().unwrap();
         let config_path = package.path().join("config.json");
         let components = ResolvedComponents {
-            path: package.path().to_string_lossy().into_owned(),
+            // The resolver hands over a canonical package path.
+            path: package
+                .path()
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
             selected_fp8: true,
         };
         let fp8 = json!({
@@ -636,7 +642,13 @@ mod tests {
             json!({}),
         ] {
             let components = ResolvedComponents {
-                path: package.path().to_string_lossy().into_owned(),
+                // The resolver hands over a canonical package path.
+                path: package
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
                 selected_fp8: selected_artifact_is_fp8(&metadata),
             };
             let fp8_encoder = is_validated_fp8_qwen3_encoder(&components).await;
@@ -651,7 +663,13 @@ mod tests {
         let package = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         let components = ResolvedComponents {
-            path: package.path().to_string_lossy().into_owned(),
+            // The resolver hands over a canonical package path.
+            path: package
+                .path()
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
             selected_fp8: true,
         };
         let config = json!({

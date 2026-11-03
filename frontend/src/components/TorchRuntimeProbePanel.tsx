@@ -55,7 +55,7 @@ export function TorchRuntimeProbePanel({ tag, trialStore }: TorchRuntimeProbePan
       {report && (
         <>
           {report.recorded_at && <p className="mt-2">Recorded {new Date(report.recorded_at).toLocaleString()}</p>}
-          {report.stale && <p role="alert" className="mt-2">Saved checks are stale. {report.staleReasons?.join('; ')}</p>}
+          {report.stale && <p role="alert" className="mt-2">Saved checks are stale. {report.staleReasons.join('; ')}</p>}
           <p className="mt-2">
             Core: <strong>{report.core_status}</strong> · Image adapter: <strong>{report.adapter_status}</strong>
             {report.status === 'partial' && ' · Partial support; inspect the adapter checks below.'}

@@ -246,12 +246,12 @@ class HeldSourceTests(unittest.TestCase):
         for name, fd in self.originals.items():
             self.assertEqual(os.pread(fd, len(self.bodies[name]), 0), self.bodies[name])
 
-    def test_original_expectations_are_required_and_cannot_be_rebased(self):
+    def test_original_expectation_shape_is_required(self):
         self.select().close()
         for expected in (
             None,
             {},
-            {name: (len(raw), b"x" * 32) for name, raw in self.bodies.items()},
+            {name: (len(raw), b"x" * 31) for name, raw in self.bodies.items()},
         ):
             with patch.object(source_api, "_sealed_copy") as sealed:
                 with self.assertRaises(ValueError):
@@ -315,7 +315,7 @@ class HeldSourceTests(unittest.TestCase):
         for name, body in self.bodies.items():
             self.assertEqual(reader.read(name, len(body)), body)
 
-    def test_mutation_during_sealed_copy_refuses_without_leaking_fds(self):
+    def test_capture_retains_historical_checksum_without_rechecking_contents(self):
         from loaders import owned_cohere_source
 
         reader = self.select()
@@ -331,17 +331,23 @@ class HeldSourceTests(unittest.TestCase):
             return original(fd, identity, digest)
 
         with patch.object(owned_cohere_source, "_sealed_copy", side_effect=mutate):
-            with self.assertRaisesRegex(ValueError, "changed"):
-                HeldCohereReadSource._from_members(
-                    self.owner, self.originals, expected=self.expected()
-                )
+            reader = HeldCohereReadSource._from_members(
+                self.owner, self.originals, expected=self.expected()
+            )
+        self.assertEqual(
+            reader._members["model.safetensors"][2], self.expected()["model.safetensors"][1]
+        )
+        with open(reader.weights_filename(), "rb") as file:
+            self.assertEqual(file.read(), b"x" * len(self.bodies["model.safetensors"]))
+        reader.close()
         self.assertEqual(set(os.listdir("/proc/self/fd")), before)
 
-    def test_changed_held_bytes_size_and_closed_reader_refuse(self):
+    def test_same_size_content_change_preserves_sealed_view_but_size_and_close_refuse(self):
         reader = self.select()
         (self.root / "model.safetensors").write_bytes(b"x" * len(self.bodies["model.safetensors"]))
-        with self.assertRaisesRegex(ValueError, "changed"):
-            reader.weights_filename()
+        reader.validate()
+        with open(reader.weights_filename(), "rb") as file:
+            self.assertEqual(file.read(), self.bodies["model.safetensors"])
         (self.root / "config.json").write_bytes(b"longer" * 100)
         with self.assertRaisesRegex(ValueError, "changed"):
             reader.read("config.json", 65536)

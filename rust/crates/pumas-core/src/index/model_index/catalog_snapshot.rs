@@ -139,7 +139,7 @@ impl ModelIndex {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 impl ModelIndex {
     pub(crate) fn hold_catalog_connection_for_test(
         &self,

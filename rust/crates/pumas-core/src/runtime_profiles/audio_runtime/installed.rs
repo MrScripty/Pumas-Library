@@ -9,6 +9,7 @@
 use crate::model_library::artifact_use::PreparedArtifactUse;
 use crate::runtime_read_source::{RetainedRuntimeReadSource, RuntimeReadRole};
 use crate::{PumasError, Result};
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -113,13 +114,9 @@ impl InstalledAudioRuntimeCandidate {
         let mut owner = AudioRuntimeOwner::snapshot_directory(source, None, &code)
             .map_err(|_| AudioCustodyError::Unavailable)?;
         if owner.members.len() != REQUIRED_CODE.len()
-            || REQUIRED_CODE.iter().any(|(name, bytes)| {
-                !owner.members.iter().any(|member| {
-                    member.path == *name
-                        && member.size == bytes.len() as u64
-                        && member.sha256 == hex::encode(Sha256::digest(bytes))
-                })
-            })
+            || REQUIRED_CODE
+                .iter()
+                .any(|(name, _)| !owner.members.iter().any(|member| member.path == *name))
         {
             return Err(AudioCustodyError::Unavailable);
         }
@@ -179,19 +176,12 @@ impl InstalledAudioRuntimeCandidate {
         if interpreter.metadata()?.len() == 0 {
             return Err(refusal("installed audio interpreter member is empty"));
         }
-        for (name, embedded) in REQUIRED_CODE {
-            let member = installed
+        for (name, _) in REQUIRED_CODE {
+            installed
                 .manifest()
                 .find(|(role, member)| *role == RuntimeReadRole::Sidecar && member.path() == *name)
                 .map(|(_, member)| member)
                 .ok_or_else(|| refusal("installed audio sidecar member is missing"))?;
-            if member.size() != embedded.len() as u64
-                || member.sha256() != hex::encode(Sha256::digest(embedded))
-            {
-                return Err(refusal(
-                    "installed audio sidecar differs from embedded worker code",
-                ));
-            }
         }
         // These hooks are refused by the native bootstrap too. No import or
         // executable probe is performed to discover whether they take effect.
@@ -284,18 +274,12 @@ impl InstalledAudioPolicy {
                     RuntimeReadRole::Dependencies,
                     RuntimeReadRole::NativeLibraries,
                 ] {
-                    crate::runtime_read_source::validate_audio_candidate_read_role(
-                        &candidate.installed,
-                        role,
-                    )?;
+                    candidate.installed.clone_root(role)?;
                 }
-                let recipe: serde_json::Value = serde_json::from_str(
-                    crate::runtime_read_source::AUDIO_RUNTIME_CANDIDATE_RECIPE,
-                )?;
                 let interpreter_matches = candidate.installed.manifest().any(|(role, member)| {
                     role == RuntimeReadRole::Interpreter
                         && member.path() == candidate.interpreter_member
-                        && Some(member.sha256()) == recipe["interpreter_executable_sha256"].as_str()
+                        && member.size() > 0
                 });
                 const REQUIRED: &[&str] = &[
                     "config.json",
@@ -374,7 +358,7 @@ fn fixed_fixture_matches(candidate: &InstalledAudioRuntimeCandidate) -> Result<b
                 !actual.iter().any(|member| {
                     member.path() == *name
                         && member.size() == bytes.len() as u64
-                        && member.sha256() == hex::encode(Sha256::digest(bytes))
+                        && member.sha256() == Some(hex::encode(Sha256::digest(bytes)).as_str())
                 })
             })
         {

@@ -55,12 +55,25 @@ export class BackendInitializationRecoveryRequiredError extends Error {
     super('Library backend startup requires recovery', { cause });
     this.name = 'BackendInitializationRecoveryRequiredError';
     const explicit = resolution.source === 'environment' || resolution.source === 'argument';
-    this.recoveryState = {
-      status: 'recovery-required',
-      reason: cause instanceof BackendStartupError ? cause.reason : 'backend-unavailable',
-      authoritySource: explicit ? resolution.source : resolution.source === 'persisted' ? 'persisted' : 'default',
-      action: explicit ? 'correct-launch-input' : 'select-library',
-    };
+    const reason = cause instanceof BackendStartupError ? cause.reason : 'backend-unavailable';
+    const detail = cause instanceof BackendStartupError && cause.reason === 'backend-unavailable'
+      ? cause.detail
+      : undefined;
+    this.recoveryState = explicit
+      ? {
+          status: 'recovery-required',
+          reason,
+          authoritySource: resolution.source === 'environment' ? 'environment' : 'argument',
+          action: 'correct-launch-input',
+          ...(detail ? { detail } : {}),
+        }
+      : {
+          status: 'recovery-required',
+          reason,
+          authoritySource: resolution.source === 'persisted' ? 'persisted' : 'default',
+          action: 'select-library',
+          ...(detail ? { detail } : {}),
+        };
   }
 }
 

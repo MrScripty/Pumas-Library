@@ -5,7 +5,6 @@ hash-locked requirements retain provenance for review before staged code is used
 """
 
 import argparse
-import base64
 import csv
 from email.parser import Parser
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -294,14 +293,9 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                 claimed.add(relative)
                 if len(claimed) > 200_000:
                     raise ValueError("Staged package manifest is too large")
-                digest, size = staged_file_digest(file)
-                if file != record:
-                    expected = "sha256=" + base64.urlsafe_b64encode(digest).rstrip(b"=").decode(
-                        "ascii"
-                    )
-                    if recorded_hash != expected or recorded_size != str(size):
-                        raise ValueError("Staged wheel RECORD hash or size differs")
-                elif recorded_hash or recorded_size:
+                # pip verified supplied wheel download hashes. Installed RECORD
+                # checksums are retained metadata, not another content gate.
+                if file == record and (recorded_hash or recorded_size):
                     raise ValueError("Staged wheel RECORD must not self-hash")
     files = []
     for root, dirs, names in os.walk(target, followlinks=False):
@@ -1202,6 +1196,7 @@ def main() -> None:
     parser.add_argument("--install", action="store_true")
     parser.add_argument("--target", type=Path)
     parser.add_argument("--cache-dir", type=Path)
+    parser.add_argument("--constraints", type=Path)
     parser.add_argument("--progress-file", type=Path)
     parser.add_argument("--discover", action="store_true")
     parser.add_argument("--release-options", action="store_true")
@@ -1210,30 +1205,16 @@ def main() -> None:
     parser.add_argument("--python-candidate", action="append")
     parser.add_argument("--torch-wheel")
     parser.add_argument("--torch-sha256")
-    parser.add_argument("--audio-candidate-links", type=Path)
     args = parser.parse_args()
     if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
         parser.error("Only stable upstream Torch versions are supported")
-    if args.audio_candidate_links is not None:
-        if (
-            not args.install
-            or args.discover
-            or args.release_options
-            or args.version != "2.10.0"
-            or args.build != "cpu"
-            or args.adapter != "cohere-asr"
-            or args.torch_wheel is not None
-            or args.torch_sha256 is not None
-        ):
-            parser.error("Audio candidate links require the fixed staged audio selection")
-        if args.audio_candidate_links.is_symlink() or not args.audio_candidate_links.is_file():
-            parser.error("Audio candidate links must be a regular file")
     if args.release_options:
         if (
             args.discover
             or args.build
             or args.output
             or args.selected_python
+            or args.constraints is not None
             or args.cache_dir is not None
             or args.progress_file is not None
             or args.adapter != "none"
@@ -1273,6 +1254,8 @@ def main() -> None:
     if not RELEASE_CHANNEL.fullmatch(args.build):
         parser.error("Select a canonical CPU, CUDA, or ROCm build channel")
     if args.discover:
+        if args.constraints is not None:
+            parser.error("Discovery does not accept --constraints")
         if args.install:
             parser.error("Discovery does not accept --install")
         if args.cache_dir is not None:
@@ -1334,20 +1317,6 @@ def main() -> None:
         if target == "macos" and args.build == "cpu"
         else f"{args.version}+{args.build}"
     )
-    # The qualification owner generates only the source-pinned, hash-bearing
-    # wheel links and checks the resulting artifacts before publication. Keep
-    # the original named roots: direct-URL requirements or listing transitive
-    # wheels as roots changes direct_url.json, REQUESTED and RECORD bytes.
-    sources = (
-        ["--no-index", "--find-links", str(args.audio_candidate_links)]
-        if args.audio_candidate_links is not None
-        else [
-            "--index-url",
-            f"https://download.pytorch.org/whl/{args.build}",
-            "--extra-index-url",
-            "https://pypi.org/simple",
-        ]
-    )
     pip_arguments = [
         "--isolated",
         "install",
@@ -1357,8 +1326,12 @@ def main() -> None:
         "--report",
         str(report_path),
         "--ignore-installed",
+        *(["--constraint", str(args.constraints)] if args.constraints is not None else []),
         "--only-binary=:all:",
-        *sources,
+        "--index-url",
+        f"https://download.pytorch.org/whl/{args.build}",
+        "--extra-index-url",
+        "https://pypi.org/simple",
         (
             f"torch @ {args.torch_wheel}"
             + (f"#sha256={args.torch_sha256}" if args.torch_sha256 is not None else "")

@@ -410,7 +410,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "model_id is required".to_string(),
                         })?;
-                self.model_library.delete_model(model_id, true).await?;
+                self.delete_library_model(model_id).await?;
                 Ok(serde_json::to_value(models::DeleteModelResponse {
                     success: true,
                     error: None,

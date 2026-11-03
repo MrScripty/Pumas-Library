@@ -1,6 +1,7 @@
 import type { ModelInfo, RelatedModelsState } from '../types/apps';
 
 export interface LocalModelRowState {
+  downloadError?: string;
   canPause: boolean;
   canRecoverPartial: boolean;
   canResume: boolean;
@@ -96,7 +97,7 @@ function getPartialDownloadState({
   recoveringPartialModelIds?: Set<string>;
 }): PartialDownloadState {
   const hasRecovery = model.provenance === 'catalog' && Boolean(model.recovery);
-  const missingRecoveryMetadata = isPartialDownload && !hasRecovery;
+  const missingRecoveryMetadata = !isDownloading && isPartialDownload && !hasRecovery;
 
   return {
     canRecoverPartial:
@@ -153,6 +154,9 @@ export function getLocalModelRowState({
   });
 
   return {
+    downloadError: isDownloading && model.downloadKey
+      ? downloadErrors?.[model.downloadKey]
+      : undefined,
     canPause: download.canPause,
     canRecoverPartial: partial.canRecoverPartial,
     canResume: download.canResume,

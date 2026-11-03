@@ -114,24 +114,5 @@ export interface RelatedModelsState {
   error?: string;
 }
 
-export interface SystemResources {
-  cpu: {
-    usage: number;
-    temp?: number;
-  };
-  gpu: {
-    usage: number;
-    memory: number;
-    memory_total: number;
-    temp?: number;
-  };
-  ram: {
-    usage: number;
-    total: number;
-  };
-  disk: {
-    usage: number;
-    total: number;
-    free: number;
-  };
-}
+// The backend's resource sample, generated from its declaration.
+export type { SystemResources } from './api-system';

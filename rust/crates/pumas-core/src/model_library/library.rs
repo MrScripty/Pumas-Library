@@ -2816,6 +2816,19 @@ impl ModelLibrary {
     /// * `model_id` - Model ID to delete
     /// * `cascade` - Whether to remove all symlinks pointing to this model
     pub async fn delete_model(&self, model_id: &str, cascade: bool) -> Result<()> {
+        self.delete_model_with_execution(model_id, cascade, None)
+            .await
+    }
+
+    /// The primary API may share its HF native root grant while retaining the
+    /// exact destination's mutation lock. Durable custody and intent checks
+    /// still belong to this library's mutation authority.
+    pub(crate) async fn delete_model_with_execution(
+        &self,
+        model_id: &str,
+        cascade: bool,
+        execution: Option<crate::model_library::mutation_authority::ModelDeletionExecution>,
+    ) -> Result<()> {
         let authority = self.mutation_authority()?;
         let tasks = authority.tasks();
         let library = self.clone();
@@ -2824,7 +2837,7 @@ impl ModelLibrary {
             .run_owned("delete model", move |context| async move {
                 owned_mutation_outcome(
                     library
-                        .delete_model_owned(&model_id, cascade, authority, context)
+                        .delete_model_owned(&model_id, cascade, authority, context, execution)
                         .await,
                 )
             })
@@ -2837,7 +2850,10 @@ impl ModelLibrary {
         cascade: bool,
         authority: LibraryMutationAuthority,
         context: crate::api::RuntimeTaskContext,
+        execution: Option<crate::model_library::mutation_authority::ModelDeletionExecution>,
     ) -> Result<()> {
+        let execution = execution.map(Arc::new);
+        let retained_execution = execution.clone();
         let model_dir = self.library_root.join(model_id);
         let mutation_index = self.index.clone();
         let mutation_model_id = model_id.to_string();
@@ -2846,8 +2862,16 @@ impl ModelLibrary {
         let (mut mutation, destination, storage_kind) = context
             .run_blocking("claim and inspect model deletion", move || {
                 let destination = deletion_root.resolve(&mutation_dir)?;
-                let mutation =
-                    authority.acquire(&mutation_index, &[(mutation_model_id, mutation_dir)])?;
+                let targets = [(mutation_model_id, mutation_dir)];
+                let mut mutation = match retained_execution.as_ref() {
+                    Some(execution) => authority.acquire_under_grant(
+                        &mutation_index,
+                        &targets,
+                        execution.grant_for(&destination)?,
+                    )?,
+                    None => authority.acquire(&mutation_index, &targets)?,
+                };
+                mutation.retain_deletion_execution(retained_execution);
                 let metadata = match destination.read_model_metadata() {
                     Ok(metadata) => metadata,
                     Err(error) => {
@@ -5461,6 +5485,14 @@ impl ModelLibrary {
         atomic_write_json(path, metadata, true)
     }
 
+    /// An owned move that maintains the index itself must not reach the
+    /// watcher as an external change at its destination.
+    pub(crate) fn notify_owned_move_destination(&self, model_dir: &Path) {
+        self.notify_metadata_projection_write(&model_dir.join(METADATA_FILENAME));
+    }
+
+    /// Tell the watcher that this library wrote `path` (a model's metadata
+    /// file), so the write and its directory are not treated as external.
     fn notify_metadata_projection_write(&self, path: &Path) {
         let notifier = match self.metadata_write_notifier.lock() {
             Ok(guard) => guard.clone(),
@@ -7156,7 +7188,9 @@ fn render_migration_execution_markdown(report: &MigrationExecutionReport) -> Str
     output
 }
 
-/// Find the primary model file in a directory (the largest model file).
+/// Find the primary model file in a directory: the largest model file that is
+/// not a multimodal projector. A directory holding only a projector still
+/// returns it, so the caller can report what it found.
 ///
 /// This is used for hash verification - the hashes in metadata correspond to the
 /// primary (largest) model file in the directory.
@@ -7169,6 +7203,7 @@ fn find_primary_model_file_in_selection(
     selected_paths: Option<&std::collections::HashSet<PathBuf>>,
 ) -> Option<PathBuf> {
     let mut largest: Option<(PathBuf, u64)> = None;
+    let mut largest_projector: Option<(PathBuf, u64)> = None;
 
     for entry in WalkDir::new(model_dir)
         .min_depth(1)
@@ -7208,15 +7243,20 @@ fn find_primary_model_file_in_selection(
 
         if let Ok(meta) = entry.metadata() {
             let size = meta.len();
-            if largest.as_ref().is_none_or(|(path, previous_size)| {
+            let slot = if crate::runtime_profiles::mmproj::is_projector_file_name(&filename) {
+                &mut largest_projector
+            } else {
+                &mut largest
+            };
+            if slot.as_ref().is_none_or(|(path, previous_size)| {
                 size > *previous_size || (size == *previous_size && entry.path() < path.as_path())
             }) {
-                largest = Some((entry.path().to_path_buf(), size));
+                *slot = Some((entry.path().to_path_buf(), size));
             }
         }
     }
 
-    largest.map(|(path, _)| path)
+    largest.or(largest_projector).map(|(path, _)| path)
 }
 
 fn resolve_local_model_type_with_persisted_hints(
@@ -8035,6 +8075,7 @@ pub struct DeepScanResult {
 
 /// Progress update for deep scan.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct DeepScanProgress {
     /// Current model number (1-indexed)
     pub current: usize,
@@ -11805,7 +11846,21 @@ mod tests {
         library.save_metadata(&source_dir, &metadata).await.unwrap();
         library.index_model_dir(&source_dir).await.unwrap();
 
+        // The mover maintains the index itself, so it must tell the watcher
+        // about the moved model's metadata like every other owned move.
+        let recorded = Arc::new(StdMutex::new(Vec::new()));
+        library.set_metadata_write_notifier(Some(Arc::new({
+            let recorded = recorded.clone();
+            move |path| recorded.lock().unwrap().push(path)
+        })));
         let report = library.execute_migration_with_checkpoint().await.unwrap();
+        library.set_metadata_write_notifier(None);
+        let moved_dir = library.build_model_path("diffusion", "llama", "exec-move");
+        let recorded = recorded.lock().unwrap().clone();
+        assert!(
+            recorded.contains(&moved_dir.join(METADATA_FILENAME)),
+            "the migrated model's metadata was not suppressed: {recorded:?}"
+        );
         assert_eq!(report.planned_move_count, 1);
         assert_eq!(report.completed_move_count, 1);
         assert_eq!(report.error_count, 0);
@@ -11817,7 +11872,6 @@ mod tests {
         assert!(report.machine_readable_report_path.is_some());
         assert!(report.human_readable_report_path.is_some());
 
-        let moved_dir = library.build_model_path("diffusion", "llama", "exec-move");
         assert!(moved_dir.exists());
         assert!(moved_dir.join("model.safetensors").is_file());
         assert!(moved_dir.join("config.json").is_file());
@@ -15068,6 +15122,24 @@ mod tests {
         assert_eq!(
             refreshed.validation_state,
             Some(AssetValidationState::Degraded)
+        );
+    }
+
+    #[test]
+    fn primary_model_file_is_never_a_larger_projector() {
+        let temp_dir = TempDir::new().unwrap();
+        let model_dir = temp_dir.path();
+        std::fs::write(model_dir.join("embeddinggemma-2-Q8_0.gguf"), vec![0u8; 16]).unwrap();
+        std::fs::write(model_dir.join("mmproj-Q8_0.gguf"), vec![0u8; 64]).unwrap();
+        assert_eq!(
+            find_primary_model_file(model_dir),
+            Some(model_dir.join("embeddinggemma-2-Q8_0.gguf"))
+        );
+        // A directory holding only a projector still reports it.
+        std::fs::remove_file(model_dir.join("embeddinggemma-2-Q8_0.gguf")).unwrap();
+        assert_eq!(
+            find_primary_model_file(model_dir),
+            Some(model_dir.join("mmproj-Q8_0.gguf"))
         );
     }
 }

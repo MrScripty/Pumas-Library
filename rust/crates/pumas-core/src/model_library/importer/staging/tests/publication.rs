@@ -409,7 +409,7 @@ async fn copied_import_receipt_uncertainty_and_ready_metadata_uncertainty_are_di
 }
 
 #[tokio::test]
-async fn copied_import_final_metadata_notifier_cannot_confirm_changed_payload() {
+async fn copied_import_final_metadata_notifier_keeps_checksum_as_historical_evidence() {
     let fixture = Fixture::new().await;
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = calls.clone();
@@ -422,23 +422,29 @@ async fn copied_import_final_metadata_notifier_cannot_confirm_changed_payload() 
                 std::fs::write(weights, vec![b'x'; bytes.len()]).unwrap();
             }
         })));
-    let error = fixture
-        .importer
-        .import(&fixture.spec)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("was published"));
-    assert!(error.contains("payload identity, contents or completeness changed"));
+    let result = fixture.importer.import(&fixture.spec).await.unwrap();
+    assert!(result.success);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    assert_eq!(receipt_at(&fixture.target())["state"], "pending");
-    assert!(!fixture
+    assert_eq!(receipt_at(&fixture.target())["state"], "confirmed");
+    let metadata = fixture
         .library
         .load_metadata(&fixture.target())
         .unwrap()
+        .unwrap();
+    assert!(metadata.copied_import_ready());
+    let weights = metadata
+        .files
+        .as_ref()
         .unwrap()
-        .copied_import_ready());
-    assert!(fixture.tasks.shutdown_owned().await.is_err());
+        .iter()
+        .find(|file| file.name == "model.onnx")
+        .unwrap();
+    let path = fixture.target().join("model.onnx");
+    assert!(matches!(
+        crate::model_library::hashing::verify_sha256(&path, weights.sha256.as_ref().unwrap()),
+        Err(PumasError::HashMismatch { .. })
+    ));
+    fixture.tasks.shutdown_owned().await.unwrap();
 }
 #[tokio::test]
 async fn copied_import_pending_receipt_uncertainty_cleans_before_publication() {
@@ -959,30 +965,6 @@ async fn copied_import_reserved_backup_source_and_native_alias_collisions_are_re
     assert_eq!(
         std::fs::read(source.join("b")).unwrap(),
         b"backup collision"
-    );
-    fixture.tasks.shutdown_owned().await.unwrap();
-}
-
-#[tokio::test]
-async fn copied_import_hashes_destination_once_after_every_callback() {
-    let mut fixture = Fixture::new().await;
-    let observed = Arc::new(std::sync::Mutex::new(None));
-    let capture = observed.clone();
-    fixture.importer.import_hook = Some(Arc::new(move |_, destination| {
-        assert_eq!(destination.import_hash_pass_count(), 0);
-        *capture.lock().unwrap() = Some(destination.clone());
-        Ok(())
-    }));
-    let result = fixture.importer.import(&fixture.spec).await.unwrap();
-    assert!(result.success);
-    assert_eq!(
-        observed
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .import_hash_pass_count(),
-        1
     );
     fixture.tasks.shutdown_owned().await.unwrap();
 }

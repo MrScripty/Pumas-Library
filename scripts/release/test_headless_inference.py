@@ -371,6 +371,21 @@ class ArchiveTests(unittest.TestCase):
                     package.assemble(inputs, build, runtime, contract, schema, output)
                 self.assertFalse(output.exists())
 
+    def test_checksum_inventory_is_host_independent(self):
+        # Windows paths sort case-insensitively and text mode writes CRLF; the
+        # inventory must be byte-identical however the host orders names.
+        for name, data in (("b.dll", b"b"), ("LICENSE", b"l"), ("a.exe", b"a")):
+            (self.root / name).write_bytes(data)
+        inventory = package.checksum_inventory(self.root, ["b.dll", "a.exe", "LICENSE"])
+        lines = inventory.decode("utf-8").split("\n")
+        self.assertEqual(
+            [line.split("  ")[1] for line in lines if line], ["LICENSE", "a.exe", "b.dll"]
+        )
+        self.assertNotIn(b"\r", inventory)
+        self.assertEqual(
+            inventory, package.checksum_inventory(self.root, ["LICENSE", "b.dll", "a.exe"])
+        )
+
     def test_roundtrip_both_archive_formats_and_no_ambient_payload(self):
         for target in package.TARGETS:
             with self.subTest(target=target):

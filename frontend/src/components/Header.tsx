@@ -1,4 +1,5 @@
 import React from 'react';
+import type { AppResourceUsage } from '../generated/desktop-contract';
 import type { SystemResources } from '../types/apps';
 import type { ActiveModelDownload } from '../hooks/useActiveModelDownload';
 import { HeaderStatusBadge, HeaderUpdateControls, HeaderWindowControls } from './HeaderControls';
@@ -8,10 +9,7 @@ import { getHeaderStatusInfo, type InstallationProgress } from './HeaderStatus';
 interface HeaderProps {
   appId?: string | null;
   systemResources?: SystemResources;
-  appResources?: {
-    gpu_memory?: number;
-    ram_memory?: number;
-  };
+  appResources?: AppResourceUsage | null;
   launcherUpdateAvailable: boolean;
   launcherLatestVersion?: string | null;
   isCheckingLauncherUpdates?: boolean;

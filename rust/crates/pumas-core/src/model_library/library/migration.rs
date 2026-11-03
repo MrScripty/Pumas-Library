@@ -1678,6 +1678,7 @@ impl ModelLibrary {
                 mutation.mark_started();
                 source.rename_model_directory_noreplace(&target)?;
                 migration_library.normalize_owned_move_metadata(&source_dir, &target, &mut metadata)?;
+                migration_library.notify_owned_move_destination(&target_for_record);
                 target.write_model_metadata(&metadata)?;
                 let record = metadata_to_record(&target_model_id, &target_for_record, &metadata);
                 if let Some(expected) = expected_publication {

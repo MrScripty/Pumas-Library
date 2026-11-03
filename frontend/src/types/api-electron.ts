@@ -1,9 +1,17 @@
 import type { DesktopBridgeAPI } from './api-bridge';
-import type { ModelDownloadUpdateNotification } from './api-models';
-import type { ModelLibraryUpdateNotification } from './api-package-facts';
-import type { RuntimeProfileUpdateFeed } from './api-runtime-profiles';
-import type { ServingStatusUpdateFeed } from './api-serving';
-import type { StatusTelemetryUpdateNotification } from './api-system';
+import type {
+  ModelDownloadUpdateOutcome,
+  ModelLibraryUpdateNotification,
+  RuntimeProfileUpdateFeed,
+  ServingStatusUpdateFeed,
+  StatusTelemetryUpdateNotification,
+} from '../generated/desktop-contract';
+
+/**
+ * Receives why an update could not be delivered: a payload that failed its
+ * contract, or a stream failure. Resynchronize from the RPC snapshot.
+ */
+export type UpdateStreamErrorHandler = (message: string) => void;
 
 // ============================================================================
 // Electron-specific API extensions
@@ -20,24 +28,28 @@ export interface ElectronWindowAPI {
   getPathForFile(file: File): string;
   /** Subscribe to backend-owned model-library update notifications. */
   onModelLibraryUpdate(
-    callback: (notification: ModelLibraryUpdateNotification) => void
+    callback: (notification: ModelLibraryUpdateNotification) => void,
+    onError: UpdateStreamErrorHandler
   ): () => void;
   /** Subscribe to backend-owned model download update notifications. */
   onModelDownloadUpdate(
-    callback: (notification: ModelDownloadUpdateNotification) => void
+    callback: (notification: ModelDownloadUpdateOutcome) => void,
+    onError: UpdateStreamErrorHandler
   ): () => void;
   /** Subscribe to backend-owned runtime profile update notifications. */
   onRuntimeProfileUpdate(
-    callback: (notification: RuntimeProfileUpdateFeed) => void
+    callback: (notification: RuntimeProfileUpdateFeed) => void,
+    onError: UpdateStreamErrorHandler
   ): () => void;
   /** Subscribe to backend-owned serving status update notifications. */
   onServingStatusUpdate(
     callback: (notification: ServingStatusUpdateFeed) => void,
-    onError?: (message: string) => void
+    onError: UpdateStreamErrorHandler
   ): () => void;
   /** Subscribe to backend-owned status/resource telemetry notifications. */
   onStatusTelemetryUpdate(
-    callback: (notification: StatusTelemetryUpdateNotification) => void
+    callback: (notification: StatusTelemetryUpdateNotification) => void,
+    onError: UpdateStreamErrorHandler
   ): () => void;
 }
 

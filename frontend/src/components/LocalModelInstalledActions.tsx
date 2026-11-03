@@ -9,10 +9,11 @@ import type { LocalModelRowState } from './LocalModelRowState';
 interface LocalModelInstalledActionsProps {
   model: ModelInfo;
   isLoading?: boolean;
+  isDeleting?: boolean;
   rowState: LocalModelRowState;
   selectedAppId: string | null;
   servedStatus?: ServedModelStatus | null;
-  onDeleteModel?: (modelId: string) => void;
+  onDeleteModel?: (modelId: string) => void | Promise<void>;
   onConvertModel?: (model: ModelInfo) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
   onServeModel?: (model: ModelInfo) => void;
@@ -56,6 +57,7 @@ function RecoverPartialDownloadIcon({ rowState }: { rowState: LocalModelRowState
 export function LocalModelInstalledActions({
   model,
   isLoading = false,
+  isDeleting = false,
   rowState,
   selectedAppId,
   servedStatus,
@@ -107,7 +109,8 @@ export function LocalModelInstalledActions({
         onServeModel={onServeModel}
       />
       {onDeleteModel && (
-        <HoldToDeleteButton onDelete={() => onDeleteModel(model.id)} />
+        <HoldToDeleteButton onDelete={() => onDeleteModel(model.id)}
+          disabled={isDeleting} tooltip={isDeleting ? 'Deleting...' : 'Hold to delete'} />
       )}
     </>
   );

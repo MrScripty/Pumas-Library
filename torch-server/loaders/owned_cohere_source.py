@@ -6,7 +6,6 @@ contain interpreter imports or native dlopen/data reads. Linux sealed copies
 keep the loader's selected model bytes immutable after capture.
 """
 
-import hashlib
 import json
 import math
 import os
@@ -98,19 +97,6 @@ def _identity(fd):
     return info.st_dev, info.st_ino, info.st_size
 
 
-def _digest(fd, size):
-    digest, offset = hashlib.sha256(), 0
-    while offset < size:
-        chunk = os.pread(fd, min(65536, size - offset), offset)
-        if not chunk:
-            raise ValueError("Owned Cohere member changed during reading")
-        digest.update(chunk)
-        offset += len(chunk)
-    if os.pread(fd, 1, size):
-        raise ValueError("Owned Cohere member changed during reading")
-    return digest.digest()
-
-
 def _sealed_copy(original, identity, digest):
     """Copy only held bytes, then irreversibly prohibit writes and resizing.
 
@@ -131,12 +117,11 @@ def _sealed_copy(original, identity, digest):
     fd = os.memfd_create("pumas-owned-cohere", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
     readonly = None
     try:
-        observed, offset = hashlib.sha256(), 0
+        offset = 0
         while offset < identity[2]:
             chunk = os.pread(original, min(65536, identity[2] - offset), offset)
             if not chunk:
                 raise ValueError("Owned Cohere member changed during capture")
-            observed.update(chunk)
             written = 0
             while written < len(chunk):
                 count = os.pwrite(fd, chunk[written:], offset + written)
@@ -144,17 +129,13 @@ def _sealed_copy(original, identity, digest):
                     raise OSError("Owned Cohere sealed copy made no progress")
                 written += count
             offset += len(chunk)
-        if (
-            _identity(original) != identity
-            or os.pread(original, 1, identity[2])
-            or observed.digest() != digest
-        ):
+        if _identity(original) != identity or os.pread(original, 1, identity[2]):
             raise ValueError("Owned Cohere member changed during capture")
         fcntl.fcntl(fd, F_ADD_SEALS, seals)
         if fcntl.fcntl(fd, F_GET_SEALS) & seals != seals:
             raise ValueError("Owned Cohere immutable read source unavailable")
         readonly = os.open(f"/proc/self/fd/{fd}", os.O_RDONLY | os.O_CLOEXEC)
-        if _identity(readonly) != _identity(fd) or _digest(readonly, identity[2]) != digest:
+        if _identity(readonly) != _identity(fd):
             raise ValueError("Owned Cohere sealed copy differs from selected bytes")
         result = (readonly, _identity(readonly), digest)
         readonly = None
@@ -168,8 +149,8 @@ def _sealed_copy(original, identity, digest):
 class HeldCohereReadSource:
     """Original source retention plus immutable selected model snapshots.
 
-    Hashes observe held bytes, not execution qualification. The source policy
-    must validate their binding to its original prepared allocation separately.
+    Optional checksums retain historical evidence, never execution qualification.
+    The source policy validates ownership of its original prepared allocation.
     """
 
     def __init__(self, *args, **kwargs):
@@ -193,12 +174,11 @@ class HeldCohereReadSource:
                 or len(value) != 2
                 or type(value[0]) is not int
                 or value[0] < 0
-                or type(value[1]) is not bytes
-                or len(value[1]) != 32
+                or (value[1] is not None and (type(value[1]) is not bytes or len(value[1]) != 32))
                 for value in expected.values()
             )
         ):
-            raise ValueError("Owned Cohere requires original selected size/digest expectations")
+            raise ValueError("Owned Cohere requires selected sizes and optional checksum evidence")
         # Copy the expectation mapping before any descriptor/capture work.
         # Values are immutable; a later original mutation cannot redefine them.
         expected = expected.copy()
@@ -226,9 +206,11 @@ class HeldCohereReadSource:
                     identity = _identity(fd)
                     if identity != identities[name]:
                         raise ValueError("Owned Cohere member changed during capture")
-                    digest = _digest(fd, identity[2])
-                    if _identity(fd) != identity or digest != expected[name][1]:
-                        raise ValueError("Owned Cohere member differs from original selected bytes")
+                    # Retain historical checksum evidence without automatically
+                    # checking installed/captured contents against it.
+                    digest = expected[name][1]
+                    if _identity(fd) != identity:
+                        raise ValueError("Owned Cohere member identity changed")
                 except BaseException:
                     os.close(fd)
                     raise
@@ -247,33 +229,21 @@ class HeldCohereReadSource:
     def validate(self):
         if self._closed:
             raise ValueError("Owned Cohere read source is closed")
-        for fd, identity, digest in self._members.values():
-            if (
-                _identity(fd) != identity
-                or _digest(fd, identity[2]) != digest
-                or _identity(fd) != identity
-            ):
+        for fd, identity, _ in self._members.values():
+            if _identity(fd) != identity:
                 raise ValueError("Owned Cohere retained member changed")
 
     def read(self, name, maximum):
         if self._closed or name not in self._members:
             raise ValueError("Owned Cohere member is not selected")
-        original, original_identity, expected = self._members[name]
-        if (
-            _identity(original) != original_identity
-            or _digest(original, original_identity[2]) != expected
-            or _identity(original) != original_identity
-        ):
+        original, original_identity, _ = self._members[name]
+        if _identity(original) != original_identity:
             raise ValueError("Owned Cohere retained member changed")
-        fd, identity, digest = self._sealed[name]
+        fd, identity, _ = self._sealed[name]
         if identity[2] > maximum:
             raise ValueError("Owned Cohere descriptor is too large")
         raw = os.pread(fd, maximum + 1, 0)
-        if (
-            _identity(fd) != identity
-            or len(raw) != identity[2]
-            or hashlib.sha256(raw).digest() != digest
-        ):
+        if _identity(fd) != identity or len(raw) != identity[2]:
             raise ValueError("Owned Cohere retained member changed")
         return raw
 

@@ -205,6 +205,7 @@ export default function InferencePluginsApp() {
     <>
       <AppShell
       importPaths={importPaths}
+      notices={status?.notices ?? []}
       showImportDialog={showImportDialog}
       showSidebar={true}
       onImportComplete={handleImportComplete}

@@ -9,7 +9,11 @@ use super::*;
 // Matches the non-transforming relative identity policy in core and RPC admission.
 const MODEL_LOOKUP_ID_PATTERN: &str = r"^(?![A-Za-z]:)(?!.*(?:^|/)\.{1,2}(?:/|$))[^\\/\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+(?:/[^\\/\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+)*$";
 
-use pumas_library::models::RouterProfileSyncStatus;
+use crate::startup_failure::StartupFailureFrame;
+use pumas_library::models::{
+    ModelLibraryUpdateNotification, RouterProfileSyncStatus, RuntimeProfileUpdateFeed,
+    ServingStatusUpdateFeed, StatusTelemetryUpdateNotification,
+};
 use schemars::{generate::SchemaSettings, JsonSchema};
 
 /// Conformance values are made by the production constructors and real ticket
@@ -517,6 +521,16 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             message: reason.message(),
         })?;
     }
+    for (key, value) in update_stream_fixtures()?.as_object().into_iter().flatten() {
+        fixtures[key] = value.clone();
+    }
+    for (key, value) in super::torch_runtime_fixtures()?
+        .as_object()
+        .into_iter()
+        .flatten()
+    {
+        fixtures[key] = value.clone();
+    }
     for key in ["version_status_empty", "version_status_no_manager"] {
         fixtures[key] =
             serde_json::to_value(VersionStatusOutcome::new(RuntimeVersionStatus::default())?)?;
@@ -755,6 +769,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         )+ };
     }
     export!(
+        StartupFailureFrame,
         S3PersistedImportsWire,
         S3TransferRetryParams,
         S3TransferRetryState,
@@ -776,6 +791,11 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         S3ImportOutcome,
         S3ImportCancelOutcome,
         RouterProfileSyncStatus,
+        ModelLibraryUpdateNotification,
+        RuntimeProfileUpdateFeed,
+        ServingStatusUpdateFeed,
+        StatusTelemetryUpdateNotification,
+        ModelDownloadUpdateOutcome,
         ModelsOutcome,
         ModelLookupParams,
         ModelLookupOutcome,
@@ -801,6 +821,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         DownloadStatusOutcome,
         DownloadStartedOutcome,
         DownloadMutationOutcome,
+        DownloadLocationReport,
+        DownloadResolutionRequest,
         PartialDownloadOutcome,
         ModelIndexRefreshOutcome,
         RecoverDownloadParams,
@@ -844,7 +866,22 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         GetTorchRuntimeProbeParams,
         TrialTorchRuntimeParams,
         TrialTorchRuntimeOutcome,
+        TorchTrialStartupStatus,
+        TorchTrialHealthStatus,
+        TorchTrialCleanup,
+        TorchRuntimeOptionsOutcome,
+        TorchPythonChoice,
+        TorchRuntimeSelection,
+        TorchInstalledRuntime,
+        TorchRuntimeProbeOutcome,
+        TorchProbeStatus,
+        TorchProbeCoreStatus,
+        TorchProbeAdapterStatus,
+        TorchCapabilityProbe,
         FindTorchAlternativesParams,
+        TorchAlternativesOutcome,
+        TorchAlternativesStatus,
+        TorchAlternativeMatch,
         StopRuntimeProfileGenerationParams,
         StopRuntimeProfileGenerationOutcome,
         InstallVersionOutcome,
@@ -864,6 +901,144 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         "format": "pumas-desktop-contract-1",
         "dialect": "http://json-schema.org/draft-07/schema#",
         "schemas": schemas,
+    }))
+}
+
+/// Update-stream payloads built from the producer types and serialized by
+/// their production serde, without opening a library.
+fn update_stream_fixtures() -> anyhow::Result<Value> {
+    use pumas_library::models::{
+        AppResourceUsage, AppResources, CpuResources, DiskResources, GpuResources,
+        LibraryStatusResponse, ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope,
+        ModelLibraryUpdateEvent, NetworkStatusResponse, RamResources, RuntimeProfileEvent,
+        RuntimeProfileEventKind, RuntimeProfileId, RuntimeProviderId, ServingStatusEvent,
+        ServingStatusEventKind, StatusResponse, StatusTelemetrySnapshot, SystemResources,
+    };
+    let profile_id = RuntimeProfileId::parse("llama-default").map_err(anyhow::Error::msg)?;
+    let model_library = ModelLibraryUpdateNotification {
+        cursor: "model-library-updates:2".into(),
+        events: vec![ModelLibraryUpdateEvent {
+            cursor: "model-library-updates:2".into(),
+            model_id: "llm/example/model".into(),
+            change_kind: ModelLibraryChangeKind::MetadataModified,
+            fact_family: ModelFactFamily::Metadata,
+            refresh_scope: ModelLibraryRefreshScope::SummaryAndDetail,
+            selected_artifact_id: Some("example/model::Q4".into()),
+            producer_revision: None,
+        }],
+        stale_cursor: false,
+        snapshot_required: false,
+    };
+    let model_library_resync = ModelLibraryUpdateNotification {
+        cursor: "model-library-updates:9".into(),
+        events: Vec::new(),
+        stale_cursor: true,
+        snapshot_required: true,
+    };
+    let runtime_profile = RuntimeProfileUpdateFeed {
+        cursor: "runtime-profiles:3".into(),
+        events: vec![RuntimeProfileEvent {
+            cursor: "runtime-profiles:3".into(),
+            event_kind: RuntimeProfileEventKind::StatusChanged,
+            profile_id: Some(profile_id.clone()),
+            provider: Some(RuntimeProviderId::LlamaCpp),
+            model_id: None,
+            producer_revision: None,
+        }],
+        stale_cursor: false,
+        snapshot_required: false,
+    };
+    let serving_status = ServingStatusUpdateFeed {
+        cursor: "serving:4".into(),
+        events: vec![ServingStatusEvent {
+            cursor: "serving:4".into(),
+            event_kind: ServingStatusEventKind::LoadFailed,
+            model_id: Some("llm/example/model".into()),
+            profile_id: Some(profile_id),
+            provider: Some(RuntimeProviderId::LlamaCpp),
+        }],
+        stale_cursor: false,
+        snapshot_required: false,
+    };
+    let telemetry = StatusTelemetryUpdateNotification {
+        cursor: "status-telemetry:5".into(),
+        snapshot: StatusTelemetrySnapshot {
+            cursor: "status-telemetry:5".into(),
+            revision: 5,
+            sampled_at: "2026-10-01T12:00:00+00:00".into(),
+            source_state: "ready".into(),
+            status: StatusResponse {
+                success: true,
+                error: None,
+                version: "0.8.0".into(),
+                message: "Ready".into(),
+                ollama_running: true,
+                torch_running: false,
+                last_launch_error: None,
+                last_launch_log: None,
+                app_resources: Some(AppResources {
+                    ollama: Some(AppResourceUsage {
+                        gpu_memory: Some(1024),
+                        ram_memory: Some(2048),
+                    }),
+                }),
+                notices: vec![
+                    "Downloads are unavailable: saved download state is unreadable".into(),
+                ],
+            },
+            resources: SystemResources {
+                cpu: CpuResources {
+                    usage: 12.5,
+                    temp: Some(55.0),
+                },
+                gpu: GpuResources {
+                    usage: 40.0,
+                    memory: 4096,
+                    memory_total: 16384,
+                    temp: None,
+                },
+                ram: RamResources {
+                    usage: 33.0,
+                    total: 65536,
+                },
+                disk: DiskResources {
+                    usage: 70.0,
+                    total: 1_000_000,
+                    free: 300_000,
+                },
+            },
+            network: NetworkStatusResponse {
+                success: true,
+                error: None,
+                total_requests: 3,
+                successful_requests: 2,
+                failed_requests: 1,
+                circuit_breaker_rejections: 0,
+                retries: 1,
+                success_rate: 66.7,
+                circuit_states: [("huggingface.co".to_string(), "closed".to_string())].into(),
+                is_offline: false,
+            },
+            library: LibraryStatusResponse {
+                success: true,
+                error: None,
+                indexing: false,
+                deep_scan_in_progress: false,
+                model_count: 12,
+                pending_lookups: Some(0),
+                deep_scan_progress: None,
+            },
+            model_library_loaded: true,
+        },
+        stale_cursor: false,
+        snapshot_required: false,
+    };
+    Ok(serde_json::json!({
+        "model_library_update": model_library,
+        "model_library_update_resync": model_library_resync,
+        "runtime_profile_update": runtime_profile,
+        "serving_status_update": serving_status,
+        "status_telemetry_update": telemetry,
     }))
 }
 
@@ -896,6 +1071,12 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
         for (name, definition) in definitions {
             refine_named(name, definition);
         }
+    }
+    // Desktop DTOs ship with their consumers and are closed. The startup frame
+    // is read from a backend that may come from another build, so its readers
+    // must ignore fields they do not know.
+    if T::schema_name() == "StartupFailureFrame" {
+        schema["additionalProperties"] = true.into();
     }
     constrain_representation(&mut schema);
     Ok(schema)
@@ -1351,6 +1532,9 @@ fn refine_named(name: &str, schema: &mut Value) {
         "ConversionSetupSnapshotOutcome" => {
             object.insert("pumasConversionSetup".into(), true.into());
         }
+        "TorchRuntimeOptionsOutcome" => {
+            object.insert("pumasTorchDefaultAdapter".into(), true.into());
+        }
         _ => {}
     }
     if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
@@ -1374,12 +1558,18 @@ fn refine_named(name: &str, schema: &mut Value) {
             "QuantOption" => {
                 properties["bitsPerWeight"]["minimum"] = 0.into();
             }
+            "TorchAlternativesOutcome" => {
+                properties["incomplete"]["const"] = true.into();
+                properties["dependenciesNotChecked"]["const"] = true.into();
+            }
             "ConversionSetupSnapshotOutcome" => {
                 properties["operationId"]["pattern"] =
                     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$".into();
                 properties["operationId"]["minLength"] = 36.into();
                 properties["operationId"]["maxLength"] = 36.into();
-                properties["error"]["enum"] = serde_json::json!([null, SETUP_FAILURE_MESSAGE]);
+                // A failed setup carries its public reason (see public_text).
+                properties["error"]["maxLength"] =
+                    crate::public_text::MAX_PUBLIC_REASON_CHARS.into();
             }
             "StartConversionSetupParams" | "StartBackendSetupParams" => {
                 properties["expected_previous_operation_id"]["pattern"] =
@@ -1390,10 +1580,9 @@ fn refine_named(name: &str, schema: &mut Value) {
             "ConversionProgressOutcome" => {
                 properties["progress"]["minimum"] = 0.into();
                 properties["progress"]["maximum"] = 1.into();
-                properties["error"]["enum"] = serde_json::json!([
-                    null,
-                    "The model conversion did not complete successfully."
-                ]);
+                // A failed conversion carries its public reason (see public_text).
+                properties["error"]["maxLength"] =
+                    crate::public_text::MAX_PUBLIC_REASON_CHARS.into();
             }
             "LinkHealthOutcome" | "LinkHealthResponse" => {
                 properties["success"]["const"] = true.into();

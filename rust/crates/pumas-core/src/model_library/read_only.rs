@@ -253,7 +253,10 @@ mod tests {
             .model_library_selector_snapshot(ModelLibrarySelectorSnapshotRequest::default())
             .unwrap();
 
-        assert_eq!(read_only.library_root(), temp.path());
+        assert_eq!(
+            read_only.library_root(),
+            temp.path().canonicalize().unwrap()
+        );
         assert_eq!(snapshot.rows.len(), 1);
         assert_eq!(snapshot.rows[0].model_id, "llm/example/read-only");
         assert_eq!(

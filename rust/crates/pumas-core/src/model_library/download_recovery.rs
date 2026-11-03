@@ -212,8 +212,6 @@ pub(crate) struct DownloadRecoveryDestination {
     #[cfg(all(test, unix))]
     import_permission_failure: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(test)]
-    import_hash_passes: Arc<std::sync::atomic::AtomicUsize>,
-    #[cfg(test)]
     cleanup_parent_sync: Option<Arc<CleanupParentSync>>,
 }
 
@@ -452,8 +450,6 @@ impl DownloadDestinationRoot {
             #[cfg(all(test, unix))]
             import_permission_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(test)]
-            import_hash_passes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            #[cfg(test)]
             cleanup_parent_sync: None,
         };
         match destination.directory(false) {
@@ -531,8 +527,6 @@ impl RecoveryRoot {
             import_document_uncertainty: Arc::new(Mutex::new(None)),
             #[cfg(all(test, unix))]
             import_permission_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            #[cfg(test)]
-            import_hash_passes: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
             cleanup_parent_sync: None,
         })
@@ -1007,7 +1001,7 @@ impl DownloadRecoveryDestination {
     pub(crate) fn remove_import_stage_all(&self) -> Result<()> {
         self.validate_import_stage_bindings()?;
         if let Some(expected) = self.import_payload.get() {
-            self.verify_import_payload(expected)?;
+            self.verify_import_bindings(expected)?;
         }
         self.remove_model_directory_all()
     }
@@ -1390,6 +1384,32 @@ impl DownloadRecoveryDestination {
 
     pub(crate) fn file_len(&self, file: &str) -> io::Result<Option<u64>> {
         self.regular_file_len(&self.model_relative.join(file))
+    }
+
+    /// Metadata-only observation through the held, no-follow parent capability.
+    /// Never opens or hashes the selected payload.
+    pub(crate) fn observe_retained_file(&self, file: &str) -> io::Result<Option<Value>> {
+        self.authority.require_current()?;
+        let Some((parent, name)) = self.file_parent_if_present(file, false)? else {
+            return Ok(None);
+        };
+        let metadata = match parent.symlink_metadata(name) {
+            Ok(metadata) if metadata.is_file() && !metadata.is_symlink() => metadata,
+            Ok(_) => return Err(invalid_capability_path()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let identity = filesystem_identity(&metadata).ok_or_else(invalid_capability_path)?;
+        let modified = metadata
+            .modified()?
+            .into_std()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| invalid_capability_path())?;
+        self.authority.require_current()?;
+        Ok(Some(
+            serde_json::json!({"identity":identity,"size":metadata.len(),
+            "modified_seconds":modified.as_secs(),"modified_nanoseconds":modified.subsec_nanos()}),
+        ))
     }
 
     pub(crate) fn part_len(&self, file: &str) -> io::Result<Option<u64>> {

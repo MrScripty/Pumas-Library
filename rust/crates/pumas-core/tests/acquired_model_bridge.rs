@@ -364,7 +364,29 @@ async fn acquire(
                 Some(ImportState::Ready)
             );
             for (path, expected) in &files {
-                assert_eq!(std::fs::read(target.join(path)).unwrap(), *expected);
+                let mut current = expected.clone();
+                if matches!(fault, Fault::ChangedBytes) && path == primary {
+                    *current.last_mut().unwrap() ^= 1;
+                }
+                assert_eq!(std::fs::read(target.join(path)).unwrap(), current);
+                let original = record.files.iter().find(|file| file.path == *path).unwrap();
+                assert_eq!(original.sha256, hex::encode(Sha256::digest(expected)));
+            }
+            if matches!(fault, Fault::ChangedBytes) {
+                let retained_sha = &record
+                    .files
+                    .iter()
+                    .find(|file| file.path == primary)
+                    .unwrap()
+                    .sha256;
+                let original = files.iter().find(|(path, _)| path == primary).unwrap();
+                assert_eq!(*retained_sha, hex::encode(Sha256::digest(&original.1)));
+                assert_ne!(
+                    pumas_library::model_library::compute_dual_hash(target.join(primary))
+                        .unwrap()
+                        .sha256,
+                    *retained_sha
+                );
             }
             let checked_id = id.clone();
             let observed = consumer
@@ -527,18 +549,28 @@ async fn required_processor_and_custom_code_policy_are_enforced() {
     }
 }
 #[tokio::test]
-async fn custody_receipt_mismatch_and_copy_mutation_refuse_publication() {
-    for fault in [Fault::WrongSpec, Fault::ChangedBytes] {
-        assert!(
-            !import(
-                vec![("weights.safetensors".into(), tensor("weight"))],
-                "weights.safetensors",
-                fault
-            )
-            .await
-            .0
-        );
-    }
+async fn custody_receipt_mismatch_refuses_publication() {
+    assert!(
+        !import(
+            vec![("weights.safetensors".into(), tensor("weight"))],
+            "weights.safetensors",
+            Fault::WrongSpec
+        )
+        .await
+        .0
+    );
+}
+#[tokio::test]
+async fn verified_content_changes_publish_and_reconcile_with_original_checksum_evidence() {
+    assert!(
+        import(
+            vec![("weights.safetensors".into(), tensor("weight"))],
+            "weights.safetensors",
+            Fault::ChangedBytes
+        )
+        .await
+        .0
+    );
 }
 #[tokio::test]
 async fn cancelled_sharded_transfer_has_no_receipt_or_publication() {

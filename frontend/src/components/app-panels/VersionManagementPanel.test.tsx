@@ -116,7 +116,7 @@ describe('VersionManagementPanel refresh lifecycle', () => {
       finishTrial({
         success: true, tag: 'v2.10.0', profileId: 'managed-torch', startupStatus: 'passed',
         healthStatus: 'passed', protocol: 3, capabilities: [], generation: 'generation-42',
-        startedByTrial: true, cleanup: 'not_needed',
+        startedByTrial: true, error: null, cleanup: 'not_needed',
       });
     });
 

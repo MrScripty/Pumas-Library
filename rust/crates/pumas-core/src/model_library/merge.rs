@@ -372,6 +372,7 @@ impl LibraryMerger {
                 rename_source.rename_model_directory_noreplace(&rename_target)
             })
             .await??;
+        self.destination.notify_owned_move_destination(&dest_dir);
 
         let metadata_library = self.destination.clone();
         let metadata_source = source_dir.to_path_buf();

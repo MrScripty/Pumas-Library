@@ -342,6 +342,28 @@ impl LibraryRegistry {
         })
     }
 
+    /// Key for looking up a registered path that may no longer exist. Rows
+    /// are keyed by the canonical path recorded at registration, so a removed
+    /// library resolves through its deepest surviving ancestor. On macOS the
+    /// temporary and user directories live under the `/var` -> `/private/var`
+    /// symlink, so the unresolved path never matches its own row.
+    fn lookup_path(path: &Path) -> PathBuf {
+        if let Ok(canonical) = path.canonicalize() {
+            return canonical;
+        }
+        let mut missing = Vec::new();
+        let mut current = path;
+        while let (Some(parent), Some(name)) = (current.parent(), current.file_name()) {
+            missing.push(name.to_owned());
+            if let Ok(mut canonical) = parent.canonicalize() {
+                canonical.extend(missing.iter().rev());
+                return canonical;
+            }
+            current = parent;
+        }
+        path.to_path_buf()
+    }
+
     fn read_instance_entry(conn: &Connection, path_str: &str) -> Result<Option<InstanceEntry>> {
         conn.query_row(
             "SELECT library_path, pid, port, started_at, version, status,
@@ -449,7 +471,7 @@ impl LibraryRegistry {
     /// Unregister a library path. Also removes any associated instance entry.
     pub fn unregister(&self, path: &Path) -> Result<bool> {
         let conn = self.lock_conn()?;
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = Self::lookup_path(path);
         let path_str = canonical.to_string_lossy().to_string();
 
         conn.execute(
@@ -496,7 +518,7 @@ impl LibraryRegistry {
     /// Get a library entry by its canonical path.
     pub fn get_by_path(&self, path: &Path) -> Result<Option<LibraryEntry>> {
         let conn = self.lock_conn()?;
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = Self::lookup_path(path);
         let path_str = canonical.to_string_lossy().to_string();
 
         let result = conn
@@ -549,7 +571,7 @@ impl LibraryRegistry {
     /// Update the last_accessed timestamp for a library.
     pub fn touch(&self, path: &Path) -> Result<bool> {
         let conn = self.lock_conn()?;
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = Self::lookup_path(path);
         let path_str = canonical.to_string_lossy().to_string();
         let now = Utc::now().to_rfc3339();
 
@@ -934,7 +956,7 @@ impl LibraryRegistry {
     /// Unregister a running instance for a library path.
     pub fn unregister_instance(&self, path: &Path) -> Result<bool> {
         let conn = self.lock_conn()?;
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = Self::lookup_path(path);
         let path_str = canonical.to_string_lossy().to_string();
 
         let rows = conn.execute(
@@ -952,7 +974,7 @@ impl LibraryRegistry {
     /// Get the running instance for a library path.
     pub fn get_instance(&self, path: &Path) -> Result<Option<InstanceEntry>> {
         let conn = self.lock_conn()?;
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = Self::lookup_path(path);
         let path_str = canonical.to_string_lossy().to_string();
 
         Self::read_instance_entry(&conn, &path_str)
@@ -1008,6 +1030,26 @@ mod tests {
         let dir = parent.join(name);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn removed_library_is_found_through_a_symlinked_parent() {
+        // macOS keeps temporary and user directories under /var -> /private/var.
+        let temp_dir = TempDir::new().unwrap();
+        let registry = LibraryRegistry::open_at(&temp_dir.path().join("registry.db")).unwrap();
+        let real = create_library_dir(temp_dir.path(), "private-var");
+        std::os::unix::fs::symlink(&real, temp_dir.path().join("var")).unwrap();
+        let alias = temp_dir.path().join("var").join("library");
+        std::fs::create_dir(&alias).unwrap();
+        registry.register(&alias, "aliased").unwrap();
+        registry.register_instance(&alias, 999_999_999, 1).unwrap();
+        std::fs::remove_dir(real.join("library")).unwrap();
+
+        assert!(registry.get_by_path(&alias).unwrap().is_some());
+        assert!(registry.get_instance(&alias).unwrap().is_some());
+        assert!(registry.unregister_instance(&alias).unwrap());
+        assert!(registry.unregister(&alias).unwrap());
     }
 
     #[test]

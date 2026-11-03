@@ -490,7 +490,8 @@ async fn scoped_http_lookup_isolates_corrupt_foreign_rows_and_refuses_corrupt_ta
         connection
             .execute(
                 "UPDATE http_services SET description_json=?1 WHERE library_path=?2",
-                rusqlite::params![json, other_root.to_string_lossy()],
+                // Rows are keyed by the canonical root (on macOS /var is /private/var).
+                rusqlite::params![json, other_root.canonicalize().unwrap().to_string_lossy()],
             )
             .unwrap();
         let observer = LocalDiscovery::open_at(&temp.path().join("registry.db")).unwrap();
@@ -537,7 +538,7 @@ async fn scoped_http_lookup_isolates_corrupt_foreign_rows_and_refuses_corrupt_ta
         let retained_json: String = connection
             .query_row(
                 "SELECT description_json FROM http_services WHERE library_path=?1",
-                [other_root.to_string_lossy()],
+                [other_root.canonicalize().unwrap().to_string_lossy()],
                 |row| row.get(0),
             )
             .unwrap();

@@ -955,6 +955,11 @@ mod tests {
         }
     }
 
+    // Apple's TLS stack refuses a server certificate valid for more than 825
+    // days, so this long-lived self-signed fixture cannot authenticate there.
+    // The downgrade refusal under test is platform-independent and runs on
+    // Linux and Windows.
+    #[cfg(not(target_os = "macos"))]
     #[tokio::test]
     async fn https_transport_preserves_custom_ca_and_refuses_same_port_downgrade() {
         use std::io::{Read, Write};

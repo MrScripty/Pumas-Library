@@ -751,6 +751,11 @@ mod tests {
         set_directory_mode(&owner.copied_root, true).unwrap();
         let original = owner.read_source_path().join("support");
         let held = owner.read_source_path().join("held-support");
+        // macOS also requires write permission on a directory being renamed.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&original, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         std::fs::rename(&original, &held).unwrap();
         std::fs::create_dir(&original).unwrap();
         std::fs::write(original.join("keep.txt"), b"not our directory").unwrap();

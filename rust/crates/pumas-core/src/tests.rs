@@ -635,7 +635,8 @@ async fn test_api_creation() {
     let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::new(temp_dir.path()).await.unwrap();
 
-    assert_eq!(api.launcher_root(), temp_dir.path());
+    // The owner works from the canonical root (on macOS /var is /private/var).
+    assert_eq!(api.launcher_root(), &temp_dir.path().canonicalize().unwrap());
 }
 
 #[tokio::test]

@@ -209,8 +209,20 @@ fn identify_gguf<R: Read + Seek>(file: &mut R, path: &Path) -> Result<ModelTypeI
     // Then: metadata key-value pairs
 
     let mut header = [0u8; 24];
-    file.read_exact(&mut header)
-        .map_err(|e| PumasError::io_with_path(e, path))?;
+    match file.read_exact(&mut header) {
+        Ok(()) => {}
+        // Too short for a GGUF header: malformed content, not a failed read.
+        // Validation reports the unusable file; import must not fail on it.
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+            return Ok(ModelTypeInfo {
+                format: FileFormat::Gguf,
+                model_type: ModelType::Unknown,
+                family: None,
+                extra: HashMap::new(),
+            });
+        }
+        Err(error) => return Err(PumasError::io_with_path(error, path)),
+    }
 
     let version = u32::from_le_bytes(header[4..8].try_into().unwrap());
     let metadata_count = u64::from_le_bytes(header[16..24].try_into().unwrap());
@@ -1032,6 +1044,23 @@ pub fn extract_gguf_metadata(path: impl AsRef<Path>) -> Result<HashMap<String, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncated_gguf_is_identified_as_unknown_not_an_io_failure() {
+        // A .gguf too short for its header (here, no GGUF magic at all) is
+        // malformed content; identification must not fail the import.
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("weights.gguf");
+        std::fs::write(&path, b"retained artifact").unwrap();
+        let info = identify_model_type(&path).unwrap();
+        assert_eq!(info.format, FileFormat::Gguf);
+        assert_eq!(info.model_type, ModelType::Unknown);
+        std::fs::write(&path, b"GGUF\x03\x00\x00\x00").unwrap();
+        assert_eq!(
+            identify_model_type(&path).unwrap().model_type,
+            ModelType::Unknown
+        );
+    }
 
     #[test]
     fn acquired_descriptor_identification_ignores_unselected_context() {

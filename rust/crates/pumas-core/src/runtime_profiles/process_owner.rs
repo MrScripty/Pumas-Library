@@ -1329,7 +1329,19 @@ mod tests {
         assert!(custody.drain(Duration::from_secs(5)).unwrap());
         assert!(!custody.is_active());
         assert!(!custody.has_parked_child());
-        let after_confirmed_drain = PhysicalStoreLease::try_acquire(&store);
+        // A child forked by a parallel test briefly holds an inherited copy of
+        // the lock until its exec closes it, so release is awaited (bounded).
+        let release_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let after_confirmed_drain = loop {
+            let attempt = PhysicalStoreLease::try_acquire(&store);
+            if !matches!(&attempt, Err(StoreLeaseError::Busy(_)))
+                || std::time::Instant::now() >= release_deadline
+            {
+                break attempt;
+            }
+            drop(attempt);
+            std::thread::sleep(Duration::from_millis(10));
+        };
         assert!(
             after_confirmed_drain.is_ok(),
             "confirmed fixture drain did not release physical store: {after_confirmed_drain:?}"

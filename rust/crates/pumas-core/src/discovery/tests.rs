@@ -503,12 +503,29 @@ async fn ordinary_drop_retains_owner_until_real_finite_index_mutation_and_ipc_se
         .is_err());
     // This diagnostic handle still owns the mutable library after settlement.
     drop(primary);
-    let successor = attach_or_start(
-        registry.clone(),
-        &root,
-        &CompatibilityRequirements::default(),
-    )
+    // Dropping the owner does not release the native store lock immediately:
+    // a child spawned by a parallel test can briefly inherit its descriptor.
+    // Only that busy refusal is retried, within a bound.
+    let successor = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match attach_or_start(
+                registry.clone(),
+                &root,
+                &CompatibilityRequirements::default(),
+            )
+            .await
+            {
+                Err(crate::PumasError::InvalidParams { message })
+                    if message.contains("already running for physical store") =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                other => break other,
+            }
+        }
+    })
     .await
+    .expect("physical store lease was not released after the owner dropped")
     .unwrap();
     assert!(matches!(&successor, LocalAccess::Owned { .. }));
     successor.shutdown_owned().await.unwrap();

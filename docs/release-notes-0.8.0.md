@@ -41,8 +41,10 @@ its capabilities and runtime limits. A request needs only `model`, `input` and
 `outcome` and a human-readable `message`. Responses grow additively within
 contract version 1, so consumers must ignore fields, capabilities and enum
 values they do not use. New capabilities: `multimodal_embedding` (EmbeddingGemma
-2 and other projector-backed embedders) and `decision` (llama.cpp decision
-models such as Kev and OpenJev, which need llama.cpp b11429 or newer). See the
+2 and other projector-backed embedders; EmbeddingGemma 2 needs llama.cpp b11454
+or newer, the first published build with its `gemma-embedding2` architecture)
+and `decision` (llama.cpp decision models such as Kev and OpenJev, which need
+llama.cpp b11429 or newer). See the
 [model operations contract](contracts/model-operations-v1.md).
 
 ## Existing libraries and migration

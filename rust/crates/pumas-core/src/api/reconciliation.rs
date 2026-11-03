@@ -1829,7 +1829,22 @@ async fn run_scope(
             stage_partial_download_rows(primary, context).await?;
             Ok(reclassify.changes)
         }
-        ReconcileScope::Model(model_id) => reconcile_model_scope(primary, context, model_id).await,
+        ReconcileScope::Model(model_id) => {
+            match reconcile_model_scope(primary, context, model_id).await {
+                // An owned move or deletion can take the model away after the
+                // scope's existence check. The scope is then stale, exactly as
+                // if the directory had been gone before it started.
+                Err(PumasError::ModelNotFound { .. })
+                    if !path_exists(&primary.model_library.library_root().join(model_id))
+                        .await? =>
+                {
+                    tracing::debug!("Reconcile(model): {model_id} moved during reconciliation");
+                    let _ = primary.model_library.index().delete(model_id)?;
+                    Ok(Vec::new())
+                }
+                result => result,
+            }
+        }
     }
 }
 

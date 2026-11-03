@@ -212,6 +212,8 @@ fn normalize_modality_token(token: &str) -> Option<&'static str> {
         }
         "keypoints" | "pose" | "skeleton" | "landmarks" => Some("keypoints"),
         "action" | "action-label" | "activity" => Some("action"),
+        // A choice, score or yes/no answer with probabilities.
+        "decision" | "decisions" | "choice" | "scores" | "probabilities" => Some("decision"),
         "3d" | "mesh" | "pointcloud" | "point-cloud" => Some("3d"),
         "embedding" | "embeddings" | "vector" | "vectors" | "feature" | "features" => {
             Some("embedding")
@@ -232,13 +234,13 @@ fn hf_task_to_signature(input: &str) -> Option<String> {
         | "fill-mask"
         | "summarization"
         | "translation"
-        | "text-classification"
         | "token-classification"
         | "question-answering"
         | "table-question-answering"
         | "conversational"
         | "sentence-similarity" => "text->text",
         "text-ranking" => "text+document->text",
+        "text-classification" | "zero-shot-classification" => "text->decision",
         "text-to-image" | "unconditional-image-generation" | "image-generation" => "text->image",
         "image-to-image" | "image-inpainting" => "image->image",
         "text-image-to-image" => "text+image->image",
@@ -248,6 +250,9 @@ fn hf_task_to_signature(input: &str) -> Option<String> {
         "document-question-answering" => "text+document->text",
         "video-text-to-text" | "video-question-answering" => "text+video->text",
         "text-to-video" => "text->video",
+        "image-to-video" => "image->video",
+        "image-text-to-video" => "text+image->video",
+        "video-to-video" => "video->video",
         "automatic-speech-recognition" | "speech-to-text" => "audio->text",
         "audio-to-audio" => "audio->audio",
         "audio-classification" => "audio->text",

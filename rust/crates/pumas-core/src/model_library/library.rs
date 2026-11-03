@@ -4317,15 +4317,16 @@ impl ModelLibrary {
             .clone()
     }
 
-    /// Reclassify a model: re-detect its type and move to the correct directory if needed.
+    /// Reclassify a model: re-detect its category and family.
     ///
-    /// Unlike `redetect_model_type()` which only updates metadata in-place,
-    /// this method also relocates the model directory to match the new type,
-    /// maintaining consistency between on-disk layout and metadata.
+    /// The category is metadata and never moves the model: it keeps its
+    /// storage bucket (first ID segment). Only a family change relocates the
+    /// directory, to `<bucket>/<new family>/<basename>`.
     ///
     /// # Returns
     ///
-    /// The new model_id if the model was reclassified and moved, None if unchanged.
+    /// The model's ID after reclassification (unchanged unless the family
+    /// moved it) when its category or family changed, `None` if nothing changed.
     pub async fn reclassify_model(&self, model_id: &str) -> Result<Option<String>> {
         let model_dir = self.library_root.join(model_id);
 
@@ -4479,14 +4480,22 @@ impl ModelLibrary {
             .ok_or_else(|| PumasError::InvalidParams {
                 message: "Model directory must have a UTF-8 basename".into(),
             })?;
+        // The category is metadata: the model keeps its storage bucket (first
+        // ID segment), so only a family change can move it.
+        let storage_bucket = model_id
+            .split('/')
+            .next()
+            .filter(|bucket| !bucket.is_empty())
+            .map(normalize_name)
+            .unwrap_or_else(|| normalize_name(&new_type_str));
         let new_dir = self
             .library_root
-            .join(normalize_name(&new_type_str))
+            .join(&storage_bucket)
             .join(normalize_name(&new_family))
             .join(basename);
         let new_model_id = format!(
             "{}/{}/{}",
-            normalize_name(&new_type_str),
+            storage_bucket,
             normalize_name(&new_family),
             basename
         );
@@ -6545,13 +6554,14 @@ fn save_package_facts_cache_migration_checkpoint(
     atomic_write_json(path, checkpoint, true)
 }
 
+/// Apply the family and name a move gives a model. The first ID segment is
+/// only the storage bucket; the category stays whatever was resolved.
 fn apply_target_identity_to_metadata(metadata: &mut ModelMetadata, target_model_id: &str) {
     let parts = target_model_id.split('/').collect::<Vec<_>>();
     if parts.len() < 3 {
         return;
     }
 
-    metadata.model_type = Some(parts[0].to_string());
     metadata.family = Some(parts[1].to_string());
     metadata.architecture_family = Some(parts[1].to_string());
     if let Some(cleaned_name) = parts.last() {
@@ -7466,7 +7476,8 @@ fn apply_unresolved_model_type_fallbacks(
         return resolved;
     }
 
-    let Some(file_type_info) = file_type_info else {
+    let Some(file_type_info) = file_type_info.filter(|info| info.model_type != ModelType::Unknown)
+    else {
         if let Some(token_type) = detect_model_type_from_name_tokens(model_dir, library_root) {
             apply_fallback_resolution(
                 &mut resolved,
@@ -7474,22 +7485,20 @@ fn apply_unresolved_model_type_fallbacks(
                 "model-type-name-tokens",
                 0.60,
                 "model-type-fallback-name-tokens",
+            );
+        } else if let Some(bucket_type) = storage_bucket_category(model_dir, library_root) {
+            // Nothing else describes the model, so the folder a person placed
+            // it in is the only stated intent.
+            apply_fallback_resolution(
+                &mut resolved,
+                bucket_type,
+                "model-type-storage-bucket",
+                0.55,
+                "model-type-fallback-storage-bucket",
             );
         }
         return resolved;
     };
-    if file_type_info.model_type == ModelType::Unknown {
-        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir, library_root) {
-            apply_fallback_resolution(
-                &mut resolved,
-                token_type,
-                "model-type-name-tokens",
-                0.60,
-                "model-type-fallback-name-tokens",
-            );
-        }
-        return resolved;
-    }
 
     apply_fallback_resolution(
         &mut resolved,
@@ -7598,10 +7607,28 @@ fn detect_model_type_from_directory_layout(model_dir: &Path) -> Option<ModelType
     None
 }
 
+/// The category named by a model's storage bucket (its first library-relative
+/// folder), when that folder is a category name.
+fn storage_bucket_category(model_dir: &Path, library_root: &Path) -> Option<ModelType> {
+    let relative = model_dir.strip_prefix(library_root).ok()?;
+    if relative.components().count() < 2 {
+        return None;
+    }
+    let bucket = relative.components().next()?.as_os_str().to_str()?;
+    match bucket.parse::<ModelType>() {
+        Ok(category) if category != ModelType::Unknown && category.as_str() == bucket => {
+            Some(category)
+        }
+        _ => None,
+    }
+}
+
 fn detect_model_type_from_name_tokens(model_dir: &Path, library_root: &Path) -> Option<ModelType> {
     // Host/library ancestors are not model evidence (and temporary directory
     // names can contain classification tokens). Preserve only library-relative
     // type/family/name hints plus immediate members; external paths use basename.
+    // The first library segment is the storage bucket chosen at import, not
+    // evidence: counting it would keep re-confirming a stale category.
     let mut token_pool = model_dir
         .strip_prefix(library_root)
         .ok()
@@ -7611,9 +7638,18 @@ fn detect_model_type_from_name_tokens(model_dir: &Path, library_root: &Path) -> 
                     .components()
                     .all(|part| matches!(part, Component::Normal(_)))
         })
-        .map(Path::as_os_str)
-        .or_else(|| model_dir.file_name())
-        .map(|name| name.to_string_lossy().to_lowercase())
+        .map(|relative| {
+            let mut parts = relative.components();
+            if relative.components().count() > 1 {
+                parts.next();
+            }
+            parts.as_path().to_string_lossy().to_lowercase()
+        })
+        .or_else(|| {
+            model_dir
+                .file_name()
+                .map(|name| name.to_string_lossy().to_lowercase())
+        })
         .unwrap_or_default();
     if let Ok(entries) = std::fs::read_dir(model_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
@@ -11997,6 +12033,7 @@ mod tests {
                 selected_artifact_id: Some("resume-move-artifact".to_string()),
                 selected_artifact_files: vec!["model.safetensors".to_string()],
                 action_kind: Some("move".to_string()),
+                resolved_model_type: None,
             }],
             completed_results: vec![],
         };
@@ -12725,6 +12762,7 @@ mod tests {
                 selected_artifact_id: Some("owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
                 selected_artifact_files: vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()],
                 action_kind: Some("split_artifact_directory".to_string()),
+                resolved_model_type: None,
             }],
             completed_results: vec![],
         };

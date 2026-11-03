@@ -41,7 +41,7 @@ impl ModelIndex {
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               pattern TEXT NOT NULL,
               match_style TEXT NOT NULL CHECK (match_style IN ('exact', 'prefix', 'suffix', 'wildcard')),
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'decision', 'diffusion', 'video', 'audio', 'vision', 'embedding', 'unknown')),
               priority INTEGER NOT NULL DEFAULT 100,
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
               source TEXT NOT NULL DEFAULT 'system',
@@ -60,7 +60,7 @@ impl ModelIndex {
             CREATE TABLE IF NOT EXISTS model_type_config_rules (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               config_model_type TEXT NOT NULL,
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'decision', 'diffusion', 'video', 'audio', 'vision', 'embedding', 'unknown')),
               priority INTEGER NOT NULL DEFAULT 100,
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
               source TEXT NOT NULL DEFAULT 'system',
@@ -199,7 +199,9 @@ impl ModelIndex {
             .optional()?;
         if arch_sql.as_deref().is_some_and(|sql| {
             let sql = sql.to_lowercase();
-            !sql.contains("'reranker'") || !sql.contains("'vlm'")
+            ["'reranker'", "'vlm'", "'decision'", "'video'"]
+                .iter()
+                .any(|category| !sql.contains(category))
         }) {
             Self::rebuild_model_type_arch_rules_table(conn)?;
         }
@@ -214,7 +216,9 @@ impl ModelIndex {
             .optional()?;
         if config_sql.as_deref().is_some_and(|sql| {
             let sql = sql.to_lowercase();
-            !sql.contains("'reranker'") || !sql.contains("'vlm'")
+            ["'reranker'", "'vlm'", "'decision'", "'video'"]
+                .iter()
+                .any(|category| !sql.contains(category))
         }) {
             Self::rebuild_model_type_config_rules_table(conn)?;
         }
@@ -251,7 +255,7 @@ impl ModelIndex {
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               pattern TEXT NOT NULL,
               match_style TEXT NOT NULL CHECK (match_style IN ('exact', 'prefix', 'suffix', 'wildcard')),
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'decision', 'diffusion', 'video', 'audio', 'vision', 'embedding', 'unknown')),
               priority INTEGER NOT NULL DEFAULT 100,
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
               source TEXT NOT NULL DEFAULT 'system',
@@ -300,7 +304,7 @@ impl ModelIndex {
             CREATE TABLE model_type_config_rules (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               config_model_type TEXT NOT NULL,
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'decision', 'diffusion', 'video', 'audio', 'vision', 'embedding', 'unknown')),
               priority INTEGER NOT NULL DEFAULT 100,
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
               source TEXT NOT NULL DEFAULT 'system',
@@ -393,6 +397,10 @@ impl ModelIndex {
               ('text+image->text', 1, '[\"text\",\"image\"]', '[\"text\"]', 'visual-question-answering', 100, 'active', 'system'),
               ('text+video->text', 1, '[\"text\",\"video\"]', '[\"text\"]', 'video-question-answering', 100, 'active', 'system'),
               ('text->video', 1, '[\"text\"]', '[\"video\"]', 'text-to-video', 100, 'active', 'system'),
+              ('image->video', 1, '[\"image\"]', '[\"video\"]', 'image-to-video', 100, 'active', 'system'),
+              ('text+image->video', 1, '[\"text\",\"image\"]', '[\"video\"]', 'image-text-to-video', 100, 'active', 'system'),
+              ('video->video', 1, '[\"video\"]', '[\"video\"]', 'video-to-video', 100, 'active', 'system'),
+              ('text->decision', 1, '[\"text\"]', '[\"decision\"]', 'text-classification', 100, 'active', 'system'),
               ('text->3d', 1, '[\"text\"]', '[\"3d\"]', 'text-to-3d', 100, 'active', 'system'),
               ('image->3d', 1, '[\"image\"]', '[\"3d\"]', 'image-to-3d', 100, 'active', 'system');
 
@@ -400,10 +408,11 @@ impl ModelIndex {
               ('ForCausalLM', 'suffix', 'llm', 100, 'active', 'system'),
               ('ForMaskedLM', 'suffix', 'llm', 100, 'active', 'system'),
               ('ForConditionalGeneration', 'suffix', 'llm', 100, 'active', 'system'),
-              ('ForSequenceClassification', 'suffix', 'llm', 100, 'active', 'system'),
+              ('ForSequenceClassification', 'suffix', 'decision', 100, 'active', 'system'),
               ('ForTokenClassification', 'suffix', 'llm', 100, 'active', 'system'),
               ('ForQuestionAnswering', 'suffix', 'llm', 100, 'active', 'system'),
               ('ForSpeechSeq2Seq', 'suffix', 'audio', 100, 'active', 'system'),
+              ('ForASR', 'suffix', 'audio', 100, 'active', 'system'),
               ('ForAudioClassification', 'suffix', 'audio', 100, 'active', 'system'),
               ('Whisper', 'prefix', 'audio', 100, 'active', 'system'),
               ('Encodec', 'prefix', 'audio', 100, 'active', 'system'),
@@ -430,7 +439,9 @@ impl ModelIndex {
               ('llm', 'llm', 50, 'active', 'system'),
               ('vlm', 'vlm', 50, 'active', 'system'),
               ('reranker', 'reranker', 50, 'active', 'system'),
+              ('decision', 'decision', 50, 'active', 'system'),
               ('diffusion', 'diffusion', 50, 'active', 'system'),
+              ('video', 'video', 50, 'active', 'system'),
               ('embedding', 'embedding', 50, 'active', 'system'),
               ('audio', 'audio', 50, 'active', 'system'),
               ('vision', 'vision', 50, 'active', 'system'),
@@ -439,7 +450,8 @@ impl ModelIndex {
               ('text2text-generation', 'llm', 60, 'active', 'system'),
               ('question-answering', 'llm', 60, 'active', 'system'),
               ('token-classification', 'llm', 60, 'active', 'system'),
-              ('text-classification', 'llm', 60, 'active', 'system'),
+              ('text-classification', 'decision', 60, 'active', 'system'),
+              ('zero-shot-classification', 'decision', 60, 'active', 'system'),
               ('fill-mask', 'llm', 60, 'active', 'system'),
               ('translation', 'llm', 60, 'active', 'system'),
               ('summarization', 'llm', 60, 'active', 'system'),
@@ -449,7 +461,10 @@ impl ModelIndex {
               ('image-to-image', 'diffusion', 60, 'active', 'system'),
               ('unconditional-image-generation', 'diffusion', 60, 'active', 'system'),
               ('image-inpainting', 'diffusion', 60, 'active', 'system'),
-              ('text-to-video', 'diffusion', 60, 'active', 'system'),
+              ('text-to-video', 'video', 60, 'active', 'system'),
+              ('image-to-video', 'video', 60, 'active', 'system'),
+              ('video-to-video', 'video', 60, 'active', 'system'),
+              ('image-text-to-video', 'video', 60, 'active', 'system'),
               ('video-classification', 'vision', 60, 'active', 'system'),
               ('image-text-to-text', 'vlm', 60, 'active', 'system'),
               ('mask-generation', 'vision', 60, 'active', 'system'),
@@ -578,6 +593,39 @@ impl ModelIndex {
             ",
         )?;
 
+        Self::repair_use_category_rule_rows(conn)?;
+
+        Ok(())
+    }
+
+    /// Bring system rules seeded by earlier versions to the use categories.
+    /// `INSERT OR IGNORE` never updates an existing row, so libraries created
+    /// before `decision` and `video` keep classifying classifiers as LLMs and
+    /// video generators as image diffusion. Only active system rows change;
+    /// rules a person edited or added keep their values.
+    fn repair_use_category_rule_rows(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "
+            UPDATE model_type_config_rules
+            SET model_type = 'decision', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            WHERE source = 'system' AND status = 'active'
+              AND lower(config_model_type) IN ('text-classification', 'zero-shot-classification')
+              AND model_type != 'decision';
+
+            UPDATE model_type_config_rules
+            SET model_type = 'video', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            WHERE source = 'system' AND status = 'active'
+              AND lower(config_model_type) IN
+                ('text-to-video', 'image-to-video', 'video-to-video', 'image-text-to-video')
+              AND model_type != 'video';
+
+            UPDATE model_type_arch_rules
+            SET model_type = 'decision', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            WHERE source = 'system' AND status = 'active'
+              AND pattern = 'ForSequenceClassification' AND match_style = 'suffix'
+              AND model_type != 'decision';
+            ",
+        )?;
         Ok(())
     }
 

@@ -38,11 +38,37 @@ pub fn resolve_model_type_with_rules(
     spec_model_type: Option<&str>,
     huggingface_evidence: Option<&HuggingFaceEvidence>,
 ) -> Result<ModelTypeResolution> {
+    // A GGUF that declares a decision head is served by llama.cpp as a decision
+    // model. That file fact outranks any task tag or name.
+    if gguf_declares_decision_head(model_dir) {
+        return Ok(ModelTypeResolution {
+            model_type: ModelType::Decision,
+            source: "model-type-gguf-decision-head".to_string(),
+            confidence: 0.95,
+            review_reasons: Vec::new(),
+        });
+    }
     let name_hint = model_dir.file_name().and_then(|name| name.to_str());
     let signals = load_config_signals(model_dir, huggingface_evidence);
     let medium_hints =
         collect_medium_hints(index, pipeline_tag, spec_model_type, huggingface_evidence)?;
     resolve_model_type_from_inputs(index, signals, medium_hints, name_hint)
+}
+
+/// The model's primary GGUF (a top-level `.gguf` that is not a projector)
+/// declares `<arch>.decision.type`.
+fn gguf_declares_decision_head(model_dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(model_dir) else {
+        return false;
+    };
+    entries.filter_map(|entry| entry.ok()).any(|entry| {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        name.ends_with(".gguf")
+            && !name.contains("mmproj")
+            && entry.file_type().is_ok_and(|kind| kind.is_file())
+            && crate::model_library::identify_model_type(entry.path())
+                .is_ok_and(|info| info.model_type == ModelType::Decision)
+    })
 }
 
 pub fn resolve_model_type_from_huggingface_evidence(
@@ -171,14 +197,18 @@ fn resolve_model_type_from_inputs(
         score += 0.20;
     }
 
+    let mut hint_conflict = false;
     for hint in &medium_hints {
         if *hint == resolved_type {
             score += 0.10;
         } else {
             score -= 0.20;
+            hint_conflict = true;
         }
     }
-    score = score.clamp(0.0, 1.0);
+    // A hard source signal (architecture, config) is never outvoted by a task
+    // tag: a disagreeing tag lowers confidence and asks for review instead.
+    score = score.clamp(if hint_conflict { 0.60 } else { 0.0 }, 1.0);
 
     let source = if !arch_votes.is_empty() && config_vote.is_some() {
         "model-type-resolver-arch-config-rules".to_string()
@@ -200,6 +230,9 @@ fn resolve_model_type_from_inputs(
     let mut review_reasons = Vec::new();
     if score < 0.85 {
         review_reasons.push("model-type-low-confidence".to_string());
+    }
+    if hint_conflict {
+        review_reasons.push("model-type-hint-conflict".to_string());
     }
 
     Ok(ModelTypeResolution {
@@ -751,6 +784,16 @@ fn collect_medium_hints(
     spec_model_type: Option<&str>,
     huggingface_evidence: Option<&HuggingFaceEvidence>,
 ) -> Result<Vec<ModelType>> {
+    // The source's own task tag outranks hints derived from it (search kinds,
+    // download-dialog categories) whenever it names a known category.
+    if let Some(tag) = huggingface_evidence
+        .and_then(|evidence| evidence.pipeline_tag.as_deref())
+        .or(pipeline_tag)
+    {
+        if let Some(mt) = map_medium_hint(index, tag)? {
+            return Ok(vec![mt]);
+        }
+    }
     let mut hints = HashSet::new();
     let mut raw_hints = Vec::new();
     if let Some(evidence) = huggingface_evidence {
@@ -771,20 +814,23 @@ fn collect_medium_hints(
     }
 
     for raw_hint in raw_hints {
-        let direct = raw_hint.parse::<ModelType>().unwrap_or(ModelType::Unknown);
-        if direct != ModelType::Unknown {
-            hints.insert(direct);
-            continue;
-        }
-
-        if let Some(mapped) = index.resolve_model_type_hint(raw_hint)? {
-            let mt = parse_model_type(&mapped);
-            if mt != ModelType::Unknown {
-                hints.insert(mt);
-            }
+        if let Some(mt) = map_medium_hint(index, raw_hint)? {
+            hints.insert(mt);
         }
     }
     Ok(hints.into_iter().collect())
+}
+
+/// A task tag or category name as a known category, or `None`.
+fn map_medium_hint(index: &ModelIndex, raw_hint: &str) -> Result<Option<ModelType>> {
+    let direct = raw_hint.parse::<ModelType>().unwrap_or(ModelType::Unknown);
+    if direct != ModelType::Unknown {
+        return Ok(Some(direct));
+    }
+    Ok(index
+        .resolve_model_type_hint(raw_hint)?
+        .map(|mapped| parse_model_type(&mapped))
+        .filter(|mt| *mt != ModelType::Unknown))
 }
 
 fn is_vlm_task_hint(value: &str) -> bool {

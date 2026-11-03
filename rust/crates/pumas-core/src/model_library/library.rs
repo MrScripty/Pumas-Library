@@ -4359,8 +4359,10 @@ impl ModelLibrary {
             }
             let original_metadata = metadata.clone();
             let mut cleared = metadata;
-            cleared.model_type_resolution_source = None;
-            cleared.model_type_resolution_confidence = None;
+            // A valid interim state: re-detection replaces it, and if it
+            // fails the model is left as "re-detection requested", not "user".
+            cleared.model_type_resolution_source = Some(REDETECT_REQUESTED_SOURCE.to_string());
+            cleared.model_type_resolution_confidence = Some(0.0);
             cleared.updated_date = Some(chrono::Utc::now().to_rfc3339());
             self.write_reclassification_metadata_owned(
                 model_id.to_string(),
@@ -7696,6 +7698,9 @@ fn detect_model_type_from_directory_layout(model_dir: &Path) -> Option<ModelType
 
 /// `model_type_resolution_source` recorded when a person chose the category.
 pub(crate) const USER_CATEGORY_SOURCE: &str = "user";
+
+/// `model_type_resolution_source` while a cleared choice awaits re-detection.
+const REDETECT_REQUESTED_SOURCE: &str = "model-type-redetect-requested";
 
 /// The category a person chose for this model, if any.
 pub(crate) fn user_chosen_category(metadata: &ModelMetadata) -> Option<ModelType> {

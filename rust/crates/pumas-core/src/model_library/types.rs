@@ -46,6 +46,29 @@ pub enum ModelType {
 }
 
 impl ModelType {
+    /// Every category, in library display order. The single list other
+    /// checks (metadata validation, RPC admission) derive from.
+    pub const ALL: [ModelType; 10] = [
+        ModelType::Llm,
+        ModelType::Vlm,
+        ModelType::Decision,
+        ModelType::Embedding,
+        ModelType::Reranker,
+        ModelType::Diffusion,
+        ModelType::Video,
+        ModelType::Audio,
+        ModelType::Vision,
+        ModelType::Unknown,
+    ];
+
+    /// The category with exactly this canonical name. Unlike `FromStr`, it
+    /// never maps HF task tags.
+    pub fn from_canonical(value: &str) -> Option<ModelType> {
+        Self::ALL
+            .into_iter()
+            .find(|category| category.as_str() == value)
+    }
+
     /// Return the canonical lowercase string for this model type.
     pub fn as_str(&self) -> &'static str {
         match self {

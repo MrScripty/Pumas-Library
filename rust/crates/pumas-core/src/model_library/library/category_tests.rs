@@ -60,12 +60,26 @@ async fn add_model(
         std::fs::write(dir.join(name), bytes).unwrap();
     }
     let parts: Vec<&str> = model_id.split('/').collect();
+    // Strict schema-v2 metadata, as an owner library records it: writes are
+    // validated against the canonical categories and modalities.
+    let task = metadata
+        .pipeline_tag
+        .clone()
+        .unwrap_or_else(|| "text-generation".into());
     let metadata = ModelMetadata {
+        schema_version: Some(2),
         model_id: Some(model_id.to_string()),
         model_type: Some(parts[0].to_string()),
         family: Some(parts[1].to_string()),
         cleaned_name: Some(parts[2].to_string()),
         official_name: Some(parts[2].to_string()),
+        task_type_primary: Some(task),
+        task_classification_source: Some("fixture".into()),
+        task_classification_confidence: Some(1.0),
+        model_type_resolution_source: Some("fixture".into()),
+        model_type_resolution_confidence: Some(0.65),
+        input_modalities: Some(vec!["text".into()]),
+        output_modalities: Some(vec!["text".into()]),
         ..metadata
     };
     library.save_metadata(&dir, &metadata).await.unwrap();

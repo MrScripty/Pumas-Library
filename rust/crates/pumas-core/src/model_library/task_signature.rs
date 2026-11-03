@@ -39,7 +39,7 @@ impl NormalizedTaskSignature {
     }
 }
 
-pub(crate) const CANONICAL_MODALITY_TOKENS: [&str; 17] = [
+pub(crate) const CANONICAL_MODALITY_TOKENS: [&str; 18] = [
     "text",
     "image",
     "audio",
@@ -52,6 +52,8 @@ pub(crate) const CANONICAL_MODALITY_TOKENS: [&str; 17] = [
     "action",
     "3d",
     "embedding",
+    // A choice, score or yes/no answer with probabilities.
+    "decision",
     "tabular",
     "timeseries",
     "rl-state",

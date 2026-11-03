@@ -5705,11 +5705,12 @@ where
     Option::<String>::deserialize(deserializer).map(Some)
 }
 
-/// Categories a person can choose; `unknown` is cleared instead.
+/// Categories a person can choose: every category except `unknown`, which is
+/// cleared instead.
 pub(crate) const CHOOSABLE_MODEL_CATEGORIES: [pumas_library::model_library::ModelType; 9] = {
-    use pumas_library::model_library::ModelType::*;
+    let all = pumas_library::model_library::ModelType::ALL;
     [
-        Llm, Vlm, Decision, Embedding, Reranker, Diffusion, Video, Audio, Vision,
+        all[0], all[1], all[2], all[3], all[4], all[5], all[6], all[7], all[8],
     ]
 };
 
@@ -7581,6 +7582,16 @@ mod tests {
             "unexpected": false,
         }))
         .is_err());
+    }
+
+    #[test]
+    fn choosable_categories_are_every_category_except_unknown() {
+        use pumas_library::model_library::ModelType;
+        let expected: Vec<ModelType> = ModelType::ALL
+            .into_iter()
+            .filter(|category| *category != ModelType::Unknown)
+            .collect();
+        assert_eq!(CHOOSABLE_MODEL_CATEGORIES.to_vec(), expected);
     }
 
     #[test]

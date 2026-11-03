@@ -149,7 +149,10 @@ def main():
     command = [str(args.rpc.resolve()), "--launcher-root", str(root), "--host", "127.0.0.1", "--port", "0"]
     diagnostics = output / "rpc-stdout.log"
     stderr = (output / "rpc-stderr.log").open("w")
-    process = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=stderr, text=True)
+    # Windows has no SIGTERM: send_signal(SIGTERM) is TerminateProcess. A
+    # separate process group lets CTRL_BREAK request the orderly shutdown.
+    process = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=stderr, text=True,
+                               creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0)
     ready = queue.Queue()
 
     def capture():
@@ -232,7 +235,7 @@ def main():
         cleanup_errors = []
         try:
             if process.poll() is None:
-                process.send_signal(signal.SIGTERM)
+                process.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
                 try:
                     process.wait(timeout=15)
                 except subprocess.TimeoutExpired:

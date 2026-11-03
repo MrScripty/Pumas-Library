@@ -1797,6 +1797,9 @@ pub(crate) fn validate_staged_files(target: &Path, manifest: &StagedFilesManifes
 }
 
 fn venv_packages_dir(runtime: &Path, python_minor: &str) -> PathBuf {
+    // Windows venvs have no per-minor directory.
+    #[cfg(windows)]
+    let _ = python_minor;
     #[cfg(windows)]
     let packages = runtime.join("venv").join("Lib").join("site-packages");
     #[cfg(not(windows))]

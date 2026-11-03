@@ -218,7 +218,8 @@ impl ManagedChild {
     /// Transfer this child's private protocol pipes once. Both ends must exist;
     /// a missing end refuses without partially consuming the other. Extracted
     /// pipes never confer process-stop or cleanup authority.
-    #[cfg_attr(not(test), allow(dead_code))] // Shipping audio qualifier remains closed.
+    // Shipping audio qualifier remains closed; only Unix tests open the pipes.
+    #[cfg_attr(not(all(test, unix)), allow(dead_code))]
     pub(crate) fn take_private_stdio(
         &mut self,
     ) -> io::Result<(std::process::ChildStdin, std::process::ChildStdout)> {

@@ -80,7 +80,7 @@ pub(crate) struct RuntimeTaskContext {
 }
 
 impl RuntimeTasks {
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn owned_task_count_for_catalog_test(&self) -> usize {
         self.inner
             .lock()

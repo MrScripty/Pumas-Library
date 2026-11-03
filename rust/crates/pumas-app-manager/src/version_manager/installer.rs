@@ -11,7 +11,7 @@ pub(crate) use torch::retry_pending_torch_cleanup;
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) use torch::validate_staged_files;
 pub(crate) use torch::TorchVersionsLock;
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) use torch::{move_verified_packages, BootstrapPackages};
 pub(crate) use torch::{write_embedded_torch_runtime, StagedFilesManifest};
 pub(crate) struct TorchInstallPlan {
@@ -1258,6 +1258,7 @@ pub(crate) struct NativeRecoveryPause {
 
 #[cfg(test)]
 impl NativeRecoveryPause {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     pub(crate) fn new() -> (Self, std::sync::mpsc::Sender<()>) {
         let (resume, receiver) = std::sync::mpsc::channel();
         (
@@ -1369,7 +1370,7 @@ impl VersionInstaller {
         Ok(self)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
     pub(crate) fn with_native_recovery_pause(mut self, pause: Arc<NativeRecoveryPause>) -> Self {
         self.native_recovery_pause = Some(pause);
         self

@@ -5485,6 +5485,14 @@ impl ModelLibrary {
         atomic_write_json(path, metadata, true)
     }
 
+    /// An owned move that maintains the index itself must not reach the
+    /// watcher as an external change at its destination.
+    pub(crate) fn notify_owned_move_destination(&self, model_dir: &Path) {
+        self.notify_metadata_projection_write(&model_dir.join(METADATA_FILENAME));
+    }
+
+    /// Tell the watcher that this library wrote `path` (a model's metadata
+    /// file), so the write and its directory are not treated as external.
     fn notify_metadata_projection_write(&self, path: &Path) {
         let notifier = match self.metadata_write_notifier.lock() {
             Ok(guard) => guard.clone(),
@@ -11838,7 +11846,21 @@ mod tests {
         library.save_metadata(&source_dir, &metadata).await.unwrap();
         library.index_model_dir(&source_dir).await.unwrap();
 
+        // The mover maintains the index itself, so it must tell the watcher
+        // about the moved model's metadata like every other owned move.
+        let recorded = Arc::new(StdMutex::new(Vec::new()));
+        library.set_metadata_write_notifier(Some(Arc::new({
+            let recorded = recorded.clone();
+            move |path| recorded.lock().unwrap().push(path)
+        })));
         let report = library.execute_migration_with_checkpoint().await.unwrap();
+        library.set_metadata_write_notifier(None);
+        let moved_dir = library.build_model_path("diffusion", "llama", "exec-move");
+        let recorded = recorded.lock().unwrap().clone();
+        assert!(
+            recorded.contains(&moved_dir.join(METADATA_FILENAME)),
+            "the migrated model's metadata was not suppressed: {recorded:?}"
+        );
         assert_eq!(report.planned_move_count, 1);
         assert_eq!(report.completed_move_count, 1);
         assert_eq!(report.error_count, 0);
@@ -11850,7 +11872,6 @@ mod tests {
         assert!(report.machine_readable_report_path.is_some());
         assert!(report.human_readable_report_path.is_some());
 
-        let moved_dir = library.build_model_path("diffusion", "llama", "exec-move");
         assert!(moved_dir.exists());
         assert!(moved_dir.join("model.safetensors").is_file());
         assert!(moved_dir.join("config.json").is_file());

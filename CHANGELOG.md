@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.8.0] - Unreleased candidate
+## [0.8.0] - Unreleased
 
-Source manifests currently identify `0.8.0-rc.1`; no final release is implied.
+Source manifests identify `0.8.0`. The date is set when the release is published.
 See [release notes and migration](docs/release-notes-0.8.0.md) and the
 [checkpoint qualification](docs/release-qa-0.8.0.md) before choosing a consumer pin.
 

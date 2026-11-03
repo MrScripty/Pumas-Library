@@ -1,8 +1,7 @@
-# Pumas Library 0.8.0 candidate
+# Pumas Library 0.8.0
 
-Status: source checkpoint preparation. Current manifests are `0.8.0-rc.1`.
-There is no final v0.8.0 tag, accepted installer set or publication decision in
-this change. [Release QA](release-qa-0.8.0.md) owns candidate identity, observed
+Status: source manifests identify `0.8.0`; the release is not yet tagged or
+published. [Release QA](release-qa-0.8.0.md) owns candidate identity, observed
 consumer revisions, evidence and remaining gates.
 
 ## Consumer-visible changes

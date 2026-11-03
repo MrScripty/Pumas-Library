@@ -1,6 +1,6 @@
 {
   "name": "pumas-library-electron",
-  "version": "0.8.0-rc.1",
+  "version": "0.8.0",
   "description": "Electron wrapper for Pumas Library",
   "main": "dist/main.js",
   "author": "Pumas Library Team",
@@ -90,7 +90,7 @@
         "to": "LICENSE.txt"
       },
       {
-        "from": "../docs/release-attribution/0.8.0-rc.1/THIRD-PARTY-NOTICES.txt",
+        "from": "../docs/release-attribution/0.8.0/THIRD-PARTY-NOTICES.txt",
         "to": "THIRD-PARTY-NOTICES.txt"
       }
     ],

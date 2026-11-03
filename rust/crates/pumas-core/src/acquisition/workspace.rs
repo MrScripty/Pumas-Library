@@ -1203,7 +1203,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn acquisition_integration_windows_flush_access_is_explicit_and_denial_retained() {
+    fn acquisition_integration_windows_flush_access_is_first_verification_only() {
         use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("payload.bin");
@@ -1221,30 +1221,43 @@ mod tests {
         writable.sync_all().unwrap();
         drop(writable);
         assert_eq!(std::fs::read(&path).unwrap(), b"DATA");
-        let workspace = AcquisitionWorkspace::from_capability(
-            crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
-            WorkspaceIdentity {
-                root_identity: "windows-flush-fixture".into(),
-                relative_target: "stage".into(),
-            },
-            Arc::new(()),
-            || Ok(()),
-        )
-        .unwrap();
+        let workspace = || {
+            AcquisitionWorkspace::from_capability(
+                crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+                WorkspaceIdentity {
+                    root_identity: "windows-flush-fixture".into(),
+                    relative_target: "stage".into(),
+                },
+                Arc::new(()),
+                || Ok(()),
+            )
+            .unwrap()
+        };
         let manifest = verification_manifest(b"DATA");
-        let receipts = workspace.seal(&manifest).unwrap();
         let permissions = std::fs::metadata(&path).unwrap().permissions();
         let mut denied = permissions.clone();
         denied.set_readonly(true);
-        std::fs::set_permissions(&path, denied).unwrap();
-        let refusal = workspace.verify_receipts(&manifest, &receipts);
+
+        // First acquisition verification flushes, so it needs GENERIC_WRITE and
+        // retains the native denial for a read-only file.
+        std::fs::set_permissions(&path, denied.clone()).unwrap();
+        let first = workspace().seal(&manifest);
         // Restore only the fixture's exact original permissions before asserting,
         // so an unexpected result cannot strand an undeletable temporary file.
-        std::fs::set_permissions(&path, permissions).unwrap();
+        std::fs::set_permissions(&path, permissions.clone()).unwrap();
         assert!(
-            matches!(refusal, Err(PumasError::Io { source: Some(ref source), .. })
-            if source.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32))
+            matches!(first, Err(PumasError::Io { source: Some(ref source), .. })
+            if source.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32)),
+            "{first:?}"
         );
+
+        // Reusing that receipt never rehashes or flushes, so read access suffices.
+        let verified = workspace();
+        let receipts = verified.seal(&manifest).unwrap();
+        std::fs::set_permissions(&path, denied).unwrap();
+        let reused = verified.verify_receipts(&manifest, &receipts);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        assert!(reused.is_ok(), "{reused:?}");
         assert_eq!(std::fs::read(&path).unwrap(), b"DATA");
     }
 

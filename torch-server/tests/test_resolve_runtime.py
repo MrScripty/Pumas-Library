@@ -1804,6 +1804,8 @@ class ResolverTests(unittest.TestCase):
                         str(constraints),
                     ],
                 ),
+                # The `+cpu` local version is Linux/Windows wheel naming; pin the host.
+                patch.object(resolver, "native_target", return_value="linux"),
                 patch.object(resolver.subprocess, "run", side_effect=fake_run),
                 patch.object(resolver, "installed_file_manifest", return_value={"files": []}),
             ):

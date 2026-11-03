@@ -68,6 +68,11 @@ fn spec(primary: &str) -> ModelImportSpec {
         security_acknowledged: None,
     }
 }
+/// Execution descriptors report paths in display form (no Windows `\\?\` prefix).
+fn display(path: &Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(pumas_library::platform::platform_display_path(path))
+}
+
 async fn api(root: &Path) -> PumasApi {
     PumasApi::builder(root)
         .with_registry(
@@ -386,7 +391,10 @@ async fn acquire(
                 .resolve_model_execution_descriptor(id)
                 .await
                 .unwrap();
-            assert_eq!(Path::new(&descriptor.entry_path), target.join(primary));
+            assert_eq!(
+                Path::new(&descriptor.entry_path),
+                display(&target.join(primary))
+            );
             if matches!(fault, Fault::Maintenance) {
                 let scan = api
                     .model_library()
@@ -406,7 +414,10 @@ async fn acquire(
                     .resolve_model_execution_descriptor(id)
                     .await
                     .unwrap();
-                assert_eq!(Path::new(&descriptor.entry_path), target.join(primary));
+                assert_eq!(
+                    Path::new(&descriptor.entry_path),
+                    display(&target.join(primary))
+                );
                 let metadata: pumas_library::models::ModelMetadata =
                     serde_json::from_slice(&std::fs::read(target.join("metadata.json")).unwrap())
                         .unwrap();
@@ -707,7 +718,7 @@ async fn assert_current_primary(api: &PumasApi, id: &str, primary: &str, bytes: 
         .resolve_model_execution_descriptor(id)
         .await
         .unwrap();
-    assert_eq!(Path::new(&descriptor.entry_path), expected_entry);
+    assert_eq!(Path::new(&descriptor.entry_path), display(&expected_entry));
     let migration = library.generate_migration_dry_run_report().unwrap();
     let item = migration
         .items

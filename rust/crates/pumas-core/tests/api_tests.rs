@@ -308,7 +308,11 @@ async fn test_api_paths() {
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Test path methods
-    assert_eq!(api.launcher_root(), temp_dir.path());
+    // The owner works from the canonical root (on macOS /var is /private/var).
+    assert_eq!(
+        api.launcher_root(),
+        &temp_dir.path().canonicalize().unwrap()
+    );
     assert!(api.launcher_data_dir().ends_with("launcher-data"));
     assert!(api.metadata_dir().ends_with("metadata"));
     assert!(api.cache_dir().ends_with("cache"));
@@ -355,8 +359,8 @@ async fn test_runtime_profile_snapshot_preserves_singleton_ollama_status() {
     assert_eq!(status.ollama_running, singleton_ollama_running);
 }
 
-// Linux owns binary runtime processes. Other platforms must reject the launch
-// explicitly; their in-process runtime profile tests still run normally.
+// Linux owns every binary runtime process; macOS and Windows launch only Torch
+// and must reject other providers explicitly. In-process profiles still run.
 fn expect_binary_launch_result(
     result: pumas_library::Result<pumas_library::models::LaunchResponse>,
 ) -> Option<pumas_library::models::LaunchResponse> {
@@ -365,7 +369,7 @@ fn expect_binary_launch_result(
     } else {
         assert!(
             matches!(&result, Err(PumasError::Other(message))
-                if message == "Owned binary runtime profiles are currently supported only on Linux"),
+                if message == "Only Torch binary profiles are supported on this platform"),
             "expected unsupported binary launch, got {result:?}"
         );
         None

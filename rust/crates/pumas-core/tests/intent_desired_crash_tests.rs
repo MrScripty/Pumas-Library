@@ -327,7 +327,9 @@ async fn acknowledged_intent_commit_release_and_aba_survive_abrupt_exit_without_
                 .await;
             assert!(
                 matches!(retry, Err(PumasError::InvalidParams { message }) if message == format!(
-                    "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.", root.display(), owner.pid
+                    "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
+                    pumas_library::platform::platform_display_path(&root.canonicalize().unwrap()),
+                    owner.pid
                 ))
             );
             assert_eq!(

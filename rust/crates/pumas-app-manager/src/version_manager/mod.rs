@@ -4128,7 +4128,10 @@ mod tests {
                 Err(PumasError::InvalidParams { message })
                     if message == format!(
                         "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
-                        root.path().display(), child_pid
+                        pumas_library::platform::platform_display_path(
+                            &root.path().canonicalize().unwrap()
+                        ),
+                        child_pid
                     )
             ));
             assert_eq!(

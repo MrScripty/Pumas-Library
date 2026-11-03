@@ -431,7 +431,7 @@ impl PumasApiBuilder {
                     return Err(PumasError::InvalidParams {
                     message: format!(
                         "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
-                        self.launcher_root.display(),
+                        crate::platform::platform_display_path(&self.launcher_root),
                         instance.pid
                     ),
                 });

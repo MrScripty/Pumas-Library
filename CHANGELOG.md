@@ -71,8 +71,10 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
   had launched EmbeddingGemma 2's projector as the model and broke llama.cpp
   router catalog generation.
 - llama.cpp embedding and reranking models launch in embedding/reranking mode
-  in dedicated profiles too, with a micro-batch that fits whole inputs; Ollama
-  embedding models load through `/api/embed`.
+  in dedicated profiles too, with a micro-batch that fits whole inputs: the
+  served context when the profile sets one, otherwise 8,192 tokens, never more
+  than the model's trained context. Ollama embedding models load through
+  `/api/embed`.
 - Saved download state that this version cannot read (for example, fields
   written by a newer Pumas) no longer stops the backend. The library, models
   and inference start, downloads are disabled without rewriting that state,

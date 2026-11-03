@@ -121,6 +121,7 @@ pub use model_type_resolver::{
     ModelTypeResolution,
 };
 pub use naming::normalize_name;
+pub(crate) use package_facts::gguf::gguf_trained_context_length;
 pub use read_only::PumasReadOnlyLibrary;
 pub use task_signature::{
     normalize_task_signature, NormalizedTaskSignature, TaskNormalizationStatus,

@@ -5,6 +5,7 @@ import type { CatalogModel } from '../generated/desktop-contract';
 function catalog(overrides: Partial<CatalogModel> = {}): CatalogModel {
   return {
     id: 'llm/example', modelDir: '/models/example', modelType: 'llm',
+    inputModalities: ['text'], outputModalities: ['text'], adapter: false,
     displayName: 'Example', format: 'gguf', quantization: 'Q4_K_M', sizeBytes: 1234,
     displayDate: '2026-03-06T00:00:00Z', dependencyCount: 1, relatedAvailable: true,
     artifact: { state: 'complete' }, integrity: { state: 'clean' }, ...overrides,
@@ -45,5 +46,22 @@ describe('catalog projection', () => {
   it('groups catalog rows by their declared model type', () => {
     expect(groupCatalogModels([catalog(), catalog({ id: 'audio/example', modelType: 'audio' })])
       .map((group) => group.category)).toEqual(['llm', 'audio']);
+  });
+
+  it('orders groups by use, with unclassified and future categories last', () => {
+    const order = groupCatalogModels([
+      catalog({ id: 'u', modelType: 'unknown' }),
+      catalog({ id: 'f', modelType: 'future-kind' }),
+      catalog({ id: 'v', modelType: 'video' }),
+      catalog({ id: 'd', modelType: 'decision' }),
+      catalog({ id: 'l', modelType: 'llm' }),
+    ]).map((group) => group.category);
+    expect(order).toEqual(['llm', 'decision', 'video', 'unknown', 'future-kind']);
+  });
+
+  it('carries declared modalities and the adapter flag into rows', () => {
+    expect(projectCatalogModel(catalog({
+      modelType: 'video', inputModalities: ['text', 'image'], outputModalities: ['video'], adapter: true,
+    }))).toMatchObject({ category: 'video', inputModalities: ['text', 'image'], outputModalities: ['video'], adapter: true });
   });
 });

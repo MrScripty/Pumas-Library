@@ -366,6 +366,7 @@ test('mutation response decoding preserves producer confirmations and rejects co
     ['update_model_notes_text', contract.decodeUpdateModelNotesOutcome],
     ['update_model_notes_clear', contract.decodeUpdateModelNotesOutcome],
     ['update_model_notes_missing', contract.decodeUpdateModelNotesOutcome],
+    ['set_model_category_decision', contract.decodeModelCategoryOutcome],
   ]) {
     const value = fixtures[key];
     assert.equal(decode(value).status, 'valid', key);
@@ -379,6 +380,9 @@ test('mutation response decoding preserves producer confirmations and rejects co
   }
   assert.equal(contract.decodeUpdateModelNotesOutcome({ ...fixtures.update_model_notes_missing, notes: 'contradiction' }).status, 'invalid');
   assert.equal(contract.decodeUpdateInferenceSettingsOutcome({ ...fixtures.update_inference_settings, success: false }).status, 'invalid');
+  for (const patch of [{ category: 'text-classification' }, { category: null }, { success: false }, { model_id: '' }]) {
+    assert.equal(contract.decodeModelCategoryOutcome({ ...fixtures.set_model_category_decision, ...patch }).status, 'invalid', JSON.stringify(patch));
+  }
 });
 
 test('notes mutation decoding agrees with actual Rust request admission', () => {

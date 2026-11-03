@@ -23,6 +23,26 @@ describe('LocalModelMetadataSummary', () => {
     );
   });
 
+  it('shows inputs and outputs, and marks adapters', () => {
+    render(
+      <LocalModelMetadataSummary
+        inputModalities={['text', 'image']}
+        outputModalities={['video', 'audio']}
+        adapter={true}
+      />
+    );
+
+    expect(screen.getByText('Text, Image → Video, Audio')).toBeInTheDocument();
+    expect(screen.getByText('Adapter')).toBeInTheDocument();
+  });
+
+  it('omits modality and adapter badges when nothing is declared', () => {
+    render(<LocalModelMetadataSummary format="gguf" />);
+
+    expect(screen.queryByText(/→/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Adapter')).not.toBeInTheDocument();
+  });
+
   it('renders explicit fallbacks for missing format, quant, and size', () => {
     render(<LocalModelMetadataSummary />);
 

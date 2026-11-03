@@ -68,6 +68,7 @@ import {
   decodeUpdateInferenceSettingsParams,
   decodeUpdateModelNotesParams,
   decodeUpdateModelNotesOutcome,
+  decodeModelCategoryOutcome,
   decodeUpdateInferenceSettingsOutcome,
   decodeAvailableVersionsOutcome,
   decodeGithubCacheStatusOutcome,
@@ -648,6 +649,16 @@ const electronAPI = {
     const result = await validatedApiCall('update_model_notes', decodeUpdateModelNotesOutcome, params);
     if (result.model_id !== modelId) {
       throw new DesktopContractError('update_model_notes', { status: 'invalid', message: 'Response model identity does not match the request.' });
+    }
+    return result;
+  },
+  /** Choose a model's category (`null` clears the choice and re-detects it). */
+  set_model_category: async (modelId: string, category: string | null) => {
+    const result = await validatedApiCall('set_model_category', decodeModelCategoryOutcome, {
+      model_id: modelId, category,
+    });
+    if (result.model_id !== modelId) {
+      throw new DesktopContractError('set_model_category', { status: 'invalid', message: 'Response model identity does not match the request.' });
     }
     return result;
   },

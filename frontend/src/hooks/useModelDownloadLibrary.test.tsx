@@ -24,6 +24,7 @@ const failure = 'The model download did not complete successfully.';
 
 function catalog(id: string, complete = false): CatalogModel {
   return { id, modelDir: `/models/${id}`, modelType: 'reranker', displayName: 'CLM-v0.1-8B-GGUF',
+    inputModalities: [], outputModalities: [], adapter: false,
     format: 'gguf', quantization: 'Q8_0', sizeBytes: id === selectedId ? 8252495488 : 8709518976,
     dependencyCount: 0, relatedAvailable: false, integrity: { state: 'clean' },
     artifact: complete ? { state: 'complete' }

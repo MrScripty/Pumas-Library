@@ -11,7 +11,16 @@ describe('LocalModelGroupHeader', () => {
       />
     );
 
-    expect(screen.getByText('llm')).toBeInTheDocument();
+    expect(screen.getByText('Language models')).toBeInTheDocument();
     expect(screen.getByText('(3)')).toBeInTheDocument();
+  });
+
+  it('names new categories and keeps unrecognized ones readable', () => {
+    const { rerender } = render(<LocalModelGroupHeader category="video" modelCount={1} />);
+    expect(screen.getByText('Video generation')).toBeInTheDocument();
+    rerender(<LocalModelGroupHeader category="decision" modelCount={1} />);
+    expect(screen.getByText('Decision and evaluation')).toBeInTheDocument();
+    rerender(<LocalModelGroupHeader category="future-kind" modelCount={1} />);
+    expect(screen.getByText('future-kind')).toBeInTheDocument();
   });
 });

@@ -35,6 +35,7 @@ import type {
   SearchHFModelsResponse,
   UpdateInferenceSettingsResponse,
   UpdateModelNotesResponse,
+  SetModelCategoryResponse,
 } from './api-models';
 import type {
   ModelLibraryUpdateFeed,
@@ -134,6 +135,15 @@ export interface DesktopBridgeModelAPI {
     modelId: string,
     notes?: string | null
   ): Promise<UpdateModelNotesResponse>;
+
+  /**
+   * Choose a model's category; `null` clears the choice and re-detects it.
+   * The model keeps its folder and ID.
+   */
+  set_model_category(
+    modelId: string,
+    category: string | null
+  ): Promise<SetModelCategoryResponse>;
 
   /**
    * Get metadata for a library model (both stored and embedded)

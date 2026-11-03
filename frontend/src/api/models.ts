@@ -17,6 +17,7 @@ import type {
   PumasModelRef,
   ResolvedModelPackageFacts,
   UpdateModelNotesResponse,
+  SetModelCategoryResponse,
   UpdateInferenceSettingsResponse,
 } from '../types/api';
 
@@ -196,6 +197,15 @@ class ModelsAPI {
   ): Promise<UpdateModelNotesResponse> {
     const api = this.getAPI();
     return await api.update_model_notes(modelId, notes);
+  }
+
+  /** Choose a model's category, or clear the choice (`null`) to re-detect it. */
+  async setModelCategory(
+    modelId: string,
+    category: string | null
+  ): Promise<SetModelCategoryResponse> {
+    const api = this.getAPI();
+    return await api.set_model_category(modelId, category);
   }
 }
 

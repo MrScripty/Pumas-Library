@@ -40,6 +40,42 @@ pub struct MetadataProjectionCleanupExecutionReport {
 }
 
 /// Convert `ModelMetadata` into the canonical index row projection.
+/// Index-only projection key: the package adapts another model (LoRA or
+/// PEFT adapter) rather than being usable on its own.
+pub(crate) const ADAPTER_METADATA_KEY: &str = "is_adapter";
+
+/// A LoRA/PEFT adapter package: PEFT's `adapter_config.json` or
+/// `adapter_model.*`, or `lora` as a whole token in a weight file name or in
+/// the model's name or repository.
+fn is_adapter_package(model_dir: &Path, metadata: &ModelMetadata) -> bool {
+    let has_lora_token = |text: &str| {
+        text.to_ascii_lowercase()
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .any(|token| token == "lora")
+    };
+    if [
+        metadata.official_name.as_deref(),
+        metadata.repo_id.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(has_lora_token)
+    {
+        return true;
+    }
+    let Ok(entries) = std::fs::read_dir(model_dir) else {
+        return false;
+    };
+    entries.filter_map(|entry| entry.ok()).any(|entry| {
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        let weights = [".safetensors", ".bin", ".gguf", ".pt", ".pth"]
+            .iter()
+            .any(|suffix| name.ends_with(suffix));
+        name == "adapter_config.json"
+            || (weights && (name.starts_with("adapter_model.") || has_lora_token(&name)))
+    })
+}
+
 pub(super) fn metadata_to_record(
     model_id: &str,
     model_dir: &Path,
@@ -92,6 +128,10 @@ pub(super) fn metadata_to_record(
             derive_quantization_value(obj),
         );
         cleanup_metadata_projection_fields(obj);
+        obj.insert(
+            ADAPTER_METADATA_KEY.to_string(),
+            Value::Bool(is_adapter_package(model_dir, metadata)),
+        );
     }
 
     ModelRecord {

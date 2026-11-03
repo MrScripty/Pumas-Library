@@ -11,6 +11,7 @@ import { modelsAPI } from '../api/models';
 import { useModelExecutionFacts } from '../hooks/useModelExecutionFacts';
 import type { BundleComponentManifestEntry, InferenceParamSchema } from '../types/api';
 import { getStoredNotes, type MetadataSource } from './ModelMetadataFieldConfig';
+import { ModelCategoryControl } from './ModelCategoryControl';
 import { ModelMetadataModalContent } from './ModelMetadataModalContent';
 import { ModelMetadataModalFrame } from './ModelMetadataModalFrame';
 
@@ -284,6 +285,21 @@ const ModelMetadataModalSession: React.FC<ModelMetadataModalProps> = ({
           ) : error ? (
             <div className="text-center py-8 text-[hsl(var(--accent-error))]">{error}</div>
           ) : (
+            <>
+            {typeof storedMetadata?.['model_type'] === 'string' && (
+              <ModelCategoryControl
+                modelId={modelId}
+                category={storedMetadata['model_type']}
+                resolutionSource={typeof storedMetadata['model_type_resolution_source'] === 'string'
+                  ? storedMetadata['model_type_resolution_source']
+                  : null}
+                onChanged={(category, resolutionSource) => setStoredMetadata((prev) => ({
+                  ...(prev ?? {}),
+                  model_type: category,
+                  model_type_resolution_source: resolutionSource,
+                }))}
+              />
+            )}
             <ModelMetadataModalContent
               activeSource={activeSource}
               addingParam={addingParam}
@@ -330,6 +346,7 @@ const ModelMetadataModalSession: React.FC<ModelMetadataModalProps> = ({
               onToggleFieldExpanded={toggleFieldExpanded}
               onToggleShowAllFields={() => setShowAllFields((prev) => !prev)}
             />
+            </>
           )}
     </ModelMetadataModalFrame>
   );

@@ -1073,7 +1073,10 @@ mod tests {
     #[tokio::test]
     async fn retained_paused_download_status_round_trips_through_http_json_rpc() {
         let temp = TempDir::new().unwrap();
-        let launcher_root = temp.path();
+        // Pumas persists download paths under its canonical root (on macOS
+        // /var is /private/var), so the fixture's paths must use it too.
+        let canonical_root = temp.path().canonicalize().unwrap();
+        let launcher_root = canonical_root.as_path();
         let model_dir = launcher_root.join("shared-resources/models/llm/acme/partial-model");
         std::fs::create_dir_all(&model_dir).unwrap();
         std::fs::create_dir_all(launcher_root.join("launcher-data")).unwrap();
@@ -1160,8 +1163,9 @@ mod tests {
             "RPC server shutdown exceeded its deadline"
         );
         assert!(
-            shutdown.unwrap().is_ok(),
-            "RPC server shutdown did not observe all owner drains"
+            shutdown.as_ref().unwrap().is_ok(),
+            "RPC server shutdown did not observe all owner drains: {:?}",
+            shutdown
         );
         let first = first.expect("first status request must complete with a bounded response");
         let second = second.expect("second status request must complete with a bounded response");
@@ -1351,7 +1355,10 @@ mod tests {
         }
 
         let temp = TempDir::new().unwrap();
-        let launcher_root = temp.path();
+        // Pumas persists download paths under its canonical root (on macOS
+        // /var is /private/var), so the fixture's paths must use it too.
+        let canonical_root = temp.path().canonicalize().unwrap();
+        let launcher_root = canonical_root.as_path();
         std::fs::create_dir_all(launcher_root.join("launcher-data")).unwrap();
         let target_directory = seed_paused_download(
             launcher_root,
@@ -1441,8 +1448,9 @@ mod tests {
             "first RPC server shutdown exceeded its deadline"
         );
         assert!(
-            first_shutdown.unwrap().is_ok(),
-            "first RPC server did not observe all owner drains"
+            first_shutdown.as_ref().unwrap().is_ok(),
+            "first RPC server did not observe all owner drains: {:?}",
+            first_shutdown
         );
         drop(server);
         drop(client);
@@ -1495,8 +1503,9 @@ mod tests {
             "reopened RPC server shutdown exceeded its deadline"
         );
         assert!(
-            reopened_shutdown.unwrap().is_ok(),
-            "reopened RPC server did not observe all owner drains"
+            reopened_shutdown.as_ref().unwrap().is_ok(),
+            "reopened RPC server did not observe all owner drains: {:?}",
+            reopened_shutdown
         );
 
         let target_partial_after_reopen = target_directory.join("weights.gguf.part").exists();
@@ -1727,7 +1736,10 @@ mod tests {
         }
 
         let temp = TempDir::new().unwrap();
-        let launcher_root = temp.path();
+        // Pumas persists download paths under its canonical root (on macOS
+        // /var is /private/var), so the fixture's paths must use it too.
+        let canonical_root = temp.path().canonicalize().unwrap();
+        let launcher_root = canonical_root.as_path();
         std::fs::create_dir_all(launcher_root.join("launcher-data")).unwrap();
         let destination = launcher_root.join("shared-resources/models/llm/acme/weak-resume-model");
         std::fs::create_dir_all(&destination).unwrap();
@@ -1810,8 +1822,9 @@ mod tests {
             "first weak resume RPC server shutdown exceeded its deadline"
         );
         assert!(
-            first_shutdown.unwrap().is_ok(),
-            "first weak resume RPC server did not observe all owner drains"
+            first_shutdown.as_ref().unwrap().is_ok(),
+            "first weak resume RPC server did not observe all owner drains: {:?}",
+            first_shutdown
         );
         drop(server);
         drop(client);
@@ -1865,8 +1878,9 @@ mod tests {
             "reopened weak resume RPC server shutdown exceeded its deadline"
         );
         assert!(
-            reopened_shutdown.unwrap().is_ok(),
-            "reopened weak resume RPC server did not observe all owner drains"
+            reopened_shutdown.as_ref().unwrap().is_ok(),
+            "reopened weak resume RPC server did not observe all owner drains: {:?}",
+            reopened_shutdown
         );
         drop(reopened_server);
         drop(reopened_client);
@@ -2054,7 +2068,10 @@ mod tests {
         let complete_bytes = fixture_gguf();
         assert_eq!(complete_bytes.len(), 24);
         let temp = TempDir::new().unwrap();
-        let launcher_root = temp.path();
+        // Pumas persists download paths under its canonical root (on macOS
+        // /var is /private/var), so the fixture's paths must use it too.
+        let canonical_root = temp.path().canonicalize().unwrap();
+        let launcher_root = canonical_root.as_path();
         std::fs::create_dir_all(launcher_root.join("launcher-data")).unwrap();
         let destination =
             launcher_root.join("shared-resources/models/llm/acme/digest-resume-model");
@@ -2249,8 +2266,9 @@ mod tests {
             "RPC server shutdown exceeded its deadline"
         );
         assert!(
-            shutdown.unwrap().is_ok(),
-            "RPC server did not observe all owner drains"
+            shutdown.as_ref().unwrap().is_ok(),
+            "RPC server did not observe all owner drains: {:?}",
+            shutdown
         );
         assert!(
             partial_replacement.is_ok(),
@@ -2687,6 +2705,9 @@ mod http_discovery_tests {
         let registry = LibraryRegistry::open_at(&temp.path().join("registry.db")).unwrap();
         let root = temp.path().join("root");
         std::fs::create_dir(&root).unwrap();
+        // Registry rows and descriptions carry the canonical root (on macOS
+        // /var is /private/var; on Windows it gains the \\?\ prefix).
+        let root = root.canonicalize().unwrap();
         let api = PumasApi::builder(&root)
             .with_registry(registry.clone())
             .with_hf_client(false)
@@ -2882,6 +2903,7 @@ mod http_discovery_tests {
         let (temp, registry, root, api) = api_fixture().await;
         let other_root = temp.path().join("other");
         std::fs::create_dir(&other_root).unwrap();
+        let other_root = other_root.canonicalize().unwrap();
         let other = PumasApi::builder(&other_root)
             .with_registry(registry.clone())
             .with_hf_client(false)

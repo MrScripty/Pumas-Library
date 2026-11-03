@@ -112,7 +112,10 @@ async fn request(socket: &mut tokio::net::TcpStream) -> String {
             headers.push(socket.read_u8().await.unwrap());
         }
         let request = String::from_utf8(headers).unwrap().to_ascii_lowercase();
-        assert!(request.starts_with("get /acme/model/resolve/main/weights.gguf http/1.1"));
+        assert!(
+            request.starts_with("get /acme/model/resolve/main/weights.gguf http/1.1"),
+            "unexpected fixture request: {request}"
+        );
         assert!(
             !request.contains("authorization:"),
             "fixture must never load ambient credentials"
@@ -166,7 +169,10 @@ async fn retained_partial_rpc_http_resume_interrupts_retries_and_awaits_durable_
 
 async fn exercise_resume() {
     let temp = TempDir::new().unwrap();
-    let root = temp.path();
+    // Pumas persists download paths under its canonical root (on macOS
+    // /var is /private/var), so the fixture's paths must use it too.
+    let canonical_root = temp.path().canonicalize().unwrap();
+    let root = canonical_root.as_path();
     std::fs::create_dir_all(root.join("launcher-data")).unwrap();
     let destination = root.join("shared-resources/models/llm/acme/http-resume-model");
     std::fs::create_dir_all(&destination).unwrap();

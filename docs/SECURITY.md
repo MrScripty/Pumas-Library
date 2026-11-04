@@ -53,10 +53,14 @@ projection rather than serializing errors directly.
 ## Dependency and Release Evidence
 
 Authoritative dependency inputs are the checked-in Cargo and pnpm lockfiles plus
-the Python requirements under `torch-server/`. The managed Torch runtime
-installs from `torch-server/runtime/requirements.lock`, a hash-pinned lock for
-its known-good Linux x86_64 / CPython 3.12 recipe. `torch-server/requirements.txt`
-is an unpinned direct-development input, not a shipped dependency set.
+the Python requirements under `torch-server/`. Only the bundled Torch preset
+(Linux x86_64, CPython 3.12) installs from `torch-server/runtime/requirements.lock`,
+a hash-pinned lock for that one recipe. Every other managed Torch install
+resolves its own dependencies when it is created, so the checked-in lock does
+not describe it: audit that installation's `runtime/requirements.txt`,
+`runtime/resolution.json` and `runtime/pip-resolution.json` instead.
+`torch-server/requirements.txt` is an unpinned direct-development input, not a
+shipped dependency set.
 
 Before a release, run current vulnerability and license checks against the
 resolved shipped dependency closure for all three ecosystems. Record tool

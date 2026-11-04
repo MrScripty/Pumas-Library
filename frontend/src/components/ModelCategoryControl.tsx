@@ -5,10 +5,11 @@
  *
  * Picking an option does not save it; **Apply** does, so stepping through the
  * options with the keyboard records nothing. The backend owns the result: after
- * a save the parent re-reads the model's metadata.
+ * a save the parent re-reads the model's metadata, and the picker follows it
+ * unless the person has picked something else in the meantime.
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { modelsAPI } from '../api/models';
 import {
   CHOOSABLE_MODEL_CATEGORIES,
@@ -39,13 +40,25 @@ export function ModelCategoryControl({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const [synced, setSynced] = useState(current);
+  const [applied, setApplied] = useState<string | null>(null);
 
-  useEffect(() => setPending(current), [current]);
+  // The saved category arrives after Apply, from a separate metadata read.
+  // Follow it only when the picker still shows the previous or the applied
+  // value; a newer pick made while the read was in flight is kept.
+  if (current !== synced) {
+    setSynced(current);
+    setApplied(null);
+    if (pending === synced || pending === applied) {
+      setPending(current);
+    }
+  }
 
   const apply = async () => {
     setSaving(true);
     setError(null);
     setSaved(null);
+    setApplied(pending);
     try {
       const result = await modelsAPI.setModelCategory(modelId, pending === DETECT ? null : pending);
       setSaved(

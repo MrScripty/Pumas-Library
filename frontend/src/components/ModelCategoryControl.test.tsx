@@ -38,6 +38,39 @@ describe('ModelCategoryControl', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Saved as Decision and evaluation.');
   });
 
+  const detected = {
+    modelId: 'llm/x/kev', category: 'llm', resolutionSource: 'model-type-resolver-arch-rules',
+  };
+
+  it('shows the category the backend saved once the metadata re-read arrives', async () => {
+    const onChanged = vi.fn();
+    setModelCategoryMock.mockResolvedValue({ success: true, model_id: 'llm/x/kev', category: 'decision' });
+    const { rerender } = render(<ModelCategoryControl {...detected} onChanged={onChanged} />);
+    const select = screen.getByRole('combobox', { name: 'Used as' });
+    fireEvent.change(select, { target: { value: 'decision' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+
+    rerender(<ModelCategoryControl {...detected} category="embedding" resolutionSource="user" onChanged={onChanged} />);
+    expect(select).toHaveValue('embedding');
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+  });
+
+  it('keeps a newer pick made while the metadata re-read is in flight', async () => {
+    const onChanged = vi.fn();
+    setModelCategoryMock.mockResolvedValue({ success: true, model_id: 'llm/x/kev', category: 'decision' });
+    const { rerender } = render(<ModelCategoryControl {...detected} onChanged={onChanged} />);
+    const select = screen.getByRole('combobox', { name: 'Used as' });
+    fireEvent.change(select, { target: { value: 'decision' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(select, { target: { value: 'vision' } });
+    rerender(<ModelCategoryControl {...detected} category="decision" resolutionSource="user" onChanged={onChanged} />);
+    expect(select).toHaveValue('vision');
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+  });
+
   it('clears a choice to re-detect, and shows refusal reasons', async () => {
     const onChanged = vi.fn();
     setModelCategoryMock.mockRejectedValueOnce(new Error('category must be one of llm, vlm'));

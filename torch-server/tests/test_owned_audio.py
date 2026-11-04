@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from held_child import assert_child_holds_after
 from test_model_manager import _FakeDeviceManager, _TestModelManager
 from model_manager import LoadedModel, SlotState
 from owned_audio import (
@@ -522,20 +523,12 @@ class QuarantineTests(unittest.TestCase):
     def test_unknown_start_cleanup_and_cuda_retain_through_orderly_shutdown(self):
         for mode in ("owner_start", "thread_start", "cleanup", "release", "cuda"):
             with self.subTest(mode=mode):
-                child = subprocess.Popen(
-                    [sys.executable, __file__, "--quarantine", mode],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
+                assert_child_holds_after(
+                    self,
+                    __file__,
+                    ["--quarantine", mode],
+                    "custody retained before orderly shutdown",
                 )
-                try:
-                    with self.assertRaises(subprocess.TimeoutExpired):
-                        child.communicate(timeout=3)
-                finally:
-                    child.kill()
-                    output, error = child.communicate(timeout=3)
-                self.assertIn("custody retained before orderly shutdown", output)
-                self.assertNotIn("Traceback", error)
 
 
 # Fixed-source conditional plumbing tests only. This policy is never imported
@@ -1244,20 +1237,12 @@ class InstalledQuarantinePlumbingTests(unittest.TestCase):
             "incomplete_weights",
         ):
             with self.subTest(stage=stage):
-                child = subprocess.Popen(
-                    [sys.executable, __file__, "--installed-quarantine", stage],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
+                assert_child_holds_after(
+                    self,
+                    __file__,
+                    ["--installed-quarantine", stage],
+                    "installed conditional custody retained: " + stage,
                 )
-                try:
-                    with self.assertRaises(subprocess.TimeoutExpired):
-                        child.communicate(timeout=3)
-                finally:
-                    child.kill()
-                    output, error = child.communicate(timeout=3)
-                self.assertIn("installed conditional custody retained: " + stage, output)
-                self.assertNotIn("Traceback", error)
 
 
 if __name__ == "__main__":

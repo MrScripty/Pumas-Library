@@ -3,13 +3,13 @@
 import asyncio
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from held_child import assert_child_holds_after
 from test_owned_audio import Devices, HeldInstalledFixtureSource, fixed_installed_native_modules
 from test_model_manager import _TestModelManager
 from installed_cohere_source import _InstalledCohereSourceOwner, _experimental_policy_for
@@ -87,20 +87,12 @@ class ExperimentalCohereTests(unittest.TestCase):
                 fixture.abort_unclaimed_fixture()
 
     def test_explicit_attempt_loads_but_never_claims_native_disposal(self):
-        child = subprocess.Popen(
-            [sys.executable, __file__, "--attempt"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+        assert_child_holds_after(
+            self,
+            __file__,
+            ["--attempt"],
+            "experimental load succeeded; exact child drain required",
         )
-        try:
-            with self.assertRaises(subprocess.TimeoutExpired):
-                child.communicate(timeout=3)
-        finally:
-            child.kill()
-            output, error = child.communicate(timeout=3)
-        self.assertIn("experimental load succeeded; exact child drain required", output)
-        self.assertNotIn("Traceback", error)
 
 
 if __name__ == "__main__":

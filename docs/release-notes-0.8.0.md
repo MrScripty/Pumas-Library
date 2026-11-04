@@ -1,105 +1,192 @@
-# Pumas Library 0.8.0
+# Pumas Library v0.8.0
 
-Status: source manifests identify `0.8.0`; the release is not yet tagged or
-published. [Release QA](release-qa-0.8.0.md) owns candidate identity, observed
-consumer revisions, evidence and remaining gates.
+Pumas Library 0.8 makes Pumas easier to build on. Applications that use Pumas
+for their models get one typed API to discover what is served and run it, and
+the desktop library now shows models by what they are used for.
 
-## Consumer-visible changes
+The largest changes are:
 
-The generic HTTP operation boundary accepts typed text, embeddings, image and
-audio requests against an explicitly selected model/profile. Capability
-descriptors report what the current serving context can execute. Bounded
-Image-to-Text adds named image and image-bearing message inputs, preserving
-request identity, image bytes, resource bounds and typed refusal outcomes.
-See the [Image-to-Text contract](contracts/image-to-text-v0.8.md).
-Production installed Audio-to-Text remains unavailable; qualification-only
-constructors and controlled provider replies do not enable production speech.
+- a typed model-operations API with model discovery (`GET /v1/served-models`)
+- new `decision` and `multimodal_embedding` capabilities, and bounded
+  image-to-text
+- models grouped by use, with new **Decision and evaluation** and **Video
+  generation** categories, input/output badges and adapter marking
+- a model's category is metadata: changing it never moves a model or changes
+  its ID
+- local owner discovery for applications that embed Pumas
+- digest-checked local imports and S3 imports
+- inference-enabled headless builds for Linux, Windows and macOS
+- an explicit, backed-up upgrade for older libraries
 
-Local consumers can discover and explicitly attach to a selected ready owner,
-retain its lifetime and fence requests against root/generation changes. An
-existing catalogue entry does not imply a loaded or executable model. Borrowed
-attachment must not terminate another application's owner; a disconnect or
-uncertain request result does not authorize inference replay.
+## For desktop users
 
-Acquisition includes digest-bound local input capabilities and conditional S3
-single-object/authored-bundle GGUF imports. Hugging Face browse/cache observations
-remain separate from download details resolved after selection. Managed models
-keep receipt-bound identities, including the selected GGUF primary/projector
-through owned library moves. These contracts do not promise arbitrary
-ONNX/Safetensors/Diffusers imports through the public S3 GGUF path.
-The current S3 checks use controlled HTTPS fixtures; they do not certify AWS,
-non-AWS providers or MinIO endpoint combinations. Those provider-specific claims
-retain their existing AQ-S3 acceptance gate.
+### Models grouped by use
 
-### Typed API for consumers
+The library groups models by what you would use them for: LLM,
+vision-language, **Decision and evaluation** (new), embedding, reranking, image
+generation, **Video generation** (new), audio and vision. Each row shows the
+inputs and outputs the model handles (for example *image → video* or
+*audio → text*), and LoRA/PEFT adapters are marked **Adapter**.
 
-Start from `GET /v1/served-models`: it lists each served model and profile with
-its capabilities and runtime limits. A request needs only `model`, `input` and
-`output`; add `capability` when Pumas reports `ambiguous_operation`, and
-`profile` when `profile_required` is true. Every error has a stable `code`, an
-`outcome` and a human-readable `message`. Responses grow additively within
-contract version 1, so consumers must ignore fields, capabilities and enum
-values they do not use. New capabilities: `multimodal_embedding` (EmbeddingGemma
-2 and other projector-backed embedders; EmbeddingGemma 2 needs llama.cpp b11454
-or newer, the first published build with its `gemma-embedding2` architecture)
-and `decision` (llama.cpp decision models such as Kev and OpenJev, which need
-llama.cpp b11429 or newer). See the
+Detection now trusts what the files say over a repository's task tag: a GGUF
+with a decision head is a decision model, a `…ForASR` architecture is audio,
+and video tasks are video. When a task tag disagrees, the model is flagged for
+review instead of being overruled by the tag.
+
+If Pumas gets a category wrong, choose **Used as** in the model's metadata
+window. Your choice is kept by later re-scans; clearing it re-detects the
+category.
+
+### Categories never move your models
+
+A model's category is now metadata. Re-detection or your own choice changes
+how the model is grouped, never its folder or ID, so served-model IDs and
+runtime profiles keep working. (A change of model family can still move it.)
+
+The first time 0.8.0 opens a library it updates the library's classification
+rules in place; the next refresh re-detects categories without moving anything.
+
+### Clearer startup and recovery
+
+- If the backend cannot start, the recovery screen shows the actual reason.
+- Download state written by a newer Pumas no longer stops the backend: the
+  library, models and inference start, downloads are paused without rewriting
+  that state, and a banner explains why.
+- A failed Torch startup trial says why the managed launch failed.
+- Desktop views that receive an invalid update report it and reload instead of
+  going stale.
+
+## For applications that use Pumas
+
+### One typed API
+
+Start from `GET /v1/served-models`: it lists every served model and profile
+with its provider, context size and capabilities, so you discover models
+instead of configuring profiles by hand. Send operations to
+`/v1/model-operations`. A request needs only `model`, `input` and `output`; add
+`capability` when Pumas answers `ambiguous_operation`, and `profile` when
+`profile_required` is true. Every request accepted before stays valid.
+
+Every error carries a stable `code`, an `outcome` and a human-readable
+`message`, echoes your `request_id` when it is readable, and uses an HTTP
+status that matches the code. Provider failure reasons reach you with
+credential-shaped text redacted.
+
+Limits come from the serving runtime rather than fixed caps: `max_tokens` is
+bounded by the served context, ONNX batch limits apply only to ONNX, and a
+requested embedding dimension is applied by Matryoshka truncation when the
+provider ignores it. `/v1/models` lists each model ID once, with its profiles.
+
+Responses may gain fields, capabilities and enum values within contract
+version 1. Ignore what you do not use. See the
 [model operations contract](contracts/model-operations-v1.md).
 
-## Existing libraries and migration
+### New capabilities
 
-Read [Opening an older library](library-upgrade.md) before opening a shared
-library with this candidate. Download-store schema 7 is an explicit one-way
-metadata conversion from the supported v4/v5/schema-6 states. Stop all readers,
-writers, old applications and developer instances first. Use the desktop's
-**Upgrade Library** confirmation or the documented Linux offline RPC command.
-The converter creates a private exact backup of `downloads.json`; it does not
-copy, scan, hash or rewrite model payloads. Opening the converted library then
-performs ordinary startup work.
+- **`decision`**: typed choice, score and yes/no questions answered with
+  probabilities by llama.cpp native decision models such as Kev and OpenJev.
+  Needs llama.cpp **b11429** or newer.
+- **`multimodal_embedding`**: image and mixed text/image embeddings from
+  llama.cpp embedding models with a projector, such as EmbeddingGemma 2. Needs
+  llama.cpp **b11454** or newer.
+- **Image-to-text**: named image and image-bearing message inputs with bounded
+  sizes and typed refusals. Vision-language models published as
+  `image-text-to-text` (Gemma, Qwen VL) are available for chat and
+  image-to-text. See the [image-to-text contract](contracts/image-to-text-v0.8.md).
 
-Do not reopen upgraded metadata with an older binary or automatically restore
-the backup after an uncertain publication. Preserve metadata, backups and logs
-on failure. Unsupported/corrupt stores are refused. Migration cannot retire a
-previously retained failed owner claim: a dead PID is insufficient authority to
-delete registry state. Recovery requires the existing custody contract.
+### Embedding Pumas
 
-Model categories are now metadata. Opening a library updates its system
-classification rules in place; the next library refresh re-detects categories
-(adding Decision and Video) without moving folders or changing model IDs, so
-served-model IDs and runtime profiles keep working. A category you choose in
-the model's metadata window is kept by later refreshes.
+Local applications can discover a running Pumas owner, attach to a library
+explicitly, keep that owner alive while they use it, and detect when the
+library or its owner changed underneath them. Attaching never terminates
+another application's owner, and a disconnect or uncertain result never
+replays an inference request.
 
-Missing download destinations remain represented in their retained error/paused
-state without startup creating folders or pretending absent bytes completed.
-Interactive download-location reconciliation is separately planned work; this
-checkpoint does not turn its proposal into implemented functionality.
+Rust consumers pin an immutable Git revision of `pumas-library`. Update the
+manifest, lockfile and CI pin together, then run your own library and
+lifecycle tests. HTTP consumers should check the advertised protocol and
+schema versions rather than matching product versions.
 
-## Compatibility and distribution
+### Changes for Rust consumers
 
-Native Rust consumers use an immutable Git revision and their locked dependency
-closure. Update Pantograph's manifest, lockfile and CI setup pin as one consumer
-cohort, then run its actual library/IPC/lifecycle checks. Independent HTTP
-consumers must validate the named protocol/schema advertisements and closed
-operation variants they use; matching product versions alone is insufficient.
-The source-exported Python session helper is a reference, not a supported SDK.
-The binding support matrix still accepts no UniFFI/Rustler host package tuple.
+- `ModelImporter::import` and `import_with_progress` (including copied
+  Diffusers bundles) need the `ModelLibrary` owned by `PumasApi` or
+  `PumasLibraryInstance`. A directly constructed library returns
+  `PumasError::Config` before staging anything; read-only use is unchanged.
+- `ModelImporter::discover_shard_recovery` (and `_async`) returns a typed,
+  read-only report. `recover_incomplete_shards` is deprecated: a guessed path
+  never starts a download.
+- Merging libraries refuses copied imports that carry a publication receipt
+  bound to their current library root; leave those in place.
 
-The [artifact plan](../scripts/release/artifact-plan.json) requires sixteen
-files: five full desktop installers, five no-inference desktop installers,
-three no-inference headless archives and three inference headless archives.
-Targets are Linux x86_64, Windows x86_64 and macOS ARM64. Headless binaries
-include the core; embedders do not need a separate core binary. Choose the
-correct inference variant explicitly. Run only one desktop variant per machine
-because their product name is shared.
+### Acquisition
 
-Inference archives bind exact source/schema/runtime bytes and upstream notices.
-CPU ONNX Runtime is pinned to 1.24.2; Cargo never downloads it. Current PR Linux
-review can prove an extracted archive's finite untrained-graph execution and
-cleanup. This is distinct from pretrained Nomic quality, native Windows/macOS
-acceptance, vision model/projector execution, production speech and final
-distribution acceptance. Follow [Releasing](../RELEASING.md) for native runtime
-prerequisites, packaged model checks, notices, security review and publication.
+- Local imports are bound to the digest of the file you selected.
+- S3 imports of a single object or an authored bundle, optionally conditional
+  on a strong ETag plus SHA-256, for any package the importer supports. These
+  are tested against controlled HTTPS fixtures; specific providers (AWS, MinIO
+  and others) are not yet certified.
+- Hugging Face browsing and cache results stay separate from the download
+  details resolved after you select a model.
+- A managed GGUF keeps its selected primary file and projector through library
+  moves, and a directory's primary file is never its projector.
 
-Custom Torch component assembly, additional discovery networks, arbitrary
-modality pairs and new language SDKs are later scope. Their absence does not
-authorize weakening current capability, ownership or migration refusals.
+### llama.cpp serving
+
+- Embedding and reranking models launch in embedding/reranking mode in
+  dedicated profiles too, with a micro-batch that fits whole inputs (the served
+  context, otherwise 8,192 tokens, never more than the trained context).
+- Ollama embedding models load through `/api/embed`.
+
+## Upgrading an existing library
+
+Libraries from earlier versions need a one-time metadata upgrade. Read
+[Opening an older library](library-upgrade.md) first. In short:
+
+1. Stop every other app, backend and tool that uses the library.
+2. Choose **Upgrade Library** on the desktop recovery screen (or use the
+   documented offline command on Linux).
+3. Pumas backs up `downloads.json` exactly, then converts it. Model files are
+   never copied, scanned, hashed or rewritten.
+
+The upgrade is one-way: older Pumas versions cannot open the upgraded
+metadata. If anything fails, keep the metadata, backup and logs; do not restore
+the backup automatically.
+
+## Downloads
+
+Sixteen files are published, for Linux x86_64, Windows x86_64 and macOS ARM64.
+The standard builds include inference-plugin integration; **no-inference**
+builds leave it out and only manage libraries and downloads. Inference runtimes
+such as llama.cpp have their own setup requirements.
+
+| Use | Linux x86_64 | Windows x86_64 | macOS ARM64 |
+| --- | --- | --- | --- |
+| Desktop app | `Pumas.Library-0.8.0.AppImage`, `pumas-library-electron_0.8.0_amd64.deb` | `Pumas.Library.Setup.0.8.0.exe` (installer), `Pumas.Library.0.8.0.exe` (portable) | `Pumas.Library-0.8.0-arm64.dmg` |
+| Desktop app, no inference | `Pumas.Library-no-inference-0.8.0.AppImage`, `pumas-library-electron-no-inference_0.8.0_amd64.deb` | `Pumas.Library.Setup.no-inference.0.8.0.exe`, `Pumas.Library.no-inference.0.8.0.exe` | `Pumas.Library-no-inference-0.8.0-arm64.dmg` |
+| Headless server | `pumas-rpc-inference-0.8.0-linux-x86_64.tar.gz` | `pumas-rpc-inference-0.8.0-windows-x86_64.zip` | `pumas-rpc-inference-0.8.0-macos-arm64.tar.gz` |
+| Headless server, no inference | `pumas-rpc-no-inference-0.8.0-linux-x86_64.tar.gz` | `pumas-rpc-no-inference-0.8.0-windows-x86_64.zip` | `pumas-rpc-no-inference-0.8.0-macos-arm64.tar.gz` |
+
+The full and no-inference installers (`.deb`, Windows setup, `.dmg`) share a
+product name, so install only one of them per machine; AppImage, portable and
+headless builds can sit side by side.
+Headless archives include the core, so no separate core binary is needed.
+`THIRD-PARTY-NOTICES-0.8.0.txt` and `pumas-library-0.8.0.provenance.jsonl`
+accompany the release.
+
+## Known limitations
+
+- Installers are not code-signed or notarized. Windows SmartScreen and macOS
+  Gatekeeper will warn on first launch.
+- Production audio-to-text (speech transcription) is not available yet.
+- An adapter with no task tag or base-model evidence (for example the LTX-2.3
+  IC-LoRA) stays under image generation until you choose **Video generation**
+  for it.
+- A model reports only the inputs and outputs its metadata records. LTX-2.3
+  shows *image → video*; it also accepts text and produces audio, which its
+  published metadata does not state.
+- S3 imports are not certified for specific providers.
+- No UniFFI or Rustler host packages are published; the Python session helper
+  is a reference example, not a supported SDK.
+
+The full list of changes is in the [changelog](../CHANGELOG.md).

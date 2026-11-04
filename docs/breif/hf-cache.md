@@ -1,5 +1,11 @@
 # Hugging Face Discovery Cache Brief
 
+**Status:** Direction. The local parts below are partly implemented as of 0.8.0
+(explicit `cache:` browse of retained details and search without detail
+hydration; see [Existing Local Cache](#existing-local-cache)). The shared online
+cache, bulk index, other catalog sources and peer sharing are not started and
+not authorized.
+
 ## Purpose
 
 Pumas Library currently uses the Hugging Face Hub API for model discovery and repository metadata. Although Pumas already maintains a local SQLite cache for search results and repository details, normal interactive use can still generate enough upstream API traffic to encounter Hugging Face rate limits.
@@ -32,6 +38,13 @@ Pumas already maintains a SQLite-backed Hugging Face cache containing:
 The current search cache is primarily an **exact request cache**. Query text, filters, pagination, and limits form part of the cache identity. As a result, a previously discovered repository does not necessarily help answer a different search query.
 
 Cached search results may also be re-enriched with repository/download information, which can still cause Hugging Face API traffic when repository-detail cache entries are unavailable, stale, or considered incomplete.
+
+Implemented in 0.8.0:
+
+* a query prefixed `cache:` (for example `cache:acme multilingual`) passed to the existing `search_hf_models` API browses or searches retained anonymous public repository details with zero upstream requests. Results carry reserved `model_card.pumas_discovery` provenance (source URL, observation time, freshness) and no download options; the desktop exposes this as an explicit cached-search source;
+* ordinary desktop search requests no detail hydration (`hydrate_limit = 0`); opening one repository's download menu fetches that repository's missing details.
+
+This is bounded browse/search of retained detail records, not the FTS-backed local discovery catalog proposed below, and records learned only from search are not included.
 
 The local cache should remain the fastest and most private cache layer, but its role should expand from exact-request reuse toward a local discovery catalog.
 
@@ -228,6 +241,5 @@ A future implementation plan should determine:
 ## Deferred Service Readiness
 
 The [service readiness checklist](../plans/hf-discovery-cache/readiness.md)
-records dependencies and decisions for the later discovery phase. Current work
-remains baseline repairs, S3 acquisition and restricted networking; no external
+records dependencies and decisions for the later discovery phase. No external
 service provisioning or search implementation is authorized by that checklist.

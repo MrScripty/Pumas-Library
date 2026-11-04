@@ -1,5 +1,15 @@
 # Pumas Library — Capability Discovery and Resolution Fabric
 
+**Status:** Architectural direction; it does not authorize implementation. As of
+0.8.0 only local pieces exist: the machine-level library registry (section 26)
+backs `pumas-rpc --discover-local` and explicit attach/retain of an existing
+owner, and the gateway's `GET /v1/served-models` and `GET /v1/capabilities`
+return typed capability descriptors that separate capability from availability
+(sections 7–8, for the local gateway only; see the
+[model operations contract](../contracts/model-operations-v1.md)). LAN, cluster,
+Kubernetes and fleet discovery, node identity, leases, capability handles and
+subscriptions are not started.
+
 ## Purpose
 
 Pumas should provide a unified mechanism for discovering both **Pumas itself** and the **capabilities available through Pumas**, regardless of whether those capabilities are provided by:

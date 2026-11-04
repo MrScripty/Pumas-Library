@@ -10,8 +10,8 @@ integration, and experimental host-language adapters.
 | `pumas-library` (`crates/pumas-core`) | Library state, metadata, SQLite index, imports, downloads, reconciliation, runtime profiles, and serving contracts |
 | `pumas-app-manager` | External runtime installation, version selection, processes, and service clients |
 | `pumas-rpc` | Desktop sidecar, HTTP/JSON-RPC dispatch, events, and `/v1` gateway |
-| `pumas-uniffi` | Experimental UniFFI adapter and binding generation surface |
-| `pumas-rustler` | Experimental Rustler/NIF conversion surface |
+| `pumas-uniffi` | Experimental UniFFI adapter; no supported host binding ([status](../docs/native-bindings.md)) |
+| `pumas-rustler` | Experimental Rustler/NIF conversion surface; no supported host binding |
 
 `pumas-rustler` is excluded from the default workspace test set because it
 requires an Erlang/OTP host. It does not currently expose the core library API.
@@ -37,18 +37,27 @@ gateway capability checks remain separate contracts. See
 
 ## Features and Variants
 
-`pumas-rpc` enables `inference-plugins` by default. Its verified library-only
-variant is:
+This section owns the Cargo feature facts that other guides link to.
+
+`pumas-rpc` enables `inference-plugins` by default (`pumas-app-manager` plus the
+core `onnx-runtime`, `process-manager` and `gpu-monitor` features). Its verified
+inference-disabled variant is:
 
 ```bash
 cargo build --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
 ```
 
-The `pumas-core` `hf-client`, `process-manager`, and `gpu-monitor` feature names
-currently do not remove their dependencies or public modules. Only the optional
-`uniffi` dependency has a direct feature gate. Do not describe
-`pumas-library --no-default-features` as a minimal build until that contract is
-corrected and tested.
+`s3` (S3 import RPCs), `export-contract` (desktop contract export) and
+`test-support` are opt-in.
+
+`pumas-library` enables `full` by default: `hf-client`, `process-manager`,
+`gpu-monitor` and `onnx-runtime`. Only `onnx-runtime`, `s3`, `contract-schema`
+and `uniffi` gate optional dependencies. `hf-client` and `gpu-monitor` change
+only the advertised build-info feature list, and `process-manager` only whether
+the builder may enable the process manager; none of the three removes a
+dependency or public module. `default-features = false` therefore drops ONNX
+Runtime, tokenizers and half-precision support, but is not otherwise a minimal
+build. Do not describe it as minimal until those three features gate their code.
 
 ## Verification
 

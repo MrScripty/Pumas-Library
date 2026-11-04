@@ -1,7 +1,6 @@
 # Native Image-to-Text qualification
 
-Status: candidate selected; acquisition, import extension and native execution
-are pending. This is the next qualification slice for the
+Status: candidate selected; acquisition and native execution are pending. This is the next qualification slice for the
 [existing adapter](image-to-text-v0.8.md), not a shipping runtime policy or a
 receipt that model bytes have been read. The machine-readable
 [cohort selection](image-to-text-native-cohort.json) contains publisher pins and
@@ -39,52 +38,13 @@ measured peak usage. Use one slot, four CPU threads, a 2048-token context and
 at most 128 generated tokens initially. Use `--n-gpu-layers 0` and
 `--no-mmproj-offload`; no GPU or paid service is required.
 
-## Acquisition owner integration proposal
+## Import roles
 
-The acquisition integration lead owns the changing generic importer. Keep this
-extension separate from its unrelated format and transport edits. The proposed
-new helper is `model_library/importer/acquired_vision.rs`; reserve its write
-ownership before implementation. Required wiring remains with the importer
-owner. Do not simply add `gguf` to the inert auxiliary extension allowlist.
-
-1. Add an explicit closed vision-pair selection with a primary import spec,
-   projector logical path, and `image_to_text` semantic task. Initial admission
-   is exactly two distinct, same-directory, digest-pinned GGUF members. The
-   primary must not be a projector and the secondary must be the one selected
-   projector. Refuse extra GGUFs, missing roles, equal paths, ambiguous pairs,
-   nested placement that breaks sibling association and unverified members.
-2. Bind that complete selection to the existing consumer receipt payload.
-   Validate and copy both through `AcquiredArtifactUse` held descriptors and
-   the existing owned publication path. Preserve checksum verification,
-   mutation exclusion, caller-loss custody and recovery/no-replay behavior.
-   Qualification must inspect projector structure/role through held readers;
-   a `.gguf` extension or `mmproj` substring is not sufficient. A deliberately
-   narrower exact-publisher-digest cohort is an alternative to broad format
-   admission, but must remain explicitly scoped to that cohort.
-3. Carry the primary identity through `CopyPlan`, metadata and reconciliation.
-   Both current main and the old development branch choose the largest copied
-   model file when calculating primary hashes in `importer/staging.rs`.
-   The selected projector is **190,031,616 bytes**, larger than the primary's
-   **175,054,528 bytes**. This candidate therefore requires replacing that
-   heuristic for acquired sets with the explicitly selected primary. Do not
-   change ordinary unrelated import selection as a side effect.
-4. Bind the canonical runtime load path and selected artifact to the primary;
-   expose the projector as its companion, not an independently interchangeable
-   model. Keep the exact two-file manifest and primary/projector roles in
-   the publication/reconciliation proof. Populate task metadata from the
-   explicit vision-pair operation; imported `llama` architecture or a `vlm`
-   modality label alone must not grant image-to-text availability.
-5. Preserve the generic acquired-model operation's existing behavior when no
-   explicit vision-pair selection is supplied. Coordinate any public DTO or
-   generated schema addition with the integration lead before changing it.
-
-Required regression oracles: a projector larger than its primary retains the
-primary hashes/load target; reordered manifest members do not change roles;
-missing/extra/duplicate/misplaced/wrong-role members refuse before publication;
-changed source bytes fail digest verification; output receipts bind both files;
-caller loss retains admitted work; reconciliation observes the exact existing
-pair without replaying import. Synthetic GGUF test files establish only these
-boundaries, never runtime compatibility or inference.
+The receipt-bound two-GGUF import this cohort needs is implemented; the
+[adapter contract](image-to-text-v0.8.md#receipt-bound-acquired-modelprojector-roles)
+owns its behavior. This cohort's projector (**190,031,616 bytes**) is larger
+than its primary (**175,054,528 bytes**), so qualification must confirm that
+the explicitly selected primary keeps the model hashes and load target.
 
 ## Real execution sequence
 
@@ -94,7 +54,7 @@ metadata, compare publisher size/SHA-256 to streamed bytes, and retain all
 owner-issued receipts. Do not use llama.cpp's `-hf` auto-download, a new ad-hoc
 downloader, ambient cache discovery, or hand-edited model-index rows.
 
-After the bounded importer extension is composed, publish the selected pair
+Publish the selected pair
 through that owner and launch a managed `LlamaCppDedicated` CPU profile through
 Pumas. Record the canonical model ID, profile, process generation, runtime
 executable/dependent-library identities and model/projector hashes. Require the
@@ -113,20 +73,3 @@ there is no replay, the exact managed child/session drains, no runtime process
 remains, and a subsequent owned launch can complete another real request. HTTP
 closure alone cannot pass native teardown. Tuldok application acceptance is
 owned separately and must pin the final combined Pumas source/schema.
-
-## Current execution blocker
-
-On 2026-10-09 this cloud executor returned `Tunnel connection failed: 403
-Forbidden` for the public Hugging Face model metadata and GitHub release API.
-An approved escalated HF metadata read encountered the same proxy response.
-Web/GitHub integration reads resolved the official pins, but do not provide
-binary assets to the native acquisition owner. No weights/runtime download or
-model execution was attempted, and no additional account terms were accepted.
-
-Required resource change: permit the existing native acquisition owner to reach
-`huggingface.co` and `api.github.com`, the exact pinned GitHub asset URL and the
-asset hosts in their validated download redirects, or supply equivalent
-already verified owner-managed resources in the qualification environment.
-Do not disable the proxy, weaken TLS or substitute mutable/unverified assets.
-The import-role wiring above is a separate engineering prerequisite; restoring
-network access does not complete it or grant inference readiness.

@@ -7,7 +7,7 @@ These are the admitted exact paths/closed path families. The actual source files
 Parent admits exactly one pre-FilesReady Linux process-loss milestone from frozen
 ed31639 on `feat/s3-installed-process-loss-ed31639`. Only the existing installed
 harness, its focused provenance/harness tests, owning plan/ledger/write-set and
-the [process-loss report](s3-installed-process-loss-2026-10-06.md) with matching
+the process-loss report (`s3-installed-process-loss-2026-10-06.md`, removed; see Git history) with matching
 JSON evidence may change. Preserve the actual qualified production binary and
 all frozen Rust/native/dependency/ONNX/network settings. Tests and precise
 boundary/cold-custody claims are recorded in that admission. No further fault
@@ -644,7 +644,7 @@ Any source/test path or byte change invalidates the frozen fingerprint and requi
 
 ### AC09 independent native bootstrap and repeated shutdown — admitted 2026-10-02
 
-An independent GPT-6.1 Sol High gap review selected `native_independent_acquisition_installs_and_repeated_shutdown_preserves_receipt` to prove successful native bootstrap with an independently constructed acquisition service and repeatable owner drainage. Exact source/test write set: one `#[cfg(all(target_os = "linux", target_arch = "x86_64"))` regression in `rust/crates/pumas-app-manager/src/version_manager/mod.rs`, reusing `native_archive_fixture_with_request_monitor`, `AcquisitionStore`, `AcquisitionService`, `VersionManager::new_with_acquisition`, and the public `install_version("b1234+cpu")` path. Construct the service directly without `PumasApi`; keep the request monitor and fixture server alive through the full test. Observe the controlled metadata and archive requests, positive extraction/output and metadata publication, exact `Adopted` acquisition/completion receipt and queue release, unrelated sentinel preservation, and absence of both the model database and its download-state partition. Await manager shutdown twice and acquisition-service shutdown twice under bounded waits; require both sequences to succeed, then check unchanged installed output/receipt/store state, closed installation admission for a different tag before any source request or filesystem change, and `open_consumer` returning `DownloadLifecycleClosed`. Compare monitored source requests before and after shutdown to prove none occur after settlement. Initial evidence commands are the exact-test filters in default and `--no-default-features` app-manager configurations through `/tmp/pumas-cargo-admission/run-cargo-serialized`; format the touched file and run `git diff --check`.
+An independent GPT-6.1 Sol High gap review selected `native_independent_acquisition_installs_and_repeated_shutdown_preserves_receipt` to prove successful native bootstrap with an independently constructed acquisition service and repeatable owner drainage. Exact source/test write set: one `#cfg(all(target_os = "linux", target_arch = "x86_64"))` regression in `rust/crates/pumas-app-manager/src/version_manager/mod.rs`, reusing `native_archive_fixture_with_request_monitor`, `AcquisitionStore`, `AcquisitionService`, `VersionManager::new_with_acquisition`, and the public `install_version("b1234+cpu")` path. Construct the service directly without `PumasApi`; keep the request monitor and fixture server alive through the full test. Observe the controlled metadata and archive requests, positive extraction/output and metadata publication, exact `Adopted` acquisition/completion receipt and queue release, unrelated sentinel preservation, and absence of both the model database and its download-state partition. Await manager shutdown twice and acquisition-service shutdown twice under bounded waits; require both sequences to succeed, then check unchanged installed output/receipt/store state, closed installation admission for a different tag before any source request or filesystem change, and `open_consumer` returning `DownloadLifecycleClosed`. Compare monitored source requests before and after shutdown to prove none occur after settlement. Initial evidence commands are the exact-test filters in default and `--no-default-features` app-manager configurations through `/tmp/pumas-cargo-admission/run-cargo-serialized`; format the touched file and run `git diff --check`.
 
 Canonical evidence write set: this `reports/write-sets.md`, `plan.md`, `execution-ledger.md`, `reports/acceptance-matrix.md`, and `reports/dependency-gates.md`. No production logic, public API, generated contract, schema, lockfile, package install, live root, or Runtime R1–R5 write is admitted. This is one Linux x86_64 controlled-source bootstrap/shutdown composition; it does not prove native target platforms, packaged runtime, power-loss durability, resource bounds, process crash, real-source availability or full AC09/AQ-HTTP. Keep AC09 and AQ-HTTP pending unless all matrix requirements pass.
 
@@ -780,7 +780,7 @@ Parent owns PR/review/merge/hosted/Library coordination.
 ## Q3 authenticated desktop/RPC successor — 2026-10-05
 
 Scope was traced and reported before implementation in
-[s3-credential-boundaries-2026-10-05.md](s3-credential-boundaries-2026-10-05.md).
+[s3-credential-boundaries-2026-10-05.md (`s3-credential-boundaries-2026-10-05.md`, removed; see Git history).
 Independent review fixes are frozen on `fix/s3-desktop-review-106a6ca4` at
 `887308dc`; authenticated successor descends from that tested commit and frozen
 anonymous `106a6ca4`. Prerequisite `0023bcf9` edits Electron `python-bridge.ts`,
@@ -822,7 +822,7 @@ reconciliation/HF/library/publication-observation/test/report changes solely by
 normal merge, with frozen milestones and refs preserved. Follow-up 5104a21e adds
 only empty-object refusal fixture and help/docs text. Affected composed lifecycle
 and full RPC checks were rerun. Qualification/plan/ledger records are the final
-docs set. See [report](s3-desktop-bundle-qualification-2026-10-05.md) for public
+docs set. See report (`s3-desktop-bundle-qualification-2026-10-05.md`, removed; see Git history) for public
 surfaces, raw evidence, exact composition and pending browser/default/provider
 limits. Parent owns PRs/reviews/merges/hosted/Library coordination.
 
@@ -891,7 +891,7 @@ network, lease-through-child cleanup and bootstrap traffic accounting are absent
 
 Tested source `8a147160c2b3743c549e00a89b1e48f54d7a2390` (tree `9544e16dde7802baa2033bf7ceea7d44c2ba3767`) changes only the one Linux ignored
 test/local helpers in `api/hf.rs`. The owning plan, ledger, matrix, gates and
-[measurement report](ac10-public-hf-measurement-2026-10-06.md) record two fresh
+measurement report (`ac10-public-hf-measurement-2026-10-06.md`, removed; see Git history) record two fresh
 512 MiB runs, exact raw-log archive/JSON, independent source review, failed timing
 attempt and cache/resource manifests. No production hooks, dependencies,
 public API, S3/native frozen writes or Q2 source changes. All gates remain pending.
@@ -928,6 +928,6 @@ Tested source `0950c4d5839608c8dd5f52afcb3fd2424a9a1656` (tree `55c7dea28bae397e
 admitted shared service owner and co-located tests, plus core README, contract
 and admission notes. Final source blob `83478facd105a08f8a52e36e6ce9780d09e76d2a` is
 independently reviewed. Owning plan/ledger/matrix/gates and
-[qualification](http-elapsed-budget-qualification-2026-10-06.md) record affected
+qualification (`http-elapsed-budget-qualification-2026-10-06.md`, removed; see Git history) record affected
 checks, historical failures, cache restoration and pending broader gate scope.
 Evidence-only successor preserves source, dependencies and frozen refs.

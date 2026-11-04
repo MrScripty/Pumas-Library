@@ -1,9 +1,11 @@
 # Unified Pumas Inference Gateway
 
-**Status:** Deferred until after the next release, per user decision on
-2026-09-12. This brief records direction only; it does not authorize further
-feature development or add a requirement for the next release. Revisit scope and
-acceptance after that release.
+**Status:** Direction only, deferred past 0.8.0 (user decision of 2026-09-12).
+It does not authorize feature development. 0.8.0 shipped typed served-model and
+capability discovery (see the
+[model operations contract](../contracts/model-operations-v1.md)), but not the
+unloaded-model advertisement or on-demand loading proposed here. Settle scope and
+acceptance before any implementation plan.
 
 ## Intent
 
@@ -20,8 +22,10 @@ Clients → Pumas API gateway → Provider adapters → Inference backends
 ## Current Behavior
 
 Pumas's `/v1/models` advertises currently loaded models with usable serving
-observations. Requests for unloaded models are rejected; gateway requests do not
-currently trigger loading. The llama.cpp router separately advertises the
+observations, each ID once with its serving profiles. `GET /v1/served-models`
+lists every served (model, profile) pair with its `load_state` and typed
+capabilities. Requests for unloaded models are rejected; gateway requests do not
+trigger loading. The llama.cpp router separately advertises the
 Pumas-generated GGUF catalog and can load models requested directly by clients.
 Pumas observes those external loads and unloads in the library UI.
 
@@ -51,7 +55,7 @@ optional. Uncertain loading outcomes must not trigger automatic mutation retries
 New llama.cpp catalog entries may be added live, while removals and changed paths
 remain pending until profile restart, as explicitly approved by the user.
 
-After the next release, settle discovery eligibility, stable model identities,
+Before implementation, settle discovery eligibility, stable model identities,
 backend routing, cold-start behavior, resource/eviction policy and the required
-access-isolation boundary before implementation. No release version or delivery
+access-isolation boundary. No release version or delivery
 date is committed by this brief.

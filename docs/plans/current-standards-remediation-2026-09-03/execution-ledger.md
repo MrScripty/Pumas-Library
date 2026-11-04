@@ -3,7 +3,7 @@
 ## 2026-09-20 — Register Torch Image Provider Contract Correction
 
 Planning-only reconciliation registered the focused
-[Torch Image Provider Contract Correction](../torch-image-provider-contract/plan.md)
+Torch Image Provider Contract Correction (removed; `git show 78c52fcf:docs/plans/torch-image-provider-contract/plan.md`)
 as the sole owner of the image-specific lifetime, compatibility, private result,
 and gateway projection subset of PRG-A4/DRBT-A5. The program retains objective-
 level integration; the desktop/Torch remediation retains its broader work; and

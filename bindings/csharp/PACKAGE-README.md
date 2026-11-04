@@ -9,7 +9,8 @@ commit, target, and build profile. Place the native library beside the host
 executable or on the platform's native-library search path before loading the
 binding.
 
-These bindings are experimental. The current smoke evidence covers native
-loading and a synchronous version call, not the full async or model-library API.
+These bindings are experimental and not a supported SDK. The current smoke
+evidence covers native loading and a synchronous version call, not the full
+async or model-library API.
 See `docs/native-bindings.md` in the archive for integration constraints and
 the evidence required before claiming host support.

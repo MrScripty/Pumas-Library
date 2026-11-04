@@ -1,5 +1,11 @@
 # Pumas Library — Agent Interaction and MCP Layer Brief
 
+**Status:** Architectural direction; not started and not authorized. Pumas has no
+MCP adapter or agent skill as of 0.8.0. The local intent service it would project
+(`query_models`, `get_model`, `get_model_status`, `ensure_model`,
+`release_model`) exists; see the
+[core README](../../rust/crates/pumas-core/README.md#local-intent-interface).
+
 ## Purpose
 
 Pumas should expose an explicit **agent interaction layer** that allows coding agents and autonomous systems to use Pumas through a small, stable, intent-oriented interface.

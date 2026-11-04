@@ -15,13 +15,13 @@ manual/tag behavior. All outputs remain
 unsigned, unverified candidates. The workflow has read-only contents permissions
 and never creates a tag or GitHub release.
 
-For a build-only rehearsal, first have the parent review the exact source and
-run action. Set `PUMAS_REHEARSAL_SHA` to that reviewed full commit, then dispatch
-this branch (or the accepted branch containing this workflow):
+For a build-only rehearsal, first have the maintainer review the exact source
+and run action. Set `PUMAS_REHEARSAL_BRANCH` to the branch holding that source
+and `PUMAS_REHEARSAL_SHA` to its reviewed full commit, then dispatch:
 
 ```bash
 gh workflow run build.yml --repo MrScripty/Pumas-Library \
-  --ref release/v080-package-qualification-20261014 \
+  --ref "$PUMAS_REHEARSAL_BRANCH" \
   -F build_candidates=true -f expected_source="$PUMAS_REHEARSAL_SHA"
 ```
 
@@ -168,7 +168,7 @@ and macOS ARM64 archives through `headless_inference_ci.py` and the existing
 strict `headless_inference_build.py` producer. Candidate assembly requires all
 three in addition to the thirteen existing assets. A missing or failed native
 job blocks the combined candidate. No workflow step publishes a release.
-Pull requests and manual workflow runs also run the bounded Linux-only
+Pull requests and ordinary (non-candidate) manual runs also run the bounded Linux-only
 `review-inference-linux` job on the existing `ubuntu-24.04` runner. It checks out
 the exact PR head (or manual run SHA), uses the same strict release producer,
 extracts the archive, and compares authenticated core/RPC startup identities.
@@ -181,11 +181,16 @@ untrained ONNX graph through its own extracted Pumas binary, observes the pinned
 native runtime mapping, and requires graceful shutdown. Its separately labeled
 fixture hashes and lifecycle log are execution evidence, not pretrained Nomic
 acceptance or embedding-quality evidence. No model weights are downloaded.
-The source version is `0.8.0`. Setting it does not publish a tag or release and
-does not qualify native model execution.
-The producer requires source version 0.8; older 0.7 sources fail before compilation.
-After manifest or dependency changes, regenerate/review the matching `<version>`
-and `<version>-s3` attribution directories. The generator and inference producer
+
+The bounded PR/manual `review-audio-dependencies` job separately requires the
+frozen non-model audio dependency cohort to execute under real Linux confinement.
+Unsupported confinement or recipe mismatch fails the job. Its evidence contains
+the exact source head/tree, probe report and log; installed runtime bytes are not
+uploaded. This dependency probe does not qualify a pretrained ASR model.
+
+The producer requires source version 0.8; older 0.7 sources fail before
+compilation. After manifest or dependency changes, regenerate/review the
+matching `<version>` and `<version>-s3` attribution directories. The generator and inference producer
 select those source-version paths without retaining a hard-coded 0.7 directory.
 
 `onnx-runtime-pins.json` records the official CPU 1.24.2 GitHub release archive
@@ -250,9 +255,9 @@ also passed against the pinned library in this environment. A separate C harness
 executed a real CPU session using a synthetic two-element Identity graph, observed
 the pinned mapped runtime, released its native handles and exited successfully.
 That bounded untrained graph is not Pumas/Nomic or pretrained-model evidence.
-This development environment has not executed a v0.8 release build, pretrained ONNX model, native Windows/macOS
-startup, signing/notarization, final SBOM or security qualification. Preserve those
-gates before the maintainer's publication decision.
+None of these local checks executes a release build, a pretrained ONNX model,
+native Windows/macOS startup, signing/notarization, a final SBOM or security
+qualification. Those remain gates before the maintainer's publication decision.
 
 ## Complete candidate metadata
 
@@ -281,10 +286,14 @@ SPDX/provenance or treat installer-only checksums as final publication coverage.
 ## Reviewed trained fixture
 
 The documented fixture is Nomic's public `nomic-ai/nomic-embed-text-v1.5`, using
-`onnx/model_fp16.onnx` plus its matching tokenizer/config files. The
-[fixture investigation](docs/plans/v080-packaging/reports/nomic-fixture.md) records
-the official revision, publisher license declaration, exact weight identity and
-remaining byte-verification limits. A provided directory is copied into an
+`onnx/model_fp16.onnx` plus its matching `tokenizer.json`, `config.json`,
+`tokenizer_config.json` and `special_tokens_map.json`, all at the immutable
+revision `ac6fcd72429d86ff25c17895e47a9bfcfc50c1b2` (publisher license:
+Apache-2.0). The publisher's Git-LFS pointer gives `onnx/model_fp16.onnx` as
+273,859,028 bytes with SHA-256
+`cf5b5a86edb00f895561803cfc04729090a958340b8ca2ad76c143f565f6bb04`; that digest
+comes from upstream and has not been recomputed locally. Fetch only those five
+paths, never the whole (about 2.2 GB) repository. A provided directory is copied into an
 isolated library and never modified. The lifecycle receipt records the copied
 bytes; it does not itself authenticate their model provenance or establish model
 quality. No model is bundled in release artifacts or silently downloaded by this
@@ -298,17 +307,19 @@ unmounts it, compares packaged resources, checks ARM64 executables and runs both
 RPC and desktop startup from the copied application. Reproduce on a Mac with
 `python3 scripts/release/smoke-macos-package.py CANDIDATE_DMG`. This check requires
 the matching staged RPC and frontend inputs. It does not qualify Gatekeeper,
-notarization, native chooser recovery or interactive desktop behavior. macOS
-remains a required target; its native results are pending until that job runs.
+notarization, native chooser recovery or interactive desktop behavior. macOS is
+a required target.
 
 ## Required release acceptance
 
 The candidate workflow rejects missing, empty, duplicate, stale-version, and
-unexpected installer archives, and hashes the exact staged bytes. It checks
-native RPC startup from staging and both extracted Linux installers, compares
-packaged Linux resources against their build inputs, and checks Linux desktop
-startup. These
-are bounded startup checks, not installer installation or complete user flows.
+unexpected artifacts, and hashes the exact final bytes. It checks native RPC
+startup from staging on each target, compares packaged resources against their
+build inputs on Linux, macOS and Windows, starts the packaged RPC and desktop
+(Linux under Xvfb, the copied macOS application, the installed and portable
+Windows applications), and asserts inference-route absence for each
+no-inference package. These are bounded startup checks, not complete user
+flows.
 
 Before tagging or publishing, satisfy the remaining artifact-plan obligations:
 
@@ -328,8 +339,8 @@ Before tagging or publishing, satisfy the remaining artifact-plan obligations:
   embed the accepted notices and project license in each distributable.
 - Run current Cargo and pnpm vulnerability/license checks and review their
   results against the shipped dependency closure.
-- Verify the final publication inventory and regenerate checksums after adding
-  release metadata. Candidate checksums cover installers only.
+- Verify the final publication inventory. Candidate checksums cover every final
+  artifact and metadata file; regenerate them if anything is added or changed.
 - If shipping a Torch runtime, verify its resolved dependencies and real
   load/inference/control behavior on each claimed device/platform tuple. Unit
   fakes and source adapters do not qualify a runtime distribution.
@@ -350,8 +361,8 @@ no-follow traversal, a pinned execution lock file, native handle-relative rename
 and writable directory flushes. Durable JSON publication retains the same explicit
 failure and durability states across Linux, macOS, and Windows. Native startup
 checks do not establish signing, SmartScreen acceptance, or interactive workflows.
-See the [dependency review](docs/dependency-review-0.7.0.md) for the remaining
-security and attribution decisions.
+Run the vulnerability and license checks for the exact shipped closure, and
+re-confirm the [accepted advisory exceptions](docs/SECURITY.md#accepted-advisory-exceptions).
 
 ## Tag and publish
 
@@ -366,21 +377,3 @@ version. Failed workflow artifacts are diagnostics, never distribution assets.
 (The v0.7.0 tag was moved once before any publication because its original
 commit never passed CI and no release was cut from it; that pre-publication
 move is the exception, not the practice.)
-
-## Why this workflow changed for 0.7
-
-The histories leading to v0.1–v0.6 repeatedly needed last-minute fixes for
-binding-generator invocations, pnpm/native optional dependencies, action pins,
-platform paths and symlinks, test isolation, lint, and Windows RAM-disk behavior.
-The previous pipeline also shipped outputs excluded by the current artifact
-plan and allowed missing uploads. The replacement removes RAM-disk setup and
-unsupported bundle generation, locks Cargo resolution, reads the Rust toolchain
-pin once, makes headless execution a separate gate, and rehearses installer
-assembly before tags. Release failures remain visible instead of being converted
-into partial success.
-
-The bounded PR/manual `review-audio-dependencies` job separately requires the
-frozen non-model audio dependency cohort to execute under real Linux confinement.
-Unsupported confinement or recipe mismatch fails the job. Its evidence contains
-the exact source head/tree, probe report and log; installed runtime bytes are not
-uploaded. This dependency probe does not qualify a pretrained ASR model.

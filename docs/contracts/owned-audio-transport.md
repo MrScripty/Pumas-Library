@@ -135,40 +135,28 @@ native `stop`/`length` evidence. Missing or ambiguous terminal evidence is a
 confirmed typed failure, never a fabricated stop. Fixtures exercise EOS, the
 512-token bound and missing evidence; a real model remains unvalidated.
 
-## Upstream integration and remaining gates
-
-Import the private candidate over PR55 head `9e9ba63c022bce52c00256cd42f4a33afb0e6731`
-and its private lifecycle parent `4e40ea0c0493547104dfd2c9985edd9ca3613596`.
-The public PR55 author/committer is connector identity Puma; the separate local
-format candidate used MrScripty and has the same source tree. Do not rewrite
-published author history. Coordinate public changes with the root/integration
-worker; this candidate is not published or merged.
+## Remaining gates
 
 Before making shipping audio available through the existing generic endpoint, the
 owning runtime must qualify and retain the installed interpreter and complete
 immutable dependency/loader code, materialize all imported modules in the
 runtime recipe, and prove the real loader's full selected-model read set.
-The bundled Transformers 4.57.6 recipe is not sufficient for this loader. Bind
+The bundled Transformers 4.57.6 recipe is not sufficient for this loader, which
+requires Transformers >=5.4. Bind
 the client and stop callback to that exact process generation, register its
 private slot owner through the existing model-operation boundary, and derive
 availability from this qualification rather than a reply or flag. Validate a
-real model acquired through Pumas under the user's download/terms authorization;
-no model acquisition or inference occurred for this candidate.
+real model acquired through Pumas under the user's download/terms authorization.
 
-Use the recorded offline focused, aggregate and strict lint commands in the
-private handoff. Pantograph consumers should continue using the existing generic
-typed modality contract, retain caller correlation IDs and accept audio refusal
-until the owning runtime gate is satisfied. No authorized real model was present
-in this execution environment: a Pumas-indexed canonical Cohere ASR package with
-all required selected files is missing. The subsequent public-source audit pins
-the proposed official repository revision and documents access terms,
-verification and compatible runtime requirements in
+Pantograph consumers should continue using the existing generic typed modality
+contract, retain caller correlation IDs and accept audio refusal until the owning
+runtime gate is satisfied. The selected official repository revision, access
+terms, verification and compatible runtime requirements are recorded in
 [Cohere qualification](cohere-native-qualification.md). Gated member bytes,
-digests and accepted access consent remain missing. The bundled runtime remains
-Transformers 4.57.6; the native adapter requires >=5.4. Do not download gated
-assets to bridge those gaps without the user's authorization.
-Do not substitute HTTP status/cancel,
-public paths, manifests or automatic retries for the private custody channel.
+digests and accepted access consent remain missing. Do not download gated
+assets to bridge those gaps without the user's authorization. Do not substitute
+HTTP status/cancel, public paths, manifests or automatic retries for the private
+custody channel.
 
 ## Hung-peer and disposal limits
 

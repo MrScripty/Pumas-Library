@@ -7,9 +7,9 @@ imports, integrity reconciliation, runtime profiles, and serving state.
 ## Optional inference dependencies
 
 Default builds retain ONNX execution through the `full` feature. Model-management
-consumers can use `default-features = false` (and `features = ["hf-client"]` for
-Hugging Face access) without compiling ONNX Runtime, tokenizers or half-precision
-tensor support. Enable `onnx-runtime` explicitly to expose `onnx_runtime` and its
+consumers can use `default-features = false` without compiling ONNX Runtime,
+tokenizers or half-precision tensor support; Hugging Face access is compiled in
+either way (see [Features](#features)). Enable `onnx-runtime` explicitly to expose `onnx_runtime` and its
 re-exported execution types. Provider descriptions and model metadata remain
 available without that feature. RPC enables it through `inference-plugins`.
 
@@ -89,8 +89,9 @@ backend fallback. Requests use the existing reqwest transport pool, constrained
 to the configured origin and GET/HEAD. SDK construction, complete request futures
 and body polls use scoped diagnostics to prevent credential-header tracing while
 preserving outer acquisition status events. Error bodies are bounded to 1 MiB;
-provider diagnostics are never propagated. Prefix listing and its reviewed XML
-validation guard remain separate planned work.
+provider diagnostics are never propagated. `S3Reader::enumerate_prefix` lists an
+explicitly authorized prefix within `S3PrefixLimits`, under a 4096-node, no-DTD
+XML guard; it pins each listed object but downloads and imports nothing.
 
 The maintained SDK signs HEAD and conditional range GET with SigV4 and includes
 the optional session token. Credentials remain in the in-memory reader/selection
@@ -122,10 +123,13 @@ With `s3` enabled, `PumasApi::import_s3_model(request, control)` composes explic
 source selection, shared acquisition/verification and the existing model importer.
 `S3ModelImportRequest` supplies endpoint/region/bucket/addressing/timeout facts,
 `Vec<S3ManifestEntry>` with exact key/VersionId/logical path/SHA-256 evidence,
-`ModelImportSpec` naming the selected primary GGUF, a caller-reserved
+`ModelImportSpec` naming the selected primary weight file, a caller-reserved
 `AcquisitionWorkspace`, positive finite `AcquisitionRetryPolicy` budgets and a
-caller-retained `operation_id: Uuid`. One GGUF and optional explicit data/text
-auxiliaries use the existing importer eligibility and receipt rules.
+caller-retained `operation_id: Uuid`. The acquired set must pass the shared
+importer's supported package qualification (`ModelImporter::import_acquired_model`)
+and receipt rules. `import_s3_conditional_model` and
+`import_s3_conditional_bundle` are the conditional (strong ETag plus mandatory
+SHA-256) single-object and authored-bundle variants of the same path.
 
 Set `credentials: None` for anonymous access, or move explicit `S3Credentials`
 into `Some(...)` for HTTPS authentication. The request has no Debug or serde
@@ -152,8 +156,9 @@ for the same logical request, and reconcile retained work through the existing
 `model.s3.workflow` acquisition consumer and exact model-output proof pipeline.
 A reused control is refused; never use a new UUID to replay uncertain publication.
 Dropping the result waiter reports `Interrupted`, not completion; shared
-`shutdown_acquisition()` drains registered effects. RPC/desktop source entry,
-credential refresh and real-provider acceptance remain separate.
+`shutdown_acquisition()` drains registered effects. The RPC and desktop entry
+points are described in the [RPC guide](../pumas-rpc/README.md#explicit-s3-model-import);
+credential refresh and live-provider acceptance are not provided.
 
 ### Shared S3 acquisition and one-file GGUF import
 
@@ -242,11 +247,14 @@ auxiliary extensions are json, txt, md, model, tiktoken, vocab and merges. Anoth
 weight file, executable auxiliary and reserved root metadata name are refused.
 Output receipt versions and ordinary/single-object behavior remain unchanged.
 
-Authenticated stores, prefix discovery, sharded/multifile weight formats,
-desktop source selection, and live AWS/non-AWS/MinIO qualification
-remain open. Local synthetic GGUF fixtures prove model-library publication,
-not inference execution, packaged consumers, or the AQ-S3 gate. Hosted S3
-commands explicitly enable `s3`; ordinary feature graphs omit the reader.
+The low-level GGUF consumer path above does not accept sharded GGUF or other
+weight formats; use `PumasApi::import_s3_model` for packages the shared importer
+supports. Live AWS, non-AWS and MinIO qualification remains open (the AQ-S3
+gate). Local synthetic fixtures prove model-library publication, not inference
+execution or packaged consumers. Hosted S3 commands explicitly enable `s3`;
+ordinary feature graphs omit the reader. The
+[artifact acquisition contract](../../../docs/contracts/artifact-acquisition.md#6-s3-and-other-source-readers)
+owns the cross-source S3 rules.
 
 ## Choose the Correct Access Role
 
@@ -332,10 +340,12 @@ result becomes `Available`.
 Public operational `DownloadRequest` values retain their existing default-main
 behavior. Intent acquisition carries its immutable revision through metadata,
 auxiliary files, retries, persistence, resume, integrity verification, and
-import. Download persistence uses schema 5 with validated schema-4 upgrade;
-older readers reject the new version. `PersistedDownload` gains a
-`revision: Option<String>` field, so Rust callers constructing that lower-level
-record must initialize it. Pinned ticket recovery is unavailable; pinned
+import. The download store is schema 7; supported v4/v5/schema-6 stores need the
+explicit offline upgrade (`DownloadPersistence::migrate_library_offline`, or
+`pumas-rpc --migrate-download-store-offline --confirm-old-writers-stopped`), which
+normal open never runs. See [Opening an older library](../../../docs/library-upgrade.md).
+`PersistedDownload` has a `revision: Option<String>` field, so Rust callers
+constructing that lower-level record must initialize it. Pinned ticket recovery is unavailable; pinned
 execution resumes through its persisted download record.
 
 `ensure_model(&EnsureModelRequest)` durably records a consumer's requirement
@@ -466,10 +476,9 @@ which requires the Tokio runtime to poll the abort. Disposal does not prove
 that server-side work stopped, and it does not drain a hung exchange to completion.
 
 Operational lookup/download methods remain available. UniFFI and the desktop
-bridge continue to expose their existing operational contracts; adopting the
-intent methods through those bindings is separate work. Nodes, fleet management,
-remote discovery and additional network features are deferred until after the
-next Pumas release.
+bridge expose their existing operational contracts, not the intent methods.
+Nodes, fleet management, remote discovery and additional discovery networks are
+later scope.
 
 ## Model and Storage Rules
 
@@ -478,6 +487,25 @@ Model identity includes repository/source and artifact information; repository
 name alone is insufficient because a repository can contain several files or
 quantizations. Equivalent content published in a different repository remains
 a separate source model.
+
+### Model categories
+
+`ModelType` records what a model is used for: `llm`, `vlm`, `reranker`,
+`decision`, `diffusion`, `video`, `embedding`, `audio`, `vision` or `unknown`
+(`ModelType::ALL` is the single list metadata validation and RPC admission use).
+It is library metadata: it groups models for display and never decides a
+model's folder or ID. Re-detection (`reclassify_model`, `reclassify_all_models`)
+moves a model only when its family changes. Inputs and outputs beyond the
+primary use are recorded as `input_modalities`/`output_modalities`.
+
+Detection uses the library's SQLite rule tables, which opening a library
+updates in place. File facts and architectures outrank task tags (for example
+a GGUF decision head makes a `decision` model), and a disagreeing task tag
+requests review rather than overruling them. `set_model_category(model_id,
+Some(category))` records a person's choice, which every later re-detection
+keeps; `None` clears it and re-detects; `unknown` is refused as a choice.
+
+### Files, index and downloads
 
 Import, resumable download, finalization, repair, migration, and deletion must
 coordinate filesystem state, metadata, index rows, and update events. A
@@ -678,10 +706,11 @@ failed outcomes instead of collapsing them into defaults.
 
 ## Features
 
-The default `full` feature enables `hf-client`, `process-manager`, `gpu-monitor`,
-and `onnx-runtime`. The first three retain their existing marker behavior.
-`onnx-runtime` gates the ONNX execution module and its native/runtime dependencies;
-`uniffi` gates the optional UniFFI dependency.
+The default `full` feature enables `hf-client`, `process-manager`, `gpu-monitor`
+and `onnx-runtime`. `onnx-runtime` gates the ONNX execution module and its
+native dependencies; `s3`, `contract-schema` and `uniffi` gate their optional
+dependencies. The other three remove no dependency or module; the
+[Rust guide](../../README.md#features-and-variants) owns the exact facts.
 
 ## Verification
 

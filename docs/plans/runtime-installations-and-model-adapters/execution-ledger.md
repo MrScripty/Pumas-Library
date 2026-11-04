@@ -25,7 +25,7 @@ APIs, and reports typed missing/invalid-runtime failures. Qualified implementati
 `524391ecec40b9f64432e20ca0f12dfd4c27375d` and its exact tree, dependency audit,
 no-fetch traces, full suite results, native failure regression, compatibility
 contract, and outstanding SDK/platform acceptance inputs are recorded in the
-[qualification report](reports/onnx-no-build-download-2026-10-05.md).
+qualification report (`reports/onnx-no-build-download-2026-10-05.md`, removed; see Git history).
 
 Frozen S3 head `493b935c6a41d4d4aeca8e8a66f10b4aba114365` and its write set were
 preserved. Parent coordination retains PR/review/merge and downstream pin
@@ -33,3 +33,7 @@ ownership. This correction adds no runtime installer/downloader and does not
 start R1 or change any acquisition gate readiness. R1 remains the next runtime
 slice after target-scoped AQ-HTTP acceptance; acquisition Q3 real-provider
 acceptance and Q4 shipping qualification retain their existing pending inputs.
+
+## 2026-11-04 — v0.8.0 documentation review
+
+Status unchanged: `Planned`, R1 gated by AQ-HTTP. Acquisition Q1 and Q3 are merged and ship in 0.8.0 without an accepted gate. The ONNX build-correction qualification report was removed; its durable rules live in `docs/DEVELOPMENT.md` and ADR 0001, and the report is in Git history at `78c52fcf`. Plan header base and phase lines updated.

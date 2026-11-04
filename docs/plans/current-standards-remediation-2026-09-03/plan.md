@@ -2,6 +2,13 @@
 
 **Plan status:** `Active`
 
+**Status as of v0.8.0 (2026-11-03):** this program was last updated on
+2026-09-25. v0.8.0 shipped without completing it; the governance sub-plan is
+accepted, and the Rust/RPC, frontend and desktop/release/Torch sub-plans remain
+open with their recorded issues. Those issues have not been re-verified
+against v0.8.0 source. Before the next slice, re-check each open issue against
+current `main` and close, re-scope or retire the program.
+
 **Post-release deferral:** Further unified inference gateway development is
 deferred until after the next release (user decision, 2026-09-12). The
 [architecture brief](../../breif/unified-inference-gateway.md) records the proposed direction;
@@ -943,7 +950,7 @@ owned by the focused plans.
 | [Governance and verification](governance-and-verification/plan.md) | Standards routing, count/error gate disposition, permanent-gate claims and schedules | G-01–G-06; CS-10, CS-13, CS-14 and G-06 evidence routing |
 | [Rust library and RPC](rust-library-and-rpc/plan.md) | Rust/server RPC and local IPC contracts, public errors/redaction, SQLite state/events/migrations, Rust lifecycle/features, Rust binding placement, plugin startup | R-01–R-09; CS-01–CS-03, Rust portions of CS-04/CS-07/CS-08, CS-11 |
 | [Desktop, release, bindings, and Torch](desktop-release-bindings-and-torch/plan.md) | Generated Electron projections/decoding, desktop authority/lifecycle, Torch, launcher, host cohorts, release artifact/dependency evidence | P-01–P-10; desktop portions of CS-02/CS-04/CS-06/CS-07, CS-12, CS-15 |
-| [Torch Image Provider Contract Correction](../torch-image-provider-contract/plan.md) | Reusable Pumas generation transport, focused image live compatibility/private result/gateway projection, and exact candidate/user-workflow handoffs | Delegated Pumas transport and image subset of PRG-A4/DRBT-A5; does not claim external Ollama/llama.cpp worker cleanup or own text semantics/usage, broader Torch remediation, or distribution |
+| Torch Image Provider Contract Correction (removed; `git show 78c52fcf:docs/plans/torch-image-provider-contract/plan.md`) | Reusable Pumas generation transport, focused image live compatibility/private result/gateway projection, and exact candidate/user-workflow handoffs | Delegated Pumas transport and image subset of PRG-A4/DRBT-A5; does not claim external Ollama/llama.cpp worker cleanup or own text semantics/usage, broader Torch remediation, or distribution |
 | [Frontend and UI](frontend-and-ui/plan.md) | Renderer consumption, cached model provenance, installation lifecycle, interaction Modules, status/motion, renderer variants | F-01–F-08; CS-05, CS-09, renderer portions of CS-02/CS-04/CS-08 |
 
 Shared findings close only when every named producer and consumer claim passes;

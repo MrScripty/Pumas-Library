@@ -77,10 +77,9 @@ of admitted work. The primary drains local effects and downloads during composed
 shutdown. See the [core contract](../rust/crates/pumas-core/README.md#local-intent-interface)
 for availability evidence, restart, retry, deletion and downgrade limits.
 
-Existing operational consumers remain supported. Desktop and UniFFI intent
-adoption is separate from this native/local transport increment. Node, fleet,
-remote discovery and additional network features are deferred until after the
-next Pumas release.
+Existing operational consumers remain supported. The desktop bridge and UniFFI
+do not expose the intent methods. Nodes, fleet management, remote discovery and
+additional discovery networks are later scope.
 
 ## Storage
 
@@ -99,6 +98,17 @@ Important launcher-root paths are:
 Import, download, reconciliation, migration, and deletion must keep filesystem,
 metadata, index, and event history consistent. Recovery outcomes must remain
 distinguishable from normal success.
+
+A model's category (what it is used for, such as `llm`, `decision`, `video` or
+`embedding`) is metadata. It groups models for display and never decides where
+a model is stored or what its ID is; only a family change moves a model. Core
+owns detection and the person's explicit choice (`set_model_category`), which
+later re-detection keeps. See the
+[core guide](../rust/crates/pumas-core/README.md#model-categories).
+
+The download store is schema 7. Older supported stores need the explicit,
+one-way offline upgrade in [Opening an older library](library-upgrade.md);
+ordinary startup never converts them.
 
 ## Desktop Boundary
 
@@ -167,12 +177,11 @@ boundary split is recorded in
 The default `pumas-rpc` build enables inference plugins. The library-only
 desktop variant combines `pumas-rpc --no-default-features` with the frontend
 `library-only` Vite mode. `PUMAS_INFERENCE_PLUGINS=false` selects that pair in
-the shared launcher.
+the shared launcher. Releases ship both variants (see [Releasing](../RELEASING.md)).
 
-The `pumas-core` HF/process/GPU feature names do not currently remove their
-underlying dependency or public module surfaces. Do not describe its
-`--no-default-features` build as minimal until the feature contract is fixed and
-verified.
+The [Rust guide](../rust/README.md#features-and-variants) owns the Cargo feature
+facts, including why `pumas-library --no-default-features` is not a minimal
+build.
 
 ## Known Boundary Work
 

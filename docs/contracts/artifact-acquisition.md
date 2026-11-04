@@ -1,6 +1,6 @@
 # Artifact acquisition contract
 
-**Status:** Q1 implementation contract; its public API and acceptance remain pending.
+**Status:** Q1 (shared HTTP) and Q3 (S3) are implemented and ship in 0.8.0. Their acceptance gates (AQ-HTTP, AQ-S3) are not yet accepted; Q2 (runtime packages) has not started.
 **Canonical owner:** Pumas acquisition integration.
 **Implementation authority:** [Acquisition plan](../plans/artifact-acquisition/plan.md).
 **Consumer:** [Runtime installation and model-adapter plan](../plans/runtime-installations-and-model-adapters/plan.md), plus the existing model-library and native/package integrations.

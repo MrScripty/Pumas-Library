@@ -9,6 +9,28 @@ runtime management on 2026-09-24, retaining the existing Linux support. On
 2026-09-25, the owner authorized Pumas-managed CPython provisioning and removed
 the requirement for a host-installed Python interpreter or a user Python choice.
 
+**Status review (2026-11-04, v0.8.0):** Still `Active`; no slice of this plan
+has landed since 2026-09-29, and every remaining gate below is still open. The
+v0.8.0 desktop packages contain this manager source, but v0.8.0 qualification
+does not exercise Torch installation: `torch-native-e2e` is not a dependency of
+the `release-candidate` job, and candidate builds omit it (see
+[Releasing](../../../RELEASING.md)). v0.8.0 therefore accepts none of X1–X8.
+The [missing declared CPython license references](reports/managed-python-license-collection/missing-declared-license-references.md)
+blocker is also still open: the hosted `torch-native-e2e` runs recorded in the
+artifact-acquisition ledger (Builds 36934392505 through 36995870643) failed on
+all three targets during CPython 3.14.7 full-archive license collection
+(declared `LICENSE.zstd.txt` absent everywhere, `LICENSE.zlib-ng.txt` also
+absent on Linux and macOS). The superseded Linux
+`torch-upstream-version-management` plan, the completed
+`torch-diffusion-serving` (Tuldok image) plan, and the accepted
+`torch-image-provider-contract` plan were removed from the working tree in the
+v0.8.0 documentation cleanup; their evidence remains in Git history at
+`78c52fcf`. Their durable decisions live in
+[ADR 0002](../../adr/0002-torch-image-provider-protocol.md),
+[generation lifetime](../../contracts/generation-lifetime.md),
+[image generation](../../contracts/image-generation.md), and the
+[Torch sidecar README](../../../torch-server/README.md).
+
 **Current acceptance:** Manual native run
 [36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
 on runtime commit `21041697` passed the current v2.14.0 CPU/Core RPC installation
@@ -131,8 +153,9 @@ update the public toolbar-linked package.
 **Next slice:** Verify the rebuilt Linux direct-install candidate, then run
 packaged install acceptance on Windows and macOS and close provider
 cancellation/tamper gates. Keep Tuldok qualification limited to its recorded
-exact image-generation tuple; publish a new toolbar-linked release only after
-the PR is merged and a new version is tagged.
+exact image-generation tuple. v0.8.0 ships this source without these gates;
+a later release may claim packaged Torch installation only after they pass on
+its exact candidate.
 
 ## Objective and scope
 
@@ -162,9 +185,13 @@ stable standard-CPython wheel, and complete dependency resolution exist. It does
 not promise a wheel for every release or every supported host. Source builds and
 unqualified adapters remain outside this objective.
 
-The current accepted Linux contract remains the regression baseline in the
-[upstream version-management plan](../torch-upstream-version-management/plan.md)
-and its [runtime inventory](../torch-diffusion-serving/reports/upstream-version-manager-progress.md).
+The accepted Linux upstream version-management contract (U1–U6: complete
+stable-tag discovery within a 20-page / 120-second listing budget, exact
+official-wheel resolution, staged install, explicit selection/start/stop) is
+the regression baseline. Its plan and runtime inventory were removed in the
+v0.8.0 cleanup and remain in Git history at `78c52fcf`
+(`docs/plans/torch-upstream-version-management/plan.md` and
+`docs/plans/torch-diffusion-serving/reports/upstream-version-manager-progress.md`).
 Native RPC acceptance now proves the v2.14.0 CPU/Core managed install and
 restart path on Windows x64 and macOS arm64 as well as Linux x86_64. Broader
 platform acceptance remains gated on the incomplete X2–X7 checks below,
@@ -478,9 +505,11 @@ and unit fixtures do not substitute for the Windows/macOS runtime claims.
 - **Goal:** Collect target-native resolver/install/lifecycle/packaged desktop
   evidence for managed Python and update the existing Torch inventory without
   broadening Tuldok claims.
-- **Write set:** New plan evidence/report; relevant sections of
-  `docs/plans/torch-diffusion-serving/reports/upstream-version-manager-progress.md`;
-  execution ledger. Existing historical model reports remain unchanged.
+- **Write set:** New plan evidence/report under this plan's `reports/`;
+  execution ledger. The former Torch runtime inventory in
+  `docs/plans/torch-diffusion-serving/reports/` was removed in the v0.8.0
+  cleanup (Git history at `78c52fcf`); record new inventory here instead.
+  Historical model reports remain unchanged in history.
 - **Verification:** Every X1–X7 claim has an evidence environment, execution
   mode, result, and link. Reuse read-only review for any lifecycle/security
   repair.

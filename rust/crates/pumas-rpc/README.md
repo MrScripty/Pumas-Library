@@ -1,4 +1,49 @@
-# Backend setup RPC
+# pumas-rpc
+
+## Purpose
+
+`pumas-rpc` is the standalone process that serves one Pumas library over local
+HTTP: the desktop sidecar, and the backend for headless and HTTP consumers. The
+core library is compiled in, so one binary is the whole backend.
+
+## Responsibility
+
+It owns HTTP transport and admission, JSON-RPC decoding and dispatch, the
+server-sent update streams, the `/v1` gateway and typed model operations, local
+owner discovery/retention endpoints, and orderly process shutdown. It does not
+own durable model state, downloads, imports or runtime installation; those stay
+in `pumas-library` and `pumas-app-manager`, and handlers only decode, call and
+project their outcomes.
+
+## Invariants
+
+- It binds a loopback address only and rejects non-loopback Host/Origin values
+  before dispatch; there is no LAN mode (see [Security](../../../docs/SECURITY.md)).
+- Request bodies and in-flight requests are bounded.
+- Every error leaves through the redacted public projection in
+  `src/public_text.rs`; transports never serialize core errors directly.
+- Rust owns the desktop wire contract: `src/contract.rs` declares it and the
+  `export-contract` feature exports the schemas that Electron and the frontend
+  generate decoders from (see [Electron](../../../electron/README.md)).
+- Shutdown is one shared, observable receipt for signals and the `shutdown`
+  method; see [shutdown ownership](SHUTDOWN.md).
+- Each dispatched call runs in an INFO `rpc_call` span with a process-local
+  `rpc_call_id`, the method and the request ID. `get_model_download_status`
+  failures log their stage (`state_lookup` or `outcome_validation`) and a
+  category, never download identifiers or paths.
+
+## Entry Points
+
+- `pumas-rpc --launcher-root PATH [--port N]` serves a library (port 0 picks a
+  free port). `--help` lists the other modes, including `--build-info`,
+  `--discover-local`, `--describe-local-http`, `--attach-or-start-local-http`,
+  `--retain-local-http-owner` and the offline download-store upgrade
+  (`--migrate-download-store-offline --confirm-old-writers-stopped`).
+- Routes: `/rpc` (JSON-RPC), `/health`, `/events/*` update streams, and with
+  `inference-plugins` the `/v1` gateway listed under
+  [Typed model operations](#typed-model-operations).
+- Features: `inference-plugins` (default), `s3`, `export-contract`,
+  `test-support`; see the [Rust guide](../../README.md#features-and-variants).
 
 ## Explicit S3 model import
 
@@ -24,8 +69,10 @@ known size and strong quoted HTTP ETag; `W/` validators fail. Every GET uses
 exact If-Match; nonempty reads use the selected range. Returned metadata/bytes
 must match. ETag and size
 remain Weak source revision evidence, never a content digest or immutable pin.
-Bundles and prefix discovery explicitly reject conditional mode as unsupported.
-The existing dialog still submits VersionId selections; no new UI mode is added.
+The bundle starts also accept `read_mode: "conditional"` for an authored set of
+non-versioned objects; each file is then `{key, logical_path, sha256,
+expected_etag, expected_size}` (decimal string) instead of carrying a
+`version_id`. Prefix discovery remains VersionId-only. The desktop dialog submits VersionId selections only.
 
 `start_authenticated_s3_model_import` is a distinct additive command. Its closed
 params are `{source: <the existing start params>, credentials: {access_key_id,
@@ -143,6 +190,23 @@ and can reopen a retained result without another start. Controlled Linux HTTPS,
 RPC and DOM/preload fixtures provide local support; real-browser, packaged,
 default-inference, cross-platform and live-provider acceptance remain separate.
 
+Conditional RPC qualification uses the actual production process and owned HTTPS
+fixtures (`scripts/tests/qualify-s3-conditional-rpc.py`). It checks exact verified
+receipts, copied bytes, Confirmed publication and Ready metadata. Catalog lookup
+visibility remains an independently reproduced baseline issue, excluded from
+this qualification. Retried partial transfers retain the same acquisition, but a
+re-reserved RPC workspace restarts at byte zero unless the core has matching live
+prefix custody. Changed conditional ETag or size fails before appending or publishing.
+Authenticated retry requires fresh credentials; saved work never stores them.
+
+Prefix discovery (`start_s3_prefix_discovery`,
+`start_authenticated_s3_prefix_discovery`, `get_s3_prefix_discovery`,
+`cancel_s3_prefix_discovery`), same-process retained-transfer retry
+(`get_s3_transfer_retry`, `retry_s3_model_transfer`) and the read-only
+`inspect_persisted_s3_imports` are specified in the
+[artifact acquisition contract](../../../docs/contracts/artifact-acquisition.md#6-s3-and-other-source-readers).
+Discovery pins objects but never imports them.
+
 ## Backend setup
 
 The RPC adapter exposes the standalone library's existing setup owners. It does
@@ -155,7 +219,7 @@ not own another installer lifecycle.
   record exists. Only the current terminal operation's canonical UUID authorizes
   a retry; stale IDs return the selected owner's current record.
 
-Backend values are exactly `python_conversion`, `llama_cpp`, `nvfp4`, and
+Backend values are exactly `python_conversion`, `llama_cpp`, `nvfp4`, `fp8` and
 `sherry`. These new methods reject legacy aliases and extra fields. Malformed
 IDs and retry tokens without a selected owner-local record are invalid parameters
 (`-32602`). Closed setup admission returns the existing cancellation code (`-32004`).
@@ -297,12 +361,3 @@ Every error has `code`, `outcome` (`not_admitted` or `unknown`) and a
 human-readable `message`, and echoes the caller's `request_id` when the body
 was readable. Responses can gain fields, capabilities and enum values within
 contract version 1; consumers must ignore what they do not use.
-
-Conditional RPC qualification uses the actual production process and owned HTTPS
-fixtures (`scripts/tests/qualify-s3-conditional-rpc.py`). It checks exact verified
-receipts, copied bytes, Confirmed publication and Ready metadata. Catalog lookup
-visibility remains an independently reproduced baseline issue, excluded from
-this qualification. Retried partial transfers retain the same acquisition, but a
-re-reserved RPC workspace restarts at byte zero unless the core has matching live
-prefix custody. Changed conditional ETag or size fails before appending or publishing.
-Authenticated retry requires fresh credentials; saved work never stores them.

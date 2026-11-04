@@ -5,10 +5,11 @@ endpoint. External clients must use the Pumas `/v1` gateway
 ([public image contract](../docs/contracts/image-generation.md)); the
 sidecar's own routes are private and defined by the
 [Torch provider protocol](../docs/contracts/torch-provider-protocol.md).
-A managed runtime bundle is being qualified; it is not yet a published
-or accepted Pumas runtime.
-Promotion requires a resolved production dependency set and real ASGI,
-model-loader, generation, device, responsiveness, and shutdown evidence.
+Pumas installs Torch into a managed Python environment from official pinned
+wheels; no Pumas-hosted runtime bundle is published (see
+[Install and Run](#install-and-run)). Accepting a runtime for a platform
+requires a resolved production dependency set and real ASGI, model-loader,
+generation, device, responsiveness, and shutdown evidence.
 
 ## HTTP Surface
 
@@ -105,9 +106,26 @@ tests; the shared manager no longer downloads that archive. Managed installation
 downloads the official pinned wheels and other hash-locked dependencies only
 after the user selects a supported upstream release. Model weights remain
 library-owned. Candidate `torch-runtime-0.1.6` remains unpublished and is not the
-default runtime. See the [active plan](../docs/plans/torch-diffusion-serving/plan.md).
-Existing installed `0.1.x` entries remain available. Stop a running Torch
-process before changing its runtime.
+default runtime. Existing installed `0.1.x` entries remain available.
+
+Version rules:
+
+- Release discovery lists stable `vMAJOR.MINOR.PATCH` tags from
+  `pytorch/pytorch`; prereleases and nightlies are excluded. A failed page, or
+  running past 20 pages or 120 seconds, is an error, never a partial list.
+  Installed versions stay inspectable offline.
+- Installing a version does not activate it. Selecting, setting the default,
+  starting and stopping are separate explicit operations.
+- One Torch version serves at a time. Unload its models and stop the Torch
+  process before changing its runtime.
+- The bundled `v2.9.1` preset (CUDA 13.0, CPython 3.12, Linux x86_64, with an
+  embedded hash-pinned lock) is a separately qualified exception; other
+  `v2.9.1` tuples do not inherit it. Nunchaku is pinned to `1.2.0+torch2.9` and
+  runs only on that tuple.
+- XPU builds are not offered, and Torch is never built from source.
+
+Not yet supported: native NVFP4 encoder serving, LLaDA, image adapters outside
+Linux, and upgrading in place between two upstream Torch tags.
 
 ## Network Safety
 
@@ -136,7 +154,8 @@ Those tests prove focused request and control logic only. They do not prove
 ASGI middleware, production dependency resolution, device discovery, model
 loading, inference, control responsiveness during inference, disconnect or
 cancellation behavior, or bounded shutdown. The Linux sm_120 Nunchaku and Klein/FP8 workflows
-have separate real release/GPU/browser evidence in the active plan.
+have separate real release/GPU/browser evidence, recorded in the completed
+diffusion serving plan (`git show 78c52fcf:docs/plans/torch-diffusion-serving/`).
 
 The managed runtime lock is the production dependency candidate; the root
 `requirements.txt` remains a direct-development input. Keep qualification,
@@ -152,7 +171,8 @@ torch-versions/torch-runtime-0.1.2/venv/bin/python -I -m unittest discover -s to
 The Z-Image adapter includes a narrow Nunchaku 1.2/Diffusers 0.37 forward-call
 compatibility boundary. It keeps packed rotary hooks and passes patch dimensions
 by name. Native dependency imports alone do not establish this compatibility;
-checkpoint kernel and full pipeline qualification are recorded in the plan.
+checkpoint kernel and full pipeline qualification were recorded in the completed
+diffusion serving plan.
 
 ## Model-supplied Python code
 

@@ -33,6 +33,10 @@ generation transport: models listing, embeddings, health, startup, model
 loading, installation, non-generation inference, cancellation cleanup, and
 shutdown. Those budgets must never become a maximum generation duration.
 
+The evidence proves that Pumas propagates a client disconnect to its provider
+connection. It does not prove that an Ollama or llama.cpp worker stops
+generating after that disconnect.
+
 ## Cancellation, custody, and uncertainty
 
 - Bounded admission, busy rejection, retained resource ownership, explicit

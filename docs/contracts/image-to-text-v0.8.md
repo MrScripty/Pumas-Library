@@ -8,13 +8,14 @@ and from controlled backend tests.
 
 ## Consumer parser update
 
-`contract_version` remains `1`. The closed `Capability` enum gains
-`image_to_text`, making seven descriptor variants. Named operation input gains
-`image` and `image_messages`; input formats gain `png_base64`, `jpeg_base64`, and
-`messages_image`. Descriptor option names gain `image_bytes`, `image_pixels`, and
-`image_count`. Consumers with closed enums must update their parser and pin the
-adapter cohort before consuming these descriptors. Existing capability formats
-remain present. Discovery's shared `PumasBuildInfo` advertises
+`contract_version` remains `1`. Image to text adds the `image_to_text`
+capability, the `image` and `image_messages` input kinds, the `png_base64`,
+`jpeg_base64` and `messages_image` input formats, and the `image_bytes`,
+`image_pixels` and `image_count` option names. Later capabilities
+(`multimodal_embedding`, `decision`) were added the same way. Under the
+[compatibility rules](model-operations-v1.md#compatibility-rules) consumers
+ignore capabilities and enum values they do not use rather than pinning a closed
+set. Existing capability formats remain present. Discovery's shared `PumasBuildInfo` advertises
 `pumas.model-operations.image-to-text` schema version `1` when inference plugins
 are compiled. This is a protocol advertisement, not model readiness.
 
@@ -30,7 +31,8 @@ cargo test --locked --offline --manifest-path rust/Cargo.toml \
   handlers::model_operations::types::image_to_text_schema_tests::image_to_text_actual_dto_schema_export
 ```
 
-This emits `operation-request`, `modality-request`, `capabilities-response`,
+This emits `operation-request` (the internal resolved operation), `modality-request`
+(the public request grammar), `capabilities-response`,
 `capability-descriptor`, `operation-response`, and `error-response` schema JSON
 files. Schemas describe serialization. The bounds and readiness rules below also
 apply at runtime; JSON Schema alone does not prove admission or execution.
@@ -41,13 +43,13 @@ The Tuldok repository owner must update its closed parser before pinning this
 Pumas cohort. No Tuldok source or application acceptance is supplied by this
 Pumas change. In addition to the discriminants above:
 
-- Preserve all seven capabilities: `chat_generation`, `text_generation`,
-  `text_embedding`, `image_generation`, `image_to_text`, `audio_transcription`,
-  and `audio_classification`. Preserve the existing unavailable reasons;
-  `available` is a live observation, not a durable model qualification receipt.
+- Ignore capabilities, unavailable reasons and other enum values it does not
+  use. `available` is a live observation, not a durable model qualification
+  receipt.
 - Require the `pumas.model-operations.image-to-text:1` build advertisement and
   select the explicit model/profile with an available Image→Text descriptor.
-  Pass `semantic_task:"image_to_text"` in facade requests and `stream:false`.
+  `capability:"image_to_text"` or `semantic_task:"image_to_text"` may be sent
+  to make the selection explicit; `stream` must be false.
 - Preserve ordered role/parts, encode only PNG/JPEG bytes, and apply all bounds
   below, including aggregate compressed bytes and total message parts. Images
   belong only to user messages. Never convert paths or URLs into input authority.
@@ -63,12 +65,10 @@ Pumas change. In addition to the discriminants above:
 
 The production DTO export and controlled HTTP tests are the Pumas-side oracle.
 They do not validate Tuldok's parser implementation or its process lifecycle.
-The integration lead must regenerate any combined desktop contract after the
-provider task enum and other branches have been composed.
 
 ## Requests and results
 
-An image-only facade request is:
+An image-only request is:
 
 ```json
 {
@@ -101,9 +101,10 @@ For annotation, retain role and part order:
 }
 ```
 
-Named requests use `capability: "image_to_text"`, mandatory
-`options: {"kind":"text_generation"}`, and `input.kind: "image_messages"`
-instead of the facade's `messages` for image-bearing histories. Only user
+`capability`, `semantic_task` and `options` are optional; when present they must
+select `image_to_text` and `text_generation` options (default `max_tokens` 512).
+Image-bearing histories use `input.kind: "messages"` with image parts or the
+equivalent `image_messages`. Only user
 messages may contain images. System and assistant messages may contain text.
 At least one user image is required. Text parts must contain non-whitespace text.
 The image-only form inserts `Describe this image.` before the image. Text and
@@ -123,13 +124,14 @@ public typed result.
 
 ## Admission and supported runtime
 
-The selected record must explicitly declare the image-to-text task using
-`image-to-text`, `image_to_text`, or `image->text` in existing pipeline/primary task
-metadata. Modality labels alone do not enable inference. Existing model/profile
+The selected record must explicitly declare an image-to-text task in existing
+pipeline/primary task metadata: `image-to-text`, `image_to_text`, or `image->text`,
+or a vision-language task (`image-text-to-text`, `image_text_to_text`,
+`text+image->text`, `any-to-any`), which also offers chat and text generation. Modality labels alone do not enable inference. Existing model/profile
 selection and semantic ambiguity errors still apply; an options kind does not
 choose a semantic task.
 
-Only enabled `LlamaCppDedicated` profiles are supported initially. Router,
+Only enabled `LlamaCppDedicated` profiles are supported. Router,
 Ollama, Torch, and ONNX vision adapters are unavailable. Endpoint bases with
 queries or fragments are refused. A read-only query to
 `/props?model=<canonical-id>&autoload=false` must declare `modalities.vision:true`,
@@ -155,7 +157,7 @@ fence the bound managed process; this adapter adds no recovery attestation.
 
 ## Decoding and resource bounds
 
-Both facade and named requests validate options, strict canonical standard
+Every image request validates options, strict canonical standard
 base64, complete PNG/JPEG containers, and full raster decoding before any backend
 GET or POST. The declared encoding must match actual bytes. Corruption,
 truncation, trailing container data, APNG, and multi-picture JPEG are rejected.
@@ -201,7 +203,7 @@ provider request through the existing generation owner. The admission marker is
 set immediately before a possible inference POST. Pre-admission errors report
 `not_admitted`; after possible provider effects, loss/failure is `unknown` and
 never replayed. Format limits use HTTP 413; malformed inputs use HTTP 400;
-unsupported facade pairings use HTTP 422; unavailable capabilities use HTTP 503.
+unsupported input/output pairings use HTTP 422; unavailable capabilities use HTTP 503.
 
 The cohort includes real PNG/JPEG decoding and controlled HTTP backend tests.
 Those tests are not pretrained model inference. Tiny numerical vision forward
@@ -212,8 +214,8 @@ synthetic text replies. Acquire and verify the exact runtime/model/projector
 cohort through the existing acquisition and runtime controls before real-model
 qualification.
 
-The next native qualification candidate, explicit two-GGUF import proposal,
-resource budget and current execution blocker are recorded in the
+The selected native qualification cohort, resource budget and real execution
+sequence are recorded in the
 [native qualification contract](image-to-text-native-qualification.md).
 
 ## Receipt-bound acquired model/projector roles

@@ -2,7 +2,7 @@
 
 **2026-10-09 combined consumer reconciliation:** The pinned ec03 Linux
 consumer evidence and every original AC01–AC18 criterion are reconciled in
-[the bounded report](combined-ec03-acquisition-acceptance-2026-10-09.md).
+the [bounded report](combined-ec03-acquisition-acceptance-2026-10-09.md).
 A separate tests-only checkpoint adds duplicate-ETag raw HTTP regressions;
 all 28 core HTTP module tests pass in the recorded no-default-plus-S3 run.
 The qualified consumer executable remains the ec03 producer. Full criteria,
@@ -469,7 +469,7 @@ at actual importer hold, exact source/file/receipt SHA, model/index publication,
 Adopted and settled admission are asserted. Full-root no-follow inventories
 show one artifact-sized retained file. Raw RSS/HWM and I/O counters, allocation,
 source bytes/requests and configured capacity are bound in the
-[report](ac10-public-hf-measurement-2026-10-06.md). Strict all-target core Clippy
+report (`ac10-public-hf-measurement-2026-10-06.md`, removed; see Git history). Strict all-target core Clippy
 and existing mixed-size status controls pass in both modes. The repaired timing
 failure and compile/interruption logs are retained. One synthetic Linux core
 workload does not establish concurrent admission/resource envelopes, page-cache
@@ -486,7 +486,7 @@ cases in each default/no-default mode, one public HF status/import control in
 each, and strict Clippy in three feature modes pass. This supports bounded
 AC02/AC06/AC10/AC15 behavior only. Already registered writes drain before return;
 no hard filesystem/verification/import/child-cleanup return deadline is claimed.
-See [http-elapsed-budget-qualification-2026-10-06](http-elapsed-budget-qualification-2026-10-06.md) for exact logs and independent source reviews.
+See http-elapsed-budget-qualification-2026-10-06 (`http-elapsed-budget-qualification-2026-10-06.md`, removed; see Git history) for exact logs and independent source reviews.
 No public shape, S3/native frozen source, generator or Q2 writes. AQ-HTTP remains
 not ready; broader acceptance, current-head hosted checks, resource/platform/UI,
 public-client and deployment dispositions remain pending. Q2 exact local package

@@ -17,9 +17,8 @@ the RPC path rather than treating process termination as a graceful signal.
 
 `--http-shutdown-grace-ms` controls the common deadline for accepted HTTP/1
 connections after shutdown starts (default 10,000 ms; accepted range 1 through
-3,600,000 ms). This is not a normal request or generation timeout. Axum's enabled
-protocol was already HTTP/1 only; Hyper now supplies explicit connection
-ownership without enabling or claiming HTTP/2.
+3,600,000 ms). This is not a normal request or generation timeout. The server
+owns each connection through Hyper's HTTP/1 server; HTTP/2 is not enabled.
 
 The listener stops accepting connections. Health, SSE and gateway routes refuse
 new work at headers; RPC also checks after body decoding and only allows the
@@ -65,18 +64,15 @@ failures in active serving and drainage, including a shutdown-observation race. 
 failures are injected around a real loopback listener without changing process
 resource limits or operating-system settings.
 
-Hyper and hyper-util were already locked and included in shipped attribution.
-The RPC crate now directly owns their HTTP/1 server and Tokio adapter features;
-no package version or license selection changed. Tests cover partial request
-bodies, blocked response writers, held handler ownership beyond socket closure,
-benign keep-alive completion, and closed request admission.
+Tests also cover partial request bodies, blocked response writers, held handler
+ownership beyond socket closure, benign keep-alive completion, and closed
+request admission.
 
 The cross-platform real-process regression observes complete acknowledgement,
 all applicable SSE end-of-body results, and successful process exit without any
-OS signal. It runs explicitly on native Linux, macOS and Windows CI. The owned-transport unit regressions also execute explicitly on all three native
-hosts. These deterministic local-process tests do not qualify a distributed
+OS signal. It and the owned-transport unit regressions run on native Linux,
+macOS and Windows CI (`torch-quality` job). These deterministic local-process tests do not qualify a distributed
 cluster, packaged Electron, or real model execution.
-
 
 ## Shared acquisition integration
 

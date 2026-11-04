@@ -142,5 +142,6 @@ recipe and the bundled live sidecar agree exactly on both values.
   `rust/crates/pumas-rpc/src/handlers/openai_gateway.rs`,
   `openai_gateway_images.rs`, and `openai_gateway_tests.rs`
 - Protocol/recipe agreement: `torch-server/validate_runtime.py`
-- Real GPU and browser evidence: `docs/plans/torch-diffusion-serving/reports/`
-  (`nunchaku.md`, `flux2.md`, `tuldok.md`, `release-acceptance.md`)
+- Real GPU and browser evidence: the completed diffusion serving plan's
+  reports (`nunchaku.md`, `flux2.md`, `tuldok.md`, `release-acceptance.md`),
+  kept in Git history: `git show 78c52fcf:docs/plans/torch-diffusion-serving/reports/`

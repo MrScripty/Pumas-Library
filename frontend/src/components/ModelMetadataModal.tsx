@@ -85,6 +85,28 @@ const ModelMetadataModalSession: React.FC<ModelMetadataModalProps> = ({
     }
   };
 
+  // The backend decides the category, its source, and the task and
+  // modalities that follow it; re-read those instead of guessing them.
+  const refreshCategoryFields = async () => {
+    try {
+      const fresh = await modelsAPI.getLibraryModelMetadata(modelId);
+      if (fresh.model_id !== modelId || !fresh.stored_metadata) return;
+      const stored = fresh.stored_metadata;
+      setStoredMetadata((prev) => ({
+        ...(prev ?? {}),
+        model_type: stored['model_type'],
+        model_type_resolution_source: stored['model_type_resolution_source'],
+        model_type_resolution_confidence: stored['model_type_resolution_confidence'],
+        task_type_primary: stored['task_type_primary'],
+        input_modalities: stored['input_modalities'],
+        output_modalities: stored['output_modalities'],
+        review_reasons: stored['review_reasons'],
+      }));
+    } catch {
+      setError('The category was saved, but the metadata could not be reloaded. Close and reopen this model.');
+    }
+  };
+
   useEffect(() => {
     // The bridge cannot cancel reads. Observe completion, but only this mounted
     // model session may apply it; replacement also discards model-specific drafts.
@@ -293,11 +315,7 @@ const ModelMetadataModalSession: React.FC<ModelMetadataModalProps> = ({
                 resolutionSource={typeof storedMetadata['model_type_resolution_source'] === 'string'
                   ? storedMetadata['model_type_resolution_source']
                   : null}
-                onChanged={(category, resolutionSource) => setStoredMetadata((prev) => ({
-                  ...(prev ?? {}),
-                  model_type: category,
-                  model_type_resolution_source: resolutionSource,
-                }))}
+                onChanged={() => void refreshCategoryFields()}
               />
             )}
             <ModelMetadataModalContent

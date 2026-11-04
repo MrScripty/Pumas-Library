@@ -6481,12 +6481,66 @@ fn apply_model_type_resolution(
         || metadata.review_status != prev_review_status
 }
 
+/// The task a model's recorded category implies, when that category came from
+/// a strong source (architecture/config rules, a GGUF decision head, a
+/// disambiguation guard, or a person's choice) and the source task tag
+/// contradicts it. Inputs and outputs then follow the category, as the
+/// category itself does; weak fallbacks never override the tag.
+fn category_task_override(metadata: &ModelMetadata, tag: &str) -> Option<&'static str> {
+    let category = ModelType::from_canonical(metadata.model_type.as_deref()?)?;
+    let tag_category = ModelType::from_pipeline_tag(tag);
+    if tag_category == category || tag_category == ModelType::Unknown {
+        return None;
+    }
+    let source = metadata.model_type_resolution_source.as_deref()?;
+    let strong = matches!(
+        source,
+        USER_CATEGORY_SOURCE
+            | "model-type-gguf-decision-head"
+            | "model-type-resolver-arch-rules"
+            | "model-type-resolver-config-rules"
+            | "model-type-resolver-arch-config-rules"
+    ) || source.ends_with("-disambiguation-guard");
+    if !strong {
+        return None;
+    }
+    let names_speech_synthesis = [
+        metadata.official_name.as_deref(),
+        metadata.repo_id.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::to_ascii_lowercase)
+    .any(|name| {
+        name.split(|c: char| !c.is_ascii_alphanumeric())
+            .any(|token| token == "tts")
+            || name.contains("text-to-speech")
+    });
+    Some(match category {
+        ModelType::Llm => "text-generation",
+        ModelType::Vlm => "image-text-to-text",
+        ModelType::Decision => "text-classification",
+        ModelType::Embedding => "feature-extraction",
+        ModelType::Reranker => "text-ranking",
+        ModelType::Diffusion => "text-to-image",
+        ModelType::Video => "text-to-video",
+        ModelType::Vision => "image-classification",
+        ModelType::Audio if names_speech_synthesis => "text-to-speech",
+        ModelType::Audio => "automatic-speech-recognition",
+        ModelType::Unknown => return None,
+    })
+}
+
 fn apply_task_projection_from_persisted_evidence(metadata: &mut ModelMetadata) -> bool {
-    let Some(pipeline_tag) = preferred_pipeline_tag(metadata) else {
+    let Some(source_tag) = preferred_pipeline_tag(metadata) else {
         return false;
     };
+    let category_task = category_task_override(metadata, &source_tag);
+    let task = category_task
+        .map(str::to_string)
+        .unwrap_or_else(|| source_tag.clone());
 
-    let normalized = normalize_task_signature(&pipeline_tag);
+    let normalized = normalize_task_signature(&task);
     let previous_pipeline_tag = metadata.pipeline_tag.clone();
     let previous_task_type = metadata.task_type_primary.clone();
     let previous_inputs = metadata.input_modalities.clone();
@@ -6497,14 +6551,22 @@ fn apply_task_projection_from_persisted_evidence(metadata: &mut ModelMetadata) -
     let previous_needs_review = metadata.metadata_needs_review;
     let previous_review_status = metadata.review_status.clone();
 
-    metadata.pipeline_tag = Some(pipeline_tag.clone());
-    metadata.task_type_primary = Some(pipeline_tag);
+    // The source tag stays recorded as evidence; the task follows the category.
+    metadata.pipeline_tag = Some(source_tag);
+    metadata.task_type_primary = Some(task);
     metadata.input_modalities = Some(normalized.input_modalities.clone());
     metadata.output_modalities = Some(normalized.output_modalities.clone());
 
     match normalized.normalization_status {
         TaskNormalizationStatus::Ok | TaskNormalizationStatus::Warning => {
-            metadata.task_classification_source = Some("hf-pipeline-tag".to_string());
+            metadata.task_classification_source = Some(
+                if category_task.is_some() {
+                    "model-category"
+                } else {
+                    "hf-pipeline-tag"
+                }
+                .to_string(),
+            );
             metadata.task_classification_confidence = Some(match normalized.normalization_status {
                 TaskNormalizationStatus::Ok => 1.0,
                 TaskNormalizationStatus::Warning => 0.8,

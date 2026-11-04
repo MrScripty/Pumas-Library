@@ -195,6 +195,17 @@ async fn asr_architecture_outranks_a_feature_extraction_tag() {
     assert!(dir.exists());
     assert_eq!(recorded_category(&library, id).0, "audio");
     let metadata = library.load_metadata(&dir).unwrap().unwrap();
+    // Inputs and outputs follow the architecture, not the contradicting tag.
+    let indexed = library.index().get(id).unwrap().unwrap();
+    assert_eq!(
+        indexed.metadata["input_modalities"],
+        serde_json::json!(["audio"])
+    );
+    assert_eq!(
+        indexed.metadata["output_modalities"],
+        serde_json::json!(["text"])
+    );
+    assert_eq!(indexed.metadata["pipeline_tag"], "feature-extraction");
     assert!(metadata
         .review_reasons
         .unwrap_or_default()

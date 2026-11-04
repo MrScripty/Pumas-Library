@@ -429,12 +429,13 @@ mod custody_tests {
                 .is_err()
         );
         registry.unregister_instance(&root).unwrap();
-        let api = PumasApi::builder(&root)
-            .with_registry(registry.clone())
-            .with_instance_profile(InstanceProfile::CatalogQuery)
-            .build()
-            .await
-            .unwrap();
+        let api = after_fork_release(|| {
+            PumasApi::builder(&root)
+                .with_registry(registry.clone())
+                .with_instance_profile(InstanceProfile::CatalogQuery)
+                .build()
+        })
+        .await;
         let checkpoint = api.catalog_checkpoint().await.unwrap();
         let owner = api.catalog().unwrap().ready.get().unwrap().clone();
         // Simulated owner loss is an explicit registry fixture, not SIGKILL proof:

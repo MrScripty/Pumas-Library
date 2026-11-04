@@ -7187,6 +7187,11 @@ impl HuggingFaceClient {
 
 #[cfg(test)]
 mod tests {
+    /// Bound for waits on an event the test expects: it returns as soon as the
+    /// event arrives, so only a hang reaches it. Busy CI runners can delay a
+    /// spawned worker well past a second.
+    const POSITIVE_EVENT_WAIT: Duration = Duration::from_secs(30);
+
     #[cfg(unix)]
     #[tokio::test]
     async fn interrupted_intent_resume_requires_durable_active_pin_and_respects_explicit_pause() {
@@ -11029,7 +11034,7 @@ mod tests {
             let destination = destination.clone();
             tokio::spawn(async move { client.start_download(&request, &destination, None).await })
         };
-        tokio::time::timeout(Duration::from_secs(1), committed_receiver)
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, committed_receiver)
             .await
             .expect("start should synchronously start its committed owner")
             .unwrap();
@@ -11090,7 +11095,7 @@ mod tests {
             let client = client.clone();
             tokio::spawn(async move { client.start_download(&request, &destination, None).await })
         };
-        tokio::time::timeout(Duration::from_secs(1), preparing_receiver)
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, preparing_receiver)
             .await
             .expect("start should reach cancellable pre-admission auth preparation")
             .unwrap();
@@ -11151,7 +11156,7 @@ mod tests {
             let destination = destination.clone();
             async move { client.start_download(&request, &destination, None).await }
         });
-        tokio::time::timeout(Duration::from_secs(1), save_started)
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, save_started)
             .await
             .expect("owned admission should reach persistence before returning")
             .unwrap();
@@ -11250,7 +11255,7 @@ mod tests {
             .start_download(&request, &destination, None)
             .await
             .expect("marker creation failure occurs in admitted work");
-        tokio::time::timeout(Duration::from_secs(1), persist_started)
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, persist_started)
             .await
             .expect("terminal Error persistence must be owner-registered")
             .unwrap();
@@ -11346,7 +11351,7 @@ mod tests {
         })));
 
         assert!(client.resume_download(download_id).await.unwrap());
-        tokio::time::timeout(Duration::from_secs(1), persist_started)
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, persist_started)
             .await
             .expect("resumed Worker must own the Queued persistence update")
             .unwrap();
@@ -16502,7 +16507,7 @@ mod tests {
             let client = client.clone();
             tokio::spawn(async move { client.resume_download(download_id).await })
         };
-        tokio::time::timeout(Duration::from_secs(1), preparing_receiver)
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, preparing_receiver)
             .await
             .expect("resume should reach its pre-admission preparation")
             .unwrap();
@@ -16573,7 +16578,7 @@ mod tests {
                 let download_id = download_id.clone();
                 tokio::spawn(async move { client.resume_download(&download_id).await })
             };
-            tokio::time::timeout(Duration::from_secs(1), started_receiver)
+            tokio::time::timeout(POSITIVE_EVENT_WAIT, started_receiver)
                 .await
                 .expect("resume should synchronously start its committed owner")
                 .unwrap();
@@ -16868,7 +16873,7 @@ mod tests {
             .install_gated(finished)
             .unwrap()
             .start();
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client
                 .download_tasks
                 .snapshot(finished_id)
@@ -17336,7 +17341,7 @@ mod tests {
             let client = client.clone();
             tokio::spawn(async move { client.cancel_download(download_id).await })
         };
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             loop {
                 if client.get_download_status(download_id).await == Some(DownloadStatus::Cancelling)
                 {
@@ -17683,7 +17688,7 @@ mod tests {
             .install_gated(prepared)
             .unwrap()
             .start();
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client
                 .download_tasks
                 .snapshot(download_id)
@@ -17696,7 +17701,7 @@ mod tests {
         .unwrap();
 
         assert!(client.cancel_download(download_id).await.unwrap());
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client
                 .download_tasks
                 .snapshot(download_id)
@@ -17748,7 +17753,7 @@ mod tests {
         nested_finished.await.unwrap();
 
         assert!(client.cancel_download(download_id).await.unwrap());
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client
                 .download_tasks
                 .snapshot(download_id)
@@ -17800,7 +17805,7 @@ mod tests {
             .start();
 
         assert!(client.cancel_download(download_id).await.unwrap());
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client
                 .download_tasks
                 .snapshot(download_id)
@@ -17841,7 +17846,7 @@ mod tests {
             .install_gated(prepared)
             .unwrap()
             .start();
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client
                 .download_tasks
                 .snapshot(download_id)
@@ -17892,7 +17897,7 @@ mod tests {
                 .install_gated(prepared)
                 .unwrap()
                 .start();
-            tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
                 while !client
                     .download_tasks
                     .snapshot(download_id)
@@ -18006,7 +18011,7 @@ mod tests {
             .expect("cancel must reach the exact pre-replacement seam");
         assert!(!client.download_tasks.outer_finished_for_test(download_id));
         finish_sender.send(()).unwrap();
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client.download_tasks.outer_finished_for_test(download_id) {
                 tokio::task::yield_now().await;
             }
@@ -18074,11 +18079,11 @@ mod tests {
             .install_gated(prepared)
             .unwrap()
             .start();
-        tokio::time::timeout(Duration::from_secs(1), nested_started)
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, nested_started)
             .await
             .unwrap()
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client.download_tasks.outer_finished_for_test(download_id) {
                 tokio::task::yield_now().await;
             }
@@ -18140,7 +18145,7 @@ mod tests {
             .install_gated(prepared)
             .unwrap()
             .start();
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client
                 .download_tasks
                 .snapshot(download_id)
@@ -18196,7 +18201,7 @@ mod tests {
                 .install_gated(prepared)
                 .unwrap()
                 .start();
-            tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
                 while !client
                     .download_tasks
                     .snapshot(download_id)
@@ -18322,7 +18327,7 @@ mod tests {
             .install_projection_gated(prepared)
             .unwrap()
             .start();
-        tokio::time::timeout(Duration::from_secs(1), fallback_reached)
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, fallback_reached)
             .await
             .expect("projection panic must enter its owned fallback")
             .unwrap();
@@ -18429,7 +18434,7 @@ mod tests {
             .install_gated(prepared)
             .unwrap()
             .start();
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client
                 .download_tasks
                 .snapshot(download_id)
@@ -18507,7 +18512,7 @@ mod tests {
             })
             .unwrap();
         client.download_tasks.install_gated(failed).unwrap().start();
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client
                 .download_tasks
                 .snapshot(download_id)
@@ -18629,7 +18634,7 @@ mod tests {
             })
             .unwrap();
         client.download_tasks.install_gated(failed).unwrap().start();
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             while !client
                 .download_tasks
                 .snapshot(download_id)
@@ -18736,7 +18741,7 @@ mod tests {
         );
 
         assert!(client.cancel_download(download_id).await.unwrap());
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, async {
             loop {
                 let terminal = client
                     .downloads
@@ -18849,7 +18854,7 @@ mod tests {
             })));
 
             assert!(client.cancel_download(download_id).await.unwrap());
-            tokio::time::timeout(Duration::from_secs(1), started)
+            tokio::time::timeout(POSITIVE_EVENT_WAIT, started)
                 .await
                 .expect("the finalizer must own partial cleanup")
                 .unwrap();
@@ -22397,11 +22402,11 @@ mod tests {
             .start();
 
         assert!(client.cancel_download(&download_id).await.unwrap());
-        let first_update = tokio::time::timeout(Duration::from_secs(1), updates.recv())
+        let first_update = tokio::time::timeout(POSITIVE_EVENT_WAIT, updates.recv())
             .await
             .expect("download update should be published")
             .expect("download update channel should stay open");
-        let second_update = tokio::time::timeout(Duration::from_secs(1), updates.recv())
+        let second_update = tokio::time::timeout(POSITIVE_EVENT_WAIT, updates.recv())
             .await
             .expect("terminal download update should be published")
             .expect("download update channel should stay open");
@@ -22500,7 +22505,7 @@ mod tests {
                     .block_on(client.publish_download_snapshot())
             })
         };
-        tokio::time::timeout(Duration::from_secs(1), older_built_receiver)
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, older_built_receiver)
             .await
             .expect("older active snapshot should be built")
             .unwrap();
@@ -22525,11 +22530,11 @@ mod tests {
         older.join().expect("older publication should settle");
         newer.join().expect("newer publication should settle");
 
-        let first = tokio::time::timeout(Duration::from_secs(1), updates.recv())
+        let first = tokio::time::timeout(POSITIVE_EVENT_WAIT, updates.recv())
             .await
             .unwrap()
             .unwrap();
-        let second = tokio::time::timeout(Duration::from_secs(1), updates.recv())
+        let second = tokio::time::timeout(POSITIVE_EVENT_WAIT, updates.recv())
             .await
             .unwrap()
             .unwrap();
@@ -22649,7 +22654,7 @@ mod tests {
         };
 
         client.publish_download_snapshot().await;
-        tokio::time::timeout(Duration::from_secs(1), reentrant)
+        tokio::time::timeout(POSITIVE_EVENT_WAIT, reentrant)
             .await
             .expect("subscriber publication must not deadlock on publisher custody")
             .unwrap();

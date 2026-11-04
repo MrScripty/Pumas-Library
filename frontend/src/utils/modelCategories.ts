@@ -7,7 +7,10 @@
  * name and sort last.
  */
 
-/** Categories a person can choose, in library display order. */
+import type { ModelCategoryOutcome } from '../generated/desktop-contract';
+
+/** Categories a person can choose, in library display order. Checked against
+ * the backend's generated category list; `unknown` cannot be chosen. */
 export const CHOOSABLE_MODEL_CATEGORIES = [
   'llm',
   'vlm',
@@ -18,7 +21,15 @@ export const CHOOSABLE_MODEL_CATEGORIES = [
   'video',
   'audio',
   'vision',
-] as const;
+] as const satisfies readonly Exclude<ModelCategoryOutcome['category'], 'unknown'>[];
+
+/** Fails to compile if the backend adds a choosable category not listed above. */
+type MissingChoosableCategory = Exclude<
+  Exclude<ModelCategoryOutcome['category'], 'unknown'>,
+  (typeof CHOOSABLE_MODEL_CATEGORIES)[number]
+>;
+const allCategoriesChoosable: MissingChoosableCategory extends never ? true : never = true;
+void allCategoriesChoosable;
 
 export type ChoosableModelCategory = (typeof CHOOSABLE_MODEL_CATEGORIES)[number];
 

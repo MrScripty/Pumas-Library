@@ -148,11 +148,22 @@ fn start_primary_background_work(
             },
         );
         runtime_tasks.spawn(async move {
-            let Ok(scan) = scan else {
-                return;
-            };
-            let Ok(Ok(interrupted)) = scan.await else {
-                return;
+            let interrupted = match scan {
+                Err(error) => {
+                    tracing::warn!("Could not inspect interrupted downloads: {error}");
+                    return;
+                }
+                Ok(scan) => match scan.await {
+                    Ok(Ok(interrupted)) => interrupted,
+                    Ok(Err(error)) => {
+                        tracing::warn!("Could not inspect interrupted downloads: {error}");
+                        return;
+                    }
+                    Err(error) => {
+                        tracing::warn!("Interrupted download inspection did not finish: {error}");
+                        return;
+                    }
+                },
             };
             if interrupted.is_empty() {
                 return;
@@ -166,14 +177,16 @@ fn start_primary_background_work(
                 return;
             };
             for item in interrupted {
-                let repo_id = item.repo_id.unwrap_or_else(|| {
-                    let dir_name = item
-                        .model_dir
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or(&item.inferred_name);
-                    format!("{}/{}", item.family, dir_name)
-                });
+                // Only a repository recorded by Pumas when the download
+                // started authorizes resuming it. A name guessed from the
+                // folder could fetch an unrelated repository into it.
+                let Some(repo_id) = item.repo_id else {
+                    tracing::warn!(
+                        "Not resuming partial files in {}: no download record names their repository",
+                        crate::platform::platform_display_path(&item.model_dir),
+                    );
+                    continue;
+                };
                 let request = model_library::DownloadRequest {
                     repo_id: repo_id.clone(),
                     family: item.family,

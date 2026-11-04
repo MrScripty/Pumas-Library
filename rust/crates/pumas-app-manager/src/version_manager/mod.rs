@@ -1211,6 +1211,15 @@ impl VersionManager {
 
         let task = tokio::spawn(async move {
             let _install_guard = install_guard;
+            // A previous attempt's finished progress belongs to that attempt.
+            // Clear it now so the failure check below only sees progress that
+            // this attempt started (a quick retry of the same tag would
+            // otherwise look as if it had already begun its effects).
+            progress_tracker
+                .write()
+                .await
+                .clear_completed_state_async()
+                .await;
             if app_id == AppId::Torch {
                 let mut tracker = progress_tracker.write().await;
                 tracker.start_installation(&tag, None, None, None);
@@ -1276,8 +1285,19 @@ impl VersionManager {
             }
 
             // Send final status
+            // Each installer starts tracking before its first effect. A failure
+            // before that (release lookup, asset selection) created nothing to
+            // settle: it is an outcome reported to the caller, not a shutdown
+            // failure that must retain library ownership.
+            let mut failed_before_effects = false;
             if let Err(error) = &result {
+                warn!("Installation of {} failed: {}", tag, error);
                 let mut tracker = progress_tracker.write().await;
+                let tracked_tag = tracker.get_current_state().and_then(|state| state.tag);
+                if tracked_tag.as_deref() != Some(tag.as_str()) {
+                    failed_before_effects = true;
+                    tracker.start_installation(&tag, None, None, None);
+                }
                 tracker.set_error(&error.to_string());
                 tracker.complete_installation(false);
             }
@@ -1287,7 +1307,11 @@ impl VersionManager {
                 .get_current_state()
                 .as_ref()
                 .and_then(CompletedProgressIdentity::capture);
-            let terminal = result.as_ref().map(|_| ()).map_err(ToString::to_string);
+            let terminal = if failed_before_effects {
+                Ok(())
+            } else {
+                result.as_ref().map(|_| ()).map_err(ToString::to_string)
+            };
             tokio::select! {
                 _ = tx.send(match result {
                     Ok(_) => ProgressUpdate::Completed { success: true },
@@ -5254,6 +5278,103 @@ mod tests {
             manager.shutdown_installations().await.unwrap();
             acquisition.shutdown().await.unwrap();
         }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn install_failure_before_progress_tracking_is_still_reported() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let root = TempDir::new().unwrap();
+        pumas_library::network::ReleasesCache::new(
+            root.path().join("launcher-data/cache"),
+            Duration::from_secs(3600),
+        )
+        .set_disk(
+            AppId::LlamaCpp.github_repo(),
+            &[pumas_library::network::GitHubRelease {
+                tag_name: "b1234".into(),
+                name: "Native fixture".into(),
+                published_at: "2026-09-29T00:00:00Z".into(),
+                body: None,
+                tarball_url: None,
+                zipball_url: None,
+                prerelease: false,
+                assets: vec![pumas_library::network::GitHubAsset {
+                    name: "llama-b1234-bin-ubuntu-x64.tar.gz".into(),
+                    size: 4,
+                    download_url: "http://127.0.0.1:9/archive".into(),
+                    content_type: Some("application/gzip".into()),
+                }],
+                html_url: "https://github.com/ggml-org/llama.cpp/releases/tag/b1234".into(),
+                total_size: Some(4),
+                archive_size: Some(4),
+                dependencies_size: None,
+            }],
+        )
+        .unwrap();
+        // The publisher lookup fails before the installer starts tracking.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut request = [0; 4096];
+                let _ = stream.read(&mut request).await;
+                let _ = stream
+                    .write_all(b"HTTP/1.1 404 Not Found\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
+                    .await;
+            }
+        });
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
+        // Retry at once, before the first attempt's progress is cleaned up:
+        // the retry must not mistake that finished progress for its own.
+        let mut failure = None;
+        for _attempt in 0..2 {
+            let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+            failure = None;
+            while let Some(update) = tokio::time::timeout(Duration::from_secs(30), updates.recv())
+                .await
+                .unwrap()
+            {
+                if let ProgressUpdate::Error { message } = update {
+                    failure = Some(message);
+                    break;
+                }
+            }
+        }
+        let failure = failure.expect("the caller receives the failure");
+        let progress = manager
+            .get_installation_progress()
+            .await
+            .expect("an early failure is visible in progress");
+        assert_eq!(progress.tag.as_deref(), Some("b1234+cpu"));
+        assert_eq!(progress.success, Some(false));
+        assert_eq!(progress.error.as_deref(), Some(failure.as_str()));
+        // Nothing was created, so the failure does not fail shutdown (which
+        // would retain library ownership and block the next open).
+        manager.shutdown_installations().await.unwrap();
+        server.abort();
+        api.shutdown_intent().await.unwrap();
+        api.shutdown_acquisition().await.unwrap();
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]

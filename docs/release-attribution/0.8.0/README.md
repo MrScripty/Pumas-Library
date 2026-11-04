@@ -9,7 +9,9 @@ text. Validate with `node scripts/release/check-attribution.cjs`.
 The bundled JPEG codec retains both its license and incorporated IJG terms; the
 wrapper MIT text is pinned to the published crate's upstream VCS revision.
 Managed CPython archive notices remain a conservative superset, bound to the
-checked provider/catalog evidence. These records establish attribution inputs,
+checked provider/catalog evidence. Declared CPython license files that the
+upstream archives omit come from separately labelled, hash-checked supplemental
+texts in `scripts/release/licenses/managed-python-supplemental/`. These records establish attribution inputs,
 not native execution, signing, model quality or permission to publish a release.
 
 An S3-enabled build must use the [S3 profile](../0.8.0-s3/README.md).

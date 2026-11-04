@@ -2177,6 +2177,36 @@ fn requested_dimensions_truncate_and_renormalize_provider_vectors() {
 }
 
 #[test]
+fn requested_dimensions_truncate_every_vector_of_a_batch() {
+    let mut r = request();
+    r.capability = Capability::TextEmbedding;
+    r.output = OutputFormat::EmbeddingsFloat32;
+    r.input = OperationInput::TextBatch {
+        texts: vec!["a".into(), "b".into()],
+    };
+    r.options = OperationOptions::Embeddings {
+        dimensions: Some(2),
+    };
+    let provider = json!({"data":[
+        {"index":0,"embedding":[0.6,0.0,0.8,0.0]},
+        {"index":1,"embedding":[0.0,0.6,0.0,0.8]}
+    ]});
+    let OperationResult::Embeddings { vectors } = projection::result(&r, provider).unwrap() else {
+        panic!("embedding result");
+    };
+    assert_eq!(vectors, vec![vec![1.0, 0.0], vec![0.0, 1.0]]);
+    // Provider vectors of different widths are still incoherent.
+    let ragged = json!({"data":[
+        {"index":0,"embedding":[0.6,0.0,0.8,0.0]},
+        {"index":1,"embedding":[0.6,0.8]}
+    ]});
+    assert_eq!(
+        projection::result(&r, ragged),
+        Err(ErrorCode::InvalidProviderResult)
+    );
+}
+
+#[test]
 fn image_and_mixed_items_project_to_llama_cpp_multimodal_embeddings() {
     let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
     let request: modality::ModalityRequest = serde_json::from_value(json!({

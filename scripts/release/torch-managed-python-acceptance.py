@@ -9,6 +9,7 @@ import argparse
 from contextlib import contextmanager
 import errno
 import hashlib
+import importlib.util
 import io
 import json
 import ntpath
@@ -43,6 +44,7 @@ FULL_FLAVORS = {
     "aarch64-apple-darwin": "pgo+lto",
     "x86_64-pc-windows-msvc": "pgo",
 }
+SUPPLEMENTAL_LICENSE_DIR = Path(__file__).resolve().parent / "licenses/managed-python-supplemental"
 MAX_RELEASE_JSON_BYTES = 8 * 1024 * 1024
 MAX_FULL_ARCHIVE_BYTES = 200 * 1024 * 1024
 MAX_LICENSE_BYTES = 16 * 1024 * 1024
@@ -62,6 +64,18 @@ class HTTPSOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 DOWNLOAD_HTTP = urllib.request.build_opener(HTTPSOnlyRedirectHandler())
+
+
+def load_supplemental_module():
+    """Load the shared supplemental-license rules without relying on sys.path."""
+    path = Path(__file__).resolve().with_name("managed_python_supplemental.py")
+    spec = importlib.util.spec_from_file_location("managed_python_supplemental", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+SUPPLEMENTAL = load_supplemental_module()
 
 
 class GitHubApiRedirectHandler(HTTPSOnlyRedirectHandler):
@@ -1570,6 +1584,7 @@ class FullArchiveLicenseFixture(unittest.TestCase):
         pax_bytes: int = 0,
         zstd: bool = False,
         metadata_overrides: dict | None = None,
+        declared_absent: tuple[str, ...] = (),
     ) -> None:
         metadata = {
             "version": "8",
@@ -1580,6 +1595,11 @@ class FullArchiveLicenseFixture(unittest.TestCase):
             "python_implementation_name": "cpython",
         }
         metadata.update(metadata_overrides or {})
+        if declared_absent:
+            # Mirrors PBS 20260901: PYTHON.json names files the archive omits.
+            metadata["build_info"] = {
+                "extensions": {"_zstd": [{"license_paths": list(declared_absent)}]}
+            }
         entries = [
             ("python/PYTHON.json", json.dumps(metadata).encode()),
             ("python/licenses/LICENSE.cpython.txt", b"CPython license"),
@@ -1931,6 +1951,152 @@ http.client.HTTPResponse(Socket()).begin()
                         export_full_archive_licenses(root, Path(temporary) / "evidence")
                 self.assertFalse((root / "tmp/selected-managed-python-full.tar.zst").exists())
 
+    @staticmethod
+    def supplemental(
+        directory: Path,
+        declared_path: str,
+        content: bytes,
+        *,
+        targets: tuple[str, ...] = ("x86_64-unknown-linux-gnu",),
+        recorded: bytes | None = None,
+    ) -> dict:
+        directory.mkdir(parents=True, exist_ok=True)
+        component = declared_path.removeprefix("licenses/LICENSE.").removesuffix(".txt")
+        name = f"{component}-1.0-LICENSE"
+        (directory / name).write_bytes(content)
+        signed = content if recorded is None else recorded
+        record = {
+            "schema_version": 1,
+            "declared_path": declared_path,
+            "supplemental_reason": SUPPLEMENTAL.REASON,
+            "note": "Fixture text supplied outside the archive.",
+            "python_build_standalone_release": REVIEWED_PBS_RELEASE,
+            "pin_authority": (
+                "https://github.com/astral-sh/python-build-standalone/blob/"
+                f"{REVIEWED_PBS_RELEASE}/pythonbuild/downloads.py"
+            ),
+            "targets": sorted(targets),
+            "component": component,
+            "version": "1.0",
+            "license": "BSD-3-Clause",
+            "source_archive": {
+                "url": f"https://example.invalid/{component}-1.0.tar.gz",
+                "size": 10,
+                "sha256": "b" * 64,
+            },
+            "path_in_source_archive": f"{component}-1.0/LICENSE",
+            "file": name,
+            "size": len(signed),
+            "sha256": hashlib.sha256(signed).hexdigest(),
+        }
+        (directory / f"{name}{SUPPLEMENTAL.RECORD_SUFFIX}").write_text(
+            json.dumps(record), encoding="utf-8"
+        )
+        return record
+
+    def test_absent_declared_licenses_use_verified_supplemental_texts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            archive = base / "archive.tar"
+            absent = ("licenses/LICENSE.zlib-ng.txt", "licenses/LICENSE.zstd.txt")
+            self.archive(archive, declared_absent=absent)
+            supplemental = base / "supplemental"
+            for path in absent:
+                self.supplemental(supplemental, path, f"text for {path}\n".encode())
+            extract_full_archive_licenses(
+                archive,
+                base / "evidence",
+                self.collector_asset(),
+                mode="r|",
+                supplemental_dir=supplemental,
+            )
+            evidence = base / "evidence/managed-python-licenses"
+            manifest = json.loads((evidence / "full-archive-manifest.json").read_text())
+            self.assertEqual(
+                [item["path"] for item in manifest["files"]], ["licenses/LICENSE.cpython.txt"]
+            )
+            self.assertEqual(
+                manifest["declared_license_sources"],
+                {"archive": ["licenses/LICENSE.cpython.txt"], "supplemental": list(absent)},
+            )
+            self.assertEqual(
+                [item["path"] for item in manifest["supplemental_files"]], list(absent)
+            )
+            for item in manifest["supplemental_files"]:
+                self.assertEqual(item["supplemental_reason"], SUPPLEMENTAL.REASON)
+                self.assertTrue(item["provenance"].startswith(SUPPLEMENTAL.DIRECTORY + "/"))
+                self.assertEqual(
+                    hashlib.sha256((evidence / item["evidence_path"]).read_bytes()).hexdigest(),
+                    item["sha256"],
+                )
+            self.assertEqual(
+                sorted(path.name for path in (evidence / "full-archive/licenses").iterdir()),
+                ["LICENSE.cpython.txt"],
+            )
+
+    def test_supplemental_text_with_mismatched_hash_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            archive = base / "archive.tar"
+            self.archive(archive, declared_absent=("licenses/LICENSE.zstd.txt",))
+            supplemental = base / "supplemental"
+            self.supplemental(
+                supplemental, "licenses/LICENSE.zstd.txt", b"altered\n", recorded=b"original\n"
+            )
+            with self.assertRaisesRegex(RuntimeError, "Changed managed CPython supplemental"):
+                extract_full_archive_licenses(
+                    archive,
+                    base / "evidence",
+                    self.collector_asset(),
+                    mode="r|",
+                    supplemental_dir=supplemental,
+                )
+            self.assertFalse((base / "evidence").exists())
+
+    def test_absent_declared_license_without_matching_supplemental_still_fails(self) -> None:
+        cases = {
+            "no supplemental texts": (),
+            "other declared path only": (
+                ("licenses/LICENSE.zlib-ng.txt", ("x86_64-unknown-linux-gnu",)),
+            ),
+            "other target only": (("licenses/LICENSE.zstd.txt", ("x86_64-pc-windows-msvc",)),),
+        }
+        for case, records in cases.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                base = Path(temporary)
+                archive = base / "archive.tar"
+                self.archive(archive, declared_absent=("licenses/LICENSE.zstd.txt",))
+                supplemental = base / "supplemental"
+                for path, targets in records:
+                    self.supplemental(supplemental, path, b"text\n", targets=targets)
+                with self.assertRaisesRegex(RuntimeError, "LICENSE.zstd.txt"):
+                    extract_full_archive_licenses(
+                        archive,
+                        base / "evidence",
+                        self.collector_asset(),
+                        mode="r|",
+                        supplemental_dir=supplemental,
+                    )
+                self.assertFalse((base / "evidence").exists())
+
+    def test_checked_in_supplemental_texts_cover_reviewed_targets(self) -> None:
+        records = SUPPLEMENTAL.load_records(
+            SUPPLEMENTAL_LICENSE_DIR, REVIEWED_PBS_RELEASE, set(FULL_FLAVORS)
+        )
+        cpython = "licenses/LICENSE.cpython.txt"
+        zstd = "licenses/LICENSE.zstd.txt"
+        zlib_ng = "licenses/LICENSE.zlib-ng.txt"
+        expected = {
+            "x86_64-pc-windows-msvc": [zstd],
+            "x86_64-unknown-linux-gnu": [zlib_ng, zstd],
+            "aarch64-apple-darwin": [zlib_ng, zstd],
+        }
+        for target, absent in expected.items():
+            selected = SUPPLEMENTAL.select(
+                records, target, {cpython, *absent}, {cpython}, strict=True
+            )
+            self.assertEqual([record["declared_path"] for record in selected], absent)
+
 
 INSTALL_REPORTS = (
     "runtime.json",
@@ -2277,8 +2443,41 @@ def open_bounded_tar(archive: Path, mode: str):
             yield tar
 
 
+def supplemental_licenses(
+    target: str, declared: set[str], members: set[str], directory: Path
+) -> list[dict]:
+    """Verified supplemental texts for declared paths that the archive omits.
+
+    Any declared path that is missing and lacks a byte-verified record for this
+    exact path, target and reviewed release still fails acceptance.
+    """
+    missing = declared - members
+    if not missing:
+        return []
+    relative = {path.removeprefix("python/") for path in members if path.startswith("python/")}
+    try:
+        records = SUPPLEMENTAL.load_records(directory, REVIEWED_PBS_RELEASE, set(FULL_FLAVORS))
+        return SUPPLEMENTAL.select(
+            records,
+            target,
+            {path.removeprefix("python/") for path in declared},
+            relative,
+            strict=False,
+        )
+    except (OSError, ValueError) as error:
+        detail = {"missing": sorted(missing), "supplemental": str(error)}
+        raise RuntimeError(
+            f"declared full-archive license members failed: {json.dumps(detail)[:1200]}"
+        ) from error
+
+
 def extract_full_archive_licenses(
-    archive: Path, output: Path, asset: dict, *, mode: str = "r|zst"
+    archive: Path,
+    output: Path,
+    asset: dict,
+    *,
+    mode: str = "r|zst",
+    supplemental_dir: Path | None = None,
 ) -> None:
     members = set()
     regular_sizes = {}
@@ -2333,10 +2532,19 @@ def extract_full_archive_licenses(
     )
     validate_full_archive_metadata(metadata, asset)
     declared = declared_license_paths(metadata)
-    wanted = candidates | declared
     require(bool(candidates), "full-archive license directory", asset["name"])
+    supplemental = supplemental_licenses(
+        asset["target"],
+        declared,
+        members,
+        SUPPLEMENTAL_LICENSE_DIR if supplemental_dir is None else supplemental_dir,
+    )
+    archive_declared = declared - {"python/" + record["declared_path"] for record in supplemental}
+    wanted = candidates | archive_declared
     require(
-        declared <= members, "declared full-archive license members", sorted(declared - members)
+        archive_declared <= members,
+        "declared full-archive license members",
+        sorted(archive_declared - members),
     )
     require(len(wanted) <= MAX_ARCHIVE_MEMBERS, "bounded selected licenses", len(wanted))
     selected_bytes = 0
@@ -2384,6 +2592,33 @@ def extract_full_archive_licenses(
             )
             found.add(name)
     require(found == wanted, "all selected full-archive licenses", sorted(wanted - found))
+    supplemental_files = []
+    for record in supplemental:
+        # Kept apart from full-archive/: these texts are not archive members.
+        content = record["text_path"].read_bytes()
+        require(
+            hashlib.sha256(content).hexdigest() == record["sha256"],
+            "verified supplemental license text",
+            record["file"],
+        )
+        copied = output / "managed-python-licenses" / "supplemental" / record["file"]
+        copied.parent.mkdir(parents=True, exist_ok=True)
+        copied.write_bytes(content)
+        supplemental_files.append(
+            {
+                "path": record["declared_path"],
+                "sha256": record["sha256"],
+                "size": record["size"],
+                "evidence_path": f"supplemental/{record['file']}",
+                "provenance": f"{SUPPLEMENTAL.DIRECTORY}/{record['record_path'].name}",
+                "supplemental_reason": record["supplemental_reason"],
+                "component": record["component"],
+                "version": record["version"],
+                "license": record["license"],
+                "source_archive": record["source_archive"],
+                "path_in_source_archive": record["path_in_source_archive"],
+            }
+        )
     (destination / "PYTHON.json").write_bytes(metadata_bytes)
     (output / "managed-python-licenses" / "full-archive-manifest.json").write_text(
         json.dumps(
@@ -2404,6 +2639,11 @@ def extract_full_archive_licenses(
                     "size": len(metadata_bytes),
                 },
                 "files": sorted(files, key=lambda item: item["path"]),
+                "supplemental_files": supplemental_files,
+                "declared_license_sources": {
+                    "archive": sorted(path.removeprefix("python/") for path in archive_declared),
+                    "supplemental": [item["path"] for item in supplemental_files],
+                },
             },
             indent=2,
             sort_keys=True,

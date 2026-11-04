@@ -5,7 +5,10 @@ use crate::models::{
 
 use super::{served_model_reserves_gateway_alias, ServingValidationContext};
 
-const MAX_GATEWAY_ALIAS_LEN: usize = 128;
+/// The longest served-model alias, in bytes: the bound the model-operations
+/// contract accepts for `model`, so every servable alias stays addressable.
+/// Library IDs are the default llama.cpp alias and can exceed 128 bytes.
+pub const MAX_GATEWAY_ALIAS_BYTES: usize = 256;
 
 pub(super) fn validate_gateway_alias_contract(
     model_id: &str,
@@ -22,9 +25,9 @@ pub(super) fn validate_gateway_alias_contract(
     }
 
     let mut message = None;
-    if alias.len() > MAX_GATEWAY_ALIAS_LEN {
+    if alias.len() > MAX_GATEWAY_ALIAS_BYTES {
         message = Some(format!(
-            "model_alias must be {MAX_GATEWAY_ALIAS_LEN} characters or fewer"
+            "model_alias must be {MAX_GATEWAY_ALIAS_BYTES} bytes or fewer; choose a shorter alias for this model"
         ));
     } else if alias.starts_with('/') || alias.ends_with('/') || alias.contains("//") {
         message = Some("model_alias cannot begin or end with '/', or contain '//'".to_string());

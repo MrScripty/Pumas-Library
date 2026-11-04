@@ -7777,6 +7777,32 @@
       ]
     },
     {
+      "name": "zlib-ng",
+      "version": "2.2.4",
+      "license_declared": "Zlib",
+      "source": "https://github.com/python/cpython-source-deps/archive/refs/tags/zlib-ng-2.2.4.tar.gz",
+      "scope": "Managed Python supplemental license text for aarch64-apple-darwin; PYTHON.json declares licenses/LICENSE.zlib-ng.txt but the CPython full archive omits it; supplied from cpython-source-deps-zlib-ng-2.2.4/LICENSE.md in the source archive pinned by python-build-standalone 20260901 (sha256 00bbd88709bc416cb96160ab61d3e1c8f76e106799af7328d0fe434dc7dd5004), not from the CPython archive",
+      "texts": [
+        {
+          "path": "managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md",
+          "sha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee"
+        }
+      ]
+    },
+    {
+      "name": "zstd",
+      "version": "1.5.7",
+      "license_declared": "BSD-3-Clause",
+      "source": "https://github.com/python/cpython-source-deps/archive/refs/tags/zstd-1.5.7.tar.gz",
+      "scope": "Managed Python supplemental license text for aarch64-apple-darwin; PYTHON.json declares licenses/LICENSE.zstd.txt but the CPython full archive omits it; supplied from cpython-source-deps-zstd-1.5.7/LICENSE in the source archive pinned by python-build-standalone 20260901 (sha256 f24b52470d12f466e9fa4fcc94e6c530625ada51d7b36de7fdc6ed7e6f499c8e), not from the CPython archive",
+      "texts": [
+        {
+          "path": "managed-python-supplemental/zstd-1.5.7-LICENSE",
+          "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"
+        }
+      ]
+    },
+    {
       "name": "CPython full archive",
       "version": "3.14.7",
       "license_declared": "Python-2.0, CNRI-Python",
@@ -7862,6 +7888,19 @@
       ]
     },
     {
+      "name": "zstd",
+      "version": "1.5.7",
+      "license_declared": "BSD-3-Clause",
+      "source": "https://github.com/python/cpython-source-deps/archive/refs/tags/zstd-1.5.7.tar.gz",
+      "scope": "Managed Python supplemental license text for x86_64-pc-windows-msvc; PYTHON.json declares licenses/LICENSE.zstd.txt but the CPython full archive omits it; supplied from cpython-source-deps-zstd-1.5.7/LICENSE in the source archive pinned by python-build-standalone 20260901 (sha256 f24b52470d12f466e9fa4fcc94e6c530625ada51d7b36de7fdc6ed7e6f499c8e), not from the CPython archive",
+      "texts": [
+        {
+          "path": "managed-python-supplemental/zstd-1.5.7-LICENSE",
+          "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"
+        }
+      ]
+    },
+    {
       "name": "CPython full archive",
       "version": "3.14.7",
       "license_declared": "Python-2.0, CNRI-Python",
@@ -7943,6 +7982,32 @@
         {
           "path": "licenses/LICENSE.zlib.txt",
           "sha256": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c"
+        }
+      ]
+    },
+    {
+      "name": "zlib-ng",
+      "version": "2.2.4",
+      "license_declared": "Zlib",
+      "source": "https://github.com/python/cpython-source-deps/archive/refs/tags/zlib-ng-2.2.4.tar.gz",
+      "scope": "Managed Python supplemental license text for x86_64-unknown-linux-gnu; PYTHON.json declares licenses/LICENSE.zlib-ng.txt but the CPython full archive omits it; supplied from cpython-source-deps-zlib-ng-2.2.4/LICENSE.md in the source archive pinned by python-build-standalone 20260901 (sha256 00bbd88709bc416cb96160ab61d3e1c8f76e106799af7328d0fe434dc7dd5004), not from the CPython archive",
+      "texts": [
+        {
+          "path": "managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md",
+          "sha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee"
+        }
+      ]
+    },
+    {
+      "name": "zstd",
+      "version": "1.5.7",
+      "license_declared": "BSD-3-Clause",
+      "source": "https://github.com/python/cpython-source-deps/archive/refs/tags/zstd-1.5.7.tar.gz",
+      "scope": "Managed Python supplemental license text for x86_64-unknown-linux-gnu; PYTHON.json declares licenses/LICENSE.zstd.txt but the CPython full archive omits it; supplied from cpython-source-deps-zstd-1.5.7/LICENSE in the source archive pinned by python-build-standalone 20260901 (sha256 f24b52470d12f466e9fa4fcc94e6c530625ada51d7b36de7fdc6ed7e6f499c8e), not from the CPython archive",
+      "texts": [
+        {
+          "path": "managed-python-supplemental/zstd-1.5.7-LICENSE",
+          "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"
         }
       ]
     },
@@ -8134,6 +8199,20 @@
           "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.zlib.txt",
           "sha256": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c"
         }
+      ],
+      "supplemental_legal_files": [
+        {
+          "declared_path": "licenses/LICENSE.zlib-ng.txt",
+          "path": "scripts/release/licenses/managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md",
+          "sha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee",
+          "provenance": "scripts/release/licenses/managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md.provenance.json"
+        },
+        {
+          "declared_path": "licenses/LICENSE.zstd.txt",
+          "path": "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE",
+          "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+          "provenance": "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json"
+        }
       ]
     },
     {
@@ -8224,6 +8303,14 @@
         {
           "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.zlib.txt",
           "sha256": "365e36720db366054863235aea5d6f440142ab968834bfaf81fa9d187c99b9b8"
+        }
+      ],
+      "supplemental_legal_files": [
+        {
+          "declared_path": "licenses/LICENSE.zstd.txt",
+          "path": "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE",
+          "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+          "provenance": "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json"
         }
       ]
     },
@@ -8316,6 +8403,20 @@
           "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.zlib.txt",
           "sha256": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c"
         }
+      ],
+      "supplemental_legal_files": [
+        {
+          "declared_path": "licenses/LICENSE.zlib-ng.txt",
+          "path": "scripts/release/licenses/managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md",
+          "sha256": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee",
+          "provenance": "scripts/release/licenses/managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md.provenance.json"
+        },
+        {
+          "declared_path": "licenses/LICENSE.zstd.txt",
+          "path": "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE",
+          "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+          "provenance": "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json"
+        }
       ]
     }
   ],
@@ -8397,7 +8498,11 @@
     "rust/crates/pumas-rpc/Cargo.toml": "92b67b71767f6f495895c6d35a7c72107cfccc1cb60dedc400dd7f301a3a97f8",
     "scripts/release/artifact-plan.json": "66348a507f00ffdc74741fc7d70eab02f4a0eed4d3655354784cea2971662064",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
-    "scripts/release/torch-managed-python-acceptance.py": "b0486387627d6ae98b4b6533adcceed93e93ebf868385626f3b13f1fb949893b"
+    "scripts/release/licenses/managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md": "6c9f0d975b41afaa34d22f55bb8986ce69e5cb7ad327cb2b28820cd425edf5ee",
+    "scripts/release/licenses/managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md.provenance.json": "3abbd4c93221c44bd33aa7012b5cd12bd1bce0a569768d076e820ee24959c10d",
+    "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+    "scripts/release/licenses/managed-python-supplemental/zstd-1.5.7-LICENSE.provenance.json": "7b15e355b4839ed30f39267b47c3048902765f21805c9caa5099a7ab5301431d",
+    "scripts/release/torch-managed-python-acceptance.py": "2fe0e7a7727026690c67485a0aa072c07d728836b3ad0f8db4eb5ab3edb66198"
   },
-  "notices_sha256": "9d050ff595057df42bcc67809a457e9b362dd286ed5b02ed218062d6ab0a570f"
+  "notices_sha256": "2d72871a68f29d50bbcee55091b624379b9e1c9b76a26b35116f5f309d533c39"
 }

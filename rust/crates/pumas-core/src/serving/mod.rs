@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::broadcast;
 
-pub use gateway_alias::effective_gateway_model_alias;
+pub use gateway_alias::{effective_gateway_model_alias, MAX_GATEWAY_ALIAS_BYTES};
 use gateway_alias::{validate_gateway_alias_contract, validate_gateway_alias_is_unique};
 use placement::validate_provider_placement;
 
@@ -1319,6 +1319,29 @@ mod tests {
             .iter()
             .any(|error| error.code == ModelServeErrorCode::InvalidRequest
                 && error.message.contains("model_alias")));
+    }
+
+    #[test]
+    fn validation_accepts_a_long_library_id_alias_up_to_the_operations_bound() {
+        // A real downloaded EmbeddingGemma 2 ID (147 bytes), which llama.cpp
+        // serving uses as its default alias.
+        let library_id = "embedding/gemma-embedding2/unsloth--embeddinggemma-2-gguf__files_555e3f992f30__555e3f992f30__revision_031f0d4b35536f69ab3509d4893c923264fcf253";
+        for (alias, accepted) in [
+            (library_id.to_string(), true),
+            ("a".repeat(MAX_GATEWAY_ALIAS_BYTES), true),
+            ("a".repeat(MAX_GATEWAY_ALIAS_BYTES + 1), false),
+        ] {
+            let mut request = request();
+            request.config.provider = RuntimeProviderId::LlamaCpp;
+            request.config.profile_id = RuntimeProfileId::parse("llama-gpu").unwrap();
+            request.config.model_alias = Some(alias);
+            let response = validate(&request, &valid_context());
+            let alias_error = response
+                .errors
+                .iter()
+                .any(|error| error.message.contains("bytes or fewer"));
+            assert_eq!(alias_error, !accepted);
+        }
     }
 
     #[test]

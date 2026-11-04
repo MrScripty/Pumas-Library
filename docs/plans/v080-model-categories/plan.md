@@ -1,7 +1,7 @@
 # v0.8.0 model categories and modalities
 
-**Plan status:** Active. **Acceptance status:** not yet satisfied.
-**Current phase:** verification. **Next slice:** M5 live re-scan of the owner library.
+**Plan status:** Complete. **Acceptance status:** satisfied on the owner library (2026-11-03).
+**Current phase:** done.
 
 ## Objective and scope
 
@@ -63,4 +63,11 @@ composition at serve time.
 | M2 | Category changes never move folders or change IDs; ID-prefix readers use metadata; user override honored by re-scan | library/reconcile/migration tests | done: reclassification/migration tests rewritten to the rule; `user` source honored in the shared resolver |
 | M3 | Desktop catalog carries category, input/output modalities and adapter role; `set_model_category` RPC | contract export, conformance, RPC tests | done: catalog DTO, `set_model_category` admission tests, regenerated contract, conformance fixture |
 | M4 | UI groups by category (with Video and Decision), shows modality and adapter badges, lets the user set a category | frontend tests | done: frontend grouping/header/badge/picker tests |
-| M5 | Owner library re-scanned: Kev/Laya → decision, LTX → video (LoRA as adapter), Granite nar → audio, without moving folders | live check on the owner library; CHANGELOG/release notes; candidate rehearsal | pending |
+| M5 | Owner library re-scanned: Kev/Laya → decision, LTX → video (LoRA as adapter), Granite nar → audio, without moving folders | live check on the owner library; CHANGELOG/release notes; candidate rehearsal | done: live refresh of the 94-model owner library: Kev/Laya decision, LTX video, Granite nar audio (audio → text), IC-LoRA adapter; 0 errors, 0 ID or folder changes; second pass settled |
+
+## Known limits
+
+- The LTX IC-LoRA adapter has no task tag or base-model evidence, so it stays
+  under image generation until a person chooses Video in its metadata window.
+- LTX-2.3 reports image → video from its `image-to-video` tag; it also takes
+  text and produces audio, which no recorded evidence states.

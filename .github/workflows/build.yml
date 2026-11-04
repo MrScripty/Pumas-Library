@@ -28,6 +28,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '0'
+  # Dozens of workspace test executables with full debug info fill the
+  # runner's disk at link time. Line tables keep file:line backtraces.
+  # Release and ci-test profiles set their own debug info and are unaffected.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   lint-workflows:

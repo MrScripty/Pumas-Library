@@ -495,16 +495,18 @@ pub fn result(request: &OperationRequest, value: Value) -> Result<OperationResul
                             .ok_or(invalid)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
+                // Coherence compares the provider's own widths, before any
+                // requested truncation changes them.
                 if vector.is_empty() || width.is_some_and(|w| w != vector.len()) {
                     return Err(invalid);
                 }
+                width = Some(vector.len());
                 let vector = match request.options {
                     OperationOptions::Embeddings {
                         dimensions: Some(d),
                     } => truncate_embedding(vector, d).ok_or(invalid)?,
                     _ => vector,
                 };
-                width = Some(vector.len());
                 vectors.push(vector);
             }
             Ok(OperationResult::Embeddings { vectors })

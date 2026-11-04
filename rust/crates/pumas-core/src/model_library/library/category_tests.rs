@@ -242,6 +242,7 @@ async fn chosen_category_survives_reclassification_until_cleared() {
         recorded_category(&library, id),
         ("vision".into(), Some(USER_CATEGORY_SOURCE.into()))
     );
+    assert_modalities(&library, id, &["image"], &["text"]);
     library.reclassify_model(id).await.unwrap();
     assert_eq!(
         recorded_category(&library, id).0,
@@ -261,4 +262,89 @@ async fn chosen_category_survives_reclassification_until_cleared() {
     );
     assert!(dir.exists());
     assert_eq!(recorded_category(&library, id).0, "decision");
+    // A tagless decision GGUF reports decision outputs, not text.
+    assert_modalities(&library, id, &["text"], &["decision"]);
+}
+
+fn assert_modalities(library: &ModelLibrary, model_id: &str, inputs: &[&str], outputs: &[&str]) {
+    let indexed = library.index().get(model_id).unwrap().unwrap();
+    assert_eq!(
+        indexed.metadata["input_modalities"],
+        serde_json::json!(inputs)
+    );
+    assert_eq!(
+        indexed.metadata["output_modalities"],
+        serde_json::json!(outputs)
+    );
+}
+
+#[tokio::test]
+async fn clearing_a_choice_keeps_the_model_where_it_is() {
+    // Filed under a family that detection would not choose: clearing the
+    // category re-detects the category only, never the family or the ID.
+    let (_temp, library) = fixture().await;
+    let id = "llm/misfiled/kev-4b";
+    let dir = add_model(
+        &library,
+        id,
+        &[(
+            "Kev-4B-Q8_0.gguf",
+            gguf(&[
+                ("general.architecture", "qwen35"),
+                ("general.name", "Kev 4B"),
+                ("qwen35.decision.type", "kev"),
+            ]),
+        )],
+        ModelMetadata::default(),
+    )
+    .await;
+
+    library
+        .set_model_category(id, Some(ModelType::Llm))
+        .await
+        .unwrap();
+    assert_eq!(
+        library.set_model_category(id, None).await.unwrap(),
+        ModelType::Decision
+    );
+    assert!(dir.exists(), "clearing a choice never moves a model");
+    assert_eq!(
+        recorded_category(&library, id),
+        (
+            "decision".into(),
+            Some("model-type-gguf-decision-head".into())
+        )
+    );
+    let metadata = library.load_metadata(&dir).unwrap().unwrap();
+    assert_eq!(metadata.family.as_deref(), Some("misfiled"));
+}
+
+#[tokio::test]
+async fn decision_head_with_a_contradicting_tag_is_flagged_for_review() {
+    let (_temp, library) = fixture().await;
+    let id = "llm/qwen35/kev-4b-tagged";
+    let dir = add_model(
+        &library,
+        id,
+        &[(
+            "Kev-4B-Q8_0.gguf",
+            gguf(&[
+                ("general.architecture", "qwen35"),
+                ("qwen35.decision.type", "kev"),
+            ]),
+        )],
+        ModelMetadata {
+            pipeline_tag: Some("text-generation".into()),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    library.reclassify_model(id).await.unwrap();
+    assert_eq!(recorded_category(&library, id).0, "decision");
+    let metadata = library.load_metadata(&dir).unwrap().unwrap();
+    let reasons = metadata.review_reasons.unwrap_or_default();
+    assert!(reasons.contains(&"model-type-hint-conflict".to_string()));
+    assert!(metadata.model_type_resolution_confidence.unwrap() < 0.85);
+    assert_modalities(&library, id, &["text"], &["decision"]);
 }

@@ -4357,13 +4357,38 @@ impl ModelLibrary {
                     .and_then(|value| value.parse().ok())
                     .unwrap_or(ModelType::Unknown));
             }
+            // Re-detect the category only, in place: clearing a choice never
+            // re-detects the family, so it never moves the model or changes
+            // its ID. One guarded write records the detected category.
             let original_metadata = metadata.clone();
             let mut cleared = metadata;
-            // A valid interim state: re-detection replaces it, and if it
-            // fails the model is left as "re-detection requested", not "user".
-            cleared.model_type_resolution_source = Some(REDETECT_REQUESTED_SOURCE.to_string());
-            cleared.model_type_resolution_confidence = Some(0.0);
+            cleared.model_type_resolution_source = None;
+            let library_for_type = self.clone();
+            let model_id_for_type = model_id.to_owned();
+            let file_type_info = self
+                .store_lifetime
+                .spawn_blocking(move || {
+                    library_for_type
+                        .get_primary_model_file(&model_id_for_type)
+                        .as_ref()
+                        .and_then(|file| identify_model_type(file).ok())
+                })
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Failed to join category detection: {error}"))
+                })?;
+            let resolved = resolve_local_model_type_with_persisted_hints_async(
+                self.index().clone(),
+                self.library_root.clone(),
+                model_dir.clone(),
+                cleared.clone(),
+                file_type_info,
+            )
+            .await?;
+            cleared.model_type = Some(resolved.model_type.as_str().to_string());
+            apply_model_type_resolution(&mut cleared, &resolved);
             cleared.updated_date = Some(chrono::Utc::now().to_rfc3339());
+            validate_metadata_v2_with_index(&cleared, self.index())?;
             self.write_reclassification_metadata_owned(
                 model_id.to_string(),
                 model_dir,
@@ -4372,13 +4397,7 @@ impl ModelLibrary {
                 None,
             )
             .await?;
-            self.reclassify_model(model_id).await?;
-            let detected = self
-                .load_metadata(&self.library_root.join(model_id))?
-                .and_then(|metadata| metadata.model_type)
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(ModelType::Unknown);
-            return Ok(detected);
+            return Ok(resolved.model_type);
         };
 
         let original_metadata = metadata.clone();
@@ -6492,6 +6511,20 @@ fn category_task_override(metadata: &ModelMetadata, tag: &str) -> Option<&'stati
     if tag_category == category || tag_category == ModelType::Unknown {
         return None;
     }
+    strong_category_task(metadata)
+}
+
+/// For a model with no task tag: the category's task when the recorded task
+/// contradicts a strongly sourced category (for example a tagless GGUF with a
+/// decision head recorded as text generation). A model with no recorded task
+/// is left alone; nothing contradicts the category.
+fn untagged_category_task(metadata: &ModelMetadata) -> Option<&'static str> {
+    category_task_override(metadata, metadata.task_type_primary.as_deref()?)
+}
+
+/// The task implied by a category recorded from a strong source.
+fn strong_category_task(metadata: &ModelMetadata) -> Option<&'static str> {
+    let category = ModelType::from_canonical(metadata.model_type.as_deref()?)?;
     let source = metadata.model_type_resolution_source.as_deref()?;
     let strong = matches!(
         source,
@@ -6532,13 +6565,17 @@ fn category_task_override(metadata: &ModelMetadata, tag: &str) -> Option<&'stati
 }
 
 fn apply_task_projection_from_persisted_evidence(metadata: &mut ModelMetadata) -> bool {
-    let Some(source_tag) = preferred_pipeline_tag(metadata) else {
+    let source_tag = preferred_pipeline_tag(metadata);
+    let category_task = match source_tag.as_deref() {
+        Some(tag) => category_task_override(metadata, tag),
+        None => untagged_category_task(metadata),
+    };
+    let Some(task) = category_task
+        .map(str::to_string)
+        .or_else(|| source_tag.clone())
+    else {
         return false;
     };
-    let category_task = category_task_override(metadata, &source_tag);
-    let task = category_task
-        .map(str::to_string)
-        .unwrap_or_else(|| source_tag.clone());
 
     let normalized = normalize_task_signature(&task);
     let previous_pipeline_tag = metadata.pipeline_tag.clone();
@@ -6552,7 +6589,9 @@ fn apply_task_projection_from_persisted_evidence(metadata: &mut ModelMetadata) -
     let previous_review_status = metadata.review_status.clone();
 
     // The source tag stays recorded as evidence; the task follows the category.
-    metadata.pipeline_tag = Some(source_tag);
+    if source_tag.is_some() {
+        metadata.pipeline_tag = source_tag;
+    }
     metadata.task_type_primary = Some(task);
     metadata.input_modalities = Some(normalized.input_modalities.clone());
     metadata.output_modalities = Some(normalized.output_modalities.clone());
@@ -7760,9 +7799,6 @@ fn detect_model_type_from_directory_layout(model_dir: &Path) -> Option<ModelType
 
 /// `model_type_resolution_source` recorded when a person chose the category.
 pub(crate) const USER_CATEGORY_SOURCE: &str = "user";
-
-/// `model_type_resolution_source` while a cleared choice awaits re-detection.
-const REDETECT_REQUESTED_SOURCE: &str = "model-type-redetect-requested";
 
 /// The category a person chose for this model, if any.
 pub(crate) fn user_chosen_category(metadata: &ModelMetadata) -> Option<ModelType> {

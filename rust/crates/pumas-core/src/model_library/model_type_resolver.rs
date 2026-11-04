@@ -40,18 +40,32 @@ pub fn resolve_model_type_with_rules(
 ) -> Result<ModelTypeResolution> {
     // A GGUF that declares a decision head is served by llama.cpp as a decision
     // model. That file fact outranks any task tag or name.
+    let medium_hints =
+        collect_medium_hints(index, pipeline_tag, spec_model_type, huggingface_evidence)?;
     if gguf_declares_decision_head(model_dir) {
+        // A task tag that names another category still wins nothing, but the
+        // disagreement is recorded so a person can confirm the category.
+        let conflicting_hint = medium_hints.iter().any(|hint| *hint != ModelType::Decision);
+        let (confidence, review_reasons) = if conflicting_hint {
+            (
+                0.75,
+                vec![
+                    "model-type-hint-conflict".to_string(),
+                    "model-type-low-confidence".to_string(),
+                ],
+            )
+        } else {
+            (0.95, Vec::new())
+        };
         return Ok(ModelTypeResolution {
             model_type: ModelType::Decision,
             source: "model-type-gguf-decision-head".to_string(),
-            confidence: 0.95,
-            review_reasons: Vec::new(),
+            confidence,
+            review_reasons,
         });
     }
     let name_hint = model_dir.file_name().and_then(|name| name.to_str());
     let signals = load_config_signals(model_dir, huggingface_evidence);
-    let medium_hints =
-        collect_medium_hints(index, pipeline_tag, spec_model_type, huggingface_evidence)?;
     resolve_model_type_from_inputs(index, signals, medium_hints, name_hint)
 }
 

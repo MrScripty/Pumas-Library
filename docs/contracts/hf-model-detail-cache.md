@@ -31,7 +31,8 @@ download menu requests that repository's details.
   bounded response body, ETag/Last-Modified, validation time, freshness and any
   cooldown deadline.
 - Body at most 4 MiB; envelope read at most 4 MiB + 64 KiB. Only regular
-  files are read, without following symlinks.
+  files are read. Reads refuse symlinks on Unix; the Windows reader can follow
+  a symlink to a regular file.
 - Freshness is at most 24 hours. `Cache-Control` can shorten it; `no-cache`
   forces revalidation; `private`/`no-store`, `Authorization` in `Vary` or a
   wildcard `Vary` prevent storage; `Age` reduces freshness. `Expires` is not

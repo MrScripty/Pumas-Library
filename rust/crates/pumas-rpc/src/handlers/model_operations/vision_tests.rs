@@ -599,3 +599,86 @@ async fn actual_http_disconnect_and_shutdown_close_held_probe_or_post_without_re
         }
     }
 }
+
+#[tokio::test]
+async fn image_embeddings_pass_the_vision_guard_on_the_embeddings_route() {
+    // Embedding routes carry no generation lifetime; the vision guard must
+    // still run (and pass) instead of refusing every image embedding.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let calls: Calls = Arc::new(Mutex::new(Vec::new()));
+    let (get_calls, post_calls) = (calls.clone(), calls.clone());
+    let app = Router::new()
+        .route(
+            "/props",
+            get(move |uri: Uri| {
+                let calls = get_calls.clone();
+                async move {
+                    calls.lock().unwrap().push((uri.to_string(), Value::Null));
+                    Json(props())
+                }
+            }),
+        )
+        .route(
+            "/v1/embeddings",
+            post(move |Json(body): Json<Value>| {
+                let calls = post_calls.clone();
+                async move {
+                    calls.lock().unwrap().push(("POST".into(), body));
+                    Json(json!({"data":[{"index":0,"embedding":[0.6,0.8]}]}))
+                }
+            }),
+        );
+    let backend = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let (_root, state) = fixture(&endpoint, Some("feature-extraction")).await;
+    let mut record = state
+        .api
+        .model_library()
+        .index()
+        .get("models/llama")
+        .unwrap()
+        .unwrap();
+    record.model_type = "embedding".into();
+    state.api.model_library().index().upsert(&record).unwrap();
+
+    let declared = caps(state.clone()).await;
+    let multimodal = declared["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["capability"] == "multimodal_embedding")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        multimodal["availability"]["state"], "available",
+        "{multimodal}"
+    );
+
+    let (public, server) = public_server(state.clone()).await;
+    let response = reqwest::Client::new()
+        .post(format!("{public}/v1/model-operations"))
+        .json(&json!({
+            "contract_version": 1,
+            "request_id": "embed-image-1",
+            "model": "llama",
+            "capability": "multimodal_embedding",
+            "input": image("png", PNG),
+            "output": "embeddings_float32"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let result: Value = response.json().await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["result"]["kind"], "embeddings");
+    assert_eq!(result["result"]["vectors"].as_array().unwrap().len(), 1);
+    assert!(calls.lock().unwrap().iter().any(|(kind, _)| kind == "POST"));
+
+    state.shutdown_request.request();
+    server.await.unwrap().unwrap();
+    backend.abort();
+    let _ = backend.await;
+}

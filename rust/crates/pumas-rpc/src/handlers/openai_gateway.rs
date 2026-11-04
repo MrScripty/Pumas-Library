@@ -440,21 +440,26 @@ pub(super) async fn dispatch_openai(
                 Ok(OpenAiServedModelLookup::Found(fresh))
                     if same_selection(&fresh, &served) && fresh.loaded_at == served.loaded_at)
         };
-        let Some(lifetime) = lifetime.as_mut() else {
-            return openai_public_error_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                PublicError::unavailable(),
-            );
-        };
-        let ready = tokio::select! {
-            biased;
-            () = lifetime.cancelled() => false,
-            ready = guard => ready,
+        // Generation routes (image-to-text) race the probe against their
+        // lifetime. Embedding routes have no generation lifetime; the probe is
+        // bounded on its own, so it runs directly rather than refusing.
+        let ready = match lifetime.as_mut() {
+            Some(lifetime) => tokio::select! {
+                biased;
+                () = lifetime.cancelled() => false,
+                ready = guard => ready,
+            },
+            None => guard.await,
         };
         if !ready {
             return openai_public_error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
-                PublicError::unavailable(),
+                PublicError {
+                    message: std::borrow::Cow::Borrowed(
+                        "Image input for the selected model is not ready: it needs an enabled dedicated llama.cpp profile with the model's projector loaded.",
+                    ),
+                    ..PublicError::unavailable()
+                },
             );
         }
     }

@@ -7,6 +7,14 @@ const catalogPath = 'scripts/release/licenses/managed-python-sources.json';
 const planPath = 'scripts/release/artifact-plan.json';
 const pinsPath = 'rust/crates/pumas-app-manager/src/version_manager/managed_python.rs';
 const mappingPath = 'scripts/release/torch-managed-python-acceptance.py';
+const supplementalPath = 'scripts/release/licenses/managed-python-supplemental';
+const supplementalSuffix = '.provenance.json';
+const supplementalReason = 'declared_by_python_json_but_absent_from_upstream_full_archive';
+const supplementalKeys = [
+  'schema_version', 'declared_path', 'supplemental_reason', 'note',
+  'python_build_standalone_release', 'pin_authority', 'targets', 'component',
+  'version', 'license', 'source_archive', 'path_in_source_archive', 'file', 'size', 'sha256',
+].sort();
 const uvArmTargets = {
   LinuxX8664: 'x86_64-unknown-linux-gnu',
   WindowsX8664: 'x86_64-pc-windows-msvc',
@@ -43,6 +51,82 @@ function retainedFullArchiveMapping(source, expectedTargets) {
     throw new Error('Managed CPython full-archive mapping does not match desktop targets');
   }
   return { release: release[0], flavors: Object.fromEntries(flavors.map(item => [item[1], item[2]])) };
+}
+
+function declaredLicensePaths(metadata) {
+  const paths = new Set();
+  const visit = value => {
+    if (Array.isArray(value)) value.forEach(visit);
+    else if (value && typeof value === 'object') {
+      for (const [key, item] of Object.entries(value)) {
+        if ((key === 'license_path' || key === 'license_paths') && item !== null && item !== undefined) {
+          const values = typeof item === 'string' ? [item] : item;
+          if (!Array.isArray(values) || !values.every(entry => typeof entry === 'string' && entry)) {
+            throw new Error(`Invalid PYTHON.json license reference: ${JSON.stringify(item)}`);
+          }
+          values.forEach(entry => paths.add(entry));
+        } else visit(item);
+      }
+    }
+  };
+  visit(metadata);
+  return paths;
+}
+
+// Supplemental texts satisfy declared CPython license paths that the upstream
+// full archive omits. They are byte-verified against their provenance records
+// and must never be presented as archive members.
+function supplementalRecords(relative, hash, release, expectedTargets) {
+  const directory = relative(supplementalPath);
+  if (!fs.existsSync(directory)) return [];
+  const entries = fs.readdirSync(directory, { withFileTypes: true });
+  if (entries.some(item => !item.isFile())) throw new Error('Supplemental license directory must hold regular files');
+  const sha = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+  const positive = value => Number.isInteger(value) && value > 0;
+  const text = value => typeof value === 'string' && value.trim() !== '';
+  const records = entries.filter(item => item.name.endsWith(supplementalSuffix)).map(item => {
+    const recordPath = `${supplementalPath}/${item.name}`;
+    const record = JSON.parse(fs.readFileSync(relative(recordPath)));
+    const source = record?.source_archive;
+    const targets = record?.targets;
+    if (!record || typeof record !== 'object' || Array.isArray(record)
+      || JSON.stringify(Object.keys(record).sort()) !== JSON.stringify(supplementalKeys)
+      || record.schema_version !== 1 || record.supplemental_reason !== supplementalReason
+      || record.python_build_standalone_release !== release
+      || record.pin_authority !== `https://github.com/astral-sh/python-build-standalone/blob/${release}/pythonbuild/downloads.py`
+      || typeof record.declared_path !== 'string' || !/^licenses\/[A-Za-z0-9._-]+$/.test(record.declared_path)
+      || !Array.isArray(targets) || !targets.length || !targets.every(text)
+      || JSON.stringify(targets) !== JSON.stringify([...new Set(targets)].sort())
+      || !targets.every(target => expectedTargets.includes(target))
+      || !['note', 'component', 'version', 'license', 'path_in_source_archive'].every(key => text(record[key]))
+      || !source || typeof source !== 'object'
+      || JSON.stringify(Object.keys(source).sort()) !== JSON.stringify(['sha256', 'size', 'url'])
+      || typeof source.url !== 'string' || !source.url.startsWith('https://')
+      || !positive(source.size) || !sha(source.sha256)
+      || record.file !== item.name.slice(0, -supplementalSuffix.length)
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(record.file)
+      || !positive(record.size) || !sha(record.sha256)) {
+      throw new Error(`Invalid managed CPython supplemental license record: ${item.name}`);
+    }
+    const textPath = `${supplementalPath}/${record.file}`;
+    const data = fs.readFileSync(relative(textPath));
+    if (hash(relative(textPath)) !== record.sha256 || data.length !== record.size) {
+      throw new Error(`Changed managed CPython supplemental license: ${record.file}`);
+    }
+    return { ...record, recordPath, textPath };
+  });
+  const referenced = new Set(records.map(record => record.file));
+  const orphans = entries.filter(item => !item.name.endsWith(supplementalSuffix) && !referenced.has(item.name));
+  if (orphans.length) throw new Error(`Supplemental license texts without provenance: ${orphans.map(item => item.name)}`);
+  const claimed = new Set();
+  for (const record of records) {
+    for (const target of record.targets) {
+      const key = `${target}\0${record.declared_path}`;
+      if (claimed.has(key)) throw new Error(`Duplicate supplemental license for ${target}: ${record.declared_path}`);
+      claimed.add(key);
+    }
+  }
+  return records;
 }
 
 function checkAttribution(directory, features = []) {
@@ -100,6 +184,7 @@ function checkAttribution(directory, features = []) {
   const catalog = JSON.parse(fs.readFileSync(relative(catalogPath)));
   const entries = catalog.targets;
   const managed = inventory.managed_python;
+  const supplemental = supplementalRecords(relative, hash, pbs.release, expectedTargets);
   const coversTargets = values => Array.isArray(values) && values.length === 3
     && expectedTargets.length === 3
     && JSON.stringify(values.map(value => value.target).sort()) === JSON.stringify(expectedTargets);
@@ -129,14 +214,44 @@ function checkAttribution(directory, features = []) {
     const pythonBytes = fs.readFileSync(relative(pythonPath));
     const python = JSON.parse(pythonBytes);
     const files = manifest.files;
-    const declared = Array.isArray(files) ? files.map(item => item.path) : [];
+    const archived = Array.isArray(files) ? files.map(item => item.path) : [];
     const actual = fs.readdirSync(relative(`${archiveDir}/licenses`), { withFileTypes: true })
       .filter(item => item.isFile()).map(item => `licenses/${item.name}`).sort();
-    if (!declared.length || new Set(declared).size !== declared.length
-      || declared.some(name => !/^licenses\/[A-Za-z0-9._-]+$/.test(name))
-      || JSON.stringify(declared.slice().sort()) !== JSON.stringify(actual)
-      || !declared.includes(python.license_path)) {
+    if (!archived.length || new Set(archived).size !== archived.length
+      || archived.some(name => !/^licenses\/[A-Za-z0-9._-]+$/.test(name))
+      || JSON.stringify(archived.slice().sort()) !== JSON.stringify(actual)
+      || !archived.includes(python.license_path)) {
       throw new Error(`Incomplete managed CPython legal files: ${entry.target}`);
+    }
+    // Every declared reference must be an archive member or a verified supplemental text.
+    const missing = [...declaredLicensePaths(python)].filter(name => !archived.includes(name)).sort();
+    const applicable = supplemental.filter(item => item.targets.includes(entry.target));
+    const supplied = applicable.filter(item => missing.includes(item.declared_path))
+      .sort((a, b) => a.declared_path.localeCompare(b.declared_path));
+    const unsatisfied = missing.filter(name => !supplied.some(item => item.declared_path === name));
+    if (unsatisfied.length) {
+      throw new Error(`Declared managed CPython licenses absent from the full archive and without a verified supplemental text for ${entry.target}: ${unsatisfied}`);
+    }
+    const stale = applicable.filter(item => !supplied.includes(item)).map(item => item.declared_path);
+    if (stale.length) throw new Error(`Supplemental managed CPython licenses not needed for ${entry.target}: ${stale}`);
+    const supplementalFiles = supplied.map(item => ({
+      declared_path: item.declared_path, path: item.textPath, sha256: item.sha256, provenance: item.recordPath,
+    }));
+    if (JSON.stringify(record.supplemental_legal_files) !== JSON.stringify(supplementalFiles)) {
+      throw new Error(`Managed CPython supplemental inventory mismatch: ${entry.target}`);
+    }
+    for (const item of supplied) {
+      input(item.textPath);
+      input(item.recordPath);
+      if (inventory.input_sha256[item.textPath] !== item.sha256) throw new Error(`Changed managed CPython supplemental license: ${item.textPath}`);
+      const label = item.textPath.slice('scripts/release/licenses/'.length);
+      const notice = inventory.packages.find(pkg => pkg.name === item.component && pkg.version === item.version
+        && pkg.scope?.startsWith(`Managed Python supplemental license text for ${entry.target};`));
+      if (!notice || notice.source !== item.source_archive.url || notice.license_declared !== item.license
+        || !notice.scope.includes(item.declared_path) || !notice.scope.includes(item.source_archive.sha256)
+        || JSON.stringify(notice.texts) !== JSON.stringify([{ path: label, sha256: item.sha256 }])) {
+        throw new Error(`Missing managed CPython supplemental notice: ${entry.target} ${item.declared_path}`);
+      }
     }
     const legalFiles = files.map(item => ({ path: `${archiveDir}/${item.path}`, sha256: item.sha256 }));
     const byPath = (a, b) => a.path.localeCompare(b.path);

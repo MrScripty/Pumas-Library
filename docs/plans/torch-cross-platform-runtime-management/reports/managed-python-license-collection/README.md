@@ -29,9 +29,10 @@ The Linux evidence README describes the accepted installation that produced
 its selected archive record. All per-file hashes can be checked directly
 against the manifests.
 
-## Outstanding attribution evidence
+## Declared files missing from the archives
 
-The inventory includes the collected files for all three targets. It does not
-certify completeness of declared references: the upstream Windows archive
-omits a declared zstd license file. See the
-[verified evidence gap and release gate](missing-declared-license-references.md).
+Each `PYTHON.json` also declares zstd (all three targets) or zlib-ng (Linux and
+macOS) license files that the upstream full archives omit. Release attribution
+fills these from byte-verified supplemental texts taken from the source
+archives that python-build-standalone pins, and labels them as such. See the
+[evidence gap and its resolution](missing-declared-license-references.md).

@@ -10,6 +10,10 @@ is recorded in the release attribution report, not inferred from this list.
 The uv notice covers a runtime executable downloaded by Pumas, not a bundled binary.
 Managed CPython full-archive notices are target-scoped supersets for separately
 selected install-only distributions; each archive identity is recorded below.
+Where a CPython PYTHON.json declares a license file that its full archive omits,
+a separately labelled supplemental notice reproduces that component's license
+file from the source archive pinned by python-build-standalone; it is not an
+archive member.
 
 adler2 2.0.1 (Rust normal/build dependency, all desktop targets; conservative superset)
 Source: https://crates.io/api/v1/crates/adler2/2.0.1/download
@@ -79742,6 +79746,71 @@ docs/license.html_lib.
 
 ==============================================================================
 
+zlib-ng 2.2.4 (Managed Python supplemental license text for aarch64-apple-darwin; PYTHON.json declares licenses/LICENSE.zlib-ng.txt but the CPython full archive omits it; supplied from cpython-source-deps-zlib-ng-2.2.4/LICENSE.md in the source archive pinned by python-build-standalone 20260901 (sha256 00bbd88709bc416cb96160ab61d3e1c8f76e106799af7328d0fe434dc7dd5004), not from the CPython archive)
+Source: https://github.com/python/cpython-source-deps/archive/refs/tags/zlib-ng-2.2.4.tar.gz
+Declared license: Zlib
+--- managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md ---
+(C) 1995-2024 Jean-loup Gailly and Mark Adler
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
+
+
+==============================================================================
+
+zstd 1.5.7 (Managed Python supplemental license text for aarch64-apple-darwin; PYTHON.json declares licenses/LICENSE.zstd.txt but the CPython full archive omits it; supplied from cpython-source-deps-zstd-1.5.7/LICENSE in the source archive pinned by python-build-standalone 20260901 (sha256 f24b52470d12f466e9fa4fcc94e6c530625ada51d7b36de7fdc6ed7e6f499c8e), not from the CPython archive)
+Source: https://github.com/python/cpython-source-deps/archive/refs/tags/zstd-1.5.7.tar.gz
+Declared license: BSD-3-Clause
+--- managed-python-supplemental/zstd-1.5.7-LICENSE ---
+BSD License
+
+For Zstandard software
+
+Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+ * Neither the name Facebook, nor Meta, nor the names of its contributors may
+   be used to endorse or promote products derived from this software without
+   specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+==============================================================================
+
 CPython full archive 3.14.7 (Managed Python full-archive notice superset for x86_64-pc-windows-msvc; selected install-only runtime tracked separately)
 Source: https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-pc-windows-msvc-pgo-full.tar.zst
 Declared license: Python-2.0, CNRI-Python
@@ -82316,6 +82385,44 @@ docs/license.html_lib.
 
 ==============================================================================
 
+zstd 1.5.7 (Managed Python supplemental license text for x86_64-pc-windows-msvc; PYTHON.json declares licenses/LICENSE.zstd.txt but the CPython full archive omits it; supplied from cpython-source-deps-zstd-1.5.7/LICENSE in the source archive pinned by python-build-standalone 20260901 (sha256 f24b52470d12f466e9fa4fcc94e6c530625ada51d7b36de7fdc6ed7e6f499c8e), not from the CPython archive)
+Source: https://github.com/python/cpython-source-deps/archive/refs/tags/zstd-1.5.7.tar.gz
+Declared license: BSD-3-Clause
+--- managed-python-supplemental/zstd-1.5.7-LICENSE ---
+BSD License
+
+For Zstandard software
+
+Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+ * Neither the name Facebook, nor Meta, nor the names of its contributors may
+   be used to endorse or promote products derived from this software without
+   specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+==============================================================================
+
 CPython full archive 3.14.7 (Managed Python full-archive notice superset for x86_64-unknown-linux-gnu; selected install-only runtime tracked separately)
 Source: https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-unknown-linux-gnu-pgo%2Blto-full.tar.zst
 Declared license: Python-2.0, CNRI-Python
@@ -84886,6 +84993,71 @@ docs/license.html_lib.
 
   Jean-loup Gailly        Mark Adler
   jloup@gzip.org          madler@alumni.caltech.edu
+
+
+==============================================================================
+
+zlib-ng 2.2.4 (Managed Python supplemental license text for x86_64-unknown-linux-gnu; PYTHON.json declares licenses/LICENSE.zlib-ng.txt but the CPython full archive omits it; supplied from cpython-source-deps-zlib-ng-2.2.4/LICENSE.md in the source archive pinned by python-build-standalone 20260901 (sha256 00bbd88709bc416cb96160ab61d3e1c8f76e106799af7328d0fe434dc7dd5004), not from the CPython archive)
+Source: https://github.com/python/cpython-source-deps/archive/refs/tags/zlib-ng-2.2.4.tar.gz
+Declared license: Zlib
+--- managed-python-supplemental/zlib-ng-2.2.4-LICENSE.md ---
+(C) 1995-2024 Jean-loup Gailly and Mark Adler
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
+
+
+==============================================================================
+
+zstd 1.5.7 (Managed Python supplemental license text for x86_64-unknown-linux-gnu; PYTHON.json declares licenses/LICENSE.zstd.txt but the CPython full archive omits it; supplied from cpython-source-deps-zstd-1.5.7/LICENSE in the source archive pinned by python-build-standalone 20260901 (sha256 f24b52470d12f466e9fa4fcc94e6c530625ada51d7b36de7fdc6ed7e6f499c8e), not from the CPython archive)
+Source: https://github.com/python/cpython-source-deps/archive/refs/tags/zstd-1.5.7.tar.gz
+Declared license: BSD-3-Clause
+--- managed-python-supplemental/zstd-1.5.7-LICENSE ---
+BSD License
+
+For Zstandard software
+
+Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+ * Neither the name Facebook, nor Meta, nor the names of its contributors may
+   be used to endorse or promote products derived from this software without
+   specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ==============================================================================

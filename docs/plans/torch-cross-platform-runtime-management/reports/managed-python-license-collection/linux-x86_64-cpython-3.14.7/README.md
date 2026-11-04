@@ -13,9 +13,9 @@ declared file references outside that directory.
 
 The files document the Linux archive only. Corresponding Windows x86_64 and
 macOS arm64 collections are retained beside this directory; all three are
-included in the 0.7.0 attribution inventory. Collection does not establish
-complete upstream license coverage: see the [missing declared license
-report](../missing-declared-license-references.md) before release acceptance.
+included in the 0.7.0 attribution inventory. The archive omits
+two declared license files; see the [missing declared license
+report](../missing-declared-license-references.md) for the supplemental texts.
 
 See [`full-archive-manifest.json`](managed-python-licenses/full-archive-manifest.json)
 for exact source identities and per-file hashes. The raw `PYTHON.json` and

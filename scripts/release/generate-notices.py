@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -17,6 +18,11 @@ MANAGED_PYTHON_CATALOG = "scripts/release/licenses/managed-python-sources.json"
 ARTIFACT_PLAN = "scripts/release/artifact-plan.json"
 MANAGED_PYTHON_PINS = "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs"
 PBS_MAPPING = "scripts/release/torch-managed-python-acceptance.py"
+_SUPPLEMENTAL_SPEC = importlib.util.spec_from_file_location(
+    "managed_python_supplemental", Path(__file__).with_name("managed_python_supplemental.py")
+)
+SUPPLEMENTAL = importlib.util.module_from_spec(_SUPPLEMENTAL_SPEC)
+_SUPPLEMENTAL_SPEC.loader.exec_module(SUPPLEMENTAL)
 UV_ARM_TARGETS = {
     "LinuxX8664": "x86_64-unknown-linux-gnu",
     "WindowsX8664": "x86_64-pc-windows-msvc",
@@ -144,6 +150,9 @@ def collect_managed_python(add):
         [],
         {ARTIFACT_PLAN, MANAGED_PYTHON_CATALOG, MANAGED_PYTHON_PINS, PBS_MAPPING},
     )
+    supplemental_records = SUPPLEMENTAL.load_records(
+        repository_file(SUPPLEMENTAL.DIRECTORY), pbs_release, expected_targets
+    )
     for item in sorted(entries, key=lambda item: item["target"]):
         target = item["target"]
         report_name = item["runtime_report"]
@@ -224,6 +233,13 @@ def collect_managed_python(add):
                 raise ValueError(f"Changed managed CPython legal file: {name}")
             legal_files.append({"path": name, "sha256": entry["sha256"]})
             inputs.add(name)
+        supplemental = SUPPLEMENTAL.select(
+            supplemental_records,
+            target,
+            SUPPLEMENTAL.declared_license_paths(python),
+            set(names),
+            strict=True,
+        )
         add(
             "CPython full archive",
             version,
@@ -236,6 +252,33 @@ def collect_managed_python(add):
             ],
             f"Managed Python full-archive notice superset for {target}; selected install-only runtime tracked separately",
         )
+        supplemental_files = []
+        for record in supplemental:
+            text_name = record["text_path"].relative_to(ROOT).as_posix()
+            record_name = record["record_path"].relative_to(ROOT).as_posix()
+            source = record["source_archive"]
+            add(
+                record["component"],
+                record["version"],
+                record["license"],
+                source["url"],
+                LICENSES,
+                [record["text_path"]],
+                f"Managed Python supplemental license text for {target}; PYTHON.json declares "
+                f"{record['declared_path']} but the CPython full archive omits it; supplied "
+                f"from {record['path_in_source_archive']} in the source archive pinned by "
+                f"python-build-standalone {record['python_build_standalone_release']} "
+                f"(sha256 {source['sha256']}), not from the CPython archive",
+            )
+            supplemental_files.append(
+                {
+                    "declared_path": record["declared_path"],
+                    "path": text_name,
+                    "sha256": record["sha256"],
+                    "provenance": record_name,
+                }
+            )
+            inputs.update((text_name, record_name))
         inventory.append(
             {
                 "target": target,
@@ -250,6 +293,7 @@ def collect_managed_python(add):
                 "full_archive_sha256": manifest["archive_sha256"],
                 "python_json": python_name,
                 "legal_files": legal_files,
+                "supplemental_legal_files": supplemental_files,
             }
         )
     return inventory, inputs, uv_version
@@ -476,6 +520,10 @@ is recorded in the release attribution report, not inferred from this list.
 The uv notice covers a runtime executable downloaded by Pumas, not a bundled binary.
 Managed CPython full-archive notices are target-scoped supersets for separately
 selected install-only distributions; each archive identity is recorded below.
+Where a CPython PYTHON.json declares a license file that its full archive omits,
+a separately labelled supplemental notice reproduces that component's license
+file from the source archive pinned by python-build-standalone; it is not an
+archive member.
 
 """
     text = header + ("\n\n" + "=" * 78 + "\n\n").join(sections) + "\n"

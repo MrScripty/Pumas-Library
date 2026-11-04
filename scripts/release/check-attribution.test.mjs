@@ -15,6 +15,9 @@ const planPath = 'scripts/release/artifact-plan.json';
 const pinsPath = 'rust/crates/pumas-app-manager/src/version_manager/managed_python.rs';
 const mappingPath = 'scripts/release/torch-managed-python-acceptance.py';
 const directory = 'docs/release-attribution/0.7.0';
+const supplementalDir = 'scripts/release/licenses/managed-python-supplemental';
+const supplementalReason = 'declared_by_python_json_but_absent_from_upstream_full_archive';
+const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
 const hash = data => createHash('sha256').update(data).digest('hex');
 
 test('bundled JPEG attribution retains IJG terms and exact wrapper provenance', () => {
@@ -44,6 +47,28 @@ function fixture(t) {
   write(pinsPath, `const UV_VERSION: &str = "0.12.18";\nconst UV_BASE_URL: &str = "https://releases.astral.sh/github/uv/releases/download/0.12.18/";\nfn pin(self) -> UvPin {\n${targets.map((target, index) => `    Self::${arms[index]} => UvPin {\n        archive: "uv-${target}.tar.gz",\n        sha256: "${uvHashes[target]}",`).join('\n')}\n    fn accepts_observed`, true);
   write(mappingPath, `REVIEWED_PBS_RELEASE = "20260901"\nFULL_FLAVORS = {\n${targets.map(target => `    "${target}": "${flavors[target]}",`).join('\n')}\n}\n`, true);
   write('scripts/release/licenses/source.txt', 'upstream');
+  // Mirrors PBS 20260901: PYTHON.json declares texts its full archive omits.
+  const supplemental = [
+    { declared_path: 'licenses/LICENSE.zlib-ng.txt', component: 'zlib-ng', version: '2.2.4', license: 'Zlib',
+      file: 'zlib-ng-2.2.4-LICENSE.md', text: 'zlib-ng terms\n', targets: targets.filter(target => !target.includes('windows')).sort() },
+    { declared_path: 'licenses/LICENSE.zstd.txt', component: 'zstd', version: '1.5.7', license: 'BSD-3-Clause',
+      file: 'zstd-1.5.7-LICENSE', text: 'zstd terms\n', targets: targets.slice().sort() },
+  ].map(item => {
+    const record = {
+      schema_version: 1, declared_path: item.declared_path, supplemental_reason: supplementalReason,
+      note: 'Fixture text supplied outside the archive.', python_build_standalone_release: '20260901',
+      pin_authority: 'https://github.com/astral-sh/python-build-standalone/blob/20260901/pythonbuild/downloads.py',
+      targets: item.targets, component: item.component, version: item.version, license: item.license,
+      source_archive: { url: `https://example.invalid/${item.component}.tar.gz`, size: 10, sha256: 'b'.repeat(64) },
+      path_in_source_archive: `${item.component}/LICENSE`, file: item.file,
+      size: Buffer.byteLength(item.text), sha256: hash(item.text),
+    };
+    const textPath = `${supplementalDir}/${item.file}`;
+    const recordPath = `${textPath}.provenance.json`;
+    write(textPath, item.text, true);
+    json(recordPath, record, true);
+    return { record, textPath, recordPath };
+  });
   write(`${directory}/THIRD-PARTY-NOTICES.txt`, 'license text');
   const entries = [];
   const managed = [];
@@ -60,7 +85,9 @@ function fixture(t) {
     const fullName = `cpython-3.14.7+20260901-${target}-${flavors[target]}-full.tar.zst`;
     const full = `https://github.com/astral-sh/python-build-standalone/releases/download/20260901/${encodeURIComponent(fullName)}`;
     const legal = target.includes('windows') ? 'Windows legal\r\nsecond line\r\n' : 'Legal text\n';
-    const python = { target_triple: target, python_version: '3.14.7', build_options: flavors[target], license_path: 'licenses/LICENSE.cpython.txt', licenses: ['Python-2.0'] };
+    const supplied = supplemental.filter(item => item.record.targets.includes(target));
+    const python = { target_triple: target, python_version: '3.14.7', build_options: flavors[target], license_path: 'licenses/LICENSE.cpython.txt', licenses: ['Python-2.0'],
+      build_info: { extensions: { _zstd: [{ license_paths: supplied.map(item => item.record.declared_path) }] } } };
     const pythonBytes = Buffer.from(`${JSON.stringify(python)}\n`);
     write(legalPath, legal, true);
     write(pythonPath, pythonBytes, true);
@@ -80,10 +107,20 @@ function fixture(t) {
       provider_archive_sha256: uvHashes[target], full_archive_url: full,
       full_archive_sha256: 'd'.repeat(64), python_json: pythonPath,
       legal_files: [{ path: legalPath, sha256: hash(legal) }],
+      supplemental_legal_files: supplied.map(item => ({ declared_path: item.record.declared_path,
+        path: item.textPath, sha256: item.record.sha256, provenance: item.recordPath })),
     });
-    packages.push({ name: 'CPython full archive', version: '3.14.7', scope: `full archive ${target}`,
-      source: full, texts: [{ path: 'licenses/LICENSE.cpython.txt', sha256: hash(legal) }],
+    packages.push({ name: 'CPython full archive', version: '3.14.7', license_declared: 'Python-2.0', source: full,
+      scope: `Managed Python full-archive notice superset for ${target}; selected install-only runtime tracked separately`,
+      texts: [{ path: 'licenses/LICENSE.cpython.txt', sha256: hash(legal) }],
     });
+    for (const { record } of supplied) {
+      packages.push({ name: record.component, version: record.version, license_declared: record.license,
+        source: record.source_archive.url,
+        scope: `Managed Python supplemental license text for ${target}; PYTHON.json declares ${record.declared_path} but the CPython full archive omits it; supplied from ${record.path_in_source_archive} in the source archive pinned by python-build-standalone 20260901 (sha256 ${record.source_archive.sha256}), not from the CPython archive`,
+        texts: [{ path: `managed-python-supplemental/${record.file}`, sha256: record.sha256 }],
+      });
+    }
     paths[target] = { reportPath, manifestPath, pythonPath, legalPath };
   }
   json(catalogPath, { schema_version: 1, targets: entries }, true);
@@ -95,11 +132,36 @@ function fixture(t) {
   fs.copyFileSync(path.join(source, '.gitattributes'), path.join(root, '.gitattributes'));
   const run = (features = []) => spawnSync(process.execPath, [path.join(root, 'scripts/release/check-attribution.cjs'),
     '--directory', path.join(root, directory), ...(features.length ? ['--features', ...features] : [])], { encoding: 'utf8' });
-  return { root, run, write, json, inventory, paths };
+  const save = () => json(`${directory}/inventory.json`, inventory);
+  return { root, run, write, json, inventory, paths, supplemental, save };
+}
+
+// Run the real generator's managed-CPython collection against a fixture root.
+function generateManagedPython(root) {
+  const probe = `import importlib.util, json, pathlib, sys
+spec = importlib.util.spec_from_file_location('notices', sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.ROOT = pathlib.Path(sys.argv[2])
+module.LICENSES = module.ROOT / 'scripts/release/licenses'
+packages = []
+def add(name, version, license_id, source, root, files, scope):
+    packages.append({'name': name, 'version': version, 'license_declared': license_id, 'source': source, 'scope': scope,
+        'texts': [{'path': file.relative_to(root if file.is_relative_to(root) else module.LICENSES).as_posix(),
+                   'sha256': module.digest(file.read_bytes())} for file in files]})
+try:
+    inventory, inputs, _ = module.collect_managed_python(add)
+except ValueError as error:
+    print(json.dumps({'error': str(error)}))
+else:
+    print(json.dumps({'inventory': inventory, 'inputs': sorted(inputs), 'packages': packages}))`;
+  const result = spawnSync(python, ['-c', probe, path.join(source, 'scripts/release/generate-notices.py'), root], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
 }
 
 test('attribution survives a Windows-style checkout with original legal bytes', t => {
-  const { root, run, inventory, paths } = fixture(t);
+  const { root, run, inventory, paths, supplemental } = fixture(t);
   assert.equal(run().status, 0);
   const checkout = path.join(path.dirname(root), `${path.basename(root)}-checkout`);
   t.after(() => fs.rmSync(checkout, { recursive: true, force: true }));
@@ -114,7 +176,10 @@ test('attribution survives a Windows-style checkout with original legal bytes', 
   assert.equal(checked.status, 0, checked.stderr);
   const windowsLegal = paths['x86_64-pc-windows-msvc'].legalPath;
   assert.deepEqual(fs.readFileSync(path.join(checkout, windowsLegal)), fs.readFileSync(path.join(root, windowsLegal)));
-  assert.equal(Object.keys(inventory.input_sha256).length, 12 + targets.length * 4);
+  for (const { textPath } of supplemental) {
+    assert.deepEqual(fs.readFileSync(path.join(checkout, textPath)), fs.readFileSync(path.join(root, textPath)));
+  }
+  assert.equal(Object.keys(inventory.input_sha256).length, 12 + targets.length * 4 + supplemental.length * 2);
 });
 
 test('S3 notices require the explicit feature profile and complete Rust closure', t => {
@@ -140,7 +205,6 @@ test('S3 notices require the explicit feature profile and complete Rust closure'
 
 test('generator refuses selected dependencies absent from metadata instead of omitting notices', t => {
   const data = fixture(t);
-  const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
   const probe = `import importlib.util, pathlib, sys\nspec = importlib.util.spec_from_file_location('notices', sys.argv[1])\nmodule = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\nmodule.LICENSES = pathlib.Path(sys.argv[2])\n(module.LICENSES / 'sources.json').write_text('[]')\nseen = []\ndef run(*args):\n seen.append(args)\n if args[1] == 'metadata':\n  assert '--features' in args and 'pumas-rpc/s3' in args\n  return '{"packages": []}'\n return 'aws-sdk-s3 v1.137.0\\n'\nmodule.run = run\ntry:\n module.collect(('s3',))\nexcept ValueError as error:\n assert 'Incomplete Rust attribution closure' in str(error), str(error)\nelse:\n raise AssertionError('selected SDK was silently omitted')`;
   const result = spawnSync(python, ['-c', probe, path.join(source, 'scripts/release/generate-notices.py'), path.join(data.root, 'scripts/release/licenses')], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
@@ -246,7 +310,6 @@ test('checker binds reports to shipped uv pins and the reviewed PBS build', t =>
 
 test('swapping complete Rust target pin arms is rejected after rehashing', t => {
   const data = fixture(t);
-  const python = process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
   const probe = `import importlib.util, pathlib, sys\nspec = importlib.util.spec_from_file_location('notices', sys.argv[1])\nmodule = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\nmodule.ROOT = pathlib.Path(sys.argv[2])\nmodule.retained_provider_pins(set(sys.argv[3].split(',')))`;
   const validateGeneratorPins = () => spawnSync(python, ['-c', probe, path.join(source, 'scripts/release/generate-notices.py'), data.root, targets.join(',')], { encoding: 'utf8' });
   assert.equal(validateGeneratorPins().status, 0);
@@ -315,4 +378,76 @@ test('checker requires each legal notice text exactly once', t => {
   notice.texts = [second];
   data.json(`${directory}/inventory.json`, data.inventory);
   assert.match(data.run().stderr, /Missing managed CPython full-archive notice/);
+});
+
+test('supplemental license rules pass their Python unit tests', () => {
+  const result = spawnSync(python, ['-m', 'unittest', '-v', 'test_managed_python_supplemental'],
+    { cwd: path.join(source, 'scripts/release'), encoding: 'utf8', timeout: 30_000 });
+  assert.equal(result.status, 0, result.stderr || String(result.error));
+});
+
+test('generator and checker agree on verified supplemental CPython notices', t => {
+  const data = fixture(t);
+  assert.equal(data.run().status, 0, data.run().stderr);
+  const generated = generateManagedPython(data.root);
+  assert.equal(generated.error, undefined, generated.error);
+  const byTarget = (a, b) => a.target.localeCompare(b.target);
+  assert.deepEqual(generated.inventory, data.inventory.managed_python.slice().sort(byTarget));
+  const byNotice = (a, b) => `${a.scope}\0${a.name}`.localeCompare(`${b.scope}\0${b.name}`);
+  assert.deepEqual(generated.packages.slice().sort(byNotice), data.inventory.packages.slice().sort(byNotice));
+  const base = new Set(['rust/Cargo.lock', 'rust/Cargo.toml', 'rust/crates/pumas-core/Cargo.toml', 'rust/crates/pumas-rpc/Cargo.toml', 'rust/crates/pumas-app-manager/Cargo.toml', 'pnpm-lock.yaml', 'electron/package.json', 'frontend/package.json']);
+  assert.deepEqual(generated.inputs, Object.keys(data.inventory.input_sha256).filter(name => !base.has(name)).sort());
+  const windows = generated.inventory.find(item => item.target === 'x86_64-pc-windows-msvc');
+  assert.deepEqual(windows.supplemental_legal_files.map(item => item.declared_path), ['licenses/LICENSE.zstd.txt']);
+  for (const item of generated.inventory) {
+    assert.ok(item.legal_files.every(file => !file.path.startsWith(supplementalDir)), 'supplemental text listed as archive member');
+  }
+});
+
+test('supplemental text whose bytes differ from its provenance is refused', t => {
+  const data = fixture(t);
+  const { textPath } = data.supplemental[1];
+  data.write(textPath, 'altered zstd terms\n');
+  assert.match(data.run().stderr, /Stale release attribution/);
+  data.inventory.input_sha256[textPath] = hash('altered zstd terms\n');
+  data.save();
+  assert.match(data.run().stderr, /Changed managed CPython supplemental license/);
+  assert.match(generateManagedPython(data.root).error, /Changed managed CPython supplemental license/);
+});
+
+test('declared licenses absent from the archive need an exact verified supplemental text', t => {
+  const unsupplied = fixture(t);
+  const zlib = unsupplied.supplemental[0];
+  for (const name of [zlib.textPath, zlib.recordPath]) {
+    fs.unlinkSync(path.join(unsupplied.root, name));
+    delete unsupplied.inventory.input_sha256[name];
+  }
+  for (const item of unsupplied.inventory.managed_python) {
+    item.supplemental_legal_files = item.supplemental_legal_files.filter(file => file.path !== zlib.textPath);
+  }
+  unsupplied.save();
+  assert.match(unsupplied.run().stderr, /absent from the full archive and without a verified supplemental text .*LICENSE\.zlib-ng\.txt/);
+  assert.match(generateManagedPython(unsupplied.root).error, /absent from the full archive.*LICENSE\.zlib-ng\.txt/);
+
+  const undeclared = fixture(t);
+  const extra = { ...undeclared.supplemental[1].record, declared_path: 'licenses/LICENSE.other.txt', file: 'other-LICENSE' };
+  undeclared.write(`${supplementalDir}/other-LICENSE`, 'zstd terms\n', false);
+  undeclared.json(`${supplementalDir}/other-LICENSE.provenance.json`, extra);
+  assert.match(undeclared.run().stderr, /Supplemental managed CPython licenses not needed .*LICENSE\.other\.txt/);
+  assert.match(generateManagedPython(undeclared.root).error, /not needed .*LICENSE\.other\.txt/);
+
+  const orphan = fixture(t);
+  orphan.write(`${supplementalDir}/unexplained-LICENSE`, 'terms\n');
+  assert.match(orphan.run().stderr, /Supplemental license texts without provenance/);
+
+  const presented = fixture(t);
+  const notice = presented.inventory.packages.find(item => item.name === 'zstd');
+  notice.texts = [{ path: 'licenses/LICENSE.zstd.txt', sha256: notice.texts[0].sha256 }];
+  presented.save();
+  assert.match(presented.run().stderr, /Missing managed CPython supplemental notice/);
+
+  const omitted = fixture(t);
+  omitted.inventory.managed_python[0].supplemental_legal_files = [];
+  omitted.save();
+  assert.match(omitted.run().stderr, /Managed CPython supplemental inventory mismatch/);
 });

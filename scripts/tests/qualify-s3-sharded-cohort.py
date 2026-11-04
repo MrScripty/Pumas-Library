@@ -207,7 +207,7 @@ def main():
         server.socket = context.wrap_socket(server.socket, server_side=True)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        command = ["cargo", "test", "--offline", "--locked", "--manifest-path", "rust/Cargo.toml", "-p", "pumas-library", "--no-default-features", "--features", "s3", "--test", "s3_sharded_cohort", "--", "--ignored", "--nocapture"]
+        command = ["cargo", "test", "--offline", "--locked", "--manifest-path", "rust/Cargo.toml", "-p", "pumas-library", "--no-default-features", "--features", "s3", "--test", "integration", "--", "--ignored", "--nocapture", "s3_sharded_cohort::"]
         environment = dict(os.environ, ORT_SKIP_DOWNLOAD="1", SSL_CERT_FILE=str(ca), PUMAS_S3_COHORT_ENDPOINT=f"https://127.0.0.1:{server.server_port}", PUMAS_S3_COHORT_OBJECTS=str(workspace))
         try:
             with (output / "cargo-test.log").open("w") as log:

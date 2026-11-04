@@ -169,12 +169,27 @@ pub async fn import_local_cohere(state: &AppState, params: &Value) -> pumas_libr
     )?)
 }
 
+/// A required list parameter. A missing or malformed list is refused with its
+/// reason; it never becomes an empty list that reports success.
+fn required_list<T: serde::de::DeserializeOwned>(
+    params: &Value,
+    key: &str,
+) -> pumas_library::Result<Vec<T>> {
+    let value = params
+        .get(key)
+        .ok_or_else(|| pumas_library::PumasError::InvalidParams {
+            message: format!("`{key}` is required"),
+        })?;
+    serde_json::from_value(value.clone()).map_err(|error| {
+        pumas_library::PumasError::InvalidParams {
+            message: format!("`{key}` is invalid: {error}"),
+        }
+    })
+}
+
 pub async fn import_batch(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
-    // Parse the imports array from params
-    let imports: Vec<pumas_library::model_library::ModelImportSpec> = params
-        .get("imports")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+    let imports: Vec<pumas_library::model_library::ModelImportSpec> =
+        required_list(params, "imports")?;
 
     let results = state.api.import_models_batch(imports).await;
     let imported = results.iter().filter(|r| r.success).count();
@@ -213,10 +228,7 @@ pub async fn classify_model_import_paths(
     state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    let paths: Vec<String> = params
-        .get("paths")
-        .and_then(|value| serde_json::from_value(value.clone()).ok())
-        .unwrap_or_default();
+    let paths: Vec<String> = required_list(params, "paths")?;
 
     let result = state.api.classify_model_import_paths(&paths).await?;
     Ok(serde_json::to_value(result)?)
@@ -292,11 +304,7 @@ pub async fn detect_sharded_sets(
     _state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    // Get files array from params
-    let files: Vec<String> = params
-        .get("files")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+    let files: Vec<String> = required_list(params, "files")?;
 
     let mut paths = Vec::with_capacity(files.len());
     for file in files {

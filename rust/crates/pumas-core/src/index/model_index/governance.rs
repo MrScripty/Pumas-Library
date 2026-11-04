@@ -246,8 +246,35 @@ impl ModelIndex {
         Ok(())
     }
 
+    /// Run a multi-statement schema change as one unit. A savepoint nests
+    /// inside a caller's transaction and, at the outermost level, is atomic
+    /// across a crash: an interrupted rebuild never leaves a renamed table
+    /// behind with an empty replacement.
+    fn all_or_nothing(conn: &Connection, name: &str, sql: &str) -> Result<()> {
+        conn.execute_batch(&format!("SAVEPOINT {name};"))?;
+        match conn.execute_batch(sql) {
+            Ok(()) => {
+                conn.execute_batch(&format!("RELEASE {name};"))?;
+                Ok(())
+            }
+            Err(error) => {
+                if let Err(rollback) =
+                    conn.execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name};"))
+                {
+                    return Err(PumasError::Database {
+                        message: format!("{error}; rolling back {name} also failed: {rollback}"),
+                        source: None,
+                    });
+                }
+                Err(error.into())
+            }
+        }
+    }
+
     fn rebuild_model_type_arch_rules_table(conn: &Connection) -> Result<()> {
-        conn.execute_batch(
+        Self::all_or_nothing(
+            conn,
+            "rebuild_model_type_arch_rules",
             "
             ALTER TABLE model_type_arch_rules RENAME TO model_type_arch_rules_legacy;
 
@@ -297,7 +324,9 @@ impl ModelIndex {
     }
 
     fn rebuild_model_type_config_rules_table(conn: &Connection) -> Result<()> {
-        conn.execute_batch(
+        Self::all_or_nothing(
+            conn,
+            "rebuild_model_type_config_rules",
             "
             ALTER TABLE model_type_config_rules RENAME TO model_type_config_rules_legacy;
 
@@ -909,5 +938,47 @@ impl ModelIndex {
         let mapped: Option<String> = stmt.query_row(params![hint], |row| row.get(0)).optional()?;
 
         Ok(mapped)
+    }
+}
+
+#[cfg(test)]
+mod rebuild_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_rule_table_rebuild_leaves_the_original_table_and_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE model_type_arch_rules (id INTEGER PRIMARY KEY, pattern TEXT);
+             INSERT INTO model_type_arch_rules (pattern) VALUES ('UserRuleForASR');",
+        )
+        .unwrap();
+
+        // Fails after the rename, as an interrupted rebuild would.
+        let result = ModelIndex::all_or_nothing(
+            &conn,
+            "rebuild_model_type_arch_rules",
+            "ALTER TABLE model_type_arch_rules RENAME TO model_type_arch_rules_legacy;
+             CREATE TABLE model_type_arch_rules (id INTEGER PRIMARY KEY, pattern TEXT);
+             INSERT INTO model_type_arch_rules SELECT * FROM missing_table;",
+        );
+
+        assert!(result.is_err());
+        let pattern: String = conn
+            .query_row("SELECT pattern FROM model_type_arch_rules", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(pattern, "UserRuleForASR");
+        let legacy: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'model_type_arch_rules_legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy, 0);
+        // The connection is usable afterwards: no savepoint is left open.
+        assert!(conn.is_autocommit());
     }
 }

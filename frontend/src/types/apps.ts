@@ -27,7 +27,14 @@ export interface ModelInfo {
   recovery?: CatalogRecoveryIdentity;
   id: string;
   name: string;
+  /** What the model is used for; see utils/modelCategories. */
   category: string;
+  /** Input kinds the model accepts (text, image, audio, video, ...). */
+  inputModalities?: readonly string[];
+  /** Output kinds the model produces (text, image, video, embedding, decision, ...). */
+  outputModalities?: readonly string[];
+  /** A LoRA/PEFT adapter for another model, not usable on its own. */
+  adapter?: boolean;
   path?: string;
   modelDir?: string;
   format?: string;

@@ -22,6 +22,9 @@ struct GgufMetadata {
     basename: Option<String>,
     /// Model type field from GGUF (usually "model")
     model_type: Option<String>,
+    /// `<arch>.decision.type` is present: llama.cpp serves the model as a
+    /// decision model (`/v1/systemone`), not as a chat model.
+    decision: bool,
 }
 
 /// Magic bytes for file format detection.
@@ -265,6 +268,9 @@ fn identify_gguf<R: Read + Seek>(file: &mut R, path: &Path) -> Result<ModelTypeI
 /// Checks architecture, name, and basename to classify the model.
 /// Priority: architecture match > name/basename keywords > default to LLM.
 fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
+    if metadata.decision {
+        return ModelType::Decision;
+    }
     // 1. Check architecture for known non-LLM types
     if let Some(ref arch) = metadata.architecture {
         let arch_lower = arch.to_lowercase();
@@ -414,6 +420,14 @@ fn extract_gguf_key_metadata<R: Read>(file: &mut R, metadata_count: usize) -> Re
             Err(_) => break,
         };
 
+        // Model keys precede the (large) tokenizer arrays.
+        if key.starts_with("tokenizer.") {
+            break;
+        }
+        if key.ends_with(".decision.type") {
+            metadata.decision = true;
+        }
+
         // Read value type
         let mut type_buf = [0u8; 4];
         if file.read_exact(&mut type_buf).is_err() {
@@ -437,15 +451,6 @@ fn extract_gguf_key_metadata<R: Read>(file: &mut R, metadata_count: usize) -> Re
             if skip_gguf_value(file, value_type).is_err() {
                 break;
             }
-        }
-
-        // Early exit if we have all the info we need
-        if metadata.architecture.is_some()
-            && metadata.name.is_some()
-            && metadata.basename.is_some()
-            && metadata.model_type.is_some()
-        {
-            break;
         }
     }
 
@@ -1144,10 +1149,62 @@ mod tests {
             name: Some("Qwen3-Reranker-4B".to_string()),
             basename: Some("qwen3-reranker-4b".to_string()),
             model_type: Some("model".to_string()),
+            decision: false,
         };
         assert_eq!(
             detect_model_type_from_gguf_metadata(&metadata),
             ModelType::Reranker
+        );
+    }
+
+    /// A GGUF header carrying string keys, as llama.cpp writes them.
+    fn gguf_with_string_keys(keys: &[(&str, &str)]) -> Vec<u8> {
+        let mut bytes = b"GGUF".to_vec();
+        bytes.extend_from_slice(&3_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes());
+        bytes.extend_from_slice(&(keys.len() as u64).to_le_bytes());
+        for (key, value) in keys {
+            bytes.extend_from_slice(&(key.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(key.as_bytes());
+            bytes.extend_from_slice(&8_u32.to_le_bytes());
+            bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(value.as_bytes());
+        }
+        bytes
+    }
+
+    #[test]
+    fn gguf_decision_head_identifies_a_decision_model() {
+        // Kev and Laya declare `<arch>.decision.type` after their general keys.
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("Kev-4B-Q8_0.gguf");
+        std::fs::write(
+            &path,
+            gguf_with_string_keys(&[
+                ("general.architecture", "qwen35"),
+                ("general.type", "model"),
+                ("general.name", "Kev 4B"),
+                ("general.basename", "kev"),
+                ("qwen35.decision.type", "kev"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            identify_model_type(&path).unwrap().model_type,
+            ModelType::Decision
+        );
+
+        std::fs::write(
+            &path,
+            gguf_with_string_keys(&[
+                ("general.architecture", "qwen35"),
+                ("general.name", "Qwen3.5 4B"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            identify_model_type(&path).unwrap().model_type,
+            ModelType::Llm
         );
     }
 }

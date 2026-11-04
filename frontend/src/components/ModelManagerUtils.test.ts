@@ -413,6 +413,9 @@ describe('ModelManagerUtils', () => {
   it('maps remote pipeline kinds to local download model categories', () => {
     expect(resolveDownloadModelType('image-text-to-text')).toBe('vlm');
     expect(resolveDownloadModelType('feature-extraction')).toBe('embedding');
+    expect(resolveDownloadModelType('image-to-video')).toBe('video');
+    expect(resolveDownloadModelType('text-to-video')).toBe('video');
+    expect(resolveDownloadModelType('text-classification')).toBe('decision');
     expect(resolveDownloadModelType('unknown-pipeline')).toBe('unknown');
   });
 });

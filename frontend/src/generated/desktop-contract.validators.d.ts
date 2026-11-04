@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 6565e5785ec312399caf4db0d8659735a397b7188ab0aa065918873ec7727119. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 c4e3bf23ab179263cdc371a0932f7c97bc24df80ffbb370c04a3d1873205ec09. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -42,6 +42,7 @@ export declare function validateLibraryModelMetadataOutcome(value: unknown): boo
 export declare function validateLibraryUpgradeConfirmation(value: unknown): boolean;
 export declare function validateLibraryUpgradeResult(value: unknown): boolean;
 export declare function validateLinkHealthOutcome(value: unknown): boolean;
+export declare function validateModelCategoryOutcome(value: unknown): boolean;
 export declare function validateModelDownloadUpdateOutcome(value: unknown): boolean;
 export declare function validateModelImportSelection(value: unknown): boolean;
 export declare function validateModelIndexRefreshOutcome(value: unknown): boolean;

@@ -751,11 +751,16 @@ async fn test_get_library_status_reconciles_stale_library_state_on_first_read() 
         .path()
         .join("shared-resources/models/unknown/kittenml/kitten-tts-mini-0_8")
         .exists());
+    // Only the stale family moves a model; it keeps its `llm` storage bucket.
     assert!(!temp_dir
         .path()
         .join("shared-resources/models/llm/vit/qwen-image-2512-heretic")
         .exists());
     assert!(temp_dir
+        .path()
+        .join("shared-resources/models/llm/catplusplus/qwen-image-2512-heretic")
+        .exists());
+    assert!(!temp_dir
         .path()
         .join("shared-resources/models/diffusion/catplusplus/qwen-image-2512-heretic")
         .exists());
@@ -780,7 +785,12 @@ async fn test_generate_migration_dry_run_reconciles_before_reporting() {
         .path()
         .join("shared-resources/models/unknown/kittenml/kitten-tts-mini-0_8")
         .exists());
+    // Reconciliation fixed the stale family in place of the `llm` storage bucket.
     assert!(temp_dir
+        .path()
+        .join("shared-resources/models/llm/catplusplus/qwen-image-2512-heretic")
+        .exists());
+    assert!(!temp_dir
         .path()
         .join("shared-resources/models/diffusion/catplusplus/qwen-image-2512-heretic")
         .exists());

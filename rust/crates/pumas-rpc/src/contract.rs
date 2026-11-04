@@ -496,6 +496,11 @@ pub(crate) enum RpcCommand {
         model_id: String,
         notes: Option<String>,
     },
+    /// Record (`Some`) or clear (`None`) a person's choice of category.
+    SetModelCategory {
+        model_id: String,
+        category: Option<pumas_library::model_library::ModelType>,
+    },
     SearchCatalog {
         query: String,
         limit: usize,
@@ -647,6 +652,7 @@ impl RpcCommand {
             Self::GetHfDownloadDetails { .. } => "get_hf_download_details",
             Self::UpdateInferenceSettings { .. } => "update_inference_settings",
             Self::UpdateModelNotes { .. } => "update_model_notes",
+            Self::SetModelCategory { .. } => "set_model_category",
             Self::RefreshModelIndex => "refresh_model_index",
             Self::IntentQueryModels { .. } => "intent_query_models",
             Self::IntentGetModel { .. } => "intent_get_model",
@@ -784,6 +790,7 @@ pub(crate) enum RpcOutcome {
     InferenceSettings(Box<InferenceSettingsOutcome>),
     UpdateInferenceSettings(UpdateInferenceSettingsOutcome),
     UpdateModelNotes(UpdateModelNotesOutcome),
+    ModelCategory(ModelCategoryOutcome),
     LibraryModelMetadata(Box<LibraryModelMetadataOutcome>),
     ModelIndexRefresh(ModelIndexRefreshOutcome),
     IntentQueryModels(Box<QueryModelsOutcome>),
@@ -913,6 +920,7 @@ impl RpcOutcome {
             Self::InferenceSettings(value) => serde_json::to_value(value),
             Self::UpdateInferenceSettings(value) => serde_json::to_value(value),
             Self::UpdateModelNotes(value) => serde_json::to_value(value),
+            Self::ModelCategory(value) => serde_json::to_value(value),
             Self::LibraryModelMetadata(value) => serde_json::to_value(value),
             Self::ModelIndexRefresh(value) => serde_json::to_value(value),
             Self::IntentQueryModels(value) => serde_json::to_value(value),
@@ -3295,7 +3303,17 @@ struct CatalogModel {
     id: String,
     model_dir: String,
     display_name: String,
+    /// What the model is used for (llm, vlm, decision, embedding, reranker,
+    /// diffusion, video, audio, vision, unknown). New values may be added.
     model_type: String,
+    /// Input kinds the model accepts (text, image, audio, video, ...); empty
+    /// when unknown.
+    input_modalities: Vec<String>,
+    /// Output kinds the model produces (text, image, audio, video, embedding,
+    /// decision, ...); empty when unknown.
+    output_modalities: Vec<String>,
+    /// The package adapts another model (LoRA/PEFT) rather than running alone.
+    adapter: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "export-contract", schemars(with = "String"))]
     format: Option<String>,
@@ -3434,12 +3452,23 @@ impl CatalogModel {
             recovery.map(CatalogRecoveryIdentity::from),
         )?;
         let integrity = catalog_integrity_state(metadata, &model_id)?;
+        let input_modalities = catalog_modalities(metadata, "input_modalities", &model_id)?;
+        let output_modalities = catalog_modalities(metadata, "output_modalities", &model_id)?;
+        let adapter = match metadata.get(ADAPTER_METADATA_KEY) {
+            None | Some(Value::Null) => false,
+            Some(value) => value
+                .as_bool()
+                .ok_or_else(|| invalid_catalog_record(&model_id, "adapter flag is not boolean"))?,
+        };
 
         Ok(Self {
             id: model_id,
             model_dir,
             display_name,
             model_type,
+            input_modalities,
+            output_modalities,
+            adapter,
             format,
             quantization,
             size_bytes,
@@ -3450,6 +3479,41 @@ impl CatalogModel {
             integrity,
         })
     }
+}
+
+/// Index-projection key for the adapter flag (owned by pumas-core).
+const ADAPTER_METADATA_KEY: &str = "is_adapter";
+
+/// Declared modalities without the `unknown` placeholder. Core normalizes
+/// them to a fixed vocabulary, and duplicates are dropped, so the list is
+/// bounded by that vocabulary.
+fn catalog_modalities(
+    metadata: &Map<String, Value>,
+    field: &str,
+    model_id: &str,
+) -> Result<Vec<String>, PumasError> {
+    let values = match metadata.get(field) {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(values)) => values,
+        Some(_) => {
+            return Err(invalid_catalog_record(
+                model_id,
+                &format!("{field} is not a list"),
+            ))
+        }
+    };
+    let mut modalities = Vec::new();
+    for value in values {
+        let modality = value
+            .as_str()
+            .and_then(bounded_nonblank_text)
+            .ok_or_else(|| invalid_catalog_record(model_id, &format!("{field} has a blank entry")))?
+            .to_ascii_lowercase();
+        if modality != "unknown" && !modalities.contains(&modality) {
+            modalities.push(modality);
+        }
+    }
+    Ok(modalities)
 }
 
 fn required_record_text(value: &str, field: &str) -> Result<String, PumasError> {
@@ -5619,6 +5683,79 @@ pub(crate) struct UpdateModelNotesParams {
     notes: Option<String>,
 }
 
+/// `set_model_category` parameters: `category: null` clears the choice.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct SetModelCategoryParams {
+    #[serde(alias = "modelId")]
+    model_id: String,
+    /// Required: a category name, or `null` to clear the choice. A missing
+    /// field must never clear a choice by accident.
+    #[serde(default, deserialize_with = "present_value")]
+    #[cfg_attr(feature = "export-contract", schemars(with = "Option<String>"))]
+    category: Option<Option<String>>,
+}
+
+/// Distinguish an explicit `null` (`Some(None)`) from a missing field (`None`).
+fn present_value<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
+/// Categories a person can choose: every category except `unknown`, which is
+/// cleared instead.
+pub(crate) const CHOOSABLE_MODEL_CATEGORIES: [pumas_library::model_library::ModelType; 9] = {
+    let all = pumas_library::model_library::ModelType::ALL;
+    [
+        all[0], all[1], all[2], all[3], all[4], all[5], all[6], all[7], all[8],
+    ]
+};
+
+/// A choosable category by its exact name. HF task tags are not accepted
+/// here: the choice must be one of the categories the library shows.
+fn parse_model_category(
+    value: &str,
+) -> Result<pumas_library::model_library::ModelType, PublicError> {
+    CHOOSABLE_MODEL_CATEGORIES
+        .iter()
+        .copied()
+        .find(|category| category.as_str() == value.trim())
+        .ok_or_else(|| {
+            let names: Vec<&str> = CHOOSABLE_MODEL_CATEGORIES
+                .iter()
+                .map(|category| category.as_str())
+                .collect();
+            PublicError::from(&PumasError::InvalidParams {
+                message: format!(
+                    "category must be one of {}, or null to re-detect it",
+                    names.join(", ")
+                ),
+            })
+        })
+}
+
+/// The category now recorded for a model after `set_model_category`.
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct ModelCategoryOutcome {
+    success: bool,
+    model_id: String,
+    category: String,
+}
+
+impl ModelCategoryOutcome {
+    pub(crate) fn new(model_id: &str, category: pumas_library::model_library::ModelType) -> Self {
+        Self {
+            success: true,
+            model_id: model_id.to_string(),
+            category: category.as_str().to_string(),
+        }
+    }
+}
+
 #[cfg(any(test, feature = "export-contract"))]
 fn update_model_notes_requests() -> Vec<(Value, bool)> {
     use serde_json::json;
@@ -6780,6 +6917,17 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         }),
         #[cfg(not(feature = "inference-plugins"))]
         "set_default_version" => Err(PublicError::method_not_found()),
+        "set_model_category" => parse_params::<SetModelCategoryParams>(params).and_then(|params| {
+            let model_id = validate_lookup_model_id(params.model_id)?;
+            let Some(category) = params.category else {
+                return Err(PublicError::from(&PumasError::InvalidParams {
+                    message: "category is required: a category name, or null to re-detect it"
+                        .into(),
+                }));
+            };
+            let category = category.as_deref().map(parse_model_category).transpose()?;
+            Ok(RpcCommand::SetModelCategory { model_id, category })
+        }),
         "update_model_notes" => parse_params::<UpdateModelNotesParams>(params).map(|params| {
             RpcCommand::UpdateModelNotes {
                 model_id: params.model_id,
@@ -7434,6 +7582,66 @@ mod tests {
             "unexpected": false,
         }))
         .is_err());
+    }
+
+    #[test]
+    fn choosable_categories_are_every_category_except_unknown() {
+        use pumas_library::model_library::ModelType;
+        let expected: Vec<ModelType> = ModelType::ALL
+            .into_iter()
+            .filter(|category| *category != ModelType::Unknown)
+            .collect();
+        assert_eq!(CHOOSABLE_MODEL_CATEGORIES.to_vec(), expected);
+    }
+
+    #[test]
+    fn set_model_category_admits_exact_categories_and_explains_refusals() {
+        let chosen = AdmittedRpcRequest::decode(&request(
+            "set_model_category",
+            Some(json!({"modelId": "llm/qwen35/kev", "category": "decision"})),
+        ))
+        .unwrap();
+        assert!(matches!(
+            chosen.command,
+            RpcCommand::SetModelCategory {
+                category: Some(pumas_library::model_library::ModelType::Decision),
+                ..
+            }
+        ));
+        let cleared = AdmittedRpcRequest::decode(&request(
+            "set_model_category",
+            Some(json!({"model_id": "llm/qwen35/kev", "category": null})),
+        ))
+        .unwrap();
+        assert!(matches!(
+            cleared.command,
+            RpcCommand::SetModelCategory { category: None, .. }
+        ));
+
+        // A task tag or `unknown` is not a choosable category, and the reason says so.
+        for category in ["text-classification", "unknown", "VIDEO"] {
+            let refusal = admission_error(&request(
+                "set_model_category",
+                Some(json!({"model_id": "llm/qwen35/kev", "category": category})),
+            ));
+            assert!(
+                refusal
+                    .error
+                    .message
+                    .contains("category must be one of llm"),
+                "{category}: {}",
+                refusal.error.message
+            );
+        }
+        for params in [
+            json!({"model_id": "llm/qwen35/kev"}),
+            json!({"model_id": "../escape", "category": "llm"}),
+            json!({"model_id": "llm/qwen35/kev", "category": "llm", "extra": 1}),
+        ] {
+            assert!(
+                AdmittedRpcRequest::decode(&request("set_model_category", Some(params))).is_err()
+            );
+        }
     }
 
     #[test]
@@ -8420,7 +8628,10 @@ mod tests {
                 "selected_artifact_quant": "Q4_K_M",
                 "integrity_issue_duplicate_repo_id": true,
                 "integrity_issue_duplicate_repo_id_count": 2,
-                "integrity_issue_duplicate_repo_id_others": ["llm/acme/model-copy"]
+                "integrity_issue_duplicate_repo_id_others": ["llm/acme/model-copy"],
+                "input_modalities": ["text"],
+                "output_modalities": ["text", "unknown", "TEXT"],
+                "is_adapter": false
             }),
             updated_at: "2026-09-03T00:00:00Z".to_string(),
         };
@@ -8453,6 +8664,9 @@ mod tests {
                         "modelDir": model_dir.display().to_string(),
                         "displayName": "Model",
                         "modelType": "llm",
+                        "inputModalities": ["text"],
+                        "outputModalities": ["text"],
+                        "adapter": false,
                         "format": "gguf",
                         "quantization": "Q4_K_M",
                         "sizeBytes": 4096,

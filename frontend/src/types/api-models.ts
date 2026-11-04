@@ -1,6 +1,6 @@
 import type { BaseResponse } from './api-common';
 import type {
-  DownloadListOutcome, DownloadStartedOutcome, DownloadStatusOutcome, HfDownloadDetailsOutcome, InferenceSettingsOutcome, ModelDownloadSnapshotOutcome as DesktopModelDownloadSnapshotOutcome, ModelDownloadUpdateOutcome as DesktopModelDownloadUpdateOutcome, ModelsOutcome, PartialDownloadOutcome, UpdateInferenceSettingsOutcome, UpdateModelNotesOutcome,
+  DownloadListOutcome, DownloadStartedOutcome, DownloadStatusOutcome, HfDownloadDetailsOutcome, InferenceSettingsOutcome, ModelDownloadSnapshotOutcome as DesktopModelDownloadSnapshotOutcome, ModelDownloadUpdateOutcome as DesktopModelDownloadUpdateOutcome, ModelsOutcome, PartialDownloadOutcome, UpdateInferenceSettingsOutcome, UpdateModelNotesOutcome, ModelCategoryOutcome,
 } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -122,6 +122,7 @@ export type InferenceSettingsResponse = InferenceSettingsOutcome;
 export type UpdateInferenceSettingsResponse = UpdateInferenceSettingsOutcome;
 
 export type UpdateModelNotesResponse = UpdateModelNotesOutcome;
+export type SetModelCategoryResponse = ModelCategoryOutcome;
 
 export interface SearchHFModelsResponse extends BaseResponse {
   models: HuggingFaceModel[];

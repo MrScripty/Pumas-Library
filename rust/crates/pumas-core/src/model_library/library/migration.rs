@@ -1111,6 +1111,14 @@ impl ModelLibrary {
             )
         };
         let resolved_type = resolved.model_type.as_str().to_string();
+        // The category is metadata: a model keeps the storage bucket (first ID
+        // segment) it was imported under, so a category change never moves it.
+        let storage_bucket = model_id
+            .split('/')
+            .next()
+            .filter(|bucket| !bucket.is_empty())
+            .unwrap_or(resolved_type.as_str())
+            .to_string();
 
         let selected_artifact_id = metadata
             .as_ref()
@@ -1160,12 +1168,12 @@ impl ModelLibrary {
             if let Some(selected_artifact_id) = selected_artifact_id.as_deref() {
                 (
                     self.build_artifact_model_path(
-                        &resolved_type,
+                        &storage_bucket,
                         &resolved_family,
                         selected_artifact_id,
                     ),
                     self.build_artifact_model_id(
-                        &resolved_type,
+                        &storage_bucket,
                         &resolved_family,
                         selected_artifact_id,
                     ),
@@ -1173,10 +1181,10 @@ impl ModelLibrary {
             } else {
                 let target_cleaned_name = cleaned_name.clone();
                 (
-                    self.build_model_path(&resolved_type, &resolved_family, &target_cleaned_name),
+                    self.build_model_path(&storage_bucket, &resolved_family, &target_cleaned_name),
                     format!(
                         "{}/{}/{}",
-                        normalize_name(&resolved_type),
+                        normalize_name(&storage_bucket),
                         normalize_name(&resolved_family),
                         normalize_name(&target_cleaned_name)
                     ),
@@ -1418,6 +1426,7 @@ impl ModelLibrary {
                             .action_kind
                             .clone()
                             .or_else(|| Some(item.action.clone())),
+                        resolved_model_type: item.resolved_model_type.clone(),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -1591,6 +1600,7 @@ impl ModelLibrary {
         let selected_artifact_files = planned.selected_artifact_files.clone();
         let target_model_id = planned.target_model_id.clone();
         let old_model_id = planned.model_id.clone();
+        let resolved_category = planned.resolved_model_type.clone();
         let target_for_record = target_dir.clone();
         let conversion_candidates = self
             .model_dirs()
@@ -1664,6 +1674,9 @@ impl ModelLibrary {
                 }
                 metadata.model_id = Some(target_model_id.clone());
                 apply_target_identity_to_metadata(&mut metadata, &target_model_id);
+                if let Some(category) = resolved_category.as_ref() {
+                    metadata.model_type = Some(category.clone());
+                }
                 if let Some(selected_artifact_id) = selected_artifact_id {
                     metadata.selected_artifact_id = Some(selected_artifact_id);
                 }
@@ -2396,6 +2409,10 @@ pub struct MigrationPlannedMove {
     pub selected_artifact_files: Vec<String>,
     #[serde(default)]
     pub action_kind: Option<String>,
+    /// Category to record after the move. The target ID's first segment is
+    /// the kept storage bucket, not the category.
+    #[serde(default)]
+    pub resolved_model_type: Option<String>,
 }
 
 /// Per-model migration execution result.

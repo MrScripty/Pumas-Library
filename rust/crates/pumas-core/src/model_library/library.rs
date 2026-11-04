@@ -7,6 +7,8 @@
 //! - SQLite indexing with FTS5 full-text search
 //! - Model enumeration and querying
 
+#[cfg(test)]
+mod category_tests;
 mod migration;
 mod projection;
 mod publication_observation;
@@ -4317,15 +4319,115 @@ impl ModelLibrary {
             .clone()
     }
 
-    /// Reclassify a model: re-detect its type and move to the correct directory if needed.
+    /// Record a person's choice of category for a model, or clear it.
     ///
-    /// Unlike `redetect_model_type()` which only updates metadata in-place,
-    /// this method also relocates the model directory to match the new type,
-    /// maintaining consistency between on-disk layout and metadata.
+    /// A chosen category is kept by every later re-detection (reclassify,
+    /// redetect, migration). Clearing it re-detects the category. The model
+    /// never moves and keeps its ID. Returns the category now recorded.
+    pub async fn set_model_category(
+        &self,
+        model_id: &str,
+        category: Option<ModelType>,
+    ) -> Result<ModelType> {
+        if category == Some(ModelType::Unknown) {
+            return Err(PumasError::InvalidParams {
+                message: "Choose a category, or clear the choice to re-detect it".into(),
+            });
+        }
+        let model_dir = self.library_root.join(model_id);
+        let authority = self.mutation_authority()?;
+        let destination = authority.root().resolve(&model_dir)?;
+        let metadata = self
+            .store_lifetime
+            .spawn_blocking(move || destination.read_model_metadata())
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!("Failed to join model category read: {error}"))
+            })??
+            .ok_or_else(|| PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            })?;
+        self.require_finalized_import_edit(&model_dir, Some(&metadata))?;
+
+        let Some(category) = category else {
+            if user_chosen_category(&metadata).is_none() {
+                return Ok(metadata
+                    .model_type
+                    .as_deref()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(ModelType::Unknown));
+            }
+            // Re-detect the category only, in place: clearing a choice never
+            // re-detects the family, so it never moves the model or changes
+            // its ID. One guarded write records the detected category.
+            let original_metadata = metadata.clone();
+            let mut cleared = metadata;
+            cleared.model_type_resolution_source = None;
+            let library_for_type = self.clone();
+            let model_id_for_type = model_id.to_owned();
+            let file_type_info = self
+                .store_lifetime
+                .spawn_blocking(move || {
+                    library_for_type
+                        .get_primary_model_file(&model_id_for_type)
+                        .as_ref()
+                        .and_then(|file| identify_model_type(file).ok())
+                })
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Failed to join category detection: {error}"))
+                })?;
+            let resolved = resolve_local_model_type_with_persisted_hints_async(
+                self.index().clone(),
+                self.library_root.clone(),
+                model_dir.clone(),
+                cleared.clone(),
+                file_type_info,
+            )
+            .await?;
+            cleared.model_type = Some(resolved.model_type.as_str().to_string());
+            apply_model_type_resolution(&mut cleared, &resolved);
+            cleared.updated_date = Some(chrono::Utc::now().to_rfc3339());
+            validate_metadata_v2_with_index(&cleared, self.index())?;
+            self.write_reclassification_metadata_owned(
+                model_id.to_string(),
+                model_dir,
+                original_metadata,
+                cleared,
+                None,
+            )
+            .await?;
+            return Ok(resolved.model_type);
+        };
+
+        let original_metadata = metadata.clone();
+        let mut chosen = metadata;
+        chosen.model_type = Some(category.as_str().to_string());
+        chosen.model_type_resolution_source = Some(USER_CATEGORY_SOURCE.to_string());
+        chosen.model_type_resolution_confidence = Some(1.0);
+        chosen.updated_date = Some(chrono::Utc::now().to_rfc3339());
+        validate_metadata_v2_with_index(&chosen, self.index())?;
+        self.write_reclassification_metadata_owned(
+            model_id.to_string(),
+            model_dir,
+            original_metadata,
+            chosen,
+            None,
+        )
+        .await?;
+        Ok(category)
+    }
+
+    /// Reclassify a model: re-detect its category and family.
+    ///
+    /// The category is metadata and never moves the model: it keeps its
+    /// storage bucket (first ID segment). Only a family change relocates the
+    /// directory, to `<bucket>/<new family>/<basename>`.
     ///
     /// # Returns
     ///
-    /// The new model_id if the model was reclassified and moved, None if unchanged.
+    /// The model's ID after reclassification (unchanged unless the family
+    /// moved it) when its category or family changed, `None` if nothing changed.
     pub async fn reclassify_model(&self, model_id: &str) -> Result<Option<String>> {
         let model_dir = self.library_root.join(model_id);
 
@@ -4361,11 +4463,6 @@ impl ModelLibrary {
         let current_type = metadata.model_type.clone().unwrap_or_default();
         let current_family = metadata.family.clone().unwrap_or_default();
         let model_id_parts: Vec<&str> = model_id.split('/').collect();
-        let current_path_type = model_id_parts
-            .first()
-            .copied()
-            .unwrap_or_default()
-            .to_string();
         let current_path_family = model_id_parts
             .get(1)
             .copied()
@@ -4441,7 +4538,9 @@ impl ModelLibrary {
         metadata.subtype = new_subtype;
         let resolution_changed = apply_model_type_resolution(&mut metadata, &resolved);
 
-        let identity_changed = normalize_name(&new_type_str) != normalize_name(&current_path_type)
+        // The category is compared with the recorded category, never with the
+        // storage bucket, so a model filed under another bucket stays settled.
+        let identity_changed = normalize_name(&new_type_str) != normalize_name(&current_type)
             || normalize_name(&new_family) != normalize_name(&current_path_family)
             || metadata.subtype != current_subtype;
         if !identity_changed
@@ -4479,14 +4578,22 @@ impl ModelLibrary {
             .ok_or_else(|| PumasError::InvalidParams {
                 message: "Model directory must have a UTF-8 basename".into(),
             })?;
+        // The category is metadata: the model keeps its storage bucket (first
+        // ID segment), so only a family change can move it.
+        let storage_bucket = model_id
+            .split('/')
+            .next()
+            .filter(|bucket| !bucket.is_empty())
+            .map(normalize_name)
+            .unwrap_or_else(|| normalize_name(&new_type_str));
         let new_dir = self
             .library_root
-            .join(normalize_name(&new_type_str))
+            .join(&storage_bucket)
             .join(normalize_name(&new_family))
             .join(basename);
         let new_model_id = format!(
             "{}/{}/{}",
-            normalize_name(&new_type_str),
+            storage_bucket,
             normalize_name(&new_family),
             basename
         );
@@ -6393,12 +6500,84 @@ fn apply_model_type_resolution(
         || metadata.review_status != prev_review_status
 }
 
+/// The task a model's recorded category implies, when that category came from
+/// a strong source (architecture/config rules, a GGUF decision head, a
+/// disambiguation guard, or a person's choice) and the source task tag
+/// contradicts it. Inputs and outputs then follow the category, as the
+/// category itself does; weak fallbacks never override the tag.
+fn category_task_override(metadata: &ModelMetadata, tag: &str) -> Option<&'static str> {
+    let category = ModelType::from_canonical(metadata.model_type.as_deref()?)?;
+    let tag_category = ModelType::from_pipeline_tag(tag);
+    if tag_category == category || tag_category == ModelType::Unknown {
+        return None;
+    }
+    strong_category_task(metadata)
+}
+
+/// For a model with no task tag: the category's task when the recorded task
+/// contradicts a strongly sourced category (for example a tagless GGUF with a
+/// decision head recorded as text generation). A model with no recorded task
+/// is left alone; nothing contradicts the category.
+fn untagged_category_task(metadata: &ModelMetadata) -> Option<&'static str> {
+    category_task_override(metadata, metadata.task_type_primary.as_deref()?)
+}
+
+/// The task implied by a category recorded from a strong source.
+fn strong_category_task(metadata: &ModelMetadata) -> Option<&'static str> {
+    let category = ModelType::from_canonical(metadata.model_type.as_deref()?)?;
+    let source = metadata.model_type_resolution_source.as_deref()?;
+    let strong = matches!(
+        source,
+        USER_CATEGORY_SOURCE
+            | "model-type-gguf-decision-head"
+            | "model-type-resolver-arch-rules"
+            | "model-type-resolver-config-rules"
+            | "model-type-resolver-arch-config-rules"
+    ) || source.ends_with("-disambiguation-guard");
+    if !strong {
+        return None;
+    }
+    let names_speech_synthesis = [
+        metadata.official_name.as_deref(),
+        metadata.repo_id.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::to_ascii_lowercase)
+    .any(|name| {
+        name.split(|c: char| !c.is_ascii_alphanumeric())
+            .any(|token| token == "tts")
+            || name.contains("text-to-speech")
+    });
+    Some(match category {
+        ModelType::Llm => "text-generation",
+        ModelType::Vlm => "image-text-to-text",
+        ModelType::Decision => "text-classification",
+        ModelType::Embedding => "feature-extraction",
+        ModelType::Reranker => "text-ranking",
+        ModelType::Diffusion => "text-to-image",
+        ModelType::Video => "text-to-video",
+        ModelType::Vision => "image-classification",
+        ModelType::Audio if names_speech_synthesis => "text-to-speech",
+        ModelType::Audio => "automatic-speech-recognition",
+        ModelType::Unknown => return None,
+    })
+}
+
 fn apply_task_projection_from_persisted_evidence(metadata: &mut ModelMetadata) -> bool {
-    let Some(pipeline_tag) = preferred_pipeline_tag(metadata) else {
+    let source_tag = preferred_pipeline_tag(metadata);
+    let category_task = match source_tag.as_deref() {
+        Some(tag) => category_task_override(metadata, tag),
+        None => untagged_category_task(metadata),
+    };
+    let Some(task) = category_task
+        .map(str::to_string)
+        .or_else(|| source_tag.clone())
+    else {
         return false;
     };
 
-    let normalized = normalize_task_signature(&pipeline_tag);
+    let normalized = normalize_task_signature(&task);
     let previous_pipeline_tag = metadata.pipeline_tag.clone();
     let previous_task_type = metadata.task_type_primary.clone();
     let previous_inputs = metadata.input_modalities.clone();
@@ -6409,14 +6588,24 @@ fn apply_task_projection_from_persisted_evidence(metadata: &mut ModelMetadata) -
     let previous_needs_review = metadata.metadata_needs_review;
     let previous_review_status = metadata.review_status.clone();
 
-    metadata.pipeline_tag = Some(pipeline_tag.clone());
-    metadata.task_type_primary = Some(pipeline_tag);
+    // The source tag stays recorded as evidence; the task follows the category.
+    if source_tag.is_some() {
+        metadata.pipeline_tag = source_tag;
+    }
+    metadata.task_type_primary = Some(task);
     metadata.input_modalities = Some(normalized.input_modalities.clone());
     metadata.output_modalities = Some(normalized.output_modalities.clone());
 
     match normalized.normalization_status {
         TaskNormalizationStatus::Ok | TaskNormalizationStatus::Warning => {
-            metadata.task_classification_source = Some("hf-pipeline-tag".to_string());
+            metadata.task_classification_source = Some(
+                if category_task.is_some() {
+                    "model-category"
+                } else {
+                    "hf-pipeline-tag"
+                }
+                .to_string(),
+            );
             metadata.task_classification_confidence = Some(match normalized.normalization_status {
                 TaskNormalizationStatus::Ok => 1.0,
                 TaskNormalizationStatus::Warning => 0.8,
@@ -6545,13 +6734,14 @@ fn save_package_facts_cache_migration_checkpoint(
     atomic_write_json(path, checkpoint, true)
 }
 
+/// Apply the family and name a move gives a model. The first ID segment is
+/// only the storage bucket; the category stays whatever was resolved.
 fn apply_target_identity_to_metadata(metadata: &mut ModelMetadata, target_model_id: &str) {
     let parts = target_model_id.split('/').collect::<Vec<_>>();
     if parts.len() < 3 {
         return;
     }
 
-    metadata.model_type = Some(parts[0].to_string());
     metadata.family = Some(parts[1].to_string());
     metadata.architecture_family = Some(parts[1].to_string());
     if let Some(cleaned_name) = parts.last() {
@@ -7266,6 +7456,16 @@ fn resolve_local_model_type_with_persisted_hints(
     metadata: &ModelMetadata,
     file_type_info: Option<&ModelTypeInfo>,
 ) -> Result<ModelTypeResolution> {
+    // A person's explicit category survives every re-detection: reclassify,
+    // redetect and migration all resolve through here.
+    if let Some(chosen) = user_chosen_category(metadata) {
+        return Ok(ModelTypeResolution {
+            model_type: chosen,
+            source: USER_CATEGORY_SOURCE.to_string(),
+            confidence: 1.0,
+            review_reasons: Vec::new(),
+        });
+    }
     let (pipeline_tag, spec_model_type, huggingface_evidence) =
         classification_hints_from_persisted_sources(model_dir, metadata);
 
@@ -7466,7 +7666,8 @@ fn apply_unresolved_model_type_fallbacks(
         return resolved;
     }
 
-    let Some(file_type_info) = file_type_info else {
+    let Some(file_type_info) = file_type_info.filter(|info| info.model_type != ModelType::Unknown)
+    else {
         if let Some(token_type) = detect_model_type_from_name_tokens(model_dir, library_root) {
             apply_fallback_resolution(
                 &mut resolved,
@@ -7474,22 +7675,20 @@ fn apply_unresolved_model_type_fallbacks(
                 "model-type-name-tokens",
                 0.60,
                 "model-type-fallback-name-tokens",
+            );
+        } else if let Some(bucket_type) = storage_bucket_category(model_dir, library_root) {
+            // Nothing else describes the model, so the folder a person placed
+            // it in is the only stated intent.
+            apply_fallback_resolution(
+                &mut resolved,
+                bucket_type,
+                "model-type-storage-bucket",
+                0.55,
+                "model-type-fallback-storage-bucket",
             );
         }
         return resolved;
     };
-    if file_type_info.model_type == ModelType::Unknown {
-        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir, library_root) {
-            apply_fallback_resolution(
-                &mut resolved,
-                token_type,
-                "model-type-name-tokens",
-                0.60,
-                "model-type-fallback-name-tokens",
-            );
-        }
-        return resolved;
-    }
 
     apply_fallback_resolution(
         &mut resolved,
@@ -7598,10 +7797,43 @@ fn detect_model_type_from_directory_layout(model_dir: &Path) -> Option<ModelType
     None
 }
 
+/// `model_type_resolution_source` recorded when a person chose the category.
+pub(crate) const USER_CATEGORY_SOURCE: &str = "user";
+
+/// The category a person chose for this model, if any.
+pub(crate) fn user_chosen_category(metadata: &ModelMetadata) -> Option<ModelType> {
+    if metadata.model_type_resolution_source.as_deref() != Some(USER_CATEGORY_SOURCE) {
+        return None;
+    }
+    metadata
+        .model_type
+        .as_deref()
+        .and_then(|value| value.parse::<ModelType>().ok())
+        .filter(|category| *category != ModelType::Unknown)
+}
+
+/// The category named by a model's storage bucket (its first library-relative
+/// folder), when that folder is a category name.
+fn storage_bucket_category(model_dir: &Path, library_root: &Path) -> Option<ModelType> {
+    let relative = model_dir.strip_prefix(library_root).ok()?;
+    if relative.components().count() < 2 {
+        return None;
+    }
+    let bucket = relative.components().next()?.as_os_str().to_str()?;
+    match bucket.parse::<ModelType>() {
+        Ok(category) if category != ModelType::Unknown && category.as_str() == bucket => {
+            Some(category)
+        }
+        _ => None,
+    }
+}
+
 fn detect_model_type_from_name_tokens(model_dir: &Path, library_root: &Path) -> Option<ModelType> {
     // Host/library ancestors are not model evidence (and temporary directory
     // names can contain classification tokens). Preserve only library-relative
     // type/family/name hints plus immediate members; external paths use basename.
+    // The first library segment is the storage bucket chosen at import, not
+    // evidence: counting it would keep re-confirming a stale category.
     let mut token_pool = model_dir
         .strip_prefix(library_root)
         .ok()
@@ -7611,9 +7843,18 @@ fn detect_model_type_from_name_tokens(model_dir: &Path, library_root: &Path) -> 
                     .components()
                     .all(|part| matches!(part, Component::Normal(_)))
         })
-        .map(Path::as_os_str)
-        .or_else(|| model_dir.file_name())
-        .map(|name| name.to_string_lossy().to_lowercase())
+        .map(|relative| {
+            let mut parts = relative.components();
+            if relative.components().count() > 1 {
+                parts.next();
+            }
+            parts.as_path().to_string_lossy().to_lowercase()
+        })
+        .or_else(|| {
+            model_dir
+                .file_name()
+                .map(|name| name.to_string_lossy().to_lowercase())
+        })
         .unwrap_or_default();
     if let Ok(entries) = std::fs::read_dir(model_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
@@ -9539,15 +9780,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reclassify_model_uses_rule_resolver_for_move() {
+    async fn test_reclassify_model_uses_rule_resolver_in_place() {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
 
-        let old_dir = library.build_model_path("llm", "llama", "resolver-move");
-        std::fs::create_dir_all(&old_dir).unwrap();
-        write_min_safetensors(&old_dir.join("model.safetensors"));
+        let model_dir = library.build_model_path("llm", "llama", "resolver-move");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
         std::fs::write(
-            old_dir.join("config.json"),
+            model_dir.join("config.json"),
             r#"{"architectures":["UNet2DConditionModel"]}"#,
         )
         .unwrap();
@@ -9560,28 +9801,36 @@ mod tests {
             cleaned_name: Some("resolver-move".to_string()),
             ..Default::default()
         };
-        library.save_metadata(&old_dir, &metadata).await.unwrap();
-        library.index_model_dir(&old_dir).await.unwrap();
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
 
-        let moved = library
+        // The category is metadata: the model keeps its `llm` storage bucket.
+        let reclassified = library
             .reclassify_model("llm/llama/resolver-move")
             .await
             .unwrap();
         assert_eq!(
-            moved.as_deref().map(normalize_path_separators),
-            Some("diffusion/llama/resolver-move".to_string())
+            reclassified.as_deref().map(normalize_path_separators),
+            Some("llm/llama/resolver-move".to_string())
         );
 
-        let new_dir = library.build_model_path("diffusion", "llama", "resolver-move");
-        assert!(new_dir.exists());
-        assert!(!old_dir.exists());
+        assert!(model_dir.exists());
+        assert!(!library
+            .build_model_path("diffusion", "llama", "resolver-move")
+            .exists());
 
-        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
         assert_eq!(updated.model_type, Some("diffusion".to_string()));
         assert_eq!(
             updated.model_type_resolution_source,
             Some("model-type-resolver-arch-rules".to_string())
         );
+        let record = library
+            .get_model("llm/llama/resolver-move")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.model_type, "diffusion");
     }
 
     #[tokio::test]
@@ -9819,13 +10068,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reclassify_model_falls_back_to_file_signature_for_move() {
+    async fn test_reclassify_model_falls_back_to_file_signature_in_place() {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
 
-        let old_dir = library.build_model_path("llm", "test", "resolver-fallback-embedding");
-        std::fs::create_dir_all(&old_dir).unwrap();
-        write_min_safetensors(&old_dir.join("model.safetensors"));
+        let model_dir = library.build_model_path("llm", "test", "resolver-fallback-embedding");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
 
         let metadata = ModelMetadata {
             model_id: Some("llm/test/resolver-fallback-embedding".to_string()),
@@ -9835,40 +10084,48 @@ mod tests {
             cleaned_name: Some("resolver-fallback-embedding".to_string()),
             ..Default::default()
         };
-        library.save_metadata(&old_dir, &metadata).await.unwrap();
-        library.index_model_dir(&old_dir).await.unwrap();
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
 
-        let moved = library
+        let reclassified = library
             .reclassify_model("llm/test/resolver-fallback-embedding")
             .await
             .unwrap();
         assert_eq!(
-            moved.as_deref().map(normalize_path_separators),
-            Some("embedding/test/resolver-fallback-embedding".to_string())
+            reclassified.as_deref().map(normalize_path_separators),
+            Some("llm/test/resolver-fallback-embedding".to_string())
         );
 
-        let new_dir = library.build_model_path("embedding", "test", "resolver-fallback-embedding");
-        assert!(new_dir.exists());
-        assert!(!old_dir.exists());
+        assert!(model_dir.exists());
+        assert!(!library
+            .build_model_path("embedding", "test", "resolver-fallback-embedding")
+            .exists());
 
-        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
         assert_eq!(updated.model_type, Some("embedding".to_string()));
         assert_eq!(
             updated.model_type_resolution_source,
             Some("model-type-file-signature".to_string())
         );
+        let record = library
+            .get_model("llm/test/resolver-fallback-embedding")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.model_type, "embedding");
     }
 
     #[tokio::test]
-    async fn test_reclassify_model_moves_when_path_is_stale_but_metadata_already_updated() {
+    async fn test_reclassify_model_settles_in_bucket_when_metadata_already_records_category() {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
 
-        let old_dir = library.build_model_path("unknown", "test", "stale-path-embedding");
-        std::fs::create_dir_all(&old_dir).unwrap();
-        write_min_safetensors(&old_dir.join("model.safetensors"));
+        let model_dir = library.build_model_path("unknown", "test", "stale-path-embedding");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
 
-        // Metadata already updated by prior redetect pass, but model still sits under unknown/.
+        // Metadata already updated by prior redetect pass. The model stays under its
+        // `unknown/` storage bucket because the bucket is not the category.
         let metadata = ModelMetadata {
             model_id: Some("unknown/test/stale-path-embedding".to_string()),
             family: Some("test".to_string()),
@@ -9877,33 +10134,49 @@ mod tests {
             cleaned_name: Some("stale-path-embedding".to_string()),
             ..Default::default()
         };
-        library.save_metadata(&old_dir, &metadata).await.unwrap();
-        library.index_model_dir(&old_dir).await.unwrap();
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
 
-        let moved = library
+        // The recorded category already matches the detected one and the family is
+        // unchanged, so only resolution fields are recorded and no ID is reported.
+        let changed = library
             .reclassify_model("unknown/test/stale-path-embedding")
             .await
             .unwrap();
+        assert_eq!(changed, None);
+
+        assert!(model_dir.exists());
+        assert!(!library
+            .build_model_path("embedding", "test", "stale-path-embedding")
+            .exists());
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
         assert_eq!(
-            moved.as_deref().map(normalize_path_separators),
-            Some("embedding/test/stale-path-embedding".to_string())
+            updated.model_id.as_deref(),
+            Some("unknown/test/stale-path-embedding")
+        );
+        assert_eq!(updated.model_type.as_deref(), Some("embedding"));
+        assert_eq!(
+            updated.model_type_resolution_source.as_deref(),
+            Some("model-type-file-signature")
         );
 
-        let new_dir = library.build_model_path("embedding", "test", "stale-path-embedding");
-        assert!(new_dir.exists());
-        assert!(!old_dir.exists());
+        let settled = library
+            .reclassify_model("unknown/test/stale-path-embedding")
+            .await
+            .unwrap();
+        assert_eq!(settled, None);
     }
 
     #[tokio::test]
-    async fn test_reclassify_model_moves_whisper_style_unknown_dir_to_audio() {
+    async fn test_reclassify_model_classifies_whisper_style_unknown_dir_as_audio_in_place() {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
 
-        let old_dir = library.build_model_path("unknown", "openai", "whisper-large-v3-turbo");
-        std::fs::create_dir_all(&old_dir).unwrap();
-        write_min_safetensors(&old_dir.join("model.safetensors"));
+        let model_dir = library.build_model_path("unknown", "openai", "whisper-large-v3-turbo");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
         std::fs::write(
-            old_dir.join("config.json"),
+            model_dir.join("config.json"),
             r#"{"architectures":["WhisperForConditionalGeneration"],"model_type":"whisper"}"#,
         )
         .unwrap();
@@ -9917,36 +10190,43 @@ mod tests {
             repo_id: Some("openai/whisper-large-v3-turbo".to_string()),
             ..Default::default()
         };
-        library.save_metadata(&old_dir, &metadata).await.unwrap();
-        library.index_model_dir(&old_dir).await.unwrap();
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
 
         let resolved =
-            resolve_model_type_with_rules(library.index(), &old_dir, None, None, None).unwrap();
+            resolve_model_type_with_rules(library.index(), &model_dir, None, None, None).unwrap();
         assert_eq!(resolved.model_type, ModelType::Audio);
 
-        let moved = library
+        let reclassified = library
             .reclassify_model("unknown/openai/whisper-large-v3-turbo")
             .await
             .unwrap();
         assert_eq!(
-            moved.as_deref().map(normalize_path_separators),
-            Some("audio/openai/whisper-large-v3-turbo".to_string())
+            reclassified.as_deref().map(normalize_path_separators),
+            Some("unknown/openai/whisper-large-v3-turbo".to_string())
         );
 
-        let new_dir = library.build_model_path("audio", "openai", "whisper-large-v3-turbo");
-        assert!(new_dir.exists());
-        assert!(!old_dir.exists());
+        assert!(model_dir.exists());
+        assert!(!library
+            .build_model_path("audio", "openai", "whisper-large-v3-turbo")
+            .exists());
 
-        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
         assert_eq!(
             updated.model_id.as_deref(),
-            Some("audio/openai/whisper-large-v3-turbo")
+            Some("unknown/openai/whisper-large-v3-turbo")
         );
         assert_eq!(updated.model_type.as_deref(), Some("audio"));
         assert_eq!(
             updated.model_type_resolution_source.as_deref(),
             Some("model-type-audio-disambiguation-guard")
         );
+        let record = library
+            .get_model("unknown/openai/whisper-large-v3-turbo")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.model_type, "audio");
     }
 
     #[tokio::test]
@@ -9954,7 +10234,8 @@ mod tests {
         let (temp_dir, library) = setup_library_relative_to_cwd().await;
         install_test_mutation_authority(&temp_dir, &library);
 
-        let old_dir = library.build_model_path("unknown", "openai", "whisper-large-v3-turbo");
+        // Only a family change moves a model: the path family is stale.
+        let old_dir = library.build_model_path("unknown", "old-family", "whisper-large-v3-turbo");
         std::fs::create_dir_all(&old_dir).unwrap();
         write_min_safetensors(&old_dir.join("model.safetensors"));
         std::fs::write(
@@ -9964,7 +10245,7 @@ mod tests {
         .unwrap();
 
         let metadata = ModelMetadata {
-            model_id: Some("unknown/openai/whisper-large-v3-turbo".to_string()),
+            model_id: Some("unknown/old-family/whisper-large-v3-turbo".to_string()),
             family: Some("openai".to_string()),
             model_type: Some("unknown".to_string()),
             official_name: Some("whisper-large-v3-turbo".to_string()),
@@ -9976,17 +10257,19 @@ mod tests {
         library.index_model_dir(&old_dir).await.unwrap();
 
         let moved = library
-            .reclassify_model("unknown/openai/whisper-large-v3-turbo")
+            .reclassify_model("unknown/old-family/whisper-large-v3-turbo")
             .await
             .unwrap();
         assert_eq!(
             moved.as_deref().map(normalize_path_separators),
-            Some("audio/openai/whisper-large-v3-turbo".to_string())
+            Some("unknown/openai/whisper-large-v3-turbo".to_string())
         );
 
-        let new_dir = library.build_model_path("audio", "openai", "whisper-large-v3-turbo");
+        let new_dir = library.build_model_path("unknown", "openai", "whisper-large-v3-turbo");
         assert!(new_dir.exists());
         assert!(!old_dir.exists());
+        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type.as_deref(), Some("audio"));
     }
 
     #[tokio::test]
@@ -10042,11 +10325,11 @@ mod tests {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
 
-        let old_dir = library.build_model_path("llm", "catplusplus", "qwen-image-2512-heretic");
-        std::fs::create_dir_all(&old_dir).unwrap();
-        write_min_safetensors(&old_dir.join("model.safetensors"));
+        let model_dir = library.build_model_path("llm", "catplusplus", "qwen-image-2512-heretic");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
         std::fs::write(
-            old_dir.join("config.json"),
+            model_dir.join("config.json"),
             r#"{"architectures":["Qwen2_5_VLForConditionalGeneration"],"model_type":"qwen2_5_vl"}"#,
         )
         .unwrap();
@@ -10059,26 +10342,31 @@ mod tests {
             cleaned_name: Some("qwen-image-2512-heretic".to_string()),
             ..Default::default()
         };
-        library.save_metadata(&old_dir, &metadata).await.unwrap();
-        library.index_model_dir(&old_dir).await.unwrap();
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
 
-        let moved = library
+        let reclassified = library
             .reclassify_model("llm/catplusplus/qwen-image-2512-heretic")
             .await
             .unwrap();
         assert_eq!(
-            moved.as_deref().map(normalize_path_separators),
-            Some("diffusion/catplusplus/qwen-image-2512-heretic".to_string())
+            reclassified.as_deref().map(normalize_path_separators),
+            Some("llm/catplusplus/qwen-image-2512-heretic".to_string())
         );
 
-        let new_dir =
-            library.build_model_path("diffusion", "catplusplus", "qwen-image-2512-heretic");
-        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        assert!(model_dir.exists());
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
         assert_eq!(updated.model_type, Some("diffusion".to_string()));
         assert_eq!(
             updated.model_type_resolution_source,
             Some("model-type-diffusion-disambiguation-guard".to_string())
         );
+        let record = library
+            .get_model("llm/catplusplus/qwen-image-2512-heretic")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.model_type, "diffusion");
     }
 
     #[tokio::test]
@@ -10086,11 +10374,11 @@ mod tests {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
 
-        let old_dir = library.build_model_path("llm", "nunchaku-ai", "nunchaku-z-image-turbo");
-        std::fs::create_dir_all(&old_dir).unwrap();
-        write_min_safetensors(&old_dir.join("svdq-int4_r256-z-image-turbo.safetensors"));
+        let model_dir = library.build_model_path("llm", "nunchaku-ai", "nunchaku-z-image-turbo");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("svdq-int4_r256-z-image-turbo.safetensors"));
         std::fs::write(
-            old_dir.join(".pumas_download"),
+            model_dir.join(".pumas_download"),
             serde_json::to_string_pretty(&serde_json::json!({
                 "repo_id": "nunchaku-ai/nunchaku-z-image-turbo",
                 "model_type": "llm"
@@ -10107,43 +10395,48 @@ mod tests {
             cleaned_name: Some("nunchaku-z-image-turbo".to_string()),
             ..Default::default()
         };
-        library.save_metadata(&old_dir, &metadata).await.unwrap();
-        library.index_model_dir(&old_dir).await.unwrap();
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
 
-        let moved = library
+        let reclassified = library
             .reclassify_model("llm/nunchaku-ai/nunchaku-z-image-turbo")
             .await
             .unwrap();
         assert_eq!(
-            moved.as_deref().map(normalize_path_separators),
-            Some("diffusion/nunchaku-ai/nunchaku-z-image-turbo".to_string())
+            reclassified.as_deref().map(normalize_path_separators),
+            Some("llm/nunchaku-ai/nunchaku-z-image-turbo".to_string())
         );
 
-        let new_dir =
-            library.build_model_path("diffusion", "nunchaku-ai", "nunchaku-z-image-turbo");
-        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        assert!(model_dir.exists());
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
         assert_eq!(updated.model_type, Some("diffusion".to_string()));
         assert_eq!(
             updated.model_type_resolution_source,
             Some("model-type-name-tokens".to_string())
         );
+        let record = library
+            .get_model("llm/nunchaku-ai/nunchaku-z-image-turbo")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.model_type, "diffusion");
     }
 
     #[tokio::test]
-    async fn test_reclassify_model_moves_florence_to_vlm() {
+    async fn test_reclassify_model_classifies_florence_as_vlm_in_place() {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
 
-        let old_dir = library.build_model_path("embedding", "microsoft", "florence-2-large");
-        std::fs::create_dir_all(&old_dir).unwrap();
-        write_min_safetensors(&old_dir.join("model.safetensors"));
+        let model_dir = library.build_model_path("embedding", "microsoft", "florence-2-large");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
         std::fs::write(
-            old_dir.join("config.json"),
+            model_dir.join("config.json"),
             r#"{"architectures":["Florence2ForConditionalGeneration"],"model_type":"florence2","vision_config":{"model_type":"davit"}}"#,
         )
         .unwrap();
         std::fs::write(
-            old_dir.join(".pumas_download"),
+            model_dir.join(".pumas_download"),
             serde_json::to_string_pretty(&serde_json::json!({
                 "repo_id": "microsoft/Florence-2-large",
                 "model_type": "llm",
@@ -10182,20 +10475,29 @@ mod tests {
             }),
             ..Default::default()
         };
-        library.save_metadata(&old_dir, &metadata).await.unwrap();
-        library.index_model_dir(&old_dir).await.unwrap();
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
 
-        let moved = library
+        let reclassified = library
             .reclassify_model("embedding/microsoft/florence-2-large")
             .await
             .unwrap();
         assert_eq!(
-            moved.as_deref().map(normalize_path_separators),
-            Some("vlm/microsoft/florence-2-large".to_string())
+            reclassified.as_deref().map(normalize_path_separators),
+            Some("embedding/microsoft/florence-2-large".to_string())
         );
 
-        let new_dir = library.build_model_path("vlm", "microsoft", "florence-2-large");
-        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        assert!(model_dir.exists());
+        assert!(!library
+            .build_model_path("vlm", "microsoft", "florence-2-large")
+            .exists());
+        let record = library
+            .get_model("embedding/microsoft/florence-2-large")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.model_type, "vlm");
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
         assert_eq!(updated.model_type, Some("vlm".to_string()));
         assert_eq!(
             updated.model_type_resolution_source,
@@ -10211,9 +10513,12 @@ mod tests {
     async fn test_reclassify_model_preserves_quant_basename_and_display_metadata() {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
-        let source_id = "unknown/qwen3/qwen--qwen3-embedding-8b-gguf__q4_k_m";
-        let existing_id = "embedding/qwen3/qwen3-embedding-8b-gguf";
-        let expected_id = "embedding/qwen3/qwen--qwen3-embedding-8b-gguf__q4_k_m";
+        // Only a family change moves a model: the source path family is stale, and
+        // the moved directory keeps its artifact basename instead of the shared
+        // cleaned name that an existing entry already occupies.
+        let source_id = "unknown/old-family/qwen--qwen3-embedding-8b-gguf__q4_k_m";
+        let existing_id = "unknown/qwen3/qwen3-embedding-8b-gguf";
+        let expected_id = "unknown/qwen3/qwen--qwen3-embedding-8b-gguf__q4_k_m";
         for (id, quant, payload) in [(source_id, "Q4_K_M", b"q4"), (existing_id, "Q8_0", b"q8")] {
             let directory = library.library_root().join(id);
             std::fs::create_dir_all(&directory).unwrap();
@@ -10280,13 +10585,15 @@ mod tests {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
 
-        let source_dir = library.build_model_path("unknown", "test", "collision-dedupe");
-        let target_dir = library.build_model_path("diffusion", "test", "collision-dedupe");
+        // Only a family change moves a model: the source path family is stale and
+        // the family-corrected destination already holds another repository's entry.
+        let source_dir = library.build_model_path("unknown", "old-family", "collision-dedupe");
+        let target_dir = library.build_model_path("unknown", "test", "collision-dedupe");
         std::fs::create_dir_all(&source_dir).unwrap();
         std::fs::create_dir_all(&target_dir).unwrap();
 
         let metadata = ModelMetadata {
-            model_id: Some("unknown/test/collision-dedupe".to_string()),
+            model_id: Some("unknown/old-family/collision-dedupe".to_string()),
             family: Some("test".to_string()),
             model_type: Some("llm".to_string()),
             official_name: Some("Collision Dedupe".to_string()),
@@ -10298,7 +10605,7 @@ mod tests {
         let metadata_json = serde_json::to_string_pretty(&metadata).unwrap();
         std::fs::write(source_dir.join("metadata.json"), &metadata_json).unwrap();
         let mut target_metadata = metadata.clone();
-        target_metadata.model_id = Some("diffusion/test/collision-dedupe".into());
+        target_metadata.model_id = Some("unknown/test/collision-dedupe".into());
         target_metadata.model_type = Some("diffusion".into());
         target_metadata.repo_id = Some("second/model".into());
         library
@@ -10325,7 +10632,7 @@ mod tests {
         let target_before = std::fs::read(target_dir.join("metadata.json")).unwrap();
         let payload_before = std::fs::read(source_dir.join("model.safetensors")).unwrap();
         let error = library
-            .reclassify_model("unknown/test/collision-dedupe")
+            .reclassify_model("unknown/old-family/collision-dedupe")
             .await
             .expect_err("reclassification must not merge separate library entries");
         assert!(matches!(error, PumasError::Io { source: Some(error), .. }
@@ -10347,12 +10654,12 @@ mod tests {
             payload_before
         );
         assert!(library
-            .get_model("unknown/test/collision-dedupe")
+            .get_model("unknown/old-family/collision-dedupe")
             .await
             .unwrap()
             .is_some());
         assert!(library
-            .get_model("diffusion/test/collision-dedupe")
+            .get_model("unknown/test/collision-dedupe")
             .await
             .unwrap()
             .is_some());
@@ -10363,20 +10670,22 @@ mod tests {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
 
-        let source_dir = library.build_model_path("unknown", "test", "collision-blocked");
-        let target_dir = library.build_model_path("diffusion", "test", "collision-blocked");
+        // Only a family change moves a model: the source path family is stale and
+        // the family-corrected destination is occupied by different content.
+        let source_dir = library.build_model_path("unknown", "old-family", "collision-blocked");
+        let target_dir = library.build_model_path("unknown", "test", "collision-blocked");
         std::fs::create_dir_all(&source_dir).unwrap();
         std::fs::create_dir_all(&target_dir).unwrap();
 
         let source_metadata = ModelMetadata {
-            model_id: Some("unknown/test/collision-blocked".to_string()),
+            model_id: Some("unknown/old-family/collision-blocked".to_string()),
             family: Some("test".to_string()),
             model_type: Some("llm".to_string()),
             cleaned_name: Some("collision-blocked".to_string()),
             ..Default::default()
         };
         let target_metadata = ModelMetadata {
-            model_id: Some("embedding/test/collision-blocked".to_string()),
+            model_id: Some("unknown/test/collision-blocked".to_string()),
             family: Some("test".to_string()),
             model_type: Some("embedding".to_string()),
             cleaned_name: Some("collision-blocked".to_string()),
@@ -10407,7 +10716,7 @@ mod tests {
         library.index_model_dir(&target_dir).await.unwrap();
 
         let err = library
-            .reclassify_model("unknown/test/collision-blocked")
+            .reclassify_model("unknown/old-family/collision-blocked")
             .await
             .expect_err("non-identical collision should still fail");
         assert!(matches!(err, PumasError::Io { source: Some(error), .. }
@@ -11062,17 +11371,60 @@ mod tests {
                 "host ancestor {ancestor} must not change model classification"
             );
         }
+        let unresolved = || ModelTypeResolution {
+            model_type: ModelType::Unknown,
+            source: "unresolved".to_string(),
+            confidence: 0.0,
+            review_reasons: vec!["model-type-unresolved".to_string()],
+        };
         for (relative, expected) in [
             ("audio/vendor/generic-model", ModelType::Audio),
-            ("vlm/qwen/generic-model", ModelType::Vlm),
+            ("vlm/vendor/generic-model", ModelType::Vlm),
             ("reranker/vendor/generic-model", ModelType::Reranker),
         ] {
+            let model_dir = temp.path().join(relative);
+            // The storage bucket is not name evidence.
             assert_eq!(
-                detect_model_type_from_name_tokens(&temp.path().join(relative), temp.path()),
-                Some(expected),
-                "legitimate library-relative category must survive"
+                detect_model_type_from_name_tokens(&model_dir, temp.path()),
+                None,
+                "storage bucket of {relative} must not count as a name token"
             );
+            assert_eq!(
+                storage_bucket_category(&model_dir, temp.path()),
+                Some(expected),
+                "storage bucket of {relative} names a category"
+            );
+            // With nothing else describing the model, the bucket is the last fallback.
+            let resolved =
+                apply_unresolved_model_type_fallbacks(unresolved(), &model_dir, temp.path(), None);
+            assert_eq!(resolved.model_type, expected, "{relative}");
+            assert_eq!(resolved.source, "model-type-storage-bucket", "{relative}");
+            assert!(resolved
+                .review_reasons
+                .contains(&"model-type-fallback-storage-bucket".to_string()));
         }
+
+        // Name evidence below the bucket still outranks the bucket.
+        let named_dir = temp.path().join("audio/qwen3/qwen3-reranker-4b");
+        assert_eq!(
+            detect_model_type_from_name_tokens(&named_dir, temp.path()),
+            Some(ModelType::Reranker)
+        );
+        let resolved =
+            apply_unresolved_model_type_fallbacks(unresolved(), &named_dir, temp.path(), None);
+        assert_eq!(resolved.model_type, ModelType::Reranker);
+        assert_eq!(resolved.source, "model-type-name-tokens");
+
+        // A bucket that is not a category name, or a model without a bucket,
+        // gives no fallback.
+        assert_eq!(
+            storage_bucket_category(&temp.path().join("models/vendor/generic"), temp.path()),
+            None
+        );
+        assert_eq!(
+            storage_bucket_category(&temp.path().join("audio"), temp.path()),
+            None
+        );
     }
 
     #[tokio::test]
@@ -11293,10 +11645,13 @@ mod tests {
         )
         .unwrap();
 
+        // Only a family change moves a model: the recorded architecture family
+        // differs from the path family. The `llm` storage bucket is kept.
         let metadata = ModelMetadata {
             schema_version: Some(2),
             model_id: Some("llm/llama/dry-run-move".to_string()),
             family: Some("llama".to_string()),
+            architecture_family: Some("unet".to_string()),
             model_type: Some("llm".to_string()),
             cleaned_name: Some("dry-run-move".to_string()),
             metadata_needs_review: Some(true),
@@ -11324,8 +11679,9 @@ mod tests {
             item.target_model_id
                 .as_deref()
                 .map(normalize_path_separators),
-            Some("diffusion/llama/dry-run-move".to_string())
+            Some("llm/unet/dry-run-move".to_string())
         );
+        assert_eq!(item.resolved_model_type.as_deref(), Some("diffusion"));
         assert!(item.findings.contains(&"metadata_needs_review".to_string()));
         assert!(item.findings.contains(&"license_unresolved".to_string()));
     }
@@ -11334,8 +11690,10 @@ mod tests {
     async fn test_migration_remaps_model_id_references_for_ordinary_move() {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
+        // Only a family change moves a model: the recorded architecture family
+        // differs from the path family. The `llm` storage bucket is kept.
         let model_id = "llm/llama/bound-move";
-        let target_model_id = "diffusion/llama/bound-move";
+        let target_model_id = "llm/unet/bound-move";
         let model_dir = library.build_model_path("llm", "llama", "bound-move");
         std::fs::create_dir_all(&model_dir).unwrap();
         write_min_safetensors(&model_dir.join("model.safetensors"));
@@ -11349,6 +11707,7 @@ mod tests {
             schema_version: Some(2),
             model_id: Some(model_id.to_string()),
             family: Some("llama".to_string()),
+            architecture_family: Some("unet".to_string()),
             model_type: Some("llm".to_string()),
             cleaned_name: Some("bound-move".to_string()),
             task_type_primary: Some("text-generation".to_string()),
@@ -11541,8 +11900,10 @@ mod tests {
     async fn test_generate_migration_dry_run_report_detects_collision() {
         let (_, library) = setup_library().await;
 
+        // Only a family change moves a model: the source's recorded architecture
+        // family points at a destination that another entry already occupies.
         let source_dir = library.build_model_path("llm", "llama", "dry-run-collision");
-        let target_dir = library.build_model_path("diffusion", "llama", "dry-run-collision");
+        let target_dir = library.build_model_path("llm", "unet", "dry-run-collision");
         std::fs::create_dir_all(&source_dir).unwrap();
         std::fs::create_dir_all(&target_dir).unwrap();
         write_min_safetensors(&source_dir.join("model.safetensors"));
@@ -11555,13 +11916,14 @@ mod tests {
         let source_metadata = ModelMetadata {
             model_id: Some("llm/llama/dry-run-collision".to_string()),
             family: Some("llama".to_string()),
+            architecture_family: Some("unet".to_string()),
             model_type: Some("llm".to_string()),
             cleaned_name: Some("dry-run-collision".to_string()),
             ..Default::default()
         };
         let target_metadata = ModelMetadata {
-            model_id: Some("diffusion/llama/dry-run-collision".to_string()),
-            family: Some("llama".to_string()),
+            model_id: Some("llm/unet/dry-run-collision".to_string()),
+            family: Some("unet".to_string()),
             model_type: Some("diffusion".to_string()),
             cleaned_name: Some("dry-run-collision".to_string()),
             ..Default::default()
@@ -11580,10 +11942,11 @@ mod tests {
         let report = library.generate_migration_dry_run_report().unwrap();
         assert_eq!(report.total_models, 2);
         assert_eq!(report.collision_count, 1);
-        assert!(report
-            .items
-            .iter()
-            .any(|item| item.action == "blocked_collision"));
+        assert!(report.items.iter().any(|item| {
+            item.action == "blocked_collision"
+                && item.model_id == "llm/llama/dry-run-collision"
+                && item.target_model_id.as_deref() == Some("llm/unet/dry-run-collision")
+        }));
     }
 
     #[tokio::test]
@@ -11836,9 +12199,12 @@ mod tests {
         )
         .unwrap();
 
+        // Only a family change moves a model: the recorded architecture family
+        // differs from the path family. The `llm` storage bucket is kept.
         let metadata = ModelMetadata {
             model_id: Some("llm/llama/exec-move".to_string()),
             family: Some("llama".to_string()),
+            architecture_family: Some("unet".to_string()),
             model_type: Some("llm".to_string()),
             cleaned_name: Some("exec-move".to_string()),
             ..Default::default()
@@ -11855,7 +12221,7 @@ mod tests {
         })));
         let report = library.execute_migration_with_checkpoint().await.unwrap();
         library.set_metadata_write_notifier(None);
-        let moved_dir = library.build_model_path("diffusion", "llama", "exec-move");
+        let moved_dir = library.build_model_path("llm", "unet", "exec-move");
         let recorded = recorded.lock().unwrap().clone();
         assert!(
             recorded.contains(&moved_dir.join(METADATA_FILENAME)),
@@ -11877,8 +12243,18 @@ mod tests {
         assert!(moved_dir.join("config.json").is_file());
         assert!(moved_dir.join("nested/assets/adapter.json").is_file());
         assert!(!source_dir.exists());
-        let moved_record = library.index().get("diffusion/llama/exec-move").unwrap();
-        assert!(moved_record.is_some());
+        let moved_record = library.index().get("llm/unet/exec-move").unwrap();
+        assert_eq!(
+            moved_record.map(|record| record.model_type).as_deref(),
+            Some("diffusion")
+        );
+        let moved_metadata = library.load_metadata(&moved_dir).unwrap().unwrap();
+        assert_eq!(
+            moved_metadata.model_id.as_deref(),
+            Some("llm/unet/exec-move")
+        );
+        assert_eq!(moved_metadata.model_type.as_deref(), Some("diffusion"));
+        assert_eq!(moved_metadata.family.as_deref(), Some("unet"));
         assert!(library
             .index()
             .get("llm/llama/exec-move")
@@ -11909,8 +12285,10 @@ mod tests {
     async fn test_execute_migration_with_checkpoint_advances_update_feed_for_move() {
         let (temp_dir, library) = setup_library().await;
         install_test_mutation_authority(&temp_dir, &library);
+        // Only a family change moves a model: the recorded architecture family
+        // differs from the path family. The `llm` storage bucket is kept.
         let source_model_id = "llm/llama/feed-move";
-        let target_model_id = "diffusion/llama/feed-move";
+        let target_model_id = "llm/unet/feed-move";
         let source_dir = library.build_model_path("llm", "llama", "feed-move");
         std::fs::create_dir_all(&source_dir).unwrap();
         write_min_safetensors(&source_dir.join("model.safetensors"));
@@ -11923,6 +12301,7 @@ mod tests {
         let metadata = ModelMetadata {
             model_id: Some(source_model_id.to_string()),
             family: Some("llama".to_string()),
+            architecture_family: Some("unet".to_string()),
             model_type: Some("llm".to_string()),
             cleaned_name: Some("feed-move".to_string()),
             ..Default::default()
@@ -11997,6 +12376,7 @@ mod tests {
                 selected_artifact_id: Some("resume-move-artifact".to_string()),
                 selected_artifact_files: vec!["model.safetensors".to_string()],
                 action_kind: Some("move".to_string()),
+                resolved_model_type: None,
             }],
             completed_results: vec![],
         };
@@ -12725,6 +13105,7 @@ mod tests {
                 selected_artifact_id: Some("owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
                 selected_artifact_files: vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()],
                 action_kind: Some("split_artifact_directory".to_string()),
+                resolved_model_type: None,
             }],
             completed_results: vec![],
         };
@@ -12792,9 +13173,12 @@ mod tests {
         )
         .unwrap();
 
+        // Only a family change moves a model: the row's architecture family
+        // differs from the path family, so the partial download needs a move.
         let partial_metadata = ModelMetadata {
             model_id: Some("llm/forturne/qwen3-reranker-4b-nvfp4".to_string()),
             family: Some("forturne".to_string()),
+            architecture_family: Some("qwen3".to_string()),
             model_type: Some("reranker".to_string()),
             cleaned_name: Some("qwen3-reranker-4b-nvfp4".to_string()),
             official_name: Some("Qwen3-Reranker-4B-NVFP4".to_string()),
@@ -12813,6 +13197,10 @@ mod tests {
             .find(|item| item.model_id == "llm/forturne/qwen3-reranker-4b-nvfp4")
             .unwrap();
         assert_eq!(row.action, "blocked_partial_download");
+        assert_eq!(
+            row.target_model_id.as_deref(),
+            Some("llm/qwen3/qwen3-reranker-4b-nvfp4")
+        );
         assert_eq!(row.current_model_type.as_deref(), Some("reranker"));
         assert_eq!(row.resolved_model_type.as_deref(), Some("reranker"));
         assert!(row
@@ -12834,9 +13222,12 @@ mod tests {
         .unwrap();
         std::fs::write(partial_dir.join("model.safetensors.part"), b"partial").unwrap();
 
+        // Only a family change moves a model: the row's architecture family
+        // differs from the path family, so the partial download needs a move.
         let partial_metadata = ModelMetadata {
             model_id: Some("llm/forturne/qwen3-reranker-4b-nvfp4".to_string()),
             family: Some("forturne".to_string()),
+            architecture_family: Some("qwen3".to_string()),
             model_type: Some("reranker".to_string()),
             cleaned_name: Some("qwen3-reranker-4b-nvfp4".to_string()),
             official_name: Some("Qwen3-Reranker-4B-NVFP4".to_string()),

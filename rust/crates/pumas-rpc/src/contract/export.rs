@@ -708,6 +708,10 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         None,
     )?)?;
     fixtures["update_model_notes_clear"] = serde_json::to_value(notes_outcome(true, None, None)?)?;
+    fixtures["set_model_category_decision"] = serde_json::to_value(ModelCategoryOutcome::new(
+        "llm/qwen35/ggml-org--kev-4b-gguf",
+        pumas_library::model_library::ModelType::Decision,
+    ))?;
     fixtures["update_model_notes_missing"] = serde_json::to_value(notes_outcome(
         false,
         None,
@@ -812,6 +816,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         ValidateInstallationsOutcome,
         InstallationProgressOutcome,
         UpdateModelNotesOutcome,
+        ModelCategoryOutcome,
         LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,
         UpdateInferenceSettingsParams,
@@ -1503,6 +1508,17 @@ fn refine_named(name: &str, schema: &mut Value) {
             );
         }
     }
+    if name == "ModelCategoryOutcome" {
+        // The recorded category: a choosable one, or `unknown` when clearing a
+        // choice re-detects nothing.
+        let mut categories: Vec<&str> = crate::contract::CHOOSABLE_MODEL_CATEGORIES
+            .iter()
+            .map(|category| category.as_str())
+            .collect();
+        categories.push("unknown");
+        object["properties"]["category"]["enum"] = serde_json::json!(categories);
+        object["properties"]["model_id"]["minLength"] = 1.into();
+    }
     if name == "UpdateModelNotesSuccess" {
         object.insert(
             "required".into(),
@@ -1719,6 +1735,7 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "VersionStatusOutcome"
             | "VersionInfoOutcome"
             | "UpdateModelNotesSuccess"
+            | "ModelCategoryOutcome"
             | "LibraryModelMetadataOutcome"
             | "LibraryModelMetadataResponse"
             | "ModelIndexRefreshOutcome" => Some(true),

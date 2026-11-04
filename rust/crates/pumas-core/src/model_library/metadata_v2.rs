@@ -99,12 +99,14 @@ fn validate_metadata_v2_internal(
     }
 
     let model_type = require_non_empty_str("model_type", metadata.model_type.as_deref())?;
-    if !is_canonical_model_type(model_type) {
+    if crate::model_library::ModelType::from_canonical(model_type).is_none() {
+        let names: Vec<&str> = crate::model_library::ModelType::ALL
+            .iter()
+            .map(|category| category.as_str())
+            .collect();
         return Err(PumasError::Validation {
             field: "model_type".to_string(),
-            message:
-                "must be one of llm, vlm, reranker, diffusion, embedding, audio, vision, unknown"
-                    .to_string(),
+            message: format!("must be one of {}", names.join(", ")),
         });
     }
 
@@ -205,13 +207,6 @@ fn require_non_empty_str<'a>(field: &str, value: Option<&'a str>) -> Result<&'a 
             message: "is required for schema_version >= 2".to_string(),
         })?;
     Ok(value)
-}
-
-fn is_canonical_model_type(value: &str) -> bool {
-    matches!(
-        value,
-        "llm" | "vlm" | "reranker" | "diffusion" | "embedding" | "audio" | "vision" | "unknown"
-    )
 }
 
 fn is_canonical_task_type(value: &str) -> bool {

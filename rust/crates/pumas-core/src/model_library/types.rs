@@ -15,7 +15,9 @@ pub use crate::models::{
     ModelImportSpec, ModelMetadata, ModelOverrides, SecurityTier,
 };
 
-/// Supported model types.
+/// What a person uses a model for. This is library metadata: it groups models
+/// for display and never decides where a model is stored or what it is called.
+/// Inputs and outputs beyond the primary use are recorded as modalities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
@@ -26,8 +28,13 @@ pub enum ModelType {
     Vlm,
     /// Reranker model (text ranking / relevance scoring)
     Reranker,
+    /// Decision/evaluation model: answers choice, score or yes/no questions
+    /// with probabilities (for example llama.cpp decision models, classifiers)
+    Decision,
     /// Diffusion model (image generation)
     Diffusion,
+    /// Video generation model (text/image/video in, video out)
+    Video,
     /// Embedding model (text/image embeddings for similarity, retrieval, etc.)
     Embedding,
     /// Audio model
@@ -39,13 +46,38 @@ pub enum ModelType {
 }
 
 impl ModelType {
+    /// Every category, in library display order. The single list other
+    /// checks (metadata validation, RPC admission) derive from.
+    pub const ALL: [ModelType; 10] = [
+        ModelType::Llm,
+        ModelType::Vlm,
+        ModelType::Decision,
+        ModelType::Embedding,
+        ModelType::Reranker,
+        ModelType::Diffusion,
+        ModelType::Video,
+        ModelType::Audio,
+        ModelType::Vision,
+        ModelType::Unknown,
+    ];
+
+    /// The category with exactly this canonical name. Unlike `FromStr`, it
+    /// never maps HF task tags.
+    pub fn from_canonical(value: &str) -> Option<ModelType> {
+        Self::ALL
+            .into_iter()
+            .find(|category| category.as_str() == value)
+    }
+
     /// Return the canonical lowercase string for this model type.
     pub fn as_str(&self) -> &'static str {
         match self {
             ModelType::Llm => "llm",
             ModelType::Vlm => "vlm",
             ModelType::Reranker => "reranker",
+            ModelType::Decision => "decision",
             ModelType::Diffusion => "diffusion",
+            ModelType::Video => "video",
             ModelType::Embedding => "embedding",
             ModelType::Audio => "audio",
             ModelType::Vision => "vision",
@@ -64,7 +96,6 @@ impl ModelType {
             | "text2text-generation"
             | "question-answering"
             | "token-classification"
-            | "text-classification"
             | "fill-mask"
             | "translation"
             | "summarization"
@@ -73,14 +104,21 @@ impl ModelType {
             // Reranker / ranking
             "text-ranking" => ModelType::Reranker,
 
-            // Diffusion / image & video generation
+            // Decision / evaluation: label, score or yes/no answers
+            "text-classification" | "zero-shot-classification" => ModelType::Decision,
+
+            // Diffusion / image generation
             "text-to-image"
             | "image-to-image"
             | "unconditional-image-generation"
             | "image-inpainting"
-            | "text-to-video"
             | "text-to-3d"
             | "image-to-3d" => ModelType::Diffusion,
+
+            // Video generation: the output is video, whatever else goes in or out
+            "text-to-video" | "image-to-video" | "video-to-video" | "image-text-to-video" => {
+                ModelType::Video
+            }
 
             // Audio
             "text-to-audio"
@@ -124,7 +162,9 @@ impl std::str::FromStr for ModelType {
             "llm" => Ok(ModelType::Llm),
             "vlm" => Ok(ModelType::Vlm),
             "reranker" => Ok(ModelType::Reranker),
+            "decision" => Ok(ModelType::Decision),
             "diffusion" => Ok(ModelType::Diffusion),
+            "video" => Ok(ModelType::Video),
             "embedding" => Ok(ModelType::Embedding),
             "audio" => Ok(ModelType::Audio),
             "vision" => Ok(ModelType::Vision),

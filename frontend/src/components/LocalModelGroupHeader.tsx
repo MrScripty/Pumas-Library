@@ -1,4 +1,5 @@
 import { Tag } from 'lucide-react';
+import { modelCategoryLabel } from '../utils/modelCategories';
 
 interface LocalModelGroupHeaderProps {
   category: string;
@@ -13,7 +14,7 @@ export function LocalModelGroupHeader({
     <div className="flex items-center gap-2 px-1">
       <Tag className="w-3.5 h-3.5 text-[hsl(var(--text-muted))]" />
       <p className="text-xs font-semibold text-[hsl(var(--text-muted))] uppercase tracking-wider">
-        {category}
+        {modelCategoryLabel(category)}
       </p>
       <span className="text-xs text-[hsl(var(--text-muted))]">
         ({modelCount})

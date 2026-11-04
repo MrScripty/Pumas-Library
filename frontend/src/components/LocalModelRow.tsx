@@ -106,6 +106,9 @@ export function LocalModelRow({
                 Download activity · {model.downloadStatus}
               </div>
             ) : <LocalModelMetadataSummary
+              adapter={model.adapter}
+              inputModalities={model.inputModalities}
+              outputModalities={model.outputModalities}
               format={model.format}
               quant={model.quant}
               size={model.size}

@@ -1206,6 +1206,15 @@ async fn dispatch_admitted_command(
                 .await
                 .map(RpcOutcome::UpdateModelNotes)
         }
+        RpcCommand::SetModelCategory { model_id, category } => state
+            .api
+            .set_model_category(&model_id, category)
+            .await
+            .map(|recorded| {
+                RpcOutcome::ModelCategory(crate::contract::ModelCategoryOutcome::new(
+                    &model_id, recorded,
+                ))
+            }),
         #[cfg(feature = "inference-plugins")]
         RpcCommand::Legacy { method, params } if method == "get_version_status" => {
             versions::get_version_status(state, &params)

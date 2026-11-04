@@ -63,6 +63,12 @@ on failure. Unsupported/corrupt stores are refused. Migration cannot retire a
 previously retained failed owner claim: a dead PID is insufficient authority to
 delete registry state. Recovery requires the existing custody contract.
 
+Model categories are now metadata. Opening a library updates its system
+classification rules in place; the next library refresh re-detects categories
+(adding Decision and Video) without moving folders or changing model IDs, so
+served-model IDs and runtime profiles keep working. A category you choose in
+the model's metadata window is kept by later refreshes.
+
 Missing download destinations remain represented in their retained error/paused
 state without startup creating folders or pretending absent bytes completed.
 Interactive download-location reconciliation is separately planned work; this

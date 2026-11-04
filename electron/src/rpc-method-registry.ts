@@ -121,6 +121,7 @@ export const RPC_METHOD_REGISTRY = {
     'get_inference_settings',
     'update_inference_settings',
     'update_model_notes',
+    'set_model_category',
     'resolve_model_dependency_requirements',
     'audit_dependency_pin_compliance',
     'list_models_needing_review',

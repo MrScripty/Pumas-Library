@@ -1,5 +1,6 @@
 import type { ModelCategory, ModelInfo } from '../types/apps';
 import type { CatalogModel } from '../generated/desktop-contract';
+import { modelCategoryRank } from './modelCategories';
 
 function getConvertibleFormat(format?: string): ModelInfo['primaryFormat'] {
   return format === 'gguf' || format === 'safetensors' ? format : undefined;
@@ -13,6 +14,9 @@ export function projectCatalogModel(model: CatalogModel): ModelInfo {
     id: model.id,
     name: model.displayName,
     category: model.modelType,
+    inputModalities: model.inputModalities,
+    outputModalities: model.outputModalities,
+    adapter: model.adapter,
     path: model.id,
     modelDir: model.modelDir,
     format: model.format,
@@ -41,5 +45,7 @@ export function groupCatalogModels(models: readonly CatalogModel[]): ModelCatego
     if (group) group.push(row);
     else categoryMap.set(row.category, [row]);
   }
-  return Array.from(categoryMap, ([category, models]) => ({ category, models }));
+  return Array.from(categoryMap, ([category, models]) => ({ category, models }))
+    .sort((a, b) => modelCategoryRank(a.category) - modelCategoryRank(b.category)
+      || a.category.localeCompare(b.category));
 }

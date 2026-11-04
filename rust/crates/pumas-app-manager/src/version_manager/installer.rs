@@ -1967,6 +1967,18 @@ impl VersionInstaller {
             Utc::now().format("%Y%m%d-%H%M%S")
         ));
 
+        // Tracking starts before the first effect: a failure before this point
+        // created nothing, and the version manager treats it as an outcome.
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.start_installation(
+                tag,
+                total_size,
+                None,
+                Some(log_path.to_string_lossy().as_ref()),
+            );
+        }
+
         let versions = self.versions_dir();
         let workspace_versions = versions.clone();
         let workspace_tag = tag.to_owned();
@@ -1978,16 +1990,6 @@ impl VersionInstaller {
                 prepare_native_acquisition_workspace(workspace_versions, workspace_tag, None)
             })
             .await?;
-
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.start_installation(
-                tag,
-                total_size,
-                None,
-                Some(log_path.to_string_lossy().as_ref()),
-            );
-        }
 
         let demand = AcquisitionDemand {
             consumer: consumer.owner().to_owned(),
@@ -2729,6 +2731,14 @@ impl VersionInstaller {
             "windows" => "win",
             _ => os,
         };
+        // A runtime variant (`b1234+cuda-12`) carries only the archive the user
+        // chose; install exactly that one, whatever its flavor.
+        let mut platform_archives = assets.iter().filter(|asset| {
+            Self::is_llama_cpp_platform_archive(&asset.name.to_ascii_lowercase(), platform, arch)
+        });
+        if let (Some(only), None) = (platform_archives.next(), platform_archives.next()) {
+            return Ok(only);
+        }
         if prefer_gpu_asset {
             if let Some(asset) = Self::find_llama_cpp_gpu_asset(assets, os, platform, arch) {
                 return Ok(asset);
@@ -4644,6 +4654,23 @@ mod tests {
                 .unwrap();
 
         assert_eq!(selected.name, "llama-b9082-bin-ubuntu-vulkan-x64.tar.gz");
+    }
+
+    #[test]
+    fn llama_cpp_asset_selection_installs_the_chosen_linux_cuda_variant() {
+        for name in [
+            "llama-b12099-bin-ubuntu-cuda-12.8-x64.tar.gz",
+            "llama-b12099-bin-ubuntu-cuda-13.4-x64.tar.gz",
+        ] {
+            let assets = vec![github_asset(name)];
+            for prefer_gpu in [true, false] {
+                let selected = VersionInstaller::select_llama_cpp_asset_for_platform(
+                    &assets, "linux", "x64", prefer_gpu,
+                )
+                .unwrap();
+                assert_eq!(selected.name, name);
+            }
+        }
     }
 
     fn github_asset(name: &str) -> GitHubAsset {

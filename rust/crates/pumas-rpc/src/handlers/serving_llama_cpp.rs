@@ -157,7 +157,7 @@ pub(super) async fn serve_llama_cpp_model(
         wait_for_dedicated_readiness(
             &state.llama_cpp_router_client,
             owned.endpoint_url.as_str(),
-            model_path,
+            &[model_path, request.model_id.as_str()],
             Duration::from_secs(60),
             || {
                 state
@@ -240,7 +240,7 @@ pub(super) async fn serve_llama_cpp_model(
 async fn wait_for_dedicated_readiness(
     client: &crate::provider_clients::LlamaCppRouterClient,
     endpoint: &str,
-    model_path: &str,
+    identities: &[&str],
     budget: Duration,
     mut ownership_matches: impl FnMut() -> Result<bool, String>,
     mut owns_listener: impl FnMut() -> Result<bool, String>,
@@ -256,7 +256,7 @@ async fn wait_for_dedicated_readiness(
                 continue;
             }
             let ready = client
-                .dedicated_model_ready(endpoint, model_path, deadline)
+                .dedicated_model_ready(endpoint, identities, deadline)
                 .await?;
             // HTTP success is valid only while the same child generation remains owned.
             if !ownership_matches()? {
@@ -381,7 +381,7 @@ mod tests {
             let result = wait_for_dedicated_readiness(
                 &client,
                 &endpoint,
-                "/test.gguf",
+                &["/test.gguf"],
                 if slow_health {
                     Duration::from_millis(50)
                 } else {
@@ -450,7 +450,7 @@ mod tests {
         let result = wait_for_dedicated_readiness(
             &client,
             "http://127.0.0.1:1",
-            "/test.gguf",
+            &["/test.gguf"],
             Duration::from_secs(1),
             || Ok(false),
             || Ok(true),
@@ -468,7 +468,7 @@ mod tests {
             let check = wait_for_dedicated_readiness(
                 &client,
                 &endpoint,
-                "/test.gguf",
+                &["/test.gguf"],
                 Duration::from_millis(30),
                 || Ok(true),
                 || listener_result.clone(),

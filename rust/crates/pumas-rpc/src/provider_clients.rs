@@ -127,11 +127,13 @@ impl LlamaCppRouterClient {
     }
 
     /// Prove readiness of one dedicated server against its owned launch model.
-    /// The caller owns the overall startup deadline and process identity checks.
+    /// `identities` are the IDs that launch can report: the model file path,
+    /// or the library model ID when the launch set `--alias` (models with a
+    /// projector). The caller owns the startup deadline and process checks.
     pub(crate) async fn dedicated_model_ready(
         &self,
         endpoint: &str,
-        model_path: &str,
+        identities: &[&str],
         deadline: tokio::time::Instant,
     ) -> Result<bool, String> {
         let health = self
@@ -175,7 +177,7 @@ impl LlamaCppRouterClient {
             .json()
             .await
             .map_err(|_| "llama.cpp model endpoint returned invalid JSON")?;
-        dedicated_model_identity_ready(&models, model_path)
+        dedicated_model_identity_ready(&models, identities)
     }
 
     pub async fn load_model(
@@ -357,14 +359,17 @@ fn router_catalog_status(status: &serde_json::Value, require_loaded: bool) -> Re
 
 fn dedicated_model_identity_ready(
     models: &serde_json::Value,
-    model_path: &str,
+    identities: &[&str],
 ) -> Result<bool, String> {
     let rows = models
         .get("data")
         .and_then(serde_json::Value::as_array)
         .ok_or("llama.cpp model endpoint omitted model identity")?;
-    if rows.len() != 1 || rows[0].get("id").and_then(serde_json::Value::as_str) != Some(model_path)
-    {
+    let reported = rows
+        .first()
+        .and_then(|row| row.get("id"))
+        .and_then(serde_json::Value::as_str);
+    if rows.len() != 1 || !reported.is_some_and(|id| identities.contains(&id)) {
         return Err("llama.cpp model endpoint does not match the owned launch model".into());
     }
     match rows[0].get("meta") {
@@ -480,22 +485,37 @@ mod tests {
             serde_json::json!({"data": [{"id": expected, "meta": false}]}),
             serde_json::json!({"data": [{"id": expected, "meta": {}}, {"id": expected, "meta": {}}]}),
         ] {
-            assert!(dedicated_model_identity_ready(&payload, expected).is_err());
+            assert!(dedicated_model_identity_ready(&payload, &[expected]).is_err());
         }
         assert_eq!(
             dedicated_model_identity_ready(
                 &serde_json::json!({"data": [{"id": expected, "meta": null}]}),
-                expected
+                &[expected]
             ),
             Ok(false)
         );
         assert_eq!(
             dedicated_model_identity_ready(
                 &serde_json::json!({"data": [{"id": expected, "meta": {}}]}),
-                expected
+                &[expected]
             ),
             Ok(true)
         );
+        // A launch with a projector sets `--alias <library model ID>`; llama.cpp
+        // then reports the alias, which the launch also owns.
+        let library_id = "embedding/gemma-embedding2/embeddinggemma-2-gguf";
+        assert_eq!(
+            dedicated_model_identity_ready(
+                &serde_json::json!({"data": [{"id": library_id, "meta": {}}]}),
+                &[expected, library_id]
+            ),
+            Ok(true)
+        );
+        assert!(dedicated_model_identity_ready(
+            &serde_json::json!({"data": [{"id": library_id, "meta": {}}]}),
+            &[expected]
+        )
+        .is_err());
     }
 
     #[tokio::test]
@@ -545,18 +565,18 @@ mod tests {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
             assert_eq!(
                 client
-                    .dedicated_model_ready(&endpoint, "/models/test.gguf", deadline)
+                    .dedicated_model_ready(&endpoint, &["/models/test.gguf"], deadline)
                     .await,
                 Ok(false)
             );
             assert_eq!(
                 client
-                    .dedicated_model_ready(&endpoint, "/models/test.gguf", deadline)
+                    .dedicated_model_ready(&endpoint, &["/models/test.gguf"], deadline)
                     .await,
                 Ok(true)
             );
             assert!(client
-                .dedicated_model_ready(&endpoint, "/models/wrong.gguf", deadline)
+                .dedicated_model_ready(&endpoint, &["/models/wrong.gguf"], deadline)
                 .await
                 .is_err());
             stop.send(()).unwrap();

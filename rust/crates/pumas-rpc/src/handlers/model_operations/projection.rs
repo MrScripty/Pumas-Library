@@ -304,7 +304,7 @@ fn options_kind(options: &OperationOptions) -> &'static str {
 }
 pub fn valid_model(value: &str) -> bool {
     !value.trim().is_empty()
-        && value.len() <= 256
+        && value.len() <= pumas_library::serving::MAX_GATEWAY_ALIAS_BYTES
         && value.trim() == value
         && !value.chars().any(char::is_control)
 }

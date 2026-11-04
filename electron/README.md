@@ -38,7 +38,7 @@ can contain backend diagnostics and must not expose credentials.
 
 `start_backend_setup(backend, expectedPreviousOperationId?)` and
 `get_backend_setup(backend)` expose the retained Rust setup owner for
-`python_conversion`, `llama_cpp`, `nvfp4` and `sherry`, independently of inference
+`python_conversion`, `llama_cpp`, `nvfp4`, `fp8` and `sherry`, independently of inference
 plugin support. Preload and main IPC validate requests with the Rust-generated
 decoders; preload validates the existing redacted setup outcomes. Neither layer
 installs, retries or falls back automatically. A missing/unsupported RPC method
@@ -66,7 +66,8 @@ It does not confer filesystem or recovery authority.
 
 Request projections describe the canonical desktop outbound spelling accepted
 by Electron's registry and Rust. They do not promise every standalone Rust
-deserialization alias; unselected `Legacy` methods remain outside this slice.
+deserialization alias; methods still dispatched through the `Legacy` command
+remain outside the generated contract.
 
 `pnpm --dir electron run generate:desktop-contract` rebuilds that exporter and
 generates identical `src/generated/desktop-contract*` artifacts in Electron
@@ -129,8 +130,8 @@ renderer. It must make startup, ready, timeout, exit, and shutdown outcomes
 distinct. Events coordinate or invalidate cached state; they do not transfer
 durable ownership into Electron.
 
-The RPC server is loopback-only by default. Pumas RPC LAN mode is currently
-unauthenticated and must not be exposed to an untrusted network.
+The RPC server binds loopback only and has no LAN mode; see
+[Security](../docs/SECURITY.md) for its Host/Origin admission checks.
 
 ## Commands
 

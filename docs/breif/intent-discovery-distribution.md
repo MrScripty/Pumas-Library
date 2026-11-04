@@ -1,5 +1,18 @@
 # Pumas Library — Intent, Discovery, and Distributed Model Management Brief
 
+**Status:** Architectural direction; it does not authorize implementation. As of
+0.8.0, sections 1–2 exist as a local, single-library intent service
+(`query_models`, `get_model`, `get_model_status`, `ensure_model`,
+`release_model`, plus ensure status and declaration listing) through
+`PumasApi::intent()`, `PumasLocalClient::intent()` and seven `intent_` JSON-RPC
+methods; the [core README](../../rust/crates/pumas-core/README.md#local-intent-interface)
+owns that behavior. Locally, sections 8–10 are partly met: `pumas-rpc
+--discover-local` lists registered library roots without starting or contacting
+owners, and consumers attach to or retain an existing owner explicitly (see the
+[local HTTP consumer workflow](../contracts/local-http-consumer.md)). Nodes,
+fleets, peer transfer, a host daemon, managed-environment adapters and the
+`network` module rename (sections 5–7, 12–14 and 16) are not started.
+
 ## Purpose
 
 Pumas should evolve from primarily exposing low-level model-management operations into a **model-management authority** that accepts high-level requirements and determines how to satisfy them.

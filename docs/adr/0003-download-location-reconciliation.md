@@ -1,6 +1,6 @@
 # ADR 0003: Explicit local acceptance of moved legacy download outputs
 
-Status: Accepted design, implementation in progress.
+Status: Accepted and implemented (0.8.0). Native `retained_location` tests run in CI on Linux, macOS and Windows; composed and artifact acceptance evidence remains open.
 
 Historical reclassification moved a live download workspace without rebinding
 its admitted attempt. Existing shared mutation authority prevents recurrence,

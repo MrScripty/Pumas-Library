@@ -112,7 +112,7 @@
 **2026-09-20 current disposition:** The evidence above remains a dated finding,
 not a description of the current image stack. Later image-serving work established
 real Linux/GPU/runtime evidence within its recorded scope. The
-[Torch Image Provider Contract Correction](../../torch-image-provider-contract/plan.md)
+Torch Image Provider Contract Correction (removed; `git show 78c52fcf:docs/plans/torch-image-provider-contract/plan.md`)
 now owns the reusable generation lifetime plus image-specific compatibility,
 result, and projection work and its exact-candidate handoff. Milestone 3 still
 owns text shapes/semantics, usage, responsiveness, and shutdown; TIPC acceptance

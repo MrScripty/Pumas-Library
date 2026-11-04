@@ -1,5 +1,7 @@
 Generic Model Fetching Backend
 
+Status: Direction, partly implemented. The resolution / acquisition / consumption split and the shared acquisition owner are specified by the [artifact acquisition contract](../contracts/artifact-acquisition.md), which owns implemented behavior. As of 0.8.0, Hugging Face selections map into the source-neutral `ArtifactManifest` consumed by the shared acquisition owner in `pumas-core` (`acquisition/`, `model_library/hf/acquisition_source.rs`), covering much of Phases 1 and 3. Conditional S3 single-object and authored-bundle GGUF import ships behind the `s3` Cargo feature, verified against controlled HTTPS fixtures only; the AWS S3, non-AWS compatible service and MinIO validation required by Phase 2 is not certified. Arbitrary ONNX/Safetensors/Diffusers S3 import, Xet reconstruction, multi-source acquisition, chunk CAS and cluster distribution (Phases 4–7) are not started.
+
 Purpose
 
 Pumas should separate model source resolution from artifact transfer so that Hugging Face is no longer a special-purpose download path.

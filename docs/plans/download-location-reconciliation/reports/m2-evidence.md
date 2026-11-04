@@ -30,6 +30,7 @@ flow required by C1 is not established by the focused guards or the same-destina
 transfer. C6's controlled process termination at publication/live-settlement
 boundaries is also not replaced by fault injection and normal reopen. These exact
 composed probes remain pending; no assertion or accepted claim hides that gap.
-The existing native CI matrix now runs retained-location tests with default and
-no-default features on Linux/macOS/Windows. New non-Linux results are unavailable
-until this source is pushed and those jobs run. The plan remains Verifying.
+The existing native CI matrix runs retained-location tests with default and
+no-default features on Linux/macOS/Windows; after the 2026-11-02 merge they passed on
+all three in main Build 41702863505 (`torch-quality` jobs). The composed probes above
+remain pending, so the plan remains Verifying.

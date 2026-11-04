@@ -4,24 +4,14 @@ This is the additive v0.8 HTTP contract. Existing `/v1` OpenAI-compatible
 routes and model identities remain supported. Capability availability describes
 the selected served model and exact runtime, not the mere presence of a loader.
 
-`GET /v1/capabilities` returns supported contract versions and selected-model
-capabilities: semantic task, typed input and output formats, streaming support,
-closed option bounds, and availability. Audio transcription and audio
-classification are different capabilities even when both produce text.
-Protocol/build identity uses the single shared type owned by the release
-integration lane; discovery and operation APIs must not define competing types.
-
-`POST /v1/model-operations` accepts `contract_version`, `request_id`, a nonempty
-served model alias (and an exact profile where selection is ambiguous), a
-capability identifier, tagged input/output, and closed typed options. A finite
-response contains the correlated typed result. A text stream contains typed
-`started`, `delta`, `completed`, or `failed` SSE events. Request IDs correlate
-responses; they do not authorize retries or imply idempotency.
-
-Errors use fixed public codes and distinguish `not_admitted` from an admitted
-operation whose outcome is `unknown`. Unsupported or unqualified capabilities
-fail before provider admission. Never replay generation after caller loss,
-transport failure, redirects, or ambiguous provider completion.
+The routes are `GET /v1/served-models` (discovery), `GET /v1/capabilities`
+(one selected serving identity) and `POST /v1/model-operations` (typed finite
+or streamed operations). Request IDs correlate responses; they do not authorize
+retries or imply idempotency. Errors use fixed public codes and distinguish
+`not_admitted` from an admitted operation whose outcome is `unknown`.
+Unsupported or unqualified capabilities fail before provider admission. Never
+replay generation after caller loss, transport failure, redirects, or ambiguous
+provider completion.
 
 Existing chat/completion `stream: true` requests progressively forward provider
 SSE bytes. They retain the upstream transport and an admission permit until
@@ -35,28 +25,6 @@ shutdown also closes connections under the existing shutdown grace policy.
 Closure requests cancellation without establishing provider cessation. A fault
 after headers ends the body with a transport error, rather than a successful
 terminal result.
-
-Audio transcription accepts declared encoding, channel count, and sample rate.
-The adapter validates these and actually converts supported input to mono
-16 kHz PCM16LE; it must not relabel samples. Finite operations expose their exact
-runtime/slot/operation reference for status and cancellation. Language and input,
-output, and generation bounds are closed and validated before admission.
-
-Production audio requires trusted selected-byte custody before loading: a
-separate SHA-256 manifest, an owner-controlled copied read source, verified
-installed recipe/code identity, and an exact managed process and slot generation.
-The package observation fingerprint is not byte attestation. Custody survives
-caller loss and uncertain load/unload outcomes. Release requires confirmed
-native/device cessation with no outstanding operation borrows, or complete
-exact-generation process-tree drainage. Legacy arbitrary-path slots remain
-unattested. Packaging supplies runtime qualification; discovery supplies the
-compatible existing owner and its public HTTP endpoint.
-
-Implementation is qualified and integrated in small slices: progressive legacy
-streaming first, generic typed capabilities/operations second, and attested
-production audio third. This document freezes the contract direction; endpoint
-availability must reflect the slice actually installed. No scheduler, model
-downloads, acquisition policy, or consumer UI is introduced here.
 
 ## Compatibility rules
 
@@ -85,8 +53,8 @@ These rules apply to every route in this contract.
 | `request_id` | yes | Caller correlation ID, 1–128 of `A-Za-z0-9-_.:`. Echoed in every response. |
 | `model` | yes | Served model alias. |
 | `profile` | no | Exact serving profile; needed only when the alias is served by more than one profile. |
-| `input` | yes | Tagged by `kind`: `text`, `text_batch`, `messages`, `image_messages`, `image`, `audio`. |
-| `output` | yes | `text`, `embeddings_float32`, `png_base64`, `labels`. |
+| `input` | yes | Tagged by `kind`: `text`, `text_batch`, `messages`, `image_messages`, `image`, `content_batch`, `decision`, or the reserved `audio`. |
+| `output` | yes | `text`, `embeddings_float32`, `png_base64`, `decisions`, or the reserved `labels`, `pcm_s16le`, `pcm_f32le`. |
 | `capability` | no | Selects one capability explicitly. |
 | `semantic_task` | no | Narrows resolution to one semantic task. |
 | `options` | no | Tagged options; defaults apply per capability. `image_generation` requires width and height. |
@@ -132,7 +100,7 @@ The HTTP status matches the code: `invalid_request`, `unsupported_contract` →
 → 503; `provider_failure`, `invalid_provider_result`, `response_limit`,
 `transport_lost` → 502.
 
-## Typed HTTP slice
+## Endpoints
 
 `GET /v1/served-models` is the discovery entry point. It returns
 `supported_contract_versions`, the byte bounds, and `models`: one entry per
@@ -166,8 +134,8 @@ text generation and image-to-text. `multimodal_embedding` and image input to
 decision model (`decisions` output modality); such models offer no text
 generation. `audio_transcription` and `audio_classification` are explicitly
 unavailable with `unqualified_audio_runtime` until the production custody
-bridge and installed runtime are qualified. The shared build/protocol identity is a separate
-integration dependency; this endpoint does not invent an identity DTO.
+bridge and installed runtime are qualified. Build/protocol identity is reported by
+`pumas-rpc --build-info`; these endpoints define no competing identity type.
 
 For example, a finite text operation is:
 
@@ -237,7 +205,7 @@ calibrated for any particular data.
 
 A finite success has `contract_version`, the original `request_id`, and a
 tagged `result`: `text` with `text` and `finish_reason`; `embeddings` with finite
-float32 `vectors`; or `image` with `png_base64` and `seed`. Only recognized text
+float32 `vectors`; `image` with `png_base64` and `seed`; or `decisions` as above. Only recognized text
 finish reasons (`stop`, `length`, `content_filter`) are accepted. The projection
 checks a single text choice, embedding count/index/dimension coherence, and
 rejects incoherent provider results. Provider envelopes and internal errors are
@@ -259,11 +227,25 @@ comments, and multiline data are handled within a 256 KiB event bound and the
 on each downstream body poll. A silent or hung provider has no invented idle or
 drain deadline; disposing the body closes the retained transport.
 
+## Reserved audio
+
+Audio transcription and audio classification are different capabilities even
+when both produce text. Both are reserved and unavailable in this release.
+
 The audio declaration reserves `kind: "audio"`, `encoding` (`pcm_s16le` or
 `pcm_f32le`), `sample_rate_hz`, `channels`, `sample_count` (frames per channel),
 and `data_base64`. Supported conversion is 8–192 kHz, one or two channels, and
-at most 30 seconds; float32 samples must be finite and in [-1, 1]. Audio options
-reserve the existing closed language vocabulary and optional positive
-`max_output_tokens`. These declarations do not admit audio in this slice.
-Production finite-audio status/cancel routes and runtime/slot references remain
-part of the following custody slice, and are not present in this implementation.
+at most 30 seconds; float32 samples must be finite and in [-1, 1]. The adapter
+converts supported input to mono 16 kHz PCM16LE; it must not relabel samples.
+Audio options reserve the existing closed language vocabulary and optional
+positive `max_output_tokens`. These declarations do not admit audio.
+
+Production audio requires trusted selected-byte custody before loading: a
+separate SHA-256 manifest, an owner-controlled copied read source, verified
+installed recipe/code identity, and an exact managed process and slot generation.
+The package observation fingerprint is not byte attestation. Custody survives
+caller loss and uncertain load/unload outcomes. Release requires confirmed
+native/device cessation with no outstanding operation borrows, or complete
+exact-generation process-tree drainage. Finite-audio status/cancel routes and
+runtime/slot references are not present until that custody is qualified; see
+[installed audio session](installed-audio-session.md).

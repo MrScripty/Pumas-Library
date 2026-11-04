@@ -7,11 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.8.0] - Unreleased
+## [0.8.0] - 2026-11-04
 
-Source manifests identify `0.8.0`. The date is set when the release is published.
-See [release notes and migration](docs/release-notes-0.8.0.md) and the
-[checkpoint qualification](docs/release-qa-0.8.0.md) before choosing a consumer pin.
+See the [release notes](docs/release-notes-0.8.0.md) for upgrade steps,
+downloads and known limitations.
 
 ### Added
 
@@ -40,6 +39,14 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
 
 ### Changed
 
+- `ModelImporter::import` and `import_with_progress` require the lifecycle-owned
+  `ModelLibrary` from `PumasApi` or `PumasLibraryInstance`; a directly
+  constructed library returns `PumasError::Config` before staging.
+- `ModelImporter::discover_shard_recovery[_async]` returns a typed read-only
+  report; `recover_incomplete_shards[_async]` is deprecated and never starts
+  an inferred download.
+- Library merge refuses copied imports whose publication receipt is bound to
+  their current library root.
 - A model's category is metadata: re-detection never moves a model or changes
   its ID for a category change (only a family change still moves it).
   Detection prefers file facts and architectures over task tags: a GGUF
@@ -108,10 +115,10 @@ See [release notes and migration](docs/release-notes-0.8.0.md) and the
 - A desktop update that fails validation is no longer dropped silently, which
   had left views stale; the reason is reported and the view reloads.
 
-## [0.7.0] - Unreleased candidate
+## [0.7.0] - 2026-09-17
 
-See [0.7.0 release notes](docs/release-notes-0.7.0.md) for capabilities,
-upgrade guidance, and scope.
+See the [0.7.0 release](https://github.com/MrScripty/Pumas-Library/releases/tag/v0.7.0)
+for capabilities, upgrade guidance, and scope.
 
 ### Added
 

@@ -34,7 +34,7 @@
 
 - Planning-only reconciliation delegated the image lifetime, live compatibility,
   private result evolution, and gateway projection subset to the focused
-  [Torch Image Provider Contract Correction](../../torch-image-provider-contract/plan.md).
+  Torch Image Provider Contract Correction (removed; `git show 78c52fcf:docs/plans/torch-image-provider-contract/plan.md`).
 - Milestone 3 retains broader text semantics, usage accounting, health/control
   responsiveness, overload, and shutdown. TIPC evidence is necessary for the
   image subset but cannot satisfy whole DRBT-A5.

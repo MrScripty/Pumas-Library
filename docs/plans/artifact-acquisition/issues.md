@@ -1,6 +1,6 @@
 # Acquisition issues and dispositions
 
-Q1 is active; production repairs and acceptance claims remain pending until evidence is recorded. Evidence references [the source audit](reports/codebase-audit.md), [the canonical contract](../../contracts/artifact-acquisition.md), and its linked primary sources. Severity is consequence within this scope, not an asserted exploited vulnerability.
+Status review (2026-11-04, v0.8.0): Q1 and Q3 source work is merged and ships in 0.8.0; the Q1 repairs marked "fixed in the Q1 candidate" below landed with PR #34 and its follow-ups. Acceptance claims remain pending until current-head evidence is recorded; deferred items (AQ-D*) and pending environments (AQ-E01) are unchanged. Evidence references [the source audit](reports/codebase-audit.md), [the canonical contract](../../contracts/artifact-acquisition.md), and its linked primary sources. Severity is consequence within this scope, not an asserted exploited vulnerability.
 
 | ID | Severity / issue | Owner / disposition | Deciding evidence and revisit condition |
 | --- | --- | --- | --- |

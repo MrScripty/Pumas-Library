@@ -1,8 +1,10 @@
 # Deferred Hugging Face discovery-cache service readiness
 
-Status: planning only, 2026-10-03. Revisit after the current baseline repairs,
-S3 acquisition and restricted networked-node milestone. This checklist does not
-start search implementation or authorize external resources.
+Status: deferred planning checklist, 2026-10-03; reviewed unchanged for 0.8.0
+(2026-11-04). The local `cache:` browse and demand-driven detail hydration shipped
+in 0.8.0 (see the brief); the shared/bulk service below is not started. Revisit
+when a shared or bulk discovery cache is selected as product work. This checklist
+does not start search implementation or authorize external resources.
 
 ## Source and dependency decisions
 

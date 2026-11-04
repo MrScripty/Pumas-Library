@@ -471,7 +471,9 @@
   stopped by its owned generation; and RPC shutdown and process exit succeeded.
 - Retained `runtime.json`, exact `resolution.json`, `pip-resolution.json`,
   `probe-results.json`, `acceptance.json`, and `rpc.log` in
-  [the v2.14.0 evidence directory](reports/v2.14.0-linux-cpu-rpc-acceptance/).
+  `reports/v2.14.0-linux-cpu-rpc-acceptance/` (superseded by the restart and
+  current-source acceptance runs; removed in the v0.8.0 cleanup and available
+  in Git history at `78c52fcf`).
   The temporary runtime root was deleted after those files were collected.
 - Added an opt-in `torch-native-e2e` CI matrix for Ubuntu 24.04, Windows 2025,
   and macOS 15, gated to manual dispatch or version-tag builds. It builds native

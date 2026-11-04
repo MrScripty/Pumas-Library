@@ -1,7 +1,7 @@
 # Bounded owned audio lifecycle
 
-This slice extends PR55's selected-byte and PCM foundations with private
-ownership primitives. Production native audio admission and the public generic
+This extends the [selected-byte and PCM foundations](audio-custody-foundation.md)
+with private ownership primitives. Production native audio admission and the public generic
 endpoint remain unavailable. Controlled workers establish the ownership state
 machine; they do not establish that an installed model consumed selected bytes.
 

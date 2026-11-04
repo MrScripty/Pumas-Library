@@ -24,9 +24,8 @@ inputs. HTTP readiness does not grant model or runtime readiness.
 
 The accepted [release/host decision](../plans/current-standards-remediation-2026-09-03/desktop-release-bindings-and-torch/reports/release-and-host-contract-decision.md)
 selects immutable Rust source consumers and removes unsupported host-binding
-publication. The [v0.8 distribution plan](../plans/headless-inference-distribution-v0.8.md)
-adds headless RPC candidates and consumes the shared discovery/build contracts;
-it does not admit a Python SDK. Existing native generator scripts and their older
+publication. Releases add headless RPC archives (see [Releasing](../../RELEASING.md))
+that consume the shared discovery/build contracts; they do not admit a Python SDK. Existing native generator scripts and their older
 experimental documentation are inventory, not an accepted support tuple.
 
 This module therefore stays a Pumas-owned, source-exported CLI example under

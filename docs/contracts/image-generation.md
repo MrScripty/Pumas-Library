@@ -17,10 +17,13 @@ Only the concrete adapters below are supported.
 Use the Pumas gateway address reported by the running RPC server. The llama.cpp
 router and the internal Torch listener are different endpoints.
 
-`GET /v1/models` lists served models. Image models add
-`"capabilities": ["image_generation"]` only when their Torch slot is ready.
-Existing text entries retain their response shape. Clients should offer only
-models with that capability for image generation.
+`GET /v1/models` lists each served model ID once, with its serving `profiles`.
+Image models add `"capabilities": ["image_generation"]` only when their Torch
+slot is ready. Existing text entries retain their response shape. Clients should
+offer only models with that capability for image generation. Typed consumers can
+instead discover models through `GET /v1/served-models` and request the
+`image_generation` capability through the
+[model operations contract](model-operations-v1.md).
 
 `POST /v1/images/generations` accepts a JSON object:
 

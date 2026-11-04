@@ -1,10 +1,16 @@
 # Download location and failed-attempt reconciliation
 
-- Status: **Verifying**; the recovery implementation and Linux desktop path are complete; required composed/native evidence remains open.
+- Status: **Verifying**; the recovery implementation and Linux desktop path are complete and merged to `main`
+  (`619c55cc`, 2026-11-02), so they ship in 0.8.0. Required composed evidence remains open.
+- Status review (2026-11-04, v0.8.0): the native `retained_location` cases (default and
+  `--no-default-features`) now run in the `torch-quality` matrix and passed on Linux, macOS and
+  Windows in main Build 41702863505. The C10 Debian evidence in [M3](reports/m3-evidence.md) is for
+  the 0.8.0-rc.1 review candidate, not the final 0.8.0 package. The C1 watcher/classification
+  composed flow and C6 process-termination probes in [M2](reports/m2-evidence.md) are still pending.
 - Created: 2026-10-10.
 - Canonical identity: `docs/plans/download-location-reconciliation/plan.md`.
 - Admission operation for a subsequent implementation request: `start`.
-- Current phase: verification and Linux review-candidate delivery.
+- Current phase: verification of the remaining composed custody and interruption claims.
 - Exactly one next slice: **M2 — remaining composed custody and interruption evidence**.
 - Objective acceptance: **pending**. Existing guard tests support the design;
   they do not satisfy this plan's new acceptance claims.

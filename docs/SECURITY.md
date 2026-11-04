@@ -16,9 +16,9 @@ maintainer explicitly announces otherwise.
 - Electron validates RPC method names and some request shapes before forwarding
   to the Rust sidecar. Coverage is incomplete; renderer TypeScript types are not
   a security boundary.
-- `pumas-rpc` binds to loopback by default and limits body size and concurrent
-  requests.
-- `pumas-rpc` has no supported LAN mode. Its receiving HTTP boundary rejects
+- `pumas-rpc` refuses to bind any non-loopback address and limits body size
+  and concurrent requests.
+- `pumas-rpc` has no LAN mode. Its receiving HTTP boundary rejects
   non-loopback Host values, non-loopback or malformed Origin values, duplicate
   authority/origin headers, and originless cross-site browser requests before
   dispatch. CORS controls response visibility and is not authorization.
@@ -53,8 +53,14 @@ projection rather than serializing errors directly.
 ## Dependency and Release Evidence
 
 Authoritative dependency inputs are the checked-in Cargo and pnpm lockfiles plus
-the Python requirements under `torch-server/`. The Torch production
-requirements are not currently resolved into a reproducible lock.
+the Python requirements under `torch-server/`. Only the bundled Torch preset
+(Linux x86_64, CPython 3.12) installs from `torch-server/runtime/requirements.lock`,
+a hash-pinned lock for that one recipe. Every other managed Torch install
+resolves its own dependencies when it is created, so the checked-in lock does
+not describe it: audit that installation's `runtime/requirements.txt`,
+`runtime/resolution.json` and `runtime/pip-resolution.json` instead.
+`torch-server/requirements.txt` is an unpinned direct-development input, not a
+shipped dependency set.
 
 Before a release, run current vulnerability and license checks against the
 resolved shipped dependency closure for all three ecosystems. Record tool
@@ -65,9 +71,20 @@ the current release workflow.
 Useful local tools include `cargo audit`, `npm audit`, and `pip-audit`, but a
 tool result is meaningful only when its inputs match the final artifact.
 
+### Accepted advisory exceptions
+
+Last reviewed on the 0.8.0-rc.1 lockfiles (2026-10-14); every version below is
+still in the 0.8.0 lockfiles. Re-confirm each one with the release's own
+checks, and drop an entry once the dependency changes.
+
+| Dependency | Advisory | Why it is accepted |
+| --- | --- | --- |
+| `sprintf-js` 1.1.3 | GHSA-hp3w-g68c-fv3c | Build-only, through electron-builder; not shipped. Kept without a suppression. |
+| `lru` 0.16.4 | RUSTSEC-2026-0253 | Only in `s3` builds, through `aws-sdk-s3` 1.137.0. The trigger is absent: the key is a `String` with no custom `Drop`, and `pop` is never called. |
+| `http-cache-semantics` 4.3.0 | GHSA-ch52-4w7c-c8xp | Disputed upstream. |
+| `bincode` 1.3.3, `instant` 0.1.13, `paste` 1.0.15 | Unmaintained notices | Pulled in by UniFFI tooling, `notify` and macro dependencies respectively; no known vulnerability. |
+
 ## Current Security Work
 
-Security and boundary findings are prioritized in the
+Open security and boundary findings are tracked in the
 [current standards audit](audits/current-standards-2026-09-03/README.md).
-Credential-safe diagnostics and the RPC/LAN threat model are the first required
-remediation slice.

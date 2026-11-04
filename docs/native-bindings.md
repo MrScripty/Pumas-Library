@@ -2,14 +2,16 @@
 
 ## Status
 
-Pumas has a UniFFI adapter and generators for Python, Kotlin, Swift, Ruby, and
-C#. CI generates archives, and the repository includes a local C# compile/load
-smoke. The project does not yet have a verified host/runtime support matrix, so
-these bindings should be treated as experimental rather than generally
-supported SDKs.
+No host-language binding is supported. `bindings/support-matrix.json` is the
+authority: its contract status is `no_supported_host_bindings` with no accepted
+host tuple, and it lists every current surface (UniFFI Python, Kotlin, Swift,
+Ruby and C#, the Rustler/Elixir crate, and the Go claim) under
+`removed_surfaces`, because none has a real host consumer or host-runtime
+evidence. That removal is decided but not yet carried out: the `pumas-uniffi`
+and `pumas_rustler` crates, generators and local smoke still exist.
 
-`pumas_rustler` is also experimental. Its current NIF surface consists mainly
-of local conversions and does not expose the core Pumas library API.
+CI does not generate or package bindings, and binding archives are not release
+assets. `pumas_rustler` does not expose the core Pumas library API.
 
 ## Boundary
 
@@ -60,8 +62,10 @@ different commits, versions, targets, or profiles.
 
 ## Promotion Requirements
 
-A host/language combination becomes supported only when CI or equivalent
-release evidence exercises the exact packaged cohort through:
+A host/language tuple is admitted to the support matrix only with a named real
+consumer, an exact host runtime and native target, a supported operation and
+lifecycle contract, deterministic cohort generation, and CI or equivalent
+release evidence that exercises the exact packaged cohort through:
 
 - native library loading;
 - a synchronous call;

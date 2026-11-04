@@ -79,6 +79,7 @@ Run the smallest evidence set that proves the change. Common baselines are:
 | Rust | `./scripts/rust/check.sh` or targeted `cargo test --manifest-path rust/Cargo.toml -p <crate>` |
 | Frontend | `npm run -w frontend lint`, `check:types`, and targeted/full `test:run` |
 | Electron | `npm run -w electron lint`, `test`, and `validate` |
+| Desktop contract | `pnpm --dir electron check:desktop-contract` after changing a Rust wire type or an `electron/contracts/` schema |
 | Launcher | `npm run test:launcher` |
 | Torch | Ruff checks plus `python3 -m unittest discover -s torch-server/tests` |
 | Release startup | `./launcher.sh --build-release` and `--release-smoke` |

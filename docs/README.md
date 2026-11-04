@@ -13,13 +13,37 @@ available through Git history rather than in the working tree.
 | [Development](DEVELOPMENT.md) | Setup, standards routing, and verification |
 | [Contributing](../CONTRIBUTING.md) | Change, planning, documentation, and commit expectations |
 | [Releasing](../RELEASING.md) | Current release flow, required evidence, and known gaps |
-| [Security](SECURITY.md) | Reporting and current trust-boundary guidance |
+| [Security](SECURITY.md) | Reporting, trust boundaries, and accepted advisory exceptions |
 | [Native bindings](native-bindings.md) | Binding status, generation, and packaging |
+| [Opening an older library](library-upgrade.md) | The one-time library metadata upgrade |
+| [Package-facts fingerprint](package-facts-fingerprint-canonicalization.md) | Canonical package-facts fingerprint |
+| [Changelog](../CHANGELOG.md) and [0.8.0 release notes](release-notes-0.8.0.md) | What changed, per release |
+
+## Contracts
+
+Consumer-facing contracts:
+
+- [Model operations v1](contracts/model-operations-v1.md) and [model lookup v1](contracts/model-lookup-v1.md)
+- [Image-to-text](contracts/image-to-text-v0.8.md), [image generation](contracts/image-generation.md) and [generation lifetime](contracts/generation-lifetime.md)
+- [Local HTTP consumer](contracts/local-http-consumer.md), [admission fence](contracts/local-http-admission-fence.md), [owner retention](contracts/local-owner-retention.md), [start authority](contracts/local-start-authority.md) and [inference-enabled bootstrap](contracts/inference-enabled-bootstrap.md)
+
+Internal boundaries:
+
+- [Artifact acquisition](contracts/artifact-acquisition.md), [Hugging Face model-detail cache](contracts/hf-model-detail-cache.md) and [retained download reconciliation](contracts/download-location-reconciliation.md)
+- [Torch provider protocol](contracts/torch-provider-protocol.md)
+- Audio: [custody foundation](contracts/audio-custody-foundation.md), [owned transport](contracts/owned-audio-transport.md), [owned lifecycle](contracts/owned-audio-lifecycle.md), [installed constructor](contracts/installed-audio-constructor.md), [installed session](contracts/installed-audio-session.md), [Cohere qualification](contracts/cohere-native-qualification.md) and [Cohere cohort](contracts/cohere-native-cohort.md)
+- [Image-to-text native qualification](contracts/image-to-text-native-qualification.md)
 
 ## Durable Decisions
 
 - [ADR 0001: ONNX Runtime provider model](adr/0001-onnx-runtime-provider-model.md)
 - [ADR 0002: Torch image provider protocol](adr/0002-torch-image-provider-protocol.md)
+- [ADR 0003: Explicit local acceptance of moved legacy download outputs](adr/0003-download-location-reconciliation.md)
+- [ADR 0004: A model's category is metadata chosen by use](adr/0004-model-category-as-metadata.md)
+
+## Runbooks
+
+- [Recover a failed download whose files moved](runbooks/download-location-reconciliation.md)
 
 ## Point-in-Time Audits
 
@@ -28,12 +52,28 @@ available through Git history rather than in the working tree.
 Audits describe the named repository and standards commits. They are evidence
 and remediation inputs, not current operating instructions.
 
+## Product Briefs
+
+Direction, not commitments. Each brief states what of it exists today.
+
+- [Hugging Face discovery cache](breif/hf-cache.md)
+- [Generic model fetching (S3)](breif/s3-model-fetch.md)
+- [Unified inference gateway](breif/unified-inference-gateway.md)
+- [Intent, discovery and distributed model management](breif/intent-discovery-distribution.md)
+- [Capability discovery and resolution fabric](breif/capability-discovery-fabric.md)
+- [Agent interaction and MCP layer](breif/agent-interaction-mcp.md)
+
 ## Active and Planned Work
 
-- [Artifact acquisition](plans/artifact-acquisition/plan.md) — Q1 shared HTTP acquisition is active; AQ-HTTP is not ready
-- [Runtime installations and model adapters](plans/runtime-installations-and-model-adapters/plan.md) — runtime implementation remains gated by acquisition evidence
-- [2026-09-03 current-standards remediation program](plans/current-standards-remediation-2026-09-03/plan.md)
-- [Local intent API and transport-independent domain language](plans/local-intent-api-2026-09-12/plan.md) — complete within the recorded local scope; native resolution, acquisition, durable declarations and existing IPC/RPC projections accepted; nodes/fleets/new networking deferred until after the next release
+No plan is being executed right now. These hold open acceptance gates:
+
+- [Artifact acquisition](plans/artifact-acquisition/plan.md) — Q1 (HTTP) and Q3 (S3) ship in 0.8.0; AQ-HTTP and AQ-S3 acceptance pending; Q2 not started
+- [Runtime installations and model adapters](plans/runtime-installations-and-model-adapters/plan.md) — planned; R1 waits on AQ-HTTP acceptance
+- [Download-location reconciliation](plans/download-location-reconciliation/plan.md) — implemented (ADR 0003); composed and artifact evidence pending
+- [Torch cross-platform runtime management](plans/torch-cross-platform-runtime-management/plan.md) — packaged and Windows/macOS install gates open; the managed-Python license blocker is open
+- [2026-09-03 current-standards remediation program](plans/current-standards-remediation-2026-09-03/plan.md) — open issues not yet re-verified against 0.8.0
+- [Hugging Face discovery cache readiness](plans/hf-discovery-cache/readiness.md) — deferred checklist for the shared cache
+- Design records still linked as current: [operating owner custody](plans/operating-owner-custody-design.md) and [local discovery bootstrap](plans/local-discovery-bootstrap.md)
 
 An implementation invocation must name the exact focused `plan.md` and an
 explicit `start`, `continue`, or `verify` operation. Plans remain temporary

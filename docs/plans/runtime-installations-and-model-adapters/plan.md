@@ -6,12 +6,13 @@
 
 **Objective acceptance:** pending; real runtime, model, migration, native-platform, and desktop acceptance has not been performed.
 
-**Current phase:** waiting for Acquisition Q1 to satisfy and merge AQ-HTTP; read-only preparation may continue.
+**Current phase:** waiting for acceptance of AQ-HTTP; Acquisition Q1 source is merged (PR #34) and ships in 0.8.0, but the gate is not accepted. Read-only preparation may continue.
 
-An independently authorized [2026-10-05 ONNX build correction](reports/onnx-no-build-download-2026-10-05.md)
-removes build-time native SDK downloads without starting R1, adding an installer,
-or advancing the acquisition gates. Its explicit SDK contract and qualification
-limits are recorded separately from runtime installation implementation.
+**Status review (2026-11-04, v0.8.0):** Still `Planned`; no R1–R5 source exists (no installation identity or adapter registry in `pumas-app-manager` or `pumas-core`). The Torch installer still does not consume the acquisition owner, so Q2/AQ-PACKAGES, the prerequisite for R2, has not started. The v0.8.0 "adapter" badge from model categories is a LoRA/adapter-package classification, not this plan's registered model adapter.
+
+The 2026-10-05 ONNX build correction (Cargo never downloads ONNX Runtime; the SDK is
+loaded dynamically from an explicit path) is independent of this plan and is owned by
+[Development](../../DEVELOPMENT.md) and [ADR 0001](../../adr/0001-onnx-runtime-provider-model.md).
 
 **Exactly one next runtime slice:** **R1 — shared installation identity and bound launch for Torch and llama.cpp; begin only after AQ-HTTP is accepted and merged for the target in scope.**
 
@@ -22,7 +23,7 @@ limits are recorded separately from runtime installation implementation.
 
 **Baselines:** Pumas `04e7f1568f00693c0ef26c77e0150e5e4dd112ea`; Coding-Standards `39d55dc330d44ecf940364ceada9d2527f7c7ea0`.
 
-**Current accepted integration base:** Pumas `e37bbf4b964a0e2aadf25f80ab71edd8fa6b3eb3`. Acquisition Q1 is active on its task branch; AQ-HTTP remains not ready. Runtime source changes must start from updated accepted `main` after that gate is merged.
+**Current accepted integration base:** current Pumas `main` (0.8.0). Acquisition Q1 is merged; AQ-HTTP remains not accepted. Runtime source changes must start from updated accepted `main` after that gate is accepted.
 
 ## 1. Objective
 

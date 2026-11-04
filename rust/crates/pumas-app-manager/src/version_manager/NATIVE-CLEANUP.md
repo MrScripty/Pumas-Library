@@ -9,8 +9,8 @@ identity, revocation, and lease. Reads and writes through acquisition use held
 capabilities and refuse an observed pathname replacement. Observed acquisition
 subdirectory replacements are checked before cleanup mutates content. Existing
 native output extraction/publication helpers retain their path-based interfaces,
-with grant checks at their effect boundaries; this slice does not replace those
-helpers or claim adversarial path-race safety for them.
+with grant checks at their effect boundaries; this contract does not replace
+those helpers or claim adversarial path-race safety for them.
 
 The contract excludes arbitrary concurrent mutation inside the owned tree by an
 actor with identical filesystem authority. In particular, Unix cannot atomically
@@ -88,8 +88,9 @@ retained cleanup diagnostics. Linux integration fixtures additionally cover
 adopted verified output with v1/v2 retained staging and failed cancellation clear
 with durable Using preservation. Crash-state fixtures are not power-loss tests.
 
-Hosted Linux, macOS, and Windows focused/package gates remain required; local
-formatting or source review does not establish cross-platform parity.
+CI runs the focused `pumas-app-manager` `native_` tests on native Linux, macOS
+and Windows (`torch-quality` job); local formatting or source review does not
+establish cross-platform parity.
 
 Implementation references for the pinned-directory mechanism are cap-std v4.0.3
 [open_dir](https://github.com/bytecodealliance/cap-std/blob/v4.0.3/cap-primitives/src/fs/open_dir.rs)

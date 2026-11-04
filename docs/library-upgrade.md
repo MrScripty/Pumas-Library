@@ -6,8 +6,9 @@ library never performs this upgrade automatically. The app stays open so you
 can explicitly upgrade its metadata, select another library, or close it.
 
 If it shows **Library could not start**, first close other apps using that
-library and reopen Pumas Library. The app's main log retains the startup failure;
-an unavailable backend never becomes an empty or ready library.
+library and reopen Pumas Library. The recovery screen shows the reason the
+backend reported, and the app's main log retains the startup failure; an
+unavailable backend never becomes an empty or ready library.
 
 ## Upgrade from the desktop
 
@@ -86,12 +87,21 @@ The migration and historical-writer obligations are owned by the
 
 ## Startup diagnostic boundary
 
-The RPC startup supervisor emits a newline-delimited, path-free stdout frame
-`PUMAS_STARTUP_FAILURE={"version":1,"reason":"migration-required"}` only
-for the typed `acquisition.migration_required` failure, before exiting nonzero.
-The Electron bridge reads bounded complete lines across chunks and waits for
-stdio closure before consuming a failed-start diagnostic. Unknown versions,
-malformed frames and other startup failures become `backend-unavailable`.
+Every fatal RPC startup failure writes one newline-delimited stdout frame
+`PUMAS_STARTUP_FAILURE={"version":1,"reason":...}` before exiting nonzero.
+The typed `acquisition.migration_required` failure uses reason
+`migration-required` and opens the upgrade flow above; every other failure uses
+`backend-unavailable` with a bounded `detail` (home directory shown as `~`),
+which the recovery screen displays. The Electron bridge reads bounded complete
+lines across chunks and waits for stdio closure before consuming a failed-start
+diagnostic. Readers ignore unknown fields; unknown reasons and malformed frames
+become `backend-unavailable`.
+
+Download state that is current but unreadable by this version (for example,
+fields written by a newer Pumas) is not a migration case. The backend starts
+with the library, models and inference available, disables downloads without
+rewriting that state, and reports the reason in a status banner. Open the
+library with the newer version, or upgrade this one.
 
 Ordinary HF-enabled owners check an existing download store while holding the
 physical library lease, before claiming the registry or starting background work.

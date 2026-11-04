@@ -45,6 +45,15 @@ Erlang-hosted Rustler crate. Individual subcommands are listed by `--help`.
 Generation and packaging can require external host toolchains. See
 [Native bindings](../docs/native-bindings.md) before publishing output.
 
+## Release, Qualification and Consumers
+
+| Directory | Purpose |
+| --- | --- |
+| `release/` | Artifact plan and inventory checker, runtime staging and probes, package smoke checks, notices and release metadata; [Releasing](../RELEASING.md) owns their use |
+| `tests/` | Qualification runners and contract tests for S3 RPC paths and Hugging Face cached search |
+| `acceptance/` | Real-process acceptance helpers (download-location reconciliation, FLUX.2 RPC); point them only at temporary libraries |
+| `consumers/` | Reference consumers of the local HTTP owner contract, not supported SDKs; see the [local HTTP consumer contract](../docs/contracts/local-http-consumer.md) |
+
 ## Governance and Development Helpers
 
 | Script | Purpose |

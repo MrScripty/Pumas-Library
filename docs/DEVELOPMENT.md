@@ -69,9 +69,9 @@ Pumas keep ownership of ORT environment settings and must select the same
 library before any other direct ORT calls.
 
 Consumers that only need model metadata can declare `pumas-library` with
-`default-features = false`; add `hf-client`, `process-manager`, `gpu-monitor`
-or `s3` only when their actual calls need them. `full` includes `onnx-runtime`.
-Metadata/index/import APIs remain outside that feature. Cargo features unify
+`default-features = false` to omit ONNX Runtime; add `s3` only when they call
+the S3 reader. The [Rust guide](../rust/README.md#features-and-variants) owns
+what each feature actually gates. Cargo features unify
 additively, so audit the entire consumer graph: another dependency enabling ORT
 defaults can reintroduce its optional download capability and is unsupported.
 `scripts/release/check-dependency-features.py` guards the workspace's default,
@@ -167,13 +167,17 @@ release risk requires it.
 
 Repository hooks provide optional early local feedback when a contributor
 installs them. They can block that local Git operation, but Git bypass remains
-operator authority and the hooks do not establish repository acceptance. CI
-runs on pull requests targeting every branch, pushes to `main`, version-tag pushes,
-and manual dispatches. Source quality and contract jobs run for every trigger;
-fully optimized builds, packages, smoke checks, artifact uploads, and candidate
-assembly run only when the selected ref is a `v*` version tag. A failing step
-blocks its workflow and dependants; whether a workflow is required to merge is
-external branch-protection state and is not asserted here.
+operator authority and the hooks do not establish repository acceptance.
+
+The `Build` workflow runs on pull requests targeting every branch, pushes to
+`main`, `v*` tag pushes, and manual dispatches. Source quality and contract jobs
+run for every trigger. A *candidate run* is a `v*` tag push or a manual dispatch
+with `build_candidates=true` (which also requires `expected_source`): only
+candidate runs build optimized releases, packages, package smoke checks and the
+release candidate. Pull requests and ordinary manual dispatches instead run the
+bounded review jobs. A failing step blocks its workflow and dependants; whether
+a workflow is required to merge is external branch-protection state and is not
+asserted here.
 
 Setup, cache, download, upload, and artifact-transport steps are prerequisites,
 not independent evidence claims. The table lists the semantic gates that are
@@ -187,34 +191,34 @@ intended to decide a property.
 | `check-merge-conflict` at installed `pre-commit` | Selected text has no unresolved merge-marker pattern; the pinned scanner is the oracle. | Git already rejects unresolved index entries; this catches accidentally staged marker text. | Local/bypassable; supported local pre-commit environment. |
 | `check-json` at installed `pre-commit` | Selected strict-JSON files outside the declared frontend/`.vscode` exclusions parse; the pinned parser is the oracle. | Package/tool consumers also parse files they read; this supplies earlier staged-file diagnosis for the remaining scope. | Local/bypassable; supported local pre-commit environment. |
 | `detect-private-key` at installed `pre-commit` | Selected staged text has no key signature recognized by the pinned detector. | Low-cost defense for known signatures; it does not prove secret absence or safe diagnostics. | Local/bypassable; supported local pre-commit environment. |
-| Actionlint in `lint-workflows` | GitHub workflow structure and expressions satisfy Actionlint's model; Actionlint is the independent parser/static oracle. | Deeper than generic YAML parsing for `.github/workflows`; does not execute jobs. | Workflow-blocking on Linux CI for every CI trigger. |
+| Actionlint in `lint-workflows` | GitHub workflow structure and expressions satisfy Actionlint's model; Actionlint is the independent parser/static oracle. | Deeper than generic YAML parsing for `.github/workflows`; does not execute jobs. | Workflow-blocking on Linux CI for every trigger. |
 | `check:dependency-ownership` in `lint-workflows` | Root owns no runtime/dev packages and each workspace declares the tool set the repository policy assigns it; manifests are inputs and the repository checker owns the mapping. | Package installation proves resolution, not declaration ownership. | Workflow-blocking, deterministic Node check on Linux CI; local on demand. |
 | `check:release-versions` in `lint-workflows` and release preparation | Root, frontend, Electron, and Rust workspace release versions are identical and version tags match them; their manifest values are the authoritative inputs. | Packaging may expose a mismatch later; this provides direct causal diagnosis before builds. | Workflow-blocking, deterministic Node check on Linux CI; locally required before release. |
-| Cross-target Rust release build in `build-rust` | The non-Rustler workspace compiles in release mode for each declared target and produces the named native/RPC files; Cargo and file production are the oracle. | Rust quality checks debug/all-feature contracts; target builds uniquely prove target compilation/artifact creation, not runtime support. | Version-tag-only on Linux x64, macOS arm64, and Windows x64; Windows runs in `windows-release`. |
-| Cross-platform Rust release tests in `build-rust` | The non-Rustler workspace tests pass in release mode on each runner OS; test assertions are the behavior oracles. | Linux debug tests overlap intentionally; runner-specific execution can expose OS/path/process behavior. | Version-tag-only on Linux, macOS, and Windows. |
+| Attribution and release-script tests in `lint-workflows` (`check-attribution.cjs` default and `--features s3`, `node --test scripts/release/*.test.mjs`, `test_s3_build_provenance.py`) | Checked-in notices match the current default and S3 dependency graphs; release scripts satisfy their unit assertions. | Packaging re-checks attribution later; this diagnoses stale notices before any build. | Workflow-blocking on Linux CI for every trigger. |
 | `scripts/rust/check.sh` in `rust-quality` | Formatting, all-target/all-feature compilation, Clippy warnings, workspace tests, doctests, and no-default compilation each satisfy their named tool/assertion contract. | Complements release target builds with static, debug, docs, and feature evidence; excludes the separately owned Rustler host claim. | Workflow-blocking on representative Linux CI; local aggregate command. |
-| Frontend ESLint in `build-frontend` | Type-aware and frontend lint rules accept the configured source scope; ESLint's AST/type analysis is the oracle for only those rules. | TypeScript overlaps type facts, not lint-specific source/interaction policy. | Workflow-blocking on representative Linux CI; local on demand. |
-| Frontend `check:types` in `build-frontend` | The configured renderer TypeScript program type-checks without emit; the compiler is authoritative for static consistency. | Build also type-checks while emitting; the no-emit command gives direct diagnosis before tests/build. | Workflow-blocking on representative Linux CI; local on demand. |
-| Frontend `test:run` in `build-frontend` | Vitest component/unit assertions pass in jsdom or their selected simulation. | Decides local renderer behavior only; representative browser/Electron workflows remain separately owned. | Workflow-blocking on representative Linux CI; local on demand. |
-| Frontend default build in `build-frontend` | Vite emits the default renderer bundle consumed by Electron; build completion and output production are the oracle. | Does not prove renderer behavior or library-only mode. | Version-tag-only on Linux CI; output is an input to all Electron package jobs. |
-| `test:launcher` in `build-frontend` | Shared CLI parsing, closed platform selection, action delegation, package-manager invocation, wrapper delegation, and controlled max/grace/force/process-tree outcomes satisfy their Node and child-process assertions. | Release smoke traverses a real startup path; the focused suite diagnoses contract and cleanup failures but Linux execution does not prove Windows or macOS process behavior. | Workflow-blocking on representative Linux CI for every CI trigger; local on demand. |
-| Torch Ruff lint and format checks in `torch-quality` | Python source satisfies the selected Ruff diagnostics and formatting projection. | Static support only; unit and real-runtime claims remain distinct. | Workflow-blocking on representative Linux CI; local on demand. |
-| Torch unit suite in `torch-quality` | Sidecar unit assertions pass with their declared local fakes/substitutes. | Does not prove ASGI, middleware, model loading, GPU, or inference in a resolved Torch environment. | Workflow-blocking on representative Linux CI; local on demand. |
-| Staged release backend plus `launcher.sh --release-smoke` in `verify-launcher` | The Linux release layout builds and the Electron process starts under the recorded Xvfb smoke conditions for its bounded observation. | Build/startup only; no user workflow or non-Linux runtime claim. | Version-tag-only on Linux Xvfb CI. |
-| Electron ESLint in `build-frontend` | Electron TypeScript/JavaScript satisfies the configured lint rules. | Deterministic lint runs once; platform tests retain target-specific value. | Workflow-blocking on representative Linux CI for every CI trigger. |
-| Electron `test` in `build-frontend` and packaging jobs | TypeScript emits and Node tests prove the current IPC allowlist/request, launcher, and process-boundary assertions. | Representative Linux runs on every trigger; version tags additionally run the package input and target-specific tests on each packaging OS. | Workflow-blocking on representative Linux for every trigger and version-tag-only on the packaging matrix. |
-| Electron-builder package step in `build-electron` | Each runner produces an installer/archive accepted by electron-builder for its configured target. | Does not prove installation, startup, contents, signing, or user behavior; those remain platform/release claims. | Version-tag-only on Linux, macOS, and Windows; the artifact-plan inventory rejects missing, empty, duplicate, and unexpected installers. |
-| `smoke-linux-packages.py` in `build-electron` | Both exact Linux installers extract, contain resources matching build inputs, and start their bundled RPC server. | Does not prove system installation, desktop user flows, signing, or packaged model inference. | Version-tag-only on Linux; native macOS and Windows use their respective installer smoke checks. |
-| `smoke-windows-packages.py` in `windows-release` | The NSIS candidate installs, installed resources match build inputs, and the installed RPC, installed desktop, and portable desktop start successfully. | Native installation/startup evidence; signing, SmartScreen, interactive workflows, and packaged inference require separate acceptance. | Version-tag-only on native Windows x64; both Windows installers are required for combined candidate assembly. |
+| No-default and S3 tests in `headless` | `pumas-library` and `pumas-rpc` pass without inference plugins (also with `hf-client`, and with `s3` for the reader, acquisition and prefix tests); the Linux audio read-confinement proof passes; the inference-disabled release backend builds and `smoke-rpc.py --inference-disabled` sees health without inference routes. | The no-default graph is otherwise compiled only by `check.sh`; this executes it. | Workflow-blocking on Linux CI for every trigger. |
+| Frontend ESLint, `check:types` and `test:run` in `build-frontend` | Lint rules, the no-emit TypeScript program and Vitest component/unit assertions pass; each tool is the oracle for only its own rules. | Decides local renderer behavior only; representative browser/Electron workflows remain separately owned. | Workflow-blocking on representative Linux CI for every trigger; local on demand. |
+| Desktop contract gates in `build-frontend` (`check:desktop-contract`, `test:desktop-contract-generator`, `test:desktop-contract-conformance`, frontend `test:desktop-contract`) | Checked-in generated decoders equal a fresh export from current Rust source and `electron/contracts/`; constructor-produced fixtures pass the generated validators through the real bundled preload and renderer. | Typecheck proves only static consistency; these prove the shipped decoders match the producer. | Workflow-blocking on representative Linux CI for every trigger. |
+| Electron ESLint, `validate` and `test` in `build-frontend` | Electron TypeScript satisfies lint and type rules; Node tests prove the IPC allowlist/request, launcher, and process-boundary assertions. | Packaging jobs re-run `test` on each packaging OS for target-specific value. | Workflow-blocking on representative Linux CI for every trigger; also on each packaging OS in candidate runs. |
+| `test:launcher` in `build-frontend` and packaging jobs | Shared CLI parsing, closed platform selection, action delegation, package-manager invocation, wrapper delegation, and controlled max/grace/force/process-tree outcomes satisfy their Node and child-process assertions. | Release smoke traverses a real startup path; Linux execution does not prove Windows or macOS process behavior. | Workflow-blocking on Linux CI for every trigger; also on each packaging OS in candidate runs. |
+| Frontend default and library-only builds in `build-frontend` | Vite emits both renderer bundles; the default bundle is the input to every Electron package job. | Does not prove renderer behavior. | Candidate runs only, on Linux CI. |
+| Torch Ruff, release-contract and unit tests in `torch-quality` | `torch-server` and `scripts/release` satisfy Ruff lint and format; release-metadata and headless-owner unit tests pass; sidecar unit assertions pass with their declared fakes. | Does not prove ASGI, middleware, model loading, GPU, or inference in a resolved Torch environment. | Workflow-blocking on native Linux, Windows and macOS for every trigger. |
+| Native cargo tests in `torch-quality` | Focused `pumas-library`, `pumas-app-manager` and `pumas-rpc` tests for Torch selection, acquisition and import custody, retained-download reconciliation, registry ownership, process ownership, HTTP drainage and RPC shutdown pass on each host OS. | Linux workspace tests overlap; these expose OS path, handle and process behavior on every trigger rather than only in candidate runs. | Workflow-blocking on native Linux, Windows and macOS for every trigger. |
+| `review-inference-linux` | The exact review head builds through the strict inference producer, the extracted archive matches its authenticated build identity, and a deterministic untrained ONNX graph imports, loads, executes and unloads through it. | A review-only archive; it cannot satisfy the release inventory or qualify pretrained models or other OSes. | Pull requests and ordinary manual dispatches only, on Linux CI. |
+| `review-audio-dependencies` | The frozen non-model audio dependency cohort executes under real Linux confinement and its controlled session lifecycle passes. | Does not qualify a pretrained speech model. | Pull requests and ordinary manual dispatches only, on Linux CI. |
+| `torch-native-e2e` | Managed Python and Torch CPU install, restart and sidecar lifecycle pass through the real native RPC (`torch-managed-python-acceptance.py`). | Real-network install evidence; not CUDA/MPS or image adapters. | Ordinary manual dispatches and `v*` tags (not `build_candidates` runs) on native Linux, Windows and macOS. |
+| Release target builds and tests in `build-rust` and `windows-release` | The non-Rustler workspace compiles warning-free and in release mode for each target, its tests pass under the `ci-test` profile, and the staged backend starts with the pinned ONNX Runtime (`onnx_runtime_probe.py`, `smoke-rpc.py`). | Linux debug tests overlap; runner-specific execution exposes OS behavior; startup is not inference. | Candidate runs only: Linux x64 and macOS arm64 in `build-rust`, Windows x64 in `windows-release`. |
+| Headless archives in `headless-rpc` and `headless-inference` | Each no-inference and inference headless archive is produced with exactly the inventory entry `check-artifacts.mjs` expects; the inference producer binds source, schema and runtime bytes and runs authenticated owner startup and graceful shutdown, and an untrained synthetic ONNX graph runs through each extracted inference archive. | No pretrained-model or embedding-quality evidence. | Candidate runs only, native on Linux x64, macOS arm64 and Windows x64. |
+| Electron-builder package steps in `build-electron`, `build-electron-no-inference`, `windows-release` and `windows-no-inference` | Each runner produces the full or no-inference installers the artifact plan names; `check-artifacts.mjs` rejects missing, empty, duplicate, and unexpected files. | Does not prove installation, startup, contents, signing, or user behavior. | Candidate runs only, on Linux, macOS, and Windows. |
+| Package smoke checks (`smoke-linux-packages.py`, `smoke-macos-package.py`, `smoke-windows-packages.py`, each with `--variant no-inference` for that line) | Linux installers extract with resources matching build inputs and start their RPC; the macOS DMG copy and Windows NSIS install match build inputs and start RPC and desktop (Windows also the portable executable); no-inference packages lack inference routes. | Native startup evidence; signing, notarization, SmartScreen, interactive workflows, and packaged inference require separate acceptance. | Candidate runs only, on each native OS. |
+| Staged release backend plus `launcher.sh --release-smoke` in `verify-launcher` | The Linux release layout builds and the Electron process starts under the recorded Xvfb smoke conditions for its bounded observation. | Build/startup only; no user workflow or non-Linux runtime claim. | Candidate runs only, on Linux Xvfb CI. |
 
-The workflow runs no-default core and RPC tests in separate Cargo invocations on
-every trigger. For version tags only, it also builds and smokes a headless
-release without the desktop toolchain. `release-candidate` then assembles only
-the required installer and archive set in `scripts/release/artifact-plan.json`
-and generates SHA-256 checksums after all required QA jobs succeed. The separate
-tag-only `windows-release` job emits both Windows installers and checksums only
-if its native checks pass. Candidate assembly never publishes a GitHub release.
-See [Releasing](../RELEASING.md) for the remaining publication obligations.
+`release-candidate` runs only after every candidate-run QA job succeeds. It
+checks that the downloaded set is exactly the sixteen files in
+`scripts/release/artifact-plan.json`, then writes SPDX inventories, unsigned
+provenance, notices and SHA-256 checksums over the final files. Candidate
+assembly never publishes a GitHub release. See [Releasing](../RELEASING.md) for
+the remaining publication obligations.
 
 ### Pending Higher-Fidelity Claims
 

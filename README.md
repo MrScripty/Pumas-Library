@@ -35,7 +35,7 @@ The listener is loopback-only. Add `--no-default-features` to the build to omit 
 
 ## Integrate it
 
-Use `pumas-library` from [pumas-core](rust/crates/pumas-core) for an embedded library, or [pumas-rpc](rust/crates/pumas-rpc/README.md) for a separate process. One `PumasApi` owns a library root; use `PumasLocalClient` to connect to an existing owner. Native bindings are experimental: check their [support status](docs/native-bindings.md) before choosing one.
+Use `pumas-library` from [pumas-core](rust/crates/pumas-core) for an embedded library, or [pumas-rpc](rust/crates/pumas-rpc/README.md) for a separate process. One `PumasApi` owns a library root; use `PumasLocalClient` to connect to an existing owner. HTTP consumers start from `GET /v1/served-models` and the [model operations contract](docs/contracts/model-operations-v1.md). No host-language binding is currently supported: see the [binding status](docs/native-bindings.md).
 
 Linux x64 is the primary runtime target. Windows x64 and macOS arm64 build artifacts exist, with narrower runtime qualification. See [release guidance](RELEASING.md).
 
@@ -47,4 +47,3 @@ Linux x64 is the primary runtime target. Windows x64 and macOS arm64 build artif
 - [Contributing](CONTRIBUTING.md) · [Security](docs/SECURITY.md)
 
 [MIT License](LICENSE).
-

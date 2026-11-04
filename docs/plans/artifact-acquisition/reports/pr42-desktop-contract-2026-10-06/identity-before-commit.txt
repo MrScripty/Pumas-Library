@@ -1,2 +1,0 @@
-GIT_AUTHOR_IDENT=MrScripty <TheEnvironmentGuy@protonmail.com> 1791274810 +0000
-GIT_COMMITTER_IDENT=MrScripty <TheEnvironmentGuy@protonmail.com> 1791274810 +0000

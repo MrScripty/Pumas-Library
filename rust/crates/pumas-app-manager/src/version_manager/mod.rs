@@ -1211,6 +1211,15 @@ impl VersionManager {
 
         let task = tokio::spawn(async move {
             let _install_guard = install_guard;
+            // A previous attempt's finished progress belongs to that attempt.
+            // Clear it now so the failure check below only sees progress that
+            // this attempt started (a quick retry of the same tag would
+            // otherwise look as if it had already begun its effects).
+            progress_tracker
+                .write()
+                .await
+                .clear_completed_state_async()
+                .await;
             if app_id == AppId::Torch {
                 let mut tracker = progress_tracker.write().await;
                 tracker.start_installation(&tag, None, None, None);
@@ -5336,15 +5345,20 @@ mod tests {
             )
             .unwrap(),
         );
-        let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+        // Retry at once, before the first attempt's progress is cleaned up:
+        // the retry must not mistake that finished progress for its own.
         let mut failure = None;
-        while let Some(update) = tokio::time::timeout(Duration::from_secs(30), updates.recv())
-            .await
-            .unwrap()
-        {
-            if let ProgressUpdate::Error { message } = update {
-                failure = Some(message);
-                break;
+        for _attempt in 0..2 {
+            let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+            failure = None;
+            while let Some(update) = tokio::time::timeout(Duration::from_secs(30), updates.recv())
+                .await
+                .unwrap()
+            {
+                if let ProgressUpdate::Error { message } = update {
+                    failure = Some(message);
+                    break;
+                }
             }
         }
         let failure = failure.expect("the caller receives the failure");

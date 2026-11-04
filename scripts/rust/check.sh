@@ -66,7 +66,7 @@ run_test_isolation() {
     for test_filter in "${guarded_lib_tests[@]}"; do
       cargo test -p pumas-library --manifest-path "${MANIFEST_PATH}" --lib "${test_filter}" -- --test-threads=4
     done
-    cargo test -p pumas-library --manifest-path "${MANIFEST_PATH}" --test api_tests -- --test-threads=4
+    cargo test -p pumas-library --manifest-path "${MANIFEST_PATH}" --test registry_override -- --test-threads=4 api_tests::
   done
 }
 
@@ -97,7 +97,8 @@ run_blocking_audit() {
 
 run_all() {
   run_fmt
-  run_check
+  # Clippy performs every check `cargo check` does on the same targets and
+  # features, so `all` does not build them a second time first.
   run_clippy
   run_test
   run_doc

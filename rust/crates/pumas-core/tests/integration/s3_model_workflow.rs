@@ -1,7 +1,6 @@
 //! Native source-facing composition; synthetic sources, no account access.
 #![cfg(feature = "s3")]
-#[path = "support/store_refusal.rs"]
-mod store_refusal;
+use crate::support::store_refusal;
 use pumas_library::{
     acquisition::{
         AcquisitionPhase, AcquisitionRetryPolicy, AcquisitionWorkspace, S3Addressing,
@@ -600,7 +599,7 @@ async fn authenticated_https_workflow_uses_explicit_credentials_and_persists_no_
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "authenticated_https_workflow_uses_explicit_credentials_and_persists_no_secrets",
+                crate::support::exact_test_name(module_path!(), "authenticated_https_workflow_uses_explicit_credentials_and_persists_no_secrets").as_str(),
                 "--nocapture",
             ])
             .env(MARKER, "1")
@@ -627,7 +626,7 @@ async fn authenticated_https_workflow_uses_explicit_credentials_and_persists_no_
     let thread = std::thread::spawn(move || {
         use std::io::{Read, Write};
         let identity = native_tls::Identity::from_pkcs12(
-            include_bytes!("fixtures/http-tls/localhost.p12"),
+            include_bytes!("../fixtures/http-tls/localhost.p12"),
             "fixture",
         )
         .unwrap();

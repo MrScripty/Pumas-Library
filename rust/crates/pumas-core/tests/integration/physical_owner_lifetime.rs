@@ -221,7 +221,12 @@ async fn real_process_loss_does_not_authorize_registry_generation_replacement() 
     let temp = tempfile::tempdir().unwrap();
     let mut child = ChildGuard(
         std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--ignored", "--exact", "process_child", "--nocapture"])
+            .args([
+                "--ignored",
+                "--exact",
+                crate::support::exact_test_name(module_path!(), "process_child").as_str(),
+                "--nocapture",
+            ])
             .env("PUMAS_PHYSICAL_OWNER_FIXTURE", temp.path())
             .stdout(std::process::Stdio::null())
             .spawn()

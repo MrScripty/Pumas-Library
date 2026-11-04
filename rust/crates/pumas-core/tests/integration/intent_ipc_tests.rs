@@ -241,7 +241,7 @@ fn start_primary_observed(
     let child = Command::new(std::env::current_exe().unwrap())
         .arg("--ignored")
         .arg("--exact")
-        .arg(child_test)
+        .arg(crate::support::exact_test_name(module_path!(), child_test))
         .arg("--nocapture")
         .env(CHILD_ROOT, root)
         .env(CHILD_READY, ready)

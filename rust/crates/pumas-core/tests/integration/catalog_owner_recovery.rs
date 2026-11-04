@@ -59,12 +59,17 @@ impl Owned {
         std::fs::create_dir(&control).unwrap();
         let log = std::fs::File::create(control.join("process.log")).unwrap();
         let mut cmd = Command::new(std::env::current_exe().unwrap());
-        cmd.args(["--exact", "catalog_process", "--ignored", "--nocapture"])
-            .env("PUMAS_CATALOG_FIXTURE", temp)
-            .env("PUMAS_CATALOG_MODE", mode)
-            .env("PUMAS_CATALOG_CONTROL", &control)
-            .stdout(log.try_clone().unwrap())
-            .stderr(log);
+        cmd.args([
+            "--exact",
+            crate::support::exact_test_name(module_path!(), "catalog_process").as_str(),
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("PUMAS_CATALOG_FIXTURE", temp)
+        .env("PUMAS_CATALOG_MODE", mode)
+        .env("PUMAS_CATALOG_CONTROL", &control)
+        .stdout(log.try_clone().unwrap())
+        .stderr(log);
         if let Some(g) = gate {
             cmd.env("PUMAS_CATALOG_GATE", g);
         }

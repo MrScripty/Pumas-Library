@@ -61,6 +61,30 @@ impl RuntimeEndpointUrl {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Whether the endpoint is on this machine (`localhost`, `*.localhost`,
+    /// 127.0.0.0/8 or `::1`). External runtime profiles may also name a
+    /// provider on another host.
+    pub fn is_loopback(&self) -> bool {
+        let Ok(url) = url::Url::parse(&self.0) else {
+            return false;
+        };
+        match url.host() {
+            Some(url::Host::Ipv4(address)) => address.is_loopback(),
+            Some(url::Host::Ipv6(address)) => address.is_loopback(),
+            Some(url::Host::Domain(name)) => {
+                let name = name.trim_end_matches('.').to_ascii_lowercase();
+                name == "localhost" || name.ends_with(".localhost")
+            }
+            None => false,
+        }
+    }
+
+    /// A remote provider reached over plain `http`: prompts, images and
+    /// outputs cross the network unencrypted.
+    pub fn is_plaintext_remote(&self) -> bool {
+        url::Url::parse(&self.0).is_ok_and(|url| url.scheme() == "http") && !self.is_loopback()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -450,6 +474,23 @@ mod tests {
         assert_eq!(endpoint.as_str(), "http://127.0.0.1:11434/");
         assert!(RuntimeEndpointUrl::parse("https://runtime.example.test").is_ok());
         assert!(RuntimeEndpointUrl::parse("file:///tmp/socket").is_err());
+    }
+
+    #[test]
+    fn remote_endpoints_are_accepted_and_plaintext_remote_is_identified() {
+        let parse = |url| RuntimeEndpointUrl::parse(url).unwrap();
+        for local in [
+            "http://127.0.0.1:11434",
+            "http://[::1]:1",
+            "http://localhost:8080",
+        ] {
+            assert!(parse(local).is_loopback(), "{local}");
+            assert!(!parse(local).is_plaintext_remote(), "{local}");
+        }
+        // External profiles keep accepting providers on other hosts.
+        assert!(!parse("https://provider.example/v1").is_loopback());
+        assert!(!parse("https://provider.example/v1").is_plaintext_remote());
+        assert!(parse("http://192.0.2.10:11434").is_plaintext_remote());
     }
 
     #[test]

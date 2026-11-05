@@ -597,15 +597,41 @@ fn validate_revision_selector(selector: &str) -> Result<&str> {
     }
 }
 
+/// Read a cached repository tree. The cache is advisory: an entry that is
+/// not a valid tree is reported and treated as a miss, so the caller refetches
+/// and overwrites it instead of failing the download.
 async fn read_repo_file_tree_cache(path: PathBuf) -> Result<Option<RepoFileTree>> {
-    tokio::task::spawn_blocking(move || atomic_read_json(&path))
+    let cache_path = path.clone();
+    let read = tokio::task::spawn_blocking(move || atomic_read_json(&path))
         .await
         .map_err(|err| {
             PumasError::Other(format!(
                 "Failed to join HuggingFace repo tree cache read task: {}",
                 err
             ))
-        })?
+        })?;
+    match read {
+        Err(error) if repo_file_tree_cache_is_corrupt(&error) => {
+            tracing::warn!(
+                path = %cache_path.display(),
+                %error,
+                "Ignoring unreadable HuggingFace repo tree cache entry; refetching"
+            );
+            Ok(None)
+        }
+        read => read,
+    }
+}
+
+fn repo_file_tree_cache_is_corrupt(error: &PumasError) -> bool {
+    match error {
+        PumasError::Json { .. } => true,
+        PumasError::Io {
+            source: Some(source),
+            ..
+        } => source.kind() == std::io::ErrorKind::InvalidData,
+        _ => false,
+    }
 }
 
 async fn write_repo_file_tree_cache(
@@ -674,6 +700,45 @@ mod tests {
             request
         });
         (base_url, server)
+    }
+
+    #[tokio::test]
+    async fn corrupt_repo_tree_cache_is_a_miss_that_refetches_and_repairs() {
+        let (base_url, server) = serve_once(
+            "200 OK",
+            r#"[{"type":"file","path":"config.json"},{"type":"file","path":"model.bin","lfs":{"oid":"abc","size":4}}]"#
+                .to_string(),
+        )
+        .await;
+        let temp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+        client.set_test_download_base_url(base_url);
+        let cache_file = client.get_cache_path(
+            &revision_cache_key("acme/model", &DownloadRevision::legacy_main()),
+            "files",
+        );
+        let corrupt_entries: [&[u8]; 2] = [b"{not json", &[0xff, 0xfe, 0x00]];
+        for corrupt in corrupt_entries {
+            std::fs::write(&cache_file, corrupt).unwrap();
+            assert!(read_repo_file_tree_cache(cache_file.clone())
+                .await
+                .unwrap()
+                .is_none());
+        }
+
+        let tree = client.get_repo_files("acme/model").await.unwrap();
+
+        assert!(server
+            .await
+            .unwrap()
+            .starts_with("GET /api/models/acme/model/tree/main?recursive=true HTTP/1.1"));
+        assert_eq!(tree.regular_files, ["config.json"]);
+        assert_eq!(tree.lfs_files.len(), 1);
+        let repaired = read_repo_file_tree_cache(cache_file)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(repaired.regular_files, ["config.json"]);
     }
 
     #[tokio::test]

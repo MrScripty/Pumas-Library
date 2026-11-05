@@ -409,6 +409,12 @@ fn is_loopback_endpoint(endpoint: &str) -> bool {
         None => false,
     }
 }
+fn error(message: &str) -> PumasError {
+    PumasError::Other(message.into())
+}
+fn http_error(error: reqwest::Error) -> PumasError {
+    PumasError::Other(error.to_string())
+}
 #[cfg(test)]
 mod loopback_tests {
     #[test]
@@ -428,10 +434,4 @@ mod loopback_tests {
             assert!(!super::is_loopback_endpoint(endpoint), "{endpoint}");
         }
     }
-}
-fn error(message: &str) -> PumasError {
-    PumasError::Other(message.into())
-}
-fn http_error(error: reqwest::Error) -> PumasError {
-    PumasError::Other(error.to_string())
 }

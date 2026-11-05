@@ -303,6 +303,7 @@ pub(crate) async fn retain_from_cli(root: &std::path::Path) -> anyhow::Result<()
 #[cfg(all(test, target_os = "linux", not(feature = "inference-plugins")))]
 mod tests {
     use super::*;
+    use axum::http::StatusCode;
     use pumas_library::discovery::{
         CompatibilityRequirements, HttpServiceDescription, LocalDiscovery,
     };

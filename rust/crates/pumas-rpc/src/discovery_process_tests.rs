@@ -1,6 +1,7 @@
 //! Real local Pumas HTTP/IPC processes with inference plugins disabled. These
 //! fixtures qualify the admission boundary, not models or crash reclamation.
 use super::*;
+use axum::http::StatusCode;
 use pumas_library::discovery::{CompatibilityRequirements, LocalDiscovery};
 use pumas_library::registry::LibraryRegistry;
 use std::path::{Path, PathBuf};

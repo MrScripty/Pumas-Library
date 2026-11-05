@@ -5007,9 +5007,8 @@ impl HuggingFaceClient {
             .await;
         }
 
-        let max_attempts = NetworkConfig::hf_download_max_retries();
+        let (max_attempts, max_retry_elapsed) = NetworkConfig::hf_download_retry_bounds()?;
         let retry_limit = retry_limit(max_attempts);
-        let max_retry_elapsed = NetworkConfig::hf_download_max_retry_elapsed();
         let retry_policy = crate::acquisition::AcquisitionRetryPolicy {
             attempts: retry_limit,
             elapsed: max_retry_elapsed,

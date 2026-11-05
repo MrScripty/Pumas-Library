@@ -74,12 +74,13 @@ impl NetworkConfig {
     /// Maximum retry attempts for HuggingFace model downloads.
     ///
     /// `0` means unlimited attempts (bounded by `HF_DOWNLOAD_MAX_RETRY_ELAPSED`).
+    /// Unlimited attempts with a disabled elapsed budget is refused.
     pub const HF_DOWNLOAD_MAX_RETRIES: u32 = 0;
     /// Base delay between download retries (longer to let network recover).
     pub const HF_DOWNLOAD_RETRY_BASE_DELAY: Duration = Duration::from_secs(5);
     /// Maximum elapsed retry budget for a single file download.
     ///
-    /// `0` disables elapsed-time capping.
+    /// `0` disables elapsed-time capping, which requires a finite attempt limit.
     pub const HF_DOWNLOAD_MAX_RETRY_ELAPSED: Duration = Duration::from_secs(12 * 60 * 60);
     /// Timeout for HuggingFace API metadata requests.
     pub const HF_API_TIMEOUT: Duration = Duration::from_secs(30);
@@ -115,6 +116,34 @@ impl NetworkConfig {
             .and_then(|value| value.parse::<u64>().ok())
             .map(Duration::from_secs)
             .unwrap_or(Self::HF_DOWNLOAD_MAX_RETRY_ELAPSED)
+    }
+
+    /// Resolve the HF download retry bounds as `(max_attempts, max_elapsed)`.
+    ///
+    /// At least one bound must be finite: unlimited attempts (`0`) with a
+    /// disabled elapsed budget (`0`) would retry a failing file forever, so
+    /// that combination is refused with a reason naming both settings.
+    pub fn hf_download_retry_bounds() -> crate::Result<(u32, Duration)> {
+        Self::checked_hf_download_retry_bounds(
+            Self::hf_download_max_retries(),
+            Self::hf_download_max_retry_elapsed(),
+        )
+    }
+
+    fn checked_hf_download_retry_bounds(
+        max_attempts: u32,
+        max_elapsed: Duration,
+    ) -> crate::Result<(u32, Duration)> {
+        if max_attempts == 0 && max_elapsed.is_zero() {
+            return Err(crate::PumasError::Config {
+                message: "HuggingFace download retries are unbounded: \
+                          PUMAS_HF_DOWNLOAD_MAX_RETRIES=0 (unlimited attempts) requires a \
+                          nonzero PUMAS_HF_DOWNLOAD_MAX_RETRY_ELAPSED_SECS; set either one \
+                          to a positive value"
+                    .to_string(),
+            });
+        }
+        Ok((max_attempts, max_elapsed))
     }
 }
 
@@ -273,6 +302,34 @@ mod tests {
     fn test_timeouts_are_reasonable() {
         assert!(InstallationConfig::UV_INSTALL_TIMEOUT > Duration::from_secs(60));
         assert!(NetworkConfig::REQUEST_TIMEOUT > Duration::ZERO);
+    }
+
+    #[test]
+    fn hf_download_retry_bounds_refuse_unbounded_retry() {
+        let error = NetworkConfig::checked_hf_download_retry_bounds(0, Duration::ZERO).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("PUMAS_HF_DOWNLOAD_MAX_RETRIES"),
+            "{message}"
+        );
+        assert!(
+            message.contains("PUMAS_HF_DOWNLOAD_MAX_RETRY_ELAPSED_SECS"),
+            "{message}"
+        );
+
+        assert_eq!(
+            NetworkConfig::checked_hf_download_retry_bounds(0, Duration::from_secs(60)).unwrap(),
+            (0, Duration::from_secs(60))
+        );
+        assert_eq!(
+            NetworkConfig::checked_hf_download_retry_bounds(4, Duration::ZERO).unwrap(),
+            (4, Duration::ZERO)
+        );
+        assert!(NetworkConfig::checked_hf_download_retry_bounds(
+            NetworkConfig::HF_DOWNLOAD_MAX_RETRIES,
+            NetworkConfig::HF_DOWNLOAD_MAX_RETRY_ELAPSED,
+        )
+        .is_ok());
     }
 
     #[test]

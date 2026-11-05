@@ -2,6 +2,8 @@
 //!
 //! Handles downloading, extracting, and setting up new versions.
 
+#[cfg(test)]
+mod native_archive_tests;
 mod torch;
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod torch_tests;
@@ -866,6 +868,171 @@ async fn settle_archive_file<T>(mut file: fs::File, path: &Path, outcome: Result
     // the stage owner may reclaim bytes. Dropping Tokio File is insufficient.
     drop(file.into_std().await);
     settled_result(outcome, settlement)
+}
+
+/// Publisher evidence a downloaded or cached native archive must match before
+/// it may be extracted.
+#[derive(Clone, Debug)]
+struct ExpectedArchive {
+    sha256: String,
+    size: Option<u64>,
+}
+
+impl ExpectedArchive {
+    fn from_selection(
+        selection: &pumas_library::acquisition::GitHubReleaseAssetSelection,
+    ) -> Result<Self> {
+        let file =
+            selection
+                .manifest()
+                .files()
+                .first()
+                .ok_or_else(|| PumasError::InstallationFailed {
+                    message: "Verified release selection has no file".into(),
+                })?;
+        let sha256 = file
+            .expected_sha256()
+            .ok_or_else(|| PumasError::InstallationFailed {
+                message: "Verified release selection has no publisher SHA-256 digest".into(),
+            })?
+            .value()
+            .to_owned();
+        Ok(Self {
+            sha256,
+            size: file.expected_size(),
+        })
+    }
+
+    fn verify(&self, sha256: &str, size: u64) -> Result<()> {
+        if self.size.is_some_and(|expected| expected != size) {
+            return Err(PumasError::InstallationFailed {
+                message: format!(
+                    "Archive is {size} bytes but the publisher declares {} bytes",
+                    self.size.unwrap_or_default()
+                ),
+            });
+        }
+        if !sha256.eq_ignore_ascii_case(&self.sha256) {
+            return Err(PumasError::InstallationFailed {
+                message: format!(
+                    "Archive SHA-256 {sha256} does not match the publisher digest {}",
+                    self.sha256
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Hash an open archive and rewind it, so the caller extracts exactly the
+    /// bytes that were verified.
+    fn verify_file(&self, file: &mut File, path: &Path) -> Result<()> {
+        use std::io::{Seek, SeekFrom};
+        let metadata = file
+            .metadata()
+            .map_err(|error| PumasError::io_with_path(error, path))?;
+        if !metadata.is_file() {
+            return Err(PumasError::InstallationFailed {
+                message: format!("Archive is not a regular file: {}", path.display()),
+            });
+        }
+        let mut digest = Sha256::new();
+        let size = std::io::copy(file, &mut digest)
+            .map_err(|error| PumasError::io_with_path(error, path))?;
+        self.verify(&format!("{:x}", digest.finalize()), size)?;
+        file.seek(SeekFrom::Start(0))
+            .map_err(|error| PumasError::io_with_path(error, path))?;
+        Ok(())
+    }
+}
+
+/// One Ollama archive selected for installation and its publisher evidence.
+struct OllamaArchive<'a> {
+    tag: &'a str,
+    release: &'a GitHubRelease,
+    client: &'a reqwest::Client,
+    download_url: &'a str,
+    /// The release's stable asset URL, recorded in installation metadata.
+    recorded_download_url: String,
+    total_size: u64,
+    asset_name: &'a str,
+    archive_path: &'a Path,
+    cache_valid: bool,
+    expected: &'a ExpectedArchive,
+}
+
+/// Cumulative extraction bounds for one native runtime archive, derived from
+/// the size of the (already verified) archive itself rather than a flat cap,
+/// so a large GPU runtime and a small CPU build are each held to bounds that
+/// scale with what the publisher actually shipped.
+struct ExtractionBudget {
+    archive_bytes: u64,
+    max_bytes: u64,
+    max_entries: u64,
+    bytes: u64,
+    entries: u64,
+}
+
+impl ExtractionBudget {
+    /// Native runtime payloads (executables and shared libraries) compress
+    /// roughly 2-6x under gzip, zstd or deflate. Allowing 64x leaves an order
+    /// of magnitude of headroom for unusually compressible releases while still
+    /// refusing a decompression bomb, whose ratio is typically in the
+    /// thousands.
+    const MAX_EXPANSION_RATIO: u64 = 64;
+    /// Every entry costs at least its header and name in the archive: a zip
+    /// entry needs a 30-byte local and a 46-byte central header, and a
+    /// compressed tar header block with a distinct name does not shrink below
+    /// a few tens of bytes. Sixteen bytes per entry is therefore a generous
+    /// lower bound, and an archive claiming more entries than that is refused.
+    const MIN_ARCHIVE_BYTES_PER_ENTRY: u64 = 16;
+
+    fn for_archive(archive: &File, dest_dir: &Path) -> Result<Self> {
+        let archive_bytes = archive
+            .metadata()
+            .map_err(|error| PumasError::io_with_path(error, dest_dir))?
+            .len();
+        Ok(Self::for_archive_bytes(archive_bytes))
+    }
+
+    fn for_archive_bytes(archive_bytes: u64) -> Self {
+        Self {
+            archive_bytes,
+            max_bytes: archive_bytes.saturating_mul(Self::MAX_EXPANSION_RATIO),
+            max_entries: archive_bytes / Self::MIN_ARCHIVE_BYTES_PER_ENTRY,
+            bytes: 0,
+            entries: 0,
+        }
+    }
+
+    /// Admit one entry of `entry_bytes` declared bytes, or refuse the archive
+    /// with the limit that was crossed and why.
+    fn admit(&mut self, entry_bytes: u64) -> Result<()> {
+        self.entries += 1;
+        if self.entries > self.max_entries {
+            return Err(PumasError::InstallationFailed {
+                message: format!(
+                    "Archive refused: more than {} entries in a {}-byte archive (at most one entry per {} archive bytes is accepted)",
+                    self.max_entries,
+                    self.archive_bytes,
+                    Self::MIN_ARCHIVE_BYTES_PER_ENTRY
+                ),
+            });
+        }
+        match self.bytes.checked_add(entry_bytes) {
+            Some(bytes) if bytes <= self.max_bytes => self.bytes = bytes,
+            _ => {
+                return Err(PumasError::InstallationFailed {
+                message: format!(
+                    "Archive refused: extracted content exceeds {} bytes, {}x the {}-byte archive, which indicates a decompression bomb",
+                    self.max_bytes,
+                    Self::MAX_EXPANSION_RATIO,
+                    self.archive_bytes
+                ),
+            })
+            }
+        }
+        Ok(())
+    }
 }
 
 type TorchCleanupCompletion = Shared<BoxFuture<'static, std::result::Result<(), Arc<String>>>>;
@@ -1765,16 +1932,36 @@ impl VersionInstaller {
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
+        Self::validate_native_tag(tag)?;
         info!("Starting Ollama binary installation for {}", tag);
 
         // Select platform-appropriate asset (e.g., ollama-linux-amd64.tgz)
         let asset = self.select_ollama_asset(&release.assets)?;
-        let download_url = &asset.download_url;
-        let total_size = asset.size;
         let asset_name = asset.name.clone();
+        let recorded_download_url = asset.download_url.clone();
+
+        // Like llama.cpp, the archive is authorized only by the publisher's
+        // SHA-256 from a fresh GitHub API response; cached discovery has no
+        // digest and cannot authorize bytes.
+        let github = self
+            .github_client
+            .as_ref()
+            .ok_or_else(|| PumasError::Config {
+                message: "Ollama requires the configured shared GitHub asset resolver".into(),
+            })?;
+        let selection = github
+            .resolve_release_asset(self.app_id.github_repo(), &release.tag_name, &asset_name)
+            .await
+            .map_err(|error| PumasError::InstallationFailed {
+                message: format!("Could not verify Ollama release asset: {error}"),
+            })?;
+        let expected = ExpectedArchive::from_selection(&selection)?;
+        let download_url = selection.download_url().to_owned();
+        let total_size = expected.size.unwrap_or(asset.size);
+        let client = self.native_download_client(&download_url)?;
 
         info!(
-            "Selected Ollama asset: {} ({} bytes)",
+            "Selected publisher-verified Ollama asset: {} ({} bytes)",
             asset_name, total_size
         );
 
@@ -1814,44 +2001,31 @@ impl VersionInstaller {
 
         let archive_path = cache_downloads.join(&asset_name);
 
-        // Check if we have a valid cached download
-        let cache_valid = if path_exists(&archive_path).await? {
-            match fs::metadata(&archive_path).await {
-                Ok(meta) if meta.len() == total_size => {
-                    info!(
-                        "Using cached download: {} ({} bytes)",
-                        asset_name, total_size
-                    );
-                    true
-                }
-                Ok(meta) => {
-                    info!(
-                        "Cached download size mismatch ({} != {}), re-downloading",
-                        meta.len(),
-                        total_size
-                    );
-                    let _ = fs::remove_file(&archive_path).await;
-                    false
-                }
-                Err(_) => {
-                    let _ = fs::remove_file(&archive_path).await;
-                    false
-                }
-            }
-        } else {
-            false
-        };
+        // A cached archive is reused only when it still hashes to the
+        // publisher digest; a matching size alone proves nothing.
+        let cache_valid = Self::cached_archive_matches(&archive_path, &expected).await?;
+        if cache_valid {
+            info!(
+                "Using cached download re-verified by SHA-256: {} ({} bytes)",
+                asset_name, total_size
+            );
+        }
 
         // Download binary asset (skip if cache is valid)
         let result = self
             .do_ollama_install(
-                tag,
-                release,
-                download_url,
-                total_size,
-                &asset_name,
-                &archive_path,
-                cache_valid,
+                OllamaArchive {
+                    tag,
+                    release,
+                    client: &client,
+                    download_url: &download_url,
+                    recorded_download_url,
+                    total_size,
+                    asset_name: &asset_name,
+                    archive_path: &archive_path,
+                    cache_valid,
+                    expected: &expected,
+                },
                 &progress_tx,
             )
             .await;
@@ -2312,18 +2486,23 @@ impl VersionInstaller {
     }
 
     /// Execute Ollama installation steps.
-    #[allow(clippy::too_many_arguments)]
     async fn do_ollama_install(
         &self,
-        tag: &str,
-        release: &GitHubRelease,
-        download_url: &str,
-        total_size: u64,
-        asset_name: &str,
-        archive_path: &Path,
-        cache_valid: bool,
+        archive: OllamaArchive<'_>,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
+        let OllamaArchive {
+            tag,
+            release,
+            client,
+            download_url,
+            recorded_download_url,
+            total_size,
+            asset_name,
+            archive_path,
+            cache_valid,
+            expected,
+        } = archive;
         // Check cancellation
         self.check_cancelled()?;
 
@@ -2348,22 +2527,23 @@ impl VersionInstaller {
             )
             .await;
         } else {
-            self.download_archive(download_url, archive_path, progress_tx)
+            self.download_archive(client, download_url, archive_path, expected, progress_tx)
                 .await?;
         }
 
         // Check cancellation
         self.check_cancelled()?;
 
-        // Step 2: Create version directory
-        let version_dir = self.versions_dir().join(tag);
-        fs::create_dir_all(&version_dir)
+        // Step 2: Extract into a private stage beside the version directory.
+        // Nothing reaches `<versions>/<tag>` until the output is validated.
+        let versions = self.versions_dir();
+        fs::create_dir_all(&versions)
             .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to create version directory: {}", e),
-                path: Some(version_dir.clone()),
-                source: Some(e),
-            })?;
+            .map_err(|e| PumasError::io_with_path(e, &versions))?;
+        let stage = tempfile::Builder::new()
+            .prefix(".ollama-install-")
+            .tempdir_in(&versions)
+            .map_err(|e| PumasError::io_with_path(e, &versions))?;
 
         // Step 3: Extract binary from archive
         {
@@ -2384,10 +2564,16 @@ impl VersionInstaller {
         .await;
 
         let archive_path = archive_path.to_path_buf();
-        let version_dir_for_extract = version_dir.clone();
+        let stage_for_extract = stage.path().to_path_buf();
         let asset_name = asset_name.to_string();
+        let expected_for_extract = expected.clone();
         tokio::task::spawn_blocking(move || {
-            Self::extract_ollama_binary(&archive_path, &version_dir_for_extract, &asset_name)
+            // Hash and extract the same open handle, so the bytes extracted
+            // are exactly the bytes that matched the publisher digest.
+            let mut archive = File::open(&archive_path)
+                .map_err(|e| PumasError::io_with_path(e, &archive_path))?;
+            expected_for_extract.verify_file(&mut archive, &archive_path)?;
+            Self::extract_ollama_binary_from(archive, &stage_for_extract, &asset_name)
         })
         .await
         .map_err(|e| {
@@ -2406,9 +2592,16 @@ impl VersionInstaller {
         // Check cancellation
         self.check_cancelled()?;
 
-        // Step 4: Finalize (no venv, no deps - just mark as installed)
-        self.finalize_ollama_installation(tag, release, &version_dir, progress_tx)
-            .await?;
+        // Step 4: Publish the stage and its metadata (no venv, no deps)
+        self.finalize_ollama_installation(
+            tag,
+            release,
+            stage.path(),
+            recorded_download_url,
+            total_size,
+            progress_tx,
+        )
+        .await?;
 
         info!("Ollama installation of {} completed successfully", tag);
         Ok(())
@@ -2809,44 +3002,37 @@ impl VersionInstaller {
             && (name.ends_with(".zip") || name.ends_with(".tar.gz") || name.ends_with(".tgz"))
     }
 
-    /// Extract Ollama binary from archive format.
+    /// Extract a verified Ollama archive into `version_dir`, then validate the
+    /// whole output before the launch binary is located and made executable.
+    ///
     /// Ollama releases are distributed as:
     /// - Linux: ollama-linux-amd64.tar.zst (Zstandard compressed tar, current format)
     /// - Linux (legacy): ollama-linux-amd64.tgz (gzip compressed tar)
     /// - macOS: ollama-darwin-arm64.tar.zst
     /// - Windows: ollama-windows-amd64.zip (containing ollama.exe)
-    fn extract_ollama_binary(
-        archive_path: &Path,
+    fn extract_ollama_binary_from(
+        archive: File,
         version_dir: &Path,
         asset_name: &str,
     ) -> Result<()> {
         info!("Extracting Ollama binary from {}", asset_name);
 
         if asset_name.ends_with(".tar.zst") {
-            // Extract tar.zst (Zstandard compressed tar - current Ollama format)
-            Self::extract_tar_zst(archive_path, version_dir)?;
+            // Zstandard-compressed tar: the current Ollama format.
+            Self::extract_tar_zst_from(archive, version_dir)?;
         } else if asset_name.ends_with(".tgz") || asset_name.ends_with(".tar.gz") {
-            // Extract tar.gz (legacy format)
-            Self::extract_tarball(archive_path, version_dir)?;
+            Self::extract_tarball_from(archive, version_dir)?;
         } else if asset_name.ends_with(".zip") {
-            // Extract zip
-            Self::extract_zip(archive_path, version_dir)?;
+            Self::extract_zip_from(archive, version_dir)?;
         } else {
-            // Raw binary (e.g., ollama-linux-amd64 without extension)
-            let binary_name = if cfg!(windows) {
-                "ollama.exe"
-            } else {
-                "ollama"
-            };
-            let dest = version_dir.join(binary_name);
-            std::fs::copy(archive_path, &dest).map_err(|e| PumasError::Io {
-                message: format!("Failed to copy binary: {}", e),
-                path: Some(dest.clone()),
-                source: Some(e),
-            })?;
+            return Err(PumasError::InstallationFailed {
+                message: format!("Unsupported Ollama archive format: {asset_name}"),
+            });
         }
 
-        // Find and make the binary executable on Unix
+        // No link may leave the output and no special file may exist before
+        // anything inside it is renamed or has its permissions changed.
+        Self::validate_native_output(version_dir)?;
         Self::finalize_ollama_binary(version_dir)?;
 
         info!("Ollama binary extraction complete");
@@ -3018,36 +3204,65 @@ impl VersionInstaller {
         }
     }
 
-    /// Extract a .tar.zst archive (Zstandard compressed tar).
-    fn extract_tar_zst(archive_path: &Path, dest_dir: &Path) -> Result<()> {
-        info!("Extracting tar.zst archive to {}", dest_dir.display());
-
-        let file = File::open(archive_path).map_err(|e| PumasError::Io {
-            message: format!("Failed to open archive: {}", e),
-            path: Some(archive_path.to_path_buf()),
-            source: Some(e),
-        })?;
-        Self::extract_tar_zst_from(file, dest_dir)
-    }
-
     fn extract_tar_zst_from(file: File, dest_dir: &Path) -> Result<()> {
+        let budget = ExtractionBudget::for_archive(&file, dest_dir)?;
         let decoder = zstd::Decoder::new(BufReader::new(file)).map_err(|e| PumasError::Io {
             message: format!("Failed to create zstd decoder: {}", e),
             path: Some(dest_dir.to_path_buf()),
             source: Some(std::io::Error::other(e)),
         })?;
+        Self::unpack_tar_within(tar::Archive::new(decoder), dest_dir, budget, "tar.zst")
+    }
 
-        let mut archive = tar::Archive::new(decoder);
-        archive.unpack(dest_dir).map_err(|e| PumasError::Io {
-            message: format!("Failed to extract tar.zst: {}", e),
-            path: Some(dest_dir.to_path_buf()),
-            source: Some(e),
-        })?;
-
+    /// Unpack a tar stream entry by entry so the cumulative size and entry
+    /// count stay inside the archive's [`ExtractionBudget`]. As in
+    /// `tar::Archive::unpack`, directory entries are applied last so their
+    /// permissions cannot block descendants, and `unpack_in` keeps every entry
+    /// inside `dest_dir`. Permissions are not preserved, so the tar crate masks
+    /// each mode to `0o777`: no setuid, setgid or sticky bit is applied.
+    fn unpack_tar_within<R: std::io::Read>(
+        mut archive: tar::Archive<R>,
+        dest_dir: &Path,
+        mut budget: ExtractionBudget,
+        format: &str,
+    ) -> Result<()> {
+        archive.set_preserve_permissions(false);
+        archive.set_preserve_ownerships(false);
+        archive.set_unpack_xattrs(false);
+        std::fs::create_dir_all(dest_dir).map_err(|e| PumasError::io_with_path(e, dest_dir))?;
+        let dest_dir = dest_dir
+            .canonicalize()
+            .map_err(|e| PumasError::io_with_path(e, dest_dir))?;
+        let failed = |e: std::io::Error| PumasError::InstallationFailed {
+            message: format!("Failed to extract {format}: {e}"),
+        };
+        let mut directories = Vec::new();
+        for entry in archive.entries().map_err(failed)? {
+            let mut entry = entry.map_err(failed)?;
+            budget.admit(entry.size())?;
+            if entry.header().entry_type() == tar::EntryType::Directory {
+                directories.push(entry);
+            } else if !entry.unpack_in(&dest_dir).map_err(failed)? {
+                return Err(PumasError::InstallationFailed {
+                    message: format!(
+                        "{format} entry has no safe path inside the extraction directory"
+                    ),
+                });
+            }
+        }
+        directories.sort_by(|a, b| b.path_bytes().cmp(&a.path_bytes()));
+        for mut directory in directories {
+            directory.unpack_in(&dest_dir).map_err(failed)?;
+        }
         Ok(())
     }
 
-    /// Find the ollama binary in the extracted directory and make it executable.
+    /// Move the Ollama binary to its launch path and make it executable.
+    ///
+    /// `version_dir` is this attempt's private stage, already checked by
+    /// [`Self::validate_native_output`]. The binary is inspected with
+    /// `symlink_metadata` and must be a non-empty regular file: a link would
+    /// let `set_permissions`, which follows links, act on another file.
     fn finalize_ollama_binary(version_dir: &Path) -> Result<()> {
         let binary_name = if cfg!(windows) {
             "ollama.exe"
@@ -3056,55 +3271,65 @@ impl VersionInstaller {
         };
         let final_path = version_dir.join(binary_name);
 
-        if !final_path.exists() {
-            let found = Self::find_ollama_binary(version_dir)?.ok_or_else(|| {
-                PumasError::InstallationFailed {
-                    message: "Could not find Ollama binary in extracted archive".to_string(),
-                }
-            })?;
-
-            if let Some(parent) = final_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| PumasError::Io {
-                    message: format!("Failed to create binary parent directory: {}", e),
-                    path: Some(parent.to_path_buf()),
+        match std::fs::symlink_metadata(&final_path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let found = Self::find_ollama_binary(version_dir)?.ok_or_else(|| {
+                    PumasError::InstallationFailed {
+                        message: "Could not find Ollama binary in extracted archive".to_string(),
+                    }
+                })?;
+                std::fs::rename(&found, &final_path).map_err(|e| PumasError::Io {
+                    message: format!("Failed to move Ollama binary into launch path: {}", e),
+                    path: Some(final_path.clone()),
                     source: Some(e),
                 })?;
+                info!(
+                    "Moved Ollama binary from {} to {}",
+                    found.display(),
+                    final_path.display()
+                );
             }
+            Err(error) => return Err(PumasError::io_with_path(error, &final_path)),
+        }
 
-            std::fs::rename(&found, &final_path).map_err(|e| PumasError::Io {
-                message: format!("Failed to move Ollama binary into launch path: {}", e),
-                path: Some(final_path.clone()),
-                source: Some(e),
-            })?;
-            info!(
-                "Moved Ollama binary from {} to {}",
-                found.display(),
-                final_path.display()
-            );
+        let metadata = std::fs::symlink_metadata(&final_path)
+            .map_err(|e| PumasError::io_with_path(e, &final_path))?;
+        if metadata.file_type().is_symlink() {
+            return Err(PumasError::InstallationFailed {
+                message: "Ollama archive supplies its binary as a symbolic link; only a regular file is accepted".into(),
+            });
+        }
+        if !metadata.is_file() {
+            return Err(PumasError::InstallationFailed {
+                message: "Ollama archive binary is not a regular file".into(),
+            });
+        }
+        if metadata.len() == 0 {
+            return Err(PumasError::InstallationFailed {
+                message: "Extracted Ollama binary is empty".into(),
+            });
         }
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&final_path)
-                .map_err(|e| PumasError::Io {
-                    message: format!("Failed to get binary metadata: {}", e),
+            std::fs::set_permissions(&final_path, std::fs::Permissions::from_mode(0o755)).map_err(
+                |e| PumasError::Io {
+                    message: format!("Failed to set binary permissions: {}", e),
                     path: Some(final_path.clone()),
                     source: Some(e),
-                })?
-                .permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&final_path, perms).map_err(|e| PumasError::Io {
-                message: format!("Failed to set binary permissions: {}", e),
-                path: Some(final_path.clone()),
-                source: Some(e),
-            })?;
+                },
+            )?;
             info!("Set executable permissions on {}", final_path.display());
         }
 
         Ok(())
     }
 
+    /// Find the first entry named like the Ollama binary without following
+    /// links. A matching link is returned, not skipped, so that the caller
+    /// refuses it with a reason instead of reporting a missing binary.
     fn find_ollama_binary(dir: &Path) -> Result<Option<PathBuf>> {
         let binary_names = if cfg!(windows) {
             ["ollama.exe", "ollama"]
@@ -3123,17 +3348,20 @@ impl VersionInstaller {
                 source: Some(e),
             })?;
             let path = entry.path();
+            let file_type = entry
+                .file_type()
+                .map_err(|e| PumasError::io_with_path(e, &path))?;
 
-            if path.is_file() {
-                if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                    if binary_names.contains(&name) {
-                        return Ok(Some(path));
-                    }
-                }
-            } else if path.is_dir() {
+            if file_type.is_dir() {
                 if let Some(found) = Self::find_ollama_binary(&path)? {
                     return Ok(Some(found));
                 }
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| binary_names.contains(&name))
+            {
+                return Ok(Some(path));
             }
         }
 
@@ -3204,12 +3432,15 @@ impl VersionInstaller {
         Ok(())
     }
 
-    /// Finalize Ollama installation (create metadata, no Python/venv).
+    /// Finalize Ollama installation: publish the validated stage as the
+    /// version directory together with its metadata (no Python/venv).
     async fn finalize_ollama_installation(
         &self,
         tag: &str,
         release: &GitHubRelease,
-        _version_dir: &Path,
+        stage: &Path,
+        download_url: String,
+        archive_size: u64,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
         info!("Finalizing Ollama installation for {}", tag);
@@ -3232,15 +3463,6 @@ impl VersionInstaller {
         )
         .await;
 
-        // Find the download URL for metadata
-        let download_url = release
-            .assets
-            .iter()
-            .find(|a| {
-                a.name.contains("linux") || a.name.contains("darwin") || a.name.contains("windows")
-            })
-            .map(|a| a.download_url.clone());
-
         // Create metadata entry (no Python version for Ollama)
         let metadata = InstalledVersionMetadata {
             path: tag.to_string(),
@@ -3250,15 +3472,36 @@ impl VersionInstaller {
             git_commit: None,
             release_date: Some(release.published_at.clone()),
             release_notes: release.body.clone(),
-            download_url,
-            size: release.archive_size,
+            download_url: Some(download_url),
+            size: Some(archive_size),
             requirements_hash: None,
             dependencies_installed: Some(true), // No dependencies needed
         };
 
-        // Save metadata
-        self.metadata_manager
-            .update_installed_version(tag, metadata, Some(self.app_id))?;
+        // Publish the stage and its metadata together: a metadata failure
+        // withdraws the newly published directory back into the stage.
+        let destination = self.versions_dir().join(tag);
+        if path_exists(&destination).await? {
+            return Err(PumasError::InstallationFailed {
+                message: format!(
+                    "Ollama version directory {} already exists; remove it and retry",
+                    destination.display()
+                ),
+            });
+        }
+        let stage = stage.to_path_buf();
+        let manager = self.metadata_manager.clone();
+        let app_id = self.app_id;
+        let tag_for_publish = tag.to_owned();
+        tokio::task::spawn_blocking(move || {
+            Self::publish_native_stage(&stage, &destination, || {
+                manager
+                    .update_installed_version(&tag_for_publish, metadata, Some(app_id))
+                    .map_err(|error| (error, true))
+            })
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join Ollama publication task: {e}")))??;
 
         // Update progress
         {
@@ -3281,13 +3524,81 @@ impl VersionInstaller {
         Ok(())
     }
 
+    /// HTTPS-only client for publisher artifact downloads, with timeouts for
+    /// large files: a connect timeout but no overall timeout (1.6 GB+). Test
+    /// builds reuse a validated loopback fixture's transport for its origin.
+    fn native_download_client(&self, download_url: &str) -> Result<reqwest::Client> {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(client) = self
+            .github_client
+            .as_ref()
+            .map(|client| client.loopback_fixture_http_client(download_url))
+            .transpose()?
+            .flatten()
+        {
+            return Ok(client);
+        }
+        #[cfg(not(any(test, feature = "test-support")))]
+        let _ = download_url;
+        reqwest::Client::builder()
+            .connect_timeout(InstallationConfig::URL_FETCH_TIMEOUT)
+            .user_agent("pumas-library")
+            .https_only(true)
+            .build()
+            .map_err(|e| PumasError::Network {
+                message: format!("Failed to create HTTP client: {}", e),
+                cause: Some(e.to_string()),
+            })
+    }
+
+    /// Whether a cached archive still hashes to the publisher digest. A
+    /// mismatching or unreadable cache entry is removed so it is downloaded
+    /// again.
+    async fn cached_archive_matches(
+        archive_path: &Path,
+        expected: &ExpectedArchive,
+    ) -> Result<bool> {
+        if !path_exists(archive_path).await? {
+            return Ok(false);
+        }
+        let path = archive_path.to_path_buf();
+        let expected = expected.clone();
+        let verified = tokio::task::spawn_blocking(move || {
+            let mut file = File::open(&path).map_err(|e| PumasError::io_with_path(e, &path))?;
+            expected.verify_file(&mut file, &path)
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join cache verification task: {e}")))?;
+        match verified {
+            Ok(()) => Ok(true),
+            Err(error) => {
+                warn!("Discarding cached download that failed re-verification: {error}");
+                let _ = fs::remove_file(archive_path).await;
+                Ok(false)
+            }
+        }
+    }
+
+    /// Download `url` to `archive_path`, hashing as it streams. The bytes are
+    /// written to a sibling `.part` file and renamed into place only after
+    /// they match the publisher digest and size, so the cache never holds an
+    /// unverified archive.
     async fn download_archive(
         &self,
+        client: &reqwest::Client,
         url: &str,
         archive_path: &Path,
+        expected: &ExpectedArchive,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
         info!("Downloading archive from {}", url);
+        let part_path = archive_path.with_file_name(format!(
+            "{}.part",
+            archive_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| PumasError::Other("Archive cache path has no file name".into()))?
+        ));
 
         // Update progress
         {
@@ -3306,18 +3617,6 @@ impl VersionInstaller {
             },
         )
         .await;
-
-        // Create HTTP client with appropriate timeouts for large downloads
-        // - connect_timeout: time to establish connection (15s is fine)
-        // - NO overall timeout: downloads can take a long time for large files (1.6 GB+)
-        let client = reqwest::Client::builder()
-            .connect_timeout(InstallationConfig::URL_FETCH_TIMEOUT)
-            .user_agent("pumas-library")
-            .build()
-            .map_err(|e| PumasError::Network {
-                message: format!("Failed to create HTTP client: {}", e),
-                cause: Some(e.to_string()),
-            })?;
 
         // Start download with retry
         let mut response = None;
@@ -3361,14 +3660,14 @@ impl VersionInstaller {
             cause: None,
         })?;
 
-        let total_size = response.content_length();
+        let total_size = expected.size.or(response.content_length());
 
         // Create output file
-        let mut file = fs::File::create(archive_path)
+        let mut file = fs::File::create(&part_path)
             .await
             .map_err(|e| PumasError::Io {
                 message: format!("Failed to create archive file: {}", e),
-                path: Some(archive_path.to_path_buf()),
+                path: Some(part_path.clone()),
                 source: Some(e),
             })?;
 
@@ -3376,6 +3675,7 @@ impl VersionInstaller {
         // their settlement remain awaited before the stage can be reclaimed.
         let transfer = async {
             let mut downloaded: u64 = 0;
+            let mut digest = Sha256::new();
             let mut stream = response.bytes_stream();
             let start_time = std::time::Instant::now();
 
@@ -3398,13 +3698,21 @@ impl VersionInstaller {
                     cause: Some(e.to_string()),
                 })?;
 
+                downloaded = downloaded
+                    .checked_add(chunk.len() as u64)
+                    .filter(|total| expected.size.is_none_or(|size| *total <= size))
+                    .ok_or_else(|| PumasError::InstallationFailed {
+                        message: format!(
+                            "Download exceeds the publisher's declared size of {} bytes",
+                            expected.size.unwrap_or_default()
+                        ),
+                    })?;
+                digest.update(&chunk);
                 file.write_all(&chunk).await.map_err(|e| PumasError::Io {
                     message: format!("Failed to write to archive: {}", e),
-                    path: Some(archive_path.to_path_buf()),
+                    path: Some(part_path.clone()),
                     source: Some(e),
                 })?;
-
-                downloaded += chunk.len() as u64;
 
                 // Calculate speed
                 let elapsed = start_time.elapsed().as_secs_f64();
@@ -3432,11 +3740,26 @@ impl VersionInstaller {
             }
 
             self.check_cancelled()?;
-            Ok(downloaded)
+            Ok((downloaded, format!("{:x}", digest.finalize())))
         }
         .await;
 
-        let downloaded = settle_archive_file(file, archive_path, transfer).await?;
+        let verified = settle_archive_file(file, &part_path, transfer)
+            .await
+            .and_then(|(downloaded, sha256)| {
+                expected.verify(&sha256, downloaded)?;
+                Ok(downloaded)
+            });
+        let downloaded = match verified {
+            Ok(downloaded) => downloaded,
+            Err(error) => {
+                let _ = fs::remove_file(&part_path).await;
+                return Err(error);
+            }
+        };
+        fs::rename(&part_path, archive_path)
+            .await
+            .map_err(|e| PumasError::io_with_path(e, archive_path))?;
 
         // Add to completed items
         {
@@ -3451,7 +3774,8 @@ impl VersionInstaller {
     /// Extracts a ZIP archive below `extract_dir`. A root or drive prefix is
     /// dropped from an entry's name; an entry whose name would still leave
     /// that directory, such as one starting with `..`, rejects the archive.
-    pub(super) fn extract_zip(archive_path: &Path, extract_dir: &Path) -> Result<()> {
+    #[cfg(test)]
+    fn extract_zip(archive_path: &Path, extract_dir: &Path) -> Result<()> {
         let file = File::open(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to open zip archive: {}", e),
             path: Some(archive_path.to_path_buf()),
@@ -3461,6 +3785,7 @@ impl VersionInstaller {
     }
 
     fn extract_zip_from(file: File, extract_dir: &Path) -> Result<()> {
+        let mut budget = ExtractionBudget::for_archive(&file, extract_dir)?;
         let mut archive =
             zip::ZipArchive::new(file).map_err(|e| PumasError::InstallationFailed {
                 message: format!("Invalid zip archive: {}", e),
@@ -3472,6 +3797,11 @@ impl VersionInstaller {
                 .map_err(|e| PumasError::InstallationFailed {
                     message: format!("Failed to read zip entry {}: {}", i, e),
                 })?;
+            // The declared size is admitted against the cumulative budget, and
+            // the copy below is held to it, so an entry that inflates past its
+            // header cannot exceed the budget either.
+            let declared = file.size();
+            budget.admit(declared)?;
 
             let outpath = match file.enclosed_name() {
                 Some(path) => extract_dir.join(path),
@@ -3507,19 +3837,35 @@ impl VersionInstaller {
                     source: Some(e),
                 })?;
 
-                std::io::copy(&mut file, &mut outfile).map_err(|e| PumasError::Io {
+                let written = std::io::copy(
+                    &mut std::io::Read::take(&mut file, declared.saturating_add(1)),
+                    &mut outfile,
+                )
+                .map_err(|e| PumasError::Io {
                     message: format!("Failed to extract file: {}", e),
                     path: Some(outpath.clone()),
                     source: Some(e),
                 })?;
+                if written > declared {
+                    return Err(PumasError::InstallationFailed {
+                        message: format!(
+                            "Zip entry {i} expands beyond its declared size of {declared} bytes"
+                        ),
+                    });
+                }
             }
 
-            // Set permissions on Unix
+            // Only permission bits are applied: an archive's setuid, setgid
+            // and sticky bits are never honoured.
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 if let Some(mode) = file.unix_mode() {
-                    std::fs::set_permissions(&outpath, std::fs::Permissions::from_mode(mode)).ok();
+                    std::fs::set_permissions(
+                        &outpath,
+                        std::fs::Permissions::from_mode(mode & 0o777),
+                    )
+                    .ok();
                 }
             }
         }
@@ -3527,26 +3873,10 @@ impl VersionInstaller {
         Ok(())
     }
 
-    fn extract_tarball(archive_path: &Path, extract_dir: &Path) -> Result<()> {
-        let file = File::open(archive_path).map_err(|e| PumasError::Io {
-            message: format!("Failed to open tarball: {}", e),
-            path: Some(archive_path.to_path_buf()),
-            source: Some(e),
-        })?;
-        Self::extract_tarball_from(file, extract_dir)
-    }
-
     fn extract_tarball_from(file: File, extract_dir: &Path) -> Result<()> {
+        let budget = ExtractionBudget::for_archive(&file, extract_dir)?;
         let decoder = flate2::read::GzDecoder::new(BufReader::new(file));
-        let mut archive = tar::Archive::new(decoder);
-
-        archive
-            .unpack(extract_dir)
-            .map_err(|e| PumasError::InstallationFailed {
-                message: format!("Failed to extract tarball: {}", e),
-            })?;
-
-        Ok(())
+        Self::unpack_tar_within(tar::Archive::new(decoder), extract_dir, budget, "tarball")
     }
 
     async fn finalize_installation(

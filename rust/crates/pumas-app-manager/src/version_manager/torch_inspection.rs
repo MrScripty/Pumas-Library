@@ -46,9 +46,10 @@ pub struct TorchInstalledRuntime {
     pub build: Option<String>,
     pub python: Option<String>,
     pub adapter: Option<String>,
-    /// True when the runtime is a verified combination with the recorded
-    /// package versions, including runtimes installed from the former fixed
-    /// v2.9.1 preset.
+    /// True when the runtime's recorded artifacts are a version match for a
+    /// verified combination: every recorded package at its recorded version.
+    /// A runtime from the former fixed v2.9.1 preset qualifies only through
+    /// its recorded artifacts, never by its recipe ID.
     pub qualified: bool,
 }
 

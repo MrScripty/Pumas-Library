@@ -57,16 +57,53 @@ the receiving boundary already restricts to loopback clients of the same user.
 Raw subprocess output is not forwarded. New transports must reuse the same
 projection rather than serializing errors directly.
 
+## Runtime Install Integrity
+
+Ollama and llama.cpp releases are installed only from bytes that match the
+publisher's SHA-256 digest, which Pumas reads from a fresh GitHub release API
+response. A release asset without a digest is refused, as is a download or a
+cached archive that does not hash to it; a cached archive is re-hashed before
+every reuse. Downloads are HTTPS-only. Archives are extracted into a private
+stage under cumulative byte and entry limits that scale with the archive's
+size, without setuid, setgid or sticky bits, and the stage is checked for
+escaping links and special files before the launch binary is accepted. That
+binary must be a regular file, not a link.
+
+Managed Torch installs are trust-on-first-use, enforced and recorded per
+install. The resolver first resolves once (a pip dry run against the official
+PyTorch index for the selected build and PyPI), pinning the Torch wheel by the
+URL and SHA-256 the official index publishes, and writes a hash lock,
+`requirements.txt`, with one `name @ url --hash=sha256:...` line per wheel.
+Pumas checks that lock (trusted wheel origins, one Torch wheel of the selected
+release and build, required packages, and agreement with `resolution.json` and
+pip's report) before anything is installed. pip then installs exactly the lock
+with `--require-hashes --no-deps --no-index --only-binary=:all:`, the install
+report must name exactly the locked wheels, every staged file must match its
+wheel's RECORD digest, and Pumas re-hashes every staged file against
+`installed-files.json` before any staged code runs. What is trusted on first
+use is the set of versions current when the install was made; their bytes are
+then bound to the lock. A user who picks a verified combination can opt into
+its recorded versions as resolution constraints.
+
+Provider clients that may reach a remote runtime profile keep the user's
+`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` for remote hosts but never proxy a
+loopback host, so local prompts and models do not leave the machine.
+
 ## Dependency and Release Evidence
 
 Authoritative dependency inputs are the checked-in Cargo and pnpm lockfiles plus
 the Python requirements under `torch-server/`. Managed Torch runtimes are
 optional add-ons: each install resolves current package versions when it is
 created, and Pumas ships no lock for them, so their advisories belong to the
-installed versions rather than to a Pumas release. Audit an installation's
-`requirements.txt`, `resolution.json` and `pip-resolution.json`.
+installed versions rather than to a Pumas release. The pip-audit input for an
+installation is its venv's `site-packages` (`pip-audit --path <site-packages>`),
+whose distributions are exactly those in its hash lock, `requirements.txt`; its
+`resolution.json`, `pip-resolution.json`, `pip-install.json` and
+`installed-files.json` record what was resolved and staged.
 `torch-server/runtime/verified-runtimes.json` records verified combinations as
-evidence and installs nothing. The one exact pin is the Cohere audio candidate
+evidence: a runtime is verified when its packages match a record's versions,
+which is not a hash or provenance claim. It installs nothing unless the user
+opts into a record's versions. The one exact pin is the Cohere audio candidate
 recipe (`rust/crates/pumas-core/src/runtime_read_source/audio_candidate_recipe.json`):
 the confined audio read boundary admits only the files that recipe describes.
 `torch-server/requirements.txt` is an unpinned direct-development input, not a

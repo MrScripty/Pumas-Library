@@ -483,6 +483,9 @@ pub(crate) struct TorchInstallSelection {
     pub build: String,
     pub python: String,
     pub adapter: String,
+    /// pip constraints (`name==version` lines) from a verified combination's
+    /// record, present only when the user opted into its versions.
+    pub verified_constraints: Option<String>,
     pub created: Instant,
 }
 
@@ -728,15 +731,29 @@ impl VersionManager {
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
                 .unwrap_or(serde_json::Value::Null);
             let recorded = |key: &str| recipe[key].as_str().map(str::to_owned);
-            // Installed by the former fixed v2.9.1 preset from its verified
-            // lock. The recipe records no adapter; it carried both image adapters.
+            // Installed by the former fixed v2.9.1 preset. The recipe records
+            // no adapter; it carried both image adapters, so the Nunchaku record
+            // (a superset of the Flux 2 one) is the one its packages can match.
+            // The recipe ID alone qualifies nothing: only recorded artifacts can.
             installed.push(if recipe["recipe_id"] == "torch-upstream-2.9.1-r1" {
+                let mut artifacts = installed_artifacts(&self.versions_dir().join(&tag)).await;
+                if artifacts.is_empty() {
+                    artifacts =
+                        serde_json::from_value(recipe["artifacts"].clone()).unwrap_or_default();
+                }
+                let qualified = super::torch_verified::is_verified(
+                    &tag,
+                    "cu130",
+                    "python3.12",
+                    "nunchaku",
+                    &artifacts,
+                );
                 TorchInstalledRuntime {
                     tag,
                     build: Some("cu130".into()),
                     python: Some("python3.12".into()),
                     adapter: Some("bundled".into()),
-                    qualified: true,
+                    qualified,
                 }
             } else {
                 let (build, python, adapter) =
@@ -795,6 +812,26 @@ impl VersionManager {
         python: &str,
         adapter: &str,
     ) -> Result<TorchPreviewOutcome> {
+        self.preview_torch_runtime_with_verified_versions(tag, build, python, adapter, false)
+            .await
+    }
+
+    /// Preview a Torch selection, optionally constraining its packages to the
+    /// versions a verified combination recorded.
+    ///
+    /// By default an install resolves current package versions: verified
+    /// combinations are evidence, not pins. With `verified_versions`, the
+    /// selection must match a verified combination exactly (no `auto` build or
+    /// Python), and its resolution is constrained to that record's versions,
+    /// so a successful install is again a version match for the record.
+    pub async fn preview_torch_runtime_with_verified_versions(
+        &self,
+        tag: &str,
+        build: &str,
+        python: &str,
+        adapter: &str,
+        verified_versions: bool,
+    ) -> Result<TorchPreviewOutcome> {
         if self.app_id != AppId::Torch
             || !(build == "auto" || supported_torch_build(build))
             || !(python == "auto" || is_python_selection(python))
@@ -834,8 +871,22 @@ impl VersionManager {
                 });
             }
         }
+        let verified_constraints = if verified_versions {
+            match super::torch_verified::verified_constraints(tag, build, python, adapter) {
+                Some(constraints) => Some(constraints),
+                None => {
+                    return Ok(TorchPreviewOutcome::Rejected {
+                        reason: TorchPreviewRejectionReason::Unsupported,
+                        message: "No verified combination matches this release, build, Python and adapter, so its recorded versions cannot be applied",
+                    })
+                }
+            }
+        } else {
+            None
+        };
         let id = preview_token()?;
         let selection = TorchInstallSelection {
+            verified_constraints,
             tag: tag.to_owned(),
             build: build.to_owned(),
             python: python.to_owned(),

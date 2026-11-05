@@ -49,10 +49,12 @@ impl VersionLauncher {
     }
 
     /// Get the version directory path.
-    fn version_path(&self, tag: &str) -> PathBuf {
-        self.launcher_root
+    fn version_path(&self, tag: &str) -> Result<PathBuf> {
+        super::validate_version_tag(tag)?;
+        Ok(self
+            .launcher_root
             .join(self.app_id.versions_dir_name())
-            .join(tag)
+            .join(tag))
     }
 
     /// Launch a version.
@@ -61,7 +63,7 @@ impl VersionLauncher {
         tag: &str,
         extra_args: Option<Vec<String>>,
     ) -> Result<LaunchResult> {
-        let version_path = self.version_path(tag);
+        let version_path = self.version_path(tag)?;
         if !path_exists(&version_path).await? {
             return Err(PumasError::VersionNotFound {
                 tag: tag.to_string(),
@@ -232,7 +234,7 @@ impl VersionLauncher {
 
     /// Stop a running version.
     pub async fn stop_version(&self, tag: &str) -> Result<bool> {
-        let version_path = self.version_path(tag);
+        let version_path = self.version_path(tag)?;
         let pid_file = version_path.join("ollama.pid");
 
         if !path_exists(&pid_file).await? {
@@ -288,7 +290,9 @@ impl VersionLauncher {
 
     /// Check if a version is running.
     pub async fn is_version_running(&self, tag: &str) -> bool {
-        let version_path = self.version_path(tag);
+        let Ok(version_path) = self.version_path(tag) else {
+            return false;
+        };
         let pid_file = version_path.join("ollama.pid");
 
         if !path_exists(&pid_file).await.unwrap_or(false) {
@@ -374,7 +378,8 @@ mod tests {
     fn test_version_path() {
         let (launcher, temp) = create_test_launcher();
 
-        let path = launcher.version_path("v1.0.0");
+        let path = launcher.version_path("v1.0.0").unwrap();
+        assert!(launcher.version_path("../x").is_err());
         assert_eq!(path, temp.path().join("ollama-versions/v1.0.0"));
     }
 

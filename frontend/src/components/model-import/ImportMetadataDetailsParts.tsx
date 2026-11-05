@@ -7,6 +7,7 @@ import {
   ToggleRight,
 } from 'lucide-react';
 import type { ImportEntryStatus } from './modelImportWorkflowTypes';
+import { ExternalLink } from '../ui/ExternalLink';
 import {
   constructQuantUrl,
   LINKED_GGUF_FIELDS,
@@ -115,16 +116,14 @@ export function MetadataEntriesGrid({
           <div key={key} className="contents">
             <span className="text-[hsl(var(--launcher-text-muted))]">{label}</span>
             {linkedUrl ? (
-              <a
+              <ExternalLink
                 href={linkedUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(event) => event.stopPropagation()}
+                stopPropagation
                 className="truncate text-[hsl(var(--launcher-accent-primary))] hover:underline"
                 title={`${value} (${linkedUrl})`}
               >
                 {value}
-              </a>
+              </ExternalLink>
             ) : (
               <span className="truncate text-[hsl(var(--launcher-text-secondary))]" title={value}>
                 {value}

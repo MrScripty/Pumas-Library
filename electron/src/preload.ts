@@ -111,6 +111,13 @@ import {
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
+  decodeSetHfTokenParams,
+  decodeModelIdParams,
+  decodeImportModelParams,
+  decodeImportBatchParams,
+  decodeStatusTelemetrySnapshot,
+  decodeNetworkStatusResponse,
+  decodeLibraryStatusResponse,
   decodeLibraryUpgradeConfirmation,
   decodeLauncherRootSelectionResult as decodeGeneratedLauncherRootSelectionResult,
   decodeLauncherRootStartupState as decodeGeneratedLauncherRootStartupState,
@@ -192,6 +199,11 @@ async function validatedApiCall<T>(
   return requireDecoded(decode(await apiCall<unknown>(method, params)), method);
 }
 
+/** JSON omits undefined; the generated decoders accept only JSON values. */
+function withoutUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined)) as T;
+}
+
 type BaseRpcResponse = {
   success: boolean;
   error?: string;
@@ -219,6 +231,39 @@ function updateListener<T>(
       return;
     }
     onError(`Desktop contract ${decoded.status} for ${stream} update: ${decoded.message}`);
+  };
+}
+
+/**
+ * Subscribe to one update stream: decoded payloads go to `callback`; an
+ * undeliverable payload, a transport failure reported by main on
+ * `<stream>:error`, or a failed subscription goes to `onError`.
+ */
+function subscribeUpdateStream<T>(
+  stream: string,
+  decode: (value: unknown) => DecodeOutcome<T>,
+  callbacks: UpdateCallbacks<T>,
+  { refcounted }: { refcounted: boolean }
+): () => void {
+  const listener = updateListener(stream, decode, callbacks);
+  const errorListener = updateListener(`${stream} error`, decodeUpdateStreamError, {
+    callback: (error) => callbacks.onError(error.message),
+    onError: callbacks.onError,
+  });
+  ipcRenderer.on(`${stream}:update`, listener);
+  ipcRenderer.on(`${stream}:error`, errorListener);
+  if (refcounted) {
+    void ipcRenderer.invoke(`${stream}:subscribe`).catch((error: unknown) => {
+      const message = (error as { message?: unknown } | null)?.message;
+      callbacks.onError(typeof message === 'string' && message.length > 0
+        ? message
+        : `Failed to subscribe to ${stream} updates`);
+    });
+  }
+  return () => {
+    ipcRenderer.removeListener(`${stream}:update`, listener);
+    ipcRenderer.removeListener(`${stream}:error`, errorListener);
+    if (refcounted) void ipcRenderer.invoke(`${stream}:unsubscribe`).catch(() => {});
   };
 }
 
@@ -293,7 +338,9 @@ const electronAPI = {
   // Status & System
   // ========================================
   get_status: () => apiCall('get_status'),
-  get_status_telemetry_snapshot: () => apiCall('get_status_telemetry_snapshot'),
+  // Pull snapshots decode like their push notifications (FE-02).
+  get_status_telemetry_snapshot: () =>
+    validatedApiCall('get_status_telemetry_snapshot', decodeStatusTelemetrySnapshot),
   get_disk_space: () => apiCall('get_disk_space'),
   get_system_resources: () => apiCall('get_system_resources'),
 
@@ -475,8 +522,9 @@ const electronAPI = {
     apiCall('torch_get_status', { connection_url: connectionUrl }),
   torch_list_devices: (connectionUrl?: string) =>
     apiCall('torch_list_devices', { connection_url: connectionUrl }),
-  torch_configure: (config: Record<string, unknown>) =>
-    apiCall('torch_configure', config),
+  // Rust reads `{ connection_url?, config }`; main validates the full shape.
+  torch_configure: (config: Record<string, unknown>, connectionUrl?: string) =>
+    apiCall('torch_configure', withoutUndefined({ config, connection_url: connectionUrl })),
 
   // Ollama Model Management
   ollama_list_models: (connectionUrl?: string) =>
@@ -664,7 +712,8 @@ const electronAPI = {
   },
 
   // HuggingFace Authentication
-  set_hf_token: (token: string) => apiCall('set_hf_token', { token }),
+  set_hf_token: (token: string) =>
+    apiCall('set_hf_token', requireDecoded(decodeSetHfTokenParams({ token }), 'set_hf_token request')),
   clear_hf_token: () => apiCall('clear_hf_token'),
   get_hf_auth_status: () => apiCall('get_hf_auth_status'),
 
@@ -682,12 +731,16 @@ const electronAPI = {
       offset,
     }),
   import_batch: (importSpecs: Array<Record<string, unknown>>) =>
-    apiCall('import_batch', { imports: importSpecs }),
+    apiCall('import_batch', requireDecoded(decodeImportBatchParams({
+      imports: Array.isArray(importSpecs)
+        ? importSpecs.map((spec) => (spec && typeof spec === 'object' ? withoutUndefined(spec) : spec))
+        : importSpecs,
+    }), 'import_batch request')),
   import_external_diffusers_directory: (spec: Record<string, unknown>) =>
     apiCall('import_external_diffusers_directory', spec),
   classify_model_import_paths: (paths: string[]) =>
     apiCall('classify_model_import_paths', { paths }),
-  get_network_status: () => apiCall('get_network_status'),
+  get_network_status: () => validatedApiCall('get_network_status', decodeNetworkStatusResponse),
 
   // ========================================
   // Model Import (Phase 2)
@@ -725,12 +778,12 @@ const electronAPI = {
     validatedApiCall('cancel_s3_model_import', decodeS3ImportCancelOutcome,
       requireDecoded(decodeS3ImportCancelParams({ operation_id: operationId }), 'cancel_s3_model_import')),
   import_model: (localPath: string, family: string, officialName: string, repoId?: string) =>
-    apiCall('import_model', {
+    apiCall('import_model', requireDecoded(decodeImportModelParams(withoutUndefined({
       local_path: localPath,
       family,
       official_name: officialName,
       repo_id: repoId,
-    }),
+    })), 'import_model request')),
   lookup_hf_metadata_for_file: (filename: string, filePath?: string | null) =>
     apiCall('lookup_hf_metadata_for_file', { filename, file_path: filePath }),
   lookup_hf_metadata_for_bundle_directory: (directoryPath: string) =>
@@ -738,7 +791,7 @@ const electronAPI = {
   detect_sharded_sets: (filePaths: string[]) =>
     apiCall('detect_sharded_sets', { files: filePaths }),
   validate_file_type: (filePath: string) => apiCall('validate_file_type', { file_path: filePath }),
-  get_library_status: () => apiCall('get_library_status'),
+  get_library_status: () => validatedApiCall('get_library_status', decodeLibraryStatusResponse),
   get_file_link_count: (filePath: string) => apiCall('get_file_link_count', { file_path: filePath }),
   check_files_writable: (filePaths: string[]) =>
     apiCall('check_files_writable', { file_paths: filePaths }),
@@ -753,9 +806,11 @@ const electronAPI = {
   clean_broken_links: () => apiCall('clean_broken_links'),
   remove_orphaned_links: (versionTag: string) =>
     apiCall('remove_orphaned_links', { version_tag: versionTag }),
-  get_links_for_model: (modelId: string) => apiCall('get_links_for_model', { model_id: modelId }),
+  get_links_for_model: (modelId: string) => apiCall('get_links_for_model',
+    requireDecoded(decodeModelIdParams({ model_id: modelId }), 'get_links_for_model request')),
   delete_model_with_cascade: (modelId: string) =>
-    apiCall('delete_model_with_cascade', { model_id: modelId }),
+    apiCall('delete_model_with_cascade',
+      requireDecoded(decodeModelIdParams({ model_id: modelId }), 'delete_model_with_cascade request')),
 
   get_sandbox_info: () => apiCall('get_sandbox_info'),
   set_model_link_exclusion: (modelId: string, appId: string, excluded: boolean) =>
@@ -943,73 +998,28 @@ const electronAPI = {
   onModelLibraryUpdate: (
     callback: (notification: ModelLibraryUpdateNotification) => void,
     onError: (message: string) => void
-  ): (() => void) => {
-    const listener = updateListener('model-library', decodeModelLibraryUpdateNotification, { callback, onError });
-    ipcRenderer.on('model-library:update', listener);
-    return () => {
-      ipcRenderer.removeListener('model-library:update', listener);
-    };
-  },
+  ): (() => void) => subscribeUpdateStream('model-library', decodeModelLibraryUpdateNotification,
+    { callback, onError }, { refcounted: false }),
   onModelDownloadUpdate: (
     callback: (notification: ModelDownloadUpdateOutcome) => void,
     onError: (message: string) => void
-  ): (() => void) => {
-    const listener = updateListener('model-download', decodeModelDownloadUpdateOutcome, { callback, onError });
-    ipcRenderer.on('model-download:update', listener);
-    void ipcRenderer.invoke('model-download:subscribe');
-    return () => {
-      ipcRenderer.removeListener('model-download:update', listener);
-      void ipcRenderer.invoke('model-download:unsubscribe');
-    };
-  },
+  ): (() => void) => subscribeUpdateStream('model-download', decodeModelDownloadUpdateOutcome,
+    { callback, onError }, { refcounted: true }),
   onRuntimeProfileUpdate: (
     callback: (notification: RuntimeProfileUpdateFeed) => void,
     onError: (message: string) => void
-  ): (() => void) => {
-    const listener = updateListener('runtime-profile', decodeRuntimeProfileUpdateFeed, { callback, onError });
-    ipcRenderer.on('runtime-profile:update', listener);
-    void ipcRenderer.invoke('runtime-profile:subscribe');
-    return () => {
-      ipcRenderer.removeListener('runtime-profile:update', listener);
-      void ipcRenderer.invoke('runtime-profile:unsubscribe');
-    };
-  },
+  ): (() => void) => subscribeUpdateStream('runtime-profile', decodeRuntimeProfileUpdateFeed,
+    { callback, onError }, { refcounted: true }),
   onServingStatusUpdate: (
     callback: (notification: ServingStatusUpdateFeed) => void,
     onError: (message: string) => void
-  ): (() => void) => {
-    const listener = updateListener('serving-status', decodeServingStatusUpdateFeed, { callback, onError });
-    const errorListener = updateListener('serving-status error', decodeUpdateStreamError, {
-      callback: (error) => onError(error.message),
-      onError,
-    });
-
-    ipcRenderer.on('serving-status:update', listener);
-    ipcRenderer.on('serving-status:error', errorListener);
-    void ipcRenderer.invoke('serving-status:subscribe').catch((error: unknown) => {
-      const message = error instanceof Error
-        ? error.message
-        : 'Failed to subscribe to serving status updates';
-      onError(message);
-    });
-    return () => {
-      ipcRenderer.removeListener('serving-status:update', listener);
-      ipcRenderer.removeListener('serving-status:error', errorListener);
-      void ipcRenderer.invoke('serving-status:unsubscribe');
-    };
-  },
+  ): (() => void) => subscribeUpdateStream('serving-status', decodeServingStatusUpdateFeed,
+    { callback, onError }, { refcounted: true }),
   onStatusTelemetryUpdate: (
     callback: (notification: StatusTelemetryUpdateNotification) => void,
     onError: (message: string) => void
-  ): (() => void) => {
-    const listener = updateListener('status-telemetry', decodeStatusTelemetryUpdateNotification, { callback, onError });
-    ipcRenderer.on('status-telemetry:update', listener);
-    void ipcRenderer.invoke('status-telemetry:subscribe');
-    return () => {
-      ipcRenderer.removeListener('status-telemetry:update', listener);
-      void ipcRenderer.invoke('status-telemetry:unsubscribe');
-    };
-  },
+  ): (() => void) => subscribeUpdateStream('status-telemetry', decodeStatusTelemetryUpdateNotification,
+    { callback, onError }, { refcounted: true }),
 
   // ========================================
   // File Utilities (for drag-and-drop)

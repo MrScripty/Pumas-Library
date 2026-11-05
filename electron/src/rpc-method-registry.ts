@@ -225,6 +225,25 @@ export const RPC_METHOD_PARAM_VALIDATION = {
   get_plugins: 'empty-record',
   get_runtime_profiles_snapshot: 'empty-record',
   get_serving_status: 'empty-record',
+  // Rust decodes these with `empty()` and refuses any parameter.
+  health_check: 'empty-record',
+  shutdown: 'empty-record',
+  get_launcher_version: 'empty-record',
+  apply_launcher_update: 'empty-record',
+  restart_launcher: 'empty-record',
+  get_sandbox_info: 'empty-record',
+  check_git: 'empty-record',
+  get_network_status: 'empty-record',
+  get_library_status: 'empty-record',
+  get_torch_runtime_options: 'empty-record',
+  clear_hf_token: 'empty-record',
+  clean_broken_links: 'empty-record',
+  list_model_conversions: 'empty-record',
+  check_conversion_environment: 'empty-record',
+  setup_conversion_environment: 'empty-record',
+  get_conversion_setup: 'empty-record',
+  get_supported_quant_types: 'empty-record',
+  get_backend_status: 'empty-record',
 } as const satisfies Partial<Record<RpcMethodName, RpcParamsValidationPolicy>>;
 
 const RPC_METHOD_PARAM_VALIDATION_BY_METHOD: Partial<

@@ -10,9 +10,14 @@ import {
   BrowserWindow,
   ipcMain,
   dialog,
+  Menu,
   shell,
   nativeTheme,
   type Event as ElectronEvent,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+  type MenuItemConstructorOptions,
+  type WebContents,
 } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -32,7 +37,7 @@ import {
   validateApiCallPayload,
   validateExternalUrl,
 } from './ipc-validation';
-import { resolveBackendBinaryPath } from './backend-path';
+import { isIgnoredPackagedOverride, resolveBackendBinaryPath } from './backend-path';
 import { PythonBridge } from './python-bridge';
 import { LibraryUpgradeCoordinator, runLibraryMetadataUpgrade } from './library-upgrade';
 import { isS3ImportMethod, receiveS3ImportRpc } from './s3-import-rpc';
@@ -50,6 +55,14 @@ import {
   WINDOW_PRESENTATION_MARKER_CSS,
   type WindowPresentationOwner,
 } from './window-presentation';
+import {
+  createAppOriginPolicy,
+  installWebContentsGuards,
+  IpcSenderRefusedError,
+  isMainFrameSender,
+  type AppOriginPolicy,
+  type GuardedWebContents,
+} from './window-security';
 import log from 'electron-log';
 
 // Configure logging
@@ -62,10 +75,13 @@ const WINDOW_HEIGHT = 1000;
 const MIN_WINDOW_WIDTH = 360;
 const MIN_WINDOW_HEIGHT = 400;
 const MODEL_LIBRARY_UPDATE_CHANNEL = 'model-library:update';
+const MODEL_LIBRARY_ERROR_CHANNEL = 'model-library:error';
 const MODEL_DOWNLOAD_UPDATE_CHANNEL = 'model-download:update';
+const MODEL_DOWNLOAD_ERROR_CHANNEL = 'model-download:error';
 const MODEL_DOWNLOAD_SUBSCRIBE_CHANNEL = 'model-download:subscribe';
 const MODEL_DOWNLOAD_UNSUBSCRIBE_CHANNEL = 'model-download:unsubscribe';
 const RUNTIME_PROFILE_UPDATE_CHANNEL = 'runtime-profile:update';
+const RUNTIME_PROFILE_ERROR_CHANNEL = 'runtime-profile:error';
 const RUNTIME_PROFILE_SUBSCRIBE_CHANNEL = 'runtime-profile:subscribe';
 const RUNTIME_PROFILE_UNSUBSCRIBE_CHANNEL = 'runtime-profile:unsubscribe';
 const SERVING_STATUS_UPDATE_CHANNEL = 'serving-status:update';
@@ -73,12 +89,14 @@ const SERVING_STATUS_ERROR_CHANNEL = 'serving-status:error';
 const SERVING_STATUS_SUBSCRIBE_CHANNEL = 'serving-status:subscribe';
 const SERVING_STATUS_UNSUBSCRIBE_CHANNEL = 'serving-status:unsubscribe';
 const STATUS_TELEMETRY_UPDATE_CHANNEL = 'status-telemetry:update';
+const STATUS_TELEMETRY_ERROR_CHANNEL = 'status-telemetry:error';
 const STATUS_TELEMETRY_SUBSCRIBE_CHANNEL = 'status-telemetry:subscribe';
 const STATUS_TELEMETRY_UNSUBSCRIBE_CHANNEL = 'status-telemetry:unsubscribe';
 const LAUNCHER_ROOT_PRESENTATION_COMMITTED_CHANNEL =
   'launcher-root:presentation-committed';
 const LAUNCHER_ROOT_PRESENTATION_TIMEOUT_CHANNEL =
   'launcher-root:presentation-timeout';
+const DEV_SERVER_URL = 'http://127.0.0.1:3000';
 const WINDOW_PRESENTATION_DEADLINE_MS = 30_000;
 const WINDOW_PRESENTATION_FALLBACK_GRACE_MS = 2_000;
 
@@ -229,24 +247,73 @@ function configureLinuxDisplay(): void {
 }
 
 /**
+ * `--dev` (Vite dev server) is a source-checkout affordance only. A packaged
+ * build never loads a remote origin with the preload attached.
+ */
+function isDevServerLaunch(): boolean {
+  return !app.isPackaged && process.argv.includes('--dev');
+}
+
+/** `--dev`/`--debug` diagnostics (DevTools, debug logging) are unpackaged only. */
+function isDebugLaunch(): boolean {
+  return !app.isPackaged && (process.argv.includes('--dev') || process.argv.includes('--debug'));
+}
+
+/** The bundled frontend entry document. */
+function getBundledFrontendPath(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'frontend', 'index.html')
+    : path.join(__dirname, '..', '..', 'frontend', 'dist', 'index.html');
+}
+
+/**
  * Get the path to the frontend content
  */
 function getFrontendPath(): string {
-  const isDev = process.argv.includes('--dev');
+  return isDevServerLaunch() ? DEV_SERVER_URL : getBundledFrontendPath();
+}
 
-  if (isDev) {
-    // Development mode: Vite dev server
-    return 'http://127.0.0.1:3000';
-  }
+let appOriginPolicy: AppOriginPolicy | null = null;
 
-  // Production mode: bundled frontend
-  if (app.isPackaged) {
-    // Packaged app: resources directory
-    return path.join(process.resourcesPath, 'frontend', 'index.html');
-  }
+/** Documents that may navigate, receive permissions, or call IPC. */
+function getAppOriginPolicy(): AppOriginPolicy {
+  appOriginPolicy ??= createAppOriginPolicy({
+    frontendEntryPath: getBundledFrontendPath(),
+    devServerOrigin: isDevServerLaunch() ? DEV_SERVER_URL : null,
+    caseInsensitivePaths: process.platform === 'win32',
+  });
+  return appOriginPolicy;
+}
 
-  // Development build: local dist
-  return path.join(__dirname, '..', '..', 'frontend', 'dist', 'index.html');
+function guardWebContents(contents: WebContents): void {
+  installWebContentsGuards(contents as unknown as GuardedWebContents, {
+    policy: getAppOriginPolicy(),
+    openExternal: (url) => shell.openExternal(url),
+    log,
+  });
+}
+
+/** Refuse IPC from anything but the application document in the main window. */
+function isApplicationSender(event: IpcMainInvokeEvent | IpcMainEvent): boolean {
+  return isMainFrameSender(event, mainWindow, getAppOriginPolicy());
+}
+
+function requireApplicationSender(channel: string, event: IpcMainInvokeEvent): void {
+  if (!isApplicationSender(event)) throw new IpcSenderRefusedError(channel);
+}
+
+/**
+ * Packaged builds get a menu without DevTools or reload accelerators.
+ * Unpackaged builds keep Electron's default menu for development.
+ */
+function configureApplicationMenu(): void {
+  if (!app.isPackaged) return;
+  const template: MenuItemConstructorOptions[] = [
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+    { role: 'editMenu' },
+    { role: 'windowMenu' },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 /**
@@ -289,9 +356,12 @@ async function createWindow(): Promise<'shown' | 'fatal' | 'closed'> {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      devTools: !app.isPackaged,
     },
   });
   mainWindow = createdWindow;
+  // Also installed from 'web-contents-created'; guards are idempotent.
+  guardWebContents(createdWindow.webContents);
 
   let presentationTerminalSettled = false;
   let settlePresentationTerminal: (
@@ -437,7 +507,7 @@ async function createWindow(): Promise<'shown' | 'fatal' | 'closed'> {
   // Load frontend content
   const frontendPath = getFrontendPath();
   const isDev = frontendPath.startsWith('http');
-  const wantsDevTools = process.argv.includes('--dev') || process.argv.includes('--debug');
+  const wantsDevTools = isDebugLaunch();
 
   if (isDev) {
     log.info(`Loading development server: ${frontendPath}`);
@@ -446,9 +516,7 @@ async function createWindow(): Promise<'shown' | 'fatal' | 'closed'> {
     } catch {
       // Dev server not running, fall back to production build
       log.warn('Dev server not available, falling back to production build');
-      const prodPath = app.isPackaged
-        ? path.join(process.resourcesPath, 'frontend', 'index.html')
-        : path.join(__dirname, '..', '..', 'frontend', 'dist', 'index.html');
+      const prodPath = getBundledFrontendPath();
       log.info(`Loading production build: ${prodPath}`);
       try {
         await createdWindow.loadFile(prodPath);
@@ -494,9 +562,12 @@ async function createWindow(): Promise<'shown' | 'fatal' | 'closed'> {
     if (mainWindow !== createdWindow) {
       return;
     }
+    // A closed renderer cannot unsubscribe; release all of its subscriptions.
+    modelDownloadRendererSubscriptions = 0;
     servingStatusRendererSubscriptions = 0;
     runtimeProfileRendererSubscriptions = 0;
     statusTelemetryRendererSubscriptions = 0;
+    pythonBridge?.stopModelDownloadUpdateStream();
     pythonBridge?.stopServingStatusUpdateStream();
     pythonBridge?.stopRuntimeProfileUpdateStream();
     pythonBridge?.stopStatusTelemetryUpdateStream();
@@ -517,7 +588,8 @@ function registerIPCHandlers(): void {
   log.info('Registering IPC handlers...');
 
   // Generic API call handler - forwards validated renderer requests to the backend sidecar.
-  ipcMain.handle('api:call', async (_event, method: unknown, params: unknown) => {
+  ipcMain.handle('api:call', async (event, method: unknown, params: unknown) => {
+    requireApplicationSender('api:call', event);
     const request = validateApiCallPayload(method, params);
 
     if (isS3ImportMethod(request.method)) {
@@ -547,15 +619,18 @@ function registerIPCHandlers(): void {
   });
 
   // Window control handlers
-  ipcMain.handle('window:close', () => {
+  ipcMain.handle('window:close', (event) => {
+    requireApplicationSender('window:close', event);
     mainWindow?.close();
   });
 
-  ipcMain.handle('window:minimize', () => {
+  ipcMain.handle('window:minimize', (event) => {
+    requireApplicationSender('window:minimize', event);
     mainWindow?.minimize();
   });
 
-  ipcMain.handle('window:maximize', () => {
+  ipcMain.handle('window:maximize', (event) => {
+    requireApplicationSender('window:maximize', event);
     if (mainWindow?.isMaximized()) {
       mainWindow.unmaximize();
     } else {
@@ -564,21 +639,20 @@ function registerIPCHandlers(): void {
   });
 
   // File dialog handler
-  ipcMain.handle('dialog:openFile', async (_event, options: unknown) => {
+  ipcMain.handle('dialog:openFile', async (event, options: unknown) => {
+    requireApplicationSender('dialog:openFile', event);
     const targetWindow = mainWindow;
     if (!targetWindow || targetWindow.isDestroyed()) return { status: 'unavailable' };
     return chooseModelImportPaths(() => dialog.showOpenDialog(targetWindow, sanitizeOpenDialogOptions(options)));
   });
 
-  ipcMain.handle('launcher:getRootState', () => launcherRootStartupState);
+  ipcMain.handle('launcher:getRootState', (event) => {
+    requireApplicationSender('launcher:getRootState', event);
+    return launcherRootStartupState;
+  });
   // A snapshot only: never wait for the backend or perform IO in synchronous IPC.
   ipcMain.on('launcher:getRootBootstrap', (event) => {
-    const window = mainWindow;
-    event.returnValue = window && !window.isDestroyed() &&
-      event.sender === window.webContents &&
-      event.senderFrame === window.webContents.mainFrame
-      ? launcherRootStartupState
-      : null;
+    event.returnValue = isApplicationSender(event) ? launcherRootStartupState : null;
   });
 
   ipcMain.handle(
@@ -590,9 +664,7 @@ function registerIPCHandlers(): void {
         return;
       }
       const outcome = targetOwner.rendererCommitted({
-        currentTopDocument:
-          event.sender === targetWindow.webContents &&
-          event.senderFrame === targetWindow.webContents.mainFrame,
+        currentTopDocument: isApplicationSender(event),
         presentation,
       });
       if (outcome.status === 'invalid') {
@@ -602,13 +674,12 @@ function registerIPCHandlers(): void {
   );
 
   ipcMain.handle('launcher:upgradeLibrary', (event, confirmation: unknown) => {
-    const window = mainWindow;
-    if (!window || window.isDestroyed() || event.sender !== window.webContents ||
-        event.senderFrame !== window.webContents.mainFrame) return { status: 'unavailable' };
+    if (!isApplicationSender(event)) return { status: 'unavailable' };
     return libraryUpgrade.run(confirmation);
   });
 
-  ipcMain.handle('launcher:chooseLibraryRoot', async () => {
+  ipcMain.handle('launcher:chooseLibraryRoot', async (event) => {
+    requireApplicationSender('launcher:chooseLibraryRoot', event);
     if (libraryUpgrade.active || applicationCleanupStarted) {
       return { status: 'recovery-required', reason: 'chooser-unavailable', authorityState: 'unchanged' };
     }
@@ -624,58 +695,67 @@ function registerIPCHandlers(): void {
   });
 
   // Shell handlers
-  ipcMain.handle('shell:openExternal', async (_event, url: unknown) => {
+  ipcMain.handle('shell:openExternal', async (event, url: unknown) => {
+    requireApplicationSender('shell:openExternal', event);
     await shell.openExternal(validateExternalUrl(url));
   });
 
   // Theme handler
-  ipcMain.handle('theme:get', () => {
+  ipcMain.handle('theme:get', (event) => {
+    requireApplicationSender('theme:get', event);
     return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
   });
 
-  ipcMain.handle(STATUS_TELEMETRY_SUBSCRIBE_CHANNEL, () => {
+  ipcMain.handle(STATUS_TELEMETRY_SUBSCRIBE_CHANNEL, (event) => {
+    requireApplicationSender(STATUS_TELEMETRY_SUBSCRIBE_CHANNEL, event);
     statusTelemetryRendererSubscriptions += 1;
     if (statusTelemetryRendererSubscriptions === 1) {
       startStatusTelemetryUpdateForwarder();
     }
   });
 
-  ipcMain.handle(STATUS_TELEMETRY_UNSUBSCRIBE_CHANNEL, () => {
+  ipcMain.handle(STATUS_TELEMETRY_UNSUBSCRIBE_CHANNEL, (event) => {
+    requireApplicationSender(STATUS_TELEMETRY_UNSUBSCRIBE_CHANNEL, event);
     statusTelemetryRendererSubscriptions = Math.max(0, statusTelemetryRendererSubscriptions - 1);
     if (statusTelemetryRendererSubscriptions === 0) {
       pythonBridge?.stopStatusTelemetryUpdateStream();
     }
   });
 
-  ipcMain.handle(MODEL_DOWNLOAD_SUBSCRIBE_CHANNEL, () => {
+  ipcMain.handle(MODEL_DOWNLOAD_SUBSCRIBE_CHANNEL, (event) => {
+    requireApplicationSender(MODEL_DOWNLOAD_SUBSCRIBE_CHANNEL, event);
     modelDownloadRendererSubscriptions += 1;
     if (modelDownloadRendererSubscriptions === 1) {
       startModelDownloadUpdateForwarder();
     }
   });
 
-  ipcMain.handle(MODEL_DOWNLOAD_UNSUBSCRIBE_CHANNEL, () => {
+  ipcMain.handle(MODEL_DOWNLOAD_UNSUBSCRIBE_CHANNEL, (event) => {
+    requireApplicationSender(MODEL_DOWNLOAD_UNSUBSCRIBE_CHANNEL, event);
     modelDownloadRendererSubscriptions = Math.max(0, modelDownloadRendererSubscriptions - 1);
     if (modelDownloadRendererSubscriptions === 0) {
       pythonBridge?.stopModelDownloadUpdateStream();
     }
   });
 
-  ipcMain.handle(RUNTIME_PROFILE_SUBSCRIBE_CHANNEL, () => {
+  ipcMain.handle(RUNTIME_PROFILE_SUBSCRIBE_CHANNEL, (event) => {
+    requireApplicationSender(RUNTIME_PROFILE_SUBSCRIBE_CHANNEL, event);
     runtimeProfileRendererSubscriptions += 1;
     if (runtimeProfileRendererSubscriptions === 1) {
       startRuntimeProfileUpdateForwarder();
     }
   });
 
-  ipcMain.handle(RUNTIME_PROFILE_UNSUBSCRIBE_CHANNEL, () => {
+  ipcMain.handle(RUNTIME_PROFILE_UNSUBSCRIBE_CHANNEL, (event) => {
+    requireApplicationSender(RUNTIME_PROFILE_UNSUBSCRIBE_CHANNEL, event);
     runtimeProfileRendererSubscriptions = Math.max(0, runtimeProfileRendererSubscriptions - 1);
     if (runtimeProfileRendererSubscriptions === 0) {
       pythonBridge?.stopRuntimeProfileUpdateStream();
     }
   });
 
-  ipcMain.handle(SERVING_STATUS_SUBSCRIBE_CHANNEL, () => {
+  ipcMain.handle(SERVING_STATUS_SUBSCRIBE_CHANNEL, (event) => {
+    requireApplicationSender(SERVING_STATUS_SUBSCRIBE_CHANNEL, event);
     servingStatusRendererSubscriptions += 1;
     if (servingStatusRendererSubscriptions === 1) {
       try {
@@ -687,7 +767,8 @@ function registerIPCHandlers(): void {
     }
   });
 
-  ipcMain.handle(SERVING_STATUS_UNSUBSCRIBE_CHANNEL, () => {
+  ipcMain.handle(SERVING_STATUS_UNSUBSCRIBE_CHANNEL, (event) => {
+    requireApplicationSender(SERVING_STATUS_UNSUBSCRIBE_CHANNEL, event);
     servingStatusRendererSubscriptions = Math.max(0, servingStatusRendererSubscriptions - 1);
     if (servingStatusRendererSubscriptions === 0) {
       pythonBridge?.stopServingStatusUpdateStream();
@@ -697,19 +778,36 @@ function registerIPCHandlers(): void {
   log.info('IPC handlers registered');
 }
 
+/** Send to the main window's renderer, if it still exists. */
+function sendToMainWindow(channel: string, payload: unknown): void {
+  const targetWindow = mainWindow;
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+  targetWindow.webContents.send(channel, payload);
+}
+
+/**
+ * Forward one update stream. Transport loss (stream ended or failed) goes to
+ * its error channel so the renderer resynchronizes and can show the failure,
+ * instead of reaching only the main-process log.
+ */
+function streamForwarder(updateChannel: string, errorChannel: string) {
+  return [
+    (payload: unknown) => sendToMainWindow(updateChannel, payload),
+    // The renderer's UpdateStreamError contract bounds the message.
+    (message: string) => sendToMainWindow(errorChannel, { message: message.slice(0, 1024) }),
+  ] as const;
+}
+
 function startModelLibraryUpdateForwarder(): void {
   if (!pythonBridge?.isRunning()) {
     return;
   }
 
-  pythonBridge.startModelLibraryUpdateStream((payload) => {
-    const targetWindow = mainWindow;
-    if (!targetWindow || targetWindow.isDestroyed()) {
-      return;
-    }
-
-    targetWindow.webContents.send(MODEL_LIBRARY_UPDATE_CHANNEL, payload);
-  });
+  pythonBridge.startModelLibraryUpdateStream(
+    ...streamForwarder(MODEL_LIBRARY_UPDATE_CHANNEL, MODEL_LIBRARY_ERROR_CHANNEL)
+  );
 }
 
 function startRuntimeProfileUpdateForwarder(): void {
@@ -717,14 +815,9 @@ function startRuntimeProfileUpdateForwarder(): void {
     return;
   }
 
-  pythonBridge.startRuntimeProfileUpdateStream((payload) => {
-    const targetWindow = mainWindow;
-    if (!targetWindow || targetWindow.isDestroyed()) {
-      return;
-    }
-
-    targetWindow.webContents.send(RUNTIME_PROFILE_UPDATE_CHANNEL, payload);
-  });
+  pythonBridge.startRuntimeProfileUpdateStream(
+    ...streamForwarder(RUNTIME_PROFILE_UPDATE_CHANNEL, RUNTIME_PROFILE_ERROR_CHANNEL)
+  );
 }
 
 function startModelDownloadUpdateForwarder(): void {
@@ -732,14 +825,9 @@ function startModelDownloadUpdateForwarder(): void {
     return;
   }
 
-  pythonBridge.startModelDownloadUpdateStream((payload) => {
-    const targetWindow = mainWindow;
-    if (!targetWindow || targetWindow.isDestroyed()) {
-      return;
-    }
-
-    targetWindow.webContents.send(MODEL_DOWNLOAD_UPDATE_CHANNEL, payload);
-  });
+  pythonBridge.startModelDownloadUpdateStream(
+    ...streamForwarder(MODEL_DOWNLOAD_UPDATE_CHANNEL, MODEL_DOWNLOAD_ERROR_CHANNEL)
+  );
 }
 
 function startStatusTelemetryUpdateForwarder(): void {
@@ -747,14 +835,9 @@ function startStatusTelemetryUpdateForwarder(): void {
     return;
   }
 
-  pythonBridge.startStatusTelemetryUpdateStream((payload) => {
-    const targetWindow = mainWindow;
-    if (!targetWindow || targetWindow.isDestroyed()) {
-      return;
-    }
-
-    targetWindow.webContents.send(STATUS_TELEMETRY_UPDATE_CHANNEL, payload);
-  });
+  pythonBridge.startStatusTelemetryUpdateStream(
+    ...streamForwarder(STATUS_TELEMETRY_UPDATE_CHANNEL, STATUS_TELEMETRY_ERROR_CHANNEL)
+  );
 }
 
 function startServingStatusUpdateForwarder(): void {
@@ -763,22 +846,7 @@ function startServingStatusUpdateForwarder(): void {
   }
 
   pythonBridge.startServingStatusUpdateStream(
-    (payload) => {
-      const targetWindow = mainWindow;
-      if (!targetWindow || targetWindow.isDestroyed()) {
-        return;
-      }
-
-      targetWindow.webContents.send(SERVING_STATUS_UPDATE_CHANNEL, payload);
-    },
-    (message) => {
-      const targetWindow = mainWindow;
-      if (!targetWindow || targetWindow.isDestroyed()) {
-        return;
-      }
-
-      targetWindow.webContents.send(SERVING_STATUS_ERROR_CHANNEL, { message });
-    }
+    ...streamForwarder(SERVING_STATUS_UPDATE_CHANNEL, SERVING_STATUS_ERROR_CHANNEL)
   );
 }
 
@@ -794,14 +862,18 @@ async function initializeBackend(): Promise<void> {
   backendInitializationPromise = (async () => {
     log.info('Initializing backend bridge...');
 
-    const rustBinaryPath = resolveBackendBinaryPath({
-      defaultBuildProfile: process.argv.includes('--dev') ? 'debug' : 'release',
+    const backendPathOptions = {
+      defaultBuildProfile: isDevServerLaunch() ? 'debug' as const : 'release' as const,
       isPackaged: app.isPackaged,
       overridePath: process.env.PUMAS_RPC_BINARY,
       platform: process.platform,
       resourcesPath: process.resourcesPath,
       sourceRoot: path.join(__dirname, '..', '..'),
-    });
+    };
+    if (isIgnoredPackagedOverride(backendPathOptions)) {
+      log.warn('Ignoring PUMAS_RPC_BINARY: a packaged desktop runs only the backend it shipped with.');
+    }
+    const rustBinaryPath = resolveBackendBinaryPath(backendPathOptions);
 
     const launcherRootResolution = resolveLauncherRoot({
       appImagePath: process.env.APPIMAGE,
@@ -819,7 +891,7 @@ async function initializeBackend(): Promise<void> {
 
     pythonBridge = new PythonBridge({
       port: 0,
-      debug: process.argv.includes('--dev') || process.argv.includes('--debug'),
+      debug: isDebugLaunch(),
       rustBinaryPath,
       launcherRoot,
     });
@@ -883,6 +955,11 @@ async function cleanup(): Promise<void> {
 // Configure Linux display before app is ready
 configureLinuxDisplay();
 
+// Every renderer, including any future window, gets the same boundary.
+app.on('web-contents-created', (_event, contents) => {
+  guardWebContents(contents);
+});
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) {
@@ -904,6 +981,7 @@ if (!hasSingleInstanceLock) {
     }
 
     try {
+      configureApplicationMenu();
       // Register IPC handlers
       registerIPCHandlers();
 

@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 2d7bec6da147be379e164c7919a78d0e658da811435a95b87d995e52ed48ab0e. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 7b761c1296db9e717947cfdd85ead3aed3f1a3f87a197acd7f99071089b1e01a. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -28,6 +28,8 @@ export declare function validateGetTorchReleaseOptionsParams(value: unknown): bo
 export declare function validateGetTorchRuntimeProbeParams(value: unknown): boolean;
 export declare function validateGithubCacheStatusOutcome(value: unknown): boolean;
 export declare function validateHfDownloadDetailsOutcome(value: unknown): boolean;
+export declare function validateImportBatchParams(value: unknown): boolean;
+export declare function validateImportModelParams(value: unknown): boolean;
 export declare function validateInferenceSettingsOutcome(value: unknown): boolean;
 export declare function validateInstallVersionDependenciesOutcome(value: unknown): boolean;
 export declare function validateInstallVersionDependenciesParams(value: unknown): boolean;
@@ -38,17 +40,20 @@ export declare function validateInstalledVersionsOutcome(value: unknown): boolea
 export declare function validateLauncherRootSelectionResult(value: unknown): boolean;
 export declare function validateLauncherRootStartupState(value: unknown): boolean;
 export declare function validateLibraryModelMetadataOutcome(value: unknown): boolean;
+export declare function validateLibraryStatusResponse(value: unknown): boolean;
 export declare function validateLibraryUpgradeConfirmation(value: unknown): boolean;
 export declare function validateLibraryUpgradeResult(value: unknown): boolean;
 export declare function validateLinkHealthOutcome(value: unknown): boolean;
 export declare function validateModelCategoryOutcome(value: unknown): boolean;
 export declare function validateModelDownloadUpdateOutcome(value: unknown): boolean;
+export declare function validateModelIdParams(value: unknown): boolean;
 export declare function validateModelImportSelection(value: unknown): boolean;
 export declare function validateModelIndexRefreshOutcome(value: unknown): boolean;
 export declare function validateModelLibraryUpdateNotification(value: unknown): boolean;
 export declare function validateModelLookupOutcome(value: unknown): boolean;
 export declare function validateModelLookupParams(value: unknown): boolean;
 export declare function validateModelsOutcome(value: unknown): boolean;
+export declare function validateNetworkStatusResponse(value: unknown): boolean;
 export declare function validatePartialDownloadOutcome(value: unknown): boolean;
 export declare function validatePreviewTorchRuntimeParams(value: unknown): boolean;
 export declare function validatePublicError(value: unknown): boolean;
@@ -85,9 +90,11 @@ export declare function validateSelectedVersionOutcome(value: unknown): boolean;
 export declare function validateServingStatusUpdateFeed(value: unknown): boolean;
 export declare function validateSetDefaultVersionOutcome(value: unknown): boolean;
 export declare function validateSetDefaultVersionParams(value: unknown): boolean;
+export declare function validateSetHfTokenParams(value: unknown): boolean;
 export declare function validateStartBackendSetupParams(value: unknown): boolean;
 export declare function validateStartConversionSetupParams(value: unknown): boolean;
 export declare function validateStartupFailureFrame(value: unknown): boolean;
+export declare function validateStatusTelemetrySnapshot(value: unknown): boolean;
 export declare function validateStatusTelemetryUpdateNotification(value: unknown): boolean;
 export declare function validateStopRuntimeProfileGenerationOutcome(value: unknown): boolean;
 export declare function validateStopRuntimeProfileGenerationParams(value: unknown): boolean;

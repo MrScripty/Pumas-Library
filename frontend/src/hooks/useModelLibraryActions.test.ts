@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { useState } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelInfo, RemoteModelInfo } from '../types/apps';
 import type { DownloadStatus } from './modelDownloadState';
 
@@ -123,7 +123,6 @@ describe('useModelLibraryActions', () => {
       await pending;
     });
   });
-  const windowOpenSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -142,11 +141,9 @@ describe('useModelLibraryActions', () => {
     });
   });
 
-  afterEach(() => {
-    windowOpenSpy.mockClear();
-  });
-
-  it('opens remote URLs through the backend when available and falls back to window.open otherwise', async () => {
+  it('opens remote URLs only through the desktop bridge', async () => {
+    const openWindow = vi.fn();
+    vi.stubGlobal('open', openWindow);
     const { result, rerender } = renderHook(
       (apiAvailable: boolean) => {
         isApiAvailableMock.mockReturnValue(apiAvailable);
@@ -165,19 +162,17 @@ describe('useModelLibraryActions', () => {
     });
 
     expect(openUrlMock).toHaveBeenCalledWith('https://huggingface.co/org/model');
-    expect(windowOpenSpy).not.toHaveBeenCalled();
 
     rerender(false);
+    openUrlMock.mockClear();
 
     act(() => {
-      result.current.openRemoteUrl('https://example.com/fallback');
+      result.current.openRemoteUrl('https://example.com/no-bridge');
     });
 
-    expect(windowOpenSpy).toHaveBeenCalledWith(
-      'https://example.com/fallback',
-      '_blank',
-      'noopener'
-    );
+    expect(openUrlMock).not.toHaveBeenCalled();
+    expect(openWindow).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 
   it('loads related models on first expand and reuses the loaded result on later toggles', async () => {

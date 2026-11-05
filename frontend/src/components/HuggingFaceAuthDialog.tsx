@@ -10,6 +10,7 @@ import { Key, CheckCircle, XCircle, ExternalLink, Loader2, X } from 'lucide-reac
 import { api, isAPIAvailable } from '../api/adapter';
 import { getLogger } from '../utils/logger';
 import { ModalDialog } from './ui';
+import { openExternalUrl } from './ui/openExternalUrl';
 
 const logger = getLogger('HuggingFaceAuthDialog');
 
@@ -204,11 +205,7 @@ export function HuggingFaceAuthDialog({ isOpen, onClose }: HuggingFaceAuthDialog
                   <button
                     type="button"
                     onClick={() => {
-                      if (isAPIAvailable()) {
-                        void api.open_url('https://huggingface.co/settings/tokens');
-                      } else {
-                        window.open('https://huggingface.co/settings/tokens', '_blank', 'noopener');
-                      }
+                      void openExternalUrl('https://huggingface.co/settings/tokens');
                     }}
                     className="inline-flex items-center gap-1.5 text-xs text-[hsl(var(--accent-primary))] hover:underline"
                   >

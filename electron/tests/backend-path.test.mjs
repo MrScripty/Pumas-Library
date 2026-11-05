@@ -3,6 +3,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   backendBinaryName,
+  isIgnoredPackagedOverride,
   resolveBackendBinaryPath,
 } from '../dist/backend-path.js';
 
@@ -64,4 +65,19 @@ test('resolveBackendBinaryPath uses packaged resources for packaged apps', () =>
     }),
     path.join('/opt/Pumas/resources', 'pumas-rpc')
   );
+});
+
+test('a packaged app ignores PUMAS_RPC_BINARY and always runs its shipped backend', () => {
+  const options = {
+    defaultBuildProfile: 'release',
+    isPackaged: true,
+    overridePath: '/tmp/other-build/pumas-rpc',
+    platform: 'linux',
+    resourcesPath: '/opt/Pumas/resources',
+    sourceRoot: '/repo',
+  };
+  assert.equal(resolveBackendBinaryPath(options), path.join('/opt/Pumas/resources', 'pumas-rpc'));
+  assert.equal(isIgnoredPackagedOverride(options), true);
+  assert.equal(isIgnoredPackagedOverride({ ...options, overridePath: '  ' }), false);
+  assert.equal(isIgnoredPackagedOverride({ ...options, isPackaged: false }), false);
 });

@@ -1,9 +1,10 @@
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { api, isAPIAvailable } from '../api/adapter';
+import { isAPIAvailable } from '../api/adapter';
 import { modelsAPI } from '../api/models';
 import { APIError } from '../errors';
 import type { ModelInfo, RelatedModelsState } from '../types/apps';
 import { getLogger } from '../utils/logger';
+import { openExternalUrl } from '../components/ui/openExternalUrl';
 
 const logger = getLogger('useModelLibraryActions');
 
@@ -70,11 +71,7 @@ export function useModelLibraryActions({
   >({});
 
   const openRemoteUrl = useCallback((url: string) => {
-    if (isAPIAvailable()) {
-      void api.open_url(url);
-      return;
-    }
-    window.open(url, '_blank', 'noopener');
+    void openExternalUrl(url);
   }, []);
 
   const fetchRelatedModels = useCallback(async (modelId: string) => {

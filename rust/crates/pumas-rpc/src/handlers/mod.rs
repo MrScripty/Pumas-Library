@@ -88,6 +88,9 @@ pub use model_operations::{handle_capabilities, handle_model_operations, handle_
 #[cfg(feature = "inference-plugins")]
 pub use openai_gateway::{handle_openai_models, handle_openai_proxy};
 
+/// Request declarations the desktop contract export projects.
+#[cfg(feature = "export-contract")]
+pub(crate) use models::ImportModelParams;
 pub(crate) use shared::{
     detect_sandbox_environment, extract_safetensors_header, get_bool_param, get_i64_param,
     get_str_param, parse_params, path_exists, require_str_param,

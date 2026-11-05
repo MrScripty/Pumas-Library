@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { ExternalLink } from './ui/ExternalLink';
 
 interface ModelNotesMarkdownPreviewProps {
   markdown: string;
@@ -36,15 +37,13 @@ function renderMarkdownInline(text: string, keyPrefix: string): ReactNode[] {
     if (linkUrl) {
       const label = fullMatch.slice(1, fullMatch.indexOf(']'));
       nodes.push(
-        <a
+        <ExternalLink
           key={`${keyPrefix}-link-${index}`}
           href={linkUrl}
-          target="_blank"
-          rel="noopener noreferrer"
           className="text-[hsl(var(--accent-link))] hover:underline"
         >
           {label}
-        </a>
+        </ExternalLink>
       );
     } else if (typeof codeText === 'string') {
       nodes.push(

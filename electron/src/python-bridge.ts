@@ -57,6 +57,16 @@ interface RPCResponse {
   error?: RPCError | string;
 }
 
+/** Health checks run this long after the previous one settles. */
+export const HEALTH_CHECK_INTERVAL_MS = 30_000;
+/**
+ * A ready backend that fails this many consecutive health checks is treated as
+ * hung and restarted through the normal crash-recovery chain. Each check can
+ * take up to its RPC deadline, so this is minutes of unresponsiveness, not a
+ * transient stall.
+ */
+export const HEALTH_FAILURES_BEFORE_RESTART = 3;
+
 export function rpcRequestTimeoutMs(method: string): number {
   // Managed Python may need a uv bootstrap, interpreter install, index scan,
   // and several wheel previews before the RPC returns any bytes. Allow these
@@ -74,7 +84,7 @@ export type ModelDownloadUpdateListener = (payload: unknown) => void;
 export type RuntimeProfileUpdateListener = (payload: unknown) => void;
 export type ServingStatusUpdateListener = (payload: unknown) => void;
 export type StatusTelemetryUpdateListener = (payload: unknown) => void;
-type StreamErrorListener = (message: string) => void;
+export type StreamErrorListener = (message: string) => void;
 
 export interface ParsedSseChunk {
   buffer: string;
@@ -337,6 +347,8 @@ export class PythonBridge {
   private restartCount = 0;
   private isShuttingDown = false;
   private healthCheckTimer: BridgeTimer | null = null;
+  private consecutiveHealthFailures = 0;
+  private unresponsiveKillTimer: BridgeTimer | null = null;
   private restartTimer: BridgeTimer | null = null;
   private pendingRpcCalls = new Set<() => void>();
   private modelLibraryUpdateStream: NamedSseStreamOwner;
@@ -546,20 +558,22 @@ export class PythonBridge {
     });
     void closedBeforeReady.catch(() => {});
 
-    // Handle stdout
+    // Sidecar output is backend diagnostics, not a user-facing record: it
+    // stays at debug so the persisted (info) log never holds it. The startup
+    // failure frame reaches the user through its own decoded channel.
     child.stdout?.on('data', (data: Buffer) => {
       if (!this.serverReady) startupFailure.push(data.toString());
       const output = data.toString().trim();
       if (output) {
-        log.info(`[${backendLabel}] ${output}`);
+        log.debug(`[${backendLabel}] ${output}`);
       }
     });
 
-    // Handle stderr (Rust uses stderr for tracing logs, which is normal)
+    // Rust writes tracing logs to stderr.
     child.stderr?.on('data', (data: Buffer) => {
       const output = data.toString().trim();
       if (output) {
-        log.info(`[${backendLabel}] ${output}`);
+        log.debug(`[${backendLabel}] ${output}`);
       }
     });
 
@@ -572,6 +586,8 @@ export class PythonBridge {
       this.terminalExit = { child, outcome: { code, signal, startupError } };
       this.process = null;
       this.clearHealthCheckTimer();
+      this.clearUnresponsiveKillTimer();
+      this.consecutiveHealthFailures = 0;
       this.closeAllUpdateStreams();
       this.clearAllUpdateStreamReconnectTimers();
       if (!wasReady) {
@@ -614,6 +630,7 @@ export class PythonBridge {
     }
 
     // Start health check interval
+    this.consecutiveHealthFailures = 0;
     this.startHealthCheck();
 
     // Reset restart counter on successful start
@@ -675,15 +692,58 @@ export class PythonBridge {
         return;
       }
 
+      const child = this.process;
       const healthy = await this.healthCheck();
-      if (!healthy && !this.isShuttingDown) {
-        log.warn(`${backendLabel} health check failed`);
+      if (this.isShuttingDown || !child || this.process !== child) {
+        return;
+      }
+      if (healthy) {
+        this.consecutiveHealthFailures = 0;
+      } else {
+        this.consecutiveHealthFailures += 1;
+        log.warn(`${backendLabel} health check failed (${this.consecutiveHealthFailures}/${HEALTH_FAILURES_BEFORE_RESTART})`);
+        if (this.consecutiveHealthFailures >= HEALTH_FAILURES_BEFORE_RESTART) {
+          this.restartUnresponsiveBackend(child, backendLabel);
+          return;
+        }
       }
 
-      if (!this.isShuttingDown && this.process) {
-        this.startHealthCheck();
+      this.startHealthCheck();
+    }, HEALTH_CHECK_INTERVAL_MS);
+  }
+
+  /**
+   * End a backend that stopped answering health checks. Its exit takes the
+   * same restart path as a crash (bounded by `maxRestarts`).
+   */
+  private restartUnresponsiveBackend(child: ChildProcess, backendLabel: string): void {
+    this.consecutiveHealthFailures = 0;
+    log.error(`${backendLabel} backend failed ${HEALTH_FAILURES_BEFORE_RESTART} consecutive health checks; restarting it`);
+    // Unix: ask first, then force. Windows kill() always terminates.
+    const graceful = process.platform !== 'win32';
+    try {
+      child.kill(graceful ? 'SIGTERM' : 'SIGKILL');
+    } catch (error) {
+      log.error(`Failed to signal unresponsive ${backendLabel} backend:`, error);
+    }
+    if (!graceful) return;
+    this.clearUnresponsiveKillTimer();
+    this.unresponsiveKillTimer = this.timerController.setTimeout(() => {
+      this.unresponsiveKillTimer = null;
+      if (this.process !== child || this.isShuttingDown) return;
+      try {
+        child.kill('SIGKILL');
+      } catch (error) {
+        log.error(`Failed to force-stop unresponsive ${backendLabel} backend:`, error);
       }
-    }, 30000);
+    }, this.options.shutdownForceWaitMs);
+  }
+
+  private clearUnresponsiveKillTimer(): void {
+    if (this.unresponsiveKillTimer) {
+      this.timerController.clearTimeout(this.unresponsiveKillTimer);
+      this.unresponsiveKillTimer = null;
+    }
   }
 
   /**
@@ -747,6 +807,7 @@ export class PythonBridge {
     let signalFailure: unknown;
     try {
       this.clearHealthCheckTimer();
+      this.clearUnresponsiveKillTimer();
       this.clearRestartTimer();
       this.stopModelLibraryUpdateStream();
       this.stopModelDownloadUpdateStream();
@@ -850,24 +911,33 @@ export class PythonBridge {
     }
   }
 
-  startModelLibraryUpdateStream(listener: ModelLibraryUpdateListener): void {
-    this.modelLibraryUpdateStream.start(listener);
+  startModelLibraryUpdateStream(
+    listener: ModelLibraryUpdateListener,
+    errorListener?: StreamErrorListener
+  ): void {
+    this.modelLibraryUpdateStream.start(listener, errorListener);
   }
 
   stopModelLibraryUpdateStream(): void {
     this.modelLibraryUpdateStream.stop();
   }
 
-  startModelDownloadUpdateStream(listener: ModelDownloadUpdateListener): void {
-    this.modelDownloadUpdateStream.start(listener);
+  startModelDownloadUpdateStream(
+    listener: ModelDownloadUpdateListener,
+    errorListener?: StreamErrorListener
+  ): void {
+    this.modelDownloadUpdateStream.start(listener, errorListener);
   }
 
   stopModelDownloadUpdateStream(): void {
     this.modelDownloadUpdateStream.stop();
   }
 
-  startRuntimeProfileUpdateStream(listener: RuntimeProfileUpdateListener): void {
-    this.runtimeProfileUpdateStream.start(listener);
+  startRuntimeProfileUpdateStream(
+    listener: RuntimeProfileUpdateListener,
+    errorListener?: StreamErrorListener
+  ): void {
+    this.runtimeProfileUpdateStream.start(listener, errorListener);
   }
 
   stopRuntimeProfileUpdateStream(): void {
@@ -885,8 +955,11 @@ export class PythonBridge {
     this.servingStatusUpdateStream.stop();
   }
 
-  startStatusTelemetryUpdateStream(listener: StatusTelemetryUpdateListener): void {
-    this.statusTelemetryUpdateStream.start(listener);
+  startStatusTelemetryUpdateStream(
+    listener: StatusTelemetryUpdateListener,
+    errorListener?: StreamErrorListener
+  ): void {
+    this.statusTelemetryUpdateStream.start(listener, errorListener);
   }
 
   stopStatusTelemetryUpdateStream(): void {
@@ -1060,7 +1133,10 @@ export class PythonBridge {
               finish(null, sourceCall ? decodeS3ImportRpcResult(method, response.result) : response.result);
             }
           } catch {
-            finish(new Error(sourceCall ? S3_RPC_FAILURE : `Invalid JSON response: ${data}`));
+            // Never echo the body: it can carry backend diagnostics.
+            finish(new Error(sourceCall
+              ? S3_RPC_FAILURE
+              : `Invalid JSON-RPC response for ${method} (HTTP ${res.statusCode ?? 'unknown'}, ${Buffer.byteLength(data)} bytes)`));
           } finally {
             data = '';
           }

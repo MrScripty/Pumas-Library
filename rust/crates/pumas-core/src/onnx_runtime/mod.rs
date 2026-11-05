@@ -23,7 +23,7 @@ mod real_backend;
 mod tensors;
 mod tokenizer;
 
-pub use config::OnnxModelConfig;
+pub use config::{OnnxInputTokenLimit, OnnxModelConfig};
 pub use fake::FakeOnnxEmbeddingBackend;
 pub use manager::{OnnxEmbeddingBackend, OnnxSessionManager};
 pub use postprocess::{

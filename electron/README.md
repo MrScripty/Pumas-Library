@@ -200,6 +200,9 @@ sidecar. For the supported end-to-end workflow, use:
 ```
 
 Packaging requires `frontend/dist` plus a matching `pumas-rpc` staged under
-`electron/resources/bin/`. Do not treat a successful package assembly as proof
+`electron/resources/bin/`. Packages carry the compiled JavaScript only:
+`dist/**/*.map` and `dist/**/*.d.ts` are excluded. CI packages with
+`CSC_IDENTITY_AUTO_DISCOVERY=false`, so installers are unsigned and the
+config declares no signing identity. Do not treat a successful package assembly as proof
 that the application runs on that platform. See [Releasing](../RELEASING.md)
 and the [current standards audit](../docs/audits/current-standards-2026-09-03/README.md).

@@ -1,4 +1,3 @@
-#![warn(unsafe_code)]
 #![allow(clippy::await_holding_lock)]
 
 use pumas_library::intent::{
@@ -9,35 +8,12 @@ use pumas_library::intent::{
 use pumas_library::models::PumasModelRef;
 use pumas_library::PumasApi;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
 use tempfile::TempDir;
 
-static REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+use crate::support::RegistryOverride;
 
-struct RegistryGuard(std::sync::MutexGuard<'static, ()>);
-impl RegistryGuard {
-    #[allow(unsafe_code)]
-    fn new(root: &Path) -> Self {
-        let guard = REGISTRY_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        // SAFETY: This test process serializes registry environment access.
-        unsafe {
-            std::env::set_var("PUMAS_REGISTRY_DB_PATH", root.join("registry.db"));
-        }
-        Self(guard)
-    }
-}
-impl Drop for RegistryGuard {
-    #[allow(unsafe_code)]
-    fn drop(&mut self) {
-        let _ = &self.0;
-        // SAFETY: The guard still holds this process's registry lock.
-        unsafe {
-            std::env::remove_var("PUMAS_REGISTRY_DB_PATH");
-        }
-    }
+fn registry_guard(root: &Path) -> RegistryOverride {
+    RegistryOverride::set(root.join("registry.db"))
 }
 
 async fn open(root: &Path) -> PumasApi {
@@ -76,7 +52,7 @@ async fn ensure(api: &PumasApi, request: &EnsureModelRequest) -> ModelDeclaratio
 #[tokio::test]
 async fn duplicate_ensure_and_orderly_restart_preserve_identity_without_claiming_availability() {
     let root = TempDir::new().unwrap();
-    let _registry = RegistryGuard::new(root.path());
+    let _registry = registry_guard(root.path());
     let api = open(root.path()).await;
     let req = request("consumer-a", "llm/intent/missing");
     let first = ensure(&api, &req).await;
@@ -116,7 +92,7 @@ async fn duplicate_ensure_and_orderly_restart_preserve_identity_without_claiming
 #[tokio::test]
 async fn two_consumers_retain_files_until_both_release_and_administrator_deletes() {
     let root = TempDir::new().unwrap();
-    let _registry = RegistryGuard::new(root.path());
+    let _registry = registry_guard(root.path());
     let api = open(root.path()).await;
     let model_id = "llm/intent/retained";
     let dir = root.path().join("shared-resources/models").join(model_id);
@@ -151,7 +127,7 @@ async fn two_consumers_retain_files_until_both_release_and_administrator_deletes
 #[tokio::test]
 async fn old_generation_and_wrong_consumer_cannot_release_after_orderly_restart() {
     let root = TempDir::new().unwrap();
-    let _registry = RegistryGuard::new(root.path());
+    let _registry = registry_guard(root.path());
     let api = open(root.path()).await;
     let req = request("consumer-a", "llm/intent/generation");
     let first = ensure(&api, &req).await;
@@ -208,7 +184,7 @@ async fn old_generation_and_wrong_consumer_cannot_release_after_orderly_restart(
 #[tokio::test]
 async fn unavailable_upstream_is_durable_but_invalid_request_is_not() {
     let root = TempDir::new().unwrap();
-    let _registry = RegistryGuard::new(root.path());
+    let _registry = registry_guard(root.path());
     let api = open(root.path()).await;
     let invalid = request("invalid consumer", "llm/intent/invalid");
     assert!(matches!(
@@ -250,7 +226,7 @@ async fn unavailable_upstream_is_durable_but_invalid_request_is_not() {
 #[tokio::test]
 async fn shutdown_closes_mutations_and_remains_repeatable() {
     let root = TempDir::new().unwrap();
-    let _registry = RegistryGuard::new(root.path());
+    let _registry = registry_guard(root.path());
     let api = open(root.path()).await;
     let declaration = ensure(&api, &request("consumer-a", "llm/intent/shutdown")).await;
     api.shutdown_intent().await.unwrap();

@@ -152,39 +152,50 @@ test('release builds and frontend artifact upload are guarded inside shared jobs
 });
 
 
-test('native workspace custody and cleanup run on every native QA platform', () => {
+const nativeQualification = fs.readFileSync(path.join(root, 'scripts/rust/native_qualification.py'), 'utf8');
+const nativeShards = ['torch', 'default-features', 'inference-disabled'];
+
+test('every native shard runs on every native QA platform', () => {
   const native = job('torch-quality');
   assert.match(native, /os: \[ubuntu-24\.04, windows-2025, macos-15\]/);
-  for (const [name, command] of [
-    ['Test reserved acquisition workspace custody', 'cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library acquisition::workspace::tests'],
-    ['Test native acquisition workspace cleanup', 'cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager native_'],
-  ]) {
-    assert.ok(native.includes(`      - name: ${name}\n        run: ${command}\n`),
-      `${name} must run without a platform-specific skip`);
+  assert.match(native, new RegExp(`shard: \\[${nativeShards.join(', ')}\\]`));
+  // The runner step has no platform or shard skip; the shard picks its groups.
+  assert.ok(native.includes(
+    '      - name: Test native Rust behavior (${{ matrix.shard }})\n'
+    + '        run: python scripts/rust/native_qualification.py --shard ${{ matrix.shard }}\n',
+  ));
+  for (const shard of nativeShards) {
+    assert.match(nativeQualification, new RegExp(`Group\\(\\s+"${shard}",`), shard);
   }
 });
+
+test('native workspace custody and cleanup run on every native QA platform', () => {
+  for (const filter of ['acquisition::workspace::tests', 'native_']) {
+    assert.ok(nativeQualification.includes(`f("${filter}"),`), `${filter} must run without a host restriction`);
+  }
+});
+
 test('headless owner identity checks include native Windows on ordinary PRs', () => {
   const native = job('torch-quality');
   assert.match(native, /os: \[ubuntu-24\.04, windows-2025, macos-15\]/);
   assert.doesNotMatch(native, /^    if:/m);
+  // Only the shard that runs the Python suites selects it; no platform or release skip.
   assert.ok(native.includes(
     '      - name: Test native headless owner root identity\n'
+    + "        if: matrix.shard == 'torch'\n"
     + '        working-directory: scripts/release\n'
     + '        run: python -m unittest -v test_headless_inference.OwnerContractTests\n',
   ), 'owner identity tests must run without a platform or release skip');
 });
 
-// PowerShell's final native exit code must not mask a preceding failing test.
-test('native baseline gates keep each cargo command in its own step', () => {
+// A shell's final exit code must not mask a preceding failing test: native
+// cargo runs go through the runner, which checks every exit status.
+test('native cargo tests run only through the status-checking runner', () => {
   const native = job('torch-quality');
-  for (const name of [
-    'Test native import integrity',
-    'Test native shard completeness',
-    'Test native registry startup ownership',
-    'Test native failed-start claim release',
-  ]) {
-    assert.ok(native.includes(`      - name: ${name}\n        run: cargo test --locked `), name);
-  }
+  assert.doesNotMatch(native, /run: cargo test/);
+  assert.doesNotMatch(native, /shell: pwsh/);
+  assert.match(nativeQualification, /if executed\.returncode != 0:/);
+  assert.match(nativeQualification, /if listed\.returncode != 0:/);
 });
 
 test('completed RPC qualification has no persistent PR-specific publication gate', () => {

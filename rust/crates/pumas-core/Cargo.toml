@@ -9,6 +9,9 @@ description = "Headless library for Pumas model and version management"
 keywords = ["ai", "models", "library", "huggingface", "model-management"]
 categories = ["database", "filesystem"]
 readme = "README.md"
+# Integration tests are modules of a few executables, not one executable per
+# file: each executable links the whole library. See tests/*/main.rs.
+autotests = false
 
 [dependencies]
 # Async runtime
@@ -130,6 +133,19 @@ libc = { workspace = true }
 windows-sys = { workspace = true }
 
 # Safe FIFO construction for isolated Unix test children; no product feature change.
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"
+
+[[test]]
+name = "registry_override"
+path = "tests/registry_override/main.rs"
+
+# A focused harness that includes production source files directly.
+[[test]]
+name = "physical_store_lifetime"
+path = "tests/physical_store_lifetime.rs"
+
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["fs"] }
 

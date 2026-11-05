@@ -170,7 +170,7 @@ fn spawn_child(
     let child = Command::new(std::env::current_exe().unwrap())
         .arg("--ignored")
         .arg("--exact")
-        .arg(CHILD_TEST)
+        .arg(crate::support::exact_test_name(module_path!(), CHILD_TEST))
         .arg("--nocapture")
         .env(CHILD_ROOT, root)
         .env(CHILD_PHASE, phase)

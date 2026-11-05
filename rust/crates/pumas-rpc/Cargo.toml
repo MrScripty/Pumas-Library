@@ -6,6 +6,8 @@ authors.workspace = true
 license.workspace = true
 description = "JSON-RPC server with the Pumas library compiled in; one binary serves the full library over HTTP"
 publish = false
+# Integration tests are modules of one executable; see tests/integration/main.rs.
+autotests = false
 
 [[bin]]
 name = "pumas-rpc"
@@ -75,6 +77,10 @@ inference-plugins = [
     "pumas-library/process-manager",
     "pumas-library/gpu-monitor",
 ]
+
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"
 
 [dev-dependencies]
 native-tls = "0.2"

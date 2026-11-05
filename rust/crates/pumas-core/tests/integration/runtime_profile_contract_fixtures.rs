@@ -6,7 +6,7 @@ use pumas_library::{ProviderBehavior, RuntimeProviderCapabilities};
 
 #[test]
 fn onnx_runtime_snapshot_fixture_matches_runtime_profile_contract() {
-    let fixture = include_str!("fixtures/runtime_profiles/onnx_runtime_snapshot.json");
+    let fixture = include_str!("../fixtures/runtime_profiles/onnx_runtime_snapshot.json");
     let snapshot: RuntimeProfilesSnapshot = serde_json::from_str(fixture).unwrap();
 
     assert_eq!(snapshot.schema_version, RUNTIME_PROFILES_SCHEMA_VERSION);

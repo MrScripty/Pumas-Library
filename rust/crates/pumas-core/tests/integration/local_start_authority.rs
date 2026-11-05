@@ -265,7 +265,7 @@ impl ConsumerProcess {
         command
             .args([
                 "--exact",
-                "local_authority_child",
+                crate::support::exact_test_name(module_path!(), "local_authority_child").as_str(),
                 "--ignored",
                 "--nocapture",
             ])

@@ -51,7 +51,12 @@ impl OwnedProcess {
         let log = std::fs::File::create(control.join("process.log")).unwrap();
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
-            .args(["--exact", "reservation_process", "--ignored", "--nocapture"])
+            .args([
+                "--exact",
+                crate::support::exact_test_name(module_path!(), "reservation_process").as_str(),
+                "--ignored",
+                "--nocapture",
+            ])
             .env("PUMAS_PENDING_FIXTURE", temp)
             .env("PUMAS_PENDING_MODE", mode)
             .env("PUMAS_PENDING_CONTROL", &control)

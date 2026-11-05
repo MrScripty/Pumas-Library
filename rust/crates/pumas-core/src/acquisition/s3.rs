@@ -29,7 +29,7 @@ pub use prefix::{S3PrefixError, S3PrefixLimits, S3PrefixListing, S3PrefixObject}
 #[cfg(test)]
 mod auth_tests;
 #[cfg(test)]
-#[path = "../../tests/s3_reader/fixture.rs"]
+#[path = "../../tests/integration/s3_reader/fixture.rs"]
 mod fixture;
 #[cfg(test)]
 mod prefix_tests;

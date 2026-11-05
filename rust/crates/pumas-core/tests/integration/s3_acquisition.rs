@@ -1,7 +1,6 @@
 //! Credential-free loopback protocol -> canonical acquisition -> real importer.
 #![cfg(feature = "s3")]
-#[path = "support/store_refusal.rs"]
-mod store_refusal;
+use crate::support::store_refusal;
 
 use pumas_library::{
     acquisition::{

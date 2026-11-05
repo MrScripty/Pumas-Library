@@ -82,6 +82,7 @@ jobs:
         with:
           python-version-file: .python-version
       - run: python scripts/release/test_s3_build_provenance.py
+      - run: python scripts/rust/test_native_qualification.py
 
   rust-quality:
     name: Rust quality
@@ -97,6 +98,7 @@ jobs:
         with:
           workspaces: rust -> target
           key: quality
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: ./scripts/rust/check.sh
 
   headless:
@@ -112,16 +114,21 @@ jobs:
         with:
           workspaces: rust -> target
           key: headless
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fetch --locked --manifest-path rust/Cargo.toml
       - run: python3 scripts/release/check-dependency-features.py --s3
       # Ordinary default/headless jobs omit the optional reader. These explicit
       # local-protocol checks qualify enabled S3 without cloud credentials.
       - name: Test enabled S3 reader and shared acquisition
-        run: cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3 --test s3_reader --test s3_acquisition -- --test-threads=1
+        run: 'cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3 --test integration -- --test-threads=1 s3_reader:: s3_acquisition::'
       - name: Test enabled S3 signing and bounded prefix discovery
         run: 'cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3 --lib acquisition::s3:: -- --test-threads=1'
       - name: Lint enabled S3 implementation
         run: cargo clippy --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3,test-support --all-targets -- -D warnings
+      # Lint compiles these workflows; this runs them, so a stale expectation
+      # cannot hide behind a compile-only gate.
+      - name: Test enabled S3 import workflows
+        run: 'cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features s3,test-support --test integration --test registry_override -- --skip s3_reader:: --skip s3_acquisition::'
       # Separate package invocations prevent workspace feature unification from
       # silently enabling the features this gate is supposed to exclude.
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
@@ -443,6 +450,7 @@ jobs:
         with:
           workspaces: rust -> target
           key: contracts
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir frontend lint
       - run: pnpm --dir frontend check:types
@@ -470,13 +478,17 @@ jobs:
           path: frontend/dist/
           if-no-files-found: error
 
+  # Native hosts qualify the Rust behavior that depends on the OS. Each shard
+  # builds its own cargo configurations once (scripts/rust/native_qualification.py)
+  # so the three shards run in parallel instead of one long serial job.
   torch-quality:
-    name: Torch native QA (${{ matrix.os }})
+    name: Native QA (${{ matrix.os }}, ${{ matrix.shard }})
     needs: lint-workflows
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, windows-2025, macos-15]
+        shard: [torch, default-features, inference-disabled]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -488,142 +500,56 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
-          key: torch-native-${{ runner.os }}
-      - uses: actions/setup-python@v6
+          key: torch-native-${{ runner.os }}-${{ matrix.shard }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - if: matrix.shard == 'torch'
+        uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
           cache: pip
           cache-dependency-path: torch-server/requirements-dev.txt
-      - run: python -m pip install -r torch-server/requirements-dev.txt
-      - run: python -m ruff check torch-server scripts/release
-      - run: python -m ruff format --check torch-server scripts/release
+      - if: matrix.shard == 'torch'
+        run: python -m pip install -r torch-server/requirements-dev.txt
+      - if: matrix.shard == 'torch'
+        run: python -m ruff check torch-server scripts/release scripts/rust
+      - if: matrix.shard == 'torch'
+        run: python -m ruff format --check torch-server scripts/release scripts/rust
       - name: Test native packaged release contracts
+        if: matrix.shard == 'torch'
         working-directory: scripts/release
         run: python -m unittest -v test_inference_release test_release_metadata
       - name: Test native headless owner root identity
+        if: matrix.shard == 'torch'
         working-directory: scripts/release
         run: python -m unittest -v test_headless_inference.OwnerContractTests
       # Fixtures validate tags and resolver behavior; the native tests below
       # validate host APIs without claiming GPU inference or model support.
-      - run: python -m unittest discover -s torch-server/tests
+      - if: matrix.shard == 'torch'
+        run: python -m unittest discover -s torch-server/tests
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
       - name: Self-test native Torch acceptance script
+        if: matrix.shard == 'torch'
         run: python scripts/release/torch-managed-python-acceptance.py --self-test
-      - name: Test native Torch wheel filtering
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager torch_alternatives
-      - name: Test native managed Python candidate selection
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager version_manager::managed_python::tests
-      - name: Test native Torch preview provider paths
-        if: runner.os == 'Linux'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager version_manager::torch_preview::tests
-      - name: Test native Torch preview Python fallback selection
-        if: runner.os == 'Windows' || runner.os == 'macOS'
-        shell: pwsh
-        run: |
-          $testName = 'auto_python_fallback_requires_a_definite_unsupported_attempt'
-          $testList = @(cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager $testName -- --list)
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (@($testList | Where-Object { $_ -match '::auto_python_fallback_requires_a_definite_unsupported_attempt: test$' }).Count -eq 0) {
-            throw "No tests matched $testName"
-          }
-          cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager $testName
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Test Windows Torch activation fixture
-        if: runner.os == 'Windows'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager restart_falls_back_from_invalid_active_torch_to_verified_default
-      - name: Test Windows locked-stage cleanup ownership
-        if: runner.os == 'Windows'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned
       - name: Self-test acquisition qualification oracles
         run: python scripts/release/test_acquisition_qualification.py
       - name: Test cross-owner core acquisition joins
+        if: matrix.shard == 'default-features'
         run: python scripts/release/test-acquisition-integration.py --package pumas-library --minimum 5
-      - name: Test cross-owner core joins with HF-only features
-        run: python scripts/release/test-acquisition-integration.py --package pumas-library --no-default-features --features hf-client --minimum 5
       - name: Test cross-owner RPC and native acquisition shutdown
+        if: matrix.shard == 'default-features'
         run: python scripts/release/test-acquisition-integration.py --package pumas-rpc --features test-support --minimum 2
+      - name: Test cross-owner core joins with HF-only features
+        if: matrix.shard == 'inference-disabled'
+        run: python scripts/release/test-acquisition-integration.py --package pumas-library --no-default-features --features hf-client --minimum 5
       - name: Test cross-owner inference-disabled RPC shutdown
+        if: matrix.shard == 'inference-disabled'
         run: python scripts/release/test-acquisition-integration.py --package pumas-rpc --no-default-features --features test-support --minimum 1
-      - name: Test native retained-download reconciliation
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library retained_location
-      - name: Test inference-disabled retained-download reconciliation
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features retained_location
-      - name: Test inference-disabled native HTTP drainage
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features http_transport::tests
-      - name: Test reserved acquisition workspace custody
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library acquisition::workspace::tests
-      - name: Test native acquisition workspace cleanup
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager native_
-      - name: Test native owned HTTP shutdown boundaries
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc http_transport::tests
-      - name: Test RPC-owned shutdown on the native host
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests rpc_shutdown_exits_after_delivering_acknowledgement_and_ending_sse
-      # Exercise the integrated filesystem and registry repairs on each host;
-      # compilation of these modules alone is not native behavioral evidence.
-      - name: Test native Windows nested import publication
-        if: runner.os == 'Windows'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library copied_import_nested_native_publication_rebinds_exact_payload -- --nocapture
-      - name: Test native GGUF file-type inspection
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::package_facts::gguf::tests
-      - name: Test native GGUF inspector cache invalidation
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library gguf_inspector_revision_invalidates_legacy_fingerprint_only_for_gguf
-      - name: Test native GGUF intent evidence
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --test intent_api_tests gguf_header_quantization_matches_canonical_label_but_filename_is_not_proof
-      - name: Test native GGUF legacy cache reinspection
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --test package_facts_resolution stale_gguf_detail_and_summary_reinspect_raw_header_before_becoming_fresh
-      - name: Test native import integrity
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::importer::tests
-      - name: Test native copied import custody and settlement
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib copied_import -- --nocapture
-      - name: Test native held destination publication and cleanup
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib model_library::download_recovery::tests
-      - name: Test native import metadata projection compatibility
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib model_library::library::tests
-      - name: Test native HF path identity containment
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib path_identity_tests
-      - name: Test native Windows canonical display prefixes
-        if: runner.os == 'Windows'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib display_identity_strips_drive_and_unc_verbatim_prefixes_without_io
-      - name: Test native shard completeness
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::sharding::tests
-      - name: Test native canonical shard discovery
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib shard_discovery
-      - name: Test read-only startup shard observation
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib shard_startup_tests
-      - name: Test shard recovery compatibility projection
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib test_recover_incomplete_shards_async_detects_missing_shard_set
-      - name: Test unchanged interrupted download discovery
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib test_find_interrupted_downloads_async_detects_partial_download_dir
-      - name: Test native registry startup ownership
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library registry::library_registry::tests
-      - name: Test native failed-start claim release
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library startup_guard_cannot_delete_a_successor_or_promoted_instance
-      - name: Test native intent IPC readiness and lifecycle
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --test intent_ipc_tests
-      - name: Test native local RPC request admission
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests http_admission_rejects_untrusted_sources_before_rpc_dispatch
-      - name: Test native Unix RPC signal drain
-        if: runner.os != 'Windows'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --test integration_tests unix_termination_signals_complete_the_owned_shutdown
-      - name: Test native managed Python paths
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library test_venv_python_path
-      - name: Test Linux incomplete process observations
-        if: runner.os == 'Linux'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library platform::linux_group
-      - name: Test Linux router observer shutdown regression
-        if: runner.os == 'Linux'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library owned_sse_observes_external_load_unload_reconnect_and_drains_before_replacement
-      - name: Test Linux silent-SSE cleanup regression
-        if: runner.os == 'Linux'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library silent_sse_expires_its_lease_and_retains_rows_without_gateway_authority
-      - name: Test Unix managed process-group ownership
-        if: runner.os != 'Windows'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library platform::managed_child
-      - name: Test Windows managed Job ownership
-        if: runner.os == 'Windows'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library platform::managed_child
+      # One cargo invocation per configuration; every filter must match a
+      # runnable test on this host, and every exit status is checked.
+      - name: Test native Rust behavior (${{ matrix.shard }})
+        run: python scripts/rust/native_qualification.py --shard ${{ matrix.shard }}
 
   torch-native-e2e:
     name: Torch native RPC E2E (${{ matrix.os }})

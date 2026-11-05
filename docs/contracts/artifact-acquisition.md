@@ -175,8 +175,10 @@ Generated contracts project these closed alternatives for both consumers.
 The existing worker retains a typed complete selector, original import intent,
 exact record and held physical reservation across explicit same-process retry.
 Authenticated retry requires fresh credentials; it cannot silently fall back.
-Cancellation drains and clears continuation proof, so incomplete members restart
-at zero while complete files require retained receipt and current ownership checks. Changed
+Cancellation drains and clears the live continuation proof; incomplete members
+keep their retained bytes and continue from the observed offset under the declared
+digest (never silently from zero), while complete files require retained receipt
+and current ownership checks. Changed
 authored source facts refuse before GET and preserve retained work. A reopened
 process can inspect persisted custody, but cannot invent live reservation/retry
 authority or start another import over the existing demand. The existing dialog

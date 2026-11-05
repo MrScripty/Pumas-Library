@@ -339,8 +339,26 @@ impl Rig {
     }
 }
 
+/// The primary member was continued from `offset` and never re-requested from
+/// byte zero: retained partial bytes are not silently discarded.
+fn assert_continued_from(calls: &[Call], offset: usize, len: usize) {
+    let primary: Vec<_> = calls
+        .iter()
+        .filter(|call| call.key == PRIMARY)
+        .filter_map(|call| call.range.as_deref())
+        .collect();
+    assert!(
+        primary.contains(&format!("bytes={offset}-{}", len - 1).as_str()),
+        "expected a continuation from byte {offset}, got {primary:?}"
+    );
+    assert!(
+        !primary.iter().any(|range| range.starts_with("bytes=0-")),
+        "the retained partial was restarted from zero: {primary:?}"
+    );
+}
+
 #[tokio::test]
-async fn cold_reopen_restarts_partial_at_zero_under_the_same_authored_record() {
+async fn cold_reopen_resumes_partial_from_its_offset_under_the_same_authored_record() {
     let files = package();
     let source = Source::start(files.clone()).await;
     source.mode.store(10, Ordering::SeqCst);
@@ -378,6 +396,15 @@ async fn cold_reopen_restarts_partial_at_zero_under_the_same_authored_record() {
         .await
         .unwrap();
     let original = rig.records().into_values().next().unwrap();
+    let retained = std::fs::read(
+        rig.stage
+            .path()
+            .join("stage")
+            .join(format!("{PRIMARY}.part")),
+    )
+    .unwrap()
+    .len();
+    assert!(retained > 0);
     let Rig {
         root,
         stage,
@@ -409,8 +436,9 @@ async fn cold_reopen_restarts_partial_at_zero_under_the_same_authored_record() {
         .unwrap();
     assert_published(&rig, &files, &result.model_id.unwrap(), &set, spec);
     assert_eq!(rig.records().into_values().next().unwrap().id, original.id);
-    assert!(source.calls()[start..].iter().any(|c| c.key == PRIMARY
-        && c.range.as_deref() == Some(&format!("bytes=0-{}", files[PRIMARY].len() - 1))));
+    // The reopened import continues the retained bytes under the declared
+    // digest; it never silently starts the file over.
+    assert_continued_from(&source.calls()[start..], retained, files[PRIMARY].len());
     rig.api.shutdown_instance().await.unwrap();
     source.close().await;
 }
@@ -896,8 +924,7 @@ async fn cancellation_and_exact_manifest_replay_preserve_retained_custody_and_re
         rig.records().keys().collect::<Vec<_>>(),
         before.keys().collect::<Vec<_>>()
     );
-    assert!(source.calls()[start..].iter().any(|c| c.key == PRIMARY
-        && c.range.as_deref() == Some(&format!("bytes=0-{}", files[PRIMARY].len() - 1))));
+    assert_continued_from(&source.calls()[start..], prefix.len(), files[PRIMARY].len());
     rig.api.shutdown_instance().await.unwrap();
     source.close().await;
 }

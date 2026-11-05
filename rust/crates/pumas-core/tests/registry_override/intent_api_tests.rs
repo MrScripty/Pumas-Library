@@ -1,5 +1,3 @@
-#![warn(unsafe_code)]
-
 use pumas_library::intent::{
     AcquisitionPolicy, ArtifactRequirement, CandidateState, IntentDiagnosticCode, ModelRequirement,
     ModelSelector, ObservedModelState, QueryModelsOutcome,
@@ -7,34 +5,12 @@ use pumas_library::intent::{
 use pumas_library::models::{PackageArtifactKind, PumasModelRef};
 use pumas_library::PumasApi;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
 use tempfile::TempDir;
 
-static REGISTRY_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+use crate::support::RegistryOverride;
 
-struct RegistryTestGuard {
-    _lock: std::sync::MutexGuard<'static, ()>,
-}
-
-impl RegistryTestGuard {
-    #[allow(unsafe_code)]
-    fn new(root: &Path) -> Self {
-        let lock = REGISTRY_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        // SAFETY: Tests in this integration-test process serialize access to this variable.
-        unsafe { std::env::set_var("PUMAS_REGISTRY_DB_PATH", root.join("registry.db")) };
-        Self { _lock: lock }
-    }
-}
-
-impl Drop for RegistryTestGuard {
-    #[allow(unsafe_code)]
-    fn drop(&mut self) {
-        // SAFETY: Guarded by the same process-wide mutex used when setting the variable.
-        unsafe { std::env::remove_var("PUMAS_REGISTRY_DB_PATH") };
-    }
+fn registry_test_guard(root: &Path) -> RegistryOverride {
+    RegistryOverride::set(root.join("registry.db"))
 }
 
 fn test_root() -> TempDir {
@@ -78,8 +54,8 @@ fn create_model(root: &Path, model_id: &str, repo_id: &str, revision: Option<&st
     .unwrap();
 }
 
-async fn api(root: &TempDir) -> (RegistryTestGuard, PumasApi) {
-    let guard = RegistryTestGuard::new(root.path());
+async fn api(root: &TempDir) -> (RegistryOverride, PumasApi) {
+    let guard = registry_test_guard(root.path());
     let api = PumasApi::builder(root.path())
         .with_hf_client(false)
         .with_process_manager(false)

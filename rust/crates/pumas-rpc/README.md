@@ -62,6 +62,16 @@ project their outcomes.
   `--discover-local`, `--describe-local-http`, `--attach-or-start-local-http`,
   `--retain-local-http-owner` and the offline download-store upgrade
   (`--migrate-download-store-offline --confirm-old-writers-stopped`).
+- Desktop launch: after binding, an owned server prints `RPC_PORT=N` and one
+  `PUMAS_RPC_READY={"version":1,"port":N,"nonce":...}` line. A parent may pass
+  a launch nonce in `PUMAS_RPC_LAUNCH_NONCE` (1–256 visible ASCII characters;
+  never on argv). It is removed from the environment before any child starts,
+  reported in that line and echoed as `launch_nonce` by `health_check`.
+  `--exit-on-stdin-eof` makes the server drain and exit normally when stdin
+  reaches end of file, so a parent's exit or crash stops it; without the flag
+  stdin is ignored.
+- Logging: a valid `RUST_LOG` selects the filter. Otherwise the default is
+  `info`, and `--debug` raises only the Pumas crates to `debug`.
 - Routes: `/rpc` (JSON-RPC), `/health`, `/events/*` update streams, and with
   `inference-plugins` the `/v1` gateway listed under
   [Typed model operations](#typed-model-operations).

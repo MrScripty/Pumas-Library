@@ -10,6 +10,7 @@ mod handlers;
 mod http_admission;
 mod http_rejection;
 mod http_transport;
+mod launch;
 mod local_enumeration;
 mod owner_retention;
 #[cfg(feature = "inference-plugins")]
@@ -29,8 +30,8 @@ use pumas_library::AppId;
 use std::io::Write;
 use std::path::PathBuf;
 use tokio::runtime::Builder;
-use tracing::{info, Level};
-use tracing_subscriber::FmtSubscriber;
+use tracing::info;
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 const RPC_WORKER_THREADS: usize = 4;
 const RPC_MAX_BLOCKING_THREADS: usize = 16;
@@ -108,7 +109,13 @@ struct Args {
     #[arg(long, default_value_t = http_transport::DEFAULT_HTTP_SHUTDOWN_GRACE_MS)]
     http_shutdown_grace_ms: u64,
 
-    /// Enable debug logging
+    /// Shut down through the normal drain when stdin reaches end of file. The
+    /// desktop holds the write end, so its exit (including a crash) stops this
+    /// process. Other launchers do not pass it and keep their stdin semantics.
+    #[arg(long)]
+    exit_on_stdin_eof: bool,
+
+    /// Enable debug logging for the Pumas crates (RUST_LOG, when set, takes precedence)
     #[arg(short, long)]
     debug: bool,
 
@@ -118,6 +125,8 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    // Before any thread or child process can observe the environment.
+    launch::take_from_env()?;
     let args = Args::parse();
     if args.migrate_download_store_offline {
         let backup = pumas_library::model_library::DownloadPersistence::migrate_library_offline(
@@ -174,17 +183,16 @@ fn main() -> Result<()> {
     let http_policy = http_transport::HttpShutdownPolicy::from_millis(args.http_shutdown_grace_ms)?;
 
     // Set up logging
-    let log_level = if args.debug {
-        Level::DEBUG
-    } else {
-        Level::INFO
-    };
+    let (filter, rejected_rust_log) = log_filter(args.debug, std::env::var("RUST_LOG").ok());
     FmtSubscriber::builder()
-        .with_max_level(log_level)
+        .with_env_filter(filter)
         .with_target(false)
         .with_thread_ids(false)
         .compact()
         .init();
+    if let Some(reason) = rejected_rust_log {
+        tracing::warn!(%reason, "RUST_LOG is invalid; using the default log filter");
+    }
 
     let runtime = Builder::new_multi_thread()
         .enable_all()
@@ -194,6 +202,60 @@ fn main() -> Result<()> {
         .build()?;
 
     runtime.block_on(run(args, host, http_policy))
+}
+
+/// Resolves when stdin reaches end of file or fails; never when `enabled` is
+/// false. Reads happen on a dedicated thread so a parent that keeps the pipe
+/// open never occupies the runtime's blocking pool.
+async fn stdin_closed(enabled: bool) {
+    if !enabled {
+        return std::future::pending().await;
+    }
+    let (closed, receiver) = tokio::sync::oneshot::channel::<()>();
+    let spawned = std::thread::Builder::new()
+        .name("pumas-rpc-stdin".into())
+        .spawn(move || {
+            use std::io::Read;
+            let mut stdin = std::io::stdin().lock();
+            let mut discard = [0u8; 1024];
+            loop {
+                match stdin.read(&mut discard) {
+                    Ok(0) => break,
+                    Ok(_) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => break,
+                }
+            }
+            let _ = closed.send(());
+        });
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "Could not watch stdin; --exit-on-stdin-eof is inactive");
+        return std::future::pending().await;
+    }
+    let _ = receiver.await;
+}
+
+/// `--debug` raises only the Pumas crates to DEBUG, so dependencies stay
+/// quiet; a valid `RUST_LOG` replaces this default entirely.
+const DEFAULT_LOG_FILTER: &str = "info";
+const DEBUG_LOG_FILTER: &str = "info,pumas_rpc=debug,pumas_library=debug,pumas_app_manager=debug";
+
+/// The log filter, and why `RUST_LOG` was ignored if it was set but invalid.
+fn log_filter(debug: bool, rust_log: Option<String>) -> (EnvFilter, Option<String>) {
+    let default = || {
+        EnvFilter::new(if debug {
+            DEBUG_LOG_FILTER
+        } else {
+            DEFAULT_LOG_FILTER
+        })
+    };
+    match rust_log.filter(|value| !value.trim().is_empty()) {
+        Some(value) => match EnvFilter::try_new(&value) {
+            Ok(filter) => (filter, None),
+            Err(error) => (default(), Some(error.to_string())),
+        },
+        None => (default(), None),
+    }
 }
 
 async fn run(
@@ -244,21 +306,28 @@ async fn run(
     info!("Launcher root configured");
 
     // Both OS signals and RPC admission converge on the same owned receipt.
+    // With --exit-on-stdin-eof, the parent closing stdin is one more such signal.
+    let parent_gone = stdin_closed(args.exit_on_stdin_eof);
     let signal = async move {
         #[cfg(windows)]
         {
             tokio::select! {
                 Some(()) = interrupt.recv() => {},
                 Some(()) = ctrl_break.recv() => {}
+                () = parent_gone => info!("stdin closed; shutting down"),
             }
         }
         #[cfg(unix)]
         tokio::select! {
             _ = interrupt.recv() => {},
             _ = terminate.recv() => {},
+            () = parent_gone => info!("stdin closed; shutting down"),
         }
         #[cfg(not(any(unix, windows)))]
-        tokio::signal::ctrl_c().await?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result?,
+            () = parent_gone => info!("stdin closed; shutting down"),
+        }
         Ok::<(), anyhow::Error>(())
     };
     let stop = server::ShutdownRequest::default();
@@ -327,6 +396,11 @@ async fn run(
         {
             let mut stdout = std::io::stdout().lock();
             writeln!(stdout, "RPC_PORT={}", server.addr().port())?;
+            writeln!(
+                stdout,
+                "{}",
+                launch::ready_line(server.addr().port(), launch::nonce())
+            )?;
             stdout.flush()?;
         }
         if let Some(description) = description {
@@ -372,6 +446,26 @@ async fn run(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rust_log_selects_the_filter_and_debug_raises_only_pumas_crates() {
+        let (filter, rejected) = super::log_filter(false, None);
+        assert_eq!(filter.to_string(), "info");
+        assert!(rejected.is_none());
+        let (filter, _) = super::log_filter(true, None);
+        assert!(filter.to_string().contains("pumas_rpc=debug"));
+        assert!(!filter.to_string().starts_with("debug"));
+        let (filter, rejected) = super::log_filter(true, Some("warn,pumas_rpc=trace".into()));
+        let rendered = filter.to_string();
+        assert!(
+            rendered.contains("pumas_rpc=trace") && rendered.contains("warn"),
+            "{rendered}"
+        );
+        assert!(rejected.is_none());
+        let (filter, rejected) = super::log_filter(false, Some("pumas_rpc=[".into()));
+        assert_eq!(filter.to_string(), "info");
+        assert!(rejected.is_some());
+    }
+
     #[cfg(feature = "inference-plugins")]
     use super::VERSION_MANAGED_APPS;
     #[cfg(feature = "inference-plugins")]

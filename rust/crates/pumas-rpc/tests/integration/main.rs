@@ -9,3 +9,4 @@ mod intent_integration_tests;
 mod local_enumeration_cli;
 mod s3_conditional_bundle_process;
 mod s3_conditional_process;
+mod stdin_eof_process;

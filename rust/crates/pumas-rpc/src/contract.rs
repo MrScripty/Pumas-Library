@@ -955,11 +955,37 @@ impl RpcOutcome {
 #[derive(Serialize)]
 pub(crate) struct HealthOutcome {
     status: &'static str,
+    /// Echo of `PUMAS_RPC_LAUNCH_NONCE`, so a parent can tell its own child
+    /// from another process on the same port. Absent when none was supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    launch_nonce: Option<&'static str>,
 }
 
 impl HealthOutcome {
-    pub(crate) const fn ok() -> Self {
-        Self { status: "ok" }
+    pub(crate) fn ok() -> Self {
+        Self::with_nonce(crate::launch::nonce())
+    }
+
+    pub(crate) const fn with_nonce(launch_nonce: Option<&'static str>) -> Self {
+        Self {
+            status: "ok",
+            launch_nonce,
+        }
+    }
+}
+
+#[cfg(test)]
+mod health_outcome_tests {
+    #[test]
+    fn health_echoes_the_launch_nonce_only_when_one_was_supplied() {
+        assert_eq!(
+            serde_json::to_value(super::HealthOutcome::with_nonce(None)).unwrap(),
+            serde_json::json!({"status": "ok"})
+        );
+        assert_eq!(
+            serde_json::to_value(super::HealthOutcome::with_nonce(Some("n0nce"))).unwrap(),
+            serde_json::json!({"status": "ok", "launch_nonce": "n0nce"})
+        );
     }
 }
 

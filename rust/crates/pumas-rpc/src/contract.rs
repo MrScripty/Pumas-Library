@@ -6081,6 +6081,7 @@ struct GetAppStatusParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 struct SetHfTokenParams {
     token: String,
 }
@@ -6101,6 +6102,7 @@ struct VersionTagParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 struct ModelIdParams {
     #[serde(alias = "modelId")]
     model_id: String,

@@ -21,10 +21,24 @@ test('RPC method registry has stable unique method names', () => {
 
 test('Torch release options request reaches the registered RPC method', () => {
   assert.ok(ALLOWED_RPC_METHODS.includes('get_torch_release_options'));
-  assert.deepEqual(validateApiCallPayload('get_torch_release_options', { tag: 'v2.14.0' }), {
+  assert.deepEqual(JSON.parse(JSON.stringify(validateApiCallPayload('get_torch_release_options', { tag: 'v2.14.0' }))), {
     method: 'get_torch_release_options',
     params: { tag: 'v2.14.0' },
   });
+  // Main decodes the request with Rust's exported declaration, not only preload.
+  for (const params of [{}, { tag: 7 }, { tag: 'v2.14.0', build: 'cu130' }]) {
+    assert.throws(() => validateApiCallPayload('get_torch_release_options', params),
+      /Invalid API params for method: get_torch_release_options: Invalid desktop contract payload/);
+  }
+});
+
+test('methods Rust decodes as empty refuse any parameter at the IPC boundary', () => {
+  for (const method of ['health_check', 'shutdown', 'clear_hf_token', 'clean_broken_links', 'get_network_status',
+    'get_library_status', 'get_torch_runtime_options', 'setup_conversion_environment', 'apply_launcher_update']) {
+    assert.deepEqual(validateApiCallPayload(method, {}).params, {});
+    assert.deepEqual(validateApiCallPayload(method, undefined).params, {});
+    assert.throws(() => validateApiCallPayload(method, { force: true }), /Unexpected API params/);
+  }
 });
 
 test('backend setup IPC validates exact backend and retry identity before forwarding', () => {
@@ -442,5 +456,64 @@ test('runtime cached-liveness requests admit only the generated empty object', (
     for (const params of [null, [], true, 0, '', { app_id: 'ollama' }, { appId: 'torch' }, { extra: true }]) {
       assert.throws(() => validateApiCallPayload(method, params), /Invalid API params/);
     }
+  }
+});
+
+test('mutating model and credential requests use the Rust-exported request contracts', () => {
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  const secret = 'hf_synthetic-secret-token';
+  assert.deepEqual(plain(validateApiCallPayload('set_hf_token', { token: secret }).params), { token: secret });
+  for (const params of [undefined, {}, { token: '' }, { token: '   ' }, { token: 7 }, { token: secret, extra: true }]) {
+    assert.throws(() => validateApiCallPayload('set_hf_token', params), (error) => {
+      assert.match(error.message, /^Invalid API params for method: set_hf_token/);
+      assert.ok(!error.message.includes('synthetic-secret'), 'rejections never echo the token');
+      return true;
+    });
+  }
+
+  for (const method of ['delete_model_with_cascade', 'get_links_for_model']) {
+    assert.deepEqual(plain(validateApiCallPayload(method, { model_id: 'llm/org/model' }).params), { model_id: 'llm/org/model' });
+    for (const params of [{}, { model_id: '' }, { model_id: ' ' }, { model_id: ['x'] }, { model_id: 'x', cascade: true }]) {
+      assert.throws(() => validateApiCallPayload(method, params), new RegExp(`Invalid API params for method: ${method}`));
+    }
+  }
+
+  const importRequest = { local_path: '/models/a.gguf', family: 'llama', official_name: 'A' };
+  assert.deepEqual(plain(validateApiCallPayload('import_model', { ...importRequest, repo_id: undefined }).params), importRequest);
+  assert.deepEqual(plain(validateApiCallPayload('import_model', { ...importRequest, repo_id: 'org/a' }).params),
+    { ...importRequest, repo_id: 'org/a' });
+  for (const params of [{ family: 'llama', official_name: 'A' }, { ...importRequest, local_path: 3 }, { ...importRequest, unknown: 1 }]) {
+    assert.throws(() => validateApiCallPayload('import_model', params), /Invalid API params for method: import_model/);
+  }
+
+  const spec = { path: '/models/a.gguf', family: 'llama', official_name: 'A', tags: ['chat'], security_acknowledged: true };
+  assert.deepEqual(plain(validateApiCallPayload('import_batch', { imports: [{ ...spec, repo_id: undefined }] }).params),
+    { imports: [spec] });
+  for (const params of [{}, { imports: {} }, { imports: [{ family: 'llama' }] }, { imports: [{ ...spec, tags: 'chat' }] },
+    { imports: [spec], extra: true }]) {
+    assert.throws(() => validateApiCallPayload('import_batch', params), /Invalid API params for method: import_batch/);
+  }
+});
+
+test('torch_configure admits only the complete TorchServerConfig shape', () => {
+  const config = { api_port: 8400, host: '127.0.0.1', max_loaded_models: 4, lan_access: false };
+  assert.deepEqual(validateApiCallPayload('torch_configure', { config }).params, { config });
+  assert.deepEqual(validateApiCallPayload('torch_configure', { config, connection_url: undefined }).params, { config });
+  assert.deepEqual(validateApiCallPayload('torch_configure', { config, connection_url: 'http://127.0.0.1:8400' }).params,
+    { config, connection_url: 'http://127.0.0.1:8400' });
+  for (const params of [
+    config, // the flat config Rust would never read
+    {},
+    { config: { ...config, api_port: 0 } },
+    { config: { ...config, api_port: 70_000 } },
+    { config: { ...config, api_port: 1.5 } },
+    { config: { ...config, host: '' } },
+    { config: { ...config, max_loaded_models: -1 } },
+    { config: { ...config, lan_access: 'yes' } },
+    { config: { ...config, extra: true } },
+    { config, extra: true },
+    { config, connection_url: '' },
+  ]) {
+    assert.throws(() => validateApiCallPayload('torch_configure', params), /Invalid API params for method: torch_configure: /);
   }
 });

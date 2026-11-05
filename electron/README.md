@@ -96,6 +96,19 @@ by Electron's registry and Rust. They do not promise every standalone Rust
 deserialization alias; methods still dispatched through the `Legacy` command
 remain outside the generated contract.
 
+Main decodes a request with its exported declaration even when preload already
+did, because a renderer can bypass preload: credential (`set_hf_token`),
+import (`import_model`, `import_batch`), deletion (`delete_model_with_cascade`,
+`get_links_for_model`), the Torch runtime requests, HF download details,
+catalog search, notes/settings mutations and conversion setup. Methods Rust
+decodes as empty are `empty-record` in the registry. `torch_configure` has no
+exported declaration yet (`TorchServerConfig` lives in `pumas-app-manager`), so
+`ipc-validation.ts` mirrors its complete shape by hand. The remaining
+shape-only methods (54 of 178, listed by probing `validateApiCallPayload` with
+an unknown field) accept any object until their Rust request types are
+exported. The status-telemetry, network and library pull snapshots decode with
+the declarations their push notification already uses.
+
 `pnpm --dir electron run generate:desktop-contract` rebuilds that exporter and
 generates identical `src/generated/desktop-contract*` artifacts in Electron
 and frontend. `check:desktop-contract` regenerates from current Rust source

@@ -9,12 +9,24 @@ use super::*;
 // Matches the non-transforming relative identity policy in core and RPC admission.
 const MODEL_LOOKUP_ID_PATTERN: &str = r"^(?![A-Za-z]:)(?!.*(?:^|/)\.{1,2}(?:/|$))[^\\/\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+(?:/[^\\/\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+)*$";
 
+use crate::handlers::ImportModelParams;
 use crate::startup_failure::StartupFailureFrame;
+use pumas_library::model_library::ModelImportSpec;
 use pumas_library::models::{
-    ModelLibraryUpdateNotification, RouterProfileSyncStatus, RuntimeProfileUpdateFeed,
-    ServingStatusUpdateFeed, StatusTelemetryUpdateNotification,
+    LibraryStatusResponse, ModelLibraryUpdateNotification, NetworkStatusResponse,
+    RouterProfileSyncStatus, RuntimeProfileUpdateFeed, ServingStatusUpdateFeed,
+    StatusTelemetrySnapshot, StatusTelemetryUpdateNotification,
 };
 use schemars::{generate::SchemaSettings, JsonSchema};
+
+/// `import_batch` request. The handler reads `imports` as
+/// `Vec<ModelImportSpec>` (`handlers/models/imports.rs`); this names that
+/// shape for the desktop decoder and has no other use.
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+struct ImportBatchParams {
+    imports: Vec<ModelImportSpec>,
+}
 
 /// Conformance values are made by the production constructors and real ticket
 /// issuer. Temporary filesystem identity is deliberately not normalized.
@@ -902,6 +914,15 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         GetReleaseDependenciesOutcome,
         CheckVersionDependenciesParams,
         CheckVersionDependenciesOutcome,
+        // Mutating requests the desktop decodes before dispatch (ELE-03).
+        SetHfTokenParams,
+        ModelIdParams,
+        ImportModelParams,
+        ImportBatchParams,
+        // Pull snapshots whose push notifications are already decoded (FE-02).
+        StatusTelemetrySnapshot,
+        NetworkStatusResponse,
+        LibraryStatusResponse,
     );
     Ok(serde_json::json!({
         "format": "pumas-desktop-contract-1",

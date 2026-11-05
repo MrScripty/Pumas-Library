@@ -111,6 +111,13 @@ import {
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
+  decodeSetHfTokenParams,
+  decodeModelIdParams,
+  decodeImportModelParams,
+  decodeImportBatchParams,
+  decodeStatusTelemetrySnapshot,
+  decodeNetworkStatusResponse,
+  decodeLibraryStatusResponse,
   decodeLibraryUpgradeConfirmation,
   decodeLauncherRootSelectionResult as decodeGeneratedLauncherRootSelectionResult,
   decodeLauncherRootStartupState as decodeGeneratedLauncherRootStartupState,
@@ -190,6 +197,11 @@ async function validatedApiCall<T>(
   params: Record<string, unknown> = {}
 ): Promise<T> {
   return requireDecoded(decode(await apiCall<unknown>(method, params)), method);
+}
+
+/** JSON omits undefined; the generated decoders accept only JSON values. */
+function withoutUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined)) as T;
 }
 
 type BaseRpcResponse = {
@@ -326,7 +338,9 @@ const electronAPI = {
   // Status & System
   // ========================================
   get_status: () => apiCall('get_status'),
-  get_status_telemetry_snapshot: () => apiCall('get_status_telemetry_snapshot'),
+  // Pull snapshots decode like their push notifications (FE-02).
+  get_status_telemetry_snapshot: () =>
+    validatedApiCall('get_status_telemetry_snapshot', decodeStatusTelemetrySnapshot),
   get_disk_space: () => apiCall('get_disk_space'),
   get_system_resources: () => apiCall('get_system_resources'),
 
@@ -508,8 +522,9 @@ const electronAPI = {
     apiCall('torch_get_status', { connection_url: connectionUrl }),
   torch_list_devices: (connectionUrl?: string) =>
     apiCall('torch_list_devices', { connection_url: connectionUrl }),
-  torch_configure: (config: Record<string, unknown>) =>
-    apiCall('torch_configure', config),
+  // Rust reads `{ connection_url?, config }`; main validates the full shape.
+  torch_configure: (config: Record<string, unknown>, connectionUrl?: string) =>
+    apiCall('torch_configure', withoutUndefined({ config, connection_url: connectionUrl })),
 
   // Ollama Model Management
   ollama_list_models: (connectionUrl?: string) =>
@@ -697,7 +712,8 @@ const electronAPI = {
   },
 
   // HuggingFace Authentication
-  set_hf_token: (token: string) => apiCall('set_hf_token', { token }),
+  set_hf_token: (token: string) =>
+    apiCall('set_hf_token', requireDecoded(decodeSetHfTokenParams({ token }), 'set_hf_token request')),
   clear_hf_token: () => apiCall('clear_hf_token'),
   get_hf_auth_status: () => apiCall('get_hf_auth_status'),
 
@@ -715,12 +731,16 @@ const electronAPI = {
       offset,
     }),
   import_batch: (importSpecs: Array<Record<string, unknown>>) =>
-    apiCall('import_batch', { imports: importSpecs }),
+    apiCall('import_batch', requireDecoded(decodeImportBatchParams({
+      imports: Array.isArray(importSpecs)
+        ? importSpecs.map((spec) => (spec && typeof spec === 'object' ? withoutUndefined(spec) : spec))
+        : importSpecs,
+    }), 'import_batch request')),
   import_external_diffusers_directory: (spec: Record<string, unknown>) =>
     apiCall('import_external_diffusers_directory', spec),
   classify_model_import_paths: (paths: string[]) =>
     apiCall('classify_model_import_paths', { paths }),
-  get_network_status: () => apiCall('get_network_status'),
+  get_network_status: () => validatedApiCall('get_network_status', decodeNetworkStatusResponse),
 
   // ========================================
   // Model Import (Phase 2)
@@ -758,12 +778,12 @@ const electronAPI = {
     validatedApiCall('cancel_s3_model_import', decodeS3ImportCancelOutcome,
       requireDecoded(decodeS3ImportCancelParams({ operation_id: operationId }), 'cancel_s3_model_import')),
   import_model: (localPath: string, family: string, officialName: string, repoId?: string) =>
-    apiCall('import_model', {
+    apiCall('import_model', requireDecoded(decodeImportModelParams(withoutUndefined({
       local_path: localPath,
       family,
       official_name: officialName,
       repo_id: repoId,
-    }),
+    })), 'import_model request')),
   lookup_hf_metadata_for_file: (filename: string, filePath?: string | null) =>
     apiCall('lookup_hf_metadata_for_file', { filename, file_path: filePath }),
   lookup_hf_metadata_for_bundle_directory: (directoryPath: string) =>
@@ -771,7 +791,7 @@ const electronAPI = {
   detect_sharded_sets: (filePaths: string[]) =>
     apiCall('detect_sharded_sets', { files: filePaths }),
   validate_file_type: (filePath: string) => apiCall('validate_file_type', { file_path: filePath }),
-  get_library_status: () => apiCall('get_library_status'),
+  get_library_status: () => validatedApiCall('get_library_status', decodeLibraryStatusResponse),
   get_file_link_count: (filePath: string) => apiCall('get_file_link_count', { file_path: filePath }),
   check_files_writable: (filePaths: string[]) =>
     apiCall('check_files_writable', { file_paths: filePaths }),
@@ -786,9 +806,11 @@ const electronAPI = {
   clean_broken_links: () => apiCall('clean_broken_links'),
   remove_orphaned_links: (versionTag: string) =>
     apiCall('remove_orphaned_links', { version_tag: versionTag }),
-  get_links_for_model: (modelId: string) => apiCall('get_links_for_model', { model_id: modelId }),
+  get_links_for_model: (modelId: string) => apiCall('get_links_for_model',
+    requireDecoded(decodeModelIdParams({ model_id: modelId }), 'get_links_for_model request')),
   delete_model_with_cascade: (modelId: string) =>
-    apiCall('delete_model_with_cascade', { model_id: modelId }),
+    apiCall('delete_model_with_cascade',
+      requireDecoded(decodeModelIdParams({ model_id: modelId }), 'delete_model_with_cascade request')),
 
   get_sandbox_info: () => apiCall('get_sandbox_info'),
   set_model_link_exclusion: (modelId: string, appId: string, excluded: boolean) =>

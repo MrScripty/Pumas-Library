@@ -913,6 +913,7 @@ pub enum ImportStage {
 /// Model import specification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ModelImportSpec {
     pub path: String,

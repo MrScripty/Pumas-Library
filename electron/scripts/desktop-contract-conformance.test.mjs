@@ -802,4 +802,15 @@ test('update-stream payloads made by Rust decode exactly and stay closed', () =>
     const decode = value.snapshot ? decoders.status_telemetry_update : decoders.runtime_profile_update;
     assert.equal(decode(value).status, 'invalid', JSON.stringify(value).slice(0, 120));
   }
+  // Pull snapshots decode with the declarations their push notification uses.
+  for (const [value, decode] of [
+    [telemetry.snapshot, contract.decodeStatusTelemetrySnapshot],
+    [telemetry.snapshot.network, contract.decodeNetworkStatusResponse],
+    [telemetry.snapshot.library, contract.decodeLibraryStatusResponse],
+  ]) {
+    const result = decode(value);
+    assert.equal(result.status, 'valid', result.message);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), value);
+    assert.equal(decode({...value, extra: true}).status, 'invalid');
+  }
 });

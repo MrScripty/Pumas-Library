@@ -8,6 +8,7 @@
 mod fts5;
 mod model_index;
 mod query;
+mod savepoint;
 
 pub use fts5::{FTS5Config, FTS5Manager};
 pub(crate) use model_index::{classify_package_facts_cache_record, ProjectionCommit};

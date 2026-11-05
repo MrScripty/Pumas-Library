@@ -1,5 +1,50 @@
 use super::*;
 
+/// A model-type rule table and the name its rebuild renames it to.
+struct RuleTable {
+    live: &'static str,
+    legacy: &'static str,
+    create_sql: &'static str,
+    columns: &'static str,
+}
+
+const ARCH_RULES_TABLE: RuleTable = RuleTable {
+    live: "model_type_arch_rules",
+    legacy: "model_type_arch_rules_legacy",
+    create_sql: "CREATE TABLE model_type_arch_rules (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              pattern TEXT NOT NULL,
+              match_style TEXT NOT NULL CHECK (match_style IN ('exact', 'prefix', 'suffix', 'wildcard')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'decision', 'diffusion', 'video', 'audio', 'vision', 'embedding', 'unknown')),
+              priority INTEGER NOT NULL DEFAULT 100,
+              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
+              source TEXT NOT NULL DEFAULT 'system',
+              notes TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            )",
+    columns: "id, pattern, match_style, model_type, priority, status, source, notes, \
+              created_at, updated_at",
+};
+
+const CONFIG_RULES_TABLE: RuleTable = RuleTable {
+    live: "model_type_config_rules",
+    legacy: "model_type_config_rules_legacy",
+    create_sql: "CREATE TABLE model_type_config_rules (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              config_model_type TEXT NOT NULL,
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'decision', 'diffusion', 'video', 'audio', 'vision', 'embedding', 'unknown')),
+              priority INTEGER NOT NULL DEFAULT 100,
+              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
+              source TEXT NOT NULL DEFAULT 'system',
+              notes TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            )",
+    columns: "id, config_model_type, model_type, priority, status, source, notes, \
+              created_at, updated_at",
+};
+
 impl ModelIndex {
     /// Create metadata v2/additional governance tables.
     pub(super) fn ensure_metadata_v2_schema(conn: &Connection) -> Result<()> {
@@ -189,6 +234,8 @@ impl ModelIndex {
     }
 
     fn migrate_model_type_rule_constraints(conn: &Connection) -> Result<()> {
+        Self::recover_interrupted_rule_table_rebuilds(conn)?;
+
         let arch_sql: Option<String> = conn
             .query_row(
                 "SELECT sql FROM sqlite_master
@@ -246,130 +293,104 @@ impl ModelIndex {
         Ok(())
     }
 
-    /// Run a multi-statement schema change as one unit. A savepoint nests
-    /// inside a caller's transaction and, at the outermost level, is atomic
-    /// across a crash: an interrupted rebuild never leaves a renamed table
-    /// behind with an empty replacement.
+    /// Run a multi-statement schema change as one unit: an interrupted
+    /// rebuild never leaves a renamed table behind with an empty replacement.
     fn all_or_nothing(conn: &Connection, name: &str, sql: &str) -> Result<()> {
-        conn.execute_batch(&format!("SAVEPOINT {name};"))?;
-        match conn.execute_batch(sql) {
-            Ok(()) => {
-                conn.execute_batch(&format!("RELEASE {name};"))?;
-                Ok(())
-            }
-            Err(error) => {
-                if let Err(rollback) =
-                    conn.execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name};"))
-                {
-                    return Err(PumasError::Database {
-                        message: format!("{error}; rolling back {name} also failed: {rollback}"),
-                        source: None,
-                    });
-                }
-                Err(error.into())
-            }
-        }
+        crate::index::savepoint::with_savepoint(conn, name, |conn| {
+            conn.execute_batch(sql).map_err(Into::into)
+        })
     }
 
     fn rebuild_model_type_arch_rules_table(conn: &Connection) -> Result<()> {
-        Self::all_or_nothing(
-            conn,
-            "rebuild_model_type_arch_rules",
-            "
-            ALTER TABLE model_type_arch_rules RENAME TO model_type_arch_rules_legacy;
-
-            CREATE TABLE model_type_arch_rules (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              pattern TEXT NOT NULL,
-              match_style TEXT NOT NULL CHECK (match_style IN ('exact', 'prefix', 'suffix', 'wildcard')),
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'decision', 'diffusion', 'video', 'audio', 'vision', 'embedding', 'unknown')),
-              priority INTEGER NOT NULL DEFAULT 100,
-              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
-              source TEXT NOT NULL DEFAULT 'system',
-              notes TEXT,
-              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-            );
-
-            INSERT INTO model_type_arch_rules (
-              id,
-              pattern,
-              match_style,
-              model_type,
-              priority,
-              status,
-              source,
-              notes,
-              created_at,
-              updated_at
-            )
-            SELECT
-              id,
-              pattern,
-              match_style,
-              model_type,
-              priority,
-              status,
-              source,
-              notes,
-              created_at,
-              updated_at
-            FROM model_type_arch_rules_legacy;
-
-            DROP TABLE model_type_arch_rules_legacy;
-            ",
-        )?;
-
-        Ok(())
+        Self::rebuild_rule_table(conn, &ARCH_RULES_TABLE)
     }
 
     fn rebuild_model_type_config_rules_table(conn: &Connection) -> Result<()> {
+        Self::rebuild_rule_table(conn, &CONFIG_RULES_TABLE)
+    }
+
+    /// Replace a rule table with the current definition, keeping every row.
+    fn rebuild_rule_table(conn: &Connection, table: &RuleTable) -> Result<()> {
+        let RuleTable {
+            live,
+            legacy,
+            create_sql,
+            columns,
+        } = table;
         Self::all_or_nothing(
             conn,
-            "rebuild_model_type_config_rules",
-            "
-            ALTER TABLE model_type_config_rules RENAME TO model_type_config_rules_legacy;
+            &format!("rebuild_{live}"),
+            &format!(
+                "ALTER TABLE {live} RENAME TO {legacy};
+                 {create_sql};
+                 INSERT INTO {live} ({columns}) SELECT {columns} FROM {legacy};
+                 DROP TABLE {legacy};"
+            ),
+        )
+    }
 
-            CREATE TABLE model_type_config_rules (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              config_model_type TEXT NOT NULL,
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'decision', 'diffusion', 'video', 'audio', 'vision', 'embedding', 'unknown')),
-              priority INTEGER NOT NULL DEFAULT 100,
-              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
-              source TEXT NOT NULL DEFAULT 'system',
-              notes TEXT,
-              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-            );
-
-            INSERT INTO model_type_config_rules (
-              id,
-              config_model_type,
-              model_type,
-              priority,
-              status,
-              source,
-              notes,
-              created_at,
-              updated_at
+    /// Settle a `*_legacy` rule table left by a rebuild that an earlier
+    /// release ran without a transaction and that was interrupted.
+    ///
+    /// With the live table missing, the rename was the last step that ran:
+    /// the copy is finished as one unit. With both tables present it is
+    /// unknown which one holds the person's rules, so startup is refused
+    /// with a reason naming the table rather than guessing.
+    fn recover_interrupted_rule_table_rebuilds(conn: &Connection) -> Result<()> {
+        for table in [&ARCH_RULES_TABLE, &CONFIG_RULES_TABLE] {
+            let RuleTable {
+                live,
+                legacy,
+                create_sql,
+                columns,
+            } = table;
+            if !Self::table_exists(conn, legacy)? {
+                continue;
+            }
+            if Self::table_exists(conn, live)? {
+                return Err(PumasError::Database {
+                    message: format!(
+                        "model index table {legacy} was left by an interrupted rule-table \
+                         rebuild and {live} also exists; startup is refused so the rules in \
+                         {legacy} are not lost. Keep the rules you need in {live}, then drop \
+                         {legacy} and reopen the library"
+                    ),
+                    source: None,
+                });
+            }
+            Self::all_or_nothing(
+                conn,
+                &format!("recover_{live}"),
+                &format!(
+                    "{create_sql};
+                     INSERT INTO {live} ({columns}) SELECT {columns} FROM {legacy};
+                     DROP TABLE {legacy};"
+                ),
             )
-            SELECT
-              id,
-              config_model_type,
-              model_type,
-              priority,
-              status,
-              source,
-              notes,
-              created_at,
-              updated_at
-            FROM model_type_config_rules_legacy;
-
-            DROP TABLE model_type_config_rules_legacy;
-            ",
-        )?;
-
+            .map_err(|error| PumasError::Database {
+                message: format!(
+                    "model index table {live} could not be restored from {legacy}, left by an \
+                     interrupted rule-table rebuild: {error}"
+                ),
+                source: None,
+            })?;
+            tracing::warn!(
+                table = live,
+                "Restored model-type rules from an interrupted rule-table rebuild"
+            );
+        }
         Ok(())
+    }
+
+    fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
+        Ok(conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                params![name],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
     }
 
     fn repair_multimodal_hint_rule_rows(conn: &Connection) -> Result<()> {
@@ -980,5 +1001,105 @@ mod rebuild_tests {
         assert_eq!(legacy, 0);
         // The connection is usable afterwards: no savepoint is left open.
         assert!(conn.is_autocommit());
+    }
+
+    /// Open an index, add a person's rule, and close it again.
+    fn library_with_user_rule(temp: &tempfile::TempDir) -> std::path::PathBuf {
+        let path = temp.path().join("models.db");
+        drop(ModelIndex::new(&path).unwrap());
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "INSERT INTO model_type_arch_rules (pattern, match_style, model_type, source)
+                 VALUES ('UserRuleForASR', 'suffix', 'audio', 'user');",
+            )
+            .unwrap();
+        path
+    }
+
+    fn user_rule_count(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(
+            &format!("SELECT COUNT(*) FROM {table} WHERE pattern = 'UserRuleForASR'"),
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_rebuild_interrupted_after_the_rename_is_completed_on_open() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = library_with_user_rule(&temp);
+        // The state a crash right after the rename left behind.
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "ALTER TABLE model_type_arch_rules RENAME TO model_type_arch_rules_legacy;",
+            )
+            .unwrap();
+
+        let index = ModelIndex::new(&path).unwrap();
+
+        let rules = index.list_active_model_type_arch_rules().unwrap();
+        assert!(rules.iter().any(|rule| rule.pattern == "UserRuleForASR"));
+        let conn = index.conn.lock().unwrap();
+        assert!(!ModelIndex::table_exists(&conn, "model_type_arch_rules_legacy").unwrap());
+        assert_eq!(user_rule_count(&conn, "model_type_arch_rules"), 1);
+        // The live table's indexes are back.
+        let unique_index: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE name = 'idx_model_type_arch_rules_active_unique'
+                   AND tbl_name = 'model_type_arch_rules'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unique_index, 1);
+    }
+
+    #[test]
+    fn a_rebuild_interrupted_with_both_tables_present_refuses_to_open() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = library_with_user_rule(&temp);
+        // The state a crash after the replacement table was created left
+        // behind: the person's rules sit in the legacy table.
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(&format!(
+                "ALTER TABLE model_type_config_rules RENAME TO model_type_config_rules_legacy;
+                 {};",
+                CONFIG_RULES_TABLE.create_sql
+            ))
+            .unwrap();
+
+        let error = match ModelIndex::new(&path) {
+            Err(error) => error,
+            Ok(_) => panic!("an ambiguous rule-table state must refuse to open"),
+        };
+        match &error {
+            PumasError::Database { message, source } => {
+                assert!(source.is_none());
+                assert!(
+                    message.contains("model_type_config_rules_legacy"),
+                    "{message}"
+                );
+                assert!(message.contains("refused"), "{message}");
+            }
+            other => panic!("expected a typed refusal, got {other:?}"),
+        }
+
+        // Nothing was changed: both tables and their rows are still there.
+        let conn = Connection::open(&path).unwrap();
+        assert!(ModelIndex::table_exists(&conn, "model_type_config_rules_legacy").unwrap());
+        let legacy_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM model_type_config_rules_legacy",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(legacy_rows > 0);
+        assert_eq!(user_rule_count(&conn, "model_type_arch_rules"), 1);
     }
 }

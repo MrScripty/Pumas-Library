@@ -1751,6 +1751,7 @@ impl ModelLibrary {
     /// Existing finalized copied assets use bounded canonical/receipt checks.
     /// Cold adoption of an already Ready copied asset verifies its full payload.
     pub async fn rebuild_index(&self) -> Result<usize> {
+        self.replay_pending_review_projections().await?;
         let existing = self.index.list_all()?;
         let mut discovered = HashSet::new();
         let mut count = 0;
@@ -2357,7 +2358,10 @@ impl ModelLibrary {
             .unwrap_or_else(|| Value::Object(Default::default()));
 
         let overlay_id = uuid::Uuid::new_v4().to_string();
-        self.index.apply_metadata_overlay(
+        // The overlay is authoritative. If writing metadata.json or the
+        // index row fails after it commits, the pending projection is
+        // replayed from the overlay on the next index rebuild.
+        let projection_token = self.index.apply_metadata_overlay_pending_projection(
             model_id,
             &overlay_id,
             &overlay_patch,
@@ -2366,6 +2370,8 @@ impl ModelLibrary {
         )?;
         self.save_metadata(&model_dir, &target_metadata).await?;
         self.index_model_dir(&model_dir).await?;
+        self.index
+            .confirm_metadata_projection(model_id, &projection_token)?;
 
         let review_status = target_metadata
             .review_status
@@ -2406,19 +2412,52 @@ impl ModelLibrary {
             });
         }
 
-        let reset = self
+        let projection_token = self
             .index
-            .reset_metadata_overlay(model_id, reviewer, reason)?;
-        if reset {
-            if let Some(metadata) =
-                load_effective_metadata_by_id_async(self.clone(), model_id.to_string()).await?
-            {
-                self.save_metadata(&model_dir, &metadata).await?;
-                self.index_model_dir(&model_dir).await?;
-            }
+            .reset_metadata_overlay_pending_projection(model_id, reviewer, reason)?;
+        let reset = projection_token.is_some();
+        if let Some(token) = projection_token {
+            self.project_reviewed_metadata(model_id, &token, true)
+                .await?;
         }
 
         Ok(reset)
+    }
+
+    /// Re-derive `metadata.json` (and, with `reindex`, the index row) from
+    /// the authoritative overlay state, then confirm the projection.
+    async fn project_reviewed_metadata(
+        &self,
+        model_id: &str,
+        token: &str,
+        reindex: bool,
+    ) -> Result<()> {
+        let model_dir = self.library_root.join(model_id);
+        if let Some(metadata) =
+            load_effective_metadata_by_id_async(self.clone(), model_id.to_string()).await?
+        {
+            self.save_metadata(&model_dir, &metadata).await?;
+            if reindex {
+                self.index_model_dir(&model_dir).await?;
+            }
+        }
+        self.index.confirm_metadata_projection(model_id, token)
+    }
+
+    /// Finish review projections a failure or crash interrupted after the
+    /// overlay committed. Each failure is logged and stays pending for the
+    /// next rebuild.
+    async fn replay_pending_review_projections(&self) -> Result<()> {
+        for (model_id, token) in self.index.list_pending_metadata_projections()? {
+            // The rebuild that follows re-indexes every model directory.
+            if let Err(error) = self
+                .project_reviewed_metadata(&model_id, &token, false)
+                .await
+            {
+                tracing::warn!(%model_id, %error, "Review projection stays pending");
+            }
+        }
+        Ok(())
     }
 
     /// Get models pending online lookup.
@@ -8459,10 +8498,9 @@ mod tests {
             )
             .unwrap();
 
-        assert!(library
-            .index()
-            .search("", None, None, 10, 0)
-            .is_ok_and(|result| result.models.is_empty()));
+        // Paginated search and the complete list both surface the damaged
+        // row rather than presenting a partial catalog as success.
+        assert!(library.index().search("", None, None, 10, 0).is_err());
         assert!(library.list_models().await.is_err());
     }
 
@@ -11540,6 +11578,165 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("alice")
         );
+    }
+
+    /// Make a model directory unwritable, as a failure between the overlay
+    /// commit and the metadata.json write would. Returns false when the
+    /// process can write regardless (for example as root).
+    #[cfg(unix)]
+    fn block_metadata_writes(model_dir: &Path, blocked: bool) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if blocked { 0o555 } else { 0o755 };
+        std::fs::set_permissions(model_dir, std::fs::Permissions::from_mode(mode)).unwrap();
+        if !blocked {
+            return true;
+        }
+        let probe = model_dir.join(".write-probe");
+        let writable = std::fs::write(&probe, b"probe").is_ok();
+        let _ = std::fs::remove_file(probe);
+        !writable
+    }
+
+    /// Valid v2 metadata waiting for review.
+    fn review_fixture_metadata(model_id: &str, name: &str) -> ModelMetadata {
+        ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some(name.to_string()),
+            task_type_primary: Some("text-generation".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["text".to_string()]),
+            task_classification_source: Some("task-signature-mapping".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("model-type-resolver-arch-rules".to_string()),
+            model_type_resolution_confidence: Some(0.7),
+            metadata_needs_review: Some(true),
+            review_status: Some("pending".to_string()),
+            review_reasons: Some(vec!["unknown-task-signature".to_string()]),
+            ..Default::default()
+        }
+    }
+
+    #[cfg(unix)]
+    fn metadata_json_review_status(model_dir: &Path) -> Option<String> {
+        let raw = std::fs::read(model_dir.join(METADATA_FILENAME)).unwrap();
+        let value: Value = serde_json::from_slice(&raw).unwrap();
+        value
+            .get("review_status")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_interrupted_review_projection_is_replayed_from_the_overlay() {
+        let (_temp, library) = setup_library().await;
+        let model_id = "llm/llama/interrupted-review";
+        let model_dir = library.build_model_path("llm", "llama", "interrupted-review");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        let metadata = review_fixture_metadata(model_id, "Interrupted Review");
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+        let index_review_status = |library: &ModelLibrary| {
+            library.index().get(model_id).unwrap().unwrap().metadata["review_status"].clone()
+        };
+
+        // Submit: the overlay commits, then writing metadata.json fails.
+        if !block_metadata_writes(&model_dir, true) {
+            return;
+        }
+        let submitted = library
+            .submit_model_review(model_id, serde_json::json!({}), "alice", None)
+            .await;
+        block_metadata_writes(&model_dir, false);
+        assert!(submitted.is_err());
+        let effective = library.get_effective_metadata(model_id).unwrap().unwrap();
+        assert_eq!(effective.review_status.as_deref(), Some("reviewed"));
+        assert_eq!(
+            metadata_json_review_status(&model_dir).as_deref(),
+            Some("pending")
+        );
+        assert_eq!(index_review_status(&library), "pending");
+        assert_eq!(
+            library
+                .index()
+                .list_pending_metadata_projections()
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // The next rebuild re-derives the file and the index row.
+        library.rebuild_index().await.unwrap();
+        assert_eq!(
+            metadata_json_review_status(&model_dir).as_deref(),
+            Some("reviewed")
+        );
+        assert_eq!(index_review_status(&library), "reviewed");
+        assert!(library
+            .list_models_needing_review(None)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(library
+            .index()
+            .list_pending_metadata_projections()
+            .unwrap()
+            .is_empty());
+
+        // Reset: the overlay is reverted, then writing metadata.json fails.
+        assert!(block_metadata_writes(&model_dir, true));
+        let reset = library.reset_model_review(model_id, "alice", None).await;
+        block_metadata_writes(&model_dir, false);
+        assert!(reset.is_err());
+        assert_eq!(
+            metadata_json_review_status(&model_dir).as_deref(),
+            Some("reviewed")
+        );
+
+        library.rebuild_index().await.unwrap();
+        assert_eq!(
+            metadata_json_review_status(&model_dir).as_deref(),
+            Some("pending")
+        );
+        assert_eq!(index_review_status(&library), "pending");
+        assert!(library
+            .index()
+            .list_pending_metadata_projections()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_completed_review_leaves_no_pending_projection() {
+        let (_temp, library) = setup_library().await;
+        let model_id = "llm/llama/completed-review";
+        let model_dir = library.build_model_path("llm", "llama", "completed-review");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        let metadata = review_fixture_metadata(model_id, "Completed Review");
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        library
+            .submit_model_review(model_id, serde_json::json!({}), "alice", None)
+            .await
+            .unwrap();
+        assert!(library
+            .index()
+            .list_pending_metadata_projections()
+            .unwrap()
+            .is_empty());
+        assert!(library
+            .reset_model_review(model_id, "alice", None)
+            .await
+            .unwrap());
+        assert!(library
+            .index()
+            .list_pending_metadata_projections()
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

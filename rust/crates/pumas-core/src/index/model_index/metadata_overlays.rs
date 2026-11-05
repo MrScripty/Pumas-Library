@@ -4,6 +4,72 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
 
 impl ModelIndex {
+    /// Create the table recording review edits whose file and index
+    /// projections are not yet confirmed.
+    ///
+    /// The overlay rows are authoritative. A row here names a model whose
+    /// `metadata.json` and index row must be re-derived from them; it is
+    /// written in the overlay's own transaction and removed once the
+    /// projection is written, so an interruption in between replays cleanly.
+    pub(super) fn ensure_metadata_projection_schema(conn: &rusqlite::Connection) -> Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS model_metadata_projection_pending (
+               model_id TEXT PRIMARY KEY,
+               token TEXT NOT NULL,
+               requested_at TEXT NOT NULL,
+               FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+             );",
+        )?;
+        Ok(())
+    }
+
+    fn mark_metadata_projection_pending(
+        tx: &rusqlite::Transaction<'_>,
+        model_id: &str,
+        now: &str,
+    ) -> Result<String> {
+        let token = uuid::Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO model_metadata_projection_pending (model_id, token, requested_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(model_id) DO UPDATE SET
+               token = excluded.token,
+               requested_at = excluded.requested_at",
+            params![model_id, token, now],
+        )?;
+        Ok(token)
+    }
+
+    /// Models whose review projection is not yet confirmed, with the token
+    /// that confirms the latest request.
+    pub(crate) fn list_pending_metadata_projections(&self) -> Result<Vec<(String, String)>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT model_id, token FROM model_metadata_projection_pending ORDER BY model_id",
+        )?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Confirm a projection. A newer request for the same model carries a
+    /// different token and stays pending.
+    pub(crate) fn confirm_metadata_projection(&self, model_id: &str, token: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+        conn.execute(
+            "DELETE FROM model_metadata_projection_pending WHERE model_id = ?1 AND token = ?2",
+            params![model_id, token],
+        )?;
+        Ok(())
+    }
+
     /// Return the active metadata overlay row for a model, if present.
     pub fn get_active_metadata_overlay(
         &self,
@@ -172,6 +238,9 @@ impl ModelIndex {
     }
 
     /// Apply a metadata overlay in one transaction (supersede current active, create new active, append history).
+    ///
+    /// The same transaction marks the model's file and index projection as
+    /// pending; see [`Self::ensure_metadata_projection_schema`].
     pub fn apply_metadata_overlay(
         &self,
         model_id: &str,
@@ -180,6 +249,26 @@ impl ModelIndex {
         actor: &str,
         reason: Option<&str>,
     ) -> Result<()> {
+        self.apply_metadata_overlay_pending_projection(
+            model_id,
+            overlay_id,
+            overlay_json,
+            actor,
+            reason,
+        )
+        .map(drop)
+    }
+
+    /// [`Self::apply_metadata_overlay`], returning the pending-projection
+    /// token to confirm once `metadata.json` and the index row are written.
+    pub(crate) fn apply_metadata_overlay_pending_projection(
+        &self,
+        model_id: &str,
+        overlay_id: &str,
+        overlay_json: &Value,
+        actor: &str,
+        reason: Option<&str>,
+    ) -> Result<String> {
         let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
@@ -240,17 +329,34 @@ impl ModelIndex {
             params![model_id, overlay_id, actor, overlay_json_str, reason, now],
         )?;
 
+        let token = Self::mark_metadata_projection_pending(&tx, model_id, &now)?;
         tx.commit()?;
-        Ok(())
+        Ok(token)
     }
 
     /// Reset model metadata to baseline by reverting/removing active overlay.
+    ///
+    /// A reset marks the model's projection as pending in the same
+    /// transaction; see [`Self::ensure_metadata_projection_schema`].
     pub fn reset_metadata_overlay(
         &self,
         model_id: &str,
         actor: &str,
         reason: Option<&str>,
     ) -> Result<bool> {
+        Ok(self
+            .reset_metadata_overlay_pending_projection(model_id, actor, reason)?
+            .is_some())
+    }
+
+    /// [`Self::reset_metadata_overlay`], returning the pending-projection
+    /// token when an overlay was reverted.
+    pub(crate) fn reset_metadata_overlay_pending_projection(
+        &self,
+        model_id: &str,
+        actor: &str,
+        reason: Option<&str>,
+    ) -> Result<Option<String>> {
         let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
@@ -271,7 +377,7 @@ impl ModelIndex {
             .optional()?;
 
         let Some((overlay_id, overlay_json)) = active_overlay else {
-            return Ok(false);
+            return Ok(None);
         };
 
         tx.execute(
@@ -295,8 +401,9 @@ impl ModelIndex {
             params![model_id, overlay_id, actor, overlay_json, reason, now],
         )?;
 
+        let token = Self::mark_metadata_projection_pending(&tx, model_id, &now)?;
         tx.commit()?;
-        Ok(true)
+        Ok(Some(token))
     }
 
     fn ensure_metadata_baseline_in_tx(

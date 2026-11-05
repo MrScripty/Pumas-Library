@@ -1,5 +1,6 @@
 //! FTS5 virtual table setup and management.
 
+use super::savepoint::with_savepoint;
 use crate::Result;
 use rusqlite::{Connection, OptionalExtension};
 use tracing::{debug, info};
@@ -84,20 +85,57 @@ impl<'a> FTS5Manager<'a> {
     }
 
     /// Ensure FTS5 is fully set up.
+    ///
+    /// Runs as one unit: a failure leaves the previous table, triggers and
+    /// search rows in place.
     pub fn ensure_setup(&self, conn: &Connection) -> Result<()> {
-        if !self.table_exists(conn)? {
-            self.create_table(conn)?;
-        }
+        with_savepoint(conn, "ensure_fts5_setup", |conn| {
+            let created = if !self.table_exists(conn)? {
+                self.create_table(conn)?;
+                true
+            } else {
+                false
+            };
 
-        if !self.triggers_current(conn)? {
+            if created || !self.triggers_current(conn)? {
+                self.drop_triggers(conn)?;
+                self.create_triggers(conn)?;
+                self.populate_from_models(conn)?;
+                return Ok(());
+            }
+
+            self.create_triggers(conn)?;
+            Ok(())
+        })
+    }
+
+    /// Ensure the table and all three triggers exist, without inspecting
+    /// the trigger bodies. Used for an index whose schema identity already
+    /// vouches for their shape; anything missing is rebuilt as one unit.
+    pub(crate) fn ensure_present(&self, conn: &Connection) -> Result<()> {
+        with_savepoint(conn, "ensure_fts5_present", |conn| {
+            if self.table_exists(conn)? && self.all_triggers_exist(conn)? {
+                return Ok(());
+            }
+            self.create_table(conn)?;
             self.drop_triggers(conn)?;
             self.create_triggers(conn)?;
-            self.populate_from_models(conn)?;
-            return Ok(());
-        }
+            self.populate_from_models(conn)
+        })
+    }
 
-        self.create_triggers(conn)?;
-        Ok(())
+    fn all_triggers_exist(&self, conn: &Connection) -> Result<bool> {
+        let table = &self.config.table_name;
+        let count: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name IN (?1, ?2, ?3)",
+            [
+                format!("{table}_ai"),
+                format!("{table}_au"),
+                format!("{table}_ad"),
+            ],
+            |row| row.get(0),
+        )?;
+        Ok(count == 3)
     }
 
     /// Create the FTS5 virtual table.
@@ -233,17 +271,22 @@ impl<'a> FTS5Manager<'a> {
     }
 
     /// Rebuild the FTS5 index completely.
+    ///
+    /// Runs as one unit: a failure leaves the previous table, triggers and
+    /// search rows in place.
     pub fn rebuild(&self, conn: &Connection) -> Result<()> {
-        // Drop and recreate
-        let drop_sql = format!("DROP TABLE IF EXISTS {}", self.config.table_name);
-        conn.execute(&drop_sql, [])?;
+        with_savepoint(conn, "rebuild_fts5", |conn| {
+            // Drop and recreate
+            let drop_sql = format!("DROP TABLE IF EXISTS {}", self.config.table_name);
+            conn.execute(&drop_sql, [])?;
 
-        self.drop_triggers(conn)?;
+            self.drop_triggers(conn)?;
 
-        // Recreate
-        self.create_table(conn)?;
-        self.create_triggers(conn)?;
-        self.populate_from_models(conn)?;
+            // Recreate
+            self.create_table(conn)?;
+            self.create_triggers(conn)?;
+            self.populate_from_models(conn)
+        })?;
 
         info!("Rebuilt FTS5 index");
         Ok(())
@@ -520,5 +563,90 @@ mod tests {
 
         // Table still works
         assert!(manager.table_exists(&conn).unwrap());
+    }
+
+    fn insert_model(conn: &Connection, id: &str, tags_json: &str) {
+        conn.execute(
+            "INSERT INTO models VALUES (?, 'path', ?, ?, 'llm', ?, '{}', '{}', '2024-01-01')",
+            [id, id, id, tags_json],
+        )
+        .unwrap();
+    }
+
+    fn search_rows(conn: &Connection, term: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM model_search WHERE model_search MATCH ?1",
+            [term],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn trigger_sql(conn: &Connection, name: &str) -> Option<String> {
+        conn.query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1",
+            [name],
+            |row| row.get(0),
+        )
+        .optional()
+        .unwrap()
+    }
+
+    /// A row whose tags cannot be projected makes the populate step fail after
+    /// the earlier drop/create statements have already run.
+    fn add_unprojectable_row(conn: &Connection) {
+        conn.execute_batch("DROP TRIGGER model_search_ai;").unwrap();
+        insert_model(conn, "broken", "{not json");
+    }
+
+    #[test]
+    fn a_failed_rebuild_leaves_the_previous_search_index_in_place() {
+        let (conn, _temp) = create_test_db();
+        let config = FTS5Config::default();
+        let manager = FTS5Manager::new(&config);
+        manager.ensure_setup(&conn).unwrap();
+        insert_model(&conn, "kept", "[]");
+        add_unprojectable_row(&conn);
+
+        assert!(manager.rebuild(&conn).is_err());
+
+        assert!(conn.is_autocommit());
+        assert!(manager.table_exists(&conn).unwrap());
+        assert_eq!(search_rows(&conn, "kept"), 1);
+        assert!(trigger_sql(&conn, "model_search_ai").is_none());
+        assert!(trigger_sql(&conn, "model_search_au").is_some());
+    }
+
+    #[test]
+    fn a_failed_setup_leaves_the_previous_triggers_and_rows_in_place() {
+        let (conn, _temp) = create_test_db();
+        let config = FTS5Config::default();
+        let manager = FTS5Manager::new(&config);
+        manager.ensure_setup(&conn).unwrap();
+        insert_model(&conn, "kept", "[]");
+        add_unprojectable_row(&conn);
+        // The missing insert trigger makes the triggers stale, so setup
+        // drops, recreates and repopulates them.
+        assert!(!manager.triggers_current(&conn).unwrap());
+        let update_trigger = trigger_sql(&conn, "model_search_au");
+
+        assert!(manager.ensure_setup(&conn).is_err());
+
+        assert!(conn.is_autocommit());
+        assert_eq!(search_rows(&conn, "kept"), 1);
+        assert!(trigger_sql(&conn, "model_search_ai").is_none());
+        assert_eq!(trigger_sql(&conn, "model_search_au"), update_trigger);
+    }
+
+    #[test]
+    fn setup_populates_a_search_table_it_creates() {
+        let (conn, _temp) = create_test_db();
+        let config = FTS5Config::default();
+        let manager = FTS5Manager::new(&config);
+        insert_model(&conn, "existing", "[]");
+
+        manager.ensure_setup(&conn).unwrap();
+
+        assert_eq!(search_rows(&conn, "existing"), 1);
     }
 }

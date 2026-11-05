@@ -1,8 +1,9 @@
 //! Shared identity and generation-bound local HTTP rendezvous.
+use crate::http_rejection::{FenceHeaderError, HttpRejection};
 use crate::server::AppState;
 use axum::{
     extract::{Request, State},
-    http::{header, StatusCode},
+    http::header,
     middleware::Next,
     response::{IntoResponse, Response},
     Extension, Json,
@@ -131,27 +132,36 @@ pub(crate) async fn enforce_generation_fence(
     let fence = match request_fence(request.headers()) {
         Ok(None) => return next.run(request).await,
         Ok(Some(fence)) => fence,
-        Err(()) => return StatusCode::BAD_REQUEST.into_response(),
+        Err(error) => return HttpRejection::MalformedFence(error).into_response(),
     };
+    match current_description(&state, &identity) {
+        Ok(description) if fence.matches(&description) => next.run(request).await,
+        Ok(_) => HttpRejection::GenerationMismatch.into_response(),
+        Err(rejection) => rejection.into_response(),
+    }
+}
+
+/// The registry advertisement this bound listener still owns, or why not.
+pub(crate) fn current_description(
+    state: &AppState,
+    identity: &HttpRouteIdentity,
+) -> Result<HttpServiceDescription, HttpRejection> {
     if state.shutdown_request.is_requested() {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        return Err(HttpRejection::ShuttingDown);
     }
     let description = match state.api.advertised_http_service() {
         Ok(Some(description)) => description,
-        _ => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        _ => return Err(HttpRejection::ServiceNotAdvertised),
     };
-    if !identity.fence.matches(&description) || identity.endpoint != description.endpoint {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    if !identity.matches(&description) {
+        return Err(HttpRejection::ListenerSuperseded);
     }
-    if !fence.matches(&description) {
-        return StatusCode::PRECONDITION_FAILED.into_response();
-    }
-    next.run(request).await
+    Ok(description)
 }
 
 pub(crate) fn request_fence(
     headers: &axum::http::HeaderMap,
-) -> Result<Option<HttpAdmissionFence>, ()> {
+) -> Result<Option<HttpAdmissionFence>, FenceHeaderError> {
     let instance = headers.get_all(HTTP_INSTANCE_GENERATION_HEADER);
     let service = headers.get_all(HTTP_SERVICE_GENERATION_HEADER);
     if instance.iter().next().is_none() && service.iter().next().is_none() {
@@ -162,20 +172,23 @@ pub(crate) fn request_fence(
     // and UUIDs). No trimming, splitting or normalization can change identity.
     fn token(
         values: axum::http::header::GetAll<'_, axum::http::HeaderValue>,
-    ) -> Result<String, ()> {
+    ) -> Result<String, FenceHeaderError> {
         let mut values = values.iter();
-        let value = values.next().ok_or(())?;
+        let value = values.next().ok_or(FenceHeaderError::Partial)?;
         if values.next().is_some() {
-            return Err(());
+            return Err(FenceHeaderError::Repeated);
         }
         let bytes = value.as_bytes();
         if bytes.is_empty()
             || bytes.len() > 256
             || bytes.iter().any(|b| !b.is_ascii_graphic() || *b == b',')
         {
-            return Err(());
+            return Err(FenceHeaderError::Malformed);
         }
-        value.to_str().map(str::to_owned).map_err(|_| ())
+        value
+            .to_str()
+            .map(str::to_owned)
+            .map_err(|_| FenceHeaderError::Malformed)
     }
     Ok(Some(HttpAdmissionFence {
         instance_generation: token(instance)?,
@@ -187,14 +200,13 @@ pub(crate) async fn handle_description(
     State(state): State<Arc<AppState>>,
     Extension(identity): Extension<HttpRouteIdentity>,
 ) -> Response {
+    // The description stays readable while closing; only identity is checked.
     match state.api.advertised_http_service() {
-        Ok(Some(description))
-            if identity.fence.matches(&description)
-                && description.endpoint == identity.endpoint =>
-        {
+        Ok(Some(description)) if identity.matches(&description) => {
             ([(header::CACHE_CONTROL, "no-store")], Json(description)).into_response()
         }
-        _ => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        Ok(Some(_)) => HttpRejection::ListenerSuperseded.into_response(),
+        _ => HttpRejection::ServiceNotAdvertised.into_response(),
     }
 }
 
@@ -237,7 +249,7 @@ mod tests {
             HTTP_INSTANCE_GENERATION_HEADER,
             HeaderValue::from_static("owner"),
         );
-        assert!(request_fence(&headers).is_err());
+        assert_eq!(request_fence(&headers), Err(FenceHeaderError::Partial));
         headers.insert(
             HTTP_SERVICE_GENERATION_HEADER,
             HeaderValue::from_static("service"),
@@ -253,16 +265,20 @@ mod tests {
         ] {
             let valid = headers.clone();
             headers.append(name, HeaderValue::from_static("duplicate"));
-            assert!(request_fence(&headers).is_err());
+            assert_eq!(request_fence(&headers), Err(FenceHeaderError::Repeated));
             headers = valid;
             for value in ["", "x,y", "x y", " x", "x ", &"x".repeat(257)] {
                 let mut invalid = headers.clone();
                 invalid.insert(name, HeaderValue::from_str(value).unwrap());
-                assert!(request_fence(&invalid).is_err(), "{name}: {value:?}");
+                assert_eq!(
+                    request_fence(&invalid),
+                    Err(FenceHeaderError::Malformed),
+                    "{name}: {value:?}"
+                );
             }
             let mut invalid = headers.clone();
             invalid.insert(name, HeaderValue::from_bytes(&[0xff]).unwrap());
-            assert!(request_fence(&invalid).is_err());
+            assert_eq!(request_fence(&invalid), Err(FenceHeaderError::Malformed));
         }
     }
 }

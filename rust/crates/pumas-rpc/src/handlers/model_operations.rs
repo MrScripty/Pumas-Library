@@ -698,7 +698,13 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     vec![InputFormat::PcmS16le, InputFormat::PcmF32le],
                     vec![OutputFormat::Text],
                     None,
-                    vec![bound(OptionName::MaxOutputTokens, 512., 512.)],
+                    // The qualified transcription adapter generates up to its
+                    // fixed native bound; projection refuses any other value.
+                    vec![bound(
+                        OptionName::MaxOutputTokens,
+                        f64::from(AUDIO_MAX_OUTPUT_TOKENS),
+                        f64::from(AUDIO_MAX_OUTPUT_TOKENS),
+                    )],
                 ),
                 Capability::AudioClassification => (
                     SemanticTask::AudioClassification,
@@ -712,11 +718,7 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     vec![InputFormat::Decision],
                     vec![OutputFormat::Decisions],
                     Some(OpenAiGatewayEndpoint::SystemOne),
-                    vec![
-                        bound(OptionName::ImageBytes, 1., (8 * 1024 * 1024) as f64),
-                        bound(OptionName::ImagePixels, 1., 4_194_304.),
-                        bound(OptionName::ImageCount, 0., 4.),
-                    ],
+                    image_input::image_bounds(0, false),
                 ),
                 Capability::MultimodalEmbedding => (
                     SemanticTask::MultimodalEmbedding,
@@ -727,12 +729,9 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                     ],
                     vec![OutputFormat::EmbeddingsFloat32],
                     Some(OpenAiGatewayEndpoint::Embeddings),
-                    vec![
-                        bound(OptionName::Dimensions, 1., u32::MAX as f64),
-                        bound(OptionName::ImageBytes, 1., (8 * 1024 * 1024) as f64),
-                        bound(OptionName::ImagePixels, 1., 4_194_304.),
-                        bound(OptionName::ImageCount, 1., 4.),
-                    ],
+                    std::iter::once(bound(OptionName::Dimensions, 1., u32::MAX as f64))
+                        .chain(image_input::image_bounds(1, false))
+                        .collect(),
                 ),
                 Capability::ImageToText => (
                     SemanticTask::ImageToText,
@@ -751,12 +750,10 @@ async fn descriptors(state: &AppState, served: &ServedModelStatus) -> Vec<Capabi
                         ),
                         bound(OptionName::Temperature, 0., 2.),
                         bound(OptionName::TopP, 0., 1.),
-                        bound(OptionName::ImageBytes, 1., (8 * 1024 * 1024) as f64),
-                        bound(OptionName::ImagePixels, 1., 4_194_304.),
-                        bound(OptionName::ImageCount, 1., 4.),
-                        bound(OptionName::Width, 1., 4096.),
-                        bound(OptionName::Height, 1., 4096.),
-                    ],
+                    ]
+                    .into_iter()
+                    .chain(image_input::image_bounds(1, true))
+                    .collect(),
                 ),
             };
         let adapter = endpoint.is_some_and(|endpoint| {
@@ -914,6 +911,9 @@ fn embedding_bounds(provider: RuntimeProviderId) -> Vec<OptionBound> {
         vec![bound(OptionName::Dimensions, 1., u32::MAX as f64)]
     }
 }
+/// The qualified transcription adapter's fixed native generation bound
+/// (`torch-server/owned_model_operations.py`); it accepts no other value.
+const AUDIO_MAX_OUTPUT_TOKENS: u32 = 512;
 fn bound(option: OptionName, minimum: f64, maximum: f64) -> OptionBound {
     OptionBound {
         option,

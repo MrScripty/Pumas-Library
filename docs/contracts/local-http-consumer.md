@@ -185,8 +185,10 @@ The same reference session also offers `capabilities(model, profile=None)` and
 `/v1/model-operations` routes. Both use the authenticated selected endpoint and
 paired generation fences. They return `{"status": HTTP_STATUS, "body": JSON_OBJECT}`,
 preserving producer errors, outcomes and typed result fields. An empty non-200
-response has `body=None`; native pre-handler fencing returns such a 412 without
-an operation envelope. The reference invents no error/outcome field. Capability replies
+response has `body=None`. Native pre-handler fencing returns a 412 whose body is
+the [refusal body](local-http-admission-fence.md#refusal-body)
+`{"error":{"code":"generation_mismatch","message":...}}`, not an operation
+envelope. The reference invents no error/outcome field. Capability replies
 advertise `supported_contract_versions`; they do not contain an operation's
 `contract_version` field. The reference requires a common version 1 and leaves
 capability selection to the existing descriptor helper and server admission.

@@ -27,19 +27,29 @@ pub(crate) struct S3CredentialParams {
 }
 impl S3CredentialParams {
     pub(super) fn validate(&self) -> Result<(), PublicError> {
-        for value in [&self.access_key_id, &self.secret_access_key]
-            .into_iter()
-            .chain(self.session_token.as_ref())
-        {
+        for (field, value) in [
+            ("access_key_id", &self.access_key_id),
+            ("secret_access_key", &self.secret_access_key),
+        ]
+        .into_iter()
+        .chain(
+            self.session_token
+                .as_ref()
+                .map(|token| ("session_token", token)),
+        ) {
             if value.is_empty()
                 || value.len() > 4096
                 || !value.bytes().all(|b| (0x21..=0x7e).contains(&b))
             {
-                return Err(PublicError::invalid_params());
+                return Err(PublicError::invalid_params_because(format!(
+                    "`credentials.{field}` must be 1 to 4096 visible ASCII characters"
+                )));
             }
         }
         if self.access_key_id.contains(['/', ',', '=']) {
-            return Err(PublicError::invalid_params());
+            return Err(PublicError::invalid_params_because(
+                "`credentials.access_key_id` must not contain `/`, `,` or `=`",
+            ));
         }
         Ok(())
     }
@@ -56,10 +66,10 @@ impl S3CredentialParams {
             self.secret_access_key.clone(),
             self.session_token.clone(),
         )
-        .map_err(|_| PublicError::invalid_params())?;
+        .map_err(|error| PublicError::invalid_params_because(error.to_string()))?;
         pumas_library::acquisition::S3Reader::new_authenticated(config, credentials)
             .map(|_| ())
-            .map_err(|_| PublicError::invalid_params())
+            .map_err(|error| PublicError::invalid_params_because(error.to_string()))
     }
     #[cfg(feature = "s3")]
     pub(crate) fn into_native(
@@ -71,7 +81,7 @@ impl S3CredentialParams {
             self.secret_access_key,
             self.session_token,
         )
-        .map_err(|_| PublicError::invalid_params())
+        .map_err(|error| PublicError::invalid_params_because(error.to_string()))
     }
 }
 #[derive(Deserialize)]
@@ -258,13 +268,13 @@ impl S3ConditionalFileParams {
             || !value.bytes().all(|b| b.is_ascii_digit())
             || (value.len() > 1 && value.starts_with('0'))
         {
-            return Err(PublicError::invalid_params());
+            return Err(expected_size_reason());
         }
         value
             .parse::<u64>()
             .ok()
             .filter(|size| *size <= i64::MAX as u64)
-            .ok_or_else(PublicError::invalid_params)
+            .ok_or_else(expected_size_reason)
     }
     fn validate_etag(&self) -> Result<(), PublicError> {
         let tag = &self.expected_etag;
@@ -278,9 +288,23 @@ impl S3ConditionalFileParams {
         {
             Ok(())
         } else {
-            Err(PublicError::invalid_params())
+            Err(PublicError::invalid_params_because(
+                "`expected_etag` must be a quoted HTTP entity tag",
+            ))
         }
     }
+}
+
+fn expected_size_reason() -> PublicError {
+    PublicError::invalid_params_because(
+        "`expected_size` must be a decimal byte count without leading zeros, at most 9223372036854775807",
+    )
+}
+
+fn bundle_size_reason(files: usize) -> PublicError {
+    PublicError::invalid_params_because(format!(
+        "`files` has {files} entries; a bundle must have 2 to 32"
+    ))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -298,13 +322,17 @@ impl S3AuthenticatedBundleImportParams {
 impl S3BundleImportParams {
     pub(crate) fn primary(&self) -> Result<S3ImportParams, PublicError> {
         if !(2..=32).contains(&self.files.len()) {
-            return Err(PublicError::invalid_params());
+            return Err(bundle_size_reason(self.files.len()));
         }
         let primary = self
             .files
             .iter()
             .find(|file| file.facts().1 == self.primary_logical_path)
-            .ok_or_else(PublicError::invalid_params)?;
+            .ok_or_else(|| {
+                PublicError::invalid_params_because(
+                    "`primary_logical_path` does not name one of `files`",
+                )
+            })?;
         let (key, _, sha256, version_id) = primary.facts();
         Ok(S3ImportParams {
             operation_id: self.operation_id.clone(),
@@ -323,7 +351,7 @@ impl S3BundleImportParams {
     }
     pub(crate) fn validate(&self) -> Result<(), PublicError> {
         if !(2..=32).contains(&self.files.len()) {
-            return Err(PublicError::invalid_params());
+            return Err(bundle_size_reason(self.files.len()));
         }
         let primary = self.primary()?;
         primary.validate()?;
@@ -335,7 +363,9 @@ impl S3BundleImportParams {
         for file in sorted {
             let (key, path, sha256, version_id) = file.facts();
             if path.is_empty() || path.len() > 1024 || path.chars().any(char::is_control) {
-                return Err(PublicError::invalid_params());
+                return Err(PublicError::invalid_params_because(
+                    "each `logical_path` must be 1 to 1024 bytes without control characters",
+                ));
             }
             let member = S3ImportParams {
                 key: key.into(),
@@ -347,7 +377,7 @@ impl S3BundleImportParams {
             let (source_key, size) = match (self.read_mode, file) {
                 (S3ReadMode::VersionId, S3SelectedFileParams::Versioned(_)) => (
                     serde_json::to_string(&(key, version_id))
-                        .map_err(|_| PublicError::invalid_params())?,
+                        .map_err(|error| PublicError::invalid_params_because(error.to_string()))?,
                     None,
                 ),
                 (S3ReadMode::Conditional, S3SelectedFileParams::Conditional(file)) => {
@@ -357,12 +387,18 @@ impl S3BundleImportParams {
                         .insert(key, file.expected_etag.as_str())
                         .is_some_and(|old| old != file.expected_etag)
                     {
-                        return Err(PublicError::invalid_params());
+                        return Err(PublicError::invalid_params_because(
+                            "one source key is listed with two different `expected_etag` values",
+                        ));
                     }
                     pins.push((key, file.expected_etag.as_str(), size));
                     (key.into(), Some(size))
                 }
-                _ => return Err(PublicError::invalid_params()),
+                _ => {
+                    return Err(PublicError::invalid_params_because(
+                        "every file must use the shape that matches `read_mode`",
+                    ))
+                }
             };
             files.push(
                 pumas_library::acquisition::ArtifactFile::new(
@@ -371,11 +407,13 @@ impl S3BundleImportParams {
                     size,
                     Some(
                         pumas_library::acquisition::Sha256Evidence::new("caller.sha256", sha256)
-                            .map_err(|_| PublicError::invalid_params())?,
+                            .map_err(|error| {
+                                PublicError::invalid_params_because(error.to_string())
+                            })?,
                     ),
                     pumas_library::acquisition::FileVerificationRequirement::Sha256,
                 )
-                .map_err(|_| PublicError::invalid_params())?,
+                .map_err(|error| PublicError::invalid_params_because(error.to_string()))?,
             );
         }
         let (authority, revision, strength) = match self.read_mode {
@@ -386,7 +424,8 @@ impl S3BundleImportParams {
             ),
             S3ReadMode::Conditional => (
                 "s3.explicit_conditional_objects",
-                serde_json::to_string(&pins).map_err(|_| PublicError::invalid_params())?,
+                serde_json::to_string(&pins)
+                    .map_err(|error| PublicError::invalid_params_because(error.to_string()))?,
                 pumas_library::acquisition::RevisionStrength::Weak,
             ),
         };
@@ -396,11 +435,11 @@ impl S3BundleImportParams {
             pumas_library::acquisition::ArtifactRevisionEvidence::new(
                 authority, revision, strength,
             )
-            .map_err(|_| PublicError::invalid_params())?,
+            .map_err(|error| PublicError::invalid_params_because(error.to_string()))?,
         )
-        .map_err(|_| PublicError::invalid_params())?;
+        .map_err(|error| PublicError::invalid_params_because(error.to_string()))?;
         pumas_library::acquisition::ArtifactManifest::new(source, files)
-            .map_err(|_| PublicError::invalid_params())?;
+            .map_err(|error| PublicError::invalid_params_because(error.to_string()))?;
         pumas_library::model_library::ModelImporter::validate_acquired_payload_paths(
             &self
                 .files
@@ -408,7 +447,7 @@ impl S3BundleImportParams {
                 .map(|file| file.facts().1)
                 .collect::<Vec<_>>(),
         )
-        .map_err(|_| PublicError::invalid_params())
+        .map_err(|error| PublicError::invalid_params_because(error.to_string()))
     }
     #[cfg(feature = "s3")]
     pub(crate) fn native_entries(&self) -> Result<Vec<BundleEntry>, PublicError> {
@@ -423,9 +462,11 @@ impl S3BundleImportParams {
                         "caller.sha256",
                         file.sha256.clone(),
                     )
-                    .map_err(|_| PublicError::invalid_params())?,
+                    .map_err(|error| PublicError::invalid_params_because(error.to_string()))?,
                 }),
-                _ => Err(PublicError::invalid_params()),
+                _ => Err(PublicError::invalid_params_because(
+                    "every file must use the shape that matches `read_mode`",
+                )),
             })
             .collect()
     }
@@ -446,10 +487,12 @@ impl S3BundleImportParams {
                             "caller.sha256",
                             file.sha256.clone(),
                         )
-                        .map_err(|_| PublicError::invalid_params())?,
+                        .map_err(|error| PublicError::invalid_params_because(error.to_string()))?,
                     })
                 }
-                _ => Err(PublicError::invalid_params()),
+                _ => Err(PublicError::invalid_params_because(
+                    "every file must use the shape that matches `read_mode`",
+                )),
             })
             .collect()
     }
@@ -576,24 +619,57 @@ pub(crate) fn validate_s3_id(id: &str) -> Result<(), PublicError> {
     if valid_id(id) {
         Ok(())
     } else {
-        Err(PublicError::invalid_params())
+        Err(PublicError::invalid_params_because(
+            "`operation_id` must be a lowercase hyphenated UUID",
+        ))
     }
+}
+
+/// Bounded, non-blank text without control characters.
+pub(crate) fn validate_s3_text(field: &str, value: &str, max: usize) -> Result<(), PublicError> {
+    if value.trim().is_empty() || value.len() > max || value.chars().any(char::is_control) {
+        return Err(PublicError::invalid_params_because(format!(
+            "`{field}` must be 1 to {max} bytes, not blank, without control characters"
+        )));
+    }
+    Ok(())
+}
+
+/// An S3 endpoint is an `https://` origin: no credentials, path, query or fragment.
+pub(crate) fn validate_s3_endpoint(endpoint: &str) -> Result<(), PublicError> {
+    let reason = || {
+        PublicError::invalid_params_because(
+            "`endpoint` must be an https:// origin without credentials, path, query or fragment",
+        )
+    };
+    let url = url::Url::parse(endpoint).map_err(|_| reason())?;
+    if !endpoint.starts_with("https://")
+        || endpoint.trim() != endpoint
+        || url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || url.path() != "/"
+    {
+        return Err(reason());
+    }
+    Ok(())
 }
 impl S3ImportParams {
     pub(crate) fn validate(&self) -> Result<(), PublicError> {
         validate_s3_id(&self.operation_id)?;
-        for (value, max) in [
-            (&self.endpoint, 4096),
-            (&self.region, 255),
-            (&self.bucket, 255),
-            (&self.key, 1024),
-            (&self.filename, 1024),
-            (&self.family, 255),
-            (&self.official_name, 255),
+        for (field, value, max) in [
+            ("endpoint", &self.endpoint, 4096),
+            ("region", &self.region, 255),
+            ("bucket", &self.bucket, 255),
+            ("key", &self.key, 1024),
+            ("filename", &self.filename, 1024),
+            ("family", &self.family, 255),
+            ("official_name", &self.official_name, 255),
         ] {
-            if value.trim().is_empty() || value.len() > max || value.chars().any(char::is_control) {
-                return Err(PublicError::invalid_params());
-            }
+            validate_s3_text(field, value, max)?;
         }
         match self.read_mode {
             S3ReadMode::VersionId
@@ -602,10 +678,14 @@ impl S3ImportParams {
                     || self.version_id.len() > 4096
                     || self.version_id.chars().any(char::is_control) =>
             {
-                return Err(PublicError::invalid_params());
+                return Err(PublicError::invalid_params_because(
+                    "`version_id` must be a concrete S3 version id of 1 to 4096 bytes (not `null`)",
+                ));
             }
             S3ReadMode::Conditional if !self.version_id.is_empty() => {
-                return Err(PublicError::invalid_params());
+                return Err(PublicError::invalid_params_because(
+                    "`version_id` must be empty in conditional `read_mode`",
+                ));
             }
             _ => {}
         }
@@ -618,7 +698,9 @@ impl S3ImportParams {
             .split('/')
             .any(|part| matches!(part, "" | "." | ".."))
         {
-            return Err(PublicError::invalid_params());
+            return Err(PublicError::invalid_params_because(
+                "`key` must not have empty, `.` or `..` segments",
+            ));
         }
         if self.filename.split('/').any(|component| {
             component.is_empty()
@@ -627,7 +709,9 @@ impl S3ImportParams {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
         }) {
-            return Err(PublicError::invalid_params());
+            return Err(PublicError::invalid_params_because(
+                "each `filename` segment must start with a letter or digit and use only letters, digits, `.`, `_` and `-`",
+            ));
         }
         // Source-independent logical-path admission; extensions grant no model
         // authority. Full namespace/hash and package validation happen later.
@@ -638,7 +722,7 @@ impl S3ImportParams {
             None,
             pumas_library::acquisition::FileVerificationRequirement::CompleteRepresentation,
         )
-        .map_err(|_| PublicError::invalid_params())?;
+        .map_err(|error| PublicError::invalid_params_because(error.to_string()))?;
         // Check destination normalization and the namespace root. Nested
         // primaries also enter package requests, which preserve their layout.
         // Importer documents must be refused before workspace allocation.
@@ -647,24 +731,14 @@ impl S3ImportParams {
             self.filename.split('/').next().unwrap_or_default(),
         ] {
             pumas_library::model_library::ModelImporter::validate_acquired_payload_paths(&[path])
-                .map_err(|_| PublicError::invalid_params())?;
+                .map_err(|error| PublicError::invalid_params_because(error.to_string()))?;
         }
         if self.sha256.len() != 64 || !self.sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(PublicError::invalid_params());
+            return Err(PublicError::invalid_params_because(
+                "`sha256` must be 64 hexadecimal characters",
+            ));
         }
-        let url = url::Url::parse(&self.endpoint).map_err(|_| PublicError::invalid_params())?;
-        if !self.endpoint.starts_with("https://")
-            || self.endpoint.trim() != self.endpoint
-            || url.scheme() != "https"
-            || url.host_str().is_none()
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-            || url.path() != "/"
-        {
-            return Err(PublicError::invalid_params());
-        }
+        validate_s3_endpoint(&self.endpoint)?;
         Ok(())
     }
 }

@@ -77,6 +77,19 @@ pub async fn upsert_runtime_profile(
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let command: UpsertRuntimeProfileParams = parse_params("upsert_runtime_profile", params)?;
+    // Remote providers are supported for External profiles; plain http to
+    // another host sends prompts and outputs over the network unencrypted.
+    if command
+        .profile
+        .endpoint_url
+        .as_ref()
+        .is_some_and(|endpoint| endpoint.is_plaintext_remote())
+    {
+        tracing::warn!(
+            profile_id = command.profile.profile_id.as_str(),
+            "Runtime profile endpoint is a remote host over plain http; requests are not encrypted"
+        );
+    }
     Ok(serde_json::to_value(
         state.api.upsert_runtime_profile(command.profile).await?,
     )?)

@@ -15,6 +15,8 @@ pub struct PluginLoader {
     plugins_dir: PathBuf,
     /// Cached plugin configurations.
     plugins: Arc<RwLock<HashMap<String, PluginConfig>>>,
+    /// An [`empty`](Self::empty) loader never reads or writes `plugins_dir`.
+    in_memory: bool,
 }
 
 impl PluginLoader {
@@ -36,12 +38,25 @@ impl PluginLoader {
         let loader = Self {
             plugins_dir,
             plugins: Arc::new(RwLock::new(HashMap::new())),
+            in_memory: false,
         };
 
         // Load plugins on creation
         loader.reload()?;
 
         Ok(loader)
+    }
+
+    /// A loader with no plugins that never touches the filesystem, for when
+    /// the configured `plugins_dir` cannot be used. It does not substitute
+    /// another directory: [`reload`](Self::reload) keeps it empty and
+    /// [`write_default_config`](Self::write_default_config) is refused.
+    pub fn empty(plugins_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            plugins_dir: plugins_dir.into(),
+            plugins: Arc::new(RwLock::new(HashMap::new())),
+            in_memory: true,
+        }
     }
 
     /// Create a new plugin loader without blocking the async runtime.
@@ -61,6 +76,9 @@ impl PluginLoader {
     ///
     /// This will clear the cache and reload all plugin configurations.
     pub fn reload(&self) -> Result<usize> {
+        if self.in_memory {
+            return Ok(0);
+        }
         let mut plugins = self
             .plugins
             .write()
@@ -194,6 +212,14 @@ impl PluginLoader {
 
     /// Write a default plugin config file (for initial setup).
     pub fn write_default_config(&self, config: &PluginConfig) -> Result<PathBuf> {
+        if self.in_memory {
+            return Err(PumasError::Config {
+                message: format!(
+                    "The plugins directory {} could not be loaded; no plugin config was written",
+                    self.plugins_dir.display()
+                ),
+            });
+        }
         let path = self.plugins_dir.join(format!("{}.json", config.id));
 
         let content = serde_json::to_string_pretty(config).map_err(|e| PumasError::Json {
@@ -208,6 +234,23 @@ impl PluginLoader {
         })?;
 
         Ok(path)
+    }
+}
+
+#[cfg(test)]
+mod empty_loader_tests {
+    use super::*;
+
+    #[test]
+    fn empty_loader_never_reads_or_creates_its_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("absent");
+        let loader = PluginLoader::empty(&missing);
+        assert_eq!(loader.count(), 0);
+        assert_eq!(loader.reload().unwrap(), 0);
+        assert!(loader.get_all().is_empty());
+        assert!(!missing.exists());
+        assert_eq!(loader.plugins_dir(), missing.as_path());
     }
 }
 

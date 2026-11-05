@@ -4,6 +4,7 @@ use super::gateway_stream::{self, GenerationCancellation, GenerationTransport};
 use super::openai_gateway_onnx::handle_onnx_embedding;
 use crate::contract::PublicError;
 use crate::http_transport::RequestDisconnect;
+use crate::provider_clients::ProviderHttp;
 use crate::server::AppState;
 use axum::{
     body::Bytes,
@@ -34,6 +35,7 @@ const OPENAI_CHAT_COMPLETIONS_BODY_BYTES: usize = 32 * 1024 * 1024;
 const OPENAI_COMPLETIONS_BODY_BYTES: usize = 32 * 1024 * 1024;
 const OPENAI_EMBEDDINGS_BODY_BYTES: usize = 32 * 1024 * 1024;
 const OPENAI_GATEWAY_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
+const GENERATION_CANCELLED: &str = "The generation ended before a result: the caller disconnected, Pumas is shutting down or the model's serving session stopped. The provider outcome is unknown; do not assume it was not run.";
 /// Total timeout for non-generation gateway routes (models, embeddings).
 /// Generation routes never use this budget.
 const OPENAI_GATEWAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
@@ -48,15 +50,15 @@ const OPENAI_GATEWAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// `docs/contracts/generation-lifetime.md`). Non-generation routes
 /// (models, embeddings, health, startup, loading, installation, shutdown)
 /// keep their independently bounded policies and must not use this client.
-fn generation_http_client() -> &'static reqwest::Client {
-    static GENERATION_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+fn generation_http_client() -> &'static ProviderHttp {
+    static GENERATION_HTTP_CLIENT: OnceLock<ProviderHttp> = OnceLock::new();
     GENERATION_HTTP_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .connect_timeout(GENERATION_CONNECT_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .build()
-            .expect("failed to build generation HTTP client")
+        ProviderHttp::build(|builder| {
+            builder
+                .connect_timeout(GENERATION_CONNECT_TIMEOUT)
+                .retry(reqwest::retry::never())
+        })
+        .expect("failed to build generation HTTP client")
     })
 }
 
@@ -345,7 +347,9 @@ pub(super) async fn dispatch_openai(
     }) {
         return openai_public_error_response(
             StatusCode::SERVICE_UNAVAILABLE,
-            PublicError::unavailable(),
+            PublicError::unavailable_because(
+                "The served model changed after this operation was admitted; read its capabilities again before retrying.",
+            ),
         );
     }
 
@@ -406,7 +410,9 @@ pub(super) async fn dispatch_openai(
             Err(()) => {
                 return openai_public_error_response(
                     StatusCode::SERVICE_UNAVAILABLE,
-                    PublicError::unavailable(),
+                    PublicError::unavailable_because(
+                        "The serving session for this model is stopping or no longer current.",
+                    ),
                 )
             }
         };
@@ -468,12 +474,17 @@ pub(super) async fn dispatch_openai(
     // any per-request total/read/idle deadline; non-generation routes keep
     // their independently bounded budget on the gateway client.
     let send = if policy.generation {
-        generation_http_client().post(target_url).json(&body).send()
+        generation_http_client()
+            .for_url(&target_url)
+            .post(&target_url)
+            .json(&body)
+            .send()
     } else if admission.is_some() {
         // Typed operations never redirect or replay. Embeddings retain their
         // pre-existing bounded non-generation policy on this same client.
         generation_http_client()
-            .post(target_url)
+            .for_url(&target_url)
+            .post(&target_url)
             .timeout(
                 policy
                     .request_timeout
@@ -490,7 +501,8 @@ pub(super) async fn dispatch_openai(
         };
         state
             .gateway_http_client
-            .post(target_url)
+            .for_url(&target_url)
+            .post(&target_url)
             .timeout(bounded)
             .json(&body)
             .send()
@@ -504,7 +516,7 @@ pub(super) async fn dispatch_openai(
     let response = match lifetime.as_mut() {
         Some(lifetime) => tokio::select! {
             biased;
-            () = lifetime.cancelled() => return openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
+            () = lifetime.cancelled() => return openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable_because(GENERATION_CANCELLED)),
             response = send => response,
         },
         None => send.await,
@@ -524,7 +536,9 @@ pub(super) async fn dispatch_openai(
             if !is_sse {
                 return openai_public_error_response(
                     StatusCode::BAD_GATEWAY,
-                    PublicError::unavailable(),
+                    PublicError::unavailable_because(
+                        "The provider answered a streaming request without an event stream.",
+                    ),
                 );
             }
             gateway_stream::progressive_response(
@@ -536,12 +550,28 @@ pub(super) async fn dispatch_openai(
         Ok(response) => match lifetime.as_mut() {
             Some(lifetime) => tokio::select! {
                 biased;
-                () = lifetime.cancelled() => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
+                () = lifetime.cancelled() => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable_because(GENERATION_CANCELLED)),
                 response = proxy_response(response) => response,
             },
             None => proxy_response(response).await,
         },
-        Err(_) => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
+        Err(error) => openai_public_error_response(
+            StatusCode::BAD_GATEWAY,
+            PublicError::unavailable_because(provider_send_failure(&error)),
+        ),
+    }
+}
+
+/// Tell an unreachable provider from a slow one; the URL is not repeated.
+fn provider_send_failure(error: &reqwest::Error) -> String {
+    if error.is_timeout() {
+        "The provider did not answer within the request time limit.".into()
+    } else if error.is_connect() {
+        "Could not connect to the provider at the served model's endpoint.".into()
+    } else if error.is_redirect() {
+        "The provider answered with a redirect, which Pumas does not follow.".into()
+    } else {
+        "The request to the provider failed before a response arrived.".into()
     }
 }
 
@@ -939,7 +969,9 @@ async fn proxy_response(response: reqwest::Response) -> Response {
         let reason = provider_error_reason(response).await;
         return openai_public_error_response_with_reason(
             status,
-            PublicError::unavailable(),
+            PublicError::unavailable_because(format!(
+                "The provider refused the request with HTTP status {status}."
+            )),
             reason.as_deref(),
         );
     }
@@ -956,14 +988,19 @@ async fn proxy_response(response: reqwest::Response) -> Response {
             Err(_) => {
                 return openai_public_error_response(
                     StatusCode::BAD_GATEWAY,
-                    PublicError::unavailable(),
+                    PublicError::unavailable_because(
+                        "The provider response ended before it was complete.",
+                    ),
                 );
             }
         };
         if bytes.len().saturating_add(chunk.len()) > OPENAI_GATEWAY_RESPONSE_BYTES {
             return openai_public_error_response(
                 StatusCode::BAD_GATEWAY,
-                PublicError::unavailable(),
+                PublicError::unavailable_because(format!(
+                    "The provider response exceeds the gateway's {} MiB response limit.",
+                    OPENAI_GATEWAY_RESPONSE_BYTES / (1024 * 1024)
+                )),
             );
         }
         bytes.extend_from_slice(&chunk);

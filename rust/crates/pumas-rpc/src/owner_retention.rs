@@ -1,8 +1,9 @@
 //! Passive connection-held owner retention, not effect custody or recovery.
-use crate::discovery::{request_fence, HttpRouteIdentity};
+use crate::discovery::{current_description, request_fence, HttpRouteIdentity};
+use crate::http_rejection::HttpRejection;
 use crate::server::AppState;
 use axum::extract::State;
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap};
 use axum::response::{
     sse::{Event, KeepAlive, Sse},
     IntoResponse, Response,
@@ -53,30 +54,27 @@ pub(crate) async fn handle(
     headers: HeaderMap,
 ) -> Response {
     if !cfg!(target_os = "linux") {
-        return StatusCode::NOT_IMPLEMENTED.into_response();
+        return HttpRejection::RetentionUnsupported.into_response();
     }
     let fence = match request_fence(&headers) {
         Ok(Some(fence)) => fence,
-        Ok(None) => return StatusCode::PRECONDITION_REQUIRED.into_response(),
-        Err(()) => return StatusCode::BAD_REQUEST.into_response(),
+        Ok(None) => return HttpRejection::FenceRequired.into_response(),
+        Err(error) => return HttpRejection::MalformedFence(error).into_response(),
     };
-    if state.shutdown_request.is_requested() {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    }
-    let description = match state.api.advertised_http_service() {
-        Ok(Some(description)) if identity.matches(&description) => description,
-        _ => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    let description = match current_description(&state, &identity) {
+        Ok(description) => description,
+        Err(rejection) => return rejection.into_response(),
     };
     if !fence.matches(&description) {
-        return StatusCode::PRECONDITION_FAILED.into_response();
+        return HttpRejection::GenerationMismatch.into_response();
     }
     let permit = match admission.0.try_acquire_owned() {
         Ok(permit) => permit,
-        Err(_) => return StatusCode::TOO_MANY_REQUESTS.into_response(),
+        Err(_) => return HttpRejection::RetentionCapacity.into_response(),
     };
     let guard = match state.api.retain_local_owner(&description.instance) {
         Ok(guard) => guard,
-        Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        Err(_) => return HttpRejection::RetentionUnavailable.into_response(),
     };
     let active = ActiveRetention {
         state,
@@ -305,6 +303,7 @@ pub(crate) async fn retain_from_cli(root: &std::path::Path) -> anyhow::Result<()
 #[cfg(all(test, target_os = "linux", not(feature = "inference-plugins")))]
 mod tests {
     use super::*;
+    use axum::http::StatusCode;
     use pumas_library::discovery::{
         CompatibilityRequirements, HttpServiceDescription, LocalDiscovery,
     };
@@ -390,6 +389,20 @@ mod tests {
         frames
     }
 
+    /// A refusal keeps its status and names its reason in a JSON body.
+    async fn refusal(response: reqwest::Response) -> (StatusCode, String) {
+        let status = response.status();
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .is_some_and(|message| !message.is_empty()),
+            "{body}"
+        );
+        (status, body["error"]["code"].as_str().unwrap().to_owned())
+    }
+
     #[tokio::test]
     async fn retention_requires_exact_fence_and_preserves_owner_on_refusal() {
         let fixture = fixture().await;
@@ -400,38 +413,62 @@ mod tests {
             pumas_library::discovery::HTTP_OWNER_RETENTION_PATH
         );
         assert_eq!(
-            client.get(&url).send().await.unwrap().status(),
-            StatusCode::PRECONDITION_REQUIRED
+            refusal(client.get(&url).send().await.unwrap()).await,
+            (StatusCode::PRECONDITION_REQUIRED, "fence_required".into())
         );
         assert_eq!(
-            client
-                .get(&url)
-                .header(
-                    pumas_library::discovery::HTTP_INSTANCE_GENERATION_HEADER,
-                    "partial"
-                )
-                .send()
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::BAD_REQUEST
+            refusal(
+                client
+                    .get(&url)
+                    .header(
+                        pumas_library::discovery::HTTP_INSTANCE_GENERATION_HEADER,
+                        "partial"
+                    )
+                    .send()
+                    .await
+                    .unwrap()
+            )
+            .await,
+            (StatusCode::BAD_REQUEST, "fence_malformed".into())
         );
         assert_eq!(
-            client
-                .get(&url)
-                .header(
-                    pumas_library::discovery::HTTP_INSTANCE_GENERATION_HEADER,
-                    &fixture.description.instance.generation,
-                )
-                .header(
-                    pumas_library::discovery::HTTP_SERVICE_GENERATION_HEADER,
-                    "stale"
-                )
-                .send()
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::PRECONDITION_FAILED
+            refusal(
+                client
+                    .get(&url)
+                    .header(
+                        pumas_library::discovery::HTTP_INSTANCE_GENERATION_HEADER,
+                        &fixture.description.instance.generation,
+                    )
+                    .header(
+                        pumas_library::discovery::HTTP_SERVICE_GENERATION_HEADER,
+                        "stale"
+                    )
+                    .send()
+                    .await
+                    .unwrap()
+            )
+            .await,
+            (
+                StatusCode::PRECONDITION_FAILED,
+                "generation_mismatch".into()
+            )
+        );
+        // Router fallbacks: an unknown path and a wrong method on a known one.
+        let base = fixture.description.endpoint.as_str().trim_end_matches('/');
+        assert_eq!(
+            refusal(
+                client
+                    .get(format!("{base}/no-such-route"))
+                    .send()
+                    .await
+                    .unwrap()
+            )
+            .await,
+            (StatusCode::NOT_FOUND, "route_not_found".into())
+        );
+        assert_eq!(
+            refusal(client.get(format!("{base}/rpc")).send().await.unwrap()).await,
+            (StatusCode::METHOD_NOT_ALLOWED, "method_not_allowed".into())
         );
         assert_eq!(
             request(&client, &fixture.description)
@@ -463,12 +500,8 @@ mod tests {
             holds.push(acquire(&client, &fixture).await);
         }
         assert_eq!(
-            request(&client, &fixture.description)
-                .send()
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::TOO_MANY_REQUESTS
+            refusal(request(&client, &fixture.description).send().await.unwrap()).await,
+            (StatusCode::TOO_MANY_REQUESTS, "retention_capacity".into())
         );
         drop(holds.pop());
         let mut next = tokio::time::timeout(Duration::from_secs(10), async {

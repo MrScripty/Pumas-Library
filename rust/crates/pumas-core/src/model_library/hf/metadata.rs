@@ -109,6 +109,7 @@ impl HuggingFaceClient {
         repo_id: &str,
         revision: &DownloadRevision,
     ) -> Result<HfSearchResult> {
+        validate_hf_repo_id(repo_id)?;
         let url = match revision.as_persisted() {
             Some(commit) => format!(
                 "{}/api/models/{}/revision/{}",
@@ -263,6 +264,8 @@ impl HuggingFaceClient {
         repo_id: &str,
         revision: &DownloadRevision,
     ) -> Result<RepoFileTree> {
+        // The ID names both the cache file and the authenticated API path.
+        validate_hf_repo_id(repo_id)?;
         // Check cache first
         let cache_repo_id = revision_cache_key(repo_id, revision);
         let cache_file = self.get_cache_path(&cache_repo_id, "files");
@@ -547,7 +550,7 @@ fn revision_cache_key(repo_id: &str, revision: &DownloadRevision) -> String {
     }
 }
 
-fn validate_hf_repo_id(repo_id: &str) -> Result<()> {
+pub(super) fn validate_hf_repo_id(repo_id: &str) -> Result<()> {
     let mut segments = repo_id.split('/');
     let owner = segments.next().unwrap_or_default();
     let name = segments.next().unwrap_or_default();
@@ -671,6 +674,63 @@ mod tests {
             request
         });
         (base_url, server)
+    }
+
+    #[tokio::test]
+    async fn read_paths_refuse_invalid_repository_ids_before_any_request() {
+        let temp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(temp.path()).unwrap();
+        let pinned = DownloadRevision::from_commit(&"a".repeat(40)).unwrap();
+        let is_repo_refusal = |error: PumasError| matches!(error, PumasError::Validation { ref field, .. } if field == "repo_id");
+        for repo_id in ["model", "../model", "acme/model/../../x", "acme/model?x=1"] {
+            assert!(is_repo_refusal(
+                client.get_model_snapshot(repo_id).await.unwrap_err()
+            ));
+            assert!(is_repo_refusal(
+                client
+                    .get_model_snapshot_at_revision(repo_id, &pinned)
+                    .await
+                    .unwrap_err()
+            ));
+            assert!(is_repo_refusal(
+                client.get_repo_files(repo_id).await.unwrap_err()
+            ));
+            assert!(is_repo_refusal(
+                client
+                    .get_repo_files_at_revision(repo_id, &pinned)
+                    .await
+                    .unwrap_err()
+            ));
+            assert!(is_repo_refusal(
+                client.classify_repo_bundle(repo_id).await.unwrap_err()
+            ));
+            assert!(is_repo_refusal(
+                client.get_download_details(repo_id, &[]).await.unwrap_err()
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn search_encodes_the_pipeline_tag_filter() {
+        let (base_url, server) = serve_once("200 OK", "[]".to_string()).await;
+        let temp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+        client.set_test_download_base_url(base_url);
+        let params = HfSearchParams {
+            query: "llama".into(),
+            kind: Some("text-generation&author=evil".into()),
+            ..Default::default()
+        };
+
+        assert!(client.search_api(&params).await.unwrap().is_empty());
+
+        let request = server.await.unwrap();
+        let request_line = request.lines().next().unwrap();
+        assert!(
+            request_line.contains("&pipeline_tag=text-generation%26author%3Devil "),
+            "{request_line}"
+        );
+        assert!(!request_line.contains("&author="), "{request_line}");
     }
 
     #[tokio::test]

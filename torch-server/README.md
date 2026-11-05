@@ -60,7 +60,7 @@ Use the Python version pinned at the repository root. From the repository root:
 ```bash
 python3 -m venv torch-server/.venv
 torch-server/.venv/bin/pip install -r torch-server/requirements.txt
-torch-server/.venv/bin/pip install -r torch-server/requirements-dev.txt
+torch-server/.venv/bin/pip install --require-hashes -r torch-server/requirements-dev.lock
 torch-server/.venv/bin/python torch-server/serve.py --host 127.0.0.1 --port 8400 --max-models 4
 ```
 

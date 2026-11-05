@@ -52,7 +52,7 @@ fi
 echo ""
 echo "Recommended verification commands:"
 echo "  corepack pnpm install --frozen-lockfile"
-echo "  python3 -m pip install -r torch-server/requirements-dev.txt"
+echo "  python3 -m pip install --require-hashes -r torch-server/requirements-dev.lock"
 echo "  bash ./launcher.sh --install"
 echo "  npm run test:launcher"
 echo "  python3 -m ruff check torch-server"

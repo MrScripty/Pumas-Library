@@ -27,6 +27,9 @@ export function useAvailableVersionState({
   const [rateLimitRetryAfter, setRateLimitRetryAfter] = useState<number | null>(null);
 
   const followupRefreshRef = useRef<NodeJS.Timeout | null>(null);
+  // Set when the listing was served from an expired cache, which the backend
+  // refreshes in the background; cleared once the refreshed listing loads.
+  const listingMayBeStaleRef = useRef(false);
   const fetchAvailableVersionsRef = useRef<(forceRefresh?: boolean) => Promise<void>>(
     () => Promise.resolve()
   );
@@ -52,8 +55,14 @@ export function useAvailableVersionState({
 
     try {
       logger.debug('Fetching available versions', { forceRefresh });
+      // Read before listing: an expired cache here means the listing may be
+      // the stale one the backend serves while it refreshes.
+      const before = forceRefresh
+        ? null
+        : await api.get_github_cache_status(resolvedAppId).catch(() => null);
       const result = await api.get_available_versions(forceRefresh, resolvedAppId);
       if (result.success) {
+        listingMayBeStaleRef.current = before !== null && !before.is_valid;
         const mapped = result.versions.map((version) => ({
           ...version,
           body: version.body ?? undefined,
@@ -104,20 +113,19 @@ export function useAvailableVersionState({
       return () => {};
     }
 
-    let wasFetching = false;
     const checkBackgroundFetch = async () => {
       try {
         if (!isAPIAvailable()) return;
         const status = await api.get_github_cache_status(resolvedAppId);
         setCacheStatus(status);
-        // A stale listing is served at once and refreshed in the background;
-        // reload it when that refresh finishes.
-        if (wasFetching && !status.is_fetching) {
+        // Reload a stale listing once its background refresh has completed,
+        // however briefly the refresh was visible to this poll.
+        if (listingMayBeStaleRef.current && status.is_valid && !status.is_fetching) {
+          listingMayBeStaleRef.current = false;
           void fetchAvailableVersionsRef.current(false).catch(() => {
             // fetchAvailableVersions logs its own failures.
           });
         }
-        wasFetching = status.is_fetching;
 
         if (status.is_fetching && !status.has_cache) {
           logger.info('Background GitHub fetch in progress (first-time fetch)');

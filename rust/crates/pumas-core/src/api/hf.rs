@@ -4838,6 +4838,8 @@ pub(super) mod tests {
             total_size_bytes: None,
             quant_sizes: None,
             compatible_engines: Vec::new(),
+            observed_at: None,
+            cached: false,
         }
     }
 

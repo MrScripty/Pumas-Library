@@ -512,6 +512,8 @@ mod tests {
             total_size_bytes: None,
             quant_sizes: Some(quant_sizes),
             compatible_engines: vec![],
+            observed_at: None,
+            cached: false,
         };
 
         let ffi_model = FfiHuggingFaceModel::from(model);
@@ -540,6 +542,8 @@ mod tests {
             total_size_bytes: None,
             quant_sizes: None,
             compatible_engines: vec![],
+            observed_at: None,
+            cached: false,
         };
 
         let ffi_model = FfiHuggingFaceModel::from(model);

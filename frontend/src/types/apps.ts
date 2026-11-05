@@ -109,6 +109,10 @@ export interface RemoteModelInfo {
   /** Compatible inference engines based on model formats */
   compatibleEngines?: string[];
   modelCard?: Record<string, unknown> | null;
+  /** When HuggingFace was observed (RFC 3339): the original search time for a cached result. */
+  observedAt?: string;
+  /** True when the result came from the local search cache rather than a live fetch. */
+  cached?: boolean;
   /** Consumer-owned presentation, populated only for an explicit cached search. */
   cachedDiscovery?: CachedDiscoveryPresentation | null;
 }

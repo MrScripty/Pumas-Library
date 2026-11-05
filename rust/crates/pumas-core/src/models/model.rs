@@ -656,6 +656,15 @@ pub struct HuggingFaceModel {
     /// Compatible inference engines based on model formats
     #[serde(default)]
     pub compatible_engines: Vec<String>,
+    /// When this metadata was observed from HuggingFace (RFC 3339): the
+    /// original search time for a cached search result, the fetch time for a
+    /// live one. `None` when the source did not record it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<String>,
+    /// Whether this result was served from the local search cache rather
+    /// than fetched from HuggingFace for this request.
+    #[serde(default)]
+    pub cached: bool,
 }
 
 /// Exact download details derived from a repository file tree.

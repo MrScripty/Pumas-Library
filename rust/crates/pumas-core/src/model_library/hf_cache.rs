@@ -124,6 +124,8 @@ impl From<CachedRepoDetails> for HuggingFaceModel {
             total_size_bytes: cached.total_size_bytes,
             quant_sizes: None, // Deprecated field
             compatible_engines,
+            observed_at: Some(cached.cached_at.to_rfc3339()),
+            cached: true,
         }
     }
 }
@@ -492,7 +494,12 @@ impl HfSearchCache {
 
         for repo_id in &repo_ids {
             if let Some(details) = self.get_repo_details_internal(&conn, repo_id, &now)? {
-                models.push(details.into());
+                // A cached search result was observed when the search ran.
+                models.push(HuggingFaceModel {
+                    observed_at: Some(searched_at.to_rfc3339()),
+                    cached: true,
+                    ..details.into()
+                });
             }
         }
 
@@ -960,6 +967,8 @@ mod tests {
             total_size_bytes: Some(4_000_000_000),
             quant_sizes: None,
             compatible_engines: vec![],
+            observed_at: None,
+            cached: false,
         }
     }
 
@@ -1014,7 +1023,27 @@ mod tests {
         // Retrieve
         let results = cache.get_search_results("test query", None, 25, 0).unwrap();
         assert!(results.is_some());
-        assert_eq!(results.unwrap().len(), 2);
+        let results = results.unwrap();
+        assert_eq!(results.len(), 2);
+
+        // Cached results say so and carry the original search time.
+        let searched_at: String = cache
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT searched_at FROM search_cache", [], |row| row.get(0))
+            .unwrap();
+        let searched_at = chrono::DateTime::parse_from_rfc3339(&searched_at).unwrap();
+        for model in &results {
+            assert!(model.cached);
+            let observed_at =
+                chrono::DateTime::parse_from_rfc3339(model.observed_at.as_deref().unwrap())
+                    .unwrap();
+            assert_eq!(observed_at, searched_at);
+        }
+        let wire = serde_json::to_value(&results[0]).unwrap();
+        assert_eq!(wire["cached"], true);
+        assert!(wire["observedAt"].is_string());
     }
 
     #[test]

@@ -173,6 +173,11 @@ pub(crate) fn sync_directory_file(file: &File) -> io::Result<()> {
 }
 
 /// Rename one basename relative to held parents, without resolving ambient paths.
+///
+/// Uses POSIX semantics where the filesystem supports them, as `std::fs::rename`
+/// does: a replaced target that another handle still has open (a concurrent
+/// reader, an indexer, an antivirus scan) is unlinked instead of refusing the
+/// rename. Filesystems without them (FAT, older Windows) get the classic rename.
 #[cfg(windows)]
 #[allow(unsafe_code)]
 pub(crate) fn rename_at(
@@ -185,9 +190,13 @@ pub(crate) fn rename_at(
     use cap_std::fs::{OpenOptions, OpenOptionsExt};
     use std::os::windows::{ffi::OsStrExt, io::AsRawHandle};
     use windows_sys::Wdk::Storage::FileSystem::{
-        FileRenameInformation, NtSetInformationFile, FILE_RENAME_INFORMATION,
+        FileRenameInformation, FileRenameInformationEx, NtSetInformationFile,
+        FILE_RENAME_INFORMATION, FILE_RENAME_POSIX_SEMANTICS, FILE_RENAME_REPLACE_IF_EXISTS,
     };
-    use windows_sys::Win32::Foundation::RtlNtStatusToDosError;
+    use windows_sys::Win32::Foundation::{
+        RtlNtStatusToDosError, STATUS_INVALID_INFO_CLASS, STATUS_INVALID_PARAMETER,
+        STATUS_NOT_SUPPORTED,
+    };
     use windows_sys::Win32::Storage::FileSystem::{
         DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
     };
@@ -231,22 +240,41 @@ pub(crate) fn rename_at(
     // enough initialized space for the variable-length UTF-16 tail.
     let mut storage = vec![0usize; (bytes as usize).div_ceil(std::mem::size_of::<usize>())];
     let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
-    // SAFETY: storage is aligned, initialized, and sized for the header and name.
-    // Both handles and all pointers remain live for this synchronous call.
-    let result = unsafe {
-        let mut status: IO_STATUS_BLOCK = std::mem::zeroed();
-        (*info).Anonymous.ReplaceIfExists = u8::from(replace);
-        (*info).RootDirectory = target_parent.as_raw_handle();
-        (*info).FileNameLength = (name.len() * 2) as u32;
-        std::ptr::copy_nonoverlapping(name.as_ptr(), (*info).FileName.as_mut_ptr(), name.len());
-        NtSetInformationFile(
-            source.as_raw_handle(),
-            &mut status,
-            info.cast(),
-            bytes,
-            FileRenameInformation,
-        )
+    let set = |class, flags: u32| {
+        // SAFETY: storage is aligned, initialized, and sized for the header and
+        // name. Both handles and all pointers remain live for this synchronous
+        // call. The extended class reads the union as `Flags`; the classic
+        // class reads only its low `ReplaceIfExists` byte.
+        unsafe {
+            let mut status: IO_STATUS_BLOCK = std::mem::zeroed();
+            (*info).Anonymous.Flags = flags;
+            (*info).RootDirectory = target_parent.as_raw_handle();
+            (*info).FileNameLength = (name.len() * 2) as u32;
+            std::ptr::copy_nonoverlapping(name.as_ptr(), (*info).FileName.as_mut_ptr(), name.len());
+            NtSetInformationFile(
+                source.as_raw_handle(),
+                &mut status,
+                info.cast(),
+                bytes,
+                class,
+            )
+        }
     };
+    let replace_flag = if replace {
+        FILE_RENAME_REPLACE_IF_EXISTS
+    } else {
+        0
+    };
+    let mut result = set(
+        FileRenameInformationEx,
+        replace_flag | FILE_RENAME_POSIX_SEMANTICS,
+    );
+    if matches!(
+        result,
+        STATUS_INVALID_PARAMETER | STATUS_INVALID_INFO_CLASS | STATUS_NOT_SUPPORTED
+    ) {
+        result = set(FileRenameInformation, u32::from(replace));
+    }
     if result < 0 {
         // SAFETY: this pure conversion accepts any NTSTATUS value.
         Err(io::Error::from_raw_os_error(
@@ -293,6 +321,29 @@ mod tests {
         .unwrap();
         assert_eq!(directory.read("target").unwrap(), b"new");
         assert!(!directory.exists("source"));
+    }
+
+    #[test]
+    fn windows_held_rename_replaces_a_target_another_handle_has_open() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = Dir::open_ambient_dir(temp.path(), cap_std::ambient_authority()).unwrap();
+        directory.write("source", b"new").unwrap();
+        directory.write("target", b"old").unwrap();
+        // A concurrent reader (std opens with FILE_SHARE_DELETE) must not make
+        // an atomic publication fail; it keeps reading the replaced file.
+        let mut reader = std::fs::File::open(temp.path().join("target")).unwrap();
+        rename_at(
+            &directory,
+            "source".as_ref(),
+            &directory,
+            "target".as_ref(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(directory.read("target").unwrap(), b"new");
+        let mut held = Vec::new();
+        std::io::Read::read_to_end(&mut reader, &mut held).unwrap();
+        assert_eq!(held, b"old");
     }
 
     #[test]

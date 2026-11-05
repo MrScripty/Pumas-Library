@@ -128,6 +128,8 @@ GROUPS = (
             f("failed_construction_retains_claim_instead_of_asserting_initializer_cessation"),
             f("intent_ipc_tests::"),
             f("test_venv_python_path"),
+            # Held-parent renames, including replacing a target another handle has open.
+            f("platform::capability_fs::tests", WINDOWS),
             f("platform::linux_group", LINUX),
             f(
                 "owned_sse_observes_external_load_unload_reconnect_and_drains_before_replacement",

@@ -615,6 +615,12 @@ pub enum OptionName {
     ImageBytes,
     ImagePixels,
     ImageCount,
+    /// Decoded bytes of all images in one request.
+    TotalImageBytes,
+    /// Messages in one `image_messages` input.
+    MessageCount,
+    /// Content parts across one request.
+    ContentParts,
 }
 
 #[cfg(test)]

@@ -2,7 +2,9 @@
 //!
 //! Dimensions/pixel/source limits are checked before raster decode. The codec's
 //! 64 MiB allocation limit is best effort, not process/OS memory containment.
-use super::types::{ErrorCode, ImageEncoding, ImagePart, OperationInput, Role, MAX_BYTES};
+use super::types::{
+    ErrorCode, ImageEncoding, ImagePart, OperationInput, Rejection, Role, MAX_BYTES,
+};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{codecs::png::PngDecoder, DynamicImage, ImageDecoder, Limits};
 use serde_json::{json, Value};
@@ -28,45 +30,101 @@ struct Budget {
     parts: usize,
     text: usize,
 }
+/// A `request_limit` rejection that names the limit and the request's value.
+fn limit(message: String) -> Rejection {
+    Rejection::new(ErrorCode::RequestLimit, message)
+}
+
+/// The decode bounds this module enforces, advertised in `option_bounds` of
+/// every image-bearing capability. They protect the decoder, not the model:
+/// a model's own image budget is enforced by its provider.
+pub(super) fn image_bounds(min_images: usize, messages: bool) -> Vec<super::types::OptionBound> {
+    use super::types::OptionName;
+    let mut bounds = vec![
+        super::bound(OptionName::ImageBytes, 1., MAX_IMAGE_BYTES as f64),
+        super::bound(
+            OptionName::TotalImageBytes,
+            1.,
+            MAX_TOTAL_IMAGE_BYTES as f64,
+        ),
+        super::bound(OptionName::ImagePixels, 1., MAX_PIXELS as f64),
+        super::bound(OptionName::ImageCount, min_images as f64, MAX_IMAGES as f64),
+        super::bound(OptionName::Width, 1., f64::from(MAX_DIMENSION)),
+        super::bound(OptionName::Height, 1., f64::from(MAX_DIMENSION)),
+    ];
+    if messages {
+        bounds.push(super::bound(
+            OptionName::MessageCount,
+            1.,
+            MAX_MESSAGES as f64,
+        ));
+        bounds.push(super::bound(OptionName::ContentParts, 1., MAX_PARTS as f64));
+    }
+    bounds
+}
+
 impl Budget {
-    fn image(&mut self, encoded: usize) -> Result<(), ErrorCode> {
+    fn image(&mut self, encoded: usize) -> Result<(), Rejection> {
         self.images += 1;
         self.encoded += encoded;
-        if self.images > MAX_IMAGES
-            || encoded > MAX_ENCODED_BYTES
-            || self.encoded > MAX_TOTAL_ENCODED_BYTES
-        {
-            return Err(ErrorCode::RequestLimit);
+        if self.images > MAX_IMAGES {
+            return Err(limit(format!(
+                "the request has more than {MAX_IMAGES} images; the limit is {MAX_IMAGES}"
+            )));
+        }
+        if encoded > MAX_ENCODED_BYTES {
+            return Err(limit(format!(
+                "an image is {encoded} base64 bytes; the limit is {MAX_ENCODED_BYTES} ({MAX_IMAGE_BYTES} decoded bytes)"
+            )));
+        }
+        if self.encoded > MAX_TOTAL_ENCODED_BYTES {
+            return Err(limit(format!(
+                "the images total {} base64 bytes; the limit is {MAX_TOTAL_ENCODED_BYTES} ({MAX_TOTAL_IMAGE_BYTES} decoded bytes)",
+                self.encoded
+            )));
         }
         Ok(())
     }
-    fn source(&mut self, bytes: usize) -> Result<(), ErrorCode> {
+    fn source(&mut self, bytes: usize) -> Result<(), Rejection> {
         self.source += bytes;
-        if bytes > MAX_IMAGE_BYTES || self.source > MAX_TOTAL_IMAGE_BYTES {
-            return Err(ErrorCode::RequestLimit);
+        if bytes > MAX_IMAGE_BYTES {
+            return Err(limit(format!(
+                "an image is {bytes} bytes; the limit is {MAX_IMAGE_BYTES} bytes per image"
+            )));
+        }
+        if self.source > MAX_TOTAL_IMAGE_BYTES {
+            return Err(limit(format!(
+                "the images total {} bytes; the limit is {MAX_TOTAL_IMAGE_BYTES} bytes",
+                self.source
+            )));
         }
         Ok(())
     }
-    fn part(&mut self) -> Result<(), ErrorCode> {
+    fn part(&mut self) -> Result<(), Rejection> {
         self.parts += 1;
         if self.parts > MAX_PARTS {
-            return Err(ErrorCode::RequestLimit);
+            return Err(limit(format!(
+                "the request has more than {MAX_PARTS} content parts; the limit is {MAX_PARTS}"
+            )));
         }
         Ok(())
     }
-    fn text(&mut self, text: &str) -> Result<(), ErrorCode> {
+    fn text(&mut self, text: &str) -> Result<(), Rejection> {
         if text.trim().is_empty() {
-            return Err(ErrorCode::InvalidRequest);
+            return Err(Rejection::invalid("a text part must not be blank"));
         }
         self.text += text.len();
         if self.text > MAX_BYTES {
-            return Err(ErrorCode::RequestLimit);
+            return Err(limit(format!(
+                "the text parts total {} bytes; the limit is {MAX_BYTES} bytes",
+                self.text
+            )));
         }
         Ok(())
     }
 }
 
-pub(super) fn provider_messages(input: &OperationInput) -> Result<Value, ErrorCode> {
+pub(super) fn provider_messages(input: &OperationInput) -> Result<Value, Rejection> {
     let mut budget = Budget::default();
     match input {
         OperationInput::Image {
@@ -80,19 +138,25 @@ pub(super) fn provider_messages(input: &OperationInput) -> Result<Value, ErrorCo
         }
         OperationInput::ImageMessages { messages } => {
             if messages.is_empty() {
-                return Err(ErrorCode::InvalidRequest);
+                return Err(ErrorCode::InvalidRequest.into());
             }
             if messages.len() > MAX_MESSAGES {
-                return Err(ErrorCode::RequestLimit);
+                return Err(limit(format!(
+                    "input.messages has {} messages; the limit is {MAX_MESSAGES}",
+                    messages.len()
+                )));
             }
             let mut output = Vec::with_capacity(messages.len());
             let mut user_image = false;
             for message in messages {
                 if message.content.is_empty() {
-                    return Err(ErrorCode::InvalidRequest);
+                    return Err(ErrorCode::InvalidRequest.into());
                 }
                 if message.content.len() > MAX_PARTS {
-                    return Err(ErrorCode::RequestLimit);
+                    return Err(limit(format!(
+                        "a message has {} content parts; the limit is {MAX_PARTS}",
+                        message.content.len()
+                    )));
                 }
                 let mut content = Vec::with_capacity(message.content.len());
                 for part in &message.content {
@@ -107,7 +171,7 @@ pub(super) fn provider_messages(input: &OperationInput) -> Result<Value, ErrorCo
                             data_base64,
                         } => {
                             if !matches!(message.role, Role::User) {
-                                return Err(ErrorCode::InvalidRequest);
+                                return Err(ErrorCode::InvalidRequest.into());
                             }
                             user_image = true;
                             image_part(*encoding, data_base64, &mut budget)?
@@ -122,17 +186,17 @@ pub(super) fn provider_messages(input: &OperationInput) -> Result<Value, ErrorCo
                 output.push(json!({"role":role, "content":content}));
             }
             if !user_image {
-                return Err(ErrorCode::InvalidRequest);
+                return Err(ErrorCode::InvalidRequest.into());
             }
             Ok(Value::Array(output))
         }
-        _ => Err(ErrorCode::InvalidRequest),
+        _ => Err(ErrorCode::InvalidRequest.into()),
     }
 }
 
 /// llama.cpp multimodal embedding input: one `{"content": [parts]}` object
 /// per vector. Images pass the same bounded validation as vision chat.
-pub(super) fn embedding_items(input: &OperationInput) -> Result<Value, ErrorCode> {
+pub(super) fn embedding_items(input: &OperationInput) -> Result<Value, Rejection> {
     let mut budget = Budget::default();
     let items: Vec<&[ImagePart]> = match input {
         OperationInput::Image {
@@ -145,15 +209,15 @@ pub(super) fn embedding_items(input: &OperationInput) -> Result<Value, ErrorCode
         OperationInput::ContentBatch { items } => {
             items.iter().map(|item| item.parts.as_slice()).collect()
         }
-        _ => return Err(ErrorCode::InvalidRequest),
+        _ => return Err(ErrorCode::InvalidRequest.into()),
     };
     if items.is_empty() {
-        return Err(ErrorCode::InvalidRequest);
+        return Err(ErrorCode::InvalidRequest.into());
     }
     let mut output = Vec::with_capacity(items.len());
     for parts in items {
         if parts.is_empty() {
-            return Err(ErrorCode::InvalidRequest);
+            return Err(ErrorCode::InvalidRequest.into());
         }
         let mut content = Vec::with_capacity(parts.len());
         for part in parts {
@@ -176,7 +240,7 @@ pub(super) fn embedding_items(input: &OperationInput) -> Result<Value, ErrorCode
 /// Data URLs for decision-model images, after the same bounded validation.
 pub(super) fn decision_images(
     images: &[super::types::DecisionImage],
-) -> Result<Vec<String>, ErrorCode> {
+) -> Result<Vec<String>, Rejection> {
     let mut budget = Budget::default();
     images
         .iter()
@@ -185,7 +249,7 @@ pub(super) fn decision_images(
             part.pointer("/image_url/url")
                 .and_then(Value::as_str)
                 .map(str::to_owned)
-                .ok_or(ErrorCode::InvalidRequest)
+                .ok_or_else(|| ErrorCode::InvalidRequest.into())
         })
         .collect()
 }
@@ -194,20 +258,20 @@ fn image_part(
     encoding: ImageEncoding,
     encoded: &str,
     budget: &mut Budget,
-) -> Result<Value, ErrorCode> {
+) -> Result<Value, Rejection> {
     budget.image(encoded.len())?;
     let bytes = STANDARD
         .decode(encoded)
         .map_err(|_| ErrorCode::InvalidRequest)?;
     if bytes.is_empty() {
-        return Err(ErrorCode::InvalidRequest);
+        return Err(ErrorCode::InvalidRequest.into());
     }
     budget.source(bytes.len())?;
     // Standard alphabet/padding and zero pad bits are mandatory; URLs, data-URL
     // envelopes, whitespace and noncanonical encodings are not inputs.
     let canonical = STANDARD.encode(&bytes);
     if canonical != encoded {
-        return Err(ErrorCode::InvalidRequest);
+        return Err(ErrorCode::InvalidRequest.into());
     }
     let mut limits = Limits::default();
     limits.max_image_width = Some(MAX_DIMENSION);
@@ -231,33 +295,41 @@ fn image_part(
     Ok(json!({"type":"image_url", "image_url":{"url":format!("data:{mime};base64,{canonical}")}}))
 }
 
-fn codec_error(error: image::ImageError) -> ErrorCode {
+fn allocation_limit() -> Rejection {
+    limit(format!(
+        "decoding the image needs more than the {} MiB decode allocation limit",
+        MAX_ALLOC / (1024 * 1024)
+    ))
+}
+fn codec_error(error: image::ImageError) -> Rejection {
     if matches!(error, image::ImageError::Limits(_)) {
-        ErrorCode::RequestLimit
+        allocation_limit()
     } else {
-        ErrorCode::InvalidRequest
+        ErrorCode::InvalidRequest.into()
     }
 }
-fn dimensions(width: u32, height: u32) -> Result<(), ErrorCode> {
+fn dimensions(width: u32, height: u32) -> Result<(), Rejection> {
     if width == 0 || height == 0 {
-        return Err(ErrorCode::InvalidRequest);
+        return Err(ErrorCode::InvalidRequest.into());
     }
     if width > MAX_DIMENSION
         || height > MAX_DIMENSION
         || u64::from(width) * u64::from(height) > MAX_PIXELS
     {
-        return Err(ErrorCode::RequestLimit);
+        return Err(limit(format!(
+            "the image is {width}x{height} pixels; the limits are {MAX_DIMENSION} pixels per side and {MAX_PIXELS} pixels in total"
+        )));
     }
     Ok(())
 }
-fn decode(decoder: impl ImageDecoder) -> Result<(), ErrorCode> {
+fn decode(decoder: impl ImageDecoder) -> Result<(), Rejection> {
     let (width, height) = decoder.dimensions();
     dimensions(width, height)?;
     DynamicImage::from_decoder(decoder).map_err(codec_error)?;
     Ok(())
 }
 
-fn strict_jpeg(bytes: &[u8]) -> Result<Vec<u8>, ErrorCode> {
+fn strict_jpeg(bytes: &[u8]) -> Result<Vec<u8>, Rejection> {
     // The safe TurboJPEG wrapper returns errors for warnings as well as fatal
     // errors. In particular, incomplete MCU entropy cannot be accepted through
     // libjpeg's zero-bit recovery. Container framing alone cannot prove this.
@@ -265,15 +337,20 @@ fn strict_jpeg(bytes: &[u8]) -> Result<Vec<u8>, ErrorCode> {
     let header = decoder
         .read_header(bytes)
         .map_err(|_| ErrorCode::InvalidRequest)?;
-    dimensions(
-        u32::try_from(header.width).map_err(|_| ErrorCode::RequestLimit)?,
-        u32::try_from(header.height).map_err(|_| ErrorCode::RequestLimit)?,
-    )?;
-    let pitch = header.width.checked_mul(3).ok_or(ErrorCode::RequestLimit)?;
+    let side = |value: usize| {
+        u32::try_from(value).map_err(|_| {
+            limit(format!(
+                "the image is {} pixels on one side; the limit is {MAX_DIMENSION}",
+                value
+            ))
+        })
+    };
+    dimensions(side(header.width)?, side(header.height)?)?;
+    let pitch = header.width.checked_mul(3).ok_or_else(allocation_limit)?;
     let output_size = pitch
         .checked_mul(header.height)
         .filter(|size| *size <= MAX_ALLOC as usize)
-        .ok_or(ErrorCode::RequestLimit)?;
+        .ok_or_else(allocation_limit)?;
     // This bound covers the RGB output raster; native codec scratch allocations
     // remain codec-managed, not a hard 64 MiB total allocation budget.
     let mut pixels = vec![0; output_size];
@@ -294,9 +371,9 @@ fn strict_jpeg(bytes: &[u8]) -> Result<Vec<u8>, ErrorCode> {
 
 // PNG container framing/CRCs supplement full raster decode: reject APNG and a
 // truncated/missing IEND or extra trailing payload, including ignored metadata.
-fn png_container(bytes: &[u8]) -> Result<(), ErrorCode> {
+fn png_container(bytes: &[u8]) -> Result<(), Rejection> {
     if !bytes.starts_with(PNG_MAGIC) {
-        return Err(ErrorCode::InvalidRequest);
+        return Err(ErrorCode::InvalidRequest.into());
     }
     let mut offset = PNG_MAGIC.len();
     let mut header = false;
@@ -316,7 +393,7 @@ fn png_container(bytes: &[u8]) -> Result<(), ErrorCode> {
             .ok_or(ErrorCode::InvalidRequest)?;
         let kind = &prefix[4..8];
         if matches!(kind, b"acTL" | b"fcTL" | b"fdAT") {
-            return Err(ErrorCode::InvalidRequest);
+            return Err(ErrorCode::InvalidRequest.into());
         }
         let crc = u32::from_be_bytes(
             bytes[end - 4..end]
@@ -324,11 +401,11 @@ fn png_container(bytes: &[u8]) -> Result<(), ErrorCode> {
                 .map_err(|_| ErrorCode::InvalidRequest)?,
         );
         if crc32(&bytes[offset + 4..end - 4]) != crc {
-            return Err(ErrorCode::InvalidRequest);
+            return Err(ErrorCode::InvalidRequest.into());
         }
         if !header {
             if kind != b"IHDR" || length != 13 {
-                return Err(ErrorCode::InvalidRequest);
+                return Err(ErrorCode::InvalidRequest.into());
             }
             let data = &bytes[offset + 8..end - 4];
             dimensions(
@@ -345,18 +422,18 @@ fn png_container(bytes: &[u8]) -> Result<(), ErrorCode> {
             )?;
             header = true;
         } else if kind == b"IHDR" {
-            return Err(ErrorCode::InvalidRequest);
+            return Err(ErrorCode::InvalidRequest.into());
         }
         if kind == b"IEND" {
             return if length == 0 && end == bytes.len() {
                 Ok(())
             } else {
-                Err(ErrorCode::InvalidRequest)
+                Err(ErrorCode::InvalidRequest.into())
             };
         }
         offset = end;
     }
-    Err(ErrorCode::InvalidRequest)
+    Err(ErrorCode::InvalidRequest.into())
 }
 
 fn crc32(bytes: &[u8]) -> u32 {
@@ -365,9 +442,9 @@ fn crc32(bytes: &[u8]) -> u32 {
 
 // Require a complete single JPEG marker stream, not a decoder-recovered missing
 // end marker. The codec remains authoritative for tables and raster/entropy data.
-fn jpeg_container(bytes: &[u8]) -> Result<(), ErrorCode> {
+fn jpeg_container(bytes: &[u8]) -> Result<(), Rejection> {
     if !bytes.starts_with(b"\xff\xd8") {
-        return Err(ErrorCode::InvalidRequest);
+        return Err(ErrorCode::InvalidRequest.into());
     }
     let mut offset = 2;
     let mut scan = false;
@@ -379,7 +456,7 @@ fn jpeg_container(bytes: &[u8]) -> Result<(), ErrorCode> {
             continue;
         }
         if bytes[offset] != 0xff {
-            return Err(ErrorCode::InvalidRequest);
+            return Err(ErrorCode::InvalidRequest.into());
         }
         while bytes.get(offset) == Some(&0xff) {
             offset += 1;
@@ -394,11 +471,11 @@ fn jpeg_container(bytes: &[u8]) -> Result<(), ErrorCode> {
             return if frame && saw_scan && offset == bytes.len() {
                 Ok(())
             } else {
-                Err(ErrorCode::InvalidRequest)
+                Err(ErrorCode::InvalidRequest.into())
             };
         }
         if marker == 0 || marker == 0xd8 || (0xd0..=0xd7).contains(&marker) {
-            return Err(ErrorCode::InvalidRequest);
+            return Err(ErrorCode::InvalidRequest.into());
         }
         let length = bytes
             .get(offset..offset + 2)
@@ -410,11 +487,11 @@ fn jpeg_container(bytes: &[u8]) -> Result<(), ErrorCode> {
             .ok_or(ErrorCode::InvalidRequest)?;
         let data = &bytes[offset + 2..end];
         if marker == 0xe2 && data.starts_with(b"MPF\0") {
-            return Err(ErrorCode::InvalidRequest);
+            return Err(ErrorCode::InvalidRequest.into());
         }
         if (0xc0..=0xcf).contains(&marker) && !matches!(marker, 0xc4 | 0xc8 | 0xcc) {
             if frame || data.len() < 6 || data.len() != 6 + 3 * usize::from(data[5]) {
-                return Err(ErrorCode::InvalidRequest);
+                return Err(ErrorCode::InvalidRequest.into());
             }
             dimensions(
                 u32::from(u16::from_be_bytes([data[3], data[4]])),
@@ -424,14 +501,14 @@ fn jpeg_container(bytes: &[u8]) -> Result<(), ErrorCode> {
         }
         if marker == 0xda {
             if !frame || data.is_empty() || data.len() != 4 + 2 * usize::from(data[0]) {
-                return Err(ErrorCode::InvalidRequest);
+                return Err(ErrorCode::InvalidRequest.into());
             }
             saw_scan = true;
             scan = true;
         }
         offset = end;
     }
-    Err(ErrorCode::InvalidRequest)
+    Err(ErrorCode::InvalidRequest.into())
 }
 
 #[cfg(test)]
@@ -531,7 +608,10 @@ mod tests {
             input(ImageEncoding::Png, b"GIF89a"),
             input(ImageEncoding::Jpeg, b"\xff\xd8\xff\xd9"),
         ] {
-            assert_eq!(provider_messages(&request), Err(ErrorCode::InvalidRequest));
+            assert_eq!(
+                provider_messages(&request).map_err(|r| r.code),
+                Err(ErrorCode::InvalidRequest)
+            );
         }
     }
     #[test]
@@ -543,7 +623,7 @@ mod tests {
         let crc = crc32(&bytes[offset..offset + 4 + len]);
         bytes[offset + 4 + len..offset + 8 + len].copy_from_slice(&crc.to_be_bytes());
         assert_eq!(
-            provider_messages(&input(ImageEncoding::Png, &bytes)),
+            provider_messages(&input(ImageEncoding::Png, &bytes)).map_err(|r| r.code),
             Err(ErrorCode::InvalidRequest)
         );
     }
@@ -572,7 +652,8 @@ mod tests {
                 provider_messages(&OperationInput::Image {
                     encoding: ImageEncoding::Png,
                     data_base64: data
-                }),
+                })
+                .map_err(|r| r.code),
                 Err(ErrorCode::InvalidRequest)
             );
         }
@@ -586,7 +667,7 @@ mod tests {
             let crc = crc32(&bytes[12..29]);
             bytes[29..33].copy_from_slice(&crc.to_be_bytes());
             assert_eq!(
-                provider_messages(&input(ImageEncoding::Png, &bytes)),
+                provider_messages(&input(ImageEncoding::Png, &bytes)).map_err(|r| r.code),
                 Err(ErrorCode::RequestLimit)
             );
         }
@@ -600,7 +681,8 @@ mod tests {
                         role,
                         content: vec![image(ImageEncoding::Png, PNG)]
                     }]
-                }),
+                })
+                .map_err(|r| r.code),
                 Err(ErrorCode::InvalidRequest)
             );
         }
@@ -612,7 +694,8 @@ mod tests {
                         text: "No image".into()
                     }]
                 }]
-            }),
+            })
+            .map_err(|r| r.code),
             Err(ErrorCode::InvalidRequest)
         );
     }
@@ -626,13 +709,14 @@ mod tests {
         };
         assert!(provider_messages(&request(vec![image(ImageEncoding::Png, PNG); 4])).is_ok());
         assert_eq!(
-            provider_messages(&request(vec![image(ImageEncoding::Png, PNG); 5])),
+            provider_messages(&request(vec![image(ImageEncoding::Png, PNG); 5]))
+                .map_err(|r| r.code),
             Err(ErrorCode::RequestLimit)
         );
         let mut content = vec![ImagePart::Text { text: "a".into() }; 128];
         content.push(image(ImageEncoding::Png, PNG));
         assert_eq!(
-            provider_messages(&request(content)),
+            provider_messages(&request(content)).map_err(|r| r.code),
             Err(ErrorCode::RequestLimit)
         );
     }
@@ -641,20 +725,30 @@ mod tests {
         let mut budget = Budget::default();
         assert_eq!(budget.source(MAX_IMAGE_BYTES), Ok(()));
         assert_eq!(budget.source(MAX_IMAGE_BYTES), Ok(()));
-        assert_eq!(budget.source(1), Err(ErrorCode::RequestLimit));
         assert_eq!(
-            Budget::default().source(MAX_IMAGE_BYTES + 1),
+            budget.source(1).map_err(|r| r.code),
             Err(ErrorCode::RequestLimit)
         );
         assert_eq!(
-            Budget::default().image(MAX_ENCODED_BYTES + 1),
+            Budget::default()
+                .source(MAX_IMAGE_BYTES + 1)
+                .map_err(|r| r.code),
+            Err(ErrorCode::RequestLimit)
+        );
+        assert_eq!(
+            Budget::default()
+                .image(MAX_ENCODED_BYTES + 1)
+                .map_err(|r| r.code),
             Err(ErrorCode::RequestLimit)
         );
         assert_eq!(MAX_ENCODED_BYTES, 11_184_812);
         let mut encoded_budget = Budget::default();
         assert_eq!(encoded_budget.image(MAX_ENCODED_BYTES), Ok(()));
         assert_eq!(encoded_budget.image(MAX_ENCODED_BYTES), Ok(()));
-        assert_eq!(encoded_budget.image(32), Err(ErrorCode::RequestLimit));
+        assert_eq!(
+            encoded_budget.image(32).map_err(|r| r.code),
+            Err(ErrorCode::RequestLimit)
+        );
     }
     #[test]
     fn strict_jpeg_accepts_progressive_and_refuses_truncated_entropy() {
@@ -662,7 +756,7 @@ mod tests {
         let mut truncated = JPEG[..JPEG.len() - 12].to_vec();
         truncated.extend_from_slice(b"\xff\xd9");
         assert_eq!(
-            provider_messages(&input(ImageEncoding::Jpeg, &truncated)),
+            provider_messages(&input(ImageEncoding::Jpeg, &truncated)).map_err(|r| r.code),
             Err(ErrorCode::InvalidRequest)
         );
     }
@@ -674,9 +768,12 @@ mod tests {
             let mut truncated = JPEG[..JPEG.len() - cut].to_vec();
             truncated.extend_from_slice(b"\xff\xd9");
             assert_eq!(jpeg_container(&truncated), Ok(()));
-            assert_eq!(strict_jpeg(&truncated), Err(ErrorCode::InvalidRequest));
             assert_eq!(
-                provider_messages(&input(ImageEncoding::Jpeg, &truncated)),
+                strict_jpeg(&truncated).map_err(|r| r.code),
+                Err(ErrorCode::InvalidRequest)
+            );
+            assert_eq!(
+                provider_messages(&input(ImageEncoding::Jpeg, &truncated)).map_err(|r| r.code),
                 Err(ErrorCode::InvalidRequest)
             );
         }
@@ -689,7 +786,7 @@ mod tests {
             bytes[frame + 5..frame + 7].copy_from_slice(&height.to_be_bytes());
             bytes[frame + 7..frame + 9].copy_from_slice(&width.to_be_bytes());
             assert_eq!(
-                provider_messages(&input(ImageEncoding::Jpeg, &bytes)),
+                provider_messages(&input(ImageEncoding::Jpeg, &bytes)).map_err(|r| r.code),
                 Err(ErrorCode::RequestLimit)
             );
         }
@@ -711,7 +808,7 @@ mod tests {
         .is_ok());
         messages.push(text());
         assert_eq!(
-            provider_messages(&OperationInput::ImageMessages { messages }),
+            provider_messages(&OperationInput::ImageMessages { messages }).map_err(|r| r.code),
             Err(ErrorCode::RequestLimit)
         );
         let messages = vec![
@@ -729,14 +826,15 @@ mod tests {
             },
         ];
         assert_eq!(
-            provider_messages(&OperationInput::ImageMessages { messages }),
+            provider_messages(&OperationInput::ImageMessages { messages }).map_err(|r| r.code),
             Err(ErrorCode::RequestLimit)
         );
     }
     #[test]
     fn empty_messages_parts_and_zero_dimensions_are_refused() {
         assert_eq!(
-            provider_messages(&OperationInput::ImageMessages { messages: vec![] }),
+            provider_messages(&OperationInput::ImageMessages { messages: vec![] })
+                .map_err(|r| r.code),
             Err(ErrorCode::InvalidRequest)
         );
         assert_eq!(
@@ -745,11 +843,18 @@ mod tests {
                     role: Role::User,
                     content: vec![]
                 }]
-            }),
+            })
+            .map_err(|r| r.code),
             Err(ErrorCode::InvalidRequest)
         );
-        assert_eq!(dimensions(0, 1), Err(ErrorCode::InvalidRequest));
-        assert_eq!(dimensions(1, 0), Err(ErrorCode::InvalidRequest));
+        assert_eq!(
+            dimensions(0, 1).map_err(|r| r.code),
+            Err(ErrorCode::InvalidRequest)
+        );
+        assert_eq!(
+            dimensions(1, 0).map_err(|r| r.code),
+            Err(ErrorCode::InvalidRequest)
+        );
         assert_eq!(dimensions(4096, 1024), Ok(()));
     }
 }

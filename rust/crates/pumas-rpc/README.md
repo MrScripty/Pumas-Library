@@ -22,6 +22,13 @@ project their outcomes.
 - Request bodies and in-flight requests are bounded.
 - Every error leaves through the redacted public projection in
   `src/public_text.rs`; transports never serialize core errors directly.
+- Typed JSON-RPC parameters are closed: an unknown field is refused, not
+  ignored. Every `-32602` refusal says why after `Request parameters are
+  invalid:` and names the field (for example ``unknown field `x`, expected one
+  of ...``); caller-supplied string values are never echoed. A newer consumer
+  discovers support first (build-info schemas, model-operation
+  `supported_contract_versions`) instead of sending fields an older backend
+  may not know.
 - Rust owns the desktop wire contract: `src/contract.rs` declares it and the
   `export-contract` feature exports the schemas that Electron and the frontend
   generate decoders from (see [Electron](../../../electron/README.md)).

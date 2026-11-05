@@ -95,12 +95,12 @@ impl S3Imports {
         })))
     }
     pub(crate) fn admit(&self, request: S3ImportParams) -> Result<S3ImportOutcome> {
-        if request.validate().is_err()
-            || pumas_library::acquisition::S3Reader::new(source_config(&request)).is_err()
-        {
-            return Ok(S3ImportOutcome::Rejected {
-                error: PublicError::invalid_params(),
-            });
+        if let Err(error) = request.validate().and_then(|()| {
+            pumas_library::acquisition::S3Reader::new(source_config(&request))
+                .map(|_| ())
+                .map_err(|error| PublicError::invalid_params_because(error.to_string()))
+        }) {
+            return Ok(S3ImportOutcome::Rejected { error });
         }
         self.admit_ready(request, None, None)
     }
@@ -108,15 +108,12 @@ impl S3Imports {
         &self,
         request: S3AuthenticatedImportParams,
     ) -> Result<S3ImportOutcome> {
-        if request.validate().is_err()
-            || request
+        if let Err(error) = request.validate().and_then(|()| {
+            request
                 .credentials
                 .preflight(source_config(&request.source))
-                .is_err()
-        {
-            return Ok(S3ImportOutcome::Rejected {
-                error: PublicError::invalid_params(),
-            });
+        }) {
+            return Ok(S3ImportOutcome::Rejected { error });
         }
         let credentials = request
             .credentials
@@ -131,18 +128,11 @@ impl S3Imports {
     ) -> Result<S3ImportOutcome> {
         // Auth configuration must be checked before originals are consumed.
         if let Some(credentials) = &credentials {
-            let primary = match request.primary() {
-                Ok(value) => value,
-                Err(_) => {
-                    return Ok(S3ImportOutcome::Rejected {
-                        error: PublicError::invalid_params(),
-                    })
-                }
-            };
-            if credentials.preflight(source_config(&primary)).is_err() {
-                return Ok(S3ImportOutcome::Rejected {
-                    error: PublicError::invalid_params(),
-                });
+            if let Err(error) = request
+                .primary()
+                .and_then(|primary| credentials.preflight(source_config(&primary)))
+            {
+                return Ok(S3ImportOutcome::Rejected { error });
             }
         }
         let preflight = || -> std::result::Result<_, PublicError> {
@@ -158,20 +148,20 @@ impl S3Imports {
             // checks do not depend on credentials. Auth constructor preflight
             // remains separate to avoid sharing or cloning its capability.
             let reader = pumas_library::acquisition::S3Reader::new(config)
-                .map_err(|_| PublicError::invalid_params())?;
+                .map_err(|error| PublicError::invalid_params_because(error.to_string()))?;
             let entries = match request.read_mode {
                 S3ReadMode::VersionId => {
                     let entries = request.native_entries()?;
                     reader
                         .validate_manifest_entries(&entries)
-                        .map_err(|_| PublicError::invalid_params())?;
+                        .map_err(|error| PublicError::invalid_params_because(error.to_string()))?;
                     ImportSelection::Versioned(entries)
                 }
                 S3ReadMode::Conditional => {
                     let entries = request.native_conditional_entries()?;
                     reader
                         .validate_conditional_manifest_entries(&entries)
-                        .map_err(|_| PublicError::invalid_params())?;
+                        .map_err(|error| PublicError::invalid_params_because(error.to_string()))?;
                     ImportSelection::ConditionalManifest(entries)
                 }
             };
@@ -181,9 +171,7 @@ impl S3Imports {
             Ok((primary, entries, credentials)) => {
                 self.admit_ready(primary, credentials, Some(entries))
             }
-            Err(_) => Ok(S3ImportOutcome::Rejected {
-                error: PublicError::invalid_params(),
-            }),
+            Err(error) => Ok(S3ImportOutcome::Rejected { error }),
         }
     }
     pub(crate) fn bundle_snapshot(&self, id: Option<&str>) -> Result<S3BundleImportObservation> {
@@ -228,7 +216,9 @@ impl S3Imports {
                 )
         ) {
             return Ok(S3ImportOutcome::Rejected {
-                error: PublicError::invalid_params(),
+                error: PublicError::invalid_params_because(
+                    "the file selection does not match `read_mode`",
+                ),
             });
         }
         let mut state = self.0.lock().map_err(|_| unavailable())?;
@@ -320,10 +310,8 @@ impl S3Imports {
         Ok(S3TransferRetryState::Unavailable { reason })
     }
     pub(crate) fn retry(&self, request: S3TransferRetryParams) -> Result<S3ImportOutcome> {
-        if request.validate().is_err() {
-            return Ok(S3ImportOutcome::Rejected {
-                error: PublicError::invalid_params(),
-            });
+        if let Err(error) = request.validate() {
+            return Ok(S3ImportOutcome::Rejected { error });
         }
         let mut state = self.0.lock().map_err(|_| unavailable())?;
         let Some(sender) = state.sender.as_ref().filter(|s| !s.is_closed()) else {
@@ -351,18 +339,15 @@ impl S3Imports {
         // Access material is fresh and consumed by this attempt, never retained.
         if retained.authenticated != request.credentials.is_some() {
             return Ok(S3ImportOutcome::Rejected {
-                error: PublicError::invalid_params(),
+                error: PublicError::invalid_params_because(
+                    "`credentials` must be supplied exactly when the original transfer was authenticated",
+                ),
             });
         }
         let credentials = match request.credentials {
             Some(credentials) => {
-                if credentials
-                    .preflight(source_config(&retained.request))
-                    .is_err()
-                {
-                    return Ok(S3ImportOutcome::Rejected {
-                        error: PublicError::invalid_params(),
-                    });
+                if let Err(error) = credentials.preflight(source_config(&retained.request)) {
+                    return Ok(S3ImportOutcome::Rejected { error });
                 }
                 Some(credentials.into_native().map_err(|_| unavailable())?)
             }

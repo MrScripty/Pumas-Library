@@ -8,7 +8,7 @@ interface UseAppStartupChecksOptions {
   activeVersion?: string | null | undefined;
   checkLauncherVersion: (force: boolean) => Promise<unknown>;
   fetchDiskSpace: () => Promise<void> | void;
-  refetchStatus: (force?: boolean) => Promise<void> | void;
+  refetchStatus: () => Promise<void> | void;
   isApiAvailable?: (() => boolean) | undefined;
 }
 
@@ -50,7 +50,7 @@ export function useAppStartupChecks({
 
   useEffect(() => {
     if (activeVersion && isApiAvailable()) {
-      void refetchStatus(false);
+      void refetchStatus();
     }
   }, [activeVersion, isApiAvailable, refetchStatus]);
 }

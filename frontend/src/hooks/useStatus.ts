@@ -25,7 +25,7 @@ export function useStatus(options: UseStatusOptions = {}) {
   const [networkAvailable, setNetworkAvailable] = useState<boolean | null>(null);
   const [modelLibraryLoaded, setModelLibraryLoaded] = useState<boolean | null>(null);
   const inFlightRequest = useRef<Promise<void> | null>(null);
-  const pendingRefresh = useRef<{ isInitialLoad: boolean; force: boolean } | null>(null);
+  const pendingRefresh = useRef<{ isInitialLoad: boolean } | null>(null);
   const loadingDelayTimeout = useRef<NodeJS.Timeout | null>(null);
   const initialLoadStartedAt = useRef(Date.now());
   const {
@@ -75,12 +75,11 @@ export function useStatus(options: UseStatusOptions = {}) {
     }
   }, [finishInitialLoad, refetchTelemetry]);
 
-  const fetchStatus = useCallback(async (isInitialLoad = false, force = false) => {
+  const fetchStatus = useCallback(async (isInitialLoad = false) => {
     if (inFlightRequest.current) {
       const existingPending = pendingRefresh.current;
       pendingRefresh.current = {
         isInitialLoad: existingPending?.isInitialLoad || isInitialLoad,
-        force: existingPending?.force || force,
       };
       await inFlightRequest.current;
       return;
@@ -91,7 +90,7 @@ export function useStatus(options: UseStatusOptions = {}) {
       const nextRefresh = pendingRefresh.current;
       pendingRefresh.current = null;
       if (nextRefresh) {
-        void fetchStatus(nextRefresh.isInitialLoad, nextRefresh.force);
+        void fetchStatus(nextRefresh.isInitialLoad);
       }
     });
     inFlightRequest.current = request;

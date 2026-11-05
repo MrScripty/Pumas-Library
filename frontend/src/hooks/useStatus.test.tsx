@@ -89,7 +89,7 @@ describe('useStatus', () => {
     vi.clearAllMocks();
   });
 
-  it('queues forced refreshes instead of overlapping snapshot requests', async () => {
+  it('queues refreshes instead of overlapping snapshot requests', async () => {
     vi.useRealTimers();
 
     let resolveSnapshot: (() => void) | null = null;
@@ -108,14 +108,14 @@ describe('useStatus', () => {
 
     let firstRefresh!: Promise<void>;
     await act(async () => {
-      firstRefresh = result.current.refetch(false, true);
+      firstRefresh = result.current.refetch();
     });
 
     expect(getStatusTelemetrySnapshotMock).toHaveBeenCalledTimes(1);
 
     let secondRefresh!: Promise<void>;
     await act(async () => {
-      secondRefresh = result.current.refetch(false, true);
+      secondRefresh = result.current.refetch();
       expect(getStatusTelemetrySnapshotMock).toHaveBeenCalledTimes(1);
       resolveSnapshot?.();
       await firstRefresh;

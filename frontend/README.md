@@ -53,8 +53,8 @@ Framer Motion, React Aria interactions, and Vitest with Testing Library/jsdom.
 
 ## Accessibility and Themes
 
-Theme tokens live in `src/index.css`; programmatic mappings live in
-`src/config/theme.ts`. Use semantic tokens rather than hard-coded colors.
+Theme tokens live in `src/index.css` as CSS custom properties. Use semantic
+tokens rather than hard-coded colors.
 
 Prefer native semantic controls. Composite widgets must provide complete
 keyboard, focus, naming, dismissal and state behavior. The lint policy requires

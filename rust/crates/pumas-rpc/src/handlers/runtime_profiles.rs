@@ -201,7 +201,7 @@ pub async fn launch_runtime_profile(
     if app_id == "torch" {
         version_manager.verify_torch_identity(&tag).await?;
     }
-    let version_dir = version_manager.version_path(&tag);
+    let version_dir = version_manager.version_path(&tag)?;
     Ok(serde_json::to_value(
         state
             .api

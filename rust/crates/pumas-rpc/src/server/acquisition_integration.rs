@@ -242,7 +242,7 @@ async fn exercise_shutdown(include_native: bool) {
         #[cfg(all(feature = "inference-plugins", feature = "test-support"))]
         if let Some((manager, mut source, native_release)) = native {
             assert!(native_release.is_none());
-            assert!(!manager.version_path("b1234+cpu").exists());
+            assert!(!manager.version_path("b1234+cpu").unwrap().exists());
             // The public refusal is observed after the server's drain, before
             // the fixture itself ever invokes the manager's shutdown method.
             let refusal =

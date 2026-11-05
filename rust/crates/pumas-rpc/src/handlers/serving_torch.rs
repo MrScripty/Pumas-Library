@@ -175,6 +175,7 @@ pub(super) async fn serve_torch_model(
         )
         .await;
     }
+    let version_dir = manager.version_path(&tag)?;
     let existing = state
         .api
         .observe_owned_runtime_profile(&request.config.profile_id)?;
@@ -188,7 +189,7 @@ pub(super) async fn serve_torch_model(
                 .launch_runtime_profile_for_model_with_receipt(
                     request.config.profile_id.clone(),
                     &tag,
-                    &manager.version_path(&tag),
+                    &version_dir,
                     None,
                     None,
                 )

@@ -32,7 +32,7 @@ pub async fn get_release_dependencies(
     tag: &str,
 ) -> pumas_library::Result<crate::contract::GetReleaseDependenciesOutcome> {
     let vm = require_version_manager(state, app_id).await?;
-    let requirements_path = vm.version_path(tag).join("requirements.txt");
+    let requirements_path = vm.version_path(tag)?.join("requirements.txt");
     read_release_dependencies(&requirements_path)
         .await
         .map(crate::contract::GetReleaseDependenciesOutcome::new)

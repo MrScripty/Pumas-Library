@@ -109,12 +109,13 @@ pub async fn trial_torch_runtime(
             "Stop the existing owned profile before starting a trial",
         ));
     }
+    let version_dir = manager.version_path(tag)?;
     let receipt = match state
         .api
         .launch_runtime_profile_for_model_with_receipt(
             profile_id.clone(),
             tag,
-            &manager.version_path(tag),
+            &version_dir,
             None,
             None,
         )

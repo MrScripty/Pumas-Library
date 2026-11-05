@@ -149,6 +149,25 @@ impl ManagedListenerCustody {
 }
 
 impl ManagedChild {
+    /// Spawn like [`Self::spawn`], and on Linux also ask the kernel to SIGKILL
+    /// the child's leader when the spawning thread exits
+    /// (`PR_SET_PDEATHSIG`), so a crashed Pumas does not leave it running.
+    ///
+    /// Linux delivers the signal when the *thread* that forked exits, not the
+    /// whole process. Use this only when the calling thread supervises the
+    /// child for its entire life (for example the runtime-profile worker
+    /// thread). Only the leader receives the signal; descendants that survive
+    /// it are not covered. macOS has no equivalent; Windows children already
+    /// die with their kill-on-close Job.
+    pub fn spawn_bound_to_thread(
+        command: &mut Command,
+        custody: Arc<ManagedChildCustodySlot>,
+    ) -> io::Result<Self> {
+        #[cfg(target_os = "linux")]
+        set_parent_death_signal(command);
+        Self::spawn(command, custody)
+    }
+
     pub fn spawn(command: &mut Command, custody: Arc<ManagedChildCustodySlot>) -> io::Result<Self> {
         if custody
             .active
@@ -346,6 +365,9 @@ impl ManagedChild {
     }
 
     /// Stop the owned generation, prove descendant drain, then reap its leader.
+    /// On Unix the group first receives SIGTERM and has up to half of
+    /// `deadline` to exit; SIGKILL follows on every later pass. Windows Jobs
+    /// have no graceful signal and are terminated directly.
     /// An error retains custody so callers can retry rather than publishing or
     /// deleting a still-owned staging directory.
     pub fn terminate_and_drain(&mut self, deadline: Duration) -> io::Result<ExitStatus> {
@@ -356,11 +378,31 @@ impl ManagedChild {
         {
             return Err(io::Error::other("Injected process observation failure"));
         }
-        let until = Instant::now() + deadline;
+        let started = Instant::now();
+        let until = started + deadline;
+        // Graceful phase: one SIGTERM, then up to half of the caller's
+        // deadline for the group to exit before SIGKILL on every pass.
+        #[cfg(unix)]
+        let grace_until = started + deadline / 2;
+        #[cfg(unix)]
+        let mut terminated = false;
         loop {
+            #[cfg(unix)]
+            let signal = if Instant::now() >= grace_until {
+                Some(libc::SIGKILL)
+            } else if !terminated {
+                terminated = true;
+                Some(libc::SIGTERM)
+            } else {
+                None
+            };
             #[cfg(target_os = "linux")]
             let incomplete_observation = {
-                super::linux_group::signal_group(self.id())?;
+                if let Some(signal) = signal {
+                    let signal = nix::sys::signal::Signal::try_from(signal)
+                        .map_err(|error| io::Error::other(error.to_string()))?;
+                    super::linux_group::signal_group_with(self.id(), signal)?;
+                }
                 match self.observe_linux_group() {
                     Ok(false) => break,
                     Ok(true) => None,
@@ -374,22 +416,28 @@ impl ManagedChild {
             {
                 let pid =
                     i32::try_from(self.id()).map_err(|_| io::Error::other("Invalid group ID"))?;
-                if !macos_drain_group_once(pid, macos_group_has_live_members, |group| {
-                    #[cfg(test)]
-                    if self
-                        .force_group_signal_permission_denied
-                        .load(std::sync::atomic::Ordering::Acquire)
-                    {
-                        return Err(io::Error::from_raw_os_error(libc::EPERM));
+                let live = match signal {
+                    Some(signal) => {
+                        macos_drain_group_once(pid, macos_group_has_live_members, |group| {
+                            #[cfg(test)]
+                            if self
+                                .force_group_signal_permission_denied
+                                .load(std::sync::atomic::Ordering::Acquire)
+                            {
+                                return Err(io::Error::from_raw_os_error(libc::EPERM));
+                            }
+                            // SAFETY: the unreaped direct child pins its group
+                            // ID; the group was created by this owner at spawn.
+                            #[allow(unsafe_code)]
+                            if unsafe { libc::killpg(group, signal) } != 0 {
+                                return Err(io::Error::last_os_error());
+                            }
+                            Ok(())
+                        })?
                     }
-                    // SAFETY: the unreaped direct child pins its group ID; the
-                    // group was created by this owner at spawn.
-                    #[allow(unsafe_code)]
-                    if unsafe { libc::killpg(group, libc::SIGKILL) } != 0 {
-                        return Err(io::Error::last_os_error());
-                    }
-                    Ok(())
-                })? {
+                    None => macos_group_has_live_members(pid)?,
+                };
+                if !live {
                     break;
                 }
             }
@@ -478,6 +526,38 @@ impl Drop for ManagedChild {
             *slot = Some(parked);
             custody.changed.notify_waiters();
         }
+    }
+}
+
+/// Make the kernel SIGKILL the child when the forking thread exits.
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+fn set_parent_death_signal(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    let parent = libc::pid_t::try_from(std::process::id()).unwrap_or(0);
+    // SAFETY: pre_exec runs in the forked child before exec. The closure only
+    // calls the async-signal-safe prctl(2) and getppid(2) syscalls and builds
+    // io::Error from a raw errno, which does not allocate, so it touches no
+    // state shared with other threads of the forked parent.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::prctl(
+                libc::PR_SET_PDEATHSIG,
+                libc::SIGKILL as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+            ) != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            // The parent may have died before prctl took effect; then no
+            // signal will ever arrive, so refuse to start orphaned.
+            if libc::getppid() != parent {
+                return Err(io::Error::from_raw_os_error(libc::ESRCH));
+            }
+            Ok(())
+        });
     }
 }
 
@@ -1092,6 +1172,84 @@ mod unix_tests {
         assert!(!super::super::linux_group::group_has_live_members(child.id() as i32).unwrap());
         #[cfg(target_os = "macos")]
         assert!(!macos_group_has_live_members(child.id() as i32).unwrap());
+    }
+
+    #[test]
+    fn drain_sends_sigterm_before_sigkill() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("terminated");
+        let ready = root.path().join("ready");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("trap 'touch \"$1\"; exit 0' TERM; touch \"$2\"; while :; do sleep 0.05; done")
+            .arg("sh")
+            .arg(&marker)
+            .arg(&ready);
+        let mut child = ManagedChild::spawn(&mut command, ManagedChildCustodySlot::new()).unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(Instant::now() < until, "fixture did not start");
+            std::thread::sleep(POLL_INTERVAL);
+        }
+        let status = child.terminate_and_drain(Duration::from_secs(5)).unwrap();
+        assert!(marker.exists(), "the group must see SIGTERM first");
+        assert!(status.success(), "graceful exit status: {status:?}");
+    }
+
+    #[test]
+    fn drain_escalates_to_sigkill_within_the_deadline() {
+        use std::os::unix::process::ExitStatusExt;
+        let root = tempfile::tempdir().unwrap();
+        let ready = root.path().join("ready");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("trap '' TERM; touch \"$1\"; while :; do sleep 0.05; done")
+            .arg("sh")
+            .arg(&ready);
+        let mut child = ManagedChild::spawn(&mut command, ManagedChildCustodySlot::new()).unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            assert!(Instant::now() < until, "fixture did not start");
+            std::thread::sleep(POLL_INTERVAL);
+        }
+        let started = Instant::now();
+        let status = child.terminate_and_drain(Duration::from_secs(2)).unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+        assert!(started.elapsed() >= Duration::from_millis(900));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn thread_bound_child_dies_with_its_spawning_thread() {
+        use std::os::unix::process::ExitStatusExt;
+        let custody = ManagedChildCustodySlot::new();
+        let mut child = std::thread::spawn({
+            let custody = custody.clone();
+            move || {
+                let mut command = Command::new("sleep");
+                command.arg("30");
+                ManagedChild::spawn_bound_to_thread(&mut command, custody).unwrap()
+            }
+        })
+        .join()
+        .unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        let observed = loop {
+            if let Some(status) = child.observe_exit().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < until,
+                "child outlived its supervising thread"
+            );
+            std::thread::sleep(POLL_INTERVAL);
+        };
+        assert_eq!(observed.signal(), Some(libc::SIGKILL));
+        child.terminate_and_drain(Duration::from_secs(5)).unwrap();
+        assert!(!custody.is_active());
     }
 
     #[test]

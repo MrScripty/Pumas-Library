@@ -7,6 +7,7 @@ import torch
 from safetensors import safe_open
 
 from diffusion import DiffusionPipelineAdapter
+from validation import ModelLoadRefusal
 
 
 def load_scaled_fp8(checkpoint):
@@ -14,37 +15,37 @@ def load_scaled_fp8(checkpoint):
     with safe_open(checkpoint, framework="pt", device="cpu") as source:
         metadata = json.loads((source.metadata() or {}).get("_quantization_metadata", "{}"))
         if not isinstance(metadata, dict) or metadata.get("format_version") != "1.0":
-            raise ValueError("Unsupported FP8 metadata version")
+            raise ModelLoadRefusal("Unsupported FP8 metadata version")
         layers = metadata.get("layers")
         if not isinstance(layers, dict) or not layers:
-            raise ValueError("FP8 checkpoint has no declared quantized layers")
+            raise ModelLoadRefusal("FP8 checkpoint has no declared quantized layers")
         keys = set(source.keys())
         scales = {}
         auxiliary = set()
         for layer, description in layers.items():
             if not isinstance(description, dict) or description != {"format": "float8_e4m3fn"}:
-                raise ValueError("Unsupported FP8 layer format")
+                raise ModelLoadRefusal("Unsupported FP8 layer format")
             weight = f"{layer}.weight"
             if weight not in keys or source.get_slice(weight).get_dtype() != "F8_E4M3":
-                raise ValueError("Declared FP8 weight is missing or has the wrong dtype")
+                raise ModelLoadRefusal("Declared FP8 weight is missing or has the wrong dtype")
             for suffix in ("weight_scale", "input_scale"):
                 key = f"{layer}.{suffix}"
                 if key not in keys:
-                    raise ValueError("FP8 scale is missing")
+                    raise ModelLoadRefusal("FP8 scale is missing")
                 value = source.get_tensor(key)
                 if value.dtype != torch.float32 or value.numel() != 1:
-                    raise ValueError("FP8 scales must be scalar float32 values")
+                    raise ModelLoadRefusal("FP8 scales must be scalar float32 values")
                 if not torch.isfinite(value).all() or value.item() <= 0:
-                    raise ValueError("FP8 scale must be finite and positive")
+                    raise ModelLoadRefusal("FP8 scale must be finite and positive")
                 auxiliary.add(key)
                 if suffix == "weight_scale":
                     scales[weight] = value
         for key in keys - auxiliary:
             dtype = source.get_slice(key).get_dtype()
             if dtype == "F8_E4M3" and key not in scales:
-                raise ValueError("Undeclared FP8 weight")
+                raise ModelLoadRefusal("Undeclared FP8 weight")
             if dtype not in {"F8_E4M3", "BF16", "F32"} or key.endswith("_scale"):
-                raise ValueError("Unsupported checkpoint tensor")
+                raise ModelLoadRefusal("Unsupported checkpoint tensor")
         state = {}
         for key in sorted(keys - auxiliary):
             value = source.get_tensor(key)
@@ -61,6 +62,9 @@ class Flux2Klein(DiffusionPipelineAdapter):
     guidance = 1.0
     memory_policy = "scaled_fp8_to_bf16_sequential_cpu_offload"
     dimension_multiple = 16
+    # FLUX.2 [klein] is published for outputs up to 4 megapixels.
+    max_pixels = 2048 * 2048
+    peak_bytes_per_pixel = 1024
 
     def __init__(self, checkpoint, encoder_path, vae_path, device):
         from diffusers import (
@@ -76,14 +80,15 @@ class Flux2Klein(DiffusionPipelineAdapter):
         from transformers import Qwen2TokenizerFast, Qwen3ForCausalLM
 
         if device.type != "cuda" or torch.cuda.get_device_capability(device) != (12, 0):
-            raise ValueError("This Klein recipe requires the qualified sm_120 CUDA device")
+            raise ModelLoadRefusal("This Klein recipe requires the qualified sm_120 CUDA device")
+        self.device = device
         if Path(checkpoint).name != "flux-2-klein-9b-kv-fp8.safetensors":
-            raise ValueError("Select the qualified Klein 9B KV FP8 checkpoint")
+            raise ModelLoadRefusal("Select the qualified Klein 9B KV FP8 checkpoint")
         if not vae_path or not Path(vae_path).is_file():
-            raise ValueError("The library-managed FLUX.2 VAE is missing")
+            raise ModelLoadRefusal("The library-managed FLUX.2 VAE is missing")
         config = json.loads((Path(encoder_path) / "config.json").read_text())
         if config.get("model_type") != "qwen3" or config.get("hidden_size") != 4096:
-            raise ValueError("Klein 9B requires the matching Qwen3-8B encoder")
+            raise ModelLoadRefusal("Klein 9B requires the matching Qwen3-8B encoder")
         with torch.device("meta"):
             transformer = Flux2Transformer2DModel(
                 num_layers=8,

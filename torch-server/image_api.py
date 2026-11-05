@@ -10,6 +10,10 @@ never fail the operation. A disconnect or owner cancellation requests worker
 cancellation, but the device lease remains held until that worker has actually
 stopped. A lost transport before a terminal result is an unknown outcome and
 is never replayed here.
+
+Dimensions are admitted against a pixel budget derived from the adapter's
+declared limits and the device's free memory at admission (under the lease),
+so an oversized request is refused with its reason before any denoising.
 """
 
 import asyncio
@@ -30,6 +34,7 @@ from diffusion import GenerationCancelled
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+# Output-transport bound matching the Rust client's decoded-PNG limit.
 MAX_PNG_BYTES = 8 * 1024 * 1024
 
 
@@ -51,6 +56,46 @@ class ImageRequest(BaseModel):
 
 def failure(status: int, code: str, message: str):
     return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
+def _free_device_memory(device) -> int | None:
+    """Free bytes on a CUDA device, or None when the device reports no figure."""
+    if device is None or getattr(device, "type", None) != "cuda":
+        return None
+    if not torch.cuda.is_available():
+        return None
+    free_bytes, _total = torch.cuda.mem_get_info(device)
+    return int(free_bytes)
+
+
+def admit_dimensions(adapter, width: int, height: int) -> None:
+    """Refuse dimensions outside the adapter's limit or the device's memory budget.
+
+    The adapter declares ``max_pixels`` (its recipe's supported ceiling) and
+    ``peak_bytes_per_pixel`` (device memory per output pixel at peak). The
+    memory budget is the device's free memory divided by that estimate, read
+    while this request holds the device lease.
+    """
+    pixels = width * height
+    max_pixels = getattr(adapter, "max_pixels", None)
+    if max_pixels is not None and pixels > max_pixels:
+        raise failure(
+            400,
+            "dimensions_exceed_limit",
+            f"{width}x{height} is {pixels} pixels; this model supports at most {max_pixels} pixels",
+        )
+    bytes_per_pixel = getattr(adapter, "peak_bytes_per_pixel", None)
+    free_bytes = _free_device_memory(getattr(adapter, "device", None))
+    if bytes_per_pixel and free_bytes is not None:
+        budget = free_bytes // bytes_per_pixel
+        if pixels > budget:
+            raise failure(
+                507,
+                "out_of_memory",
+                f"{width}x{height} needs about {pixels * bytes_per_pixel // (1024 * 1024)} MiB "
+                f"of GPU memory; {free_bytes // (1024 * 1024)} MiB is free, which allows "
+                f"{budget} pixels. Lower the dimensions or free GPU memory.",
+            )
 
 
 def _diagnose(state: str, message: str, *, warning: bool = False) -> None:
@@ -182,6 +227,7 @@ async def generate_image(payload: ImageRequest, request: Request):
             ) from error
 
         try:
+            admit_dimensions(adapter, payload.width, payload.height)
             return await owned_generation(adapter, payload, request)
         except HTTPException:
             raise

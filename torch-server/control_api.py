@@ -6,12 +6,16 @@ and /api/configure for the Pumas Library frontend to manage the server.
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
+import torch
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from diffusion import FLUX2_KLEIN, IMAGE_ADAPTERS, NUNCHAKU_Z_IMAGE
+from model_manager import SlotConflict
 from validation import (
+    ModelLoadRefusal,
     is_loopback_host,
     validate_api_port,
     validate_bind_host,
@@ -26,10 +30,32 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Model types the loaders and image adapters implement. Omitting model_type
+# lets the loader detect a text type from config.json.
+SupportedModelType = Literal[
+    "text-generation",
+    "dllm",
+    "sherry",
+    "cohere-asr",
+    "nunchaku-z-image-turbo",
+    "flux2-klein-9b-kv-fp8",
+]
 
-def _log_and_raise_internal_error(action: str, error: Exception) -> None:
+
+def failure(status: int, code: str, message: str) -> HTTPException:
+    """A refusal with a stable code and a caller-safe reason."""
+    return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
+def _internal_error(action: str) -> HTTPException:
+    # Raw exception text stays in the log; it can carry resolved paths.
     logger.exception("Failed to %s", action)
-    raise HTTPException(status_code=500, detail=str(error))
+    return failure(500, "internal_error", f"Torch runtime failed to {action}; inspect its log")
+
+
+def _is_cuda_oom(error: BaseException) -> bool:
+    oom = getattr(getattr(torch, "cuda", None), "OutOfMemoryError", None)
+    return isinstance(oom, type) and isinstance(error, oom)
 
 
 # --- Request Models ---
@@ -40,7 +66,7 @@ class LoadModelRequest(BaseModel):
     model_path: str
     model_name: str
     device: str = "auto"
-    model_type: Optional[str] = None
+    model_type: Optional[SupportedModelType] = None
     pipeline_path: Optional[str] = None
     vae_path: Optional[str] = None
 
@@ -48,6 +74,26 @@ class LoadModelRequest(BaseModel):
     @classmethod
     def _validate_model_path(cls, value: str) -> str:
         return validate_model_path(value)
+
+    @field_validator("pipeline_path", "vae_path")
+    @classmethod
+    def _validate_component_path(cls, value: Optional[str], info) -> Optional[str]:
+        if value is None:
+            return None
+        return validate_model_path(value, field=info.field_name)
+
+    @model_validator(mode="after")
+    def _validate_adapter_components(self) -> "LoadModelRequest":
+        image_adapter = self.model_type in IMAGE_ADAPTERS
+        if image_adapter and self.pipeline_path is None:
+            raise ValueError(f"model_type {self.model_type} requires pipeline_path")
+        if self.pipeline_path is not None and not image_adapter:
+            raise ValueError(
+                f"pipeline_path requires model_type {NUNCHAKU_Z_IMAGE} or {FLUX2_KLEIN}"
+            )
+        if self.vae_path is not None and self.model_type != FLUX2_KLEIN:
+            raise ValueError(f"vae_path requires model_type {FLUX2_KLEIN}")
+        return self
 
     @field_validator("model_name")
     @classmethod
@@ -61,10 +107,12 @@ class LoadModelRequest(BaseModel):
 
 
 class UnloadModelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     slot_id: str = Field(min_length=1, max_length=64)
 
 
 class ConfigureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     host: Optional[str] = None
     api_port: Optional[int] = None
     max_loaded_models: Optional[int] = None
@@ -126,7 +174,7 @@ async def load_model(req: LoadModelRequest, request: Request):
             while not load.done():
                 if await request.is_disconnected():
                     load.cancel()
-                    raise HTTPException(status_code=499, detail="Model load cancelled")
+                    raise failure(499, "cancelled", "Model load cancelled")
                 await asyncio.wait({load}, timeout=0.1)
             slot = load.result()
         finally:
@@ -144,12 +192,27 @@ async def load_model(req: LoadModelRequest, request: Request):
         return {"success": True, "slot": slot.to_dict()}
     except HTTPException:
         raise
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        _log_and_raise_internal_error("load model", e)
+    except SlotConflict as error:
+        raise failure(409, error.code, str(error)) from None
+    except ModelLoadRefusal as error:
+        raise failure(400, "model_rejected", str(error)) from None
+    except Exception as error:
+        if _is_cuda_oom(error):
+            logger.warning("Model load ran out of device memory", exc_info=True)
+            torch.cuda.empty_cache()
+            raise failure(
+                507, "out_of_memory", "Insufficient device memory to load this model"
+            ) from None
+        if isinstance(error, (ValueError, OSError)):
+            # Library refusals (unrecognized config, missing weights) carry
+            # resolved paths; the caller gets the stable reason only.
+            logger.warning("Model load was refused by its loader", exc_info=True)
+            raise failure(
+                400,
+                "model_unloadable",
+                "The Torch runtime could not load these model files; inspect its log",
+            ) from None
+        raise _internal_error("load model") from None
 
 
 @router.post("/unload")
@@ -160,12 +223,12 @@ async def unload_model(req: UnloadModelRequest, request: Request):
     try:
         await manager.unload(req.slot_id)
         return {"success": True}
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except Exception as e:
-        _log_and_raise_internal_error("unload model", e)
+    except KeyError:
+        raise failure(404, "slot_not_found", f"Slot not found: {req.slot_id}") from None
+    except SlotConflict as error:
+        raise failure(409, error.code, str(error)) from None
+    except Exception:
+        raise _internal_error("unload model") from None
 
 
 @router.get("/status")
@@ -235,8 +298,10 @@ async def configure(req: ConfigureRequest, request: Request):
     if req.max_loaded_models is not None:
         try:
             await manager.set_max_loaded_models(req.max_loaded_models)
-        except RuntimeError as e:
-            raise HTTPException(status_code=409, detail=str(e))
+        except SlotConflict as error:
+            raise failure(409, error.code, str(error)) from None
+        except Exception:
+            raise _internal_error("configure the runtime") from None
         next_config["max_loaded_models"] = req.max_loaded_models
 
     if req.lan_access is not None:

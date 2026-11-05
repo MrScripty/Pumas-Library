@@ -285,12 +285,41 @@ impl MetadataManager {
     }
 
     /// Save versions metadata.
+    ///
+    /// This replaces the whole file. To change part of it, use
+    /// [`Self::update_versions`], which reads and writes under one lock so a
+    /// concurrent change is not lost.
     pub fn save_versions(&self, data: &VersionsMetadata, app_id: Option<AppId>) -> Result<()> {
-        let path = self.versions_path(app_id);
-        let _lock = self.write_lock.write().map_err(|_| {
-            PumasError::Other("Failed to acquire write lock for versions".to_string())
-        })?;
+        let _lock = self.lock_versions()?;
+        self.write_versions(data, app_id)
+    }
 
+    /// Load, change and save versions metadata while holding the write lock,
+    /// so two changes in this process never overwrite each other. The file
+    /// is written only when `change` succeeds; its value is returned.
+    ///
+    /// `change` must not call back into this manager's save methods, which
+    /// take the same lock.
+    pub fn update_versions<T>(
+        &self,
+        app_id: Option<AppId>,
+        change: impl FnOnce(&mut VersionsMetadata) -> Result<T>,
+    ) -> Result<T> {
+        let _lock = self.lock_versions()?;
+        let mut versions = self.load_versions(app_id)?;
+        let value = change(&mut versions)?;
+        self.write_versions(&versions, app_id)?;
+        Ok(value)
+    }
+
+    fn lock_versions(&self) -> Result<std::sync::RwLockWriteGuard<'_, ()>> {
+        self.write_lock
+            .write()
+            .map_err(|_| PumasError::Other("Failed to acquire write lock for versions".to_string()))
+    }
+
+    fn write_versions(&self, data: &VersionsMetadata, app_id: Option<AppId>) -> Result<()> {
+        let path = self.versions_path(app_id);
         debug!("Saving versions to {}", path.display());
         atomic_write_json(&path, data, true)
     }
@@ -312,25 +341,26 @@ impl MetadataManager {
         metadata: InstalledVersionMetadata,
         app_id: Option<AppId>,
     ) -> Result<()> {
-        let mut versions = self.load_versions(app_id)?;
-        versions.installed.insert(tag.to_string(), metadata);
-        self.save_versions(&versions, app_id)
+        self.update_versions(app_id, |versions| {
+            versions.installed.insert(tag.to_string(), metadata);
+            Ok(())
+        })
     }
 
     /// Remove an installed version from metadata.
     pub fn remove_installed_version(&self, tag: &str, app_id: Option<AppId>) -> Result<()> {
-        let mut versions = self.load_versions(app_id)?;
-        versions.installed.remove(tag);
+        self.update_versions(app_id, |versions| {
+            versions.installed.remove(tag);
 
-        // Clear selection if this version was selected
-        if versions.last_selected_version.as_deref() == Some(tag) {
-            versions.last_selected_version = None;
-        }
-        if versions.default_version.as_deref() == Some(tag) {
-            versions.default_version = None;
-        }
-
-        self.save_versions(&versions, app_id)
+            // Clear selection if this version was selected
+            if versions.last_selected_version.as_deref() == Some(tag) {
+                versions.last_selected_version = None;
+            }
+            if versions.default_version.as_deref() == Some(tag) {
+                versions.default_version = None;
+            }
+            Ok(())
+        })
     }
 
     /// Set the last selected version.
@@ -339,16 +369,18 @@ impl MetadataManager {
         tag: Option<&str>,
         app_id: Option<AppId>,
     ) -> Result<()> {
-        let mut versions = self.load_versions(app_id)?;
-        versions.last_selected_version = tag.map(String::from);
-        self.save_versions(&versions, app_id)
+        self.update_versions(app_id, |versions| {
+            versions.last_selected_version = tag.map(String::from);
+            Ok(())
+        })
     }
 
     /// Set the default version.
     pub fn set_default_version(&self, tag: Option<&str>, app_id: Option<AppId>) -> Result<()> {
-        let mut versions = self.load_versions(app_id)?;
-        versions.default_version = tag.map(String::from);
-        self.save_versions(&versions, app_id)
+        self.update_versions(app_id, |versions| {
+            versions.default_version = tag.map(String::from);
+            Ok(())
+        })
     }
 
     // ========================================
@@ -525,6 +557,7 @@ impl MetadataManager {
     ///
     /// Removes metadata for versions that no longer exist on disk.
     pub fn cleanup_stale_versions(&self, app_id: Option<AppId>) -> Result<Vec<String>> {
+        let _lock = self.lock_versions()?;
         let mut versions = self.load_versions(app_id)?;
         let mut removed = Vec::new();
 
@@ -562,7 +595,7 @@ impl MetadataManager {
                 }
             }
 
-            self.save_versions(&versions, app_id)?;
+            self.write_versions(&versions, app_id)?;
         }
 
         Ok(removed)
@@ -707,5 +740,58 @@ mod tests {
         manager.delete_version_config("v0.1.0").unwrap();
         let loaded = manager.load_version_config("v0.1.0").unwrap();
         assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn concurrent_version_updates_are_all_kept() {
+        let (manager, _temp) = create_test_manager();
+        let manager = std::sync::Arc::new(manager);
+        let threads: Vec<_> = (0..8)
+            .map(|thread| {
+                let manager = manager.clone();
+                std::thread::spawn(move || {
+                    for round in 0..5 {
+                        let tag = format!("v{thread}.{round}");
+                        manager
+                            .update_installed_version(
+                                &tag,
+                                InstalledVersionMetadata {
+                                    path: tag.clone(),
+                                    release_tag: tag.clone(),
+                                    ..Default::default()
+                                },
+                                None,
+                            )
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+
+        assert_eq!(manager.load_versions(None).unwrap().installed.len(), 40);
+    }
+
+    #[test]
+    fn a_failed_version_update_writes_nothing() {
+        let (manager, _temp) = create_test_manager();
+        manager.set_default_version(Some("v1"), None).unwrap();
+
+        let result = manager.update_versions(None, |versions| {
+            versions.default_version = Some("v2".to_string());
+            Err::<(), _>(PumasError::Other("refused".to_string()))
+        });
+
+        assert!(result.is_err());
+        assert_eq!(
+            manager
+                .load_versions(None)
+                .unwrap()
+                .default_version
+                .as_deref(),
+            Some("v1")
+        );
     }
 }

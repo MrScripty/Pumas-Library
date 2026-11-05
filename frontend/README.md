@@ -64,11 +64,15 @@ tokens rather than hard-coded colors.
 
 Prefer native semantic controls. Composite widgets must provide complete
 keyboard, focus, naming, dismissal and state behavior. The lint policy requires
-React Aria `useHover` instead of raw mouse hover handlers. Routine progress
-updates are not live announcements; one terminal region announces failure
-assertively and cancellation or success politely. The renderer follows the
-operating-system reduced-motion preference. jsdom tests do not prove real
-focus, layout, contrast, reduced motion or assistive-technology behavior.
+React Aria `useHover` instead of raw mouse hover handlers. `ui/Tooltip` opens
+on hover and on keyboard focus, closes on Escape, and describes its trigger
+through `aria-describedby`, so a hint on a control is never hover-only.
+Progress rings are decorative; the control that owns one states its progress
+as text. Routine progress updates are not live announcements; one terminal
+region announces failure assertively and cancellation or success politely.
+The renderer follows the operating-system reduced-motion preference. jsdom
+tests do not prove real focus, layout, contrast, reduced motion or
+assistive-technology behavior.
 
 ## Entry Points
 

@@ -100,4 +100,12 @@ describe('VersionSelectorTrigger', () => {
     fireEvent.click(screen.getByTitle('Install your first version'));
     expect(props.onOpenVersionManager).toHaveBeenCalledTimes(1);
   });
+
+  it('describes install ring progress and disk usage in text', () => {
+    renderTrigger({ hasInstallActivity: true, ringDegrees: 180, diskUsageLabel: 'Disk usage unavailable' });
+
+    expect(screen.getByRole('button', { name: 'Install new version' }))
+      .toHaveAccessibleDescription('Installation 50% complete');
+    expect(screen.getByTitle('Open active version in file manager · Disk usage unavailable')).toBeInTheDocument();
+  });
 });

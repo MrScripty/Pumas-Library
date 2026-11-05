@@ -36,7 +36,13 @@ claims the root and refuses an existing owner row, including unresolved
 ownership after failed startup/shutdown or process loss. Orderly replacement
 requires successful composed `shutdown_instance()`; PID liveness and subsystem
 drains do not authorize reclaim.
-`PumasLocalClient` explicitly connects to an existing ready owner.
+`PumasLocalClient` explicitly connects to an existing ready owner. The owner's
+loopback IPC server admits a bounded number of connections; a connection over
+the limit receives an error frame naming the limit before it is closed, and a
+client that starts a frame without finishing it within 30 s is closed with a
+reason. Idle connections between frames stay open, because local clients hold
+one connection for their lifetime. The registry database that carries the IPC
+connection tokens is owner-only (0600, directory 0700) on Unix.
 `PumasReadOnlyLibrary` reads indexed state without taking lifecycle ownership.
 An explicit `InstanceProfile::CatalogQuery` owner opens an existing index read-only
 through the same builder/API and restricted local IPC dispatcher. It supports

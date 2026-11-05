@@ -826,6 +826,16 @@ impl IpcResponse {
     }
 
     pub(crate) fn validate_envelope(&self, expected_id: u64) -> Result<()> {
+        // A null-id error is the server refusing the connection itself (for
+        // example at capacity, or a stalled frame); surface its reason.
+        if self.jsonrpc == "2.0" && self.id.is_none() && self.result.is_none() {
+            if let Some(error) = &self.error {
+                return Err(PumasError::Other(format!(
+                    "Local IPC server refused the connection: {}",
+                    error.message
+                )));
+            }
+        }
         let expected_id = Some(Value::Number(expected_id.into()));
         if self.jsonrpc != "2.0" || self.id != expected_id {
             return Err(PumasError::InvalidParams {
@@ -901,6 +911,30 @@ impl IpcError {
         Self::public(-32603, "internal", "Local IPC operation failed")
     }
 
+    /// The server is at its connection limit and refused this connection.
+    pub(crate) fn at_capacity(limit: usize) -> Self {
+        Self {
+            code: -32000,
+            message: format!(
+                "Local IPC server is at its limit of {limit} concurrent connections; \
+                 retry after another local client disconnects"
+            ),
+            data: Some(serde_json::json!({ "class": "unavailable", "limit": limit })),
+        }
+    }
+
+    /// A started frame was not completed in time, so the connection closes.
+    pub(crate) fn stalled_frame(timeout: std::time::Duration) -> Self {
+        Self {
+            code: -32600,
+            message: format!(
+                "Local IPC request frame was not completed within {} s of its first byte",
+                timeout.as_secs()
+            ),
+            data: Some(serde_json::json!({ "class": "invalid_request" })),
+        }
+    }
+
     pub(crate) fn from_pumas(error: &PumasError) -> Self {
         let code = error.to_rpc_error_code();
         let class = match code {
@@ -963,6 +997,53 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result<Optio
     reader.read_exact(&mut payload).await?;
 
     Ok(Some(payload))
+}
+
+/// The outcome of reading one frame under a completion deadline.
+#[derive(Debug)]
+pub(crate) enum FrameRead {
+    /// A complete frame.
+    Frame(Vec<u8>),
+    /// The peer closed the connection between frames.
+    Closed,
+    /// The peer started a frame and did not finish it in time.
+    Stalled,
+}
+
+/// Read a length-prefixed frame, waiting without limit for its first byte
+/// (an idle connection between requests is a supported client pattern) but
+/// requiring the rest of the header and the payload within `completion`.
+pub(crate) async fn read_frame_within<R: AsyncReadExt + Unpin>(
+    reader: &mut R,
+    completion: std::time::Duration,
+) -> Result<FrameRead> {
+    let mut len_buf = [0u8; 4];
+    match reader.read_exact(&mut len_buf[..1]).await {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(FrameRead::Closed),
+        Err(e) => return Err(e.into()),
+    }
+    let rest = async {
+        reader.read_exact(&mut len_buf[1..]).await?;
+        let len = u32::from_be_bytes(len_buf) as usize;
+        if len > RegistryConfig::MAX_IPC_MESSAGE_SIZE {
+            return Err(PumasError::Validation {
+                field: "ipc_frame".to_string(),
+                message: format!(
+                    "IPC message size {} exceeds maximum {}",
+                    len,
+                    RegistryConfig::MAX_IPC_MESSAGE_SIZE
+                ),
+            });
+        }
+        let mut payload = vec![0u8; len];
+        reader.read_exact(&mut payload).await?;
+        Ok(payload)
+    };
+    match tokio::time::timeout(completion, rest).await {
+        Ok(payload) => payload.map(FrameRead::Frame),
+        Err(_) => Ok(FrameRead::Stalled),
+    }
 }
 
 /// Write a length-prefixed frame to an async writer.

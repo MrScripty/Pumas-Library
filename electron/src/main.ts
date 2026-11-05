@@ -558,9 +558,12 @@ async function createWindow(): Promise<'shown' | 'fatal' | 'closed'> {
     if (mainWindow !== createdWindow) {
       return;
     }
+    // A closed renderer cannot unsubscribe; release all of its subscriptions.
+    modelDownloadRendererSubscriptions = 0;
     servingStatusRendererSubscriptions = 0;
     runtimeProfileRendererSubscriptions = 0;
     statusTelemetryRendererSubscriptions = 0;
+    pythonBridge?.stopModelDownloadUpdateStream();
     pythonBridge?.stopServingStatusUpdateStream();
     pythonBridge?.stopRuntimeProfileUpdateStream();
     pythonBridge?.stopStatusTelemetryUpdateStream();

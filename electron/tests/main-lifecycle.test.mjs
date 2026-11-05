@@ -609,3 +609,47 @@ test('the packaged application menu has no DevTools or reload entries', async ()
     harness.timers.clear();
   }
 });
+
+test('closing the window releases every renderer stream subscription, including downloads', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pumas-main-subscriptions-'));
+  mkdirSync(join(root, 'shared-resources', 'models'), { recursive: true });
+  const events = [];
+  class FixtureBridge {
+    isRunning() { return true; }
+    async start() {}
+    async stop() {}
+    async call() { return {}; }
+  }
+  for (const stream of ['ModelLibrary', 'ModelDownload', 'RuntimeProfile', 'ServingStatus', 'StatusTelemetry']) {
+    FixtureBridge.prototype[`start${stream}UpdateStream`] = function () { events.push(`start ${stream}`); };
+    FixtureBridge.prototype[`stop${stream}UpdateStream`] = function () { events.push(`stop ${stream}`); };
+  }
+  const harness = createMainHarness({ root, bridgeRuntime: { module: { PythonBridge: FixtureBridge } } });
+  try {
+    harness.ready();
+    await setImmediate();
+    const subscribe = (channel) => harness.handlers.get(channel)(harness.appSender());
+    subscribe('model-download:subscribe');
+    subscribe('status-telemetry:subscribe');
+    assert.deepEqual(events.filter((event) => event === 'start ModelDownload'), ['start ModelDownload']);
+
+    harness.windows[0].destroy();
+    assert.ok(events.includes('stop ModelDownload'), 'window close stops the download stream');
+    assert.ok(events.includes('stop StatusTelemetry'));
+
+    // A replacement window (macOS dock activation) must restart the stream.
+    const activation = harness.app.listeners('activate')[0]();
+    await setImmediate();
+    const replacement = harness.windows[1];
+    const sender = { sender: replacement.webContents, senderFrame: replacement.webContents.mainFrame };
+    harness.handlers.get('model-download:subscribe')(sender);
+    assert.deepEqual(events.filter((event) => event === 'start ModelDownload'),
+      ['start ModelDownload', 'start ModelDownload'], 'a leaked counter would skip this restart');
+    replacement.destroy();
+    await activation;
+  } finally {
+    for (const window of harness.windows) if (!window.destroyed) window.destroy();
+    harness.timers.clear();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

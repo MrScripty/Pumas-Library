@@ -2,8 +2,9 @@
 
 ## Reporting a Vulnerability
 
-Do not open a public issue for a suspected vulnerability. Use the repository's
-private vulnerability reporting channel or contact the maintainer privately.
+Do not open a public issue for a suspected vulnerability. Report it through
+the repository's [private vulnerability reporting](https://github.com/MrScripty/Pumas-Library/security/advisories/new)
+form, or contact the maintainer privately.
 Include affected versions, reproduction steps, impact, and any known mitigation.
 
 Only the latest development/release line receives security fixes unless a
@@ -83,6 +84,7 @@ checks, and drop an entry once the dependency changes.
 | `lru` 0.16.4 | RUSTSEC-2026-0253 | Only in `s3` builds, through `aws-sdk-s3` 1.137.0. The trigger is absent: the key is a `String` with no custom `Drop`, and `pop` is never called. |
 | `http-cache-semantics` 4.3.0 | GHSA-ch52-4w7c-c8xp | Disputed upstream. |
 | `bincode` 1.3.3, `instant` 0.1.13, `paste` 1.0.15 | Unmaintained notices | Pulled in by UniFFI tooling, `notify` and macro dependencies respectively; no known vulnerability. |
+| `zip` 2.4.2, `pyo3` 0.23.5 | Dependabot alerts on `pantograph_guard_interop/Cargo.lock` | Test-only harness lock, never built into a release. Both come from Pantograph's `inference` crate at the pinned consumer commit, so they move when that pin moves; `pyo3` is only built with `backend-pytorch`, which the harness never enables. |
 
 ## Current Security Work
 

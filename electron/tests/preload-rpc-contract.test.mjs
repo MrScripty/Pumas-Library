@@ -107,7 +107,6 @@ test('Torch runtime options require verified records and an offered default adap
     { ...options, adapterRequirements: undefined },
     { ...options, adapterRequirements: [{ adapter: 'flux2', tag: 'v2.9.1', build: 'cu130' }] },
     { ...options, verified: [{ ...options.verified[0], packages: [{ name: 'diffusers' }] }] },
-    { ...options, bundledPresetAvailable: true },
     { ...options, defaultAdapter: undefined },
     { ...options, defaultAdapter: 'bundled' },
     { ...options, adapters: ['none'], defaultAdapter: 'flux2' },

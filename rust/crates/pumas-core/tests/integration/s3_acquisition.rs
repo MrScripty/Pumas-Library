@@ -275,12 +275,15 @@ fn spec(path: &str) -> ModelImportSpec {
     }
 }
 async fn api(root: &Path) -> PumasApi {
-    match PumasApi::builder(root)
-        .auto_create_dirs(true)
-        .with_hf_client(false)
-        .with_process_manager(false)
-        .build()
-        .await
+    // Tests here cold-reopen the root they just released.
+    match crate::support::after_fork_release(|| {
+        PumasApi::builder(root)
+            .auto_create_dirs(true)
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+    })
+    .await
     {
         Ok(api) => api,
         Err(error) => panic!(

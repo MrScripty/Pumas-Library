@@ -452,16 +452,20 @@ fn workspace(stage: &Path) -> AcquisitionWorkspace {
     .unwrap()
 }
 async fn build(root: &Path) -> PumasApi {
-    PumasApi::builder(root)
-        .with_registry(
-            pumas_library::registry::LibraryRegistry::open_at(&root.join("registry.db")).unwrap(),
-        )
-        .auto_create_dirs(true)
-        .with_hf_client(false)
-        .with_process_manager(false)
-        .build()
-        .await
-        .unwrap()
+    // Tests here cold-reopen the root they just released.
+    crate::support::after_fork_release(|| {
+        PumasApi::builder(root)
+            .with_registry(
+                pumas_library::registry::LibraryRegistry::open_at(&root.join("registry.db"))
+                    .unwrap(),
+            )
+            .auto_create_dirs(true)
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+    })
+    .await
+    .unwrap()
 }
 fn assert_published(
     rig: &Rig,

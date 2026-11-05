@@ -109,6 +109,35 @@ impl<'a> FTS5Manager<'a> {
         })
     }
 
+    /// Ensure the table and all three triggers exist, without inspecting
+    /// the trigger bodies. Used for an index whose schema identity already
+    /// vouches for their shape; anything missing is rebuilt as one unit.
+    pub(crate) fn ensure_present(&self, conn: &Connection) -> Result<()> {
+        with_savepoint(conn, "ensure_fts5_present", |conn| {
+            if self.table_exists(conn)? && self.all_triggers_exist(conn)? {
+                return Ok(());
+            }
+            self.create_table(conn)?;
+            self.drop_triggers(conn)?;
+            self.create_triggers(conn)?;
+            self.populate_from_models(conn)
+        })
+    }
+
+    fn all_triggers_exist(&self, conn: &Connection) -> Result<bool> {
+        let table = &self.config.table_name;
+        let count: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name IN (?1, ?2, ?3)",
+            [
+                format!("{table}_ai"),
+                format!("{table}_au"),
+                format!("{table}_ad"),
+            ],
+            |row| row.get(0),
+        )?;
+        Ok(count == 3)
+    }
+
     /// Create the FTS5 virtual table.
     pub fn create_table(&self, conn: &Connection) -> Result<()> {
         let sql = format!(

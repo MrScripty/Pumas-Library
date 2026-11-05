@@ -12,6 +12,8 @@ mod metadata_overlays;
 mod model_library_updates;
 mod model_selector_snapshot;
 mod package_facts_cache;
+mod schema_identity;
+use schema_identity::IndexSchemaIdentity;
 
 pub(crate) use intent_declarations::{
     BoundTarget, IntentDeclarationRecord, IntentDeclarationRelease, IntentDeletionClaimResult,
@@ -287,30 +289,28 @@ impl ModelIndex {
 
         let mut conn = Connection::open(&db_path)?;
         let (update_tx, _) = broadcast::channel(256);
+        let fts5_config = FTS5Config::default();
 
-        // Refuse incompatible authoritative intent state before any unrelated
-        // write-oriented initialization can change this database.
+        // Refuse incompatible authoritative intent state, and an index schema
+        // this build does not know, before any write-oriented initialization
+        // can change this database.
         Self::inspect_intent_schema(&conn)?;
+        Self::inspect_index_schema_identity(&conn)?;
 
         // Configure connection
         Self::configure_connection(&conn)?;
 
-        // Ensure schema
-        Self::ensure_schema(&conn)?;
+        // Ensure schema, including the FTS5 search projection, as one unit.
+        Self::ensure_index_schema(&mut conn, &fts5_config)?;
         Self::ensure_intent_schema(&mut conn)?;
 
-        let index = Self {
+        Ok(Self {
             _store_lifetime: store_lifetime,
             db_path,
             conn: Arc::new(Mutex::new(conn)),
-            fts5_config: FTS5Config::default(),
+            fts5_config,
             update_tx,
-        };
-
-        // Ensure FTS5 is set up
-        index.ensure_fts5()?;
-
-        Ok(index)
+        })
     }
 
     /// Open an existing model index with a read-only SQLite connection.
@@ -319,6 +319,7 @@ impl ModelIndex {
         let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         Self::configure_read_only_connection(&conn)?;
         Self::inspect_intent_schema(&conn)?;
+        Self::inspect_index_schema_identity(&conn)?;
         let (update_tx, _) = broadcast::channel(1);
 
         Ok(Self {
@@ -356,7 +357,10 @@ impl ModelIndex {
     }
 
     /// Ensure the base schema exists.
-    fn ensure_schema(conn: &Connection) -> Result<()> {
+    ///
+    /// Shape checks for releases before the schema identity run only for an
+    /// unstamped database.
+    fn ensure_schema(conn: &Connection, identity: IndexSchemaIdentity) -> Result<()> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS models (
                 id TEXT PRIMARY KEY,
@@ -393,23 +397,10 @@ impl ModelIndex {
             [],
         )?;
 
-        Self::ensure_metadata_v2_schema(conn)?;
+        Self::ensure_metadata_v2_schema(conn, identity)?;
         Self::ensure_package_facts_cache_schema(conn)?;
         Self::ensure_model_library_updates_schema(conn)?;
         Self::seed_metadata_v2_rows(conn)?;
-
-        Ok(())
-    }
-
-    /// Ensure FTS5 virtual table and triggers exist.
-    fn ensure_fts5(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| PumasError::Database {
-            message: "Failed to acquire connection lock".to_string(),
-            source: None,
-        })?;
-
-        let fts5_manager = FTS5Manager::new(&self.fts5_config);
-        fts5_manager.ensure_setup(&conn)?;
 
         Ok(())
     }

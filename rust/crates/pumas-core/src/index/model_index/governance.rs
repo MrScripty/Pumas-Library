@@ -47,8 +47,11 @@ const CONFIG_RULES_TABLE: RuleTable = RuleTable {
 
 impl ModelIndex {
     /// Create metadata v2/additional governance tables.
-    pub(super) fn ensure_metadata_v2_schema(conn: &Connection) -> Result<()> {
-        Self::migrate_model_type_rule_constraints(conn)?;
+    pub(super) fn ensure_metadata_v2_schema(
+        conn: &Connection,
+        identity: IndexSchemaIdentity,
+    ) -> Result<()> {
+        Self::migrate_model_type_rule_constraints(conn, identity)?;
 
         conn.execute_batch(
             "
@@ -233,9 +236,15 @@ impl ModelIndex {
         Ok(())
     }
 
-    fn migrate_model_type_rule_constraints(conn: &Connection) -> Result<()> {
+    fn migrate_model_type_rule_constraints(
+        conn: &Connection,
+        identity: IndexSchemaIdentity,
+    ) -> Result<()> {
         Self::recover_interrupted_rule_table_rebuilds(conn)?;
 
+        // A stamped index already has the current rule constraints; the
+        // shape sniffing below recognises libraries from before the stamp.
+        let sniff_constraints = identity == IndexSchemaIdentity::Unstamped;
         let arch_sql: Option<String> = conn
             .query_row(
                 "SELECT sql FROM sqlite_master
@@ -244,12 +253,14 @@ impl ModelIndex {
                 |row| row.get(0),
             )
             .optional()?;
-        if arch_sql.as_deref().is_some_and(|sql| {
-            let sql = sql.to_lowercase();
-            ["'reranker'", "'vlm'", "'decision'", "'video'"]
-                .iter()
-                .any(|category| !sql.contains(category))
-        }) {
+        if sniff_constraints
+            && arch_sql.as_deref().is_some_and(|sql| {
+                let sql = sql.to_lowercase();
+                ["'reranker'", "'vlm'", "'decision'", "'video'"]
+                    .iter()
+                    .any(|category| !sql.contains(category))
+            })
+        {
             Self::rebuild_model_type_arch_rules_table(conn)?;
         }
 
@@ -261,12 +272,14 @@ impl ModelIndex {
                 |row| row.get(0),
             )
             .optional()?;
-        if config_sql.as_deref().is_some_and(|sql| {
-            let sql = sql.to_lowercase();
-            ["'reranker'", "'vlm'", "'decision'", "'video'"]
-                .iter()
-                .any(|category| !sql.contains(category))
-        }) {
+        if sniff_constraints
+            && config_sql.as_deref().is_some_and(|sql| {
+                let sql = sql.to_lowercase();
+                ["'reranker'", "'vlm'", "'decision'", "'video'"]
+                    .iter()
+                    .any(|category| !sql.contains(category))
+            })
+        {
             Self::rebuild_model_type_config_rules_table(conn)?;
         }
 
@@ -382,7 +395,7 @@ impl ModelIndex {
         Ok(())
     }
 
-    fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
+    pub(super) fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
         Ok(conn
             .query_row(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",

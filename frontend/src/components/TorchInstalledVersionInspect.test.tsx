@@ -15,7 +15,7 @@ describe('installed Torch version review', () => {
       get_torch_runtime_options: vi.fn().mockResolvedValue({
         builds: ['cpu', 'cu130'], pythons: [], adapters: ['none', 'flux2'],
         defaultAdapter: 'flux2', defaultBuild: 'auto',
-        verified: [],
+        verified: [], adapterRequirements: [],
         installed: [
           { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled', qualification: 'qualified' },
           { tag: 'v2.10.0', build: 'cpu', python: 'python3.12', adapter: 'flux2', qualification: 'unverified' },

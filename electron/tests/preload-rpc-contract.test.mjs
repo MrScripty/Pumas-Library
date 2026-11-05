@@ -95,14 +95,17 @@ test('Torch runtime options require verified records and an offered default adap
       tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapters: ['flux2'], verifiedOn: '2026-09-23',
       scope: 'Adapter imports passed.', sourceCommit: '5d373bf8', packages: [{ name: 'diffusers', version: '0.37.0' }],
     }],
+    adapterRequirements: [{ adapter: 'flux2', tag: 'v2.9.1', build: 'cu130', python: 'python3.12' }],
     installed: [],
   };
-  for (const valid of [options, { ...options, adapters: ['none'], defaultAdapter: 'none', verified: [] }]) {
+  for (const valid of [options, { ...options, adapters: ['none'], defaultAdapter: 'none', verified: [], adapterRequirements: [] }]) {
     harness.respondWith(valid);
     assert.deepEqual(toPlainValue(await harness.api.get_torch_runtime_options()), valid);
   }
   for (const invalid of [
     { ...options, verified: undefined },
+    { ...options, adapterRequirements: undefined },
+    { ...options, adapterRequirements: [{ adapter: 'flux2', tag: 'v2.9.1', build: 'cu130' }] },
     { ...options, verified: [{ ...options.verified[0], packages: [{ name: 'diffusers' }] }] },
     { ...options, bundledPresetAvailable: true },
     { ...options, defaultAdapter: undefined },

@@ -73,14 +73,28 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     };
   }, [tag, attempt]);
 
-  const imageAdapters = IMAGE_ADAPTER_CHOICES.filter((adapter) => runtimeOptions?.adapters.includes(adapter));
+  const requirementOf = (adapter: string) => runtimeOptions?.adapterRequirements.find((requirement) => requirement.adapter === adapter);
+  // An adapter whose own wheel allows one selection is offered only for its release.
+  const offered = (adapter: string) => runtimeOptions?.adapters.includes(adapter) === true
+    && (requirementOf(adapter)?.tag ?? tag) === tag;
+  const imageAdapters = IMAGE_ADAPTER_CHOICES.filter(offered);
+  const chooseAdapter = (adapter: string) => {
+    const requirement = requirementOf(adapter);
+    if (requirement) {
+      setBuildChoice(requirement.build);
+      setPythonChoice(requirement.python);
+    }
+    setAdapterChoice(adapter);
+    setError(null);
+  };
+  const adapterRequirement = requirementOf(adapterChoice);
   const verifiedChoices: { record: TorchVerifiedRuntime; adapter: string }[] = (runtimeOptions?.verified ?? [])
     .filter((record) => record.tag === tag && runtimeOptions?.builds.includes(record.build))
-    .flatMap((record) => record.adapters.filter((adapter) => runtimeOptions?.adapters.includes(adapter)).map((adapter) => ({ record, adapter })));
+    .flatMap((record) => record.adapters.filter(offered).map((adapter) => ({ record, adapter })));
   const selectedVerified = verifiedChoices.find(({ record, adapter }) => record.build === buildChoice && record.python === pythonChoice && adapter === adapterChoice);
 
   const startInstallation = async () => {
-    if (!runtimeOptions || starting || !runtimeOptions.adapters.includes(adapterChoice)) return;
+    if (!runtimeOptions || starting || !offered(adapterChoice)) return;
     const currentRequest = ++requestNumber.current;
     const build = buildChoice;
     const python = pythonChoice;
@@ -140,10 +154,13 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
             <legend className="text-sm font-medium">Image adapter</legend>
             {imageAdapters.map((adapter) => (
               <label key={adapter} className="flex items-center gap-2 text-sm">
-                <input type="radio" name="torch-image-adapter" value={adapter} checked={adapterChoice === adapter} onChange={() => { setAdapterChoice(adapter); setError(null); }} />
+                <input type="radio" name="torch-image-adapter" value={adapter} checked={adapterChoice === adapter} onChange={() => chooseAdapter(adapter)} />
                 {adapterLabel(adapter)}
               </label>
             ))}
+            {adapterRequirement && <p className="text-xs text-[hsl(var(--text-secondary))]">
+              {adapterLabel(adapterRequirement.adapter)} installs only with the {adapterRequirement.build} build and Python {adapterRequirement.python.replace(/^python/, '')}, which its wheel was built for.
+            </p>}
           </fieldset>
         )}
         {loadingOptions && <p role="status" className="flex items-center gap-2 text-sm text-[hsl(var(--text-secondary))]"><Loader2 aria-hidden="true" size={16} className="animate-spin" />Loading Torch choices…</p>}

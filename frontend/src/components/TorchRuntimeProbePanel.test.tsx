@@ -14,7 +14,7 @@ const getProfiles = vi.fn<() => Promise<unknown>>().mockResolvedValue({ success:
 const baseOptions: TorchRuntimeOptions = {
   builds: ['cpu'], pythons: [], adapters: ['none'],
   defaultAdapter: 'none', defaultBuild: 'auto',
-  verified: [],
+  verified: [], adapterRequirements: [],
   installed: [],
 };
 vi.mock('../api/adapter', () => ({

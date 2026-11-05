@@ -63,6 +63,33 @@ pub(super) const BUILDS: &[&str] = &[
     "rocm7.14",
 ];
 const ADAPTERS: &[&str] = &["none", "flux2", "nunchaku", "cohere-asr"];
+
+/// An adapter whose own binary wheel was built for one selection.
+struct AdapterRequirement {
+    adapter: &'static str,
+    tag: &'static str,
+    build: &'static str,
+    python: &'static str,
+    /// Why another selection is refused.
+    refusal: &'static str,
+}
+
+/// Nunchaku 1.2.0 publishes one wheel, for Torch 2.9 on CPython 3.12 Linux
+/// x86_64; the resolver installs it on the 2.9.1 cu130 build. A test checks
+/// this against `torch-server/resolve_runtime.py`, which owns the wheel.
+const ADAPTER_REQUIREMENTS: &[AdapterRequirement] = &[AdapterRequirement {
+    adapter: "nunchaku",
+    tag: "v2.9.1",
+    build: "cu130",
+    python: "python3.12",
+    refusal: "The Nunchaku adapter's wheel installs only on Torch v2.9.1 with the cu130 build and Python 3.12.",
+}];
+
+fn adapter_requirement(adapter: &str) -> Option<&'static AdapterRequirement> {
+    ADAPTER_REQUIREMENTS
+        .iter()
+        .find(|requirement| requirement.adapter == adapter)
+}
 pub(super) const PREVIEW_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_RETAINED_TORCH_SELECTIONS: usize = 32;
 
@@ -128,6 +155,60 @@ mod tests {
             BUILDS.iter().position(|build| *build == "rocm7.2")
                 < BUILDS.iter().position(|build| *build == "rocm7.14")
         );
+    }
+
+    #[tokio::test]
+    async fn nunchaku_is_refused_before_provisioning_outside_its_wheel_selection() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        for (tag, build, python) in [
+            ("v2.14.0", "cu130", "python3.12"),
+            ("v2.9.1", "auto", "python3.12"),
+            ("v2.9.1", "cpu", "python3.12"),
+            ("v2.9.1", "cu130", "auto"),
+            ("v2.9.1", "cu130", "python3.13"),
+        ] {
+            let outcome = manager
+                .preview_torch_runtime(tag, build, python, "nunchaku")
+                .await
+                .unwrap();
+            let TorchPreviewOutcome::Rejected { reason, message } = outcome else {
+                panic!("{tag} {build} {python} was not refused");
+            };
+            assert_eq!(reason, TorchPreviewRejectionReason::Unsupported);
+            assert!(message.contains("v2.9.1"), "{message}");
+        }
+        assert!(manager.torch_install_selections.lock().await.is_empty());
+        assert!(!root.path().join("launcher-data/managed-python").exists());
+        let ready = manager
+            .preview_torch_runtime("v2.9.1", "cu130", "python3.12", "nunchaku")
+            .await
+            .unwrap();
+        assert!(matches!(ready, TorchPreviewOutcome::Ready { .. }));
+        let options = manager.torch_runtime_options().await.unwrap();
+        assert_eq!(options.adapter_requirements.len(), 1);
+        assert_eq!(options.adapter_requirements[0].tag, "v2.9.1");
+    }
+
+    #[test]
+    fn nunchaku_requirement_matches_the_resolver_that_owns_its_wheel() {
+        let resolver = include_str!("../../../../../torch-server/resolve_runtime.py");
+        let requirement = adapter_requirement("nunchaku").unwrap();
+        let version = requirement.tag.trim_start_matches('v');
+        let minor = requirement.python.trim_start_matches("python");
+        assert!(resolver.contains(&format!("version == \"{version}\"")));
+        assert!(resolver.contains(&format!("build == \"{}\"", requirement.build)));
+        assert!(resolver.contains(&format!(
+            "sys.version_info[:2] == ({})",
+            minor.replace('.', ", ")
+        )));
+        let torch_minor = version.rsplit_once('.').unwrap().0;
+        let abi = minor.replace('.', "");
+        assert!(resolver.contains(&format!(
+            "%2Btorch{torch_minor}-cp{abi}-cp{abi}-linux_x86_64.whl"
+        )));
     }
 
     #[tokio::test]
@@ -691,6 +772,18 @@ impl VersionManager {
             adapters: adapters.iter().copied().map(str::to_owned).collect(),
             default_adapter: "none".into(),
             verified: super::torch_verified::verified_torch_runtimes(),
+            adapter_requirements: ADAPTER_REQUIREMENTS
+                .iter()
+                .filter(|requirement| adapters.contains(&requirement.adapter))
+                .map(
+                    |requirement| super::torch_inspection::TorchAdapterRequirement {
+                        adapter: requirement.adapter.into(),
+                        tag: requirement.tag.into(),
+                        build: requirement.build.into(),
+                        python: requirement.python.into(),
+                    },
+                )
+                .collect(),
             installed,
         })
     }
@@ -726,6 +819,19 @@ impl VersionManager {
                 return Err(failed(
                     "ASR dependency profile is unavailable on this platform",
                 ));
+            }
+        }
+        // Refuse before any Python is provisioned, not after every attempt.
+        if let Some(requirement) = adapter_requirement(adapter) {
+            if !cfg!(all(target_os = "linux", target_arch = "x86_64"))
+                || tag != requirement.tag
+                || build != requirement.build
+                || python != requirement.python
+            {
+                return Ok(TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Unsupported,
+                    message: requirement.refusal,
+                });
             }
         }
         let id = preview_token()?;

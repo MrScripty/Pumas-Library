@@ -206,7 +206,7 @@ describe('TorchPanel shared version controls', () => {
       get_torch_runtime_options: vi.fn().mockResolvedValue({
         builds: ['cpu'], defaultBuild: 'auto', pythons: [],
         adapters: ['none'], defaultAdapter: 'none',
-        verified: [],
+        verified: [], adapterRequirements: [],
       }),
       preview_torch_runtime: vi.fn().mockResolvedValue({
         status: 'ready', preview: {

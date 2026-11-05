@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 59524bc69abaf4b0690c8d9bae8cbe120dfe36ca15d7816b6a3ccc7865fe8cba. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 2d7bec6da147be379e164c7919a78d0e658da811435a95b87d995e52ed48ab0e. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -95,6 +95,7 @@ export declare function validateSuccessOutcome(value: unknown): boolean;
 export declare function validateSupportedQuantTypesOutcome(value: unknown): boolean;
 export declare function validateSwitchVersionOutcome(value: unknown): boolean;
 export declare function validateSwitchVersionParams(value: unknown): boolean;
+export declare function validateTorchAdapterRequirement(value: unknown): boolean;
 export declare function validateTorchAlternativeMatch(value: unknown): boolean;
 export declare function validateTorchAlternativesOutcome(value: unknown): boolean;
 export declare function validateTorchAlternativesStatus(value: unknown): boolean;

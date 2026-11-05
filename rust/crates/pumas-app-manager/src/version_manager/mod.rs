@@ -77,9 +77,9 @@ pub use torch_alternatives::{
     TorchReleaseOptionsStatus, TorchReleaseRecommendation,
 };
 pub use torch_inspection::{
-    TorchCapabilityProbe, TorchInstalledProbeReport, TorchInstalledRuntime,
-    TorchProbeAdapterStatus, TorchProbeCoreStatus, TorchProbeStatus, TorchPythonChoice,
-    TorchRuntimeOptions,
+    TorchAdapterRequirement, TorchCapabilityProbe, TorchInstalledProbeReport,
+    TorchInstalledRuntime, TorchProbeAdapterStatus, TorchProbeCoreStatus, TorchProbeStatus,
+    TorchPythonChoice, TorchRuntimeOptions,
 };
 pub use torch_preview::{
     TorchArtifact, TorchPreview, TorchPreviewOutcome, TorchPreviewRejectionReason,

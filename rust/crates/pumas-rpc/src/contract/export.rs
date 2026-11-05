@@ -877,6 +877,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         TorchPythonChoice,
         TorchVerifiedRuntime,
         TorchVerifiedPackage,
+        TorchAdapterRequirement,
         TorchInstalledRuntime,
         TorchRuntimeProbeOutcome,
         TorchProbeStatus,

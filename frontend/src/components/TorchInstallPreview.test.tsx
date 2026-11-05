@@ -24,10 +24,11 @@ vi.mock('../api/adapter', () => ({
 const options: TorchRuntimeOptions = {
   builds: ['cpu', 'cu130'], defaultBuild: 'auto',
   pythons: [], adapters: ['none'], defaultAdapter: 'none',
-
-  verified: [],
+  verified: [], adapterRequirements: [],
   installed: [],
 };
+
+const nunchakuRequirement = { adapter: 'nunchaku', tag: 'v2.9.1', build: 'cu130', python: 'python3.12' };
 
 const verifiedRecord: TorchVerifiedRuntime = {
   tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapters: ['flux2', 'nunchaku'],
@@ -258,6 +259,21 @@ describe('TorchInstallPreview', () => {
     render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={vi.fn()} />);
     expect(await screen.findByRole('button', { name: 'cu130 · python3.12 · FLUX.2 image generation' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Nunchaku/ })).not.toBeInTheDocument();
+  });
+
+  it('offers Nunchaku only for the release its wheel was built for and applies its selection', async () => {
+    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2', 'nunchaku'], adapterRequirements: [nunchakuRequirement] });
+    const { unmount } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+    expect(await screen.findByRole('radio', { name: 'FLUX.2 image generation' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Nunchaku Z-Image generation' })).not.toBeInTheDocument();
+    unmount();
+    const onInstall = vi.fn();
+    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
+    fireEvent.click(await screen.findByRole('radio', { name: 'Nunchaku Z-Image generation' }));
+    expect(screen.getByText(/installs only with the cu130 build and Python 3.12/)).toBeInTheDocument();
+    fireEvent.click(await readyInstallButton());
+    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
+    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'nunchaku' });
   });
 
   it('rejects a ready token that changes the requested verified Python', async () => {

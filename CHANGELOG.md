@@ -81,7 +81,9 @@ downloads and known limitations.
   install dialog offers as shortcuts that resolve current package versions; a
   runtime is reported as verified only when its packages match the recorded
   versions. The FLUX.2 and Nunchaku image adapters name their packages without
-  version pins, and Nunchaku is a regular adapter choice. Runtimes installed
+  version pins, and Nunchaku is a regular adapter choice, offered and accepted
+  only for the selection its wheel supports (Torch v2.9.1, cu130, Python
+  3.12). Install options list such adapters in `adapterRequirements`. Runtimes installed
   from the preset keep working. Torch install options replace
   `bundledPresetAvailable` and `preset` with `verified`.
 - Desktop update streams (model library, downloads, runtime profiles, serving

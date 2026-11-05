@@ -25,7 +25,19 @@ pub(crate) struct TorchRuntimeOptionsOutcome {
     /// Combinations verified on this platform. Evidence, not install pins:
     /// choosing one still resolves current package versions.
     verified: Vec<TorchVerifiedRuntime>,
+    /// Offered adapters that install only on one selection.
+    adapter_requirements: Vec<TorchAdapterRequirement>,
     installed: Vec<TorchInstalledRuntime>,
+}
+
+/// The one release, build and managed Python an adapter's own wheel allows.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct TorchAdapterRequirement {
+    adapter: String,
+    tag: String,
+    build: String,
+    python: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,6 +91,13 @@ impl TryFrom<domain::TorchRuntimeOptions> for TorchRuntimeOptionsOutcome {
         if !options.adapters.contains(&options.default_adapter) {
             return Err(invalid_domain_outcome("Torch default adapter"));
         }
+        if options
+            .adapter_requirements
+            .iter()
+            .any(|requirement| !options.adapters.contains(&requirement.adapter))
+        {
+            return Err(invalid_domain_outcome("Torch adapter requirement"));
+        }
         Ok(Self {
             builds: options.builds,
             default_build: options.default_build,
@@ -111,6 +130,16 @@ impl TryFrom<domain::TorchRuntimeOptions> for TorchRuntimeOptionsOutcome {
                             version: package.version,
                         })
                         .collect(),
+                })
+                .collect(),
+            adapter_requirements: options
+                .adapter_requirements
+                .into_iter()
+                .map(|requirement| TorchAdapterRequirement {
+                    adapter: requirement.adapter,
+                    tag: requirement.tag,
+                    build: requirement.build,
+                    python: requirement.python,
                 })
                 .collect(),
             installed: options
@@ -358,6 +387,12 @@ pub(crate) fn torch_runtime_fixtures() -> serde_json::Result<serde_json::Value> 
                 version: "0.37.0".into(),
             }],
         }],
+        adapter_requirements: vec![TorchAdapterRequirement {
+            adapter: "nunchaku".into(),
+            tag: "v2.9.1".into(),
+            build: "cu130".into(),
+            python: "python3.12".into(),
+        }],
         installed: vec![
             TorchInstalledRuntime {
                 tag: "v2.9.1".into(),
@@ -487,6 +522,7 @@ mod tests {
                     version: "12.1.0".into(),
                 }],
             }],
+            adapter_requirements: Vec::new(),
             installed: vec![domain::TorchInstalledRuntime {
                 tag: "v2.10.0".into(),
                 build: None,
@@ -507,9 +543,19 @@ mod tests {
 
         let unoffered = domain::TorchRuntimeOptions {
             default_adapter: "flux2".into(),
-            ..options
+            ..options.clone()
         };
         assert!(TorchRuntimeOptionsOutcome::try_from(unoffered).is_err());
+        let unoffered_requirement = domain::TorchRuntimeOptions {
+            adapter_requirements: vec![domain::TorchAdapterRequirement {
+                adapter: "nunchaku".into(),
+                tag: "v2.9.1".into(),
+                build: "cu130".into(),
+                python: "python3.12".into(),
+            }],
+            ..options
+        };
+        assert!(TorchRuntimeOptionsOutcome::try_from(unoffered_requirement).is_err());
     }
 
     #[test]

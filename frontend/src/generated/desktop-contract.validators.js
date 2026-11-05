@@ -1,4 +1,4 @@
-// Generated from the pumas-rpc contract export and electron/contracts; SHA256 59524bc69abaf4b0690c8d9bae8cbe120dfe36ca15d7816b6a3ccc7865fe8cba. DO NOT EDIT.
+// Generated from the pumas-rpc contract export and electron/contracts; SHA256 2d7bec6da147be379e164c7919a78d0e658da811435a95b87d995e52ed48ab0e. DO NOT EDIT.
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -33817,31 +33817,30 @@ function validate219(data, { instancePath = "", parentData, parentDataProperty, 
   validate219.errors = vErrors;
   return errors === 0;
 }
-var validateTorchAlternativeMatch = validate220;
-var schema260 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "tag": { "type": "string" }, "wheelUrl": { "type": ["string", "null"] } }, "required": ["tag", "build", "python", "wheelUrl", "sha256"], "title": "TorchAlternativeMatch", "type": "object" };
+var validateTorchAdapterRequirement = validate220;
 function validate220(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
-      if (data.tag === void 0 && (missing0 = "tag") || data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python") || data.wheelUrl === void 0 && (missing0 = "wheelUrl") || data.sha256 === void 0 && (missing0 = "sha256")) {
+      if (data.adapter === void 0 && (missing0 = "adapter") || data.tag === void 0 && (missing0 = "tag") || data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python")) {
         validate220.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!(key0 === "build" || key0 === "python" || key0 === "sha256" || key0 === "tag" || key0 === "wheelUrl")) {
+          if (!(key0 === "adapter" || key0 === "build" || key0 === "python" || key0 === "tag")) {
             validate220.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
         }
         if (_errs1 === errors) {
-          if (data.build !== void 0) {
+          if (data.adapter !== void 0) {
             const _errs2 = errors;
-            if (typeof data.build !== "string") {
-              validate220.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+            if (typeof data.adapter !== "string") {
+              validate220.errors = [{ instancePath: instancePath + "/adapter", schemaPath: "#/properties/adapter/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -33849,10 +33848,10 @@ function validate220(data, { instancePath = "", parentData, parentDataProperty, 
             var valid0 = true;
           }
           if (valid0) {
-            if (data.python !== void 0) {
+            if (data.build !== void 0) {
               const _errs4 = errors;
-              if (typeof data.python !== "string") {
-                validate220.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              if (typeof data.build !== "string") {
+                validate220.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                 return false;
               }
               var valid0 = _errs4 === errors;
@@ -33860,11 +33859,10 @@ function validate220(data, { instancePath = "", parentData, parentDataProperty, 
               var valid0 = true;
             }
             if (valid0) {
-              if (data.sha256 !== void 0) {
-                let data2 = data.sha256;
+              if (data.python !== void 0) {
                 const _errs6 = errors;
-                if (typeof data2 !== "string" && data2 !== null) {
-                  validate220.errors = [{ instancePath: instancePath + "/sha256", schemaPath: "#/properties/sha256/type", keyword: "type", params: { type: schema260.properties.sha256.type }, message: "must be string,null" }];
+                if (typeof data.python !== "string") {
+                  validate220.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                   return false;
                 }
                 var valid0 = _errs6 === errors;
@@ -33882,19 +33880,6 @@ function validate220(data, { instancePath = "", parentData, parentDataProperty, 
                 } else {
                   var valid0 = true;
                 }
-                if (valid0) {
-                  if (data.wheelUrl !== void 0) {
-                    let data4 = data.wheelUrl;
-                    const _errs10 = errors;
-                    if (typeof data4 !== "string" && data4 !== null) {
-                      validate220.errors = [{ instancePath: instancePath + "/wheelUrl", schemaPath: "#/properties/wheelUrl/type", keyword: "type", params: { type: schema260.properties.wheelUrl.type }, message: "must be string,null" }];
-                      return false;
-                    }
-                    var valid0 = _errs10 === errors;
-                  } else {
-                    var valid0 = true;
-                  }
-                }
               }
             }
           }
@@ -33908,24 +33893,115 @@ function validate220(data, { instancePath = "", parentData, parentDataProperty, 
   validate220.errors = vErrors;
   return errors === 0;
 }
-var validateTorchAlternativesOutcome = validate221;
-var schema261 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "TorchAlternativeMatch": { "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "tag": { "type": "string" }, "wheelUrl": { "type": ["string", "null"] } }, "required": ["tag", "build", "python", "wheelUrl", "sha256"], "type": "object" }, "TorchAlternativesStatus": { "enum": ["matches", "none", "inconclusive"], "type": "string" } }, "description": "Exact wheels for the selected Torch release on other builds or Pythons.\nDependencies are never resolved here, so the result is always incomplete.", "properties": { "checkedBuilds": { "items": { "type": "string" }, "type": "array" }, "dependenciesNotChecked": { "const": true, "description": "Always true.", "type": "boolean" }, "incomplete": { "const": true, "description": "Always true.", "type": "boolean" }, "issues": { "items": { "type": "string" }, "type": "array" }, "matches": { "items": { "$ref": "#/definitions/TorchAlternativeMatch" }, "type": "array" }, "selectedBuild": { "type": "string" }, "selectedPython": { "type": "string" }, "selectedTag": { "type": "string" }, "status": { "$ref": "#/definitions/TorchAlternativesStatus" } }, "required": ["selectedTag", "selectedBuild", "selectedPython", "status", "incomplete", "dependenciesNotChecked", "checkedBuilds", "matches", "issues"], "title": "TorchAlternativesOutcome", "type": "object" };
-var schema262 = { "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "tag": { "type": "string" }, "wheelUrl": { "type": ["string", "null"] } }, "required": ["tag", "build", "python", "wheelUrl", "sha256"], "type": "object" };
-var schema263 = { "enum": ["matches", "none", "inconclusive"], "type": "string" };
+var validateTorchAlternativeMatch = validate221;
+var schema261 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "tag": { "type": "string" }, "wheelUrl": { "type": ["string", "null"] } }, "required": ["tag", "build", "python", "wheelUrl", "sha256"], "title": "TorchAlternativeMatch", "type": "object" };
 function validate221(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
-      if (data.selectedTag === void 0 && (missing0 = "selectedTag") || data.selectedBuild === void 0 && (missing0 = "selectedBuild") || data.selectedPython === void 0 && (missing0 = "selectedPython") || data.status === void 0 && (missing0 = "status") || data.incomplete === void 0 && (missing0 = "incomplete") || data.dependenciesNotChecked === void 0 && (missing0 = "dependenciesNotChecked") || data.checkedBuilds === void 0 && (missing0 = "checkedBuilds") || data.matches === void 0 && (missing0 = "matches") || data.issues === void 0 && (missing0 = "issues")) {
+      if (data.tag === void 0 && (missing0 = "tag") || data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python") || data.wheelUrl === void 0 && (missing0 = "wheelUrl") || data.sha256 === void 0 && (missing0 = "sha256")) {
         validate221.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!func2.call(schema261.properties, key0)) {
+          if (!(key0 === "build" || key0 === "python" || key0 === "sha256" || key0 === "tag" || key0 === "wheelUrl")) {
             validate221.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.build !== void 0) {
+            const _errs2 = errors;
+            if (typeof data.build !== "string") {
+              validate221.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              return false;
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.python !== void 0) {
+              const _errs4 = errors;
+              if (typeof data.python !== "string") {
+                validate221.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                return false;
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.sha256 !== void 0) {
+                let data2 = data.sha256;
+                const _errs6 = errors;
+                if (typeof data2 !== "string" && data2 !== null) {
+                  validate221.errors = [{ instancePath: instancePath + "/sha256", schemaPath: "#/properties/sha256/type", keyword: "type", params: { type: schema261.properties.sha256.type }, message: "must be string,null" }];
+                  return false;
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.tag !== void 0) {
+                  const _errs8 = errors;
+                  if (typeof data.tag !== "string") {
+                    validate221.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    return false;
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+                if (valid0) {
+                  if (data.wheelUrl !== void 0) {
+                    let data4 = data.wheelUrl;
+                    const _errs10 = errors;
+                    if (typeof data4 !== "string" && data4 !== null) {
+                      validate221.errors = [{ instancePath: instancePath + "/wheelUrl", schemaPath: "#/properties/wheelUrl/type", keyword: "type", params: { type: schema261.properties.wheelUrl.type }, message: "must be string,null" }];
+                      return false;
+                    }
+                    var valid0 = _errs10 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate221.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate221.errors = vErrors;
+  return errors === 0;
+}
+var validateTorchAlternativesOutcome = validate222;
+var schema262 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "TorchAlternativeMatch": { "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "tag": { "type": "string" }, "wheelUrl": { "type": ["string", "null"] } }, "required": ["tag", "build", "python", "wheelUrl", "sha256"], "type": "object" }, "TorchAlternativesStatus": { "enum": ["matches", "none", "inconclusive"], "type": "string" } }, "description": "Exact wheels for the selected Torch release on other builds or Pythons.\nDependencies are never resolved here, so the result is always incomplete.", "properties": { "checkedBuilds": { "items": { "type": "string" }, "type": "array" }, "dependenciesNotChecked": { "const": true, "description": "Always true.", "type": "boolean" }, "incomplete": { "const": true, "description": "Always true.", "type": "boolean" }, "issues": { "items": { "type": "string" }, "type": "array" }, "matches": { "items": { "$ref": "#/definitions/TorchAlternativeMatch" }, "type": "array" }, "selectedBuild": { "type": "string" }, "selectedPython": { "type": "string" }, "selectedTag": { "type": "string" }, "status": { "$ref": "#/definitions/TorchAlternativesStatus" } }, "required": ["selectedTag", "selectedBuild", "selectedPython", "status", "incomplete", "dependenciesNotChecked", "checkedBuilds", "matches", "issues"], "title": "TorchAlternativesOutcome", "type": "object" };
+var schema263 = { "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "tag": { "type": "string" }, "wheelUrl": { "type": ["string", "null"] } }, "required": ["tag", "build", "python", "wheelUrl", "sha256"], "type": "object" };
+var schema264 = { "enum": ["matches", "none", "inconclusive"], "type": "string" };
+function validate222(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.selectedTag === void 0 && (missing0 = "selectedTag") || data.selectedBuild === void 0 && (missing0 = "selectedBuild") || data.selectedPython === void 0 && (missing0 = "selectedPython") || data.status === void 0 && (missing0 = "status") || data.incomplete === void 0 && (missing0 = "incomplete") || data.dependenciesNotChecked === void 0 && (missing0 = "dependenciesNotChecked") || data.checkedBuilds === void 0 && (missing0 = "checkedBuilds") || data.matches === void 0 && (missing0 = "matches") || data.issues === void 0 && (missing0 = "issues")) {
+        validate222.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!func2.call(schema262.properties, key0)) {
+            validate222.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -33941,7 +34017,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                 for (let i0 = 0; i0 < len0; i0++) {
                   const _errs4 = errors;
                   if (typeof data0[i0] !== "string") {
-                    validate221.errors = [{ instancePath: instancePath + "/checkedBuilds/" + i0, schemaPath: "#/properties/checkedBuilds/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate222.errors = [{ instancePath: instancePath + "/checkedBuilds/" + i0, schemaPath: "#/properties/checkedBuilds/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   var valid1 = _errs4 === errors;
@@ -33950,7 +34026,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                   }
                 }
               } else {
-                validate221.errors = [{ instancePath: instancePath + "/checkedBuilds", schemaPath: "#/properties/checkedBuilds/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                validate222.errors = [{ instancePath: instancePath + "/checkedBuilds", schemaPath: "#/properties/checkedBuilds/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                 return false;
               }
             }
@@ -33963,11 +34039,11 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
               let data2 = data.dependenciesNotChecked;
               const _errs6 = errors;
               if (typeof data2 !== "boolean") {
-                validate221.errors = [{ instancePath: instancePath + "/dependenciesNotChecked", schemaPath: "#/properties/dependenciesNotChecked/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                validate222.errors = [{ instancePath: instancePath + "/dependenciesNotChecked", schemaPath: "#/properties/dependenciesNotChecked/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                 return false;
               }
               if (true !== data2) {
-                validate221.errors = [{ instancePath: instancePath + "/dependenciesNotChecked", schemaPath: "#/properties/dependenciesNotChecked/const", keyword: "const", params: { allowedValue: true }, message: "must be equal to constant" }];
+                validate222.errors = [{ instancePath: instancePath + "/dependenciesNotChecked", schemaPath: "#/properties/dependenciesNotChecked/const", keyword: "const", params: { allowedValue: true }, message: "must be equal to constant" }];
                 return false;
               }
               var valid0 = _errs6 === errors;
@@ -33979,11 +34055,11 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                 let data3 = data.incomplete;
                 const _errs8 = errors;
                 if (typeof data3 !== "boolean") {
-                  validate221.errors = [{ instancePath: instancePath + "/incomplete", schemaPath: "#/properties/incomplete/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                  validate222.errors = [{ instancePath: instancePath + "/incomplete", schemaPath: "#/properties/incomplete/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                   return false;
                 }
                 if (true !== data3) {
-                  validate221.errors = [{ instancePath: instancePath + "/incomplete", schemaPath: "#/properties/incomplete/const", keyword: "const", params: { allowedValue: true }, message: "must be equal to constant" }];
+                  validate222.errors = [{ instancePath: instancePath + "/incomplete", schemaPath: "#/properties/incomplete/const", keyword: "const", params: { allowedValue: true }, message: "must be equal to constant" }];
                   return false;
                 }
                 var valid0 = _errs8 === errors;
@@ -34001,7 +34077,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                       for (let i1 = 0; i1 < len1; i1++) {
                         const _errs12 = errors;
                         if (typeof data4[i1] !== "string") {
-                          validate221.errors = [{ instancePath: instancePath + "/issues/" + i1, schemaPath: "#/properties/issues/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                          validate222.errors = [{ instancePath: instancePath + "/issues/" + i1, schemaPath: "#/properties/issues/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                           return false;
                         }
                         var valid2 = _errs12 === errors;
@@ -34010,7 +34086,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                         }
                       }
                     } else {
-                      validate221.errors = [{ instancePath: instancePath + "/issues", schemaPath: "#/properties/issues/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                      validate222.errors = [{ instancePath: instancePath + "/issues", schemaPath: "#/properties/issues/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                       return false;
                     }
                   }
@@ -34034,13 +34110,13 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                             if (data7 && typeof data7 == "object" && !Array.isArray(data7)) {
                               let missing1;
                               if (data7.tag === void 0 && (missing1 = "tag") || data7.build === void 0 && (missing1 = "build") || data7.python === void 0 && (missing1 = "python") || data7.wheelUrl === void 0 && (missing1 = "wheelUrl") || data7.sha256 === void 0 && (missing1 = "sha256")) {
-                                validate221.errors = [{ instancePath: instancePath + "/matches/" + i2, schemaPath: "#/definitions/TorchAlternativeMatch/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                                validate222.errors = [{ instancePath: instancePath + "/matches/" + i2, schemaPath: "#/definitions/TorchAlternativeMatch/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
                                 return false;
                               } else {
                                 const _errs19 = errors;
                                 for (const key1 in data7) {
                                   if (!(key1 === "build" || key1 === "python" || key1 === "sha256" || key1 === "tag" || key1 === "wheelUrl")) {
-                                    validate221.errors = [{ instancePath: instancePath + "/matches/" + i2, schemaPath: "#/definitions/TorchAlternativeMatch/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                                    validate222.errors = [{ instancePath: instancePath + "/matches/" + i2, schemaPath: "#/definitions/TorchAlternativeMatch/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
                                     return false;
                                     break;
                                   }
@@ -34049,7 +34125,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                                   if (data7.build !== void 0) {
                                     const _errs20 = errors;
                                     if (typeof data7.build !== "string") {
-                                      validate221.errors = [{ instancePath: instancePath + "/matches/" + i2 + "/build", schemaPath: "#/definitions/TorchAlternativeMatch/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                      validate222.errors = [{ instancePath: instancePath + "/matches/" + i2 + "/build", schemaPath: "#/definitions/TorchAlternativeMatch/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                       return false;
                                     }
                                     var valid5 = _errs20 === errors;
@@ -34060,7 +34136,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                                     if (data7.python !== void 0) {
                                       const _errs22 = errors;
                                       if (typeof data7.python !== "string") {
-                                        validate221.errors = [{ instancePath: instancePath + "/matches/" + i2 + "/python", schemaPath: "#/definitions/TorchAlternativeMatch/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                        validate222.errors = [{ instancePath: instancePath + "/matches/" + i2 + "/python", schemaPath: "#/definitions/TorchAlternativeMatch/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                         return false;
                                       }
                                       var valid5 = _errs22 === errors;
@@ -34072,7 +34148,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                                         let data10 = data7.sha256;
                                         const _errs24 = errors;
                                         if (typeof data10 !== "string" && data10 !== null) {
-                                          validate221.errors = [{ instancePath: instancePath + "/matches/" + i2 + "/sha256", schemaPath: "#/definitions/TorchAlternativeMatch/properties/sha256/type", keyword: "type", params: { type: schema262.properties.sha256.type }, message: "must be string,null" }];
+                                          validate222.errors = [{ instancePath: instancePath + "/matches/" + i2 + "/sha256", schemaPath: "#/definitions/TorchAlternativeMatch/properties/sha256/type", keyword: "type", params: { type: schema263.properties.sha256.type }, message: "must be string,null" }];
                                           return false;
                                         }
                                         var valid5 = _errs24 === errors;
@@ -34083,7 +34159,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                                         if (data7.tag !== void 0) {
                                           const _errs26 = errors;
                                           if (typeof data7.tag !== "string") {
-                                            validate221.errors = [{ instancePath: instancePath + "/matches/" + i2 + "/tag", schemaPath: "#/definitions/TorchAlternativeMatch/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                            validate222.errors = [{ instancePath: instancePath + "/matches/" + i2 + "/tag", schemaPath: "#/definitions/TorchAlternativeMatch/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                             return false;
                                           }
                                           var valid5 = _errs26 === errors;
@@ -34095,7 +34171,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                                             let data12 = data7.wheelUrl;
                                             const _errs28 = errors;
                                             if (typeof data12 !== "string" && data12 !== null) {
-                                              validate221.errors = [{ instancePath: instancePath + "/matches/" + i2 + "/wheelUrl", schemaPath: "#/definitions/TorchAlternativeMatch/properties/wheelUrl/type", keyword: "type", params: { type: schema262.properties.wheelUrl.type }, message: "must be string,null" }];
+                                              validate222.errors = [{ instancePath: instancePath + "/matches/" + i2 + "/wheelUrl", schemaPath: "#/definitions/TorchAlternativeMatch/properties/wheelUrl/type", keyword: "type", params: { type: schema263.properties.wheelUrl.type }, message: "must be string,null" }];
                                               return false;
                                             }
                                             var valid5 = _errs28 === errors;
@@ -34109,7 +34185,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                                 }
                               }
                             } else {
-                              validate221.errors = [{ instancePath: instancePath + "/matches/" + i2, schemaPath: "#/definitions/TorchAlternativeMatch/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                              validate222.errors = [{ instancePath: instancePath + "/matches/" + i2, schemaPath: "#/definitions/TorchAlternativeMatch/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
                               return false;
                             }
                           }
@@ -34119,7 +34195,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                           }
                         }
                       } else {
-                        validate221.errors = [{ instancePath: instancePath + "/matches", schemaPath: "#/properties/matches/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                        validate222.errors = [{ instancePath: instancePath + "/matches", schemaPath: "#/properties/matches/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                         return false;
                       }
                     }
@@ -34131,7 +34207,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                     if (data.selectedBuild !== void 0) {
                       const _errs30 = errors;
                       if (typeof data.selectedBuild !== "string") {
-                        validate221.errors = [{ instancePath: instancePath + "/selectedBuild", schemaPath: "#/properties/selectedBuild/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                        validate222.errors = [{ instancePath: instancePath + "/selectedBuild", schemaPath: "#/properties/selectedBuild/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                         return false;
                       }
                       var valid0 = _errs30 === errors;
@@ -34142,7 +34218,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                       if (data.selectedPython !== void 0) {
                         const _errs32 = errors;
                         if (typeof data.selectedPython !== "string") {
-                          validate221.errors = [{ instancePath: instancePath + "/selectedPython", schemaPath: "#/properties/selectedPython/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                          validate222.errors = [{ instancePath: instancePath + "/selectedPython", schemaPath: "#/properties/selectedPython/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                           return false;
                         }
                         var valid0 = _errs32 === errors;
@@ -34153,7 +34229,7 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                         if (data.selectedTag !== void 0) {
                           const _errs34 = errors;
                           if (typeof data.selectedTag !== "string") {
-                            validate221.errors = [{ instancePath: instancePath + "/selectedTag", schemaPath: "#/properties/selectedTag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            validate222.errors = [{ instancePath: instancePath + "/selectedTag", schemaPath: "#/properties/selectedTag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                             return false;
                           }
                           var valid0 = _errs34 === errors;
@@ -34165,11 +34241,11 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
                             let data16 = data.status;
                             const _errs36 = errors;
                             if (typeof data16 !== "string") {
-                              validate221.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchAlternativesStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                              validate222.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchAlternativesStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                               return false;
                             }
                             if (!(data16 === "matches" || data16 === "none" || data16 === "inconclusive")) {
-                              validate221.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchAlternativesStatus/enum", keyword: "enum", params: { allowedValues: schema263.enum }, message: "must be equal to one of the allowed values" }];
+                              validate222.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchAlternativesStatus/enum", keyword: "enum", params: { allowedValues: schema264.enum }, message: "must be equal to one of the allowed values" }];
                               return false;
                             }
                             var valid0 = _errs36 === errors;
@@ -34187,45 +34263,45 @@ function validate221(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate221.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate222.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
-  }
-  validate221.errors = vErrors;
-  return errors === 0;
-}
-var validateTorchAlternativesStatus = validate222;
-var schema264 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["matches", "none", "inconclusive"], "title": "TorchAlternativesStatus", "type": "string" };
-function validate222(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
-  let vErrors = null;
-  let errors = 0;
-  if (typeof data !== "string") {
-    validate222.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-    return false;
-  }
-  if (!(data === "matches" || data === "none" || data === "inconclusive")) {
-    validate222.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema264.enum }, message: "must be equal to one of the allowed values" }];
-    return false;
   }
   validate222.errors = vErrors;
   return errors === 0;
 }
-var validateTorchCapabilityProbe = validate223;
-var schema265 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "description": "One saved check. `status` is display text (for example `not tested`).", "properties": { "error": { "type": ["string", "null"] }, "reason": { "type": ["string", "null"] }, "scope": { "type": ["string", "null"] }, "status": { "type": "string" }, "version": { "description": "Version the check measured, such as the imported Torch build.", "type": ["string", "null"] } }, "required": ["status", "scope", "reason", "error", "version"], "title": "TorchCapabilityProbe", "type": "object" };
+var validateTorchAlternativesStatus = validate223;
+var schema265 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["matches", "none", "inconclusive"], "title": "TorchAlternativesStatus", "type": "string" };
 function validate223(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (typeof data !== "string") {
+    validate223.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+    return false;
+  }
+  if (!(data === "matches" || data === "none" || data === "inconclusive")) {
+    validate223.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema265.enum }, message: "must be equal to one of the allowed values" }];
+    return false;
+  }
+  validate223.errors = vErrors;
+  return errors === 0;
+}
+var validateTorchCapabilityProbe = validate224;
+var schema266 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "description": "One saved check. `status` is display text (for example `not tested`).", "properties": { "error": { "type": ["string", "null"] }, "reason": { "type": ["string", "null"] }, "scope": { "type": ["string", "null"] }, "status": { "type": "string" }, "version": { "description": "Version the check measured, such as the imported Torch build.", "type": ["string", "null"] } }, "required": ["status", "scope", "reason", "error", "version"], "title": "TorchCapabilityProbe", "type": "object" };
+function validate224(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.status === void 0 && (missing0 = "status") || data.scope === void 0 && (missing0 = "scope") || data.reason === void 0 && (missing0 = "reason") || data.error === void 0 && (missing0 = "error") || data.version === void 0 && (missing0 = "version")) {
-        validate223.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate224.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "error" || key0 === "reason" || key0 === "scope" || key0 === "status" || key0 === "version")) {
-            validate223.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate224.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -34235,7 +34311,7 @@ function validate223(data, { instancePath = "", parentData, parentDataProperty, 
             let data0 = data.error;
             const _errs2 = errors;
             if (typeof data0 !== "string" && data0 !== null) {
-              validate223.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/type", keyword: "type", params: { type: schema265.properties.error.type }, message: "must be string,null" }];
+              validate224.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/type", keyword: "type", params: { type: schema266.properties.error.type }, message: "must be string,null" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -34247,7 +34323,7 @@ function validate223(data, { instancePath = "", parentData, parentDataProperty, 
               let data1 = data.reason;
               const _errs4 = errors;
               if (typeof data1 !== "string" && data1 !== null) {
-                validate223.errors = [{ instancePath: instancePath + "/reason", schemaPath: "#/properties/reason/type", keyword: "type", params: { type: schema265.properties.reason.type }, message: "must be string,null" }];
+                validate224.errors = [{ instancePath: instancePath + "/reason", schemaPath: "#/properties/reason/type", keyword: "type", params: { type: schema266.properties.reason.type }, message: "must be string,null" }];
                 return false;
               }
               var valid0 = _errs4 === errors;
@@ -34259,7 +34335,7 @@ function validate223(data, { instancePath = "", parentData, parentDataProperty, 
                 let data2 = data.scope;
                 const _errs6 = errors;
                 if (typeof data2 !== "string" && data2 !== null) {
-                  validate223.errors = [{ instancePath: instancePath + "/scope", schemaPath: "#/properties/scope/type", keyword: "type", params: { type: schema265.properties.scope.type }, message: "must be string,null" }];
+                  validate224.errors = [{ instancePath: instancePath + "/scope", schemaPath: "#/properties/scope/type", keyword: "type", params: { type: schema266.properties.scope.type }, message: "must be string,null" }];
                   return false;
                 }
                 var valid0 = _errs6 === errors;
@@ -34270,7 +34346,7 @@ function validate223(data, { instancePath = "", parentData, parentDataProperty, 
                 if (data.status !== void 0) {
                   const _errs8 = errors;
                   if (typeof data.status !== "string") {
-                    validate223.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/properties/status/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate224.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/properties/status/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   var valid0 = _errs8 === errors;
@@ -34282,7 +34358,7 @@ function validate223(data, { instancePath = "", parentData, parentDataProperty, 
                     let data4 = data.version;
                     const _errs10 = errors;
                     if (typeof data4 !== "string" && data4 !== null) {
-                      validate223.errors = [{ instancePath: instancePath + "/version", schemaPath: "#/properties/version/type", keyword: "type", params: { type: schema265.properties.version.type }, message: "must be string,null" }];
+                      validate224.errors = [{ instancePath: instancePath + "/version", schemaPath: "#/properties/version/type", keyword: "type", params: { type: schema266.properties.version.type }, message: "must be string,null" }];
                       return false;
                     }
                     var valid0 = _errs10 === errors;
@@ -34296,31 +34372,15 @@ function validate223(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate223.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate224.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
-  }
-  validate223.errors = vErrors;
-  return errors === 0;
-}
-var validateTorchDriverAvailability = validate224;
-var schema266 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["available", "unavailable", "not_present", "unknown"], "title": "TorchDriverAvailability", "type": "string" };
-function validate224(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
-  let vErrors = null;
-  let errors = 0;
-  if (typeof data !== "string") {
-    validate224.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-    return false;
-  }
-  if (!(data === "available" || data === "unavailable" || data === "not_present" || data === "unknown")) {
-    validate224.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema266.enum }, message: "must be equal to one of the allowed values" }];
-    return false;
   }
   validate224.errors = vErrors;
   return errors === 0;
 }
-var validateTorchGpuVendor = validate225;
-var schema267 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["nvidia", "amd", "intel"], "title": "TorchGpuVendor", "type": "string" };
+var validateTorchDriverAvailability = validate225;
+var schema267 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["available", "unavailable", "not_present", "unknown"], "title": "TorchDriverAvailability", "type": "string" };
 function validate225(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -34328,30 +34388,46 @@ function validate225(data, { instancePath = "", parentData, parentDataProperty, 
     validate225.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
     return false;
   }
-  if (!(data === "nvidia" || data === "amd" || data === "intel")) {
+  if (!(data === "available" || data === "unavailable" || data === "not_present" || data === "unknown")) {
     validate225.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema267.enum }, message: "must be equal to one of the allowed values" }];
     return false;
   }
   validate225.errors = vErrors;
   return errors === 0;
 }
-var validateTorchInstalledRuntime = validate226;
-var schema268 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "TorchRuntimePreviewQualification": { "enum": ["qualified", "unverified"], "type": "string" } }, "description": "An installed runtime; a field is null when its recipe does not record it.", "properties": { "adapter": { "type": ["string", "null"] }, "build": { "type": ["string", "null"] }, "python": { "type": ["string", "null"] }, "qualification": { "$ref": "#/definitions/TorchRuntimePreviewQualification" }, "tag": { "type": "string" } }, "required": ["tag", "build", "python", "adapter", "qualification"], "title": "TorchInstalledRuntime", "type": "object" };
-var schema269 = { "enum": ["qualified", "unverified"], "type": "string" };
+var validateTorchGpuVendor = validate226;
+var schema268 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["nvidia", "amd", "intel"], "title": "TorchGpuVendor", "type": "string" };
 function validate226(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (typeof data !== "string") {
+    validate226.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+    return false;
+  }
+  if (!(data === "nvidia" || data === "amd" || data === "intel")) {
+    validate226.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema268.enum }, message: "must be equal to one of the allowed values" }];
+    return false;
+  }
+  validate226.errors = vErrors;
+  return errors === 0;
+}
+var validateTorchInstalledRuntime = validate227;
+var schema269 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "TorchRuntimePreviewQualification": { "enum": ["qualified", "unverified"], "type": "string" } }, "description": "An installed runtime; a field is null when its recipe does not record it.", "properties": { "adapter": { "type": ["string", "null"] }, "build": { "type": ["string", "null"] }, "python": { "type": ["string", "null"] }, "qualification": { "$ref": "#/definitions/TorchRuntimePreviewQualification" }, "tag": { "type": "string" } }, "required": ["tag", "build", "python", "adapter", "qualification"], "title": "TorchInstalledRuntime", "type": "object" };
+var schema270 = { "enum": ["qualified", "unverified"], "type": "string" };
+function validate227(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.tag === void 0 && (missing0 = "tag") || data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python") || data.adapter === void 0 && (missing0 = "adapter") || data.qualification === void 0 && (missing0 = "qualification")) {
-        validate226.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate227.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "adapter" || key0 === "build" || key0 === "python" || key0 === "qualification" || key0 === "tag")) {
-            validate226.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate227.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -34361,7 +34437,7 @@ function validate226(data, { instancePath = "", parentData, parentDataProperty, 
             let data0 = data.adapter;
             const _errs2 = errors;
             if (typeof data0 !== "string" && data0 !== null) {
-              validate226.errors = [{ instancePath: instancePath + "/adapter", schemaPath: "#/properties/adapter/type", keyword: "type", params: { type: schema268.properties.adapter.type }, message: "must be string,null" }];
+              validate227.errors = [{ instancePath: instancePath + "/adapter", schemaPath: "#/properties/adapter/type", keyword: "type", params: { type: schema269.properties.adapter.type }, message: "must be string,null" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -34373,7 +34449,7 @@ function validate226(data, { instancePath = "", parentData, parentDataProperty, 
               let data1 = data.build;
               const _errs4 = errors;
               if (typeof data1 !== "string" && data1 !== null) {
-                validate226.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: schema268.properties.build.type }, message: "must be string,null" }];
+                validate227.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: schema269.properties.build.type }, message: "must be string,null" }];
                 return false;
               }
               var valid0 = _errs4 === errors;
@@ -34385,7 +34461,7 @@ function validate226(data, { instancePath = "", parentData, parentDataProperty, 
                 let data2 = data.python;
                 const _errs6 = errors;
                 if (typeof data2 !== "string" && data2 !== null) {
-                  validate226.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: schema268.properties.python.type }, message: "must be string,null" }];
+                  validate227.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: schema269.properties.python.type }, message: "must be string,null" }];
                   return false;
                 }
                 var valid0 = _errs6 === errors;
@@ -34397,11 +34473,11 @@ function validate226(data, { instancePath = "", parentData, parentDataProperty, 
                   let data3 = data.qualification;
                   const _errs8 = errors;
                   if (typeof data3 !== "string") {
-                    validate226.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate227.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   if (!(data3 === "qualified" || data3 === "unverified")) {
-                    validate226.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/enum", keyword: "enum", params: { allowedValues: schema269.enum }, message: "must be equal to one of the allowed values" }];
+                    validate227.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/enum", keyword: "enum", params: { allowedValues: schema270.enum }, message: "must be equal to one of the allowed values" }];
                     return false;
                   }
                   var valid0 = _errs8 === errors;
@@ -34412,7 +34488,7 @@ function validate226(data, { instancePath = "", parentData, parentDataProperty, 
                   if (data.tag !== void 0) {
                     const _errs11 = errors;
                     if (typeof data.tag !== "string") {
-                      validate226.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      validate227.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                       return false;
                     }
                     var valid0 = _errs11 === errors;
@@ -34426,31 +34502,15 @@ function validate226(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate226.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate227.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
-  }
-  validate226.errors = vErrors;
-  return errors === 0;
-}
-var validateTorchProbeAdapterStatus = validate227;
-var schema270 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["not selected", "unavailable", "inconclusive"], "title": "TorchProbeAdapterStatus", "type": "string" };
-function validate227(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
-  let vErrors = null;
-  let errors = 0;
-  if (typeof data !== "string") {
-    validate227.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-    return false;
-  }
-  if (!(data === "not selected" || data === "unavailable" || data === "inconclusive")) {
-    validate227.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema270.enum }, message: "must be equal to one of the allowed values" }];
-    return false;
   }
   validate227.errors = vErrors;
   return errors === 0;
 }
-var validateTorchProbeCoreStatus = validate228;
-var schema271 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["passed", "failed"], "title": "TorchProbeCoreStatus", "type": "string" };
+var validateTorchProbeAdapterStatus = validate228;
+var schema271 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["not selected", "unavailable", "inconclusive"], "title": "TorchProbeAdapterStatus", "type": "string" };
 function validate228(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -34458,15 +34518,15 @@ function validate228(data, { instancePath = "", parentData, parentDataProperty, 
     validate228.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
     return false;
   }
-  if (!(data === "passed" || data === "failed")) {
+  if (!(data === "not selected" || data === "unavailable" || data === "inconclusive")) {
     validate228.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema271.enum }, message: "must be equal to one of the allowed values" }];
     return false;
   }
   validate228.errors = vErrors;
   return errors === 0;
 }
-var validateTorchProbeStatus = validate229;
-var schema272 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["passed", "partial", "failed"], "title": "TorchProbeStatus", "type": "string" };
+var validateTorchProbeCoreStatus = validate229;
+var schema272 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["passed", "failed"], "title": "TorchProbeCoreStatus", "type": "string" };
 function validate229(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -34474,28 +34534,44 @@ function validate229(data, { instancePath = "", parentData, parentDataProperty, 
     validate229.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
     return false;
   }
-  if (!(data === "passed" || data === "partial" || data === "failed")) {
+  if (!(data === "passed" || data === "failed")) {
     validate229.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema272.enum }, message: "must be equal to one of the allowed values" }];
     return false;
   }
   validate229.errors = vErrors;
   return errors === 0;
 }
-var validateTorchPythonChoice = validate230;
+var validateTorchProbeStatus = validate230;
+var schema273 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["passed", "partial", "failed"], "title": "TorchProbeStatus", "type": "string" };
 function validate230(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (typeof data !== "string") {
+    validate230.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+    return false;
+  }
+  if (!(data === "passed" || data === "partial" || data === "failed")) {
+    validate230.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema273.enum }, message: "must be equal to one of the allowed values" }];
+    return false;
+  }
+  validate230.errors = vErrors;
+  return errors === 0;
+}
+var validateTorchPythonChoice = validate231;
+function validate231(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.id === void 0 && (missing0 = "id") || data.label === void 0 && (missing0 = "label")) {
-        validate230.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate231.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "id" || key0 === "label")) {
-            validate230.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate231.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -34504,7 +34580,7 @@ function validate230(data, { instancePath = "", parentData, parentDataProperty, 
           if (data.id !== void 0) {
             const _errs2 = errors;
             if (typeof data.id !== "string") {
-              validate230.errors = [{ instancePath: instancePath + "/id", schemaPath: "#/properties/id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              validate231.errors = [{ instancePath: instancePath + "/id", schemaPath: "#/properties/id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -34515,90 +34591,12 @@ function validate230(data, { instancePath = "", parentData, parentDataProperty, 
             if (data.label !== void 0) {
               const _errs4 = errors;
               if (typeof data.label !== "string") {
-                validate230.errors = [{ instancePath: instancePath + "/label", schemaPath: "#/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                validate231.errors = [{ instancePath: instancePath + "/label", schemaPath: "#/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                 return false;
               }
               var valid0 = _errs4 === errors;
             } else {
               var valid0 = true;
-            }
-          }
-        }
-      }
-    } else {
-      validate230.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
-      return false;
-    }
-  }
-  validate230.errors = vErrors;
-  return errors === 0;
-}
-var validateTorchReleaseCombination = validate231;
-var schema274 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "wheelUrl": { "type": "string" } }, "required": ["build", "python", "wheelUrl"], "title": "TorchReleaseCombination", "type": "object" };
-function validate231(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
-  let vErrors = null;
-  let errors = 0;
-  if (errors === 0) {
-    if (data && typeof data == "object" && !Array.isArray(data)) {
-      let missing0;
-      if (data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python") || data.wheelUrl === void 0 && (missing0 = "wheelUrl")) {
-        validate231.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
-        return false;
-      } else {
-        const _errs1 = errors;
-        for (const key0 in data) {
-          if (!(key0 === "build" || key0 === "python" || key0 === "sha256" || key0 === "wheelUrl")) {
-            validate231.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
-            return false;
-            break;
-          }
-        }
-        if (_errs1 === errors) {
-          if (data.build !== void 0) {
-            const _errs2 = errors;
-            if (typeof data.build !== "string") {
-              validate231.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-              return false;
-            }
-            var valid0 = _errs2 === errors;
-          } else {
-            var valid0 = true;
-          }
-          if (valid0) {
-            if (data.python !== void 0) {
-              const _errs4 = errors;
-              if (typeof data.python !== "string") {
-                validate231.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                return false;
-              }
-              var valid0 = _errs4 === errors;
-            } else {
-              var valid0 = true;
-            }
-            if (valid0) {
-              if (data.sha256 !== void 0) {
-                let data2 = data.sha256;
-                const _errs6 = errors;
-                if (typeof data2 !== "string" && data2 !== null) {
-                  validate231.errors = [{ instancePath: instancePath + "/sha256", schemaPath: "#/properties/sha256/type", keyword: "type", params: { type: schema274.properties.sha256.type }, message: "must be string,null" }];
-                  return false;
-                }
-                var valid0 = _errs6 === errors;
-              } else {
-                var valid0 = true;
-              }
-              if (valid0) {
-                if (data.wheelUrl !== void 0) {
-                  const _errs8 = errors;
-                  if (typeof data.wheelUrl !== "string") {
-                    validate231.errors = [{ instancePath: instancePath + "/wheelUrl", schemaPath: "#/properties/wheelUrl/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                    return false;
-                  }
-                  var valid0 = _errs8 === errors;
-                } else {
-                  var valid0 = true;
-                }
-              }
             }
           }
         }
@@ -34611,36 +34609,31 @@ function validate231(data, { instancePath = "", parentData, parentDataProperty, 
   validate231.errors = vErrors;
   return errors === 0;
 }
-var validateTorchReleaseDriverStatus = validate232;
-var schema276 = { "enum": ["available", "unavailable", "not_present", "unknown"], "type": "string" };
+var validateTorchReleaseCombination = validate232;
+var schema275 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "wheelUrl": { "type": "string" } }, "required": ["build", "python", "wheelUrl"], "title": "TorchReleaseCombination", "type": "object" };
 function validate232(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
-      if (data.nvidia === void 0 && (missing0 = "nvidia") || data.amd === void 0 && (missing0 = "amd")) {
+      if (data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python") || data.wheelUrl === void 0 && (missing0 = "wheelUrl")) {
         validate232.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!(key0 === "amd" || key0 === "nvidia")) {
+          if (!(key0 === "build" || key0 === "python" || key0 === "sha256" || key0 === "wheelUrl")) {
             validate232.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
         }
         if (_errs1 === errors) {
-          if (data.amd !== void 0) {
-            let data0 = data.amd;
+          if (data.build !== void 0) {
             const _errs2 = errors;
-            if (typeof data0 !== "string") {
-              validate232.errors = [{ instancePath: instancePath + "/amd", schemaPath: "#/definitions/TorchDriverAvailability/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-              return false;
-            }
-            if (!(data0 === "available" || data0 === "unavailable" || data0 === "not_present" || data0 === "unknown")) {
-              validate232.errors = [{ instancePath: instancePath + "/amd", schemaPath: "#/definitions/TorchDriverAvailability/enum", keyword: "enum", params: { allowedValues: schema276.enum }, message: "must be equal to one of the allowed values" }];
+            if (typeof data.build !== "string") {
+              validate232.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -34648,20 +34641,40 @@ function validate232(data, { instancePath = "", parentData, parentDataProperty, 
             var valid0 = true;
           }
           if (valid0) {
-            if (data.nvidia !== void 0) {
-              let data1 = data.nvidia;
-              const _errs5 = errors;
-              if (typeof data1 !== "string") {
-                validate232.errors = [{ instancePath: instancePath + "/nvidia", schemaPath: "#/definitions/TorchDriverAvailability/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+            if (data.python !== void 0) {
+              const _errs4 = errors;
+              if (typeof data.python !== "string") {
+                validate232.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                 return false;
               }
-              if (!(data1 === "available" || data1 === "unavailable" || data1 === "not_present" || data1 === "unknown")) {
-                validate232.errors = [{ instancePath: instancePath + "/nvidia", schemaPath: "#/definitions/TorchDriverAvailability/enum", keyword: "enum", params: { allowedValues: schema276.enum }, message: "must be equal to one of the allowed values" }];
-                return false;
-              }
-              var valid0 = _errs5 === errors;
+              var valid0 = _errs4 === errors;
             } else {
               var valid0 = true;
+            }
+            if (valid0) {
+              if (data.sha256 !== void 0) {
+                let data2 = data.sha256;
+                const _errs6 = errors;
+                if (typeof data2 !== "string" && data2 !== null) {
+                  validate232.errors = [{ instancePath: instancePath + "/sha256", schemaPath: "#/properties/sha256/type", keyword: "type", params: { type: schema275.properties.sha256.type }, message: "must be string,null" }];
+                  return false;
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.wheelUrl !== void 0) {
+                  const _errs8 = errors;
+                  if (typeof data.wheelUrl !== "string") {
+                    validate232.errors = [{ instancePath: instancePath + "/wheelUrl", schemaPath: "#/properties/wheelUrl/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    return false;
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+              }
             }
           }
         }
@@ -34674,26 +34687,22 @@ function validate232(data, { instancePath = "", parentData, parentDataProperty, 
   validate232.errors = vErrors;
   return errors === 0;
 }
-var validateTorchReleaseOptionsOutcome = validate233;
-var schema278 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "TorchDriverAvailability": { "enum": ["available", "unavailable", "not_present", "unknown"], "type": "string" }, "TorchGpuVendor": { "enum": ["nvidia", "amd", "intel"], "type": "string" }, "TorchReleaseCombination": { "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "wheelUrl": { "type": "string" } }, "required": ["build", "python", "wheelUrl"], "type": "object" }, "TorchReleaseDriverStatus": { "additionalProperties": false, "properties": { "amd": { "$ref": "#/definitions/TorchDriverAvailability" }, "nvidia": { "$ref": "#/definitions/TorchDriverAvailability" } }, "required": ["nvidia", "amd"], "type": "object" }, "TorchReleaseOptionsStatus": { "enum": ["matches", "none", "inconclusive"], "type": "string" }, "TorchReleaseRecommendation": { "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" } }, "required": ["build", "python"], "type": "object" } }, "properties": { "checkedChannels": { "items": { "type": "string" }, "type": "array" }, "combinations": { "items": { "$ref": "#/definitions/TorchReleaseCombination" }, "type": "array" }, "completeScan": { "type": "boolean" }, "detectedGpuVendors": { "items": { "$ref": "#/definitions/TorchGpuVendor" }, "type": "array" }, "driverStatus": { "$ref": "#/definitions/TorchReleaseDriverStatus" }, "issues": { "items": { "type": "string" }, "type": "array" }, "recommendationNote": { "type": ["string", "null"] }, "recommended": { "anyOf": [{ "$ref": "#/definitions/TorchReleaseRecommendation" }, { "type": "null" }] }, "status": { "$ref": "#/definitions/TorchReleaseOptionsStatus" }, "tag": { "type": "string" } }, "required": ["tag", "status", "completeScan", "checkedChannels", "combinations", "issues", "detectedGpuVendors", "driverStatus", "recommended", "recommendationNote"], "title": "TorchReleaseOptionsOutcome", "type": "object" };
-var schema279 = { "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "wheelUrl": { "type": "string" } }, "required": ["build", "python", "wheelUrl"], "type": "object" };
-var schema280 = { "enum": ["nvidia", "amd", "intel"], "type": "string" };
-var schema285 = { "enum": ["matches", "none", "inconclusive"], "type": "string" };
-var schema282 = { "enum": ["available", "unavailable", "not_present", "unknown"], "type": "string" };
-function validate234(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateTorchReleaseDriverStatus = validate233;
+var schema277 = { "enum": ["available", "unavailable", "not_present", "unknown"], "type": "string" };
+function validate233(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.nvidia === void 0 && (missing0 = "nvidia") || data.amd === void 0 && (missing0 = "amd")) {
-        validate234.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate233.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "amd" || key0 === "nvidia")) {
-            validate234.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate233.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -34703,11 +34712,11 @@ function validate234(data, { instancePath = "", parentData, parentDataProperty, 
             let data0 = data.amd;
             const _errs2 = errors;
             if (typeof data0 !== "string") {
-              validate234.errors = [{ instancePath: instancePath + "/amd", schemaPath: "#/definitions/TorchDriverAvailability/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              validate233.errors = [{ instancePath: instancePath + "/amd", schemaPath: "#/definitions/TorchDriverAvailability/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
               return false;
             }
             if (!(data0 === "available" || data0 === "unavailable" || data0 === "not_present" || data0 === "unknown")) {
-              validate234.errors = [{ instancePath: instancePath + "/amd", schemaPath: "#/definitions/TorchDriverAvailability/enum", keyword: "enum", params: { allowedValues: schema282.enum }, message: "must be equal to one of the allowed values" }];
+              validate233.errors = [{ instancePath: instancePath + "/amd", schemaPath: "#/definitions/TorchDriverAvailability/enum", keyword: "enum", params: { allowedValues: schema277.enum }, message: "must be equal to one of the allowed values" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -34719,11 +34728,11 @@ function validate234(data, { instancePath = "", parentData, parentDataProperty, 
               let data1 = data.nvidia;
               const _errs5 = errors;
               if (typeof data1 !== "string") {
-                validate234.errors = [{ instancePath: instancePath + "/nvidia", schemaPath: "#/definitions/TorchDriverAvailability/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                validate233.errors = [{ instancePath: instancePath + "/nvidia", schemaPath: "#/definitions/TorchDriverAvailability/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                 return false;
               }
               if (!(data1 === "available" || data1 === "unavailable" || data1 === "not_present" || data1 === "unknown")) {
-                validate234.errors = [{ instancePath: instancePath + "/nvidia", schemaPath: "#/definitions/TorchDriverAvailability/enum", keyword: "enum", params: { allowedValues: schema282.enum }, message: "must be equal to one of the allowed values" }];
+                validate233.errors = [{ instancePath: instancePath + "/nvidia", schemaPath: "#/definitions/TorchDriverAvailability/enum", keyword: "enum", params: { allowedValues: schema277.enum }, message: "must be equal to one of the allowed values" }];
                 return false;
               }
               var valid0 = _errs5 === errors;
@@ -34734,27 +34743,94 @@ function validate234(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate234.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate233.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate234.errors = vErrors;
+  validate233.errors = vErrors;
   return errors === 0;
 }
-function validate233(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateTorchReleaseOptionsOutcome = validate234;
+var schema279 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "TorchDriverAvailability": { "enum": ["available", "unavailable", "not_present", "unknown"], "type": "string" }, "TorchGpuVendor": { "enum": ["nvidia", "amd", "intel"], "type": "string" }, "TorchReleaseCombination": { "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "wheelUrl": { "type": "string" } }, "required": ["build", "python", "wheelUrl"], "type": "object" }, "TorchReleaseDriverStatus": { "additionalProperties": false, "properties": { "amd": { "$ref": "#/definitions/TorchDriverAvailability" }, "nvidia": { "$ref": "#/definitions/TorchDriverAvailability" } }, "required": ["nvidia", "amd"], "type": "object" }, "TorchReleaseOptionsStatus": { "enum": ["matches", "none", "inconclusive"], "type": "string" }, "TorchReleaseRecommendation": { "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" } }, "required": ["build", "python"], "type": "object" } }, "properties": { "checkedChannels": { "items": { "type": "string" }, "type": "array" }, "combinations": { "items": { "$ref": "#/definitions/TorchReleaseCombination" }, "type": "array" }, "completeScan": { "type": "boolean" }, "detectedGpuVendors": { "items": { "$ref": "#/definitions/TorchGpuVendor" }, "type": "array" }, "driverStatus": { "$ref": "#/definitions/TorchReleaseDriverStatus" }, "issues": { "items": { "type": "string" }, "type": "array" }, "recommendationNote": { "type": ["string", "null"] }, "recommended": { "anyOf": [{ "$ref": "#/definitions/TorchReleaseRecommendation" }, { "type": "null" }] }, "status": { "$ref": "#/definitions/TorchReleaseOptionsStatus" }, "tag": { "type": "string" } }, "required": ["tag", "status", "completeScan", "checkedChannels", "combinations", "issues", "detectedGpuVendors", "driverStatus", "recommended", "recommendationNote"], "title": "TorchReleaseOptionsOutcome", "type": "object" };
+var schema280 = { "additionalProperties": false, "properties": { "build": { "type": "string" }, "python": { "type": "string" }, "sha256": { "type": ["string", "null"] }, "wheelUrl": { "type": "string" } }, "required": ["build", "python", "wheelUrl"], "type": "object" };
+var schema281 = { "enum": ["nvidia", "amd", "intel"], "type": "string" };
+var schema286 = { "enum": ["matches", "none", "inconclusive"], "type": "string" };
+var schema283 = { "enum": ["available", "unavailable", "not_present", "unknown"], "type": "string" };
+function validate235(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.nvidia === void 0 && (missing0 = "nvidia") || data.amd === void 0 && (missing0 = "amd")) {
+        validate235.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "amd" || key0 === "nvidia")) {
+            validate235.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.amd !== void 0) {
+            let data0 = data.amd;
+            const _errs2 = errors;
+            if (typeof data0 !== "string") {
+              validate235.errors = [{ instancePath: instancePath + "/amd", schemaPath: "#/definitions/TorchDriverAvailability/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              return false;
+            }
+            if (!(data0 === "available" || data0 === "unavailable" || data0 === "not_present" || data0 === "unknown")) {
+              validate235.errors = [{ instancePath: instancePath + "/amd", schemaPath: "#/definitions/TorchDriverAvailability/enum", keyword: "enum", params: { allowedValues: schema283.enum }, message: "must be equal to one of the allowed values" }];
+              return false;
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.nvidia !== void 0) {
+              let data1 = data.nvidia;
+              const _errs5 = errors;
+              if (typeof data1 !== "string") {
+                validate235.errors = [{ instancePath: instancePath + "/nvidia", schemaPath: "#/definitions/TorchDriverAvailability/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                return false;
+              }
+              if (!(data1 === "available" || data1 === "unavailable" || data1 === "not_present" || data1 === "unknown")) {
+                validate235.errors = [{ instancePath: instancePath + "/nvidia", schemaPath: "#/definitions/TorchDriverAvailability/enum", keyword: "enum", params: { allowedValues: schema283.enum }, message: "must be equal to one of the allowed values" }];
+                return false;
+              }
+              var valid0 = _errs5 === errors;
+            } else {
+              var valid0 = true;
+            }
+          }
+        }
+      }
+    } else {
+      validate235.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate235.errors = vErrors;
+  return errors === 0;
+}
+function validate234(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.tag === void 0 && (missing0 = "tag") || data.status === void 0 && (missing0 = "status") || data.completeScan === void 0 && (missing0 = "completeScan") || data.checkedChannels === void 0 && (missing0 = "checkedChannels") || data.combinations === void 0 && (missing0 = "combinations") || data.issues === void 0 && (missing0 = "issues") || data.detectedGpuVendors === void 0 && (missing0 = "detectedGpuVendors") || data.driverStatus === void 0 && (missing0 = "driverStatus") || data.recommended === void 0 && (missing0 = "recommended") || data.recommendationNote === void 0 && (missing0 = "recommendationNote")) {
-        validate233.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate234.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!func2.call(schema278.properties, key0)) {
-            validate233.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+          if (!func2.call(schema279.properties, key0)) {
+            validate234.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -34770,7 +34846,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                 for (let i0 = 0; i0 < len0; i0++) {
                   const _errs4 = errors;
                   if (typeof data0[i0] !== "string") {
-                    validate233.errors = [{ instancePath: instancePath + "/checkedChannels/" + i0, schemaPath: "#/properties/checkedChannels/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate234.errors = [{ instancePath: instancePath + "/checkedChannels/" + i0, schemaPath: "#/properties/checkedChannels/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   var valid1 = _errs4 === errors;
@@ -34779,7 +34855,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                   }
                 }
               } else {
-                validate233.errors = [{ instancePath: instancePath + "/checkedChannels", schemaPath: "#/properties/checkedChannels/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                validate234.errors = [{ instancePath: instancePath + "/checkedChannels", schemaPath: "#/properties/checkedChannels/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                 return false;
               }
             }
@@ -34803,13 +34879,13 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                       if (data3 && typeof data3 == "object" && !Array.isArray(data3)) {
                         let missing1;
                         if (data3.build === void 0 && (missing1 = "build") || data3.python === void 0 && (missing1 = "python") || data3.wheelUrl === void 0 && (missing1 = "wheelUrl")) {
-                          validate233.errors = [{ instancePath: instancePath + "/combinations/" + i1, schemaPath: "#/definitions/TorchReleaseCombination/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                          validate234.errors = [{ instancePath: instancePath + "/combinations/" + i1, schemaPath: "#/definitions/TorchReleaseCombination/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
                           return false;
                         } else {
                           const _errs11 = errors;
                           for (const key1 in data3) {
                             if (!(key1 === "build" || key1 === "python" || key1 === "sha256" || key1 === "wheelUrl")) {
-                              validate233.errors = [{ instancePath: instancePath + "/combinations/" + i1, schemaPath: "#/definitions/TorchReleaseCombination/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                              validate234.errors = [{ instancePath: instancePath + "/combinations/" + i1, schemaPath: "#/definitions/TorchReleaseCombination/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
                               return false;
                               break;
                             }
@@ -34818,7 +34894,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                             if (data3.build !== void 0) {
                               const _errs12 = errors;
                               if (typeof data3.build !== "string") {
-                                validate233.errors = [{ instancePath: instancePath + "/combinations/" + i1 + "/build", schemaPath: "#/definitions/TorchReleaseCombination/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                validate234.errors = [{ instancePath: instancePath + "/combinations/" + i1 + "/build", schemaPath: "#/definitions/TorchReleaseCombination/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                 return false;
                               }
                               var valid4 = _errs12 === errors;
@@ -34829,7 +34905,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                               if (data3.python !== void 0) {
                                 const _errs14 = errors;
                                 if (typeof data3.python !== "string") {
-                                  validate233.errors = [{ instancePath: instancePath + "/combinations/" + i1 + "/python", schemaPath: "#/definitions/TorchReleaseCombination/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                  validate234.errors = [{ instancePath: instancePath + "/combinations/" + i1 + "/python", schemaPath: "#/definitions/TorchReleaseCombination/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                   return false;
                                 }
                                 var valid4 = _errs14 === errors;
@@ -34841,7 +34917,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                                   let data6 = data3.sha256;
                                   const _errs16 = errors;
                                   if (typeof data6 !== "string" && data6 !== null) {
-                                    validate233.errors = [{ instancePath: instancePath + "/combinations/" + i1 + "/sha256", schemaPath: "#/definitions/TorchReleaseCombination/properties/sha256/type", keyword: "type", params: { type: schema279.properties.sha256.type }, message: "must be string,null" }];
+                                    validate234.errors = [{ instancePath: instancePath + "/combinations/" + i1 + "/sha256", schemaPath: "#/definitions/TorchReleaseCombination/properties/sha256/type", keyword: "type", params: { type: schema280.properties.sha256.type }, message: "must be string,null" }];
                                     return false;
                                   }
                                   var valid4 = _errs16 === errors;
@@ -34852,7 +34928,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                                   if (data3.wheelUrl !== void 0) {
                                     const _errs18 = errors;
                                     if (typeof data3.wheelUrl !== "string") {
-                                      validate233.errors = [{ instancePath: instancePath + "/combinations/" + i1 + "/wheelUrl", schemaPath: "#/definitions/TorchReleaseCombination/properties/wheelUrl/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                      validate234.errors = [{ instancePath: instancePath + "/combinations/" + i1 + "/wheelUrl", schemaPath: "#/definitions/TorchReleaseCombination/properties/wheelUrl/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                       return false;
                                     }
                                     var valid4 = _errs18 === errors;
@@ -34865,7 +34941,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                           }
                         }
                       } else {
-                        validate233.errors = [{ instancePath: instancePath + "/combinations/" + i1, schemaPath: "#/definitions/TorchReleaseCombination/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                        validate234.errors = [{ instancePath: instancePath + "/combinations/" + i1, schemaPath: "#/definitions/TorchReleaseCombination/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
                         return false;
                       }
                     }
@@ -34875,7 +34951,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                     }
                   }
                 } else {
-                  validate233.errors = [{ instancePath: instancePath + "/combinations", schemaPath: "#/properties/combinations/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                  validate234.errors = [{ instancePath: instancePath + "/combinations", schemaPath: "#/properties/combinations/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                   return false;
                 }
               }
@@ -34887,7 +34963,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
               if (data.completeScan !== void 0) {
                 const _errs20 = errors;
                 if (typeof data.completeScan !== "boolean") {
-                  validate233.errors = [{ instancePath: instancePath + "/completeScan", schemaPath: "#/properties/completeScan/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                  validate234.errors = [{ instancePath: instancePath + "/completeScan", schemaPath: "#/properties/completeScan/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                   return false;
                 }
                 var valid0 = _errs20 === errors;
@@ -34906,11 +34982,11 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                         let data10 = data9[i2];
                         const _errs24 = errors;
                         if (typeof data10 !== "string") {
-                          validate233.errors = [{ instancePath: instancePath + "/detectedGpuVendors/" + i2, schemaPath: "#/definitions/TorchGpuVendor/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                          validate234.errors = [{ instancePath: instancePath + "/detectedGpuVendors/" + i2, schemaPath: "#/definitions/TorchGpuVendor/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                           return false;
                         }
                         if (!(data10 === "nvidia" || data10 === "amd" || data10 === "intel")) {
-                          validate233.errors = [{ instancePath: instancePath + "/detectedGpuVendors/" + i2, schemaPath: "#/definitions/TorchGpuVendor/enum", keyword: "enum", params: { allowedValues: schema280.enum }, message: "must be equal to one of the allowed values" }];
+                          validate234.errors = [{ instancePath: instancePath + "/detectedGpuVendors/" + i2, schemaPath: "#/definitions/TorchGpuVendor/enum", keyword: "enum", params: { allowedValues: schema281.enum }, message: "must be equal to one of the allowed values" }];
                           return false;
                         }
                         var valid5 = _errs24 === errors;
@@ -34919,7 +34995,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                         }
                       }
                     } else {
-                      validate233.errors = [{ instancePath: instancePath + "/detectedGpuVendors", schemaPath: "#/properties/detectedGpuVendors/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                      validate234.errors = [{ instancePath: instancePath + "/detectedGpuVendors", schemaPath: "#/properties/detectedGpuVendors/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                       return false;
                     }
                   }
@@ -34930,8 +35006,8 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                 if (valid0) {
                   if (data.driverStatus !== void 0) {
                     const _errs27 = errors;
-                    if (!validate234(data.driverStatus, { instancePath: instancePath + "/driverStatus", parentData: data, parentDataProperty: "driverStatus", rootData })) {
-                      vErrors = vErrors === null ? validate234.errors : vErrors.concat(validate234.errors);
+                    if (!validate235(data.driverStatus, { instancePath: instancePath + "/driverStatus", parentData: data, parentDataProperty: "driverStatus", rootData })) {
+                      vErrors = vErrors === null ? validate235.errors : vErrors.concat(validate235.errors);
                       errors = vErrors.length;
                     }
                     var valid0 = _errs27 === errors;
@@ -34949,7 +35025,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                           for (let i3 = 0; i3 < len3; i3++) {
                             const _errs30 = errors;
                             if (typeof data12[i3] !== "string") {
-                              validate233.errors = [{ instancePath: instancePath + "/issues/" + i3, schemaPath: "#/properties/issues/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                              validate234.errors = [{ instancePath: instancePath + "/issues/" + i3, schemaPath: "#/properties/issues/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                               return false;
                             }
                             var valid7 = _errs30 === errors;
@@ -34958,7 +35034,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                             }
                           }
                         } else {
-                          validate233.errors = [{ instancePath: instancePath + "/issues", schemaPath: "#/properties/issues/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                          validate234.errors = [{ instancePath: instancePath + "/issues", schemaPath: "#/properties/issues/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                           return false;
                         }
                       }
@@ -34971,7 +35047,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                         let data14 = data.recommendationNote;
                         const _errs32 = errors;
                         if (typeof data14 !== "string" && data14 !== null) {
-                          validate233.errors = [{ instancePath: instancePath + "/recommendationNote", schemaPath: "#/properties/recommendationNote/type", keyword: "type", params: { type: schema278.properties.recommendationNote.type }, message: "must be string,null" }];
+                          validate234.errors = [{ instancePath: instancePath + "/recommendationNote", schemaPath: "#/properties/recommendationNote/type", keyword: "type", params: { type: schema279.properties.recommendationNote.type }, message: "must be string,null" }];
                           return false;
                         }
                         var valid0 = _errs32 === errors;
@@ -35080,7 +35156,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                               vErrors.push(err6);
                             }
                             errors++;
-                            validate233.errors = vErrors;
+                            validate234.errors = vErrors;
                             return false;
                           } else {
                             errors = _errs35;
@@ -35101,11 +35177,11 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                             let data18 = data.status;
                             const _errs46 = errors;
                             if (typeof data18 !== "string") {
-                              validate233.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchReleaseOptionsStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                              validate234.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchReleaseOptionsStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                               return false;
                             }
                             if (!(data18 === "matches" || data18 === "none" || data18 === "inconclusive")) {
-                              validate233.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchReleaseOptionsStatus/enum", keyword: "enum", params: { allowedValues: schema285.enum }, message: "must be equal to one of the allowed values" }];
+                              validate234.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchReleaseOptionsStatus/enum", keyword: "enum", params: { allowedValues: schema286.enum }, message: "must be equal to one of the allowed values" }];
                               return false;
                             }
                             var valid0 = _errs46 === errors;
@@ -35116,7 +35192,7 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
                             if (data.tag !== void 0) {
                               const _errs49 = errors;
                               if (typeof data.tag !== "string") {
-                                validate233.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                validate234.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                 return false;
                               }
                               var valid0 = _errs49 === errors;
@@ -35135,44 +35211,44 @@ function validate233(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate233.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate234.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate233.errors = vErrors;
+  validate234.errors = vErrors;
   return errors === 0;
 }
-var validateTorchReleaseOptionsStatus = validate236;
-var schema286 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["matches", "none", "inconclusive"], "title": "TorchReleaseOptionsStatus", "type": "string" };
-function validate236(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateTorchReleaseOptionsStatus = validate237;
+var schema287 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["matches", "none", "inconclusive"], "title": "TorchReleaseOptionsStatus", "type": "string" };
+function validate237(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (typeof data !== "string") {
-    validate236.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+    validate237.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
     return false;
   }
   if (!(data === "matches" || data === "none" || data === "inconclusive")) {
-    validate236.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema286.enum }, message: "must be equal to one of the allowed values" }];
+    validate237.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema287.enum }, message: "must be equal to one of the allowed values" }];
     return false;
   }
-  validate236.errors = vErrors;
+  validate237.errors = vErrors;
   return errors === 0;
 }
-var validateTorchReleaseRecommendation = validate237;
-function validate237(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateTorchReleaseRecommendation = validate238;
+function validate238(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python")) {
-        validate237.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate238.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "build" || key0 === "python")) {
-            validate237.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate238.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -35181,7 +35257,7 @@ function validate237(data, { instancePath = "", parentData, parentDataProperty, 
           if (data.build !== void 0) {
             const _errs2 = errors;
             if (typeof data.build !== "string") {
-              validate237.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              validate238.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -35192,7 +35268,7 @@ function validate237(data, { instancePath = "", parentData, parentDataProperty, 
             if (data.python !== void 0) {
               const _errs4 = errors;
               if (typeof data.python !== "string") {
-                validate237.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                validate238.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                 return false;
               }
               var valid0 = _errs4 === errors;
@@ -35203,30 +35279,30 @@ function validate237(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate237.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate238.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate237.errors = vErrors;
+  validate238.errors = vErrors;
   return errors === 0;
 }
-var validateTorchRuntimeOptionsOutcome = validate238;
-var schema289 = { "additionalProperties": false, "description": "An installed runtime; a field is null when its recipe does not record it.", "properties": { "adapter": { "type": ["string", "null"] }, "build": { "type": ["string", "null"] }, "python": { "type": ["string", "null"] }, "qualification": { "$ref": "#/definitions/TorchRuntimePreviewQualification" }, "tag": { "type": "string" } }, "required": ["tag", "build", "python", "adapter", "qualification"], "type": "object" };
-var schema290 = { "enum": ["qualified", "unverified"], "type": "string" };
-function validate239(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateTorchRuntimeOptionsOutcome = validate239;
+var schema291 = { "additionalProperties": false, "description": "An installed runtime; a field is null when its recipe does not record it.", "properties": { "adapter": { "type": ["string", "null"] }, "build": { "type": ["string", "null"] }, "python": { "type": ["string", "null"] }, "qualification": { "$ref": "#/definitions/TorchRuntimePreviewQualification" }, "tag": { "type": "string" } }, "required": ["tag", "build", "python", "adapter", "qualification"], "type": "object" };
+var schema292 = { "enum": ["qualified", "unverified"], "type": "string" };
+function validate240(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.tag === void 0 && (missing0 = "tag") || data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python") || data.adapter === void 0 && (missing0 = "adapter") || data.qualification === void 0 && (missing0 = "qualification")) {
-        validate239.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate240.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "adapter" || key0 === "build" || key0 === "python" || key0 === "qualification" || key0 === "tag")) {
-            validate239.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate240.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -35236,7 +35312,7 @@ function validate239(data, { instancePath = "", parentData, parentDataProperty, 
             let data0 = data.adapter;
             const _errs2 = errors;
             if (typeof data0 !== "string" && data0 !== null) {
-              validate239.errors = [{ instancePath: instancePath + "/adapter", schemaPath: "#/properties/adapter/type", keyword: "type", params: { type: schema289.properties.adapter.type }, message: "must be string,null" }];
+              validate240.errors = [{ instancePath: instancePath + "/adapter", schemaPath: "#/properties/adapter/type", keyword: "type", params: { type: schema291.properties.adapter.type }, message: "must be string,null" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -35248,7 +35324,7 @@ function validate239(data, { instancePath = "", parentData, parentDataProperty, 
               let data1 = data.build;
               const _errs4 = errors;
               if (typeof data1 !== "string" && data1 !== null) {
-                validate239.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: schema289.properties.build.type }, message: "must be string,null" }];
+                validate240.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: schema291.properties.build.type }, message: "must be string,null" }];
                 return false;
               }
               var valid0 = _errs4 === errors;
@@ -35260,7 +35336,7 @@ function validate239(data, { instancePath = "", parentData, parentDataProperty, 
                 let data2 = data.python;
                 const _errs6 = errors;
                 if (typeof data2 !== "string" && data2 !== null) {
-                  validate239.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: schema289.properties.python.type }, message: "must be string,null" }];
+                  validate240.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: schema291.properties.python.type }, message: "must be string,null" }];
                   return false;
                 }
                 var valid0 = _errs6 === errors;
@@ -35272,11 +35348,11 @@ function validate239(data, { instancePath = "", parentData, parentDataProperty, 
                   let data3 = data.qualification;
                   const _errs8 = errors;
                   if (typeof data3 !== "string") {
-                    validate239.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate240.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   if (!(data3 === "qualified" || data3 === "unverified")) {
-                    validate239.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/enum", keyword: "enum", params: { allowedValues: schema290.enum }, message: "must be equal to one of the allowed values" }];
+                    validate240.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/enum", keyword: "enum", params: { allowedValues: schema292.enum }, message: "must be equal to one of the allowed values" }];
                     return false;
                   }
                   var valid0 = _errs8 === errors;
@@ -35287,7 +35363,7 @@ function validate239(data, { instancePath = "", parentData, parentDataProperty, 
                   if (data.tag !== void 0) {
                     const _errs11 = errors;
                     if (typeof data.tag !== "string") {
-                      validate239.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      validate240.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                       return false;
                     }
                     var valid0 = _errs11 === errors;
@@ -35301,27 +35377,27 @@ function validate239(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate239.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate240.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate239.errors = vErrors;
+  validate240.errors = vErrors;
   return errors === 0;
 }
-function validate241(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+function validate242(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.tag === void 0 && (missing0 = "tag") || data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python") || data.adapters === void 0 && (missing0 = "adapters") || data.verifiedOn === void 0 && (missing0 = "verifiedOn") || data.scope === void 0 && (missing0 = "scope") || data.sourceCommit === void 0 && (missing0 = "sourceCommit") || data.packages === void 0 && (missing0 = "packages")) {
-        validate241.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate242.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "adapters" || key0 === "build" || key0 === "packages" || key0 === "python" || key0 === "scope" || key0 === "sourceCommit" || key0 === "tag" || key0 === "verifiedOn")) {
-            validate241.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate242.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -35337,7 +35413,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                 for (let i0 = 0; i0 < len0; i0++) {
                   const _errs4 = errors;
                   if (typeof data0[i0] !== "string") {
-                    validate241.errors = [{ instancePath: instancePath + "/adapters/" + i0, schemaPath: "#/properties/adapters/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate242.errors = [{ instancePath: instancePath + "/adapters/" + i0, schemaPath: "#/properties/adapters/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   var valid1 = _errs4 === errors;
@@ -35346,7 +35422,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                   }
                 }
               } else {
-                validate241.errors = [{ instancePath: instancePath + "/adapters", schemaPath: "#/properties/adapters/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                validate242.errors = [{ instancePath: instancePath + "/adapters", schemaPath: "#/properties/adapters/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                 return false;
               }
             }
@@ -35358,7 +35434,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
             if (data.build !== void 0) {
               const _errs6 = errors;
               if (typeof data.build !== "string") {
-                validate241.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                validate242.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                 return false;
               }
               var valid0 = _errs6 === errors;
@@ -35381,13 +35457,13 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                         if (data4 && typeof data4 == "object" && !Array.isArray(data4)) {
                           let missing1;
                           if (data4.name === void 0 && (missing1 = "name") || data4.version === void 0 && (missing1 = "version")) {
-                            validate241.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                            validate242.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
                             return false;
                           } else {
                             const _errs13 = errors;
                             for (const key1 in data4) {
                               if (!(key1 === "name" || key1 === "version")) {
-                                validate241.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                                validate242.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
                                 return false;
                                 break;
                               }
@@ -35396,7 +35472,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                               if (data4.name !== void 0) {
                                 const _errs14 = errors;
                                 if (typeof data4.name !== "string") {
-                                  validate241.errors = [{ instancePath: instancePath + "/packages/" + i1 + "/name", schemaPath: "#/definitions/TorchVerifiedPackage/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                  validate242.errors = [{ instancePath: instancePath + "/packages/" + i1 + "/name", schemaPath: "#/definitions/TorchVerifiedPackage/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                   return false;
                                 }
                                 var valid4 = _errs14 === errors;
@@ -35407,7 +35483,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                                 if (data4.version !== void 0) {
                                   const _errs16 = errors;
                                   if (typeof data4.version !== "string") {
-                                    validate241.errors = [{ instancePath: instancePath + "/packages/" + i1 + "/version", schemaPath: "#/definitions/TorchVerifiedPackage/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                    validate242.errors = [{ instancePath: instancePath + "/packages/" + i1 + "/version", schemaPath: "#/definitions/TorchVerifiedPackage/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                     return false;
                                   }
                                   var valid4 = _errs16 === errors;
@@ -35418,7 +35494,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                             }
                           }
                         } else {
-                          validate241.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                          validate242.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
                           return false;
                         }
                       }
@@ -35428,7 +35504,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                       }
                     }
                   } else {
-                    validate241.errors = [{ instancePath: instancePath + "/packages", schemaPath: "#/properties/packages/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                    validate242.errors = [{ instancePath: instancePath + "/packages", schemaPath: "#/properties/packages/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                     return false;
                   }
                 }
@@ -35440,7 +35516,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                 if (data.python !== void 0) {
                   const _errs18 = errors;
                   if (typeof data.python !== "string") {
-                    validate241.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate242.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   var valid0 = _errs18 === errors;
@@ -35451,7 +35527,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                   if (data.scope !== void 0) {
                     const _errs20 = errors;
                     if (typeof data.scope !== "string") {
-                      validate241.errors = [{ instancePath: instancePath + "/scope", schemaPath: "#/properties/scope/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      validate242.errors = [{ instancePath: instancePath + "/scope", schemaPath: "#/properties/scope/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                       return false;
                     }
                     var valid0 = _errs20 === errors;
@@ -35462,7 +35538,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                     if (data.sourceCommit !== void 0) {
                       const _errs22 = errors;
                       if (typeof data.sourceCommit !== "string") {
-                        validate241.errors = [{ instancePath: instancePath + "/sourceCommit", schemaPath: "#/properties/sourceCommit/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                        validate242.errors = [{ instancePath: instancePath + "/sourceCommit", schemaPath: "#/properties/sourceCommit/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                         return false;
                       }
                       var valid0 = _errs22 === errors;
@@ -35473,7 +35549,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                       if (data.tag !== void 0) {
                         const _errs24 = errors;
                         if (typeof data.tag !== "string") {
-                          validate241.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                          validate242.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                           return false;
                         }
                         var valid0 = _errs24 === errors;
@@ -35484,7 +35560,7 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
                         if (data.verifiedOn !== void 0) {
                           const _errs26 = errors;
                           if (typeof data.verifiedOn !== "string") {
-                            validate241.errors = [{ instancePath: instancePath + "/verifiedOn", schemaPath: "#/properties/verifiedOn/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            validate242.errors = [{ instancePath: instancePath + "/verifiedOn", schemaPath: "#/properties/verifiedOn/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                             return false;
                           }
                           var valid0 = _errs26 === errors;
@@ -35501,44 +35577,111 @@ function validate241(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate241.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate242.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate241.errors = vErrors;
+  validate242.errors = vErrors;
   return errors === 0;
 }
-function validate238(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+function validate239(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
-      if (data.builds === void 0 && (missing0 = "builds") || data.defaultBuild === void 0 && (missing0 = "defaultBuild") || data.pythons === void 0 && (missing0 = "pythons") || data.adapters === void 0 && (missing0 = "adapters") || data.defaultAdapter === void 0 && (missing0 = "defaultAdapter") || data.verified === void 0 && (missing0 = "verified") || data.installed === void 0 && (missing0 = "installed")) {
-        validate238.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+      if (data.builds === void 0 && (missing0 = "builds") || data.defaultBuild === void 0 && (missing0 = "defaultBuild") || data.pythons === void 0 && (missing0 = "pythons") || data.adapters === void 0 && (missing0 = "adapters") || data.defaultAdapter === void 0 && (missing0 = "defaultAdapter") || data.verified === void 0 && (missing0 = "verified") || data.adapterRequirements === void 0 && (missing0 = "adapterRequirements") || data.installed === void 0 && (missing0 = "installed")) {
+        validate239.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!(key0 === "adapters" || key0 === "builds" || key0 === "defaultAdapter" || key0 === "defaultBuild" || key0 === "installed" || key0 === "pythons" || key0 === "verified")) {
-            validate238.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+          if (!(key0 === "adapterRequirements" || key0 === "adapters" || key0 === "builds" || key0 === "defaultAdapter" || key0 === "defaultBuild" || key0 === "installed" || key0 === "pythons" || key0 === "verified")) {
+            validate239.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
         }
         if (_errs1 === errors) {
-          if (data.adapters !== void 0) {
-            let data0 = data.adapters;
+          if (data.adapterRequirements !== void 0) {
+            let data0 = data.adapterRequirements;
             const _errs2 = errors;
             if (errors === _errs2) {
               if (Array.isArray(data0)) {
                 var valid1 = true;
                 const len0 = data0.length;
                 for (let i0 = 0; i0 < len0; i0++) {
+                  let data1 = data0[i0];
                   const _errs4 = errors;
-                  if (typeof data0[i0] !== "string") {
-                    validate238.errors = [{ instancePath: instancePath + "/adapters/" + i0, schemaPath: "#/properties/adapters/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                    return false;
+                  const _errs5 = errors;
+                  if (errors === _errs5) {
+                    if (data1 && typeof data1 == "object" && !Array.isArray(data1)) {
+                      let missing1;
+                      if (data1.adapter === void 0 && (missing1 = "adapter") || data1.tag === void 0 && (missing1 = "tag") || data1.build === void 0 && (missing1 = "build") || data1.python === void 0 && (missing1 = "python")) {
+                        validate239.errors = [{ instancePath: instancePath + "/adapterRequirements/" + i0, schemaPath: "#/definitions/TorchAdapterRequirement/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                        return false;
+                      } else {
+                        const _errs7 = errors;
+                        for (const key1 in data1) {
+                          if (!(key1 === "adapter" || key1 === "build" || key1 === "python" || key1 === "tag")) {
+                            validate239.errors = [{ instancePath: instancePath + "/adapterRequirements/" + i0, schemaPath: "#/definitions/TorchAdapterRequirement/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                            return false;
+                            break;
+                          }
+                        }
+                        if (_errs7 === errors) {
+                          if (data1.adapter !== void 0) {
+                            const _errs8 = errors;
+                            if (typeof data1.adapter !== "string") {
+                              validate239.errors = [{ instancePath: instancePath + "/adapterRequirements/" + i0 + "/adapter", schemaPath: "#/definitions/TorchAdapterRequirement/properties/adapter/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                              return false;
+                            }
+                            var valid3 = _errs8 === errors;
+                          } else {
+                            var valid3 = true;
+                          }
+                          if (valid3) {
+                            if (data1.build !== void 0) {
+                              const _errs10 = errors;
+                              if (typeof data1.build !== "string") {
+                                validate239.errors = [{ instancePath: instancePath + "/adapterRequirements/" + i0 + "/build", schemaPath: "#/definitions/TorchAdapterRequirement/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                return false;
+                              }
+                              var valid3 = _errs10 === errors;
+                            } else {
+                              var valid3 = true;
+                            }
+                            if (valid3) {
+                              if (data1.python !== void 0) {
+                                const _errs12 = errors;
+                                if (typeof data1.python !== "string") {
+                                  validate239.errors = [{ instancePath: instancePath + "/adapterRequirements/" + i0 + "/python", schemaPath: "#/definitions/TorchAdapterRequirement/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                  return false;
+                                }
+                                var valid3 = _errs12 === errors;
+                              } else {
+                                var valid3 = true;
+                              }
+                              if (valid3) {
+                                if (data1.tag !== void 0) {
+                                  const _errs14 = errors;
+                                  if (typeof data1.tag !== "string") {
+                                    validate239.errors = [{ instancePath: instancePath + "/adapterRequirements/" + i0 + "/tag", schemaPath: "#/definitions/TorchAdapterRequirement/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                    return false;
+                                  }
+                                  var valid3 = _errs14 === errors;
+                                } else {
+                                  var valid3 = true;
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    } else {
+                      validate239.errors = [{ instancePath: instancePath + "/adapterRequirements/" + i0, schemaPath: "#/definitions/TorchAdapterRequirement/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                      return false;
+                    }
                   }
                   var valid1 = _errs4 === errors;
                   if (!valid1) {
@@ -35546,7 +35689,7 @@ function validate238(data, { instancePath = "", parentData, parentDataProperty, 
                   }
                 }
               } else {
-                validate238.errors = [{ instancePath: instancePath + "/adapters", schemaPath: "#/properties/adapters/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                validate239.errors = [{ instancePath: instancePath + "/adapterRequirements", schemaPath: "#/properties/adapterRequirements/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                 return false;
               }
             }
@@ -35555,186 +35698,215 @@ function validate238(data, { instancePath = "", parentData, parentDataProperty, 
             var valid0 = true;
           }
           if (valid0) {
-            if (data.builds !== void 0) {
-              let data2 = data.builds;
-              const _errs6 = errors;
-              if (errors === _errs6) {
-                if (Array.isArray(data2)) {
-                  var valid2 = true;
-                  const len1 = data2.length;
+            if (data.adapters !== void 0) {
+              let data6 = data.adapters;
+              const _errs16 = errors;
+              if (errors === _errs16) {
+                if (Array.isArray(data6)) {
+                  var valid4 = true;
+                  const len1 = data6.length;
                   for (let i1 = 0; i1 < len1; i1++) {
-                    const _errs8 = errors;
-                    if (typeof data2[i1] !== "string") {
-                      validate238.errors = [{ instancePath: instancePath + "/builds/" + i1, schemaPath: "#/properties/builds/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    const _errs18 = errors;
+                    if (typeof data6[i1] !== "string") {
+                      validate239.errors = [{ instancePath: instancePath + "/adapters/" + i1, schemaPath: "#/properties/adapters/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                       return false;
                     }
-                    var valid2 = _errs8 === errors;
-                    if (!valid2) {
+                    var valid4 = _errs18 === errors;
+                    if (!valid4) {
                       break;
                     }
                   }
                 } else {
-                  validate238.errors = [{ instancePath: instancePath + "/builds", schemaPath: "#/properties/builds/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                  validate239.errors = [{ instancePath: instancePath + "/adapters", schemaPath: "#/properties/adapters/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                   return false;
                 }
               }
-              var valid0 = _errs6 === errors;
+              var valid0 = _errs16 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
-              if (data.defaultAdapter !== void 0) {
-                const _errs10 = errors;
-                if (typeof data.defaultAdapter !== "string") {
-                  validate238.errors = [{ instancePath: instancePath + "/defaultAdapter", schemaPath: "#/properties/defaultAdapter/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                  return false;
+              if (data.builds !== void 0) {
+                let data8 = data.builds;
+                const _errs20 = errors;
+                if (errors === _errs20) {
+                  if (Array.isArray(data8)) {
+                    var valid5 = true;
+                    const len2 = data8.length;
+                    for (let i2 = 0; i2 < len2; i2++) {
+                      const _errs22 = errors;
+                      if (typeof data8[i2] !== "string") {
+                        validate239.errors = [{ instancePath: instancePath + "/builds/" + i2, schemaPath: "#/properties/builds/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                        return false;
+                      }
+                      var valid5 = _errs22 === errors;
+                      if (!valid5) {
+                        break;
+                      }
+                    }
+                  } else {
+                    validate239.errors = [{ instancePath: instancePath + "/builds", schemaPath: "#/properties/builds/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                    return false;
+                  }
                 }
-                var valid0 = _errs10 === errors;
+                var valid0 = _errs20 === errors;
               } else {
                 var valid0 = true;
               }
               if (valid0) {
-                if (data.defaultBuild !== void 0) {
-                  const _errs12 = errors;
-                  if (typeof data.defaultBuild !== "string") {
-                    validate238.errors = [{ instancePath: instancePath + "/defaultBuild", schemaPath: "#/properties/defaultBuild/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                if (data.defaultAdapter !== void 0) {
+                  const _errs24 = errors;
+                  if (typeof data.defaultAdapter !== "string") {
+                    validate239.errors = [{ instancePath: instancePath + "/defaultAdapter", schemaPath: "#/properties/defaultAdapter/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
-                  var valid0 = _errs12 === errors;
+                  var valid0 = _errs24 === errors;
                 } else {
                   var valid0 = true;
                 }
                 if (valid0) {
-                  if (data.installed !== void 0) {
-                    let data6 = data.installed;
-                    const _errs14 = errors;
-                    if (errors === _errs14) {
-                      if (Array.isArray(data6)) {
-                        var valid3 = true;
-                        const len2 = data6.length;
-                        for (let i2 = 0; i2 < len2; i2++) {
-                          const _errs16 = errors;
-                          if (!validate239(data6[i2], { instancePath: instancePath + "/installed/" + i2, parentData: data6, parentDataProperty: i2, rootData })) {
-                            vErrors = vErrors === null ? validate239.errors : vErrors.concat(validate239.errors);
-                            errors = vErrors.length;
-                          }
-                          var valid3 = _errs16 === errors;
-                          if (!valid3) {
-                            break;
-                          }
-                        }
-                      } else {
-                        validate238.errors = [{ instancePath: instancePath + "/installed", schemaPath: "#/properties/installed/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
-                        return false;
-                      }
+                  if (data.defaultBuild !== void 0) {
+                    const _errs26 = errors;
+                    if (typeof data.defaultBuild !== "string") {
+                      validate239.errors = [{ instancePath: instancePath + "/defaultBuild", schemaPath: "#/properties/defaultBuild/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      return false;
                     }
-                    var valid0 = _errs14 === errors;
+                    var valid0 = _errs26 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
-                    if (data.pythons !== void 0) {
-                      let data8 = data.pythons;
-                      const _errs17 = errors;
-                      if (errors === _errs17) {
-                        if (Array.isArray(data8)) {
-                          var valid4 = true;
-                          const len3 = data8.length;
+                    if (data.installed !== void 0) {
+                      let data12 = data.installed;
+                      const _errs28 = errors;
+                      if (errors === _errs28) {
+                        if (Array.isArray(data12)) {
+                          var valid6 = true;
+                          const len3 = data12.length;
                           for (let i3 = 0; i3 < len3; i3++) {
-                            let data9 = data8[i3];
-                            const _errs19 = errors;
-                            const _errs20 = errors;
-                            if (errors === _errs20) {
-                              if (data9 && typeof data9 == "object" && !Array.isArray(data9)) {
-                                let missing1;
-                                if (data9.id === void 0 && (missing1 = "id") || data9.label === void 0 && (missing1 = "label")) {
-                                  validate238.errors = [{ instancePath: instancePath + "/pythons/" + i3, schemaPath: "#/definitions/TorchPythonChoice/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
-                                  return false;
-                                } else {
-                                  const _errs22 = errors;
-                                  for (const key1 in data9) {
-                                    if (!(key1 === "id" || key1 === "label")) {
-                                      validate238.errors = [{ instancePath: instancePath + "/pythons/" + i3, schemaPath: "#/definitions/TorchPythonChoice/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
-                                      return false;
-                                      break;
-                                    }
-                                  }
-                                  if (_errs22 === errors) {
-                                    if (data9.id !== void 0) {
-                                      const _errs23 = errors;
-                                      if (typeof data9.id !== "string") {
-                                        validate238.errors = [{ instancePath: instancePath + "/pythons/" + i3 + "/id", schemaPath: "#/definitions/TorchPythonChoice/properties/id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                                        return false;
-                                      }
-                                      var valid6 = _errs23 === errors;
-                                    } else {
-                                      var valid6 = true;
-                                    }
-                                    if (valid6) {
-                                      if (data9.label !== void 0) {
-                                        const _errs25 = errors;
-                                        if (typeof data9.label !== "string") {
-                                          validate238.errors = [{ instancePath: instancePath + "/pythons/" + i3 + "/label", schemaPath: "#/definitions/TorchPythonChoice/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                                          return false;
-                                        }
-                                        var valid6 = _errs25 === errors;
-                                      } else {
-                                        var valid6 = true;
-                                      }
-                                    }
-                                  }
-                                }
-                              } else {
-                                validate238.errors = [{ instancePath: instancePath + "/pythons/" + i3, schemaPath: "#/definitions/TorchPythonChoice/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
-                                return false;
-                              }
+                            const _errs30 = errors;
+                            if (!validate240(data12[i3], { instancePath: instancePath + "/installed/" + i3, parentData: data12, parentDataProperty: i3, rootData })) {
+                              vErrors = vErrors === null ? validate240.errors : vErrors.concat(validate240.errors);
+                              errors = vErrors.length;
                             }
-                            var valid4 = _errs19 === errors;
-                            if (!valid4) {
+                            var valid6 = _errs30 === errors;
+                            if (!valid6) {
                               break;
                             }
                           }
                         } else {
-                          validate238.errors = [{ instancePath: instancePath + "/pythons", schemaPath: "#/properties/pythons/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                          validate239.errors = [{ instancePath: instancePath + "/installed", schemaPath: "#/properties/installed/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                           return false;
                         }
                       }
-                      var valid0 = _errs17 === errors;
+                      var valid0 = _errs28 === errors;
                     } else {
                       var valid0 = true;
                     }
                     if (valid0) {
-                      if (data.verified !== void 0) {
-                        let data12 = data.verified;
-                        const _errs27 = errors;
-                        if (errors === _errs27) {
-                          if (Array.isArray(data12)) {
+                      if (data.pythons !== void 0) {
+                        let data14 = data.pythons;
+                        const _errs31 = errors;
+                        if (errors === _errs31) {
+                          if (Array.isArray(data14)) {
                             var valid7 = true;
-                            const len4 = data12.length;
+                            const len4 = data14.length;
                             for (let i4 = 0; i4 < len4; i4++) {
-                              const _errs29 = errors;
-                              if (!validate241(data12[i4], { instancePath: instancePath + "/verified/" + i4, parentData: data12, parentDataProperty: i4, rootData })) {
-                                vErrors = vErrors === null ? validate241.errors : vErrors.concat(validate241.errors);
-                                errors = vErrors.length;
+                              let data15 = data14[i4];
+                              const _errs33 = errors;
+                              const _errs34 = errors;
+                              if (errors === _errs34) {
+                                if (data15 && typeof data15 == "object" && !Array.isArray(data15)) {
+                                  let missing2;
+                                  if (data15.id === void 0 && (missing2 = "id") || data15.label === void 0 && (missing2 = "label")) {
+                                    validate239.errors = [{ instancePath: instancePath + "/pythons/" + i4, schemaPath: "#/definitions/TorchPythonChoice/required", keyword: "required", params: { missingProperty: missing2 }, message: "must have required property '" + missing2 + "'" }];
+                                    return false;
+                                  } else {
+                                    const _errs36 = errors;
+                                    for (const key2 in data15) {
+                                      if (!(key2 === "id" || key2 === "label")) {
+                                        validate239.errors = [{ instancePath: instancePath + "/pythons/" + i4, schemaPath: "#/definitions/TorchPythonChoice/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key2 }, message: "must NOT have additional properties" }];
+                                        return false;
+                                        break;
+                                      }
+                                    }
+                                    if (_errs36 === errors) {
+                                      if (data15.id !== void 0) {
+                                        const _errs37 = errors;
+                                        if (typeof data15.id !== "string") {
+                                          validate239.errors = [{ instancePath: instancePath + "/pythons/" + i4 + "/id", schemaPath: "#/definitions/TorchPythonChoice/properties/id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                          return false;
+                                        }
+                                        var valid9 = _errs37 === errors;
+                                      } else {
+                                        var valid9 = true;
+                                      }
+                                      if (valid9) {
+                                        if (data15.label !== void 0) {
+                                          const _errs39 = errors;
+                                          if (typeof data15.label !== "string") {
+                                            validate239.errors = [{ instancePath: instancePath + "/pythons/" + i4 + "/label", schemaPath: "#/definitions/TorchPythonChoice/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                            return false;
+                                          }
+                                          var valid9 = _errs39 === errors;
+                                        } else {
+                                          var valid9 = true;
+                                        }
+                                      }
+                                    }
+                                  }
+                                } else {
+                                  validate239.errors = [{ instancePath: instancePath + "/pythons/" + i4, schemaPath: "#/definitions/TorchPythonChoice/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                                  return false;
+                                }
                               }
-                              var valid7 = _errs29 === errors;
+                              var valid7 = _errs33 === errors;
                               if (!valid7) {
                                 break;
                               }
                             }
                           } else {
-                            validate238.errors = [{ instancePath: instancePath + "/verified", schemaPath: "#/properties/verified/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                            validate239.errors = [{ instancePath: instancePath + "/pythons", schemaPath: "#/properties/pythons/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                             return false;
                           }
                         }
-                        var valid0 = _errs27 === errors;
+                        var valid0 = _errs31 === errors;
                       } else {
                         var valid0 = true;
                       }
                       if (valid0) {
-                        if (!Array.isArray(data.adapters) || !data.adapters.includes(data.defaultAdapter)) {
-                          validate238.errors = [{ instancePath, schemaPath: "#/pumasTorchDefaultAdapter", keyword: "pumasTorchDefaultAdapter", params: {}, message: 'must pass "pumasTorchDefaultAdapter" keyword validation' }];
-                          return false;
+                        if (data.verified !== void 0) {
+                          let data18 = data.verified;
+                          const _errs41 = errors;
+                          if (errors === _errs41) {
+                            if (Array.isArray(data18)) {
+                              var valid10 = true;
+                              const len5 = data18.length;
+                              for (let i5 = 0; i5 < len5; i5++) {
+                                const _errs43 = errors;
+                                if (!validate242(data18[i5], { instancePath: instancePath + "/verified/" + i5, parentData: data18, parentDataProperty: i5, rootData })) {
+                                  vErrors = vErrors === null ? validate242.errors : vErrors.concat(validate242.errors);
+                                  errors = vErrors.length;
+                                }
+                                var valid10 = _errs43 === errors;
+                                if (!valid10) {
+                                  break;
+                                }
+                              }
+                            } else {
+                              validate239.errors = [{ instancePath: instancePath + "/verified", schemaPath: "#/properties/verified/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                              return false;
+                            }
+                          }
+                          var valid0 = _errs41 === errors;
+                        } else {
+                          var valid0 = true;
+                        }
+                        if (valid0) {
+                          if (!Array.isArray(data.adapters) || !data.adapters.includes(data.defaultAdapter)) {
+                            validate239.errors = [{ instancePath, schemaPath: "#/pumasTorchDefaultAdapter", keyword: "pumasTorchDefaultAdapter", params: {}, message: 'must pass "pumasTorchDefaultAdapter" keyword validation' }];
+                            return false;
+                          }
                         }
                       }
                     }
@@ -35746,29 +35918,29 @@ function validate238(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate238.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate239.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate238.errors = vErrors;
+  validate239.errors = vErrors;
   return errors === 0;
 }
-var validateTorchRuntimePreview = validate243;
-var schema296 = { "enum": ["qualified", "unverified"], "type": "string" };
-function validate243(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateTorchRuntimePreview = validate244;
+var schema298 = { "enum": ["qualified", "unverified"], "type": "string" };
+function validate244(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.previewId === void 0 && (missing0 = "previewId") || data.tag === void 0 && (missing0 = "tag") || data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python") || data.adapter === void 0 && (missing0 = "adapter") || data.artifacts === void 0 && (missing0 = "artifacts") || data.qualification === void 0 && (missing0 = "qualification") || data.expiresInSeconds === void 0 && (missing0 = "expiresInSeconds")) {
-        validate243.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate244.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "adapter" || key0 === "artifacts" || key0 === "build" || key0 === "expiresInSeconds" || key0 === "previewId" || key0 === "python" || key0 === "qualification" || key0 === "tag")) {
-            validate243.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate244.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -35777,7 +35949,7 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
           if (data.adapter !== void 0) {
             const _errs2 = errors;
             if (typeof data.adapter !== "string") {
-              validate243.errors = [{ instancePath: instancePath + "/adapter", schemaPath: "#/properties/adapter/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              validate244.errors = [{ instancePath: instancePath + "/adapter", schemaPath: "#/properties/adapter/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -35800,13 +35972,13 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                       if (data2 && typeof data2 == "object" && !Array.isArray(data2)) {
                         let missing1;
                         if (data2.name === void 0 && (missing1 = "name") || data2.version === void 0 && (missing1 = "version") || data2.url === void 0 && (missing1 = "url") || data2.sha256 === void 0 && (missing1 = "sha256")) {
-                          validate243.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                          validate244.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
                           return false;
                         } else {
                           const _errs9 = errors;
                           for (const key1 in data2) {
                             if (!(key1 === "name" || key1 === "sha256" || key1 === "url" || key1 === "version")) {
-                              validate243.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                              validate244.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
                               return false;
                               break;
                             }
@@ -35815,7 +35987,7 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                             if (data2.name !== void 0) {
                               const _errs10 = errors;
                               if (typeof data2.name !== "string") {
-                                validate243.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/name", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                validate244.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/name", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                 return false;
                               }
                               var valid3 = _errs10 === errors;
@@ -35826,7 +35998,7 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                               if (data2.sha256 !== void 0) {
                                 const _errs12 = errors;
                                 if (typeof data2.sha256 !== "string") {
-                                  validate243.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/sha256", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/sha256/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                  validate244.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/sha256", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/sha256/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                   return false;
                                 }
                                 var valid3 = _errs12 === errors;
@@ -35837,7 +36009,7 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                                 if (data2.url !== void 0) {
                                   const _errs14 = errors;
                                   if (typeof data2.url !== "string") {
-                                    validate243.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/url", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/url/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                    validate244.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/url", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/url/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                     return false;
                                   }
                                   var valid3 = _errs14 === errors;
@@ -35848,7 +36020,7 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                                   if (data2.version !== void 0) {
                                     const _errs16 = errors;
                                     if (typeof data2.version !== "string") {
-                                      validate243.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/version", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                      validate244.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/version", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                       return false;
                                     }
                                     var valid3 = _errs16 === errors;
@@ -35861,7 +36033,7 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                           }
                         }
                       } else {
-                        validate243.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                        validate244.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
                         return false;
                       }
                     }
@@ -35871,7 +36043,7 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                     }
                   }
                 } else {
-                  validate243.errors = [{ instancePath: instancePath + "/artifacts", schemaPath: "#/properties/artifacts/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                  validate244.errors = [{ instancePath: instancePath + "/artifacts", schemaPath: "#/properties/artifacts/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                   return false;
                 }
               }
@@ -35883,7 +36055,7 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
               if (data.build !== void 0) {
                 const _errs18 = errors;
                 if (typeof data.build !== "string") {
-                  validate243.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  validate244.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                   return false;
                 }
                 var valid0 = _errs18 === errors;
@@ -35895,17 +36067,17 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                   let data8 = data.expiresInSeconds;
                   const _errs20 = errors;
                   if (!(typeof data8 == "number" && (!(data8 % 1) && !isNaN(data8)) && isFinite(data8))) {
-                    validate243.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                    validate244.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
                     return false;
                   }
                   if (errors === _errs20) {
                     if (typeof data8 == "number" && isFinite(data8)) {
                       if (data8 > 9007199254740991 || isNaN(data8)) {
-                        validate243.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                        validate244.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
                         return false;
                       } else {
                         if (data8 < 0 || isNaN(data8)) {
-                          validate243.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                          validate244.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
                           return false;
                         }
                       }
@@ -35919,7 +36091,7 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                   if (data.previewId !== void 0) {
                     const _errs22 = errors;
                     if (typeof data.previewId !== "string") {
-                      validate243.errors = [{ instancePath: instancePath + "/previewId", schemaPath: "#/properties/previewId/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      validate244.errors = [{ instancePath: instancePath + "/previewId", schemaPath: "#/properties/previewId/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                       return false;
                     }
                     var valid0 = _errs22 === errors;
@@ -35930,7 +36102,7 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                     if (data.python !== void 0) {
                       const _errs24 = errors;
                       if (typeof data.python !== "string") {
-                        validate243.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                        validate244.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                         return false;
                       }
                       var valid0 = _errs24 === errors;
@@ -35942,11 +36114,11 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                         let data11 = data.qualification;
                         const _errs26 = errors;
                         if (typeof data11 !== "string") {
-                          validate243.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                          validate244.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                           return false;
                         }
                         if (!(data11 === "qualified" || data11 === "unverified")) {
-                          validate243.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/enum", keyword: "enum", params: { allowedValues: schema296.enum }, message: "must be equal to one of the allowed values" }];
+                          validate244.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/enum", keyword: "enum", params: { allowedValues: schema298.enum }, message: "must be equal to one of the allowed values" }];
                           return false;
                         }
                         var valid0 = _errs26 === errors;
@@ -35957,7 +36129,7 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                         if (data.tag !== void 0) {
                           const _errs29 = errors;
                           if (typeof data.tag !== "string") {
-                            validate243.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            validate244.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                             return false;
                           }
                           var valid0 = _errs29 === errors;
@@ -35967,82 +36139,6 @@ function validate243(data, { instancePath = "", parentData, parentDataProperty, 
                       }
                     }
                   }
-                }
-              }
-            }
-          }
-        }
-      }
-    } else {
-      validate243.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
-      return false;
-    }
-  }
-  validate243.errors = vErrors;
-  return errors === 0;
-}
-var validateTorchRuntimePreviewArtifact = validate244;
-function validate244(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
-  let vErrors = null;
-  let errors = 0;
-  if (errors === 0) {
-    if (data && typeof data == "object" && !Array.isArray(data)) {
-      let missing0;
-      if (data.name === void 0 && (missing0 = "name") || data.version === void 0 && (missing0 = "version") || data.url === void 0 && (missing0 = "url") || data.sha256 === void 0 && (missing0 = "sha256")) {
-        validate244.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
-        return false;
-      } else {
-        const _errs1 = errors;
-        for (const key0 in data) {
-          if (!(key0 === "name" || key0 === "sha256" || key0 === "url" || key0 === "version")) {
-            validate244.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
-            return false;
-            break;
-          }
-        }
-        if (_errs1 === errors) {
-          if (data.name !== void 0) {
-            const _errs2 = errors;
-            if (typeof data.name !== "string") {
-              validate244.errors = [{ instancePath: instancePath + "/name", schemaPath: "#/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-              return false;
-            }
-            var valid0 = _errs2 === errors;
-          } else {
-            var valid0 = true;
-          }
-          if (valid0) {
-            if (data.sha256 !== void 0) {
-              const _errs4 = errors;
-              if (typeof data.sha256 !== "string") {
-                validate244.errors = [{ instancePath: instancePath + "/sha256", schemaPath: "#/properties/sha256/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                return false;
-              }
-              var valid0 = _errs4 === errors;
-            } else {
-              var valid0 = true;
-            }
-            if (valid0) {
-              if (data.url !== void 0) {
-                const _errs6 = errors;
-                if (typeof data.url !== "string") {
-                  validate244.errors = [{ instancePath: instancePath + "/url", schemaPath: "#/properties/url/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                  return false;
-                }
-                var valid0 = _errs6 === errors;
-              } else {
-                var valid0 = true;
-              }
-              if (valid0) {
-                if (data.version !== void 0) {
-                  const _errs8 = errors;
-                  if (typeof data.version !== "string") {
-                    validate244.errors = [{ instancePath: instancePath + "/version", schemaPath: "#/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-                    return false;
-                  }
-                  var valid0 = _errs8 === errors;
-                } else {
-                  var valid0 = true;
                 }
               }
             }
@@ -36057,23 +36153,99 @@ function validate244(data, { instancePath = "", parentData, parentDataProperty, 
   validate244.errors = vErrors;
   return errors === 0;
 }
-var validateTorchRuntimePreviewOutcome = validate245;
-var schema302 = { "enum": ["unsupported", "validation_failed", "network_inconclusive", "inconclusive"], "type": "string" };
-var schema301 = { "enum": ["qualified", "unverified"], "type": "string" };
-function validate246(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateTorchRuntimePreviewArtifact = validate245;
+function validate245(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.name === void 0 && (missing0 = "name") || data.version === void 0 && (missing0 = "version") || data.url === void 0 && (missing0 = "url") || data.sha256 === void 0 && (missing0 = "sha256")) {
+        validate245.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "name" || key0 === "sha256" || key0 === "url" || key0 === "version")) {
+            validate245.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.name !== void 0) {
+            const _errs2 = errors;
+            if (typeof data.name !== "string") {
+              validate245.errors = [{ instancePath: instancePath + "/name", schemaPath: "#/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              return false;
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.sha256 !== void 0) {
+              const _errs4 = errors;
+              if (typeof data.sha256 !== "string") {
+                validate245.errors = [{ instancePath: instancePath + "/sha256", schemaPath: "#/properties/sha256/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                return false;
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.url !== void 0) {
+                const _errs6 = errors;
+                if (typeof data.url !== "string") {
+                  validate245.errors = [{ instancePath: instancePath + "/url", schemaPath: "#/properties/url/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  return false;
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.version !== void 0) {
+                  const _errs8 = errors;
+                  if (typeof data.version !== "string") {
+                    validate245.errors = [{ instancePath: instancePath + "/version", schemaPath: "#/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    return false;
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      validate245.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate245.errors = vErrors;
+  return errors === 0;
+}
+var validateTorchRuntimePreviewOutcome = validate246;
+var schema304 = { "enum": ["unsupported", "validation_failed", "network_inconclusive", "inconclusive"], "type": "string" };
+var schema303 = { "enum": ["qualified", "unverified"], "type": "string" };
+function validate247(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.previewId === void 0 && (missing0 = "previewId") || data.tag === void 0 && (missing0 = "tag") || data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python") || data.adapter === void 0 && (missing0 = "adapter") || data.artifacts === void 0 && (missing0 = "artifacts") || data.qualification === void 0 && (missing0 = "qualification") || data.expiresInSeconds === void 0 && (missing0 = "expiresInSeconds")) {
-        validate246.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate247.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "adapter" || key0 === "artifacts" || key0 === "build" || key0 === "expiresInSeconds" || key0 === "previewId" || key0 === "python" || key0 === "qualification" || key0 === "tag")) {
-            validate246.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate247.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -36082,7 +36254,7 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
           if (data.adapter !== void 0) {
             const _errs2 = errors;
             if (typeof data.adapter !== "string") {
-              validate246.errors = [{ instancePath: instancePath + "/adapter", schemaPath: "#/properties/adapter/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              validate247.errors = [{ instancePath: instancePath + "/adapter", schemaPath: "#/properties/adapter/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -36105,13 +36277,13 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                       if (data2 && typeof data2 == "object" && !Array.isArray(data2)) {
                         let missing1;
                         if (data2.name === void 0 && (missing1 = "name") || data2.version === void 0 && (missing1 = "version") || data2.url === void 0 && (missing1 = "url") || data2.sha256 === void 0 && (missing1 = "sha256")) {
-                          validate246.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                          validate247.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
                           return false;
                         } else {
                           const _errs9 = errors;
                           for (const key1 in data2) {
                             if (!(key1 === "name" || key1 === "sha256" || key1 === "url" || key1 === "version")) {
-                              validate246.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                              validate247.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
                               return false;
                               break;
                             }
@@ -36120,7 +36292,7 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                             if (data2.name !== void 0) {
                               const _errs10 = errors;
                               if (typeof data2.name !== "string") {
-                                validate246.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/name", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                validate247.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/name", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                 return false;
                               }
                               var valid3 = _errs10 === errors;
@@ -36131,7 +36303,7 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                               if (data2.sha256 !== void 0) {
                                 const _errs12 = errors;
                                 if (typeof data2.sha256 !== "string") {
-                                  validate246.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/sha256", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/sha256/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                  validate247.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/sha256", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/sha256/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                   return false;
                                 }
                                 var valid3 = _errs12 === errors;
@@ -36142,7 +36314,7 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                                 if (data2.url !== void 0) {
                                   const _errs14 = errors;
                                   if (typeof data2.url !== "string") {
-                                    validate246.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/url", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/url/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                    validate247.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/url", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/url/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                     return false;
                                   }
                                   var valid3 = _errs14 === errors;
@@ -36153,7 +36325,7 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                                   if (data2.version !== void 0) {
                                     const _errs16 = errors;
                                     if (typeof data2.version !== "string") {
-                                      validate246.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/version", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                      validate247.errors = [{ instancePath: instancePath + "/artifacts/" + i0 + "/version", schemaPath: "#/definitions/TorchRuntimePreviewArtifact/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                       return false;
                                     }
                                     var valid3 = _errs16 === errors;
@@ -36166,7 +36338,7 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                           }
                         }
                       } else {
-                        validate246.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                        validate247.errors = [{ instancePath: instancePath + "/artifacts/" + i0, schemaPath: "#/definitions/TorchRuntimePreviewArtifact/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
                         return false;
                       }
                     }
@@ -36176,7 +36348,7 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                     }
                   }
                 } else {
-                  validate246.errors = [{ instancePath: instancePath + "/artifacts", schemaPath: "#/properties/artifacts/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                  validate247.errors = [{ instancePath: instancePath + "/artifacts", schemaPath: "#/properties/artifacts/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                   return false;
                 }
               }
@@ -36188,7 +36360,7 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
               if (data.build !== void 0) {
                 const _errs18 = errors;
                 if (typeof data.build !== "string") {
-                  validate246.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  validate247.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                   return false;
                 }
                 var valid0 = _errs18 === errors;
@@ -36200,17 +36372,17 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                   let data8 = data.expiresInSeconds;
                   const _errs20 = errors;
                   if (!(typeof data8 == "number" && (!(data8 % 1) && !isNaN(data8)) && isFinite(data8))) {
-                    validate246.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                    validate247.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
                     return false;
                   }
                   if (errors === _errs20) {
                     if (typeof data8 == "number" && isFinite(data8)) {
                       if (data8 > 9007199254740991 || isNaN(data8)) {
-                        validate246.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                        validate247.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
                         return false;
                       } else {
                         if (data8 < 0 || isNaN(data8)) {
-                          validate246.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                          validate247.errors = [{ instancePath: instancePath + "/expiresInSeconds", schemaPath: "#/properties/expiresInSeconds/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
                           return false;
                         }
                       }
@@ -36224,7 +36396,7 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                   if (data.previewId !== void 0) {
                     const _errs22 = errors;
                     if (typeof data.previewId !== "string") {
-                      validate246.errors = [{ instancePath: instancePath + "/previewId", schemaPath: "#/properties/previewId/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      validate247.errors = [{ instancePath: instancePath + "/previewId", schemaPath: "#/properties/previewId/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                       return false;
                     }
                     var valid0 = _errs22 === errors;
@@ -36235,7 +36407,7 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                     if (data.python !== void 0) {
                       const _errs24 = errors;
                       if (typeof data.python !== "string") {
-                        validate246.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                        validate247.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                         return false;
                       }
                       var valid0 = _errs24 === errors;
@@ -36247,11 +36419,11 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                         let data11 = data.qualification;
                         const _errs26 = errors;
                         if (typeof data11 !== "string") {
-                          validate246.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                          validate247.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                           return false;
                         }
                         if (!(data11 === "qualified" || data11 === "unverified")) {
-                          validate246.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/enum", keyword: "enum", params: { allowedValues: schema301.enum }, message: "must be equal to one of the allowed values" }];
+                          validate247.errors = [{ instancePath: instancePath + "/qualification", schemaPath: "#/definitions/TorchRuntimePreviewQualification/enum", keyword: "enum", params: { allowedValues: schema303.enum }, message: "must be equal to one of the allowed values" }];
                           return false;
                         }
                         var valid0 = _errs26 === errors;
@@ -36262,7 +36434,7 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
                         if (data.tag !== void 0) {
                           const _errs29 = errors;
                           if (typeof data.tag !== "string") {
-                            validate246.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            validate247.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                             return false;
                           }
                           var valid0 = _errs29 === errors;
@@ -36279,14 +36451,14 @@ function validate246(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate246.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate247.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate246.errors = vErrors;
+  validate247.errors = vErrors;
   return errors === 0;
 }
-function validate245(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+function validate246(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   const _errs0 = errors;
@@ -36321,8 +36493,8 @@ function validate245(data, { instancePath = "", parentData, parentDataProperty, 
         if (_errs3 === errors) {
           if (data.preview !== void 0) {
             const _errs4 = errors;
-            if (!validate246(data.preview, { instancePath: instancePath + "/preview", parentData: data, parentDataProperty: "preview", rootData })) {
-              vErrors = vErrors === null ? validate246.errors : vErrors.concat(validate246.errors);
+            if (!validate247(data.preview, { instancePath: instancePath + "/preview", parentData: data, parentDataProperty: "preview", rootData })) {
+              vErrors = vErrors === null ? validate247.errors : vErrors.concat(validate247.errors);
               errors = vErrors.length;
             }
             var valid1 = _errs4 === errors;
@@ -36429,7 +36601,7 @@ function validate245(data, { instancePath = "", parentData, parentDataProperty, 
                 errors++;
               }
               if (!(data3 === "unsupported" || data3 === "validation_failed" || data3 === "network_inconclusive" || data3 === "inconclusive")) {
-                const err9 = { instancePath: instancePath + "/reason", schemaPath: "#/definitions/TorchRuntimePreviewRejectionReason/enum", keyword: "enum", params: { allowedValues: schema302.enum }, message: "must be equal to one of the allowed values" };
+                const err9 = { instancePath: instancePath + "/reason", schemaPath: "#/definitions/TorchRuntimePreviewRejectionReason/enum", keyword: "enum", params: { allowedValues: schema304.enum }, message: "must be equal to one of the allowed values" };
                 if (vErrors === null) {
                   vErrors = [err9];
                 } else {
@@ -36499,7 +36671,7 @@ function validate245(data, { instancePath = "", parentData, parentDataProperty, 
       vErrors.push(err13);
     }
     errors++;
-    validate245.errors = vErrors;
+    validate246.errors = vErrors;
     return false;
   } else {
     errors = _errs0;
@@ -36511,27 +36683,11 @@ function validate245(data, { instancePath = "", parentData, parentDataProperty, 
       }
     }
   }
-  validate245.errors = vErrors;
+  validate246.errors = vErrors;
   return errors === 0;
 }
-var validateTorchRuntimePreviewQualification = validate248;
-var schema303 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["qualified", "unverified"], "title": "TorchRuntimePreviewQualification", "type": "string" };
-function validate248(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
-  let vErrors = null;
-  let errors = 0;
-  if (typeof data !== "string") {
-    validate248.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-    return false;
-  }
-  if (!(data === "qualified" || data === "unverified")) {
-    validate248.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema303.enum }, message: "must be equal to one of the allowed values" }];
-    return false;
-  }
-  validate248.errors = vErrors;
-  return errors === 0;
-}
-var validateTorchRuntimePreviewRejectionReason = validate249;
-var schema304 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["unsupported", "validation_failed", "network_inconclusive", "inconclusive"], "title": "TorchRuntimePreviewRejectionReason", "type": "string" };
+var validateTorchRuntimePreviewQualification = validate249;
+var schema305 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["qualified", "unverified"], "title": "TorchRuntimePreviewQualification", "type": "string" };
 function validate249(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -36539,33 +36695,49 @@ function validate249(data, { instancePath = "", parentData, parentDataProperty, 
     validate249.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
     return false;
   }
-  if (!(data === "unsupported" || data === "validation_failed" || data === "network_inconclusive" || data === "inconclusive")) {
-    validate249.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema304.enum }, message: "must be equal to one of the allowed values" }];
+  if (!(data === "qualified" || data === "unverified")) {
+    validate249.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema305.enum }, message: "must be equal to one of the allowed values" }];
     return false;
   }
   validate249.errors = vErrors;
   return errors === 0;
 }
-var validateTorchRuntimeProbeOutcome = validate250;
-var schema305 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "TorchCapabilityProbe": { "additionalProperties": false, "description": "One saved check. `status` is display text (for example `not tested`).", "properties": { "error": { "type": ["string", "null"] }, "reason": { "type": ["string", "null"] }, "scope": { "type": ["string", "null"] }, "status": { "type": "string" }, "version": { "description": "Version the check measured, such as the imported Torch build.", "type": ["string", "null"] } }, "required": ["status", "scope", "reason", "error", "version"], "type": "object" }, "TorchProbeAdapterStatus": { "enum": ["not selected", "unavailable", "inconclusive"], "type": "string" }, "TorchProbeCoreStatus": { "enum": ["passed", "failed"], "type": "string" }, "TorchProbeStatus": { "enum": ["passed", "partial", "failed"], "type": "string" } }, "description": "The saved install-time probe and whether it still describes the runtime.", "properties": { "adapter_status": { "$ref": "#/definitions/TorchProbeAdapterStatus" }, "capabilities": { "additionalProperties": { "$ref": "#/definitions/TorchCapabilityProbe" }, "type": "object" }, "core_status": { "$ref": "#/definitions/TorchProbeCoreStatus" }, "recorded_at": { "description": "RFC 3339 time the probe ran; null for reports older than this field.", "type": ["string", "null"] }, "stale": { "type": "boolean" }, "staleReasons": { "items": { "type": "string" }, "type": "array" }, "status": { "$ref": "#/definitions/TorchProbeStatus" } }, "required": ["recorded_at", "status", "core_status", "adapter_status", "capabilities", "stale", "staleReasons"], "title": "TorchRuntimeProbeOutcome", "type": "object" };
-var schema306 = { "enum": ["not selected", "unavailable", "inconclusive"], "type": "string" };
-var schema307 = { "additionalProperties": false, "description": "One saved check. `status` is display text (for example `not tested`).", "properties": { "error": { "type": ["string", "null"] }, "reason": { "type": ["string", "null"] }, "scope": { "type": ["string", "null"] }, "status": { "type": "string" }, "version": { "description": "Version the check measured, such as the imported Torch build.", "type": ["string", "null"] } }, "required": ["status", "scope", "reason", "error", "version"], "type": "object" };
-var schema308 = { "enum": ["passed", "failed"], "type": "string" };
-var schema309 = { "enum": ["passed", "partial", "failed"], "type": "string" };
+var validateTorchRuntimePreviewRejectionReason = validate250;
+var schema306 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["unsupported", "validation_failed", "network_inconclusive", "inconclusive"], "title": "TorchRuntimePreviewRejectionReason", "type": "string" };
 function validate250(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (typeof data !== "string") {
+    validate250.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+    return false;
+  }
+  if (!(data === "unsupported" || data === "validation_failed" || data === "network_inconclusive" || data === "inconclusive")) {
+    validate250.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema306.enum }, message: "must be equal to one of the allowed values" }];
+    return false;
+  }
+  validate250.errors = vErrors;
+  return errors === 0;
+}
+var validateTorchRuntimeProbeOutcome = validate251;
+var schema307 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "TorchCapabilityProbe": { "additionalProperties": false, "description": "One saved check. `status` is display text (for example `not tested`).", "properties": { "error": { "type": ["string", "null"] }, "reason": { "type": ["string", "null"] }, "scope": { "type": ["string", "null"] }, "status": { "type": "string" }, "version": { "description": "Version the check measured, such as the imported Torch build.", "type": ["string", "null"] } }, "required": ["status", "scope", "reason", "error", "version"], "type": "object" }, "TorchProbeAdapterStatus": { "enum": ["not selected", "unavailable", "inconclusive"], "type": "string" }, "TorchProbeCoreStatus": { "enum": ["passed", "failed"], "type": "string" }, "TorchProbeStatus": { "enum": ["passed", "partial", "failed"], "type": "string" } }, "description": "The saved install-time probe and whether it still describes the runtime.", "properties": { "adapter_status": { "$ref": "#/definitions/TorchProbeAdapterStatus" }, "capabilities": { "additionalProperties": { "$ref": "#/definitions/TorchCapabilityProbe" }, "type": "object" }, "core_status": { "$ref": "#/definitions/TorchProbeCoreStatus" }, "recorded_at": { "description": "RFC 3339 time the probe ran; null for reports older than this field.", "type": ["string", "null"] }, "stale": { "type": "boolean" }, "staleReasons": { "items": { "type": "string" }, "type": "array" }, "status": { "$ref": "#/definitions/TorchProbeStatus" } }, "required": ["recorded_at", "status", "core_status", "adapter_status", "capabilities", "stale", "staleReasons"], "title": "TorchRuntimeProbeOutcome", "type": "object" };
+var schema308 = { "enum": ["not selected", "unavailable", "inconclusive"], "type": "string" };
+var schema309 = { "additionalProperties": false, "description": "One saved check. `status` is display text (for example `not tested`).", "properties": { "error": { "type": ["string", "null"] }, "reason": { "type": ["string", "null"] }, "scope": { "type": ["string", "null"] }, "status": { "type": "string" }, "version": { "description": "Version the check measured, such as the imported Torch build.", "type": ["string", "null"] } }, "required": ["status", "scope", "reason", "error", "version"], "type": "object" };
+var schema310 = { "enum": ["passed", "failed"], "type": "string" };
+var schema311 = { "enum": ["passed", "partial", "failed"], "type": "string" };
+function validate251(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.recorded_at === void 0 && (missing0 = "recorded_at") || data.status === void 0 && (missing0 = "status") || data.core_status === void 0 && (missing0 = "core_status") || data.adapter_status === void 0 && (missing0 = "adapter_status") || data.capabilities === void 0 && (missing0 = "capabilities") || data.stale === void 0 && (missing0 = "stale") || data.staleReasons === void 0 && (missing0 = "staleReasons")) {
-        validate250.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate251.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "adapter_status" || key0 === "capabilities" || key0 === "core_status" || key0 === "recorded_at" || key0 === "stale" || key0 === "staleReasons" || key0 === "status")) {
-            validate250.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate251.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -36575,11 +36747,11 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
             let data0 = data.adapter_status;
             const _errs2 = errors;
             if (typeof data0 !== "string") {
-              validate250.errors = [{ instancePath: instancePath + "/adapter_status", schemaPath: "#/definitions/TorchProbeAdapterStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              validate251.errors = [{ instancePath: instancePath + "/adapter_status", schemaPath: "#/definitions/TorchProbeAdapterStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
               return false;
             }
             if (!(data0 === "not selected" || data0 === "unavailable" || data0 === "inconclusive")) {
-              validate250.errors = [{ instancePath: instancePath + "/adapter_status", schemaPath: "#/definitions/TorchProbeAdapterStatus/enum", keyword: "enum", params: { allowedValues: schema306.enum }, message: "must be equal to one of the allowed values" }];
+              validate251.errors = [{ instancePath: instancePath + "/adapter_status", schemaPath: "#/definitions/TorchProbeAdapterStatus/enum", keyword: "enum", params: { allowedValues: schema308.enum }, message: "must be equal to one of the allowed values" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -36600,13 +36772,13 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                       if (data2 && typeof data2 == "object" && !Array.isArray(data2)) {
                         let missing1;
                         if (data2.status === void 0 && (missing1 = "status") || data2.scope === void 0 && (missing1 = "scope") || data2.reason === void 0 && (missing1 = "reason") || data2.error === void 0 && (missing1 = "error") || data2.version === void 0 && (missing1 = "version")) {
-                          validate250.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1"), schemaPath: "#/definitions/TorchCapabilityProbe/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                          validate251.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1"), schemaPath: "#/definitions/TorchCapabilityProbe/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
                           return false;
                         } else {
                           const _errs11 = errors;
                           for (const key2 in data2) {
                             if (!(key2 === "error" || key2 === "reason" || key2 === "scope" || key2 === "status" || key2 === "version")) {
-                              validate250.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1"), schemaPath: "#/definitions/TorchCapabilityProbe/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key2 }, message: "must NOT have additional properties" }];
+                              validate251.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1"), schemaPath: "#/definitions/TorchCapabilityProbe/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key2 }, message: "must NOT have additional properties" }];
                               return false;
                               break;
                             }
@@ -36616,7 +36788,7 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                               let data3 = data2.error;
                               const _errs12 = errors;
                               if (typeof data3 !== "string" && data3 !== null) {
-                                validate250.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/error", schemaPath: "#/definitions/TorchCapabilityProbe/properties/error/type", keyword: "type", params: { type: schema307.properties.error.type }, message: "must be string,null" }];
+                                validate251.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/error", schemaPath: "#/definitions/TorchCapabilityProbe/properties/error/type", keyword: "type", params: { type: schema309.properties.error.type }, message: "must be string,null" }];
                                 return false;
                               }
                               var valid4 = _errs12 === errors;
@@ -36628,7 +36800,7 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                                 let data4 = data2.reason;
                                 const _errs14 = errors;
                                 if (typeof data4 !== "string" && data4 !== null) {
-                                  validate250.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/reason", schemaPath: "#/definitions/TorchCapabilityProbe/properties/reason/type", keyword: "type", params: { type: schema307.properties.reason.type }, message: "must be string,null" }];
+                                  validate251.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/reason", schemaPath: "#/definitions/TorchCapabilityProbe/properties/reason/type", keyword: "type", params: { type: schema309.properties.reason.type }, message: "must be string,null" }];
                                   return false;
                                 }
                                 var valid4 = _errs14 === errors;
@@ -36640,7 +36812,7 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                                   let data5 = data2.scope;
                                   const _errs16 = errors;
                                   if (typeof data5 !== "string" && data5 !== null) {
-                                    validate250.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/scope", schemaPath: "#/definitions/TorchCapabilityProbe/properties/scope/type", keyword: "type", params: { type: schema307.properties.scope.type }, message: "must be string,null" }];
+                                    validate251.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/scope", schemaPath: "#/definitions/TorchCapabilityProbe/properties/scope/type", keyword: "type", params: { type: schema309.properties.scope.type }, message: "must be string,null" }];
                                     return false;
                                   }
                                   var valid4 = _errs16 === errors;
@@ -36651,7 +36823,7 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                                   if (data2.status !== void 0) {
                                     const _errs18 = errors;
                                     if (typeof data2.status !== "string") {
-                                      validate250.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/status", schemaPath: "#/definitions/TorchCapabilityProbe/properties/status/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                      validate251.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/status", schemaPath: "#/definitions/TorchCapabilityProbe/properties/status/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                       return false;
                                     }
                                     var valid4 = _errs18 === errors;
@@ -36663,7 +36835,7 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                                       let data7 = data2.version;
                                       const _errs20 = errors;
                                       if (typeof data7 !== "string" && data7 !== null) {
-                                        validate250.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/version", schemaPath: "#/definitions/TorchCapabilityProbe/properties/version/type", keyword: "type", params: { type: schema307.properties.version.type }, message: "must be string,null" }];
+                                        validate251.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1") + "/version", schemaPath: "#/definitions/TorchCapabilityProbe/properties/version/type", keyword: "type", params: { type: schema309.properties.version.type }, message: "must be string,null" }];
                                         return false;
                                       }
                                       var valid4 = _errs20 === errors;
@@ -36677,7 +36849,7 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                           }
                         }
                       } else {
-                        validate250.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1"), schemaPath: "#/definitions/TorchCapabilityProbe/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                        validate251.errors = [{ instancePath: instancePath + "/capabilities/" + key1.replace(/~/g, "~0").replace(/\//g, "~1"), schemaPath: "#/definitions/TorchCapabilityProbe/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
                         return false;
                       }
                     }
@@ -36687,7 +36859,7 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                     }
                   }
                 } else {
-                  validate250.errors = [{ instancePath: instancePath + "/capabilities", schemaPath: "#/properties/capabilities/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                  validate251.errors = [{ instancePath: instancePath + "/capabilities", schemaPath: "#/properties/capabilities/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
                   return false;
                 }
               }
@@ -36700,11 +36872,11 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                 let data8 = data.core_status;
                 const _errs22 = errors;
                 if (typeof data8 !== "string") {
-                  validate250.errors = [{ instancePath: instancePath + "/core_status", schemaPath: "#/definitions/TorchProbeCoreStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                  validate251.errors = [{ instancePath: instancePath + "/core_status", schemaPath: "#/definitions/TorchProbeCoreStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                   return false;
                 }
                 if (!(data8 === "passed" || data8 === "failed")) {
-                  validate250.errors = [{ instancePath: instancePath + "/core_status", schemaPath: "#/definitions/TorchProbeCoreStatus/enum", keyword: "enum", params: { allowedValues: schema308.enum }, message: "must be equal to one of the allowed values" }];
+                  validate251.errors = [{ instancePath: instancePath + "/core_status", schemaPath: "#/definitions/TorchProbeCoreStatus/enum", keyword: "enum", params: { allowedValues: schema310.enum }, message: "must be equal to one of the allowed values" }];
                   return false;
                 }
                 var valid0 = _errs22 === errors;
@@ -36716,7 +36888,7 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                   let data9 = data.recorded_at;
                   const _errs25 = errors;
                   if (typeof data9 !== "string" && data9 !== null) {
-                    validate250.errors = [{ instancePath: instancePath + "/recorded_at", schemaPath: "#/properties/recorded_at/type", keyword: "type", params: { type: schema305.properties.recorded_at.type }, message: "must be string,null" }];
+                    validate251.errors = [{ instancePath: instancePath + "/recorded_at", schemaPath: "#/properties/recorded_at/type", keyword: "type", params: { type: schema307.properties.recorded_at.type }, message: "must be string,null" }];
                     return false;
                   }
                   var valid0 = _errs25 === errors;
@@ -36727,7 +36899,7 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                   if (data.stale !== void 0) {
                     const _errs27 = errors;
                     if (typeof data.stale !== "boolean") {
-                      validate250.errors = [{ instancePath: instancePath + "/stale", schemaPath: "#/properties/stale/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                      validate251.errors = [{ instancePath: instancePath + "/stale", schemaPath: "#/properties/stale/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                       return false;
                     }
                     var valid0 = _errs27 === errors;
@@ -36745,7 +36917,7 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                           for (let i0 = 0; i0 < len0; i0++) {
                             const _errs31 = errors;
                             if (typeof data11[i0] !== "string") {
-                              validate250.errors = [{ instancePath: instancePath + "/staleReasons/" + i0, schemaPath: "#/properties/staleReasons/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                              validate251.errors = [{ instancePath: instancePath + "/staleReasons/" + i0, schemaPath: "#/properties/staleReasons/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                               return false;
                             }
                             var valid6 = _errs31 === errors;
@@ -36754,7 +36926,7 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                             }
                           }
                         } else {
-                          validate250.errors = [{ instancePath: instancePath + "/staleReasons", schemaPath: "#/properties/staleReasons/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                          validate251.errors = [{ instancePath: instancePath + "/staleReasons", schemaPath: "#/properties/staleReasons/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                           return false;
                         }
                       }
@@ -36767,11 +36939,11 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
                         let data13 = data.status;
                         const _errs33 = errors;
                         if (typeof data13 !== "string") {
-                          validate250.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchProbeStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                          validate251.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchProbeStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                           return false;
                         }
                         if (!(data13 === "passed" || data13 === "partial" || data13 === "failed")) {
-                          validate250.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchProbeStatus/enum", keyword: "enum", params: { allowedValues: schema309.enum }, message: "must be equal to one of the allowed values" }];
+                          validate251.errors = [{ instancePath: instancePath + "/status", schemaPath: "#/definitions/TorchProbeStatus/enum", keyword: "enum", params: { allowedValues: schema311.enum }, message: "must be equal to one of the allowed values" }];
                           return false;
                         }
                         var valid0 = _errs33 === errors;
@@ -36787,31 +36959,15 @@ function validate250(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate250.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate251.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
-  }
-  validate250.errors = vErrors;
-  return errors === 0;
-}
-var validateTorchTrialCleanup = validate251;
-var schema310 = { "$schema": "http://json-schema.org/draft-07/schema#", "description": "What happened to a process the trial started.", "enum": ["not_needed", "stopped_owned_generation", "manual_stop_required"], "title": "TorchTrialCleanup", "type": "string" };
-function validate251(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
-  let vErrors = null;
-  let errors = 0;
-  if (typeof data !== "string") {
-    validate251.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
-    return false;
-  }
-  if (!(data === "not_needed" || data === "stopped_owned_generation" || data === "manual_stop_required")) {
-    validate251.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema310.enum }, message: "must be equal to one of the allowed values" }];
-    return false;
   }
   validate251.errors = vErrors;
   return errors === 0;
 }
-var validateTorchTrialHealthStatus = validate252;
-var schema311 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["passed", "failed", "not_checked"], "title": "TorchTrialHealthStatus", "type": "string" };
+var validateTorchTrialCleanup = validate252;
+var schema312 = { "$schema": "http://json-schema.org/draft-07/schema#", "description": "What happened to a process the trial started.", "enum": ["not_needed", "stopped_owned_generation", "manual_stop_required"], "title": "TorchTrialCleanup", "type": "string" };
 function validate252(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -36819,15 +36975,15 @@ function validate252(data, { instancePath = "", parentData, parentDataProperty, 
     validate252.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
     return false;
   }
-  if (!(data === "passed" || data === "failed" || data === "not_checked")) {
-    validate252.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema311.enum }, message: "must be equal to one of the allowed values" }];
+  if (!(data === "not_needed" || data === "stopped_owned_generation" || data === "manual_stop_required")) {
+    validate252.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema312.enum }, message: "must be equal to one of the allowed values" }];
     return false;
   }
   validate252.errors = vErrors;
   return errors === 0;
 }
-var validateTorchTrialStartupStatus = validate253;
-var schema312 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["passed", "failed"], "title": "TorchTrialStartupStatus", "type": "string" };
+var validateTorchTrialHealthStatus = validate253;
+var schema313 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["passed", "failed", "not_checked"], "title": "TorchTrialHealthStatus", "type": "string" };
 function validate253(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -36835,28 +36991,44 @@ function validate253(data, { instancePath = "", parentData, parentDataProperty, 
     validate253.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
     return false;
   }
-  if (!(data === "passed" || data === "failed")) {
-    validate253.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema312.enum }, message: "must be equal to one of the allowed values" }];
+  if (!(data === "passed" || data === "failed" || data === "not_checked")) {
+    validate253.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema313.enum }, message: "must be equal to one of the allowed values" }];
     return false;
   }
   validate253.errors = vErrors;
   return errors === 0;
 }
-var validateTorchVerifiedPackage = validate254;
+var validateTorchTrialStartupStatus = validate254;
+var schema314 = { "$schema": "http://json-schema.org/draft-07/schema#", "enum": ["passed", "failed"], "title": "TorchTrialStartupStatus", "type": "string" };
 function validate254(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (typeof data !== "string") {
+    validate254.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+    return false;
+  }
+  if (!(data === "passed" || data === "failed")) {
+    validate254.errors = [{ instancePath, schemaPath: "#/enum", keyword: "enum", params: { allowedValues: schema314.enum }, message: "must be equal to one of the allowed values" }];
+    return false;
+  }
+  validate254.errors = vErrors;
+  return errors === 0;
+}
+var validateTorchVerifiedPackage = validate255;
+function validate255(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.name === void 0 && (missing0 = "name") || data.version === void 0 && (missing0 = "version")) {
-        validate254.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate255.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "name" || key0 === "version")) {
-            validate254.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate255.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -36865,7 +37037,7 @@ function validate254(data, { instancePath = "", parentData, parentDataProperty, 
           if (data.name !== void 0) {
             const _errs2 = errors;
             if (typeof data.name !== "string") {
-              validate254.errors = [{ instancePath: instancePath + "/name", schemaPath: "#/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              validate255.errors = [{ instancePath: instancePath + "/name", schemaPath: "#/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -36876,7 +37048,7 @@ function validate254(data, { instancePath = "", parentData, parentDataProperty, 
             if (data.version !== void 0) {
               const _errs4 = errors;
               if (typeof data.version !== "string") {
-                validate254.errors = [{ instancePath: instancePath + "/version", schemaPath: "#/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                validate255.errors = [{ instancePath: instancePath + "/version", schemaPath: "#/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                 return false;
               }
               var valid0 = _errs4 === errors;
@@ -36887,28 +37059,28 @@ function validate254(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate254.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate255.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate254.errors = vErrors;
+  validate255.errors = vErrors;
   return errors === 0;
 }
-var validateTorchVerifiedRuntime = validate255;
-function validate255(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateTorchVerifiedRuntime = validate256;
+function validate256(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.tag === void 0 && (missing0 = "tag") || data.build === void 0 && (missing0 = "build") || data.python === void 0 && (missing0 = "python") || data.adapters === void 0 && (missing0 = "adapters") || data.verifiedOn === void 0 && (missing0 = "verifiedOn") || data.scope === void 0 && (missing0 = "scope") || data.sourceCommit === void 0 && (missing0 = "sourceCommit") || data.packages === void 0 && (missing0 = "packages")) {
-        validate255.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate256.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "adapters" || key0 === "build" || key0 === "packages" || key0 === "python" || key0 === "scope" || key0 === "sourceCommit" || key0 === "tag" || key0 === "verifiedOn")) {
-            validate255.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate256.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -36924,7 +37096,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                 for (let i0 = 0; i0 < len0; i0++) {
                   const _errs4 = errors;
                   if (typeof data0[i0] !== "string") {
-                    validate255.errors = [{ instancePath: instancePath + "/adapters/" + i0, schemaPath: "#/properties/adapters/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate256.errors = [{ instancePath: instancePath + "/adapters/" + i0, schemaPath: "#/properties/adapters/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   var valid1 = _errs4 === errors;
@@ -36933,7 +37105,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                   }
                 }
               } else {
-                validate255.errors = [{ instancePath: instancePath + "/adapters", schemaPath: "#/properties/adapters/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                validate256.errors = [{ instancePath: instancePath + "/adapters", schemaPath: "#/properties/adapters/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                 return false;
               }
             }
@@ -36945,7 +37117,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
             if (data.build !== void 0) {
               const _errs6 = errors;
               if (typeof data.build !== "string") {
-                validate255.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                validate256.errors = [{ instancePath: instancePath + "/build", schemaPath: "#/properties/build/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                 return false;
               }
               var valid0 = _errs6 === errors;
@@ -36968,13 +37140,13 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                         if (data4 && typeof data4 == "object" && !Array.isArray(data4)) {
                           let missing1;
                           if (data4.name === void 0 && (missing1 = "name") || data4.version === void 0 && (missing1 = "version")) {
-                            validate255.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                            validate256.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
                             return false;
                           } else {
                             const _errs13 = errors;
                             for (const key1 in data4) {
                               if (!(key1 === "name" || key1 === "version")) {
-                                validate255.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                                validate256.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
                                 return false;
                                 break;
                               }
@@ -36983,7 +37155,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                               if (data4.name !== void 0) {
                                 const _errs14 = errors;
                                 if (typeof data4.name !== "string") {
-                                  validate255.errors = [{ instancePath: instancePath + "/packages/" + i1 + "/name", schemaPath: "#/definitions/TorchVerifiedPackage/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                  validate256.errors = [{ instancePath: instancePath + "/packages/" + i1 + "/name", schemaPath: "#/definitions/TorchVerifiedPackage/properties/name/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                   return false;
                                 }
                                 var valid4 = _errs14 === errors;
@@ -36994,7 +37166,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                                 if (data4.version !== void 0) {
                                   const _errs16 = errors;
                                   if (typeof data4.version !== "string") {
-                                    validate255.errors = [{ instancePath: instancePath + "/packages/" + i1 + "/version", schemaPath: "#/definitions/TorchVerifiedPackage/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                    validate256.errors = [{ instancePath: instancePath + "/packages/" + i1 + "/version", schemaPath: "#/definitions/TorchVerifiedPackage/properties/version/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                     return false;
                                   }
                                   var valid4 = _errs16 === errors;
@@ -37005,7 +37177,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                             }
                           }
                         } else {
-                          validate255.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                          validate256.errors = [{ instancePath: instancePath + "/packages/" + i1, schemaPath: "#/definitions/TorchVerifiedPackage/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
                           return false;
                         }
                       }
@@ -37015,7 +37187,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                       }
                     }
                   } else {
-                    validate255.errors = [{ instancePath: instancePath + "/packages", schemaPath: "#/properties/packages/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                    validate256.errors = [{ instancePath: instancePath + "/packages", schemaPath: "#/properties/packages/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                     return false;
                   }
                 }
@@ -37027,7 +37199,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                 if (data.python !== void 0) {
                   const _errs18 = errors;
                   if (typeof data.python !== "string") {
-                    validate255.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate256.errors = [{ instancePath: instancePath + "/python", schemaPath: "#/properties/python/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   var valid0 = _errs18 === errors;
@@ -37038,7 +37210,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                   if (data.scope !== void 0) {
                     const _errs20 = errors;
                     if (typeof data.scope !== "string") {
-                      validate255.errors = [{ instancePath: instancePath + "/scope", schemaPath: "#/properties/scope/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      validate256.errors = [{ instancePath: instancePath + "/scope", schemaPath: "#/properties/scope/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                       return false;
                     }
                     var valid0 = _errs20 === errors;
@@ -37049,7 +37221,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                     if (data.sourceCommit !== void 0) {
                       const _errs22 = errors;
                       if (typeof data.sourceCommit !== "string") {
-                        validate255.errors = [{ instancePath: instancePath + "/sourceCommit", schemaPath: "#/properties/sourceCommit/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                        validate256.errors = [{ instancePath: instancePath + "/sourceCommit", schemaPath: "#/properties/sourceCommit/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                         return false;
                       }
                       var valid0 = _errs22 === errors;
@@ -37060,7 +37232,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                       if (data.tag !== void 0) {
                         const _errs24 = errors;
                         if (typeof data.tag !== "string") {
-                          validate255.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                          validate256.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                           return false;
                         }
                         var valid0 = _errs24 === errors;
@@ -37071,7 +37243,7 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
                         if (data.verifiedOn !== void 0) {
                           const _errs26 = errors;
                           if (typeof data.verifiedOn !== "string") {
-                            validate255.errors = [{ instancePath: instancePath + "/verifiedOn", schemaPath: "#/properties/verifiedOn/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            validate256.errors = [{ instancePath: instancePath + "/verifiedOn", schemaPath: "#/properties/verifiedOn/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                             return false;
                           }
                           var valid0 = _errs26 === errors;
@@ -37088,32 +37260,32 @@ function validate255(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate255.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate256.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate255.errors = vErrors;
+  validate256.errors = vErrors;
   return errors === 0;
 }
-var validateTrialTorchRuntimeOutcome = validate256;
-var schema316 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "TorchTrialCleanup": { "description": "What happened to a process the trial started.", "enum": ["not_needed", "stopped_owned_generation", "manual_stop_required"], "type": "string" }, "TorchTrialHealthStatus": { "enum": ["passed", "failed", "not_checked"], "type": "string" }, "TorchTrialStartupStatus": { "enum": ["passed", "failed"], "type": "string" } }, "properties": { "capabilities": { "items": { "type": "string" }, "type": "array" }, "cleanup": { "$ref": "#/definitions/TorchTrialCleanup" }, "error": { "description": "Public reason the trial failed; null on success.", "type": ["string", "null"] }, "generation": { "type": ["string", "null"] }, "healthStatus": { "$ref": "#/definitions/TorchTrialHealthStatus" }, "profileId": { "type": "string" }, "protocol": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "startedByTrial": { "type": "boolean" }, "startupStatus": { "$ref": "#/definitions/TorchTrialStartupStatus" }, "success": { "type": "boolean" }, "tag": { "type": "string" } }, "required": ["success", "tag", "profileId", "startupStatus", "healthStatus", "protocol", "capabilities", "generation", "startedByTrial", "error", "cleanup"], "title": "TrialTorchRuntimeOutcome", "type": "object" };
-var schema317 = { "description": "What happened to a process the trial started.", "enum": ["not_needed", "stopped_owned_generation", "manual_stop_required"], "type": "string" };
-var schema318 = { "enum": ["passed", "failed", "not_checked"], "type": "string" };
-var schema319 = { "enum": ["passed", "failed"], "type": "string" };
-function validate256(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateTrialTorchRuntimeOutcome = validate257;
+var schema318 = { "$schema": "http://json-schema.org/draft-07/schema#", "additionalProperties": false, "definitions": { "TorchTrialCleanup": { "description": "What happened to a process the trial started.", "enum": ["not_needed", "stopped_owned_generation", "manual_stop_required"], "type": "string" }, "TorchTrialHealthStatus": { "enum": ["passed", "failed", "not_checked"], "type": "string" }, "TorchTrialStartupStatus": { "enum": ["passed", "failed"], "type": "string" } }, "properties": { "capabilities": { "items": { "type": "string" }, "type": "array" }, "cleanup": { "$ref": "#/definitions/TorchTrialCleanup" }, "error": { "description": "Public reason the trial failed; null on success.", "type": ["string", "null"] }, "generation": { "type": ["string", "null"] }, "healthStatus": { "$ref": "#/definitions/TorchTrialHealthStatus" }, "profileId": { "type": "string" }, "protocol": { "maximum": 4294967295, "minimum": 0, "type": ["integer", "null"] }, "startedByTrial": { "type": "boolean" }, "startupStatus": { "$ref": "#/definitions/TorchTrialStartupStatus" }, "success": { "type": "boolean" }, "tag": { "type": "string" } }, "required": ["success", "tag", "profileId", "startupStatus", "healthStatus", "protocol", "capabilities", "generation", "startedByTrial", "error", "cleanup"], "title": "TrialTorchRuntimeOutcome", "type": "object" };
+var schema319 = { "description": "What happened to a process the trial started.", "enum": ["not_needed", "stopped_owned_generation", "manual_stop_required"], "type": "string" };
+var schema320 = { "enum": ["passed", "failed", "not_checked"], "type": "string" };
+var schema321 = { "enum": ["passed", "failed"], "type": "string" };
+function validate257(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.success === void 0 && (missing0 = "success") || data.tag === void 0 && (missing0 = "tag") || data.profileId === void 0 && (missing0 = "profileId") || data.startupStatus === void 0 && (missing0 = "startupStatus") || data.healthStatus === void 0 && (missing0 = "healthStatus") || data.protocol === void 0 && (missing0 = "protocol") || data.capabilities === void 0 && (missing0 = "capabilities") || data.generation === void 0 && (missing0 = "generation") || data.startedByTrial === void 0 && (missing0 = "startedByTrial") || data.error === void 0 && (missing0 = "error") || data.cleanup === void 0 && (missing0 = "cleanup")) {
-        validate256.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate257.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!func2.call(schema316.properties, key0)) {
-            validate256.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+          if (!func2.call(schema318.properties, key0)) {
+            validate257.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -37129,7 +37301,7 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
                 for (let i0 = 0; i0 < len0; i0++) {
                   const _errs4 = errors;
                   if (typeof data0[i0] !== "string") {
-                    validate256.errors = [{ instancePath: instancePath + "/capabilities/" + i0, schemaPath: "#/properties/capabilities/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate257.errors = [{ instancePath: instancePath + "/capabilities/" + i0, schemaPath: "#/properties/capabilities/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   var valid1 = _errs4 === errors;
@@ -37138,7 +37310,7 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
                   }
                 }
               } else {
-                validate256.errors = [{ instancePath: instancePath + "/capabilities", schemaPath: "#/properties/capabilities/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                validate257.errors = [{ instancePath: instancePath + "/capabilities", schemaPath: "#/properties/capabilities/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                 return false;
               }
             }
@@ -37151,11 +37323,11 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
               let data2 = data.cleanup;
               const _errs6 = errors;
               if (typeof data2 !== "string") {
-                validate256.errors = [{ instancePath: instancePath + "/cleanup", schemaPath: "#/definitions/TorchTrialCleanup/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                validate257.errors = [{ instancePath: instancePath + "/cleanup", schemaPath: "#/definitions/TorchTrialCleanup/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                 return false;
               }
               if (!(data2 === "not_needed" || data2 === "stopped_owned_generation" || data2 === "manual_stop_required")) {
-                validate256.errors = [{ instancePath: instancePath + "/cleanup", schemaPath: "#/definitions/TorchTrialCleanup/enum", keyword: "enum", params: { allowedValues: schema317.enum }, message: "must be equal to one of the allowed values" }];
+                validate257.errors = [{ instancePath: instancePath + "/cleanup", schemaPath: "#/definitions/TorchTrialCleanup/enum", keyword: "enum", params: { allowedValues: schema319.enum }, message: "must be equal to one of the allowed values" }];
                 return false;
               }
               var valid0 = _errs6 === errors;
@@ -37167,7 +37339,7 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
                 let data3 = data.error;
                 const _errs9 = errors;
                 if (typeof data3 !== "string" && data3 !== null) {
-                  validate256.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/type", keyword: "type", params: { type: schema316.properties.error.type }, message: "must be string,null" }];
+                  validate257.errors = [{ instancePath: instancePath + "/error", schemaPath: "#/properties/error/type", keyword: "type", params: { type: schema318.properties.error.type }, message: "must be string,null" }];
                   return false;
                 }
                 var valid0 = _errs9 === errors;
@@ -37179,7 +37351,7 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
                   let data4 = data.generation;
                   const _errs11 = errors;
                   if (typeof data4 !== "string" && data4 !== null) {
-                    validate256.errors = [{ instancePath: instancePath + "/generation", schemaPath: "#/properties/generation/type", keyword: "type", params: { type: schema316.properties.generation.type }, message: "must be string,null" }];
+                    validate257.errors = [{ instancePath: instancePath + "/generation", schemaPath: "#/properties/generation/type", keyword: "type", params: { type: schema318.properties.generation.type }, message: "must be string,null" }];
                     return false;
                   }
                   var valid0 = _errs11 === errors;
@@ -37191,11 +37363,11 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
                     let data5 = data.healthStatus;
                     const _errs13 = errors;
                     if (typeof data5 !== "string") {
-                      validate256.errors = [{ instancePath: instancePath + "/healthStatus", schemaPath: "#/definitions/TorchTrialHealthStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      validate257.errors = [{ instancePath: instancePath + "/healthStatus", schemaPath: "#/definitions/TorchTrialHealthStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                       return false;
                     }
                     if (!(data5 === "passed" || data5 === "failed" || data5 === "not_checked")) {
-                      validate256.errors = [{ instancePath: instancePath + "/healthStatus", schemaPath: "#/definitions/TorchTrialHealthStatus/enum", keyword: "enum", params: { allowedValues: schema318.enum }, message: "must be equal to one of the allowed values" }];
+                      validate257.errors = [{ instancePath: instancePath + "/healthStatus", schemaPath: "#/definitions/TorchTrialHealthStatus/enum", keyword: "enum", params: { allowedValues: schema320.enum }, message: "must be equal to one of the allowed values" }];
                       return false;
                     }
                     var valid0 = _errs13 === errors;
@@ -37206,7 +37378,7 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
                     if (data.profileId !== void 0) {
                       const _errs16 = errors;
                       if (typeof data.profileId !== "string") {
-                        validate256.errors = [{ instancePath: instancePath + "/profileId", schemaPath: "#/properties/profileId/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                        validate257.errors = [{ instancePath: instancePath + "/profileId", schemaPath: "#/properties/profileId/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                         return false;
                       }
                       var valid0 = _errs16 === errors;
@@ -37218,17 +37390,17 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
                         let data7 = data.protocol;
                         const _errs18 = errors;
                         if (!(typeof data7 == "number" && (!(data7 % 1) && !isNaN(data7)) && isFinite(data7)) && data7 !== null) {
-                          validate256.errors = [{ instancePath: instancePath + "/protocol", schemaPath: "#/properties/protocol/type", keyword: "type", params: { type: schema316.properties.protocol.type }, message: "must be integer,null" }];
+                          validate257.errors = [{ instancePath: instancePath + "/protocol", schemaPath: "#/properties/protocol/type", keyword: "type", params: { type: schema318.properties.protocol.type }, message: "must be integer,null" }];
                           return false;
                         }
                         if (errors === _errs18) {
                           if (typeof data7 == "number" && isFinite(data7)) {
                             if (data7 > 4294967295 || isNaN(data7)) {
-                              validate256.errors = [{ instancePath: instancePath + "/protocol", schemaPath: "#/properties/protocol/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
+                              validate257.errors = [{ instancePath: instancePath + "/protocol", schemaPath: "#/properties/protocol/maximum", keyword: "maximum", params: { comparison: "<=", limit: 4294967295 }, message: "must be <= 4294967295" }];
                               return false;
                             } else {
                               if (data7 < 0 || isNaN(data7)) {
-                                validate256.errors = [{ instancePath: instancePath + "/protocol", schemaPath: "#/properties/protocol/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                                validate257.errors = [{ instancePath: instancePath + "/protocol", schemaPath: "#/properties/protocol/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
                                 return false;
                               }
                             }
@@ -37242,7 +37414,7 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
                         if (data.startedByTrial !== void 0) {
                           const _errs20 = errors;
                           if (typeof data.startedByTrial !== "boolean") {
-                            validate256.errors = [{ instancePath: instancePath + "/startedByTrial", schemaPath: "#/properties/startedByTrial/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                            validate257.errors = [{ instancePath: instancePath + "/startedByTrial", schemaPath: "#/properties/startedByTrial/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                             return false;
                           }
                           var valid0 = _errs20 === errors;
@@ -37254,11 +37426,11 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
                             let data9 = data.startupStatus;
                             const _errs22 = errors;
                             if (typeof data9 !== "string") {
-                              validate256.errors = [{ instancePath: instancePath + "/startupStatus", schemaPath: "#/definitions/TorchTrialStartupStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                              validate257.errors = [{ instancePath: instancePath + "/startupStatus", schemaPath: "#/definitions/TorchTrialStartupStatus/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                               return false;
                             }
                             if (!(data9 === "passed" || data9 === "failed")) {
-                              validate256.errors = [{ instancePath: instancePath + "/startupStatus", schemaPath: "#/definitions/TorchTrialStartupStatus/enum", keyword: "enum", params: { allowedValues: schema319.enum }, message: "must be equal to one of the allowed values" }];
+                              validate257.errors = [{ instancePath: instancePath + "/startupStatus", schemaPath: "#/definitions/TorchTrialStartupStatus/enum", keyword: "enum", params: { allowedValues: schema321.enum }, message: "must be equal to one of the allowed values" }];
                               return false;
                             }
                             var valid0 = _errs22 === errors;
@@ -37269,7 +37441,7 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
                             if (data.success !== void 0) {
                               const _errs25 = errors;
                               if (typeof data.success !== "boolean") {
-                                validate256.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                                validate257.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                                 return false;
                               }
                               var valid0 = _errs25 === errors;
@@ -37280,7 +37452,7 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
                               if (data.tag !== void 0) {
                                 const _errs27 = errors;
                                 if (typeof data.tag !== "string") {
-                                  validate256.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                  validate257.errors = [{ instancePath: instancePath + "/tag", schemaPath: "#/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                   return false;
                                 }
                                 var valid0 = _errs27 === errors;
@@ -37300,15 +37472,15 @@ function validate256(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate256.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate257.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate256.errors = vErrors;
+  validate257.errors = vErrors;
   return errors === 0;
 }
-var validateTrialTorchRuntimeParams = validate257;
-function validate257(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateTrialTorchRuntimeParams = validate258;
+function validate258(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   const _errs0 = errors;
@@ -37469,7 +37641,7 @@ function validate257(data, { instancePath = "", parentData, parentDataProperty, 
       vErrors.push(err10);
     }
     errors++;
-    validate257.errors = vErrors;
+    validate258.errors = vErrors;
     return false;
   } else {
     errors = _errs0;
@@ -37481,24 +37653,24 @@ function validate257(data, { instancePath = "", parentData, parentDataProperty, 
       }
     }
   }
-  validate257.errors = vErrors;
+  validate258.errors = vErrors;
   return errors === 0;
 }
-var validateUpdateInferenceSettingsOutcome = validate258;
-function validate258(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateUpdateInferenceSettingsOutcome = validate259;
+function validate259(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.success === void 0 && (missing0 = "success") || data.model_id === void 0 && (missing0 = "model_id")) {
-        validate258.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate259.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "model_id" || key0 === "success")) {
-            validate258.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate259.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -37507,7 +37679,7 @@ function validate258(data, { instancePath = "", parentData, parentDataProperty, 
           if (data.model_id !== void 0) {
             const _errs2 = errors;
             if (typeof data.model_id !== "string") {
-              validate258.errors = [{ instancePath: instancePath + "/model_id", schemaPath: "#/properties/model_id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+              validate259.errors = [{ instancePath: instancePath + "/model_id", schemaPath: "#/properties/model_id/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
               return false;
             }
             var valid0 = _errs2 === errors;
@@ -37519,11 +37691,11 @@ function validate258(data, { instancePath = "", parentData, parentDataProperty, 
               let data1 = data.success;
               const _errs4 = errors;
               if (typeof data1 !== "boolean") {
-                validate258.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                validate259.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                 return false;
               }
               if (true !== data1) {
-                validate258.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/const", keyword: "const", params: { allowedValue: true }, message: "must be equal to constant" }];
+                validate259.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/const", keyword: "const", params: { allowedValue: true }, message: "must be equal to constant" }];
                 return false;
               }
               var valid0 = _errs4 === errors;
@@ -37534,19 +37706,19 @@ function validate258(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate258.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate259.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate258.errors = vErrors;
+  validate259.errors = vErrors;
   return errors === 0;
 }
-var validateUpdateInferenceSettingsParams = validate259;
-var schema323 = { "additionalProperties": false, "properties": { "constraints": { "anyOf": [{ "$ref": "#/definitions/InferenceConstraintsInput" }, { "type": "null" }] }, "default": { "$ref": "#/definitions/DesktopJsonValue" }, "description": { "default": null, "type": ["string", "null"] }, "key": { "type": "string" }, "label": { "type": "string" }, "param_type": { "$ref": "#/definitions/ParamType" } }, "required": ["key", "label", "param_type", "default"], "type": "object" };
-var schema326 = { "description": "Data type for an inference parameter.", "enum": ["Number", "Integer", "String", "Boolean"], "type": "string" };
-var schema324 = { "additionalProperties": false, "properties": { "allowed_values": { "anyOf": [{ "type": "null" }, { "items": { "$ref": "#/definitions/DesktopJsonValue" }, "type": "array" }] }, "max": { "default": null, "maximum": 17976931348623157e292, "minimum": -17976931348623157e292, "type": ["number", "null"] }, "min": { "default": null, "maximum": 17976931348623157e292, "minimum": -17976931348623157e292, "type": ["number", "null"] } }, "type": "object" };
-var wrapper4 = { validate: validate262 };
-function validate262(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateUpdateInferenceSettingsParams = validate260;
+var schema325 = { "additionalProperties": false, "properties": { "constraints": { "anyOf": [{ "$ref": "#/definitions/InferenceConstraintsInput" }, { "type": "null" }] }, "default": { "$ref": "#/definitions/DesktopJsonValue" }, "description": { "default": null, "type": ["string", "null"] }, "key": { "type": "string" }, "label": { "type": "string" }, "param_type": { "$ref": "#/definitions/ParamType" } }, "required": ["key", "label", "param_type", "default"], "type": "object" };
+var schema328 = { "description": "Data type for an inference parameter.", "enum": ["Number", "Integer", "String", "Boolean"], "type": "string" };
+var schema326 = { "additionalProperties": false, "properties": { "allowed_values": { "anyOf": [{ "type": "null" }, { "items": { "$ref": "#/definitions/DesktopJsonValue" }, "type": "array" }] }, "max": { "default": null, "maximum": 17976931348623157e292, "minimum": -17976931348623157e292, "type": ["number", "null"] }, "min": { "default": null, "maximum": 17976931348623157e292, "minimum": -17976931348623157e292, "type": ["number", "null"] } }, "type": "object" };
+var wrapper4 = { validate: validate263 };
+function validate263(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   const _errs0 = errors;
@@ -37693,7 +37865,7 @@ function validate262(data, { instancePath = "", parentData, parentDataProperty, 
       vErrors.push(err8);
     }
     errors++;
-    validate262.errors = vErrors;
+    validate263.errors = vErrors;
     return false;
   } else {
     errors = _errs0;
@@ -37705,10 +37877,10 @@ function validate262(data, { instancePath = "", parentData, parentDataProperty, 
       }
     }
   }
-  validate262.errors = vErrors;
+  validate263.errors = vErrors;
   return errors === 0;
 }
-function validate261(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+function validate262(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
@@ -37716,7 +37888,7 @@ function validate261(data, { instancePath = "", parentData, parentDataProperty, 
       const _errs1 = errors;
       for (const key0 in data) {
         if (!(key0 === "allowed_values" || key0 === "max" || key0 === "min")) {
-          validate261.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+          validate262.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
           return false;
           break;
         }
@@ -37747,8 +37919,8 @@ function validate261(data, { instancePath = "", parentData, parentDataProperty, 
                 const len0 = data0.length;
                 for (let i0 = 0; i0 < len0; i0++) {
                   const _errs8 = errors;
-                  if (!validate262(data0[i0], { instancePath: instancePath + "/allowed_values/" + i0, parentData: data0, parentDataProperty: i0, rootData })) {
-                    vErrors = vErrors === null ? validate262.errors : vErrors.concat(validate262.errors);
+                  if (!validate263(data0[i0], { instancePath: instancePath + "/allowed_values/" + i0, parentData: data0, parentDataProperty: i0, rootData })) {
+                    vErrors = vErrors === null ? validate263.errors : vErrors.concat(validate263.errors);
                     errors = vErrors.length;
                   }
                   var valid2 = _errs8 === errors;
@@ -37777,7 +37949,7 @@ function validate261(data, { instancePath = "", parentData, parentDataProperty, 
               vErrors.push(err2);
             }
             errors++;
-            validate261.errors = vErrors;
+            validate262.errors = vErrors;
             return false;
           } else {
             errors = _errs3;
@@ -37798,17 +37970,17 @@ function validate261(data, { instancePath = "", parentData, parentDataProperty, 
             let data2 = data.max;
             const _errs9 = errors;
             if (!(typeof data2 == "number" && isFinite(data2)) && data2 !== null) {
-              validate261.errors = [{ instancePath: instancePath + "/max", schemaPath: "#/properties/max/type", keyword: "type", params: { type: schema324.properties.max.type }, message: "must be number,null" }];
+              validate262.errors = [{ instancePath: instancePath + "/max", schemaPath: "#/properties/max/type", keyword: "type", params: { type: schema326.properties.max.type }, message: "must be number,null" }];
               return false;
             }
             if (errors === _errs9) {
               if (typeof data2 == "number" && isFinite(data2)) {
                 if (data2 > 17976931348623157e292 || isNaN(data2)) {
-                  validate261.errors = [{ instancePath: instancePath + "/max", schemaPath: "#/properties/max/maximum", keyword: "maximum", params: { comparison: "<=", limit: 17976931348623157e292 }, message: "must be <= 1.7976931348623157e+308" }];
+                  validate262.errors = [{ instancePath: instancePath + "/max", schemaPath: "#/properties/max/maximum", keyword: "maximum", params: { comparison: "<=", limit: 17976931348623157e292 }, message: "must be <= 1.7976931348623157e+308" }];
                   return false;
                 } else {
                   if (data2 < -17976931348623157e292 || isNaN(data2)) {
-                    validate261.errors = [{ instancePath: instancePath + "/max", schemaPath: "#/properties/max/minimum", keyword: "minimum", params: { comparison: ">=", limit: -17976931348623157e292 }, message: "must be >= -1.7976931348623157e+308" }];
+                    validate262.errors = [{ instancePath: instancePath + "/max", schemaPath: "#/properties/max/minimum", keyword: "minimum", params: { comparison: ">=", limit: -17976931348623157e292 }, message: "must be >= -1.7976931348623157e+308" }];
                     return false;
                   }
                 }
@@ -37823,17 +37995,17 @@ function validate261(data, { instancePath = "", parentData, parentDataProperty, 
               let data3 = data.min;
               const _errs11 = errors;
               if (!(typeof data3 == "number" && isFinite(data3)) && data3 !== null) {
-                validate261.errors = [{ instancePath: instancePath + "/min", schemaPath: "#/properties/min/type", keyword: "type", params: { type: schema324.properties.min.type }, message: "must be number,null" }];
+                validate262.errors = [{ instancePath: instancePath + "/min", schemaPath: "#/properties/min/type", keyword: "type", params: { type: schema326.properties.min.type }, message: "must be number,null" }];
                 return false;
               }
               if (errors === _errs11) {
                 if (typeof data3 == "number" && isFinite(data3)) {
                   if (data3 > 17976931348623157e292 || isNaN(data3)) {
-                    validate261.errors = [{ instancePath: instancePath + "/min", schemaPath: "#/properties/min/maximum", keyword: "maximum", params: { comparison: "<=", limit: 17976931348623157e292 }, message: "must be <= 1.7976931348623157e+308" }];
+                    validate262.errors = [{ instancePath: instancePath + "/min", schemaPath: "#/properties/min/maximum", keyword: "maximum", params: { comparison: "<=", limit: 17976931348623157e292 }, message: "must be <= 1.7976931348623157e+308" }];
                     return false;
                   } else {
                     if (data3 < -17976931348623157e292 || isNaN(data3)) {
-                      validate261.errors = [{ instancePath: instancePath + "/min", schemaPath: "#/properties/min/minimum", keyword: "minimum", params: { comparison: ">=", limit: -17976931348623157e292 }, message: "must be >= -1.7976931348623157e+308" }];
+                      validate262.errors = [{ instancePath: instancePath + "/min", schemaPath: "#/properties/min/minimum", keyword: "minimum", params: { comparison: ">=", limit: -17976931348623157e292 }, message: "must be >= -1.7976931348623157e+308" }];
                       return false;
                     }
                   }
@@ -37847,27 +38019,27 @@ function validate261(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate261.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate262.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate261.errors = vErrors;
+  validate262.errors = vErrors;
   return errors === 0;
 }
-function validate260(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+function validate261(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.key === void 0 && (missing0 = "key") || data.label === void 0 && (missing0 = "label") || data.param_type === void 0 && (missing0 = "param_type") || data.default === void 0 && (missing0 = "default")) {
-        validate260.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate261.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "constraints" || key0 === "default" || key0 === "description" || key0 === "key" || key0 === "label" || key0 === "param_type")) {
-            validate260.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate261.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -37879,8 +38051,8 @@ function validate260(data, { instancePath = "", parentData, parentDataProperty, 
             const _errs3 = errors;
             let valid1 = false;
             const _errs4 = errors;
-            if (!validate261(data0, { instancePath: instancePath + "/constraints", parentData: data, parentDataProperty: "constraints", rootData })) {
-              vErrors = vErrors === null ? validate261.errors : vErrors.concat(validate261.errors);
+            if (!validate262(data0, { instancePath: instancePath + "/constraints", parentData: data, parentDataProperty: "constraints", rootData })) {
+              vErrors = vErrors === null ? validate262.errors : vErrors.concat(validate262.errors);
               errors = vErrors.length;
             }
             var _valid0 = _errs4 === errors;
@@ -37907,7 +38079,7 @@ function validate260(data, { instancePath = "", parentData, parentDataProperty, 
                 vErrors.push(err1);
               }
               errors++;
-              validate260.errors = vErrors;
+              validate261.errors = vErrors;
               return false;
             } else {
               errors = _errs3;
@@ -37926,8 +38098,8 @@ function validate260(data, { instancePath = "", parentData, parentDataProperty, 
           if (valid0) {
             if (data.default !== void 0) {
               const _errs7 = errors;
-              if (!validate262(data.default, { instancePath: instancePath + "/default", parentData: data, parentDataProperty: "default", rootData })) {
-                vErrors = vErrors === null ? validate262.errors : vErrors.concat(validate262.errors);
+              if (!validate263(data.default, { instancePath: instancePath + "/default", parentData: data, parentDataProperty: "default", rootData })) {
+                vErrors = vErrors === null ? validate263.errors : vErrors.concat(validate263.errors);
                 errors = vErrors.length;
               }
               var valid0 = _errs7 === errors;
@@ -37939,7 +38111,7 @@ function validate260(data, { instancePath = "", parentData, parentDataProperty, 
                 let data2 = data.description;
                 const _errs8 = errors;
                 if (typeof data2 !== "string" && data2 !== null) {
-                  validate260.errors = [{ instancePath: instancePath + "/description", schemaPath: "#/properties/description/type", keyword: "type", params: { type: schema323.properties.description.type }, message: "must be string,null" }];
+                  validate261.errors = [{ instancePath: instancePath + "/description", schemaPath: "#/properties/description/type", keyword: "type", params: { type: schema325.properties.description.type }, message: "must be string,null" }];
                   return false;
                 }
                 var valid0 = _errs8 === errors;
@@ -37950,7 +38122,7 @@ function validate260(data, { instancePath = "", parentData, parentDataProperty, 
                 if (data.key !== void 0) {
                   const _errs10 = errors;
                   if (typeof data.key !== "string") {
-                    validate260.errors = [{ instancePath: instancePath + "/key", schemaPath: "#/properties/key/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate261.errors = [{ instancePath: instancePath + "/key", schemaPath: "#/properties/key/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   var valid0 = _errs10 === errors;
@@ -37961,7 +38133,7 @@ function validate260(data, { instancePath = "", parentData, parentDataProperty, 
                   if (data.label !== void 0) {
                     const _errs12 = errors;
                     if (typeof data.label !== "string") {
-                      validate260.errors = [{ instancePath: instancePath + "/label", schemaPath: "#/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      validate261.errors = [{ instancePath: instancePath + "/label", schemaPath: "#/properties/label/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                       return false;
                     }
                     var valid0 = _errs12 === errors;
@@ -37973,11 +38145,11 @@ function validate260(data, { instancePath = "", parentData, parentDataProperty, 
                       let data5 = data.param_type;
                       const _errs14 = errors;
                       if (typeof data5 !== "string") {
-                        validate260.errors = [{ instancePath: instancePath + "/param_type", schemaPath: "#/definitions/ParamType/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                        validate261.errors = [{ instancePath: instancePath + "/param_type", schemaPath: "#/definitions/ParamType/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                         return false;
                       }
                       if (!(data5 === "Number" || data5 === "Integer" || data5 === "String" || data5 === "Boolean")) {
-                        validate260.errors = [{ instancePath: instancePath + "/param_type", schemaPath: "#/definitions/ParamType/enum", keyword: "enum", params: { allowedValues: schema326.enum }, message: "must be equal to one of the allowed values" }];
+                        validate261.errors = [{ instancePath: instancePath + "/param_type", schemaPath: "#/definitions/ParamType/enum", keyword: "enum", params: { allowedValues: schema328.enum }, message: "must be equal to one of the allowed values" }];
                         return false;
                       }
                       var valid0 = _errs14 === errors;
@@ -37992,14 +38164,14 @@ function validate260(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate260.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate261.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate260.errors = vErrors;
+  validate261.errors = vErrors;
   return errors === 0;
 }
-function validate259(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+function validate260(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   const _errs0 = errors;
@@ -38056,8 +38228,8 @@ function validate259(data, { instancePath = "", parentData, parentDataProperty, 
                   const len0 = data1.length;
                   for (let i0 = 0; i0 < len0; i0++) {
                     const _errs8 = errors;
-                    if (!validate260(data1[i0], { instancePath: instancePath + "/settings/" + i0, parentData: data1, parentDataProperty: i0, rootData })) {
-                      vErrors = vErrors === null ? validate260.errors : vErrors.concat(validate260.errors);
+                    if (!validate261(data1[i0], { instancePath: instancePath + "/settings/" + i0, parentData: data1, parentDataProperty: i0, rootData })) {
+                      vErrors = vErrors === null ? validate261.errors : vErrors.concat(validate261.errors);
                       errors = vErrors.length;
                     }
                     var valid2 = _errs8 === errors;
@@ -38131,8 +38303,8 @@ function validate259(data, { instancePath = "", parentData, parentDataProperty, 
                   const len1 = data3.length;
                   for (let i1 = 0; i1 < len1; i1++) {
                     const _errs14 = errors;
-                    if (!validate260(data3[i1], { instancePath: instancePath + "/inference_settings/" + i1, parentData: data3, parentDataProperty: i1, rootData })) {
-                      vErrors = vErrors === null ? validate260.errors : vErrors.concat(validate260.errors);
+                    if (!validate261(data3[i1], { instancePath: instancePath + "/inference_settings/" + i1, parentData: data3, parentDataProperty: i1, rootData })) {
+                      vErrors = vErrors === null ? validate261.errors : vErrors.concat(validate261.errors);
                       errors = vErrors.length;
                     }
                     var valid4 = _errs14 === errors;
@@ -38222,8 +38394,8 @@ function validate259(data, { instancePath = "", parentData, parentDataProperty, 
                     const len2 = data6.length;
                     for (let i2 = 0; i2 < len2; i2++) {
                       const _errs22 = errors;
-                      if (!validate260(data6[i2], { instancePath: instancePath + "/inferenceSettings/" + i2, parentData: data6, parentDataProperty: i2, rootData })) {
-                        vErrors = vErrors === null ? validate260.errors : vErrors.concat(validate260.errors);
+                      if (!validate261(data6[i2], { instancePath: instancePath + "/inferenceSettings/" + i2, parentData: data6, parentDataProperty: i2, rootData })) {
+                        vErrors = vErrors === null ? validate261.errors : vErrors.concat(validate261.errors);
                         errors = vErrors.length;
                       }
                       var valid6 = _errs22 === errors;
@@ -38329,8 +38501,8 @@ function validate259(data, { instancePath = "", parentData, parentDataProperty, 
                         const len3 = data10.length;
                         for (let i3 = 0; i3 < len3; i3++) {
                           const _errs32 = errors;
-                          if (!validate260(data10[i3], { instancePath: instancePath + "/settings/" + i3, parentData: data10, parentDataProperty: i3, rootData })) {
-                            vErrors = vErrors === null ? validate260.errors : vErrors.concat(validate260.errors);
+                          if (!validate261(data10[i3], { instancePath: instancePath + "/settings/" + i3, parentData: data10, parentDataProperty: i3, rootData })) {
+                            vErrors = vErrors === null ? validate261.errors : vErrors.concat(validate261.errors);
                             errors = vErrors.length;
                           }
                           var valid8 = _errs32 === errors;
@@ -38404,8 +38576,8 @@ function validate259(data, { instancePath = "", parentData, parentDataProperty, 
                         const len4 = data12.length;
                         for (let i4 = 0; i4 < len4; i4++) {
                           const _errs38 = errors;
-                          if (!validate260(data12[i4], { instancePath: instancePath + "/inference_settings/" + i4, parentData: data12, parentDataProperty: i4, rootData })) {
-                            vErrors = vErrors === null ? validate260.errors : vErrors.concat(validate260.errors);
+                          if (!validate261(data12[i4], { instancePath: instancePath + "/inference_settings/" + i4, parentData: data12, parentDataProperty: i4, rootData })) {
+                            vErrors = vErrors === null ? validate261.errors : vErrors.concat(validate261.errors);
                             errors = vErrors.length;
                           }
                           var valid10 = _errs38 === errors;
@@ -38495,8 +38667,8 @@ function validate259(data, { instancePath = "", parentData, parentDataProperty, 
                           const len5 = data15.length;
                           for (let i5 = 0; i5 < len5; i5++) {
                             const _errs46 = errors;
-                            if (!validate260(data15[i5], { instancePath: instancePath + "/inferenceSettings/" + i5, parentData: data15, parentDataProperty: i5, rootData })) {
-                              vErrors = vErrors === null ? validate260.errors : vErrors.concat(validate260.errors);
+                            if (!validate261(data15[i5], { instancePath: instancePath + "/inferenceSettings/" + i5, parentData: data15, parentDataProperty: i5, rootData })) {
+                              vErrors = vErrors === null ? validate261.errors : vErrors.concat(validate261.errors);
                               errors = vErrors.length;
                             }
                             var valid12 = _errs46 === errors;
@@ -38562,7 +38734,7 @@ function validate259(data, { instancePath = "", parentData, parentDataProperty, 
       vErrors.push(err30);
     }
     errors++;
-    validate259.errors = vErrors;
+    validate260.errors = vErrors;
     return false;
   } else {
     errors = _errs0;
@@ -38574,11 +38746,11 @@ function validate259(data, { instancePath = "", parentData, parentDataProperty, 
       }
     }
   }
-  validate259.errors = vErrors;
+  validate260.errors = vErrors;
   return errors === 0;
 }
-var validateUpdateModelNotesOutcome = validate272;
-function validate272(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateUpdateModelNotesOutcome = validate273;
+function validate273(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   const _errs0 = errors;
@@ -38795,7 +38967,7 @@ function validate272(data, { instancePath = "", parentData, parentDataProperty, 
       vErrors.push(err14);
     }
     errors++;
-    validate272.errors = vErrors;
+    validate273.errors = vErrors;
     return false;
   } else {
     errors = _errs0;
@@ -38807,12 +38979,12 @@ function validate272(data, { instancePath = "", parentData, parentDataProperty, 
       }
     }
   }
-  validate272.errors = vErrors;
+  validate273.errors = vErrors;
   return errors === 0;
 }
-var validateUpdateModelNotesParams = validate273;
-var schema330 = { "anyOf": [{ "additionalProperties": false, "properties": { "model_id": { "type": "string" }, "notes": { "default": null, "type": ["string", "null"] } }, "required": ["model_id"], "type": "object" }, { "additionalProperties": false, "properties": { "model_id": { "type": "string" }, "model_notes": { "default": null, "type": ["string", "null"] } }, "required": ["model_id"], "type": "object" }, { "additionalProperties": false, "properties": { "modelId": { "type": "string" }, "notes": { "default": null, "type": ["string", "null"] } }, "required": ["modelId"], "type": "object" }, { "additionalProperties": false, "properties": { "modelId": { "type": "string" }, "model_notes": { "default": null, "type": ["string", "null"] } }, "required": ["modelId"], "type": "object" }] };
-function validate273(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateUpdateModelNotesParams = validate274;
+var schema332 = { "anyOf": [{ "additionalProperties": false, "properties": { "model_id": { "type": "string" }, "notes": { "default": null, "type": ["string", "null"] } }, "required": ["model_id"], "type": "object" }, { "additionalProperties": false, "properties": { "model_id": { "type": "string" }, "model_notes": { "default": null, "type": ["string", "null"] } }, "required": ["model_id"], "type": "object" }, { "additionalProperties": false, "properties": { "modelId": { "type": "string" }, "notes": { "default": null, "type": ["string", "null"] } }, "required": ["modelId"], "type": "object" }, { "additionalProperties": false, "properties": { "modelId": { "type": "string" }, "model_notes": { "default": null, "type": ["string", "null"] } }, "required": ["modelId"], "type": "object" }] };
+function validate274(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   const _errs0 = errors;
@@ -38864,7 +39036,7 @@ function validate273(data, { instancePath = "", parentData, parentDataProperty, 
               let data1 = data.notes;
               const _errs6 = errors;
               if (typeof data1 !== "string" && data1 !== null) {
-                const err3 = { instancePath: instancePath + "/notes", schemaPath: "#/anyOf/0/properties/notes/type", keyword: "type", params: { type: schema330.anyOf[0].properties.notes.type }, message: "must be string,null" };
+                const err3 = { instancePath: instancePath + "/notes", schemaPath: "#/anyOf/0/properties/notes/type", keyword: "type", params: { type: schema332.anyOf[0].properties.notes.type }, message: "must be string,null" };
                 if (vErrors === null) {
                   vErrors = [err3];
                 } else {
@@ -38939,7 +39111,7 @@ function validate273(data, { instancePath = "", parentData, parentDataProperty, 
                 let data3 = data.model_notes;
                 const _errs13 = errors;
                 if (typeof data3 !== "string" && data3 !== null) {
-                  const err8 = { instancePath: instancePath + "/model_notes", schemaPath: "#/anyOf/1/properties/model_notes/type", keyword: "type", params: { type: schema330.anyOf[1].properties.model_notes.type }, message: "must be string,null" };
+                  const err8 = { instancePath: instancePath + "/model_notes", schemaPath: "#/anyOf/1/properties/model_notes/type", keyword: "type", params: { type: schema332.anyOf[1].properties.model_notes.type }, message: "must be string,null" };
                   if (vErrors === null) {
                     vErrors = [err8];
                   } else {
@@ -39014,7 +39186,7 @@ function validate273(data, { instancePath = "", parentData, parentDataProperty, 
                   let data5 = data.notes;
                   const _errs20 = errors;
                   if (typeof data5 !== "string" && data5 !== null) {
-                    const err13 = { instancePath: instancePath + "/notes", schemaPath: "#/anyOf/2/properties/notes/type", keyword: "type", params: { type: schema330.anyOf[2].properties.notes.type }, message: "must be string,null" };
+                    const err13 = { instancePath: instancePath + "/notes", schemaPath: "#/anyOf/2/properties/notes/type", keyword: "type", params: { type: schema332.anyOf[2].properties.notes.type }, message: "must be string,null" };
                     if (vErrors === null) {
                       vErrors = [err13];
                     } else {
@@ -39089,7 +39261,7 @@ function validate273(data, { instancePath = "", parentData, parentDataProperty, 
                     let data7 = data.model_notes;
                     const _errs27 = errors;
                     if (typeof data7 !== "string" && data7 !== null) {
-                      const err18 = { instancePath: instancePath + "/model_notes", schemaPath: "#/anyOf/3/properties/model_notes/type", keyword: "type", params: { type: schema330.anyOf[3].properties.model_notes.type }, message: "must be string,null" };
+                      const err18 = { instancePath: instancePath + "/model_notes", schemaPath: "#/anyOf/3/properties/model_notes/type", keyword: "type", params: { type: schema332.anyOf[3].properties.model_notes.type }, message: "must be string,null" };
                       if (vErrors === null) {
                         vErrors = [err18];
                       } else {
@@ -39127,7 +39299,7 @@ function validate273(data, { instancePath = "", parentData, parentDataProperty, 
       vErrors.push(err20);
     }
     errors++;
-    validate273.errors = vErrors;
+    validate274.errors = vErrors;
     return false;
   } else {
     errors = _errs0;
@@ -39139,24 +39311,24 @@ function validate273(data, { instancePath = "", parentData, parentDataProperty, 
       }
     }
   }
-  validate273.errors = vErrors;
+  validate274.errors = vErrors;
   return errors === 0;
 }
-var validateUpdateStreamError = validate274;
-function validate274(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateUpdateStreamError = validate275;
+function validate275(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.message === void 0 && (missing0 = "message")) {
-        validate274.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate275.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "message")) {
-            validate274.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate275.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -39168,16 +39340,16 @@ function validate274(data, { instancePath = "", parentData, parentDataProperty, 
             if (errors === _errs2) {
               if (typeof data0 === "string") {
                 if (func5(data0) > 1024) {
-                  validate274.errors = [{ instancePath: instancePath + "/message", schemaPath: "#/properties/message/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
+                  validate275.errors = [{ instancePath: instancePath + "/message", schemaPath: "#/properties/message/maxLength", keyword: "maxLength", params: { limit: 1024 }, message: "must NOT have more than 1024 characters" }];
                   return false;
                 } else {
                   if (func5(data0) < 1) {
-                    validate274.errors = [{ instancePath: instancePath + "/message", schemaPath: "#/properties/message/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
+                    validate275.errors = [{ instancePath: instancePath + "/message", schemaPath: "#/properties/message/minLength", keyword: "minLength", params: { limit: 1 }, message: "must NOT have fewer than 1 characters" }];
                     return false;
                   }
                 }
               } else {
-                validate274.errors = [{ instancePath: instancePath + "/message", schemaPath: "#/properties/message/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                validate275.errors = [{ instancePath: instancePath + "/message", schemaPath: "#/properties/message/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                 return false;
               }
             }
@@ -39185,28 +39357,28 @@ function validate274(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate274.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate275.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate274.errors = vErrors;
+  validate275.errors = vErrors;
   return errors === 0;
 }
-var validateValidateInstallationsOutcome = validate275;
-function validate275(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateValidateInstallationsOutcome = validate276;
+function validate276(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.removed_tags === void 0 && (missing0 = "removed_tags") || data.orphaned_dirs === void 0 && (missing0 = "orphaned_dirs") || data.valid_count === void 0 && (missing0 = "valid_count")) {
-        validate275.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate276.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "orphaned_dirs" || key0 === "removed_tags" || key0 === "valid_count")) {
-            validate275.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate276.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -39222,7 +39394,7 @@ function validate275(data, { instancePath = "", parentData, parentDataProperty, 
                 for (let i0 = 0; i0 < len0; i0++) {
                   const _errs4 = errors;
                   if (typeof data0[i0] !== "string") {
-                    validate275.errors = [{ instancePath: instancePath + "/orphaned_dirs/" + i0, schemaPath: "#/properties/orphaned_dirs/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                    validate276.errors = [{ instancePath: instancePath + "/orphaned_dirs/" + i0, schemaPath: "#/properties/orphaned_dirs/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                     return false;
                   }
                   var valid1 = _errs4 === errors;
@@ -39231,7 +39403,7 @@ function validate275(data, { instancePath = "", parentData, parentDataProperty, 
                   }
                 }
               } else {
-                validate275.errors = [{ instancePath: instancePath + "/orphaned_dirs", schemaPath: "#/properties/orphaned_dirs/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                validate276.errors = [{ instancePath: instancePath + "/orphaned_dirs", schemaPath: "#/properties/orphaned_dirs/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                 return false;
               }
             }
@@ -39250,7 +39422,7 @@ function validate275(data, { instancePath = "", parentData, parentDataProperty, 
                   for (let i1 = 0; i1 < len1; i1++) {
                     const _errs8 = errors;
                     if (typeof data2[i1] !== "string") {
-                      validate275.errors = [{ instancePath: instancePath + "/removed_tags/" + i1, schemaPath: "#/properties/removed_tags/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                      validate276.errors = [{ instancePath: instancePath + "/removed_tags/" + i1, schemaPath: "#/properties/removed_tags/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                       return false;
                     }
                     var valid2 = _errs8 === errors;
@@ -39259,7 +39431,7 @@ function validate275(data, { instancePath = "", parentData, parentDataProperty, 
                     }
                   }
                 } else {
-                  validate275.errors = [{ instancePath: instancePath + "/removed_tags", schemaPath: "#/properties/removed_tags/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                  validate276.errors = [{ instancePath: instancePath + "/removed_tags", schemaPath: "#/properties/removed_tags/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                   return false;
                 }
               }
@@ -39272,17 +39444,17 @@ function validate275(data, { instancePath = "", parentData, parentDataProperty, 
                 let data4 = data.valid_count;
                 const _errs10 = errors;
                 if (!(typeof data4 == "number" && (!(data4 % 1) && !isNaN(data4)) && isFinite(data4))) {
-                  validate275.errors = [{ instancePath: instancePath + "/valid_count", schemaPath: "#/properties/valid_count/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                  validate276.errors = [{ instancePath: instancePath + "/valid_count", schemaPath: "#/properties/valid_count/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
                   return false;
                 }
                 if (errors === _errs10) {
                   if (typeof data4 == "number" && isFinite(data4)) {
                     if (data4 > 9007199254740991 || isNaN(data4)) {
-                      validate275.errors = [{ instancePath: instancePath + "/valid_count", schemaPath: "#/properties/valid_count/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                      validate276.errors = [{ instancePath: instancePath + "/valid_count", schemaPath: "#/properties/valid_count/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
                       return false;
                     } else {
                       if (data4 < 0 || isNaN(data4)) {
-                        validate275.errors = [{ instancePath: instancePath + "/valid_count", schemaPath: "#/properties/valid_count/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                        validate276.errors = [{ instancePath: instancePath + "/valid_count", schemaPath: "#/properties/valid_count/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
                         return false;
                       }
                     }
@@ -39297,28 +39469,28 @@ function validate275(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate275.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate276.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate275.errors = vErrors;
+  validate276.errors = vErrors;
   return errors === 0;
 }
-var validateVersionInfoOutcome = validate276;
-function validate276(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateVersionInfoOutcome = validate277;
+function validate277(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.success === void 0 && (missing0 = "success") || data.info === void 0 && (missing0 = "info")) {
-        validate276.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate277.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "info" || key0 === "success")) {
-            validate276.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate277.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -39332,13 +39504,13 @@ function validate276(data, { instancePath = "", parentData, parentDataProperty, 
               if (data0 && typeof data0 == "object" && !Array.isArray(data0)) {
                 let missing1;
                 if (data0.tag === void 0 && (missing1 = "tag") || data0.installed === void 0 && (missing1 = "installed") || data0.size === void 0 && (missing1 = "size")) {
-                  validate276.errors = [{ instancePath: instancePath + "/info", schemaPath: "#/definitions/RuntimeVersionInfo/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                  validate277.errors = [{ instancePath: instancePath + "/info", schemaPath: "#/definitions/RuntimeVersionInfo/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
                   return false;
                 } else {
                   const _errs5 = errors;
                   for (const key1 in data0) {
                     if (!(key1 === "installed" || key1 === "size" || key1 === "tag")) {
-                      validate276.errors = [{ instancePath: instancePath + "/info", schemaPath: "#/definitions/RuntimeVersionInfo/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                      validate277.errors = [{ instancePath: instancePath + "/info", schemaPath: "#/definitions/RuntimeVersionInfo/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
                       return false;
                       break;
                     }
@@ -39347,7 +39519,7 @@ function validate276(data, { instancePath = "", parentData, parentDataProperty, 
                     if (data0.installed !== void 0) {
                       const _errs6 = errors;
                       if (typeof data0.installed !== "boolean") {
-                        validate276.errors = [{ instancePath: instancePath + "/info/installed", schemaPath: "#/definitions/RuntimeVersionInfo/properties/installed/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                        validate277.errors = [{ instancePath: instancePath + "/info/installed", schemaPath: "#/definitions/RuntimeVersionInfo/properties/installed/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                         return false;
                       }
                       var valid2 = _errs6 === errors;
@@ -39358,7 +39530,7 @@ function validate276(data, { instancePath = "", parentData, parentDataProperty, 
                       if (data0.size !== void 0) {
                         const _errs8 = errors;
                         if (data0.size !== null) {
-                          validate276.errors = [{ instancePath: instancePath + "/info/size", schemaPath: "#/definitions/RuntimeVersionInfo/properties/size/type", keyword: "type", params: { type: "null" }, message: "must be null" }];
+                          validate277.errors = [{ instancePath: instancePath + "/info/size", schemaPath: "#/definitions/RuntimeVersionInfo/properties/size/type", keyword: "type", params: { type: "null" }, message: "must be null" }];
                           return false;
                         }
                         var valid2 = _errs8 === errors;
@@ -39369,7 +39541,7 @@ function validate276(data, { instancePath = "", parentData, parentDataProperty, 
                         if (data0.tag !== void 0) {
                           const _errs10 = errors;
                           if (typeof data0.tag !== "string") {
-                            validate276.errors = [{ instancePath: instancePath + "/info/tag", schemaPath: "#/definitions/RuntimeVersionInfo/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                            validate277.errors = [{ instancePath: instancePath + "/info/tag", schemaPath: "#/definitions/RuntimeVersionInfo/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                             return false;
                           }
                           var valid2 = _errs10 === errors;
@@ -39381,7 +39553,7 @@ function validate276(data, { instancePath = "", parentData, parentDataProperty, 
                   }
                 }
               } else {
-                validate276.errors = [{ instancePath: instancePath + "/info", schemaPath: "#/definitions/RuntimeVersionInfo/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                validate277.errors = [{ instancePath: instancePath + "/info", schemaPath: "#/definitions/RuntimeVersionInfo/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
                 return false;
               }
             }
@@ -39394,11 +39566,11 @@ function validate276(data, { instancePath = "", parentData, parentDataProperty, 
               let data4 = data.success;
               const _errs12 = errors;
               if (typeof data4 !== "boolean") {
-                validate276.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                validate277.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                 return false;
               }
               if (true !== data4) {
-                validate276.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/const", keyword: "const", params: { allowedValue: true }, message: "must be equal to constant" }];
+                validate277.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/const", keyword: "const", params: { allowedValue: true }, message: "must be equal to constant" }];
                 return false;
               }
               var valid0 = _errs12 === errors;
@@ -39409,29 +39581,29 @@ function validate276(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate276.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate277.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate276.errors = vErrors;
+  validate277.errors = vErrors;
   return errors === 0;
 }
-var validateVersionStatusOutcome = validate277;
-var schema336 = { "additionalProperties": false, "properties": { "activeVersion": { "type": ["string", "null"] }, "defaultVersion": { "type": ["string", "null"] }, "installedCount": { "maximum": 9007199254740991, "minimum": 0, "type": "integer" }, "versions": { "additionalProperties": { "$ref": "#/definitions/RuntimeVersionEntry" }, "type": "object" } }, "required": ["installedCount", "activeVersion", "defaultVersion", "versions"], "type": "object" };
-function validate279(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+var validateVersionStatusOutcome = validate278;
+var schema338 = { "additionalProperties": false, "properties": { "activeVersion": { "type": ["string", "null"] }, "defaultVersion": { "type": ["string", "null"] }, "installedCount": { "maximum": 9007199254740991, "minimum": 0, "type": "integer" }, "versions": { "additionalProperties": { "$ref": "#/definitions/RuntimeVersionEntry" }, "type": "object" } }, "required": ["installedCount", "activeVersion", "defaultVersion", "versions"], "type": "object" };
+function validate280(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
       if (data.isActive === void 0 && (missing0 = "isActive") || data.dependencies === void 0 && (missing0 = "dependencies")) {
-        validate279.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        validate280.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
           if (!(key0 === "dependencies" || key0 === "isActive")) {
-            validate279.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate280.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -39445,13 +39617,13 @@ function validate279(data, { instancePath = "", parentData, parentDataProperty, 
               if (data0 && typeof data0 == "object" && !Array.isArray(data0)) {
                 let missing1;
                 if (data0.installed === void 0 && (missing1 = "installed") || data0.missing === void 0 && (missing1 = "missing")) {
-                  validate279.errors = [{ instancePath: instancePath + "/dependencies", schemaPath: "#/definitions/RuntimeVersionDependencies/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
+                  validate280.errors = [{ instancePath: instancePath + "/dependencies", schemaPath: "#/definitions/RuntimeVersionDependencies/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" }];
                   return false;
                 } else {
                   const _errs5 = errors;
                   for (const key1 in data0) {
                     if (!(key1 === "installed" || key1 === "missing")) {
-                      validate279.errors = [{ instancePath: instancePath + "/dependencies", schemaPath: "#/definitions/RuntimeVersionDependencies/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
+                      validate280.errors = [{ instancePath: instancePath + "/dependencies", schemaPath: "#/definitions/RuntimeVersionDependencies/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" }];
                       return false;
                       break;
                     }
@@ -39467,7 +39639,7 @@ function validate279(data, { instancePath = "", parentData, parentDataProperty, 
                           for (let i0 = 0; i0 < len0; i0++) {
                             const _errs8 = errors;
                             if (typeof data1[i0] !== "string") {
-                              validate279.errors = [{ instancePath: instancePath + "/dependencies/installed/" + i0, schemaPath: "#/definitions/RuntimeVersionDependencies/properties/installed/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                              validate280.errors = [{ instancePath: instancePath + "/dependencies/installed/" + i0, schemaPath: "#/definitions/RuntimeVersionDependencies/properties/installed/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                               return false;
                             }
                             var valid3 = _errs8 === errors;
@@ -39476,7 +39648,7 @@ function validate279(data, { instancePath = "", parentData, parentDataProperty, 
                             }
                           }
                         } else {
-                          validate279.errors = [{ instancePath: instancePath + "/dependencies/installed", schemaPath: "#/definitions/RuntimeVersionDependencies/properties/installed/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                          validate280.errors = [{ instancePath: instancePath + "/dependencies/installed", schemaPath: "#/definitions/RuntimeVersionDependencies/properties/installed/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                           return false;
                         }
                       }
@@ -39495,7 +39667,7 @@ function validate279(data, { instancePath = "", parentData, parentDataProperty, 
                             for (let i1 = 0; i1 < len1; i1++) {
                               const _errs12 = errors;
                               if (typeof data3[i1] !== "string") {
-                                validate279.errors = [{ instancePath: instancePath + "/dependencies/missing/" + i1, schemaPath: "#/definitions/RuntimeVersionDependencies/properties/missing/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
+                                validate280.errors = [{ instancePath: instancePath + "/dependencies/missing/" + i1, schemaPath: "#/definitions/RuntimeVersionDependencies/properties/missing/items/type", keyword: "type", params: { type: "string" }, message: "must be string" }];
                                 return false;
                               }
                               var valid4 = _errs12 === errors;
@@ -39504,7 +39676,7 @@ function validate279(data, { instancePath = "", parentData, parentDataProperty, 
                               }
                             }
                           } else {
-                            validate279.errors = [{ instancePath: instancePath + "/dependencies/missing", schemaPath: "#/definitions/RuntimeVersionDependencies/properties/missing/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
+                            validate280.errors = [{ instancePath: instancePath + "/dependencies/missing", schemaPath: "#/definitions/RuntimeVersionDependencies/properties/missing/type", keyword: "type", params: { type: "array" }, message: "must be array" }];
                             return false;
                           }
                         }
@@ -39516,7 +39688,7 @@ function validate279(data, { instancePath = "", parentData, parentDataProperty, 
                   }
                 }
               } else {
-                validate279.errors = [{ instancePath: instancePath + "/dependencies", schemaPath: "#/definitions/RuntimeVersionDependencies/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                validate280.errors = [{ instancePath: instancePath + "/dependencies", schemaPath: "#/definitions/RuntimeVersionDependencies/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
                 return false;
               }
             }
@@ -39528,12 +39700,118 @@ function validate279(data, { instancePath = "", parentData, parentDataProperty, 
             if (data.isActive !== void 0) {
               const _errs14 = errors;
               if (typeof data.isActive !== "boolean") {
-                validate279.errors = [{ instancePath: instancePath + "/isActive", schemaPath: "#/properties/isActive/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                validate280.errors = [{ instancePath: instancePath + "/isActive", schemaPath: "#/properties/isActive/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                 return false;
               }
               var valid0 = _errs14 === errors;
             } else {
               var valid0 = true;
+            }
+          }
+        }
+      }
+    } else {
+      validate280.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      return false;
+    }
+  }
+  validate280.errors = vErrors;
+  return errors === 0;
+}
+function validate279(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  if (errors === 0) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.installedCount === void 0 && (missing0 = "installedCount") || data.activeVersion === void 0 && (missing0 = "activeVersion") || data.defaultVersion === void 0 && (missing0 = "defaultVersion") || data.versions === void 0 && (missing0 = "versions")) {
+        validate279.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
+        return false;
+      } else {
+        const _errs1 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "activeVersion" || key0 === "defaultVersion" || key0 === "installedCount" || key0 === "versions")) {
+            validate279.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            return false;
+            break;
+          }
+        }
+        if (_errs1 === errors) {
+          if (data.activeVersion !== void 0) {
+            let data0 = data.activeVersion;
+            const _errs2 = errors;
+            if (typeof data0 !== "string" && data0 !== null) {
+              validate279.errors = [{ instancePath: instancePath + "/activeVersion", schemaPath: "#/properties/activeVersion/type", keyword: "type", params: { type: schema338.properties.activeVersion.type }, message: "must be string,null" }];
+              return false;
+            }
+            var valid0 = _errs2 === errors;
+          } else {
+            var valid0 = true;
+          }
+          if (valid0) {
+            if (data.defaultVersion !== void 0) {
+              let data1 = data.defaultVersion;
+              const _errs4 = errors;
+              if (typeof data1 !== "string" && data1 !== null) {
+                validate279.errors = [{ instancePath: instancePath + "/defaultVersion", schemaPath: "#/properties/defaultVersion/type", keyword: "type", params: { type: schema338.properties.defaultVersion.type }, message: "must be string,null" }];
+                return false;
+              }
+              var valid0 = _errs4 === errors;
+            } else {
+              var valid0 = true;
+            }
+            if (valid0) {
+              if (data.installedCount !== void 0) {
+                let data2 = data.installedCount;
+                const _errs6 = errors;
+                if (!(typeof data2 == "number" && (!(data2 % 1) && !isNaN(data2)) && isFinite(data2))) {
+                  validate279.errors = [{ instancePath: instancePath + "/installedCount", schemaPath: "#/properties/installedCount/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
+                  return false;
+                }
+                if (errors === _errs6) {
+                  if (typeof data2 == "number" && isFinite(data2)) {
+                    if (data2 > 9007199254740991 || isNaN(data2)) {
+                      validate279.errors = [{ instancePath: instancePath + "/installedCount", schemaPath: "#/properties/installedCount/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
+                      return false;
+                    } else {
+                      if (data2 < 0 || isNaN(data2)) {
+                        validate279.errors = [{ instancePath: instancePath + "/installedCount", schemaPath: "#/properties/installedCount/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
+                        return false;
+                      }
+                    }
+                  }
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.versions !== void 0) {
+                  let data3 = data.versions;
+                  const _errs8 = errors;
+                  if (errors === _errs8) {
+                    if (data3 && typeof data3 == "object" && !Array.isArray(data3)) {
+                      for (const key1 in data3) {
+                        const _errs11 = errors;
+                        if (!validate280(data3[key1], { instancePath: instancePath + "/versions/" + key1.replace(/~/g, "~0").replace(/\//g, "~1"), parentData: data3, parentDataProperty: key1, rootData })) {
+                          vErrors = vErrors === null ? validate280.errors : vErrors.concat(validate280.errors);
+                          errors = vErrors.length;
+                        }
+                        var valid1 = _errs11 === errors;
+                        if (!valid1) {
+                          break;
+                        }
+                      }
+                    } else {
+                      validate279.errors = [{ instancePath: instancePath + "/versions", schemaPath: "#/properties/versions/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+                      return false;
+                    }
+                  }
+                  var valid0 = _errs8 === errors;
+                } else {
+                  var valid0 = true;
+                }
+              }
             }
           }
         }
@@ -39552,120 +39830,14 @@ function validate278(data, { instancePath = "", parentData, parentDataProperty, 
   if (errors === 0) {
     if (data && typeof data == "object" && !Array.isArray(data)) {
       let missing0;
-      if (data.installedCount === void 0 && (missing0 = "installedCount") || data.activeVersion === void 0 && (missing0 = "activeVersion") || data.defaultVersion === void 0 && (missing0 = "defaultVersion") || data.versions === void 0 && (missing0 = "versions")) {
+      if (data.success === void 0 && (missing0 = "success") || data.status === void 0 && (missing0 = "status")) {
         validate278.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
         return false;
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!(key0 === "activeVersion" || key0 === "defaultVersion" || key0 === "installedCount" || key0 === "versions")) {
-            validate278.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
-            return false;
-            break;
-          }
-        }
-        if (_errs1 === errors) {
-          if (data.activeVersion !== void 0) {
-            let data0 = data.activeVersion;
-            const _errs2 = errors;
-            if (typeof data0 !== "string" && data0 !== null) {
-              validate278.errors = [{ instancePath: instancePath + "/activeVersion", schemaPath: "#/properties/activeVersion/type", keyword: "type", params: { type: schema336.properties.activeVersion.type }, message: "must be string,null" }];
-              return false;
-            }
-            var valid0 = _errs2 === errors;
-          } else {
-            var valid0 = true;
-          }
-          if (valid0) {
-            if (data.defaultVersion !== void 0) {
-              let data1 = data.defaultVersion;
-              const _errs4 = errors;
-              if (typeof data1 !== "string" && data1 !== null) {
-                validate278.errors = [{ instancePath: instancePath + "/defaultVersion", schemaPath: "#/properties/defaultVersion/type", keyword: "type", params: { type: schema336.properties.defaultVersion.type }, message: "must be string,null" }];
-                return false;
-              }
-              var valid0 = _errs4 === errors;
-            } else {
-              var valid0 = true;
-            }
-            if (valid0) {
-              if (data.installedCount !== void 0) {
-                let data2 = data.installedCount;
-                const _errs6 = errors;
-                if (!(typeof data2 == "number" && (!(data2 % 1) && !isNaN(data2)) && isFinite(data2))) {
-                  validate278.errors = [{ instancePath: instancePath + "/installedCount", schemaPath: "#/properties/installedCount/type", keyword: "type", params: { type: "integer" }, message: "must be integer" }];
-                  return false;
-                }
-                if (errors === _errs6) {
-                  if (typeof data2 == "number" && isFinite(data2)) {
-                    if (data2 > 9007199254740991 || isNaN(data2)) {
-                      validate278.errors = [{ instancePath: instancePath + "/installedCount", schemaPath: "#/properties/installedCount/maximum", keyword: "maximum", params: { comparison: "<=", limit: 9007199254740991 }, message: "must be <= 9007199254740991" }];
-                      return false;
-                    } else {
-                      if (data2 < 0 || isNaN(data2)) {
-                        validate278.errors = [{ instancePath: instancePath + "/installedCount", schemaPath: "#/properties/installedCount/minimum", keyword: "minimum", params: { comparison: ">=", limit: 0 }, message: "must be >= 0" }];
-                        return false;
-                      }
-                    }
-                  }
-                }
-                var valid0 = _errs6 === errors;
-              } else {
-                var valid0 = true;
-              }
-              if (valid0) {
-                if (data.versions !== void 0) {
-                  let data3 = data.versions;
-                  const _errs8 = errors;
-                  if (errors === _errs8) {
-                    if (data3 && typeof data3 == "object" && !Array.isArray(data3)) {
-                      for (const key1 in data3) {
-                        const _errs11 = errors;
-                        if (!validate279(data3[key1], { instancePath: instancePath + "/versions/" + key1.replace(/~/g, "~0").replace(/\//g, "~1"), parentData: data3, parentDataProperty: key1, rootData })) {
-                          vErrors = vErrors === null ? validate279.errors : vErrors.concat(validate279.errors);
-                          errors = vErrors.length;
-                        }
-                        var valid1 = _errs11 === errors;
-                        if (!valid1) {
-                          break;
-                        }
-                      }
-                    } else {
-                      validate278.errors = [{ instancePath: instancePath + "/versions", schemaPath: "#/properties/versions/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
-                      return false;
-                    }
-                  }
-                  var valid0 = _errs8 === errors;
-                } else {
-                  var valid0 = true;
-                }
-              }
-            }
-          }
-        }
-      }
-    } else {
-      validate278.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
-      return false;
-    }
-  }
-  validate278.errors = vErrors;
-  return errors === 0;
-}
-function validate277(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
-  let vErrors = null;
-  let errors = 0;
-  if (errors === 0) {
-    if (data && typeof data == "object" && !Array.isArray(data)) {
-      let missing0;
-      if (data.success === void 0 && (missing0 = "success") || data.status === void 0 && (missing0 = "status")) {
-        validate277.errors = [{ instancePath, schemaPath: "#/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" }];
-        return false;
-      } else {
-        const _errs1 = errors;
-        for (const key0 in data) {
           if (!(key0 === "status" || key0 === "success")) {
-            validate277.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
+            validate278.errors = [{ instancePath, schemaPath: "#/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" }];
             return false;
             break;
           }
@@ -39673,8 +39845,8 @@ function validate277(data, { instancePath = "", parentData, parentDataProperty, 
         if (_errs1 === errors) {
           if (data.status !== void 0) {
             const _errs2 = errors;
-            if (!validate278(data.status, { instancePath: instancePath + "/status", parentData: data, parentDataProperty: "status", rootData })) {
-              vErrors = vErrors === null ? validate278.errors : vErrors.concat(validate278.errors);
+            if (!validate279(data.status, { instancePath: instancePath + "/status", parentData: data, parentDataProperty: "status", rootData })) {
+              vErrors = vErrors === null ? validate279.errors : vErrors.concat(validate279.errors);
               errors = vErrors.length;
             }
             var valid0 = _errs2 === errors;
@@ -39686,11 +39858,11 @@ function validate277(data, { instancePath = "", parentData, parentDataProperty, 
               let data1 = data.success;
               const _errs3 = errors;
               if (typeof data1 !== "boolean") {
-                validate277.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
+                validate278.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/type", keyword: "type", params: { type: "boolean" }, message: "must be boolean" }];
                 return false;
               }
               if (true !== data1) {
-                validate277.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/const", keyword: "const", params: { allowedValue: true }, message: "must be equal to constant" }];
+                validate278.errors = [{ instancePath: instancePath + "/success", schemaPath: "#/properties/success/const", keyword: "const", params: { allowedValue: true }, message: "must be equal to constant" }];
                 return false;
               }
               var valid0 = _errs3 === errors;
@@ -39701,11 +39873,11 @@ function validate277(data, { instancePath = "", parentData, parentDataProperty, 
         }
       }
     } else {
-      validate277.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
+      validate278.errors = [{ instancePath, schemaPath: "#/type", keyword: "type", params: { type: "object" }, message: "must be object" }];
       return false;
     }
   }
-  validate277.errors = vErrors;
+  validate278.errors = vErrors;
   return errors === 0;
 }
 export {
@@ -39805,6 +39977,7 @@ export {
   validateSupportedQuantTypesOutcome,
   validateSwitchVersionOutcome,
   validateSwitchVersionParams,
+  validateTorchAdapterRequirement,
   validateTorchAlternativeMatch,
   validateTorchAlternativesOutcome,
   validateTorchAlternativesStatus,

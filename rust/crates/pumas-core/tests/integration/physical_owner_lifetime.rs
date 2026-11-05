@@ -447,7 +447,7 @@ async fn rejected_watcher_callback_cannot_retain_physical_owner_after_shutdown()
 
     // Keep the rejected native callback paused while opening the successor.
     // Its mere attempt to enter closed admission cannot retain the old store.
-    let reopened = owner(&root, registry).await;
+    let reopened = crate::support::after_fork_release(|| owner(&root, registry.clone())).await;
     release.send(()).unwrap();
     callback_thread.join().unwrap();
     let reopened = reopened.expect("rejected callback must not retain the physical owner");
@@ -498,7 +498,7 @@ async fn shutdown_drains_actual_startup_blocking_readers_before_immediate_reopen
         }
         drop(shutdown);
         drop(api);
-        let reopened = owner(&root, registry).await;
+        let reopened = crate::support::after_fork_release(|| owner(&root, registry.clone())).await;
         assert!(
             waited_for_reader,
             "shutdown returned before the held {operation} reader completed"
@@ -552,6 +552,8 @@ async fn admitted_watcher_callback_updates_index_and_drains_before_reopen() {
     api.shutdown_instance().await.unwrap();
     drop(updates);
     drop(api);
-    let reopened = owner(&root, registry).await.unwrap();
+    let reopened = crate::support::after_fork_release(|| owner(&root, registry.clone()))
+        .await
+        .unwrap();
     reopened.shutdown_instance().await.unwrap();
 }

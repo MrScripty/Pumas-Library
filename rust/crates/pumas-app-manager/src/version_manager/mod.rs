@@ -203,6 +203,37 @@ pub(crate) fn validate_version_tag(tag: &str) -> Result<()> {
     Ok(())
 }
 
+/// Why the Torch process recorded at `pid_file` may still use the runtime,
+/// or `None` when nothing recorded there is running.
+///
+/// A verified identity record is checked against the live process. A bare PID
+/// file (no identity record) proves nothing, so it blocks only while some
+/// process holds that PID; it is never signalled here.
+fn torch_process_blocker(pid_file: &Path) -> Option<String> {
+    use pumas_library::platform::process_identity::{
+        read_record, verify, IdentityCheck, PidRecord,
+    };
+    match read_record(pid_file) {
+        Ok(None) => None,
+        Ok(Some(PidRecord::Verified(identity))) => match verify(&identity) {
+            IdentityCheck::Alive => Some(format!("process {} is running", identity.pid)),
+            IdentityCheck::Gone { .. } => None,
+            IdentityCheck::Unverifiable { reason } => Some(reason),
+        },
+        Ok(Some(PidRecord::Unverified {
+            pid: Some(pid),
+            reason,
+        })) if pumas_library::platform::is_process_alive(pid) => {
+            Some(format!("process {pid} may be running: {reason}"))
+        }
+        Ok(Some(PidRecord::Unverified { pid: None, .. })) => {
+            Some(format!("{} holds an invalid PID", pid_file.display()))
+        }
+        Ok(Some(PidRecord::Unverified { .. })) => None,
+        Err(error) => Some(format!("cannot read {}: {error}", pid_file.display())),
+    }
+}
+
 fn active_version_path(root: &Path, app_id: AppId) -> PathBuf {
     // Preserve the established native-runtime marker; Torch must not overwrite
     // llama.cpp selection when a user activates an image runtime.
@@ -1429,23 +1460,17 @@ impl VersionManager {
         }
         // Profiles share the selected environment. Require them to stop before
         // changing runtime selection or deleting files used by a profile.
-        for pid_path in pid_paths {
-            match fs::read_to_string(&pid_path).await {
-                Ok(pid) => {
-                    let pid = pid.trim().parse::<u32>().map_err(|_| {
-                        PumasError::Other(
-                            "Cannot verify Torch process: invalid PID file".to_string(),
-                        )
-                    })?;
-                    if pumas_library::platform::is_process_alive(pid) {
-                        return Err(PumasError::Other(
-                            "Stop Torch before switching or removing its runtime".to_string(),
-                        ));
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(PumasError::io_with_path(error, pid_path)),
-            }
+        let blocker = tokio::task::spawn_blocking(move || {
+            pid_paths
+                .iter()
+                .find_map(|path| torch_process_blocker(path))
+        })
+        .await
+        .map_err(|error| PumasError::Other(format!("Torch process check failed: {error}")))?;
+        if let Some(reason) = blocker {
+            return Err(PumasError::Other(format!(
+                "Stop Torch before switching or removing its runtime ({reason})"
+            )));
         }
         Ok(())
     }
@@ -6848,6 +6873,37 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("Stop Torch"));
         assert!(runtime.join("torch.pid").exists());
+    }
+
+    #[test]
+    fn torch_process_blocker_trusts_identity_records_over_bare_pids() {
+        use pumas_library::platform::process_identity::{capture, write_record};
+        let root = TempDir::new().unwrap();
+        let pid_file = root.path().join("torch.pid");
+        assert_eq!(super::torch_process_blocker(&pid_file), None);
+
+        // A verified live record blocks.
+        let live = capture(std::process::id()).unwrap();
+        write_record(&pid_file, &live).unwrap();
+        assert!(super::torch_process_blocker(&pid_file)
+            .is_some_and(|reason| reason.contains("is running")));
+
+        // A record whose PID now belongs to another process does not.
+        let mut reused = live.clone();
+        reused.start_time = reused.start_time.wrapping_add(1);
+        write_record(&pid_file, &reused).unwrap();
+        assert_eq!(super::torch_process_blocker(&pid_file), None);
+
+        // A bare PID file proves nothing; it blocks only while the PID is live.
+        std::fs::remove_file(pumas_library::platform::process_identity::identity_path(
+            &pid_file,
+        ))
+        .unwrap();
+        assert!(super::torch_process_blocker(&pid_file)
+            .is_some_and(|reason| reason.contains("may be running")));
+        std::fs::write(&pid_file, "not-a-pid").unwrap();
+        assert!(super::torch_process_blocker(&pid_file)
+            .is_some_and(|reason| reason.contains("invalid PID")));
     }
 
     #[tokio::test]

@@ -15,7 +15,9 @@ export function LocalModelDownloadProgressRing({
 }: LocalModelDownloadProgressRingProps) {
   return (
     <>
+      {/* Decorative: the owning control describes the progress in text. */}
       <span
+        aria-hidden="true"
         className={[
           'download-progress-ring',
           isQueued ? 'is-waiting' : '',
@@ -26,7 +28,7 @@ export function LocalModelDownloadProgressRing({
           .join(' ')}
         style={{ '--progress': `${ringDegrees}deg` } as CSSProperties}
       />
-      {!isQueued && !isPaused && !isRetained && <span className="download-scan-ring" />}
+      {!isQueued && !isPaused && !isRetained && <span aria-hidden="true" className="download-scan-ring" />}
     </>
   );
 }

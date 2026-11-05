@@ -5,7 +5,7 @@
  * Implements Stale-While-Revalidate (SWR) pattern for instant UI response.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { isAPIAvailable } from '../api/adapter';
 import { modelsAPI } from '../api/models';
 import { importAPI } from '../api/import';
@@ -32,6 +32,33 @@ const CACHE_TTL_MS = 30000;
 
 export type ModelLibraryLoadStatus = 'loading' | 'ready' | 'unavailable';
 
+/** Failure reasons and cache provenance the library view must keep visible. */
+export interface ModelLibraryDiagnostics {
+  /** Why the latest library load failed; null while loading or after success. */
+  loadError: string | null;
+  /** Why the latest shared-storage scan failed; null when it succeeded. */
+  scanError: string | null;
+  /** Why the latest library search failed; null when it succeeded or was cleared. */
+  searchError: string | null;
+  /** When the rows on screen come from the persisted startup snapshot, when it was written. */
+  snapshotWrittenAt: string | null;
+}
+
+const API_UNAVAILABLE_REASON = 'The desktop backend is not available.';
+
+function describeFailure(error: unknown, operation: string): string {
+  if (error instanceof APIError) {
+    logger.error(`API error ${operation}`, { error: error.message, endpoint: error.endpoint });
+    return error.message;
+  }
+  if (error instanceof Error) {
+    logger.error(`Unexpected error ${operation}`, { error: error.message });
+    return error.message;
+  }
+  logger.error(`Unknown error ${operation}`, { error });
+  return 'Unknown error';
+}
+
 /** Cache entry for SWR pattern */
 interface CacheEntry {
   query: string;
@@ -42,8 +69,16 @@ interface CacheEntry {
 
 export function useModels() {
   const libraryScopeId = useLibraryScopeId();
-  const [modelGroups, setModelGroups] = useState<ModelCategory[]>(() => readModelLibrarySnapshot(libraryScopeId));
+  // Read once per mount: the snapshot only seeds a cold start.
+  const [startupSnapshot] = useState(() => readModelLibrarySnapshot(libraryScopeId));
+  const [modelGroups, setModelGroups] = useState<ModelCategory[]>(() => startupSnapshot?.modelGroups ?? []);
+  const [snapshotWrittenAt, setSnapshotWrittenAt] = useState<string | null>(
+    () => startupSnapshot?.writtenAt ?? null
+  );
   const [libraryLoadStatus, setLibraryLoadStatus] = useState<ModelLibraryLoadStatus>('loading');
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [isRevalidating, setIsRevalidating] = useState(false);
   const [searchQueryTime, setSearchQueryTime] = useState<number | null>(null);
@@ -58,11 +93,13 @@ export function useModels() {
 
   const fetchModels = useCallback(async () => {
     const currentSequence = ++fetchSequenceRef.current;
-    setModelGroups(toDisplayOnlyModelGroups);
-    // Check API availability before fetching
+    // Rows keep their current provenance while a refresh is in flight. Only
+    // the cold-start snapshot or a failed load marks them display-only.
     if (!isAPIAvailable()) {
       logger.debug('API not available yet, skipping fetch');
+      setModelGroups(toDisplayOnlyModelGroups);
       setLibraryLoadStatus('unavailable');
+      setLoadError(API_UNAVAILABLE_REASON);
       return;
     }
 
@@ -72,6 +109,7 @@ export function useModels() {
       const result = await modelsAPI.getModels();
       if (currentSequence === fetchSequenceRef.current) {
         setLibraryLoadStatus('ready');
+        setLoadError(null);
       }
       if (currentSequence !== fetchSequenceRef.current || activeSearchRef.current) {
         logger.debug('Discarding stale model list response', {
@@ -84,19 +122,16 @@ export function useModels() {
 
       const freshModelGroups = groupCatalogModels(Object.values(result.models));
       setModelGroups(freshModelGroups);
+      setSnapshotWrittenAt(null);
       if (!writeModelLibrarySnapshot(freshModelGroups, libraryScopeId)) {
         logger.debug('Model library startup snapshot could not be persisted');
       }
     } catch (error) {
+      const reason = describeFailure(error, 'fetching models');
       if (currentSequence === fetchSequenceRef.current) {
         setLibraryLoadStatus('unavailable');
-      }
-      if (error instanceof APIError) {
-        logger.error('API error fetching models', { error: error.message, endpoint: error.endpoint });
-      } else if (error instanceof Error) {
-        logger.error('Unexpected error fetching models', { error: error.message });
-      } else {
-        logger.error('Unknown error fetching models', { error });
+        setLoadError(reason);
+        setModelGroups(toDisplayOnlyModelGroups);
       }
     }
   }, [libraryScopeId]);
@@ -104,17 +139,16 @@ export function useModels() {
   const scanModels = useCallback(async () => {
     try {
       const result = await modelsAPI.scanSharedStorage();
-      if (result.success) {
-        await fetchModels();
+      if (!result.success) {
+        const reason = result.error?.trim() || 'The backend reported the scan as unsuccessful.';
+        logger.error('Shared storage scan was not successful', { error: reason });
+        setScanError(reason);
+        return;
       }
+      setScanError(null);
+      await fetchModels();
     } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error scanning models', { error: error.message, endpoint: error.endpoint });
-      } else if (error instanceof Error) {
-        logger.error('Unexpected error scanning models', { error: error.message });
-      } else {
-        logger.error('Unknown error scanning models', { error });
-      }
+      setScanError(describeFailure(error, 'scanning models'));
     }
   }, [fetchModels]);
 
@@ -165,6 +199,7 @@ export function useModels() {
 
       // Reset new results notification
       setHasNewResults(false);
+      setSearchError(null);
 
       // Empty query - reset to full list
       if (!query.trim()) {
@@ -223,6 +258,7 @@ export function useModels() {
           });
 
           setModelGroups(categorizedModels);
+          setSnapshotWrittenAt(null);
           setSearchQueryTime(result.query_time_ms);
 
           if (resultsChanged) {
@@ -230,15 +266,9 @@ export function useModels() {
             logger.debug('New results available after revalidation', { query });
           }
         } catch (error) {
-          if (error instanceof APIError) {
-            logger.error('API error in FTS search', {
-              error: error.message,
-              endpoint: error.endpoint,
-            });
-          } else if (error instanceof Error) {
-            logger.error('Unexpected error in FTS search', { error: error.message });
-          } else {
-            logger.error('Unknown error in FTS search', { error });
+          const reason = describeFailure(error, 'in FTS search');
+          if (currentSequence === searchSequenceRef.current) {
+            setSearchError(reason);
           }
         } finally {
           if (currentSequence === searchSequenceRef.current) {
@@ -274,9 +304,15 @@ export function useModels() {
     };
   }, []);
 
+  const libraryDiagnostics = useMemo<ModelLibraryDiagnostics>(
+    () => ({ loadError, scanError, searchError, snapshotWrittenAt }),
+    [loadError, scanError, searchError, snapshotWrittenAt]
+  );
+
   return {
     modelGroups,
     libraryLoadStatus,
+    libraryDiagnostics,
     fetchModels,
     scanModels,
     searchModelsFTS,

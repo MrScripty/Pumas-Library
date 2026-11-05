@@ -54,6 +54,9 @@ export const IconButton: React.FC<IconButtonProps> = ({
   active = false,
 }) => {
   const [isHovered, setIsHovered] = useState(false);
+  // Keyboard users get the same visible label as pointer users. The
+  // accessible name already comes from aria-label.
+  const [isFocused, setIsFocused] = useState(false);
   const { hoverProps } = useHover({
     onHoverStart: () => setIsHovered(true),
     onHoverEnd: () => setIsHovered(false),
@@ -75,9 +78,11 @@ export const IconButton: React.FC<IconButtonProps> = ({
         ${className}
       `.trim().replace(/\s+/g, ' ')}
       {...hoverProps}
+      onFocus={() => setIsFocused(true)}
+      onBlur={() => setIsFocused(false)}
     >
       {icon}
-      {isHovered && tooltip && !disabled && (
+      {(isHovered || isFocused) && tooltip && !disabled && (
         <div
           className={`absolute ${tooltipPositionClasses[tooltipPosition]} px-1.5 py-0.5 bg-[hsl(var(--surface-overlay))] border border-[hsl(var(--border-default))] rounded text-[10px] text-[hsl(var(--text-primary))] whitespace-nowrap z-50 pointer-events-none`}
           role="tooltip"

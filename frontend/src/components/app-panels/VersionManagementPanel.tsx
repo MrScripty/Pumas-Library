@@ -14,7 +14,7 @@ interface VersionManagementPanelProps {
   versions: AppVersionState;
   showManager: boolean;
   onShowManager: (show: boolean) => void;
-  diskSpacePercent?: number;
+  diskSpacePercent?: number | null;
   trialStore?: ReturnType<typeof createTorchTrialLifecycleStore>;
 }
 
@@ -24,7 +24,7 @@ export function VersionManagementPanel({
   versions,
   showManager,
   onShowManager,
-  diskSpacePercent = 0,
+  diskSpacePercent = null,
   trialStore,
 }: VersionManagementPanelProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);

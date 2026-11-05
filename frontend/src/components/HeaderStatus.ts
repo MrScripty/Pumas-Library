@@ -1,4 +1,4 @@
-import { Clock, Database, Download, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, Clock, Database, Download, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react';
 import type { ActiveModelDownload } from '../hooks/useActiveModelDownload';
 import { formatBytes, formatSpeed } from '../utils/formatters';
 import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
@@ -181,6 +181,7 @@ export function getHeaderStatusInfo({
   appId,
   activeModelDownload,
   activeModelDownloadCount,
+  activeModelDownloadError = null,
   installationProgress,
   installingTag,
   modelLibraryLoaded,
@@ -189,6 +190,8 @@ export function getHeaderStatusInfo({
   appId?: string | null;
   activeModelDownload?: ActiveModelDownload | null;
   activeModelDownloadCount: number;
+  /** Why the download list could not be read; null when it was read. */
+  activeModelDownloadError?: string | null;
   installationProgress?: InstallationProgress | null;
   installingTag?: string | null;
   modelLibraryLoaded?: boolean | null;
@@ -278,6 +281,14 @@ export function getHeaderStatusInfo({
       icon: Clock,
       spinning: false,
       text: 'Model library database unavailable',
+    };
+  }
+
+  if (activeModelDownloadError) {
+    return {
+      icon: AlertTriangle,
+      spinning: false,
+      text: `Download status unavailable: ${activeModelDownloadError}`,
     };
   }
 

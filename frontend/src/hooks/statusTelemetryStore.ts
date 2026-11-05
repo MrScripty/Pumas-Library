@@ -37,20 +37,10 @@ function setState(nextState: StatusTelemetryState) {
   emitChange();
 }
 
-function mergeSnapshot(
-  nextSnapshot: StatusTelemetrySnapshot,
-  _options: { preserveEnrichedStatusFields?: boolean } = {},
-): StatusTelemetrySnapshot {
-  return nextSnapshot;
-}
-
-function applySnapshot(
-  snapshot: StatusTelemetrySnapshot,
-  options: { preserveEnrichedStatusFields?: boolean } = {},
-) {
+function applySnapshot(snapshot: StatusTelemetrySnapshot) {
   hasLoadedSnapshot = true;
   setState({
-    snapshot: mergeSnapshot(snapshot, options),
+    snapshot,
     error: null,
   });
 }
@@ -90,7 +80,7 @@ function startTelemetry(loadInitial: boolean) {
   if (!unsubscribeTelemetry && electronAPI?.onStatusTelemetryUpdate) {
     unsubscribeTelemetry = electronAPI.onStatusTelemetryUpdate(
       (notification) => {
-        applySnapshot(notification.snapshot, { preserveEnrichedStatusFields: true });
+        applySnapshot(notification.snapshot);
         if (notification.snapshot_required) {
           void fetchStatusTelemetrySnapshot({ queueIfInFlight: true });
         }

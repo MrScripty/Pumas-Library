@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useHover } from '@react-aria/interactions';
 import {
@@ -118,6 +118,7 @@ function ActiveInstallIcon({
 export function OpenActiveInstallButton({
   activeVersion,
   folderIconColor,
+  diskUsageLabel,
   isLoading,
   isOpeningPath,
   onOpenActiveInstall,
@@ -125,6 +126,7 @@ export function OpenActiveInstallButton({
 }: {
   activeVersion: string | null;
   folderIconColor: string;
+  diskUsageLabel?: string | undefined;
   isLoading: boolean;
   isOpeningPath: boolean;
   onOpenActiveInstall: (event: React.MouseEvent) => void;
@@ -137,7 +139,10 @@ export function OpenActiveInstallButton({
       className="rounded p-1 transition-colors hover:bg-[hsl(var(--surface-interactive-hover))] disabled:opacity-50"
       whileHover={{ scale: activeVersion ? 1.1 : 1 }}
       whileTap={{ scale: activeVersion ? 0.9 : 1 }}
-      title={activeVersion ? 'Open active version in file manager' : 'No active version to open'}
+      title={[
+        activeVersion ? 'Open active version in file manager' : 'No active version to open',
+        diskUsageLabel,
+      ].filter(Boolean).join(' · ')}
     >
       <ActiveInstallIcon
         folderIconColor={folderIconColor}
@@ -192,13 +197,27 @@ function InstallActivityRings({
 }) {
   return (
     <>
+      {/* Decorative: VersionManagerButton describes the progress in text. */}
       <span
+        aria-hidden="true"
         className={`download-progress-ring ${isInstallPending ? 'is-waiting' : ''}`}
         style={{ '--progress': `${ringDegrees}deg` } as React.CSSProperties}
       />
-      {!isInstallPending && !isInstallFailed && <span className="download-scan-ring" />}
+      {!isInstallPending && !isInstallFailed && <span aria-hidden="true" className="download-scan-ring" />}
     </>
   );
+}
+
+/** Text equivalent of the install progress ring for assistive technology. */
+function getInstallProgressDescription(
+  isInstallPending: boolean,
+  isInstallFailed: boolean,
+  ringDegrees: number
+): string {
+  const percent = Math.round(ringDegrees / 3.6);
+  if (isInstallFailed) return `Installation stalled at ${percent}%`;
+  if (isInstallPending) return 'Installation starting';
+  return `Installation ${percent}% complete`;
 }
 
 function getVersionManagerTitle(hasNewVersion: boolean, latestVersion: string | null): string {
@@ -233,33 +252,42 @@ export function VersionManagerButton({
 }) {
   const isEmphasized = (emphasizeInstall || hasNewVersion) && installNetworkStatus === 'idle';
   const iconVisual = getInstallIconVisual(installNetworkStatus, hasNewVersion);
+  const progressDescriptionId = useId();
 
   return (
-    <motion.button
-      onClick={onOpenVersionManager}
-      className={`rounded p-1 hover:bg-[hsl(var(--surface-interactive-hover))] disabled:opacity-50 ${
-        isEmphasized ? 'ring-1 ring-[hsl(var(--accent-success))]/60' : ''
-      }`}
-      animate={{ opacity: isEmphasized ? [1, 0.7, 1] : 1 }}
-      transition={{
-        duration: 2,
-        repeat: isEmphasized ? Infinity : 0,
-        ease: 'easeInOut',
-      }}
-      whileHover={{ scale: 1.1 }}
-      whileTap={{ scale: 0.9 }}
-      title={getVersionManagerTitle(hasNewVersion, latestVersion)}
-    >
-      <span className="relative flex h-4 w-4 items-center justify-center">
-        {hasInstallActivity && (
-          <InstallActivityRings
-            isInstallFailed={isInstallFailed}
-            isInstallPending={isInstallPending}
-            ringDegrees={ringDegrees}
-          />
-        )}
-        <Globe size={14} className={iconVisual.className} style={iconVisual.style} />
-      </span>
-    </motion.button>
+    <>
+      <motion.button
+        aria-describedby={hasInstallActivity ? progressDescriptionId : undefined}
+        onClick={onOpenVersionManager}
+        className={`rounded p-1 hover:bg-[hsl(var(--surface-interactive-hover))] disabled:opacity-50 ${
+          isEmphasized ? 'ring-1 ring-[hsl(var(--accent-success))]/60' : ''
+        }`}
+        animate={{ opacity: isEmphasized ? [1, 0.7, 1] : 1 }}
+        transition={{
+          duration: 2,
+          repeat: isEmphasized ? Infinity : 0,
+          ease: 'easeInOut',
+        }}
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
+        title={getVersionManagerTitle(hasNewVersion, latestVersion)}
+      >
+        <span className="relative flex h-4 w-4 items-center justify-center">
+          {hasInstallActivity && (
+            <InstallActivityRings
+              isInstallFailed={isInstallFailed}
+              isInstallPending={isInstallPending}
+              ringDegrees={ringDegrees}
+            />
+          )}
+          <Globe size={14} className={iconVisual.className} style={iconVisual.style} />
+        </span>
+      </motion.button>
+      {hasInstallActivity && (
+        <span id={progressDescriptionId} className="sr-only">
+          {getInstallProgressDescription(isInstallPending, isInstallFailed, ringDegrees)}
+        </span>
+      )}
+    </>
   );
 }

@@ -40,7 +40,14 @@ describe('useDiskSpace', () => {
     expect(result.current.diskSpacePercent).toBe(73);
   });
 
-  it('does nothing when the API is unavailable', async () => {
+  it('starts unknown rather than reporting 0% before the first reading', () => {
+    const { result } = renderHook(() => useDiskSpace());
+
+    expect(result.current.diskSpacePercent).toBeNull();
+    expect(result.current.diskSpaceError).toBeNull();
+  });
+
+  it('reports the backend as unavailable instead of a 0% reading', async () => {
     isApiAvailableMock.mockReturnValue(false);
 
     const { result } = renderHook(() => useDiskSpace());
@@ -50,16 +57,19 @@ describe('useDiskSpace', () => {
     });
 
     expect(getDiskSpaceMock).not.toHaveBeenCalled();
-    expect(result.current.diskSpacePercent).toBe(0);
+    expect(result.current.diskSpacePercent).toBeNull();
+    expect(result.current.diskSpaceError).toBe('The desktop backend is not available.');
   });
 
-  it('swallows backend failures and leaves the last disk-space value intact', async () => {
+  it('keeps the last valid reading and records why a refresh failed', async () => {
     getDiskSpaceMock
       .mockResolvedValueOnce({
         success: true,
         percent: 64,
       })
-      .mockRejectedValueOnce(new APIError('disk error', 'get_disk_space'));
+      .mockRejectedValueOnce(new APIError('disk error', 'get_disk_space'))
+      .mockResolvedValueOnce({ success: false, error: 'volume missing' })
+      .mockResolvedValueOnce({ success: true, percent: 64 });
 
     const { result } = renderHook(() => useDiskSpace());
 
@@ -74,5 +84,32 @@ describe('useDiskSpace', () => {
     });
 
     expect(result.current.diskSpacePercent).toBe(64);
+    expect(result.current.diskSpaceError).toBe('disk error');
+
+    await act(async () => {
+      await result.current.fetchDiskSpace();
+    });
+
+    expect(result.current.diskSpaceError).toBe('volume missing');
+
+    await act(async () => {
+      await result.current.fetchDiskSpace();
+    });
+
+    expect(result.current.diskSpacePercent).toBe(64);
+    expect(result.current.diskSpaceError).toBeNull();
+  });
+
+  it('rejects a successful response without a usable percent', async () => {
+    getDiskSpaceMock.mockResolvedValueOnce({ success: true });
+
+    const { result } = renderHook(() => useDiskSpace());
+
+    await act(async () => {
+      await result.current.fetchDiskSpace();
+    });
+
+    expect(result.current.diskSpacePercent).toBeNull();
+    expect(result.current.diskSpaceError).toBe('The backend returned an invalid disk usage value.');
   });
 });

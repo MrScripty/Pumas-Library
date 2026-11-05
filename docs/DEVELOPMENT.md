@@ -158,10 +158,9 @@ resolved Torch environment for ASGI, middleware, loading, or inference claims.
 - The ESLint policy requires React Aria `useHover` rather than raw mouse hover
   handlers.
 
-Theme tokens live in `frontend/src/index.css`; programmatic mappings live in
-`frontend/src/config/theme.ts`. Use semantic tokens rather than hard-coded
-colors. Do not claim contrast or reduced-motion compliance without current
-representative evidence.
+Theme tokens live in `frontend/src/index.css` as CSS custom properties. Use
+semantic tokens rather than hard-coded colors. Do not claim contrast or
+reduced-motion compliance without current representative evidence.
 
 ## Verification Design
 

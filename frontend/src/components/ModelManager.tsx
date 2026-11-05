@@ -18,7 +18,8 @@ import { useModelImportPicker } from '../hooks/useModelImportPicker';
 import { useModelLibraryActions } from '../hooks/useModelLibraryActions';
 import { useModelManagerFilters } from '../hooks/useModelManagerFilters';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
-import type { ModelLibraryLoadStatus } from '../hooks/useModels';
+import type { ModelLibraryDiagnostics, ModelLibraryLoadStatus } from '../hooks/useModels';
+import { ModelLibraryStatusNotice } from './ModelLibraryStatusNotice';
 import { ModelSearchBar } from './ModelSearchBar';
 import { LocalModelsList } from './LocalModelsList';
 import { RetainedDownloadFailures } from './RetainedDownloadFailures';
@@ -42,6 +43,8 @@ import { startRemoteModelDownload } from './ModelManagerRemoteDownload';
 export interface ModelManagerProps {
   modelGroups: ModelCategory[];
   libraryLoadStatus: ModelLibraryLoadStatus;
+  /** Failure reasons and cache provenance from useModels. */
+  libraryDiagnostics?: ModelLibraryDiagnostics;
   starredModels: Set<string>;
   excludedModels: Set<string>;
   onToggleStar: (modelId: string) => void;
@@ -64,6 +67,7 @@ export interface ModelManagerProps {
 export const ModelManager: React.FC<ModelManagerProps> = ({
   modelGroups,
   libraryLoadStatus,
+  libraryDiagnostics,
   starredModels,
   excludedModels,
   onToggleStar,
@@ -92,6 +96,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const {
     downloadStatusByRepo,
     downloadErrors,
+    downloadListError,
     refreshDownloads,
     hasActiveDownloads,
     startDownload,
@@ -324,17 +329,12 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 await refreshDownloads();
                 await onModelsImported?.();
               }} />
-              {libraryLoadStatus !== 'ready'  && (
-                <div
-                  role={libraryLoadStatus === 'unavailable' ? 'alert' : 'status'}
-                  className="rounded border border-[hsl(var(--launcher-border))] px-3 py-2 text-sm text-[hsl(var(--text-secondary))]"
-                >
-                  {libraryLoadStatus === 'loading'
-                    ? 'Loading library…'
-                    : 'Library unavailable. Could not load models.'}
-                  {modelGroups.length > 0 && ' Showing previously loaded models.'}
-                </div>
-              )}
+              <ModelLibraryStatusNotice
+                libraryLoadStatus={libraryLoadStatus}
+                diagnostics={libraryDiagnostics}
+                hasVisibleModels={modelGroups.length > 0}
+                downloadListError={downloadListError}
+              />
               {integrityIssueCount > 0 && (
                 <div className="rounded border border-[hsl(var(--accent-warning)/0.35)] bg-[hsl(var(--accent-warning)/0.12)] px-3 py-2 text-xs text-[hsl(var(--accent-warning))]">
                   Library integrity warning: {integrityIssueCount} model entr{integrityIssueCount === 1 ? 'y' : 'ies'} have duplicate artifact records for the same repository. Reconciliation will keep one visible entry and mark the issue.

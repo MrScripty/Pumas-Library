@@ -45,6 +45,8 @@ export function OllamaModelSection({
   const [togglingModel, setTogglingModel] = useState<string | null>(null);
   const [deletingModel, setDeletingModel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Shown registered and running models are stale while this is set.
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   // Bumped when runtime profiles change, to refetch Ollama state.
   const [runtimeProfileRevision, setRuntimeProfileRevision] = useState(0);
@@ -88,6 +90,7 @@ export function OllamaModelSection({
     if (!isAPIAvailable() || !isRunning) {
       setOllamaModels([]);
       setRunningModels([]);
+      setRefreshError(null);
       return;
     }
 
@@ -97,14 +100,21 @@ export function OllamaModelSection({
         api.ollama_list_models(connectionUrl),
         api.ollama_list_running(connectionUrl),
       ]);
+      const failures: string[] = [];
       if (tagsResult.success) {
         setOllamaModels(tagsResult.models);
+      } else {
+        failures.push(`registered models: ${tagsResult.error || 'request was not successful'}`);
       }
       if (psResult.success) {
         setRunningModels(psResult.models);
+      } else {
+        failures.push(`running models: ${psResult.error || 'request was not successful'}`);
       }
+      setRefreshError(failures.length > 0 ? `Could not refresh Ollama ${failures.join('; ')}` : null);
     } catch (err) {
-      logger.debug('Failed to fetch Ollama state', { error: err });
+      logger.warn('Failed to fetch Ollama state', { error: err });
+      setRefreshError(`Could not refresh Ollama state: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setIsRefreshing(false);
     }
@@ -129,6 +139,7 @@ export function OllamaModelSection({
     }
     setOllamaModels([]);
     setRunningModels([]);
+    setRefreshError(null);
     return undefined;
   }, [fetchOllamaState, isRunning, runtimeProfileRevision]);
 
@@ -208,6 +219,13 @@ export function OllamaModelSection({
         <div className="flex items-center gap-2 px-3 py-2 rounded bg-[hsl(var(--accent-error)/0.1)] text-[hsl(var(--accent-error))]">
           <AlertCircle className="w-4 h-4 shrink-0" />
           <span className="text-sm">{error}</span>
+        </div>
+      )}
+
+      {refreshError && (
+        <div role="alert" className="flex items-center gap-2 px-3 py-2 rounded bg-[hsl(var(--accent-error)/0.1)] text-[hsl(var(--accent-error))]">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span className="text-sm">{refreshError}</span>
         </div>
       )}
 

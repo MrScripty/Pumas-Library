@@ -366,6 +366,29 @@ describe('useModelDownloads', () => {
     expect(result.current.hasActiveDownloads).toBe(true);
   });
 
+  it('distinguishes a failed startup list from an empty one until a snapshot arrives', async () => {
+    listModelDownloadsMock.mockRejectedValueOnce(new Error('Download registry unreadable'));
+    const { result } = renderHook(() => useModelDownloads());
+    await flushMicrotasks();
+
+    expect(result.current.downloadStatusByRepo).toEqual({});
+    expect(result.current.downloadListError).toBe('Download registry unreadable');
+
+    act(() => downloadUpdateCallback?.({
+      cursor: 'download:2', snapshot: { cursor: 'download:2', revision: 2, downloads: [] },
+      stale_cursor: false, snapshot_required: false,
+    }));
+    expect(result.current.downloadListError).toBeNull();
+  });
+
+  it('reports an empty startup list without an error', async () => {
+    const { result } = renderHook(() => useModelDownloads());
+    await flushMicrotasks();
+
+    expect(result.current.downloadStatusByRepo).toEqual({});
+    expect(result.current.downloadListError).toBeNull();
+  });
+
   it('does not install a polling interval and unsubscribes on unmount', async () => {
     const setIntervalSpy = vi.spyOn(global, 'setInterval');
     const { unmount } = renderHook(() => useModelDownloads());

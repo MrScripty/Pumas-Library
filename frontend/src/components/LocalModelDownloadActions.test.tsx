@@ -53,4 +53,25 @@ describe('LocalModelDownloadActions', () => {
     const button = screen.getByTitle(/resume download/i);
     expect(button.querySelector('.download-progress-ring.is-paused')).not.toBeNull();
   });
+
+  it('describes the ring progress to assistive technology', () => {
+    const { rerender } = render(
+      <LocalModelDownloadActions
+        model={createModel({ downloadStatus: 'downloading' })}
+        rowState={createRowState({ canPause: true, isActiveDownload: true })}
+        onPauseDownload={vi.fn()}
+      />
+    );
+    const button = screen.getByRole('button', { name: 'Pause download' });
+    expect(button).toHaveAccessibleDescription('Download 55% complete');
+    expect(button.querySelector('.download-progress-ring')).toHaveAttribute('aria-hidden', 'true');
+
+    rerender(
+      <LocalModelDownloadActions
+        model={createModel({ downloadStatus: 'queued' })}
+        rowState={createRowState({ isActiveDownload: true, isQueued: true })}
+      />
+    );
+    expect(screen.getAllByRole('button')[0]).toHaveAccessibleDescription('Download queued');
+  });
 });

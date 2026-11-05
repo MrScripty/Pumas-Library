@@ -11,7 +11,7 @@ interface UseAppProcessActionsOptions {
   stopTorch: () => Promise<void>;
   torchLaunchLogPath?: string | null;
   openTorchLogPath: (path: string) => Promise<void>;
-  refetchStatus: (forceRefresh?: boolean, includeProcessStatus?: boolean) => Promise<void>;
+  refetchStatus: () => Promise<void>;
 }
 
 export function useAppProcessActions({
@@ -29,7 +29,7 @@ export function useAppProcessActions({
 }: UseAppProcessActionsOptions) {
   const scheduleStatusRefresh = useCallback(() => {
     window.setTimeout(() => {
-      void refetchStatus(false, true);
+      void refetchStatus();
     }, 1200);
   }, [refetchStatus]);
 
@@ -39,7 +39,7 @@ export function useAppProcessActions({
     } else {
       await launchOllama();
     }
-    await refetchStatus(false, true);
+    await refetchStatus();
     scheduleStatusRefresh();
   }, [launchOllama, ollamaRunning, refetchStatus, scheduleStatusRefresh, stopOllama]);
 
@@ -49,7 +49,7 @@ export function useAppProcessActions({
     } else {
       await launchTorch();
     }
-    await refetchStatus(false, true);
+    await refetchStatus();
     scheduleStatusRefresh();
   }, [launchTorch, refetchStatus, scheduleStatusRefresh, stopTorch, torchRunning]);
 

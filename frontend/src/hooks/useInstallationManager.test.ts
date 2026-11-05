@@ -63,7 +63,11 @@ vi.mock('./installationProgressTracking', async (importOriginal) => {
   };
 });
 
-import { useInstallationManager } from './useInstallationManager';
+import {
+  getInstallationPollDelay,
+  MAX_CONSECUTIVE_PROGRESS_FAILURES,
+  useInstallationManager,
+} from './useInstallationManager';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -454,6 +458,96 @@ describe('useInstallationManager', () => {
       success: true,
     });
     expect(result.current.installNetworkStatus).toBe('idle');
+  });
+
+  it('backs off between failing progress polls and recovers the cadence after a success', async () => {
+    getInstallationProgressMock
+      .mockRejectedValueOnce(new APIError('bridge closed', 'get_installation_progress'))
+      .mockRejectedValueOnce(new APIError('bridge closed', 'get_installation_progress'))
+      .mockResolvedValue(activeProgress);
+
+    const { result } = renderHook(() => useInstallationManager({
+      availableVersions,
+      onRefreshVersions: vi.fn(),
+    }));
+
+    await act(async () => {
+      await result.current.installVersion('v1.2.3');
+      await Promise.resolve();
+    });
+    expect(getInstallationProgressMock).toHaveBeenCalledTimes(1);
+    expect(result.current.installNetworkStatus).toBe('failed');
+
+    await act(async () => {
+      vi.advanceTimersByTime(getInstallationPollDelay(1) - 1);
+      await Promise.resolve();
+    });
+    expect(getInstallationProgressMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+    expect(getInstallationProgressMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      vi.advanceTimersByTime(getInstallationPollDelay(2));
+      await Promise.resolve();
+    });
+    expect(getInstallationProgressMock).toHaveBeenCalledTimes(3);
+    expect(result.current.installNetworkStatus).toBe('downloading');
+
+    await act(async () => {
+      vi.advanceTimersByTime(getInstallationPollDelay(0));
+      await Promise.resolve();
+    });
+    expect(getInstallationProgressMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('ends the lifecycle with a visible error after repeated transport failures', async () => {
+    getInstallationProgressMock
+      .mockResolvedValueOnce(activeProgress)
+      .mockRejectedValue(new APIError('bridge closed', 'get_installation_progress'));
+
+    const { result } = renderHook(() => useInstallationManager({
+      availableVersions,
+      onRefreshVersions: vi.fn(),
+    }));
+
+    await act(async () => {
+      await result.current.installVersion('v1.2.3');
+      await Promise.resolve();
+    });
+
+    for (let failures = 0; failures < MAX_CONSECUTIVE_PROGRESS_FAILURES; failures += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(getInstallationPollDelay(failures));
+        await Promise.resolve();
+      });
+    }
+
+    expect(getInstallationProgressMock).toHaveBeenCalledTimes(1 + MAX_CONSECUTIVE_PROGRESS_FAILURES);
+    expect(result.current.installingTag).toBeNull();
+    expect(result.current.installNetworkStatus).toBe('failed');
+    expect(result.current.installationProgress).toMatchObject({
+      tag: 'v1.2.3',
+      success: false,
+      overall_progress: activeProgress.overall_progress,
+    });
+    expect(result.current.installationProgress?.error).toContain(
+      `could not be read after ${MAX_CONSECUTIVE_PROGRESS_FAILURES} attempts (bridge closed)`
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+      await Promise.resolve();
+    });
+    expect(getInstallationProgressMock).toHaveBeenCalledTimes(1 + MAX_CONSECUTIVE_PROGRESS_FAILURES);
+  });
+
+  it('bounds the backed-off poll delay', () => {
+    expect(getInstallationPollDelay(0)).toBe(800);
+    expect(getInstallationPollDelay(1)).toBe(1600);
+    expect(getInstallationPollDelay(20)).toBe(10_000);
   });
 
   it('preserves terminal failure for presentation', async () => {

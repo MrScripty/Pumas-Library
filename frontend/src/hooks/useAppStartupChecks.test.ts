@@ -72,6 +72,6 @@ describe('useAppStartupChecks', () => {
       refetchStatus,
     }));
 
-    expect(refetchStatus).toHaveBeenCalledWith(false);
+    expect(refetchStatus).toHaveBeenCalledWith();
   });
 });

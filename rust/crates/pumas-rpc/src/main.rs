@@ -8,6 +8,7 @@ mod contract;
 mod discovery;
 mod handlers;
 mod http_admission;
+mod http_rejection;
 mod http_transport;
 mod local_enumeration;
 mod owner_retention;

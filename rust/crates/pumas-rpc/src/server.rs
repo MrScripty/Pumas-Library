@@ -467,7 +467,10 @@ pub(crate) async fn start_server_with_startup(
         .route("/v1/embeddings", post(handle_openai_proxy))
         .route("/v1/images/generations", post(handle_openai_proxy));
 
+    // After every route: unknown paths and methods are refused with a reason.
     let app = app
+        .fallback(crate::http_rejection::route_not_found)
+        .method_not_allowed_fallback(crate::http_rejection::method_not_allowed)
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))
         .layer(axum::middleware::from_fn_with_state(
@@ -721,7 +724,7 @@ async fn reject_during_shutdown(
     // RPC rechecks after decoding so a repeated shutdown can acknowledge without
     // admitting other commands. Other routes stop at the header boundary.
     if shutdown.is_requested() && request.uri().path() != "/rpc" {
-        return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+        return crate::http_rejection::HttpRejection::ShuttingDown.into_response();
     }
     next.run(request).await
 }
@@ -2675,6 +2678,11 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            let body = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(body["error"]["code"], "shutting_down", "{path}");
         }
     }
 }
@@ -3141,6 +3149,8 @@ mod http_discovery_tests {
             .await
             .unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["error"]["code"], "service_not_advertised");
         server.shutdown().await.unwrap();
         assert_eq!(registry.list_http_services().unwrap()[0], description);
         assert_eq!(

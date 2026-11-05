@@ -316,6 +316,8 @@ async fn native_fence_competing_bootstrap_cancellation_and_same_url_restart() {
         browser.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
         origin
     );
+    let body: serde_json::Value = browser.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "generation_mismatch");
     let partial = client
         .get(&health)
         .header(header::ORIGIN, origin)
@@ -331,6 +333,12 @@ async fn native_fence_competing_bootstrap_cancellation_and_same_url_restart() {
         partial.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
         origin
     );
+    let body: serde_json::Value = partial.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "fence_malformed");
+    assert!(body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("or neither"));
     let preflight = client
         .request(reqwest::Method::OPTIONS, &rpc)
         .header(header::ORIGIN, origin)

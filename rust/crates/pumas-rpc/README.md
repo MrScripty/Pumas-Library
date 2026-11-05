@@ -19,7 +19,14 @@ project their outcomes.
 
 - It binds a loopback address only and rejects non-loopback Host/Origin values
   before dispatch; there is no LAN mode (see [Security](../../../docs/SECURITY.md)).
-- Request bodies and in-flight requests are bounded.
+- Request bodies, in-flight requests and open connections are bounded. Beyond
+  256 open connections a new one gets a reasoned 503 (`connection_capacity`)
+  and is closed; a request head, including the next one on an idle keep-alive
+  connection, must arrive within 30 seconds. Response streaming is not timed.
+- A refusal issued before a route handler runs (generation fence, shutdown,
+  unknown route or method, owner retention, transport) keeps its status and
+  carries `{"error":{"code","message"}}` with `Cache-Control: no-store`; see
+  [the refusal body](../../../docs/contracts/local-http-admission-fence.md#refusal-body).
 - Every error leaves through the redacted public projection in
   `src/public_text.rs`; transports never serialize core errors directly.
 - Typed JSON-RPC parameters are closed: an unknown field is refused, not

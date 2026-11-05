@@ -15,7 +15,7 @@ const requireMain = createRequire(mainUrl);
 const { LibraryUpgradeCoordinator } = requireMain('./library-upgrade.js');
 const { BackendStartupError } = requireMain('./backend-startup.js');
 
-function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
+function createMainHarness({ root, bridgeRuntime, upgradeRuntime, packaged = false, argv = [] } = {}) {
   const app = new EventEmitter();
   const ipcMain = new EventEmitter();
   const handlers = new Map();
@@ -27,7 +27,7 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
   let ready;
   const readiness = new Promise((resolve) => { ready = resolve; });
   Object.assign(app, {
-    isPackaged: false,
+    isPackaged: packaged,
     commandLine: { appendSwitch() {} },
     requestSingleInstanceLock: () => true,
     whenReady: () => readiness,
@@ -39,7 +39,10 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
     },
   });
   const distDir = root ? join(root, 'electron', 'dist') : fileURLToPath(new URL('../dist', import.meta.url));
-  const appEntryUrl = pathToFileURL(join(distDir, '..', '..', 'frontend', 'dist', 'index.html')).href;
+  const resourcesPath = root ? join(root, 'resources') : '/opt/pumas/resources';
+  const appEntryUrl = pathToFileURL(packaged
+    ? join(resourcesPath, 'frontend', 'index.html')
+    : join(distDir, '..', '..', 'frontend', 'dist', 'index.html')).href;
   const createContents = () => {
     const contents = new EventEmitter();
     const session = {
@@ -55,14 +58,18 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
       windowOpenHandler: null,
       mainFrame: { url: appEntryUrl },
       setWindowOpenHandler(handler) { contents.windowOpenHandler = handler; },
+      devToolsOpened: 0,
+      openDevTools() { contents.devToolsOpened += 1; },
     });
     return contents;
   };
   class BrowserWindow extends EventEmitter {
     destroyed = false;
     contents = createContents();
-    constructor() {
+    loads = [];
+    constructor(options) {
       super();
+      this.options = options;
       this.contents.isDestroyed = () => this.destroyed;
       windows.push(this);
     }
@@ -72,7 +79,8 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
       return this.contents;
     }
     isDestroyed() { return this.destroyed; }
-    async loadFile() {}
+    async loadFile(file) { this.loads.push({ file }); }
+    async loadURL(url) { this.loads.push({ url }); }
     destroy() {
       this.destroyed = true;
       this.emit('closed');
@@ -84,8 +92,14 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
     transports: { file: {}, console: {} },
     info() {}, warn() {}, error(...args) { errors.push(args); },
   };
+  const menus = [];
+  const Menu = {
+    buildFromTemplate: (template) => ({ template }),
+    setApplicationMenu: (menu) => { menus.push(menu); },
+  };
   const runtimeProcess = {
-    argv: [],
+    argv,
+    resourcesPath,
     env: root ? { PUMAS_RPC_BINARY: process.execPath } : {},
     platform: 'linux',
     on() {},
@@ -98,7 +112,7 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
     clearTimeout(callback) { timers.delete(callback); },
     require(specifier) {
       if (specifier === 'electron') return {
-        app, BrowserWindow, ipcMain, shell,
+        app, BrowserWindow, ipcMain, shell, Menu,
       };
       if (specifier === 'electron-log') return logger;
       if (specifier === './python-bridge' && bridgeRuntime) return bridgeRuntime.module;
@@ -119,7 +133,7 @@ function createMainHarness({ root, bridgeRuntime, upgradeRuntime } = {}) {
   };
   return {
     app, ipcMain, handlers, timers, windows, ready, exits, errors,
-    appEntryUrl, createContents, externalOpens, appSender,
+    appEntryUrl, createContents, externalOpens, appSender, menus,
   };
 }
 
@@ -546,5 +560,52 @@ test('main IPC refuses senders other than the application document in the main f
     for (const window of harness.windows) if (!window.destroyed) window.destroy();
     harness.timers.clear();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('packaged builds ignore --dev and --debug and install a menu without DevTools', async () => {
+  for (const packaged of [true, false]) {
+    const harness = createMainHarness({ packaged, argv: ['electron', '.', '--dev', '--debug'] });
+    const activation = harness.app.listeners('activate')[0]();
+    await setImmediate();
+    const [window] = harness.windows;
+    try {
+      if (packaged) {
+        assert.deepEqual(window.loads, [{ file: '/opt/pumas/resources/frontend/index.html' }],
+          'a packaged build never loads the dev server');
+        assert.equal(window.options.webPreferences.devTools, false);
+        assert.equal(window.webContents.devToolsOpened, 0);
+        let prevented = false;
+        window.webContents.emit('will-navigate', { preventDefault() { prevented = true; } }, 'http://127.0.0.1:3000/');
+        assert.equal(prevented, true, 'the dev-server origin is not an application document when packaged');
+      } else {
+        assert.deepEqual(window.loads, [{ url: 'http://127.0.0.1:3000' }]);
+        assert.equal(window.options.webPreferences.devTools, true);
+        assert.equal(window.webContents.devToolsOpened, 1);
+      }
+    } finally {
+      window.destroy();
+      await activation;
+      harness.timers.clear();
+    }
+    // The menu is installed at app ready; activation alone does not set it.
+    assert.deepEqual(harness.menus, []);
+  }
+});
+
+test('the packaged application menu has no DevTools or reload entries', async () => {
+  const harness = createMainHarness({ packaged: true, argv: ['--debug'] });
+  harness.ready();
+  await setImmediate();
+  try {
+    assert.equal(harness.menus.length, 1);
+    const roles = harness.menus[0].template.map((item) => item.role);
+    assert.ok(roles.includes('editMenu'), 'copy/paste accelerators stay available');
+    for (const role of ['viewMenu', 'toggleDevTools', 'reload', 'forceReload']) {
+      assert.ok(!roles.includes(role), `${role} must not be in the packaged menu`);
+    }
+  } finally {
+    for (const window of harness.windows) if (!window.destroyed) window.destroy();
+    harness.timers.clear();
   }
 });

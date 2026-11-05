@@ -10,11 +10,13 @@ import {
   BrowserWindow,
   ipcMain,
   dialog,
+  Menu,
   shell,
   nativeTheme,
   type Event as ElectronEvent,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
+  type MenuItemConstructorOptions,
   type WebContents,
 } from 'electron';
 import * as path from 'path';
@@ -240,14 +242,17 @@ function configureLinuxDisplay(): void {
   app.commandLine.appendSwitch('gtk-version', '4');
 }
 
-/** `--dev` loads the Vite dev server. */
+/**
+ * `--dev` (Vite dev server) is a source-checkout affordance only. A packaged
+ * build never loads a remote origin with the preload attached.
+ */
 function isDevServerLaunch(): boolean {
-  return process.argv.includes('--dev');
+  return !app.isPackaged && process.argv.includes('--dev');
 }
 
-/** `--dev`/`--debug` enable DevTools and debug logging. */
+/** `--dev`/`--debug` diagnostics (DevTools, debug logging) are unpackaged only. */
 function isDebugLaunch(): boolean {
-  return process.argv.includes('--dev') || process.argv.includes('--debug');
+  return !app.isPackaged && (process.argv.includes('--dev') || process.argv.includes('--debug'));
 }
 
 /** The bundled frontend entry document. */
@@ -294,6 +299,20 @@ function requireApplicationSender(channel: string, event: IpcMainInvokeEvent): v
 }
 
 /**
+ * Packaged builds get a menu without DevTools or reload accelerators.
+ * Unpackaged builds keep Electron's default menu for development.
+ */
+function configureApplicationMenu(): void {
+  if (!app.isPackaged) return;
+  const template: MenuItemConstructorOptions[] = [
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+    { role: 'editMenu' },
+    { role: 'windowMenu' },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/**
  * Resolve the runtime icon path for window/taskbar/dock usage.
  */
 function getRuntimeIconPath(): string | undefined {
@@ -333,6 +352,7 @@ async function createWindow(): Promise<'shown' | 'fatal' | 'closed'> {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      devTools: !app.isPackaged,
     },
   });
   mainWindow = createdWindow;
@@ -963,6 +983,7 @@ if (!hasSingleInstanceLock) {
     }
 
     try {
+      configureApplicationMenu();
       // Register IPC handlers
       registerIPCHandlers();
 

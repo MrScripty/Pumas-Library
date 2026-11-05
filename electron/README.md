@@ -49,6 +49,10 @@ The renderer opens external URLs only through `ExternalLink` /
 `openExternalUrl` (`frontend/src/components/ui/`), which call `api.open_url`.
 Frontend lint forbids `target` on links and `window.open`.
 
+`--dev` (dev server) and `--debug` (DevTools, debug sidecar logging) apply only
+to unpackaged builds. Packaged builds disable DevTools and install a menu
+without DevTools or reload accelerators.
+
 TypeScript interfaces are compile-time projections, not validation of runtime
 messages. A contract change must update the receiver decoder, producer,
 consumer, and negative tests together. Treat sidecar logs as sensitive: they

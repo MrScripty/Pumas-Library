@@ -55,15 +55,38 @@ export function projectLauncherRootStartupState(
   }
 
   const reason = resolution.code === 'launcher_root_invalid' ? 'invalid' : 'unavailable';
+  const detail = sanitizeRecoveryDetail(resolution.message);
   // A saved root can be replaced by selection; explicit launch input must be corrected.
   return resolution.authoritySource === 'persisted'
-    ? { status: 'recovery-required', reason, authoritySource: 'persisted', action: 'select-library' }
+    ? {
+        status: 'recovery-required', reason, authoritySource: 'persisted', action: 'select-library',
+        ...(detail ? { detail } : {}),
+      }
     : {
         status: 'recovery-required',
         reason,
         authoritySource: resolution.authoritySource,
         action: 'correct-launch-input',
+        ...(detail ? { detail } : {}),
       };
+}
+
+/** The renderer contract bounds `detail` to 1..1024 characters. */
+const MAX_RECOVERY_DETAIL_LENGTH = 1024;
+
+/**
+ * The resolver's reason, safe for the renderer: one line, bounded. Resolver
+ * messages are fixed, path-free sentences; this keeps a future producer from
+ * pushing control characters or unbounded text across the boundary.
+ */
+export function sanitizeRecoveryDetail(message: unknown): string | undefined {
+  if (typeof message !== 'string') return undefined;
+  // eslint-disable-next-line no-control-regex -- strip control characters by design
+  const singleLine = message.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (singleLine.length === 0) return undefined;
+  return singleLine.length > MAX_RECOVERY_DETAIL_LENGTH
+    ? `${singleLine.slice(0, MAX_RECOVERY_DETAIL_LENGTH - 1)}…`
+    : singleLine;
 }
 
 export function launcherRootSelectionInvalid(): LauncherRootSelectionResult {

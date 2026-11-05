@@ -6,7 +6,9 @@ import {
   launcherRootSelectionInvalid,
   launcherRootSelectionPersistenceUnavailable,
   projectLauncherRootStartupState,
+  sanitizeRecoveryDetail,
 } from '../dist/launcher-root-recovery.js';
+import { decodeLauncherRootStartupState } from '../dist/generated/desktop-contract.js';
 import {
   LauncherRootPersistenceError,
   LauncherRootSelectionError,
@@ -93,6 +95,7 @@ test('startup projection strips paths and selects only valid recovery actions', 
     reason: 'invalid',
     authoritySource: 'persisted',
     action: 'select-library',
+    detail: 'path-free producer message',
   });
 
   for (const authoritySource of ['environment', 'argument']) {
@@ -107,6 +110,7 @@ test('startup projection strips paths and selects only valid recovery actions', 
       reason: 'unavailable',
       authoritySource,
       action: 'correct-launch-input',
+      detail: 'path-free producer message',
     });
   }
 });
@@ -172,6 +176,7 @@ test('typed startup recovery preserves the closed state for lifecycle classifica
     reason: 'unavailable',
     authoritySource: 'persisted',
     action: 'select-library',
+    detail: 'path-free recovery message',
   });
 });
 
@@ -442,4 +447,29 @@ test('selection handler reports and locks a failed synchronous relaunch request'
   assert.deepEqual(await handler(selectable), expected);
   assert.deepEqual(await handler(selectable), expected);
   assert.deepEqual(calls, { choose: 1, persist: 1, restart: 1 });
+});
+
+test('launcher-root recovery reaches the renderer with a bounded one-line reason', () => {
+  assert.equal(sanitizeRecoveryDetail('  The saved root\n is\tinvalid.\u0007 '), 'The saved root is invalid.');
+  assert.equal(sanitizeRecoveryDetail(''), undefined);
+  assert.equal(sanitizeRecoveryDetail('\n\t'), undefined);
+  assert.equal(sanitizeRecoveryDetail(undefined), undefined);
+  const long = sanitizeRecoveryDetail('x'.repeat(5000));
+  assert.equal(long.length, 1024);
+
+  const state = projectLauncherRootStartupState({
+    status: 'recovery-required',
+    code: 'launcher_root_invalid',
+    authoritySource: 'persisted',
+    persistedState: 'invalid',
+    message: 'The saved launcher root is invalid; select an existing Pumas library to recover.',
+  });
+  assert.equal(state.detail, 'The saved launcher root is invalid; select an existing Pumas library to recover.');
+  assert.equal(decodeLauncherRootStartupState(state).status, 'valid', 'the renderer contract accepts the detail');
+  const withoutMessage = projectLauncherRootStartupState({
+    status: 'recovery-required', code: 'launcher_root_unavailable', authoritySource: 'environment',
+    persistedState: 'not-consulted', message: '   ',
+  });
+  assert.equal(Object.hasOwn(withoutMessage, 'detail'), false);
+  assert.equal(decodeLauncherRootStartupState(withoutMessage).status, 'valid');
 });

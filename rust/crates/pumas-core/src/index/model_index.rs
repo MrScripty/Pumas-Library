@@ -4,6 +4,8 @@ mod catalog_snapshot;
 mod dependency_profiles;
 mod publication_projection;
 pub(crate) use publication_projection::ProjectionCommit;
+#[cfg(test)]
+mod atomicity_tests;
 mod governance;
 mod intent_declarations;
 mod metadata_overlays;
@@ -810,25 +812,34 @@ impl ModelIndex {
     }
 
     /// Delete a model by ID.
+    ///
+    /// The row removal and its durable update-feed event commit together, so a
+    /// cursor-following consumer can never miss a removal that took effect.
     pub fn delete(&self, id: &str) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+        let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
         })?;
 
-        let rows_affected = conn.execute("DELETE FROM models WHERE id = ?1", params![id])?;
-
-        if rows_affected > 0 {
-            debug!("Deleted model: {}", id);
-            let event_id = Self::append_model_library_update_event_with_conn(
-                &conn,
+        let tx = conn.transaction()?;
+        let rows_affected = tx.execute("DELETE FROM models WHERE id = ?1", params![id])?;
+        let event_id = if rows_affected > 0 {
+            Some(Self::append_model_library_update_event_with_conn(
+                &tx,
                 id,
                 ModelLibraryChangeKind::ModelRemoved,
                 ModelFactFamily::ModelRecord,
                 ModelLibraryRefreshScope::SummaryAndDetail,
                 None,
                 None,
-            )?;
+            )?)
+        } else {
+            None
+        };
+        tx.commit()?;
+
+        if let Some(event_id) = event_id {
+            debug!("Deleted model: {}", id);
             self.publish_model_library_update_event_with_conn(&conn, event_id)?;
         }
 
@@ -1190,14 +1201,17 @@ impl ModelIndex {
     }
 
     /// Clear all models from the index.
+    ///
+    /// The removals and their update-feed events commit as one transaction.
     pub fn clear(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+        let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
         })?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
         let removed_ids = {
-            let mut stmt = conn.prepare("SELECT id FROM models ORDER BY id ASC")?;
+            let mut stmt = tx.prepare("SELECT id FROM models ORDER BY id ASC")?;
             let rows = stmt
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1208,11 +1222,11 @@ impl ModelIndex {
         // This avoids "Execute returned results" error from FTS5 triggers since the
         // AFTER DELETE trigger will find nothing to delete from the FTS5 table.
         let fts_table = &self.fts5_config.table_name;
-        conn.execute_batch(&format!("DELETE FROM {}; DELETE FROM models;", fts_table))?;
+        tx.execute_batch(&format!("DELETE FROM {}; DELETE FROM models;", fts_table))?;
         let mut event_ids = Vec::with_capacity(removed_ids.len());
         for model_id in removed_ids {
             event_ids.push(Self::append_model_library_update_event_with_conn(
-                &conn,
+                &tx,
                 &model_id,
                 ModelLibraryChangeKind::ModelRemoved,
                 ModelFactFamily::ModelRecord,
@@ -1221,6 +1235,7 @@ impl ModelIndex {
                 None,
             )?);
         }
+        tx.commit()?;
         for event_id in event_ids {
             self.publish_model_library_update_event_with_conn(&conn, event_id)?;
         }

@@ -61,12 +61,13 @@ impl ModelIndex {
         &self,
         record: &ModelPackageFactsCacheRecord,
     ) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+        let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
         })?;
+        let tx = conn.transaction()?;
 
-        let changed = conn.execute(
+        let changed = tx.execute(
             "INSERT INTO model_package_facts_cache (
                 model_id,
                 selected_artifact_id,
@@ -101,13 +102,13 @@ impl ModelIndex {
             ],
         )? > 0;
 
-        if changed {
+        let event_id = if changed {
             let refresh_scope = match record.cache_scope {
                 ModelPackageFactsCacheScope::Summary => ModelLibraryRefreshScope::Summary,
                 ModelPackageFactsCacheScope::Detail => ModelLibraryRefreshScope::SummaryAndDetail,
             };
-            let event_id = Self::append_model_library_update_event_with_conn(
-                &conn,
+            Some(Self::append_model_library_update_event_with_conn(
+                &tx,
                 &record.model_id,
                 ModelLibraryChangeKind::PackageFactsModified,
                 ModelFactFamily::PackageFacts,
@@ -118,7 +119,12 @@ impl ModelIndex {
                     Some(record.selected_artifact_id.clone())
                 },
                 record.producer_revision.clone(),
-            )?;
+            )?)
+        } else {
+            None
+        };
+        tx.commit()?;
+        if let Some(event_id) = event_id {
             self.publish_model_library_update_event_with_conn(&conn, event_id)?;
         }
 
@@ -222,43 +228,51 @@ impl ModelIndex {
         Ok(records)
     }
 
+    /// Remove every cached package-facts row for a model.
+    ///
+    /// A removal that deletes rows records one package-facts update event in
+    /// the same transaction, so feed consumers refresh the invalidated facts.
     pub fn delete_model_package_facts_cache(&self, model_id: &str) -> Result<usize> {
-        let conn = self.conn.lock().map_err(|_| PumasError::Database {
-            message: "Failed to acquire connection lock".to_string(),
-            source: None,
-        })?;
-
-        Ok(conn.execute(
+        self.delete_model_package_facts_cache_rows(
+            model_id,
             "DELETE FROM model_package_facts_cache WHERE model_id = ?1",
-            params![model_id],
-        )?)
+        )
     }
 
     pub fn delete_model_package_facts_cache_without_selected_artifact(
         &self,
         model_id: &str,
     ) -> Result<usize> {
-        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+        self.delete_model_package_facts_cache_rows(
+            model_id,
+            "DELETE FROM model_package_facts_cache
+             WHERE model_id = ?1 AND selected_artifact_id = ''",
+        )
+    }
+
+    fn delete_model_package_facts_cache_rows(&self, model_id: &str, sql: &str) -> Result<usize> {
+        let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
         })?;
+        let tx = conn.transaction()?;
 
-        let deleted = conn.execute(
-            "DELETE FROM model_package_facts_cache
-             WHERE model_id = ?1 AND selected_artifact_id = ''",
-            params![model_id],
-        )?;
-
-        if deleted > 0 {
-            let event_id = Self::append_model_library_update_event_with_conn(
-                &conn,
+        let deleted = tx.execute(sql, params![model_id])?;
+        let event_id = if deleted > 0 {
+            Some(Self::append_model_library_update_event_with_conn(
+                &tx,
                 model_id,
                 ModelLibraryChangeKind::PackageFactsModified,
                 ModelFactFamily::PackageFacts,
                 ModelLibraryRefreshScope::SummaryAndDetail,
                 None,
                 None,
-            )?;
+            )?)
+        } else {
+            None
+        };
+        tx.commit()?;
+        if let Some(event_id) = event_id {
             self.publish_model_library_update_event_with_conn(&conn, event_id)?;
         }
 

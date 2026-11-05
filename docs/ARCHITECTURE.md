@@ -174,6 +174,14 @@ never signalled: the stop reports it as skipped with a reason
 Runtime-profile processes belong to the runtime-profile owner and are never
 touched by the legacy stop.
 
+Both the legacy launcher and the runtime-profile owner start their children
+from an empty environment plus an allowlist (`platform::child_environment`):
+process basics, locale and temporary directories, GPU selection and driver
+discovery, proxy/TLS trust, and `OLLAMA_*` settings. Loader and interpreter
+injection (`LD_PRELOAD`, `DYLD_*`, the inherited `LD_LIBRARY_PATH`,
+`PYTHON*`) and credentials such as `HF_TOKEN` are not inherited; a launch that
+needs one of them sets it explicitly in its launch configuration.
+
 On Linux the manager retains each launched runtime's `Child` in one shared
 observation/stop slot. Its observer uses non-reaping exit checks, and both the
 observer and the stop lock the same slot. An owned group leader is reaped only

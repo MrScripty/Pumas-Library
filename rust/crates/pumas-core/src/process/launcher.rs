@@ -434,7 +434,9 @@ impl ProcessLauncher {
         cmd.args(&config.extra_args);
         cmd.current_dir(&config.version_dir);
 
-        // Set environment variables
+        // Start from the allowlisted runtime environment, then apply the
+        // launch configuration's variables on top.
+        platform::child_environment::apply_owned_child_environment(&mut cmd);
         for (key, value) in &config.env_vars {
             cmd.env(key, value);
         }

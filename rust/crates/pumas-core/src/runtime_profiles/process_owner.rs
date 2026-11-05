@@ -991,6 +991,9 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         if let Some(arg) = &config.command {
             command.arg(arg);
         }
+        // Owned children start from an allowlisted environment; the launch
+        // configuration's variables are applied on top.
+        crate::platform::child_environment::apply_owned_child_environment(&mut command);
         command
             .args(&config.extra_args)
             .envs(&config.env_vars)
@@ -1620,6 +1623,38 @@ mod tests {
             .contains("still running"));
         assert!(survived);
         assert!(pid_file.exists());
+    }
+
+    #[tokio::test]
+    async fn owned_children_do_not_inherit_loader_injection() {
+        let fixture = Fixture::new();
+        let marker = fixture.root.path().join("environment");
+        let (mut config, spec, guard) = fixture.launch(&format!(
+            "printf '%s|%s|%s' \"${{LD_PRELOAD-unset}}\" \"${{PUMAS_FIXTURE_EXPLICIT-unset}}\" \"${{PATH:+path}}\" > '{}'; sleep 30",
+            marker.display()
+        ));
+        config
+            .env_vars
+            .insert("PUMAS_FIXTURE_EXPLICIT".into(), "explicit".into());
+        let id = spec.profile_id.clone();
+        // The parent's own LD_PRELOAD (if any) must not reach the child.
+        let result = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap();
+        assert!(result.response.success);
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        while !marker.exists() {
+            assert!(std::time::Instant::now() < until, "fixture did not report");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(fixture.owner.stop(&id).await.unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            "unset|explicit|path"
+        );
     }
 
     #[tokio::test]

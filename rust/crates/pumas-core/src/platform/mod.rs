@@ -51,6 +51,7 @@ pub(crate) fn require_audio_read_confinement() -> std::io::Result<()> {
 }
 
 pub(crate) mod capability_fs;
+pub mod child_environment;
 pub mod filesystem;
 #[cfg(target_os = "linux")]
 pub mod linux_group;

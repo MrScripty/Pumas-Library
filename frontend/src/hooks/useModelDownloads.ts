@@ -28,6 +28,10 @@ type DownloadCommand = {
   outcome: 'pending' | 'succeeded' | 'failed';
 };
 
+function describeListFailure(error: unknown): string {
+  return error instanceof Error && error.message.trim() ? error.message : 'The download list could not be loaded.';
+}
+
 function isActiveStatus(status: string): boolean {
   return (ACTIVE_STATUSES as readonly string[]).includes(status);
 }
@@ -35,6 +39,8 @@ function isActiveStatus(status: string): boolean {
 export function useModelDownloads() {
   const [downloadStatusByRepo, setDownloadStatusByRepo] = useState<Record<string, DownloadStatus>>({});
   const [downloadErrors, setDownloadErrors] = useState<Record<string, string>>({});
+  // Distinguishes "the list could not be loaded" from "there are no downloads".
+  const [downloadListError, setDownloadListError] = useState<string | null>(null);
 
   // Ref keeps command handlers independent from render timing.
   const downloadStatusRef = useRef(downloadStatusByRepo);
@@ -67,6 +73,7 @@ export function useModelDownloads() {
       }
     }
     downloadKeysRef.current = snapshotKeys;
+    setDownloadListError(null);
     setDownloadStatusByRepo((prev) => {
       if (!options.preserveExisting) return statuses;
       const merged = { ...statuses };
@@ -97,7 +104,10 @@ export function useModelDownloads() {
     let startupSuperseded = false;
 
     const restoreDownloads = async () => {
-      if (!isAPIAvailable()) return;
+      if (!isAPIAvailable()) {
+        setDownloadListError('The desktop backend is not available.');
+        return;
+      }
       try {
         const result = await api.list_model_downloads();
         if (cancelled) return;
@@ -108,6 +118,7 @@ export function useModelDownloads() {
         applyDownloadSnapshot(result.downloads.map(projectDownloadProgress), { preserveExisting: true });
       } catch (error) {
         logger.warn('Failed to restore downloads on startup', { error });
+        if (!cancelled && !startupSuperseded) setDownloadListError(describeListFailure(error));
       }
     };
 
@@ -126,6 +137,7 @@ export function useModelDownloads() {
           if (!cancelled) applyDownloadSnapshot(result.downloads.map(projectDownloadProgress));
         }).catch((error: unknown) => {
           logger.warn('Failed to reload downloads after an undelivered update', { error });
+          if (!cancelled) setDownloadListError(describeListFailure(error));
         });
       }
     );
@@ -325,6 +337,7 @@ export function useModelDownloads() {
   return {
     downloadStatusByRepo,
     downloadErrors,
+    downloadListError,
     refreshDownloads,
     hasActiveDownloads,
     startDownload,

@@ -41,7 +41,13 @@ Framer Motion, React Aria interactions, and Vitest with Testing Library/jsdom.
 - Responses are matched to the model or selection that requested them; a reply
   for another identity cannot replace the current view.
 - Cached startup data is a projection whose age, provenance, refresh state and
-  degraded outcome stay visible.
+  degraded outcome stay visible. The library snapshot stores when it was
+  written and a per-library revision. Its rows stay display-only until the
+  first load succeeds; later refreshes keep live rows actionable and downgrade
+  them only when the refresh fails.
+- A failed library load, scan or search, download-list read, disk-usage read
+  or runtime-state refresh keeps its reason on screen. It never falls back to
+  an empty list, an idle status or a 0% reading.
 - Do not infer that a model is complete from its name, repository or a partial
   set of files. One Hugging Face repository can hold several files or
   quantizations, and the same weights in another repository are a separate

@@ -44,6 +44,8 @@ export function TorchModelSlotsSection({
   const [unloadingSlot, setUnloadingSlot] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Shown slots and devices are stale while this is set.
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [selectedDevices, setSelectedDevices] = useState<Record<string, string>>({});
 
   // Extract safetensors models from library model groups
@@ -79,6 +81,7 @@ export function TorchModelSlotsSection({
     if (!isAPIAvailable() || !isRunning) {
       setSlots([]);
       setDevices([]);
+      setRefreshError(null);
       return;
     }
 
@@ -88,14 +91,21 @@ export function TorchModelSlotsSection({
         api.torch_list_slots(connectionUrl),
         api.torch_list_devices(connectionUrl),
       ]);
+      const failures: string[] = [];
       if (slotsResult.success) {
         setSlots(slotsResult.slots);
+      } else {
+        failures.push(`model slots: ${slotsResult.error || 'request was not successful'}`);
       }
       if (devicesResult.success) {
         setDevices(devicesResult.devices);
+      } else {
+        failures.push(`devices: ${devicesResult.error || 'request was not successful'}`);
       }
+      setRefreshError(failures.length > 0 ? `Could not refresh Torch ${failures.join('; ')}` : null);
     } catch (err) {
-      logger.debug('Failed to fetch Torch state', { error: err });
+      logger.warn('Failed to fetch Torch state', { error: err });
+      setRefreshError(`Could not refresh Torch state: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setIsRefreshing(false);
     }
@@ -109,6 +119,7 @@ export function TorchModelSlotsSection({
     }
     setSlots([]);
     setDevices([]);
+    setRefreshError(null);
     return undefined;
   }, [fetchTorchState, isRunning]);
 
@@ -171,6 +182,13 @@ export function TorchModelSlotsSection({
         <div className="flex items-center gap-2 px-3 py-2 rounded bg-[hsl(var(--accent-error)/0.1)] text-[hsl(var(--accent-error))]">
           <AlertCircle className="w-4 h-4 shrink-0" />
           <span className="text-sm">{error}</span>
+        </div>
+      )}
+
+      {refreshError && (
+        <div role="alert" className="flex items-center gap-2 px-3 py-2 rounded bg-[hsl(var(--accent-error)/0.1)] text-[hsl(var(--accent-error))]">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span className="text-sm">{refreshError}</span>
         </div>
       )}
 

@@ -118,6 +118,7 @@ function ActiveInstallIcon({
 export function OpenActiveInstallButton({
   activeVersion,
   folderIconColor,
+  diskUsageLabel,
   isLoading,
   isOpeningPath,
   onOpenActiveInstall,
@@ -125,6 +126,7 @@ export function OpenActiveInstallButton({
 }: {
   activeVersion: string | null;
   folderIconColor: string;
+  diskUsageLabel?: string | undefined;
   isLoading: boolean;
   isOpeningPath: boolean;
   onOpenActiveInstall: (event: React.MouseEvent) => void;
@@ -137,7 +139,10 @@ export function OpenActiveInstallButton({
       className="rounded p-1 transition-colors hover:bg-[hsl(var(--surface-interactive-hover))] disabled:opacity-50"
       whileHover={{ scale: activeVersion ? 1.1 : 1 }}
       whileTap={{ scale: activeVersion ? 0.9 : 1 }}
-      title={activeVersion ? 'Open active version in file manager' : 'No active version to open'}
+      title={[
+        activeVersion ? 'Open active version in file manager' : 'No active version to open',
+        diskUsageLabel,
+      ].filter(Boolean).join(' · ')}
     >
       <ActiveInstallIcon
         folderIconColor={folderIconColor}

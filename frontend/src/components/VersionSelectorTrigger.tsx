@@ -20,6 +20,7 @@ interface VersionSelectorTriggerProps {
   showOpenedIndicator: boolean;
   isOpeningPath: boolean;
   folderIconColor: string;
+  diskUsageLabel?: string;
   emphasizeInstall: boolean;
   hasNewVersion: boolean;
   latestVersion: string | null;
@@ -47,6 +48,7 @@ export function VersionSelectorTrigger({
   showOpenedIndicator,
   isOpeningPath,
   folderIconColor,
+  diskUsageLabel,
   emphasizeInstall,
   hasNewVersion,
   latestVersion,
@@ -102,6 +104,7 @@ export function VersionSelectorTrigger({
             <OpenActiveInstallButton
               activeVersion={activeVersion}
               folderIconColor={folderIconColor}
+              diskUsageLabel={diskUsageLabel}
               isLoading={isLoading}
               isOpeningPath={isOpeningPath}
               onOpenActiveInstall={onOpenActiveInstall}

@@ -1,7 +1,17 @@
 import type { ModelCategory, ModelInfo } from '../types/apps';
 
-export const MODEL_LIBRARY_SNAPSHOT_KEY = 'pumas:model-library:v2';
-const RETIRED_SNAPSHOT_KEY = 'pumas:model-library:v1';
+export const MODEL_LIBRARY_SNAPSHOT_KEY = 'pumas:model-library:v3';
+const RETIRED_SNAPSHOT_KEYS = ['pumas:model-library:v1', 'pumas:model-library:v2'] as const;
+const SNAPSHOT_KEYS = new Set(['libraryScopeId', 'writtenAt', 'revision', 'modelGroups']);
+
+/** A persisted display snapshot plus the provenance needed to label it as cached. */
+export interface ModelLibrarySnapshot {
+  modelGroups: ModelCategory[];
+  /** ISO-8601 time the snapshot was written from a successful library load. */
+  writtenAt: string;
+  /** Write counter for this library scope; increases on every persisted write. */
+  revision: number;
+}
 
 const DISPLAY_STRINGS = ['format', 'quant', 'date', 'integrityIssueMessage'] as const;
 const DISPLAY_NUMBERS = ['size', 'downloadProgress', 'dependencyCount'] as const;
@@ -20,6 +30,14 @@ function isDisplayString(value: unknown): value is string {
 
 function isScope(value: unknown): value is string {
   return typeof value === 'string' && /^display-v1:[a-f0-9]{64}$/.test(value);
+}
+
+function isWrittenAt(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 64 && Number.isFinite(Date.parse(value));
+}
+
+function isRevision(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
 function decodeDisplayModel(value: unknown, category: string): ModelInfo | null {
@@ -91,34 +109,67 @@ function getLocalStorage(): Storage | null {
   }
 }
 
-/** Disposable display cache only: never a source of paths, activity, or action authority. */
-export function readModelLibrarySnapshot(libraryScopeId: string | null): ModelCategory[] {
-  const storage = getLocalStorage();
-  if (!storage) return [];
+function removeRetiredSnapshots(storage: Storage): void {
+  for (const key of RETIRED_SNAPSHOT_KEYS) storage.removeItem(key);
+}
+
+function decodeSnapshot(value: unknown, libraryScopeId: string): ModelLibrarySnapshot | null {
+  if (!isRecord(value) || Object.keys(value).some((key) => !SNAPSHOT_KEYS.has(key)) ||
+    Object.keys(value).length !== SNAPSHOT_KEYS.size || value['libraryScopeId'] !== libraryScopeId ||
+    !isWrittenAt(value['writtenAt']) || !isRevision(value['revision'])) {
+    return null;
+  }
+  const modelGroups = decodeGroups(value['modelGroups']);
+  return modelGroups ? { modelGroups, writtenAt: value['writtenAt'], revision: value['revision'] } : null;
+}
+
+function readStoredRevision(storage: Storage, libraryScopeId: string): number {
   try {
-    storage.removeItem(RETIRED_SNAPSHOT_KEY);
     const serialized = storage.getItem(MODEL_LIBRARY_SNAPSHOT_KEY);
-    if (!serialized) return [];
-    const parsed: unknown = JSON.parse(serialized);
-    const groups = isScope(libraryScopeId) && isRecord(parsed) &&
-      Object.keys(parsed).length === 2 && parsed['libraryScopeId'] === libraryScopeId
-      ? decodeGroups(parsed['modelGroups']) : null;
-    if (groups) return groups;
+    const parsed: unknown = serialized ? JSON.parse(serialized) : null;
+    return isRecord(parsed) && parsed['libraryScopeId'] === libraryScopeId && isRevision(parsed['revision'])
+      ? parsed['revision'] : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Disposable display cache only: never a source of paths, activity, or action authority. */
+export function readModelLibrarySnapshot(libraryScopeId: string | null): ModelLibrarySnapshot | null {
+  const storage = getLocalStorage();
+  if (!storage) return null;
+  try {
+    removeRetiredSnapshots(storage);
+    const serialized = storage.getItem(MODEL_LIBRARY_SNAPSHOT_KEY);
+    if (!serialized) return null;
+    const snapshot = isScope(libraryScopeId) ? decodeSnapshot(JSON.parse(serialized), libraryScopeId) : null;
+    if (snapshot) return snapshot;
     storage.removeItem(MODEL_LIBRARY_SNAPSHOT_KEY);
   } catch {
     try { storage.removeItem(MODEL_LIBRARY_SNAPSHOT_KEY); } catch { /* Storage may be unavailable. */ }
   }
-  return [];
+  return null;
 }
 
-export function writeModelLibrarySnapshot(modelGroups: ModelCategory[], libraryScopeId: string | null): boolean {
+export function writeModelLibrarySnapshot(
+  modelGroups: ModelCategory[],
+  libraryScopeId: string | null,
+  writtenAt: Date = new Date(),
+): boolean {
   const storage = getLocalStorage();
-  if (!storage || !isScope(libraryScopeId)) return false;
+  if (!storage || !isScope(libraryScopeId) || !Number.isFinite(writtenAt.getTime())) return false;
   try {
     const groups = modelGroups.map((group) => ({ category: group.category, models: group.models.map(displayOnly) }));
     if (!decodeGroups(groups)) return false;
-    storage.removeItem(RETIRED_SNAPSHOT_KEY);
-    storage.setItem(MODEL_LIBRARY_SNAPSHOT_KEY, JSON.stringify({ libraryScopeId, modelGroups: groups }));
+    removeRetiredSnapshots(storage);
+    const revision = readStoredRevision(storage, libraryScopeId) + 1;
+    if (!isRevision(revision)) return false;
+    storage.setItem(MODEL_LIBRARY_SNAPSHOT_KEY, JSON.stringify({
+      libraryScopeId,
+      writtenAt: writtenAt.toISOString(),
+      revision,
+      modelGroups: groups,
+    }));
     return true;
   } catch {
     return false;

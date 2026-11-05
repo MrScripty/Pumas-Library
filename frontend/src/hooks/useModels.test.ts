@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelCategory } from '../types/apps';
 import type { ModelLibraryUpdateNotification, ModelRecord } from '../types/api';
+import { APIError } from '../errors';
 import { MODEL_LIBRARY_SNAPSHOT_KEY } from '../utils/modelLibrarySnapshot';
 
 const {
@@ -148,10 +149,94 @@ describe('useModels', () => {
     expect(getModelsMock).toHaveBeenCalledTimes(1);
     expect(groupCatalogModelsMock).toHaveBeenCalledWith([makeRecord('alpha')]);
     expect(result.current.modelGroups).toEqual(grouped(['alpha']));
-    expect(JSON.parse(localStorage.getItem(MODEL_LIBRARY_SNAPSHOT_KEY) ?? 'null')).toEqual({
+    const stored = JSON.parse(localStorage.getItem(MODEL_LIBRARY_SNAPSHOT_KEY) ?? 'null') as Record<string, unknown>;
+    expect(stored).toEqual({
       libraryScopeId,
+      writtenAt: stored['writtenAt'],
+      revision: 1,
       modelGroups: grouped(['alpha']),
     });
+    expect(Number.isFinite(Date.parse(String(stored['writtenAt'])))).toBe(true);
+    expect(result.current.libraryDiagnostics).toEqual({
+      loadError: null, scanError: null, searchError: null, snapshotWrittenAt: null,
+    });
+  });
+
+  it('keeps live rows actionable while a refresh is in flight', async () => {
+    const { result } = renderModelsHook();
+    await flushMicrotasks();
+    expect(result.current.modelGroups).toEqual(grouped(['alpha']));
+
+    const refresh = createDeferred<{ success: boolean; models: Record<string, ModelRecord> }>();
+    getModelsMock.mockReturnValueOnce(refresh.promise);
+    let pending!: Promise<void>;
+    act(() => { pending = result.current.fetchModels(); });
+
+    expect(result.current.libraryLoadStatus).toBe('loading');
+    expect(result.current.modelGroups).toEqual(grouped(['alpha']));
+
+    await act(async () => {
+      refresh.resolve({ success: true, models: { alpha: makeRecord('alpha') } });
+      await pending;
+    });
+    expect(result.current.modelGroups).toEqual(grouped(['alpha']));
+    expect(JSON.parse(localStorage.getItem(MODEL_LIBRARY_SNAPSHOT_KEY) ?? 'null')).toMatchObject({ revision: 2 });
+  });
+
+  it('keeps the backend failure reason for the library view', async () => {
+    getModelsMock.mockRejectedValueOnce(new APIError('Library database is locked', 'get_models'));
+    const { result } = renderModelsHook();
+    await flushMicrotasks();
+
+    expect(result.current.libraryLoadStatus).toBe('unavailable');
+    expect(result.current.libraryDiagnostics.loadError).toBe('Library database is locked');
+
+    await act(async () => { await result.current.fetchModels(); });
+    expect(result.current.libraryDiagnostics.loadError).toBeNull();
+  });
+
+  it('reports a missing desktop backend as the load failure reason', async () => {
+    isApiAvailableMock.mockReturnValue(false);
+    const { result } = renderModelsHook();
+    await flushMicrotasks();
+
+    expect(getModelsMock).not.toHaveBeenCalled();
+    expect(result.current.libraryLoadStatus).toBe('unavailable');
+    expect(result.current.libraryDiagnostics.loadError).toBe('The desktop backend is not available.');
+  });
+
+  it('surfaces failed and unsuccessful shared-storage scans', async () => {
+    const { result } = renderModelsHook();
+    await flushMicrotasks();
+
+    scanSharedStorageMock.mockRejectedValueOnce(new APIError('Models root is not readable', 'scan_shared_storage'));
+    await act(async () => { await result.current.scanModels(); });
+    expect(result.current.libraryDiagnostics.scanError).toBe('Models root is not readable');
+
+    scanSharedStorageMock.mockResolvedValueOnce({ success: false, error: 'Scan already running', result: {} });
+    await act(async () => { await result.current.scanModels(); });
+    expect(result.current.libraryDiagnostics.scanError).toBe('Scan already running');
+    expect(getModelsMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await result.current.scanModels(); });
+    expect(result.current.libraryDiagnostics.scanError).toBeNull();
+    expect(getModelsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces a failed library search until the next search', async () => {
+    const { result } = renderModelsHook();
+    await flushMicrotasks();
+
+    searchModelsFTSMock.mockRejectedValueOnce(new APIError('Search index unavailable', 'search_models_fts'));
+    act(() => { result.current.searchModelsFTS('qwen'); });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+    });
+    expect(result.current.libraryDiagnostics.searchError).toBe('Search index unavailable');
+
+    act(() => { result.current.searchModelsFTS('qwen 2'); });
+    expect(result.current.libraryDiagnostics.searchError).toBeNull();
   });
 
   it('recovers loading status after a failed fetch without accepting an older failure', async () => {
@@ -179,7 +264,12 @@ describe('useModels', () => {
     }>();
     localStorage.setItem(
       MODEL_LIBRARY_SNAPSHOT_KEY,
-      JSON.stringify({ libraryScopeId, modelGroups: grouped(['cached-model']) })
+      JSON.stringify({
+        libraryScopeId,
+        writtenAt: '2026-11-04T09:00:00.000Z',
+        revision: 3,
+        modelGroups: grouped(['cached-model']),
+      })
     );
     getModelsMock.mockReturnValueOnce(pendingModels.promise);
 
@@ -187,6 +277,27 @@ describe('useModels', () => {
 
     expect(getModelsMock).toHaveBeenCalledTimes(1);
     expect(result.current.modelGroups).toEqual(cachedGroups(['cached-model']));
+    expect(result.current.libraryDiagnostics.snapshotWrittenAt).toBe('2026-11-04T09:00:00.000Z');
+  });
+
+  it('replaces cold-start cached rows and their provenance after the first load', async () => {
+    localStorage.setItem(
+      MODEL_LIBRARY_SNAPSHOT_KEY,
+      JSON.stringify({
+        libraryScopeId,
+        writtenAt: '2026-11-04T09:00:00.000Z',
+        revision: 3,
+        modelGroups: grouped(['alpha']),
+      })
+    );
+
+    const { result } = renderModelsHook();
+    expect(result.current.modelGroups).toEqual(cachedGroups(['alpha']));
+    await flushMicrotasks();
+
+    expect(result.current.modelGroups).toEqual(grouped(['alpha']));
+    expect(result.current.libraryDiagnostics.snapshotWrittenAt).toBeNull();
+    expect(JSON.parse(localStorage.getItem(MODEL_LIBRARY_SNAPSHOT_KEY) ?? 'null')).toMatchObject({ revision: 4 });
   });
 
   it('ignores malformed startup snapshots while revalidation is pending', () => {

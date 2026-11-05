@@ -1,23 +1,28 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "release_artifact_plan": "scripts/release/artifact-plan.json",
   "contract": {
     "status": "no_supported_host_bindings",
     "accepted_host_tuples": [],
     "admission_rule": "A future tuple requires a named real consumer, exact host runtime and native target, supported operation and lifecycle contract, deterministic cohort generation, and real-host package evidence."
   },
-  "removed_surfaces": [
+  "surface_statuses": {
+    "present_pending_removal": "The code still exists and is not supported. Its removal is decided but not carried out; nothing may depend on it.",
+    "claim_removed": "Only a documentation claim existed, and it has been removed."
+  },
+  "unsupported_surfaces": [
     {
       "id": "uniffi-python",
       "host": "python",
-      "former_generator": "uniffi-0.28",
-      "former_native_targets": [
+      "status": "present_pending_removal",
+      "generator": "uniffi-0.28",
+      "native_targets": [
         "x86_64-unknown-linux-gnu",
         "x86_64-pc-windows-msvc",
         "aarch64-apple-darwin"
       ],
       "reason": "no real host consumer or host-runtime evidence",
-      "remove": [
+      "planned_removal": [
         "adapter",
         "generator",
         "tests",
@@ -29,14 +34,15 @@
     {
       "id": "uniffi-kotlin",
       "host": "kotlin",
-      "former_generator": "uniffi-0.28",
-      "former_native_targets": [
+      "status": "present_pending_removal",
+      "generator": "uniffi-0.28",
+      "native_targets": [
         "x86_64-unknown-linux-gnu",
         "x86_64-pc-windows-msvc",
         "aarch64-apple-darwin"
       ],
       "reason": "no real host consumer or host-runtime evidence",
-      "remove": [
+      "planned_removal": [
         "adapter",
         "generator",
         "tests",
@@ -48,14 +54,15 @@
     {
       "id": "uniffi-swift",
       "host": "swift",
-      "former_generator": "uniffi-0.28",
-      "former_native_targets": [
+      "status": "present_pending_removal",
+      "generator": "uniffi-0.28",
+      "native_targets": [
         "x86_64-unknown-linux-gnu",
         "x86_64-pc-windows-msvc",
         "aarch64-apple-darwin"
       ],
       "reason": "no real host consumer or host-runtime evidence",
-      "remove": [
+      "planned_removal": [
         "adapter",
         "generator",
         "tests",
@@ -67,14 +74,15 @@
     {
       "id": "uniffi-ruby",
       "host": "ruby",
-      "former_generator": "uniffi-0.28",
-      "former_native_targets": [
+      "status": "present_pending_removal",
+      "generator": "uniffi-0.28",
+      "native_targets": [
         "x86_64-unknown-linux-gnu",
         "x86_64-pc-windows-msvc",
         "aarch64-apple-darwin"
       ],
       "reason": "no real host consumer or host-runtime evidence",
-      "remove": [
+      "planned_removal": [
         "adapter",
         "generator",
         "tests",
@@ -86,14 +94,15 @@
     {
       "id": "uniffi-csharp",
       "host": "csharp",
-      "former_generator": "uniffi-bindgen-cs-v0.9.0+v0.28.3",
-      "former_native_targets": [
+      "status": "present_pending_removal",
+      "generator": "uniffi-bindgen-cs-v0.9.0+v0.28.3",
+      "native_targets": [
         "x86_64-unknown-linux-gnu",
         "x86_64-pc-windows-msvc",
         "aarch64-apple-darwin"
       ],
       "reason": "no Pumas host consumer; the local smoke proves only a synchronous Linux development call",
-      "remove": [
+      "planned_removal": [
         "adapter",
         "generator",
         "tests",
@@ -105,10 +114,11 @@
     {
       "id": "rustler-elixir",
       "host": "elixir-erlang",
-      "former_generator": "rustler-0.34",
-      "former_native_targets": [],
+      "status": "present_pending_removal",
+      "generator": "rustler-0.34",
+      "native_targets": [],
       "reason": "no real host consumer, no BEAM host evidence, and no core Pumas interface",
-      "remove": [
+      "planned_removal": [
         "adapter",
         "generator",
         "tests",
@@ -120,10 +130,11 @@
     {
       "id": "uniffi-go",
       "host": "go",
-      "former_generator": null,
-      "former_native_targets": [],
+      "status": "claim_removed",
+      "generator": null,
+      "native_targets": [],
       "reason": "documentation claim only; no generator, artifact, consumer, or host evidence",
-      "remove": [
+      "removed": [
         "documentation"
       ]
     }

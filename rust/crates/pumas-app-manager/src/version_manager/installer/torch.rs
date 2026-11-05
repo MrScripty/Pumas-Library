@@ -1036,7 +1036,7 @@ pub(crate) fn torch_recipe_for_tag(tag: &str) -> Option<&'static TorchRuntimeRec
 }
 
 pub(crate) fn is_torch_runtime_release(release: &GitHubRelease) -> bool {
-    !release.prerelease && stable_torch_tag(&release.tag_name).is_some()
+    !release.is_prerelease() && stable_torch_tag(&release.tag_name).is_some()
 }
 
 fn stable_torch_tag(tag: &str) -> Option<&str> {

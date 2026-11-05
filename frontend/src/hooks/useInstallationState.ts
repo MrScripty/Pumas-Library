@@ -15,10 +15,6 @@ interface UseInstallationStateOptions {
 }
 
 interface UseInstallationStateResult {
-  showPreReleases: boolean;
-  setShowPreReleases: (value: boolean) => void;
-  showInstalled: boolean;
-  setShowInstalled: (value: boolean) => void;
   viewMode: 'list' | 'details';
   setViewMode: (value: 'list' | 'details') => void;
   showCompletedItems: boolean;
@@ -34,8 +30,6 @@ export function useInstallationState({
   installingVersion,
   progress,
 }: UseInstallationStateOptions): UseInstallationStateResult {
-  const [showPreReleases, setShowPreReleases] = useState(true);
-  const [showInstalled, setShowInstalled] = useState(true);
   const [viewMode, setViewMode] = useState<'list' | 'details'>('list');
   const [showCompletedItems, setShowCompletedItems] = useState(false);
   const [hoveredTag, setHoveredTag] = useState<string | null>(null);
@@ -74,10 +68,6 @@ export function useInstallationState({
   }, [viewMode, installingVersion, progress]);
 
   return {
-    showPreReleases,
-    setShowPreReleases,
-    showInstalled,
-    setShowInstalled,
     viewMode,
     setViewMode,
     showCompletedItems,

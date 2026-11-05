@@ -192,4 +192,27 @@ describe('useAvailableVersionState', () => {
 
     expect(getGithubCacheStatusMock).not.toHaveBeenCalled();
   });
+
+  it('reloads the listing once a background refresh of a stale cache finishes', async () => {
+    const status = { has_cache: true, is_valid: false, age_seconds: 7200, last_fetched: null, releases_count: 1 };
+    getGithubCacheStatusMock
+      .mockResolvedValueOnce({ ...status, is_fetching: true })
+      .mockResolvedValueOnce({ ...status, is_fetching: true })
+      .mockResolvedValue({ ...status, is_valid: true, is_fetching: false });
+    renderHook(() => useAvailableVersionState({
+      isEnabled: true,
+      resolvedAppId: 'ollama',
+      trackAvailableVersions: true,
+    }));
+
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(getAvailableVersionsMock).not.toHaveBeenCalled();
+    await act(async () => {
+      vi.advanceTimersByTime(4000);
+    });
+    expect(getAvailableVersionsMock).toHaveBeenCalledTimes(1);
+    expect(getAvailableVersionsMock).toHaveBeenCalledWith(false, 'ollama');
+  });
 });

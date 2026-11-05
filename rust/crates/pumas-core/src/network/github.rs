@@ -631,13 +631,17 @@ impl GitHubClient {
         }
     }
 
-    /// Get releases for a repository (offline-first strategy).
+    /// Get releases for a repository.
     ///
     /// Order of operations:
     /// 1. Check in-memory cache (instant)
     /// 2. Check disk cache if valid (fast path)
-    /// 3. Return stale disk cache if available (offline support)
-    /// 4. Network fetch only if force_refresh=true
+    /// 3. A stale disk cache waits for a network refresh, and is returned
+    ///    only if that refresh fails (offline support)
+    /// 4. No cache, or force_refresh=true: network fetch
+    ///
+    /// [`Self::get_releases_for_app_listing`] returns a stale cache without
+    /// waiting.
     pub async fn get_releases(
         &self,
         repo: &str,
@@ -712,17 +716,46 @@ impl GitHubClient {
         let releases = self
             .get_releases(app_id.github_repo(), force_refresh)
             .await?;
+        Ok(Self::releases_for_app(app_id, releases))
+    }
 
-        if app_id == AppId::LlamaCpp {
-            return Ok(Self::expand_llama_cpp_release_variants(releases));
+    /// Releases for listing an app's versions. Unlike
+    /// [`Self::get_releases_for_app`], a stale cache is returned at once and
+    /// refreshed in the background: [`Self::get_cache_status`] reports the
+    /// refresh as fetching, and the next call after it returns the new
+    /// listing. A missing cache or `force_refresh` still waits for GitHub.
+    pub async fn get_releases_for_app_listing(
+        self: &Arc<Self>,
+        app_id: AppId,
+        force_refresh: bool,
+    ) -> Result<Vec<GitHubRelease>> {
+        let repo = app_id.github_repo();
+        if !force_refresh && self.cache.get_memory(repo).is_none() {
+            if let Some(entry) = self.cache.get_disk_entry_async(repo).await {
+                if !self.cache.is_disk_cache_valid(&entry.snapshot)
+                    && !may_be_legacy_truncated(repo, &entry)
+                {
+                    let client = Arc::clone(self);
+                    tokio::spawn(async move {
+                        // Concurrent refreshes of one repository share a fetch.
+                        if let Err(error) = client.get_releases(repo, true).await {
+                            warn!("Background release refresh failed for {}: {}", repo, error);
+                        }
+                    });
+                    return Ok(Self::releases_for_app(app_id, entry.snapshot.releases));
+                }
+            }
         }
+        self.get_releases_for_app(app_id, force_refresh).await
+    }
 
-        let mut releases = releases;
-
+    fn releases_for_app(app_id: AppId, mut releases: Vec<GitHubRelease>) -> Vec<GitHubRelease> {
+        if app_id == AppId::LlamaCpp {
+            return Self::expand_llama_cpp_release_variants(releases);
+        }
         // Populate archive_size from platform-matched assets
         Self::populate_archive_sizes(&mut releases, app_id);
-
-        Ok(releases)
+        releases
     }
 
     /// Populate archive_size from platform-matched release assets.
@@ -892,7 +925,7 @@ impl GitHubClient {
         force_refresh: bool,
     ) -> Result<Option<GitHubRelease>> {
         let releases: Vec<GitHubRelease> = self.get_releases(repo, force_refresh).await?;
-        Ok(releases.into_iter().find(|r| !r.prerelease))
+        Ok(releases.into_iter().find(|r| !r.is_prerelease()))
     }
 
     /// Get a specific release by tag.
@@ -1539,6 +1572,80 @@ mod tests {
             assert!(may_be_legacy_truncated(repo, &entry));
             assert!(!client.get_cache_status(repo).await.is_valid);
         }
+    }
+
+    #[tokio::test]
+    async fn listing_returns_a_stale_cache_at_once_and_refreshes_it_in_the_background() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let root = TempDir::new().unwrap();
+        let client = Arc::new(
+            GitHubClient::with_config(
+                root.path().to_path_buf(),
+                Duration::from_secs(1),
+                format!("http://{address}/api"),
+            )
+            .unwrap(),
+        );
+        let repo = AppId::Ollama.github_repo();
+        let stale = GitHubRelease {
+            tag_name: "v0.1.0".into(),
+            ..github_release(vec![])
+        };
+        client.cache.set_disk(repo, &[stale]).unwrap();
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut chunk).await.unwrap();
+                assert_ne!(read, 0);
+                request.extend_from_slice(&chunk[..read]);
+            }
+            reply_rx.await.unwrap();
+            let body = r#"[{"tag_name":"v0.2.0","name":"v0.2.0","published_at":"2026-01-02T00:00:00Z","html_url":"https://github.com/ollama/ollama/releases/tag/v0.2.0","assets":[]}]"#;
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+
+        // GitHub has not answered, so this can only be the stale cache.
+        let listed = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.get_releases_for_app_listing(AppId::Ollama, false),
+        )
+        .await
+        .expect("a stale cache must not wait for GitHub")
+        .unwrap();
+        assert_eq!(listed[0].tag_name, "v0.1.0");
+        reply_tx.send(()).unwrap();
+        server.await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while client.cache.get_memory(repo).is_none() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("background refresh did not complete");
+        let refreshed = client
+            .get_releases_for_app_listing(AppId::Ollama, false)
+            .await
+            .unwrap();
+        assert_eq!(refreshed[0].tag_name, "v0.2.0");
     }
 
     fn create_test_client() -> (GitHubClient, TempDir) {

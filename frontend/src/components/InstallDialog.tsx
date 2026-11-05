@@ -24,7 +24,6 @@ import { TorchRuntimeProbePanel } from './TorchRuntimeProbePanel';
 import { api } from '../api/adapter';
 import type { TorchInstalledConfig } from '../types/torch-install';
 import {
-  filterVersions,
   getErrorMessage,
   getStickyFailure,
   isInstallationCancellation,
@@ -32,6 +31,7 @@ import {
   reportInstallationError,
 } from './InstallDialogHelpers';
 import { getLogger } from '../utils/logger';
+import { installableReleaseListing } from '../utils/releaseListing';
 import { APIError } from '../errors';
 
 const logger = getLogger('InstallDialog');
@@ -114,8 +114,6 @@ export function InstallDialog({
   });
 
   const {
-    showPreReleases,
-    showInstalled,
     viewMode,
     setViewMode,
     showCompletedItems,
@@ -168,13 +166,7 @@ export function InstallDialog({
     return () => clearTimeout(timer);
   }, [progress, setShowCompletedItems, setViewMode]);
 
-  const filteredVersions = filterVersions(
-    availableVersions,
-    installedVersions,
-    showPreReleases,
-    showInstalled,
-    appId === 'torch'
-  );
+  const filteredVersions = installableReleaseListing(availableVersions, installedVersions);
   const stickyFailure = getStickyFailure(progress, failedInstall);
 
   const handleInstall = async (tag: string, previewId?: string) => {

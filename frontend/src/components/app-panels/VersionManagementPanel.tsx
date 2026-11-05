@@ -6,6 +6,7 @@ import { TorchRuntimeProbePanel } from '../TorchRuntimeProbePanel';
 import type { createTorchTrialLifecycleStore } from '../TorchTrialLifecycleStore';
 import type { AppVersionState } from '../../utils/appVersionState';
 import { IconButton } from '../ui';
+import { latestStableRelease } from '../../utils/releaseListing';
 
 interface VersionManagementPanelProps {
   appDisplayName: string;
@@ -36,7 +37,7 @@ export function VersionManagementPanel({
     setInspectedTorchTag(null);
   }, [versions.activeVersion]);
 
-  const latestVersion = versions.availableVersions[0]?.tagName ?? null;
+  const latestVersion = latestStableRelease(versions.availableVersions)?.tagName ?? null;
   const hasNewVersion = useMemo(() => {
     if (!latestVersion) return false;
     return !versions.installedVersions.includes(latestVersion);

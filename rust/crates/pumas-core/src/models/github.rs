@@ -39,6 +39,17 @@ pub struct GitHubRelease {
     pub dependencies_size: Option<u64>,
 }
 
+impl GitHubRelease {
+    /// Whether this is a pre-release: the publisher flagged it, or its tag is
+    /// a semantic version with a pre-release part (`v0.21.3-rc0`). Some
+    /// projects publish release candidates without the flag.
+    pub fn is_prerelease(&self) -> bool {
+        self.prerelease
+            || semver::Version::parse(self.tag_name.strip_prefix('v').unwrap_or(&self.tag_name))
+                .is_ok_and(|version| !version.pre.is_empty())
+    }
+}
+
 /// Version release info as returned to frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,11 +87,12 @@ pub struct VersionReleaseAsset {
 
 impl From<GitHubRelease> for VersionReleaseInfo {
     fn from(release: GitHubRelease) -> Self {
+        let prerelease = release.is_prerelease();
         Self {
             tag_name: release.tag_name,
             name: release.name,
             published_at: release.published_at,
-            prerelease: release.prerelease,
+            prerelease,
             body: release.body,
             html_url: release.html_url,
             assets: release
@@ -173,9 +185,31 @@ mod tests {
             dependencies_size: Some(1024),
         };
 
-        let info: VersionReleaseInfo = release.into();
+        let info: VersionReleaseInfo = release.clone().into();
         assert_eq!(info.tag_name, "v1.0.0");
         assert_eq!(info.assets.len(), 1);
         assert_eq!(info.total_size, Some(2048));
+        assert!(!info.prerelease);
+
+        let candidate = GitHubRelease {
+            tag_name: "v0.21.3-rc0".into(),
+            ..release.clone()
+        };
+        assert!(candidate.is_prerelease());
+        assert!(VersionReleaseInfo::from(candidate).prerelease);
+        for (tag, flagged, expected) in [
+            ("0.21.3-rc.1", false, true),
+            ("v1.0.0+build.5", false, false),
+            ("b12129", false, false),
+            ("b12129", true, true),
+            ("v2.9.1", true, true),
+        ] {
+            let release = GitHubRelease {
+                tag_name: tag.into(),
+                prerelease: flagged,
+                ..release.clone()
+            };
+            assert_eq!(release.is_prerelease(), expected, "{tag}");
+        }
     }
 }

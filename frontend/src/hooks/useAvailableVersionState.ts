@@ -104,11 +104,20 @@ export function useAvailableVersionState({
       return () => {};
     }
 
+    let wasFetching = false;
     const checkBackgroundFetch = async () => {
       try {
         if (!isAPIAvailable()) return;
         const status = await api.get_github_cache_status(resolvedAppId);
         setCacheStatus(status);
+        // A stale listing is served at once and refreshed in the background;
+        // reload it when that refresh finishes.
+        if (wasFetching && !status.is_fetching) {
+          void fetchAvailableVersionsRef.current(false).catch(() => {
+            // fetchAvailableVersions logs its own failures.
+          });
+        }
+        wasFetching = status.is_fetching;
 
         if (status.is_fetching && !status.has_cache) {
           logger.info('Background GitHub fetch in progress (first-time fetch)');

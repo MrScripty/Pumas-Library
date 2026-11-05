@@ -1,5 +1,6 @@
 import React from 'react';
-import { ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink as ExternalLinkIcon } from 'lucide-react';
+import { ExternalLink } from './ui/ExternalLink';
 
 interface ModelMetadataGridProps {
   metadata: Record<string, unknown>;
@@ -125,15 +126,13 @@ export function ModelMetadataGrid({
                   title={formatMetadataValue(key, value)}
                 >
                   {urlValue ? (
-                    <a
+                    <ExternalLink
                       href={urlValue}
-                      target="_blank"
-                      rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 text-[hsl(var(--accent-link))] hover:underline"
                     >
                       {formatMetadataValue(key, value)}
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
+                      <ExternalLinkIcon className="h-3 w-3" />
+                    </ExternalLink>
                   ) : (
                     formatMetadataValue(key, value)
                   )}

@@ -1580,7 +1580,7 @@ test('main delegates first visibility to one current-document presentation owner
   );
   assert.match(
     MAIN_SOURCE,
-    /ipcMain\.handle\([\s\S]*?LAUNCHER_ROOT_PRESENTATION_COMMITTED_CHANNEL[\s\S]*?event\.sender\s*===\s*targetWindow\.webContents[\s\S]*?event\.senderFrame\s*===\s*targetWindow\.webContents\.mainFrame/
+    /ipcMain\.handle\([\s\S]*?LAUNCHER_ROOT_PRESENTATION_COMMITTED_CHANNEL[\s\S]*?currentTopDocument:\s*isApplicationSender\(event\)/
   );
   assert.match(MAIN_SOURCE, /handleBrowserReady[\s\S]*?\.browserReady\(\)/);
   assert.match(MAIN_SOURCE, /\.on\('ready-to-show',\s*handleBrowserReady\)/);

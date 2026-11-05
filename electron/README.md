@@ -29,6 +29,26 @@ Node access or add a generic IPC/RPC escape hatch. The executable RPC method
 and request registry is `src/rpc-method-registry.ts`; `src/ipc-validation.ts`
 applies it before dispatch.
 
+The preload exposes the whole desktop bridge to any document it runs in, so
+`src/window-security.ts` keeps every renderer on the bundled application
+(installed for each `web-contents-created`, not only the main window):
+
+- child windows are always denied; an http/https URL is handed to the system
+  browser after `validateExternalUrl`, anything else is refused with a logged
+  reason;
+- `will-navigate` and `will-redirect` are denied unless the target is the
+  bundled entry document (or, unpackaged with `--dev`, the dev-server origin);
+  webview attachment is denied;
+- browser permissions and device access are denied, except
+  `clipboard-sanitized-write` for the application document (copy buttons);
+- every `ipcMain` handler checks that the sender is the main window's top frame
+  showing an application document; a refused `api:call` never reaches the
+  backend.
+
+The renderer opens external URLs only through `ExternalLink` /
+`openExternalUrl` (`frontend/src/components/ui/`), which call `api.open_url`.
+Frontend lint forbids `target` on links and `window.open`.
+
 TypeScript interfaces are compile-time projections, not validation of runtime
 messages. A contract change must update the receiver decoder, producer,
 consumer, and negative tests together. Treat sidecar logs as sensitive: they

@@ -147,7 +147,7 @@ test('release builds and frontend artifact upload are guarded inside shared jobs
   }
   assert.match(
     frontend,
-    new RegExp(`uses: actions/upload-artifact@v7\\.0\\.1\\n        if: ${escapedVersionTagGuard}`),
+    new RegExp(`uses: actions/upload-artifact@[0-9a-f]{40} # v7\\.0\\.1\\n        if: ${escapedVersionTagGuard}`),
   );
 });
 

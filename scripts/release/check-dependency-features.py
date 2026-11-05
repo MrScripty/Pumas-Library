@@ -12,12 +12,15 @@ TARGETS = ("x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-pc-window
 FORBIDDEN_FEATURES = {
     "ort": {"download-binaries", "fetch-models", "copy-dylibs", "tls-native", "tls-rustls"},
     "ort-sys": {"download-binaries", "copy-dylibs", "tls-native", "tls-rustls"},
-    "nix": {"fs"},  # FIFO helper is a Unix dev-dependency feature only.
+    "nix": {"fs"},  # The FIFO helper needs it only as a Unix dev-dependency.
     "sysinfo": {"component", "network", "user"},
     "zip": {"aes-crypto", "deflate-zopfli"},
     "tracing-subscriber": {"json"},
     "axum": {"form", "tower-log"},
 }
+# Features a target's own dependency requires: zip 9 enables nix `fs` on macOS
+# and the BSDs for its permission handling.
+TARGET_REQUIRED_FEATURES = {"aarch64-apple-darwin": {"nix": {"fs"}}}
 
 
 def check_ort_features(tree, scope):
@@ -94,7 +97,8 @@ def check(s3=False):
                 enabled = set(features.removesuffix(" (*)").split(","))
                 if not fixture and name.startswith("pumas-") and "test-support" in enabled:
                     raise RuntimeError(f"{target} {package}: product graph enabled {name} fixtures")
-                excess = enabled & FORBIDDEN_FEATURES.get(name, set())
+                required = TARGET_REQUIRED_FEATURES.get(target, {}).get(name, set())
+                excess = enabled & (FORBIDDEN_FEATURES.get(name, set()) - required)
                 if excess:
                     raise RuntimeError(f"{target} {package}: unnecessary {name} features: {excess}")
             forbidden = {"lnk"}

@@ -11,11 +11,5 @@
     "check:dependency-ownership": "node scripts/dev/check-workspace-dependency-ownership.mjs",
     "check:release-versions": "node scripts/dev/check-release-version-alignment.mjs",
     "test:launcher": "node --test scripts/launcher/*.test.mjs"
-  },
-  "overrides": {
-    "minimatch@^3.1.2": "3.1.5",
-    "minimatch@^10.0.3": "10.2.5",
-    "brace-expansion@^1.1.7": "1.1.18",
-    "@isaacs/brace-expansion@^5.0.0": "5.0.1"
   }
 }

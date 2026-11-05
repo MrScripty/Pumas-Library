@@ -5,3 +5,8 @@ allowBuilds:
   electron: true
   electron-winstaller: true
   esbuild: true
+# pnpm reads overrides here, not from package.json. minimatch below 11.0.1 has
+# GHSA-g3hv-75wg-m249; these build and lint tools pin older majors.
+overrides:
+  minimatch@^9.0.3: 11.0.4
+  minimatch@^10.2.2: 11.0.4

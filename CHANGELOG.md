@@ -115,6 +115,14 @@ downloads and known limitations.
 - A desktop update that fails validation is no longer dropped silently, which
   had left views stale; the reason is reported and the view reloads.
 
+### Security
+
+- Managed runtime ZIP archives are read with `zip` 9.4, which fixes
+  GHSA advisories for symlink-target exhaustion, AES HMAC bypass and
+  dual-header parser differentials. An Ollama ZIP entry whose path would leave
+  the install directory now rejects the archive instead of being written
+  outside it.
+
 ## [0.7.0] - 2026-09-17
 
 See the [0.7.0 release](https://github.com/MrScripty/Pumas-Library/releases/tag/v0.7.0)

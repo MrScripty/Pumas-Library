@@ -58,7 +58,7 @@ fs2 = "0.4"
 
 # Archive extraction
 # Preserve archive decoders; installation does not encrypt or produce ZIPs.
-zip = { version = "2", default-features = false, features = ["flate2", "deflate-flate2", "bzip2", "deflate64", "lzma", "zstd", "xz"] }
+zip = { version = "9.4", default-features = false, features = ["deflate-flate2", "bzip2", "deflate64", "lzma", "zstd", "xz"] }
 flate2 = "1"
 tar = "0.4"
 zstd = "0.13"

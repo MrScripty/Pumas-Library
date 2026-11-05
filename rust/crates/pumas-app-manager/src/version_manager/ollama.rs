@@ -612,54 +612,7 @@ impl OllamaVersionManager {
     }
 
     fn extract_zip(archive_path: &Path, dest_dir: &Path) -> Result<()> {
-        use std::io::Read;
-        let file = std::fs::File::open(archive_path).map_err(|e| PumasError::Io {
-            message: format!("Failed to open archive: {}", e),
-            path: Some(archive_path.to_path_buf()),
-            source: Some(e),
-        })?;
-
-        let mut archive =
-            zip::ZipArchive::new(file).map_err(|e| PumasError::InstallationFailed {
-                message: format!("Failed to read zip: {}", e),
-            })?;
-
-        for i in 0..archive.len() {
-            let mut file = archive
-                .by_index(i)
-                .map_err(|e| PumasError::InstallationFailed {
-                    message: format!("Failed to read zip entry: {}", e),
-                })?;
-
-            let outpath = dest_dir.join(file.name());
-
-            if file.name().ends_with('/') {
-                std::fs::create_dir_all(&outpath).ok();
-            } else {
-                if let Some(parent) = outpath.parent() {
-                    std::fs::create_dir_all(parent).ok();
-                }
-                let mut outfile = std::fs::File::create(&outpath).map_err(|e| PumasError::Io {
-                    message: format!("Failed to create file: {}", e),
-                    path: Some(outpath.clone()),
-                    source: Some(e),
-                })?;
-                let mut contents = Vec::new();
-                file.read_to_end(&mut contents)
-                    .map_err(|e| PumasError::Io {
-                        message: format!("Failed to read from archive: {}", e),
-                        path: None,
-                        source: Some(e),
-                    })?;
-                std::io::Write::write_all(&mut outfile, &contents).map_err(|e| PumasError::Io {
-                    message: format!("Failed to write file: {}", e),
-                    path: Some(outpath),
-                    source: Some(e),
-                })?;
-            }
-        }
-
-        Ok(())
+        super::installer::VersionInstaller::extract_zip(archive_path, dest_dir)
     }
 
     fn extract_tarball(archive_path: &Path, dest_dir: &Path) -> Result<()> {

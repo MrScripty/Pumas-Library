@@ -896,6 +896,9 @@ fn read_downloads_json_file(file: &mut File, path: &Path) -> Result<serde_json::
 
 trait LegacyPublicationAdapter {
     fn rename(&self, source: &Path, target: &Path) -> std::io::Result<()>;
+
+    /// Make the renames in `parent` durable.
+    fn sync_parent(&self, parent: &Path) -> std::io::Result<()>;
 }
 
 struct OsLegacyPublicationAdapter;
@@ -903,6 +906,21 @@ struct OsLegacyPublicationAdapter;
 impl LegacyPublicationAdapter for OsLegacyPublicationAdapter {
     fn rename(&self, source: &Path, target: &Path) -> std::io::Result<()> {
         fs::rename(source, target)
+    }
+
+    fn sync_parent(&self, parent: &Path) -> std::io::Result<()> {
+        #[cfg(any(unix, windows))]
+        {
+            let directory = crate::platform::capability_fs::open_directory(parent)?;
+            crate::platform::capability_fs::sync_directory(&directory)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            // No directory synchronization exists on this target; the file
+            // data itself is still synced before the rename.
+            let _ = parent;
+            Ok(())
+        }
     }
 }
 
@@ -930,8 +948,17 @@ impl Drop for LegacyTempFileCleanup {
 }
 
 fn create_owned_legacy_staging(path: &Path) -> Result<(PathBuf, File, LegacyTempFileCleanup)> {
+    create_owned_legacy_staging_with_extension(path, "json")
+}
+
+/// Exclusively create `<stem>.<extension>.<uuid>.<attempt>.tmp` beside `path`.
+fn create_owned_legacy_staging_with_extension(
+    path: &Path,
+    extension: &str,
+) -> Result<(PathBuf, File, LegacyTempFileCleanup)> {
     for attempt in 0..16_u8 {
-        let temp_path = path.with_extension(format!("json.{}.{}.tmp", Uuid::new_v4(), attempt));
+        let temp_path =
+            path.with_extension(format!("{extension}.{}.{}.tmp", Uuid::new_v4(), attempt));
         match OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -965,20 +992,85 @@ fn create_owned_legacy_staging(path: &Path) -> Result<(PathBuf, File, LegacyTemp
     })
 }
 
-/// Write data to a JSON file atomically.
+/// Request file-data synchronization for a staged file.
+#[allow(unsafe_code)]
+fn sync_staged_file(file: &File, path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        // SAFETY: file.as_raw_fd() is a valid descriptor owned by `file`
+        // for the duration of this call. fsync does not retain the
+        // descriptor after returning.
+        let sync_result = unsafe { libc::fsync(file.as_raw_fd()) };
+        if sync_result != 0 {
+            return Err(PumasError::Io {
+                message: format!("Failed to sync temp file {}", path.display()),
+                path: Some(path.to_path_buf()),
+                source: Some(std::io::Error::last_os_error()),
+            });
+        }
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    {
+        file.sync_all().map_err(|e| PumasError::Io {
+            message: format!("Failed to sync temp file {}", path.display()),
+            path: Some(path.to_path_buf()),
+            source: Some(e),
+        })
+    }
+}
+
+/// Replace `<path>.bak` with a synced copy of the current `path`, through
+/// its own staged rename, so a crash never leaves a torn backup.
+fn write_synced_backup(path: &Path, adapter: &impl LegacyPublicationAdapter) -> Result<PathBuf> {
+    let backup_path = path.with_extension("json.bak");
+    let (staging_path, mut staging, mut cleanup) =
+        create_owned_legacy_staging_with_extension(&backup_path, "bak")?;
+    let io_error = |message: String, source: std::io::Error| PumasError::Io {
+        message,
+        path: Some(path.to_path_buf()),
+        source: Some(source),
+    };
+    let mut current = File::open(path)
+        .map_err(|e| io_error(format!("Failed to open {} for backup", path.display()), e))?;
+    std::io::copy(&mut current, &mut staging).map_err(|e| {
+        io_error(
+            format!("Failed to copy {} to its backup", path.display()),
+            e,
+        )
+    })?;
+    staging
+        .flush()
+        .map_err(|e| io_error(format!("Failed to flush backup of {}", path.display()), e))?;
+    sync_staged_file(&staging, &staging_path)?;
+    drop(staging);
+    adapter.rename(&staging_path, &backup_path).map_err(|e| {
+        io_error(
+            format!("Failed to publish backup {}", backup_path.display()),
+            e,
+        )
+    })?;
+    cleanup.disarm();
+    Ok(backup_path)
+}
+
+/// Write data to a JSON file atomically and durably.
 ///
 /// This function:
 /// 1. Serializes data to an exclusively owned, collision-resistant staging file
 /// 2. Validates the JSON by re-parsing
 /// 3. Calls fsync before replacement
-/// 4. Optionally creates a .bak backup
+/// 4. Optionally replaces the .bak backup with a synced copy of the current file
 /// 5. Atomically renames temp file to target
-#[allow(unsafe_code)]
+/// 6. Syncs the parent directory so the renames survive a crash
+///
+/// A failure in step 6 is returned even though the new content is already
+/// visible, because its durability is then unconfirmed.
 pub fn atomic_write_json<T: Serialize>(path: &Path, data: &T, keep_backup: bool) -> Result<()> {
     write_json_and_rename(path, data, keep_backup, &OsLegacyPublicationAdapter)
 }
 
-#[allow(unsafe_code)]
 fn write_json_and_rename<T: Serialize>(
     path: &Path,
     data: &T,
@@ -1027,40 +1119,16 @@ fn write_json_and_rename<T: Serialize>(
         })?;
 
         // Request file-data synchronization before replacement.
-        #[cfg(unix)]
-        {
-            // SAFETY: file.as_raw_fd() is a valid descriptor owned by `file`
-            // for the duration of this call. fsync does not retain the
-            // descriptor after returning.
-            let sync_result = unsafe { libc::fsync(file.as_raw_fd()) };
-            if sync_result != 0 {
-                return Err(PumasError::Io {
-                    message: format!("Failed to sync temp file {}", temp_path.display()),
-                    path: Some(temp_path.clone()),
-                    source: Some(std::io::Error::last_os_error()),
-                });
-            }
-        }
-
-        #[cfg(not(unix))]
-        {
-            file.sync_all().map_err(|e| PumasError::Io {
-                message: format!("Failed to sync temp file {}", temp_path.display()),
-                path: Some(temp_path.clone()),
-                source: Some(e),
-            })?;
-        }
+        sync_staged_file(&file, &temp_path)?;
     }
     drop(file);
 
     // Create backup if requested and target exists
     if keep_backup && path.exists() {
-        let backup_path = path.with_extension("json.bak");
-        if let Err(e) = fs::copy(path, &backup_path) {
-            warn!("Failed to create backup {}: {}", backup_path.display(), e);
+        match write_synced_backup(path, adapter) {
+            Ok(backup_path) => debug!("Created backup: {}", backup_path.display()),
             // Continue anyway - backup failure is not fatal
-        } else {
-            debug!("Created backup: {}", backup_path.display());
+            Err(e) => warn!("Failed to create backup of {}: {}", path.display(), e),
         }
     }
 
@@ -1077,6 +1145,17 @@ fn write_json_and_rename<T: Serialize>(
             source: Some(e),
         })?;
     temp_cleanup.disarm();
+
+    let parent = publication_parent(path);
+    adapter.sync_parent(parent).map_err(|e| PumasError::Io {
+        message: format!(
+            "Wrote {} but could not sync directory {}; the change may not survive a crash",
+            path.display(),
+            parent.display()
+        ),
+        path: Some(parent.to_path_buf()),
+        source: Some(e),
+    })?;
 
     debug!("Atomically wrote {}", path.display());
     Ok(())
@@ -1297,6 +1376,95 @@ mod tests {
 
         atomic_write_json(&path, &data, false).unwrap();
         assert!(path.exists());
+    }
+
+    /// Records the legacy writer's renames and directory syncs in order.
+    #[derive(Default)]
+    struct RecordingLegacyAdapter {
+        fail_parent_sync: bool,
+        steps: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl LegacyPublicationAdapter for RecordingLegacyAdapter {
+        fn rename(&self, source: &Path, target: &Path) -> io::Result<()> {
+            OsLegacyPublicationAdapter.rename(source, target)?;
+            let name = target.file_name().unwrap().to_string_lossy();
+            self.steps.borrow_mut().push(format!("rename {name}"));
+            Ok(())
+        }
+
+        fn sync_parent(&self, parent: &Path) -> io::Result<()> {
+            self.steps.borrow_mut().push("sync parent".to_string());
+            if self.fail_parent_sync {
+                Err(io::Error::other("injected parent-sync failure"))
+            } else {
+                OsLegacyPublicationAdapter.sync_parent(parent)
+            }
+        }
+    }
+
+    fn legacy_temp_files(directory: &Path) -> Vec<PathBuf> {
+        fs::read_dir(directory)
+            .unwrap()
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| path.extension().is_some_and(|extension| extension == "tmp"))
+            .collect()
+    }
+
+    #[test]
+    fn legacy_write_publishes_a_staged_backup_then_syncs_the_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("test.json");
+        let first = TestData {
+            name: "first".to_string(),
+            value: 1,
+        };
+        let second = TestData {
+            name: "second".to_string(),
+            value: 2,
+        };
+        atomic_write_json(&path, &first, true).unwrap();
+        // A stale backup is replaced, not appended to or left torn.
+        fs::write(path.with_extension("json.bak"), b"stale backup").unwrap();
+        let adapter = RecordingLegacyAdapter::default();
+
+        write_json_and_rename(&path, &second, true, &adapter).unwrap();
+
+        assert_eq!(
+            *adapter.steps.borrow(),
+            ["rename test.json.bak", "rename test.json", "sync parent"]
+        );
+        assert_eq!(
+            atomic_read_json::<TestData>(&path.with_extension("json.bak")).unwrap(),
+            Some(first)
+        );
+        assert_eq!(atomic_read_json::<TestData>(&path).unwrap(), Some(second));
+        assert!(legacy_temp_files(temp_dir.path()).is_empty());
+    }
+
+    #[test]
+    fn legacy_write_reports_an_unsynced_directory_as_unconfirmed_durability() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("test.json");
+        let adapter = RecordingLegacyAdapter {
+            fail_parent_sync: true,
+            ..Default::default()
+        };
+        let data = TestData {
+            name: "visible".to_string(),
+            value: 3,
+        };
+
+        let error = write_json_and_rename(&path, &data, false, &adapter).unwrap_err();
+
+        assert!(
+            error.to_string().contains("may not survive a crash"),
+            "{error}"
+        );
+        // The rename already happened: the new content is visible, and no
+        // staging file is left behind.
+        assert_eq!(atomic_read_json::<TestData>(&path).unwrap(), Some(data));
+        assert!(legacy_temp_files(temp_dir.path()).is_empty());
     }
 
     #[cfg(any(unix, windows))]

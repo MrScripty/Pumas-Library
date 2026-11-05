@@ -503,6 +503,10 @@ pub enum TorchImageError {
     ModelUnavailable,
     /// The slot model does not support image generation.
     UnsupportedModel,
+    /// The requested dimensions exceed the adapter's supported maximum,
+    /// refused at admission before any generation. Carries that maximum in
+    /// output pixels when the provider reports it.
+    DimensionsExceedLimit { max_pixels: Option<u64> },
     /// The sidecar ran out of GPU memory.
     OutOfMemory,
     /// Generation was cancelled (client disconnect or explicit stop).
@@ -522,6 +526,7 @@ impl TorchImageError {
             Self::RuntimeBusy => "runtime_busy",
             Self::ModelUnavailable => "model_unavailable",
             Self::UnsupportedModel => "unsupported_model",
+            Self::DimensionsExceedLimit { .. } => "dimensions_exceed_limit",
             Self::OutOfMemory => "out_of_memory",
             Self::Cancelled => "cancelled",
             Self::BackendFailure => "backend_failure",
@@ -565,18 +570,25 @@ struct ImageSuccessBody {
 /// therefore decoded as an unclassified backend failure, never as proof that
 /// work stopped on time.
 fn decode_image_error(body: &[u8]) -> TorchImageError {
-    let code = serde_json::from_slice::<serde_json::Value>(body)
+    let detail = serde_json::from_slice::<serde_json::Value>(body)
         .ok()
-        .and_then(|value| {
-            value
-                .pointer("/detail/code")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        });
-    match code.as_deref() {
+        .and_then(|value| value.get("detail").cloned());
+    let code = detail
+        .as_ref()
+        .and_then(|detail| detail.get("code"))
+        .and_then(serde_json::Value::as_str);
+    match code {
         Some("runtime_busy") => TorchImageError::RuntimeBusy,
         Some("model_unavailable") => TorchImageError::ModelUnavailable,
         Some("unsupported_model") => TorchImageError::UnsupportedModel,
+        // Only the typed limit crosses; the provider's message text does not.
+        Some("dimensions_exceed_limit") => TorchImageError::DimensionsExceedLimit {
+            max_pixels: detail
+                .as_ref()
+                .and_then(|detail| detail.get("max_pixels"))
+                .and_then(serde_json::Value::as_u64)
+                .filter(|max_pixels| *max_pixels > 0),
+        },
         Some("out_of_memory") => TorchImageError::OutOfMemory,
         Some("cancelled") => TorchImageError::Cancelled,
         Some("invalid_backend_result") | Some("invalid_backend_response") => {
@@ -1559,6 +1571,16 @@ mod tests {
             (
                 r#"{"detail":{"code":"invalid_backend_response"}}"#,
                 TorchImageError::InvalidBackendResult,
+            ),
+            (
+                r#"{"detail":{"code":"dimensions_exceed_limit","message":"/srv/x","max_pixels":4194304}}"#,
+                TorchImageError::DimensionsExceedLimit {
+                    max_pixels: Some(4_194_304),
+                },
+            ),
+            (
+                r#"{"detail":{"code":"dimensions_exceed_limit","max_pixels":"big"}}"#,
+                TorchImageError::DimensionsExceedLimit { max_pixels: None },
             ),
         ] {
             assert_eq!(decode_image_error(body.as_bytes()), expected, "{body}");

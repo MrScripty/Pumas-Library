@@ -455,6 +455,7 @@ class ImageAdmissionTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 400)
         self.assertEqual(caught.exception.detail["code"], "dimensions_exceed_limit")
         self.assertIn(str(2048 * 2048), caught.exception.detail["message"])
+        self.assertEqual(caught.exception.detail["max_pixels"], 2048 * 2048)
 
     def test_pixel_budget_follows_free_device_memory(self):
         one_gib = 1024 * 1024 * 1024

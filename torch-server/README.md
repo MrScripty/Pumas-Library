@@ -34,7 +34,8 @@ automatically replayed. See the shared
 Image admission happens under the device lease, before any denoising. Each
 adapter declares the largest output its recipe supports (`max_pixels`) and its
 peak device memory per output pixel. A request above the adapter's limit is
-refused with `400 dimensions_exceed_limit`; a request whose pixels exceed free
+refused with `400 dimensions_exceed_limit` (its detail carries
+`max_pixels`); a request whose pixels exceed free
 GPU memory (`torch.cuda.mem_get_info`) divided by that per-pixel estimate is
 refused with `507 out_of_memory`. Both reasons name the limit and the value.
 
@@ -173,10 +174,11 @@ argv:
   it, never follows redirects, and bypasses proxies for loopback sidecars.
   The managed token replaces any `PUMAS_TORCH_API_TOKEN` in the user's own
   environment.
-- `PUMAS_TORCH_MODEL_ROOTS`: the library's `shared-resources/models`
-  directory. Model and component paths outside it are refused. A model
-  registered by external reference outside that directory therefore cannot
-  be loaded by Torch.
+- `PUMAS_TORCH_MODEL_ROOTS`: the library's model root plus the directory of
+  every external-reference model the library knows about at launch. Model and
+  component paths outside them are refused. The set is read at launch: a model
+  imported by external reference while Torch runs is refused, with that
+  reason, until the Torch profile is restarted.
 - `PUMAS_TORCH_PARENT_PID`: the launching process. A watchdog thread polls its
   identity (pid plus start time) once a second; when the launcher is gone the
   server stops itself, then exits forcibly if in-flight workers have not

@@ -28,7 +28,13 @@ maintainer explicitly announces otherwise.
   a future remote node interface needs a separate authenticated/encrypted contract.
 - The Torch sidecar is loopback-only by default. Non-loopback use requires both
   `PUMAS_TORCH_ALLOW_LAN=1` and `PUMAS_TORCH_API_TOKEN`; all routes except
-  `/health` then require the token.
+  `/health` then require the token. A Pumas-managed launch always sets a random
+  token, generated once per backend process and passed only through the
+  environment, so every managed sidecar refuses requests without it. The
+  launch also confines model loads to the library root and the directories of
+  known external-reference models (`PUMAS_TORCH_MODEL_ROOTS`), and passes the
+  backend's pid so the sidecar exits when the backend is gone. See the
+  [Torch provider protocol](contracts/torch-provider-protocol.md).
 - Model paths, import roots, URLs, archives, and generated runtime commands are
   privileged inputs and must be validated at their receiving boundary.
 

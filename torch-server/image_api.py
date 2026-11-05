@@ -54,8 +54,9 @@ class ImageRequest(BaseModel):
         return value
 
 
-def failure(status: int, code: str, message: str):
-    return HTTPException(status_code=status, detail={"code": code, "message": message})
+def failure(status: int, code: str, message: str, **facts):
+    """A refusal with a stable code, a caller-safe reason and typed facts."""
+    return HTTPException(status_code=status, detail={"code": code, "message": message, **facts})
 
 
 def _free_device_memory(device) -> int | None:
@@ -83,6 +84,7 @@ def admit_dimensions(adapter, width: int, height: int) -> None:
             400,
             "dimensions_exceed_limit",
             f"{width}x{height} is {pixels} pixels; this model supports at most {max_pixels} pixels",
+            max_pixels=max_pixels,
         )
     bytes_per_pixel = getattr(adapter, "peak_bytes_per_pixel", None)
     free_bytes = _free_device_memory(getattr(adapter, "device", None))

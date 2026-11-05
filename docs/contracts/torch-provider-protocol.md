@@ -39,6 +39,25 @@ Current protocol: `3`.
 - `capabilities`: additive list of provider abilities. Unknown entries are
   ignored by the gateway; absence of an entry only withholds that ability.
 
+## Authentication
+
+Every route except `GET /health` requires the header
+`x-pumas-torch-token: <token>` (a bearer `Authorization` header is also
+accepted). The Pumas launcher generates the token once per backend process,
+never persists it, and passes it to the sidecar only through
+`PUMAS_TORCH_API_TOKEN` in the environment, never argv. Every sidecar launched
+by that backend process shares it, so a sidecar left running by an earlier
+backend refuses the new one. A missing or wrong token is refused with
+`401` and `detail: {"code": "unauthorized", "message": ...}`. `TorchClient`
+sends the token on every request, never follows redirects, and bypasses
+proxies for loopback sidecars.
+
+The launcher also sets `PUMAS_TORCH_MODEL_ROOTS` (the library root plus the
+directory of each external-reference model known at launch; load paths
+outside them are refused, and a model imported by external reference after
+launch needs a Torch restart) and `PUMAS_TORCH_PARENT_PID` (the sidecar exits
+once that process is gone).
+
 ## Capability semantics
 
 - `image_generation` advertises that the provider process can execute image
@@ -83,6 +102,13 @@ A successful result is:
 }
 ```
 
+Dimensions are admitted before any generation, under the device lease. A
+request above the adapter's supported maximum is refused with
+`dimensions_exceed_limit`, whose detail also carries `max_pixels`. A request
+whose pixels exceed the budget derived from free GPU memory
+(`torch.cuda.mem_get_info`) and the adapter's per-pixel memory estimate is
+refused with `out_of_memory`.
+
 The PNG must match the requested dimensions and is limited to 8 MiB.
 `steps`, `guidance`, and `memory_policy` are adapter-reported values the
 gateway relays into public metadata unchanged. These six canonical fields are
@@ -91,15 +117,19 @@ required. Unknown additive private result fields are accepted within the
 
 ## Provider error outcomes
 
-The provider reports failures with stable codes the gateway maps to public
-errors; tracebacks and filesystem paths are never forwarded:
+The provider reports failures as `detail: {"code": ..., "message": ...}`,
+with additive typed facts where noted, on the image route and on the `/api`
+control and `/v1` text routes alike. The codes are stable and the gateway maps
+them to public errors; tracebacks, library error text and filesystem paths are
+never forwarded:
 
 | Provider outcome | Meaning |
 | --- | --- |
 | `model_unavailable` | No ready slot for `model_id`; load it in Pumas first |
 | `unsupported_model` | Slot exists but does not support image generation |
 | `runtime_busy` | One image operation per device; excess work rejected |
-| `out_of_memory` | Insufficient GPU memory |
+| `dimensions_exceed_limit` | Above the adapter's maximum, refused at admission; `max_pixels` names the limit (public 400 with the same code) |
+| `out_of_memory` | Insufficient GPU memory, at admission (budget from free memory) or during generation |
 | `cancelled` | Gateway disconnect; work stopped at a checkpoint |
 | `backend_failure` | Adapter or pipeline failure |
 | `invalid_backend_response` | Adapter returned an unusable image |
@@ -122,6 +152,9 @@ errors; tracebacks and filesystem paths are never forwarded:
 - `protocol` requires an exact match between sidecar and qualified recipe;
   mismatch fails validation before any model loads.
 - Capability entries are additive and optional.
+- Protocol stays `3` across additive changes: the authentication header, the
+  typed `{code, message}` detail and the `dimensions_exceed_limit` code. An
+  older client decodes an unknown code as `backend_failure`.
 - Requests are closed and reject unknown fields. Results require the canonical
   fields but permit bounded additive fields; changing required semantics still
   requires a protocol bump.

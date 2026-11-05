@@ -4,6 +4,11 @@
 //! The SDK owns its immutable C API tables and version string. A held loader
 //! handle keeps them live through preflight and ORT's process-wide adoption.
 //! Failure drops the local handle; successful adoption leaves ORT owning it.
+//!
+//! ORT reopens the library by path and keeps the first library a process
+//! adopts. After adoption Pumas therefore compares ORT's API table with the
+//! one the preflighted handle exports: a file swapped after preflight, or a
+//! different library adopted earlier in the process, is refused with a reason.
 #![allow(unsafe_code)]
 
 use super::OnnxRuntimeError;
@@ -67,7 +72,7 @@ pub(super) fn ensure_runtime_library() -> Result<(), OnnxRuntimeError> {
     let path = runtime_library_path(std::env::var_os("ORT_DYLIB_PATH"), std::env::current_exe())?;
     // Pinned ORT constructs native errors while handling loader failures, which
     // re-enters initialization. Reject those failures before entering ORT.
-    let _held_library = preflight_library(&path)?;
+    let (_held_library, preflighted_api) = preflight_library(&path)?;
     // Load the explicitly selected library fallibly before Session's lazy API
     // initialization. Leave environment settings with the embedding application.
     let _environment_builder = ort::environment::init_from(path).map_err(|error| {
@@ -75,10 +80,22 @@ pub(super) fn ensure_runtime_library() -> Result<(), OnnxRuntimeError> {
             "ONNX Runtime library could not be loaded: {error}"
         ))
     })?;
+    // While `_held_library` stays loaded, reopening the same file yields the
+    // same image, so the API tables match exactly when ORT adopted it.
+    let adopted_api: *const ort::sys::OrtApi = ort::api();
+    if !std::ptr::eq(adopted_api, preflighted_api) {
+        return Err(runtime_library_error(
+            "ONNX Runtime adopted a different library than the one Pumas verified \
+             (another library was loaded earlier in this process, or the file changed after \
+             verification); restart Pumas to use the selected library",
+        ));
+    }
     Ok(())
 }
 
-fn preflight_library(path: &Path) -> Result<libloading::Library, OnnxRuntimeError> {
+fn preflight_library(
+    path: &Path,
+) -> Result<(libloading::Library, *const ort::sys::OrtApi), OnnxRuntimeError> {
     // SAFETY: Only the host-selected, separately verified SDK is executable
     // authority here, never a model/request-supplied path. SDK initialization
     // obeys its native ABI contract and retains no borrowed Rust inputs.
@@ -124,12 +141,13 @@ fn preflight_library(path: &Path) -> Result<libloading::Library, OnnxRuntimeErro
     }
     // SAFETY: The retained immutable SDK API table owns GetApi and accepts a
     // version number. A null result means this version is unsupported.
-    if unsafe { ((*base).GetApi)(ort::sys::ORT_API_VERSION) }.is_null() {
+    let api = unsafe { ((*base).GetApi)(ort::sys::ORT_API_VERSION) };
+    if api.is_null() {
         return Err(runtime_library_error(
             "ONNX Runtime does not provide C API 24",
         ));
     }
-    Ok(library)
+    Ok((library, api))
 }
 
 #[cfg(test)]

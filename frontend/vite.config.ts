@@ -1,6 +1,10 @@
 import path from 'path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { devServerCspPlugin } from './src/config/devServerCsp';
+
+const DEV_SERVER_HOST = '127.0.0.1';
+const DEV_SERVER_PORT = 3000;
 
 export default defineConfig(({ mode }) => {
   // The explicit mode keeps the npm script cross-platform; the environment
@@ -15,10 +19,12 @@ export default defineConfig(({ mode }) => {
       __FEATURE_INFERENCE_PLUGINS__: JSON.stringify(enableInferencePlugins),
     },
     server: {
-      port: 3000,
-      host: '127.0.0.1',
+      port: DEV_SERVER_PORT,
+      host: DEV_SERVER_HOST,
     },
-    plugins: [react()],
+    // The production CSP has no loopback connect-src; only `vite serve` adds
+    // its HMR WebSocket.
+    plugins: [react(), devServerCspPlugin(DEV_SERVER_HOST, DEV_SERVER_PORT)],
     resolve: {
       alias: {
         '@app-entry': path.resolve(

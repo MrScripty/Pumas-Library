@@ -12,7 +12,9 @@ usable without it.
 - Hooks own async work, cancellation, cleanup, stale-invocation protection and
   renderer subscriptions.
 - `src/api/` adapts the sandboxed `window.electronAPI` preload bridge. The
-  renderer has no filesystem, process or network access of its own.
+  renderer has no filesystem, process or network access of its own; the
+  shipped CSP in `index.html` grants `connect-src 'self'` only. `vite serve`
+  adds its HMR WebSocket through `src/config/devServerCsp.ts`.
 
 The Rust backend owns model availability, categories, download state, repair
 outcomes, runtime installations, runtime profiles, serving instances and status

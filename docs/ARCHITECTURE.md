@@ -176,7 +176,12 @@ by an identity check, and a process group is signalled only while the verified
 process still leads it. A PID file without an identity (for example one written
 by an older Pumas), a reused PID, or a record from before the current boot is
 never signalled: the stop reports it as skipped with a reason
-(`stop_ollama_report`/`stop_torch_report`) and discards the stale file.
+(`stop_ollama_report`/`stop_torch_report`) and discards the stale file. The
+`stop_ollama`/`stop_torch` RPC outcomes carry the same skips as an optional
+`skipped: [{pid?, reason}]` list (the PID file path stays server-side), and the
+desktop shows the reasons when a stop fails. The app-manager
+`VersionLauncher::stop_version`/`is_version_running` and the Torch removal guard
+read the same identity records.
 Runtime-profile processes belong to the runtime-profile owner and are never
 touched by the legacy stop.
 

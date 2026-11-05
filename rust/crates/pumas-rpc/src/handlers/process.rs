@@ -49,7 +49,11 @@ pub async fn launch_ollama(state: &AppState) -> pumas_library::Result<RuntimeLau
 
 #[cfg(feature = "inference-plugins")]
 pub async fn stop_ollama(state: &AppState) -> pumas_library::Result<RuntimeStopOutcome> {
-    state.api.stop_ollama().await.map(RuntimeStopOutcome::new)
+    state
+        .api
+        .stop_ollama_report()
+        .await
+        .map(RuntimeStopOutcome::from_report)
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -88,7 +92,11 @@ pub async fn launch_torch(state: &AppState) -> pumas_library::Result<RuntimeLaun
 
 #[cfg(feature = "inference-plugins")]
 pub async fn stop_torch(state: &AppState) -> pumas_library::Result<RuntimeStopOutcome> {
-    state.api.stop_torch().await.map(RuntimeStopOutcome::new)
+    state
+        .api
+        .stop_torch_report()
+        .await
+        .map(RuntimeStopOutcome::from_report)
 }
 
 #[cfg(feature = "inference-plugins")]

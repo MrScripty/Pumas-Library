@@ -631,6 +631,16 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     fixtures["runtime_running_false"] = serde_json::to_value(RuntimeRunningOutcome::new(false))?;
     fixtures["runtime_stop_true"] = serde_json::to_value(RuntimeStopOutcome::new(true))?;
     fixtures["runtime_stop_false"] = serde_json::to_value(RuntimeStopOutcome::new(false))?;
+    fixtures["runtime_stop_skipped"] = serde_json::to_value(RuntimeStopOutcome::from_report(
+        pumas_library::process::RuntimeStopReport {
+            stopped: vec![],
+            skipped: vec![pumas_library::process::RuntimeStopSkip {
+                pid: Some(4242),
+                pid_file: "/fixture/ollama.pid".into(),
+                reason: "skipped: not owned by Pumas".into(),
+            }],
+        },
+    ))?;
     fixtures["install_version_dependencies_true"] =
         serde_json::to_value(InstallVersionDependenciesOutcome::new(true))?;
     fixtures["install_version_dependencies_false"] =

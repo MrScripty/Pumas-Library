@@ -6,7 +6,21 @@ import { APIError } from '../errors';
 
 type ProcessTransition = 'starting' | 'stopping' | null;
 
-interface UseManagedProcessOptions<TLaunchResponse extends LaunchResponse, TStopResponse extends BaseResponse> {
+/** Recorded processes a stop refused to signal, as reported by the backend. */
+interface StopSkipDetails {
+  skipped?: ReadonlyArray<{ pid?: number; reason: string }>;
+}
+
+type StopResponse = BaseResponse & StopSkipDetails;
+
+function stopFailureMessage(appName: string, result: StopResponse): string {
+  const reasons = (result.skipped ?? []).map((skip) => skip.reason).filter(Boolean);
+  return reasons.length > 0
+    ? `Failed to stop ${appName}: ${reasons.join('; ')}`
+    : `Failed to stop ${appName}`;
+}
+
+interface UseManagedProcessOptions<TLaunchResponse extends LaunchResponse, TStopResponse extends StopResponse> {
   appName: string;
   isRunning: boolean;
   launch: () => Promise<TLaunchResponse>;
@@ -39,7 +53,7 @@ function logProcessError(
   }
 }
 
-export function useManagedProcess<TLaunchResponse extends LaunchResponse, TStopResponse extends BaseResponse>({
+export function useManagedProcess<TLaunchResponse extends LaunchResponse, TStopResponse extends StopResponse>({
   appName,
   isRunning,
   launch,
@@ -101,7 +115,7 @@ export function useManagedProcess<TLaunchResponse extends LaunchResponse, TStopR
       if (result.success) {
         setLaunchError(null);
       } else {
-        setLaunchError(`Failed to stop ${appName}`);
+        setLaunchError(stopFailureMessage(appName, result));
         setTransition(null);
       }
     } catch (error) {

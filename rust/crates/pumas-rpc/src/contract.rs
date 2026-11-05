@@ -4922,12 +4922,48 @@ impl RuntimeRunningOutcome {
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct RuntimeStopOutcome {
     success: bool,
+    /// Recorded processes the stop left running, each with a reason. Omitted
+    /// when nothing was skipped, so the established `{success}` wire holds.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    skipped: Vec<RuntimeStopSkipped>,
+}
+
+/// A recorded runtime process a stop refused to signal, and why.
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct RuntimeStopSkipped {
+    /// The recorded PID, when the PID file named one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-contract", schemars(with = "u32"))]
+    pid: Option<u32>,
+    reason: String,
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
 impl RuntimeStopOutcome {
     pub(crate) fn new(success: bool) -> Self {
-        Self { success }
+        Self {
+            success,
+            skipped: Vec::new(),
+        }
+    }
+
+    /// The wire outcome of a core stop report. The PID file path stays
+    /// server-side; the reason already names the process.
+    pub(crate) fn from_report(report: pumas_library::process::RuntimeStopReport) -> Self {
+        Self {
+            success: report.stopped_any(),
+            skipped: report
+                .skipped
+                .into_iter()
+                .map(|skip| RuntimeStopSkipped {
+                    pid: skip.pid,
+                    reason: skip.reason,
+                })
+                .collect(),
+        }
     }
 }
 
@@ -5292,6 +5328,39 @@ mod runtime_stop_tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn runtime_stop_reports_skipped_processes_with_reasons() {
+        use pumas_library::process::{RuntimeStopReport, RuntimeStopSkip};
+        let report = RuntimeStopReport {
+            stopped: vec![],
+            skipped: vec![
+                RuntimeStopSkip {
+                    pid: Some(4242),
+                    pid_file: "/private/ollama.pid".into(),
+                    reason: "skipped: not owned by Pumas".into(),
+                },
+                RuntimeStopSkip {
+                    pid: None,
+                    pid_file: "/private/torch.pid".into(),
+                    reason: "the PID record is unreadable".into(),
+                },
+            ],
+        };
+        let wire = serde_json::to_value(RuntimeStopOutcome::from_report(report)).unwrap();
+        assert_eq!(
+            wire,
+            json!({"success":false,"skipped":[
+                {"pid":4242,"reason":"skipped: not owned by Pumas"},
+                {"reason":"the PID record is unreadable"}
+            ]})
+        );
+        // An empty report keeps the established boolean-only wire.
+        let wire =
+            serde_json::to_value(RuntimeStopOutcome::from_report(RuntimeStopReport::default()))
+                .unwrap();
+        assert_eq!(wire, json!({"success":false}));
     }
 }
 

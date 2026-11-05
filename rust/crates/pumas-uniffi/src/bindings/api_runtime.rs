@@ -1,6 +1,6 @@
 use super::{
-    FfiApiConfig, FfiDiskSpaceResponse, FfiError, FfiPumasApi, FfiStatusResponse,
-    FfiSystemResourcesResponse,
+    FfiApiConfig, FfiDiskSpaceResponse, FfiError, FfiPumasApi, FfiRuntimeStopReport,
+    FfiStatusResponse, FfiSystemResourcesResponse,
 };
 use std::sync::Arc;
 
@@ -57,5 +57,15 @@ impl FfiPumasApi {
     /// Stop the Torch inference server.
     pub async fn torch_stop(&self) -> Result<bool, FfiError> {
         self.primary().stop_torch().await.map_err(FfiError::from)
+    }
+
+    /// Stop the Torch inference server and report every recorded process
+    /// that was stopped or left running, with the reason for each skip.
+    pub async fn torch_stop_report(&self) -> Result<FfiRuntimeStopReport, FfiError> {
+        self.primary()
+            .stop_torch_report()
+            .await
+            .map(FfiRuntimeStopReport::from)
+            .map_err(FfiError::from)
     }
 }

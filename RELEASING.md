@@ -4,8 +4,8 @@
 
 The `Build` workflow runs on pull requests, `main`, version tags, and manual
 `workflow_dispatch`. Ordinary PR/main validation runs source/contract checks
-and the dependency scan (advisory there, blocking for candidates); PR and
-ordinary manual runs also produce a separately labeled Linux inference
+and the dependency scan (advisory there, blocking for candidates); PR, `main`
+and ordinary manual runs also produce a separately labeled Linux inference
 review archive.
 The complete optimized sixteen-artifact matrix runs for a `v*` version tag or an
 explicit manual `build_candidates=true` dispatch. Manual candidate builds require

@@ -108,9 +108,13 @@ test('shared quality jobs remain available to pull requests and ordinary pushes'
   }
 });
 
+// Review jobs run for pull requests, the merged commit on main and ordinary
+// manual dispatches, never for candidate runs.
+const reviewGuard = "    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)\n";
+
 test('review inference candidate is bounded, source-pinned and never publishes a release', () => {
   const review = job('review-inference-linux');
-  assert.ok(review.includes("    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)\n"));
+  assert.ok(review.includes(reviewGuard));
   assert.match(review, /^    needs: lint-workflows$/m);
   assert.match(review, /^    runs-on: ubuntu-24\.04$/m);
   assert.match(review, /^    timeout-minutes: 60$/m);
@@ -250,7 +254,7 @@ test('release build commands never enable test-support or all-features', () => {
 
 test('review audio dependency qualification requires bounded exact-source confinement', () => {
   const audio = job('review-audio-dependencies');
-  assert.ok(audio.includes("if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.build_candidates)"));
+  assert.ok(audio.includes(reviewGuard));
   assert.match(audio, /runs-on: ubuntu-24\.04/);
   assert.match(audio, /timeout-minutes: 60/);
   assert.match(audio, /persist-credentials: false/);
@@ -310,4 +314,44 @@ test('dependency audit is advisory on reviews, blocking on candidates and feeds 
   const verify = 'check-artifacts.mjs "${{ runner.temp }}/current-vulnerability-results" current-vulnerability-results "${{ github.sha }}"';
   assert.ok(candidate.includes(verify));
   assert.ok(candidate.indexOf(verify) < candidate.indexOf('write-release-metadata.py'));
+});
+
+test('every checkout drops its credentials; no job pushes', () => {
+  for (const file of ['build.yml', 'scorecard.yml']) {
+    const text = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
+    assert.doesNotMatch(text, /git push|contents: write/, file);
+    const checkouts = [...text.matchAll(/uses: actions\/checkout@[0-9a-f]{40} # \S+\n((?: {8,}.*\n)*)/g)];
+    assert.ok(checkouts.length > 0, file);
+    for (const [, block] of checkouts) assert.match(block, /persist-credentials: false/, file);
+  }
+});
+
+test('Python versions come from a version file, never a floating literal', () => {
+  assert.doesNotMatch(workflow, /python-version: /);
+  const files = new Set([...workflow.matchAll(/python-version-file: (\S+)/g)].map(match => match[1]));
+  assert.deepEqual([...files].sort(), ['.python-version', 'scripts/release/acceptance.python-version']);
+  for (const file of files) {
+    assert.match(fs.readFileSync(path.join(root, file), 'utf8'), /^\d+\.\d+\.\d+\n$/, `${file} pins an exact version`);
+  }
+  // The acceptance tooling needs compression.zstd (CPython 3.14+).
+  assert.match(fs.readFileSync(path.join(root, 'scripts/release/acceptance.python-version'), 'utf8'), /^3\.1[4-9]\./);
+  assert.match(fs.readFileSync(path.join(root, 'scripts/release/torch-managed-python-acceptance.py'), 'utf8'), /sys\.version_info >= \(3, 14\)/);
+});
+
+test('pushes to main run every gate a pull request runs', () => {
+  const jobs = [...workflow.matchAll(/^  ([a-z][a-z0-9-]+):\n/gm)].map(match => match[1]);
+  for (const name of jobs) {
+    const guard = job(name).match(/^    if: (.*)$/m)?.[1];
+    if (!guard || !guard.includes("github.event_name == 'pull_request'")) continue;
+    assert.ok(guard.includes("(github.event_name == 'push' && github.ref == 'refs/heads/main')"), `${name} skips pushes to main`);
+  }
+});
+
+test('the two tracked desktop validator copies are byte-identical and checked against a fresh export', () => {
+  for (const name of ['desktop-contract.validators.js', 'desktop-contract.validators.d.ts']) {
+    const electron = fs.readFileSync(path.join(root, 'electron/src/generated', name));
+    const frontend = fs.readFileSync(path.join(root, 'frontend/src/generated', name));
+    assert.ok(electron.equals(frontend), `${name} copies differ`);
+  }
+  assert.match(job('build-frontend'), /^      - run: pnpm --dir electron check:desktop-contract$/m);
 });

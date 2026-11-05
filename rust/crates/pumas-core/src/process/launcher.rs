@@ -3,12 +3,13 @@
 use crate::config::AppId;
 use crate::error::{PumasError, Result};
 use crate::platform;
+use crate::platform::process_identity;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// Configuration for launching a binary application (like Ollama).
 #[derive(Debug, Clone)]
@@ -390,16 +391,6 @@ impl ProcessLauncher {
         }
     }
 
-    /// Stop a process by PID using the cross-platform process module.
-    ///
-    /// Uses terminate_process_tree to handle both the main process and any child processes.
-    /// On Unix: sends SIGTERM, waits, then SIGKILL if needed
-    /// On Windows: uses taskkill with /F /T flags
-    pub fn stop_process(pid: u32, timeout_ms: u64) -> Result<bool> {
-        info!("Stopping process {} (timeout: {}ms)", pid, timeout_ms);
-        platform::terminate_process_tree(pid, timeout_ms)
-    }
-
     /// Stop an exclusively borrowed Linux child while retaining its PID pin.
     /// The manager holds the same child mutex for observation and final reap.
     #[cfg(target_os = "linux")]
@@ -407,35 +398,13 @@ impl ProcessLauncher {
         platform::process::terminate_owned_linux_group(child, timeout_ms)
     }
 
-    /// Stop all processes matching a pattern in their command line.
-    ///
-    /// This is useful for cleaning up orphaned processes that weren't tracked via PID files.
-    /// Returns the number of processes that were stopped.
-    pub fn stop_processes_by_pattern(pattern: &str, timeout_ms: u64) -> Result<u32> {
-        let processes = platform::find_processes_by_cmdline(pattern);
-        let mut stopped = 0;
-
-        for (pid, cmdline) in processes {
-            debug!("Found process {} matching '{}': {}", pid, pattern, cmdline);
-            if platform::terminate_process(pid, timeout_ms)? {
-                info!("Stopped process {} (matched pattern '{}')", pid, pattern);
-                stopped += 1;
-            }
-        }
-
-        Ok(stopped)
-    }
-
-    /// Remove a PID file.
+    /// Remove a PID file and its identity record.
     pub fn remove_pid_file(pid_file: &Path) -> Result<()> {
-        if pid_file.exists() {
-            fs::remove_file(pid_file).map_err(|e| PumasError::Io {
-                message: "remove PID file".to_string(),
-                path: Some(pid_file.to_path_buf()),
-                source: Some(e),
-            })?;
-        }
-        Ok(())
+        process_identity::remove_record(pid_file).map_err(|e| PumasError::Io {
+            message: "remove PID file".to_string(),
+            path: Some(pid_file.to_path_buf()),
+            source: Some(e),
+        })
     }
 
     /// Launch a binary application (like Ollama) with the given configuration.
@@ -522,9 +491,15 @@ impl ProcessLauncher {
 
         let pid = child.id();
 
-        // Write PID file
-        if let Err(e) = fs::write(&config.pid_file, pid.to_string()) {
-            warn!("Failed to write PID file: {}", e);
+        // Record the PID with the identity that later proves custody. Without
+        // an identity, write nothing: a bare PID is never signalled anyway.
+        match process_identity::capture(pid) {
+            Ok(identity) => {
+                if let Err(e) = process_identity::write_record(&config.pid_file, &identity) {
+                    warn!("Failed to write PID record: {}", e);
+                }
+            }
+            Err(e) => warn!("Failed to record identity of process {}: {}", pid, e),
         }
 
         info!("Launched binary process with PID {}", pid);
@@ -540,7 +515,7 @@ impl ProcessLauncher {
             let error =
                 format!("Process exited before it became the managed runtime (status={status})");
             error!("{}", error);
-            let _ = fs::remove_file(&config.pid_file);
+            let _ = process_identity::remove_record(&config.pid_file);
             return Ok(LaunchResult {
                 success: false,
                 process: None,

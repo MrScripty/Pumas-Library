@@ -158,14 +158,28 @@ one shared generation lifetime: connection-bounded but duration-unbounded
 transport with no total, read, idle, or elapsed deadline, as defined in
 [generation lifetime](contracts/generation-lifetime.md).
 
-The legacy Linux `ProcessManager` retains each launched runtime's actual `Child`
-in one shared observation/stop slot. Its observer uses non-reaping exit checks;
-normal and pattern-based stops of known children lock the same slot. An owned
-group leader is reaped only after a complete observation confirms no live group
-members remain. A successful WNOWAIT check or a PID file alone does not establish
-exclusive reaper custody. PID-only legacy stops retain best-effort behavior;
-they cannot select the borrowed-Child group stop. Non-Linux legacy observation
-and the runtime-profile `ManagedChild` ownership paths are unchanged.
+The legacy `ProcessManager` (`stop_ollama`/`stop_torch`) stops only processes
+whose custody it can prove; it never searches the process table by command
+line, so a user's own `ollama serve` or another project's `serve.py` is never
+signalled. Custody is either the actual `Child` this manager still holds or a
+PID record whose identity matches the live process. Each launch writes its PID
+file plus a `<pid file>.identity` sidecar with the boot id, start time and
+executable (Linux reads `/proc`; macOS and Windows use seconds-resolution start
+time and executable path, a documented weaker check). Every signal is preceded
+by an identity check, and a process group is signalled only while the verified
+process still leads it. A PID file without an identity (for example one written
+by an older Pumas), a reused PID, or a record from before the current boot is
+never signalled: the stop reports it as skipped with a reason
+(`stop_ollama_report`/`stop_torch_report`) and discards the stale file.
+Runtime-profile processes belong to the runtime-profile owner and are never
+touched by the legacy stop.
+
+On Linux the manager retains each launched runtime's `Child` in one shared
+observation/stop slot. Its observer uses non-reaping exit checks, and both the
+observer and the stop lock the same slot. An owned group leader is reaped only
+after a complete observation confirms no live group members remain. The
+observer backs off on repeated observation failures and gives up after a
+bounded number, leaving the child in custody for an explicit stop.
 
 The durable provider decision is recorded in
 [ADR 0001](adr/0001-onnx-runtime-provider-model.md); the Torch image

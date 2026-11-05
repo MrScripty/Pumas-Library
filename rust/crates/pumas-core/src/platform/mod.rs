@@ -10,6 +10,7 @@
 //! - `paths` - Platform-specific directory and file paths
 //! - `permissions` - File permission handling (executable bits, etc.)
 //! - `process` - Process management (signals, termination)
+//! - `process_identity` - Recorded start identity that proves custody of a PID
 //!
 //! # Supported Platforms
 //!
@@ -57,6 +58,7 @@ pub mod managed_child;
 pub mod paths;
 pub mod permissions;
 pub mod process;
+pub mod process_identity;
 #[cfg(target_os = "linux")]
 pub(crate) mod runtime_listener;
 // Internal lifetime composition; crash recovery still requires complete effect custody.
@@ -69,8 +71,7 @@ pub use paths::{
 };
 pub use permissions::set_executable;
 pub use process::{
-    configure_detached_command, find_processes_by_cmdline, is_process_alive, terminate_process,
-    terminate_process_tree,
+    configure_detached_command, is_process_alive, terminate_recorded_process, RecordedStop,
 };
 
 /// Returns the current platform name.

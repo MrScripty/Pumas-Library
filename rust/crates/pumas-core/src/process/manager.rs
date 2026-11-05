@@ -2,6 +2,11 @@
 
 use super::launcher::{BinaryLaunchConfig, LaunchResult, ProcessLauncher};
 use crate::error::{PumasError, Result};
+use crate::platform::{
+    self,
+    process_identity::{self, IdentityCheck, PidRecord},
+    RecordedStop,
+};
 use crate::system::{ProcessResources, ResourceTracker};
 use std::collections::HashMap;
 use std::fs;
@@ -10,6 +15,60 @@ use std::process::Child;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tracing::{debug, error, info, warn};
+
+const OLLAMA_VERSIONS_DIR: &str = "ollama-versions";
+const OLLAMA_PID_FILE: &str = "ollama.pid";
+const TORCH_VERSIONS_DIR: &str = "torch-versions";
+const TORCH_PID_FILE: &str = "torch.pid";
+const LEGACY_STOP_TIMEOUT_MS: u64 = 2000;
+
+/// Consecutive observation failures after which an exit observer stops
+/// retrying. The child stays in custody, so an explicit stop can still reap it.
+#[cfg(target_os = "linux")]
+const OBSERVER_FAILURE_LIMIT: u32 = 20;
+#[cfg(target_os = "linux")]
+const OBSERVER_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+#[cfg(target_os = "linux")]
+const OBSERVER_MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// A recorded process a legacy stop left alone, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeStopSkip {
+    /// The recorded PID, when the PID file named one.
+    pub pid: Option<u32>,
+    /// The PID file that named the process.
+    pub pid_file: PathBuf,
+    /// Why the process was not stopped.
+    pub reason: String,
+}
+
+/// The outcome of a legacy runtime stop.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeStopReport {
+    /// PIDs that were running under Pumas custody and have stopped.
+    pub stopped: Vec<u32>,
+    /// Recorded processes left alone, each with a reason.
+    pub skipped: Vec<RuntimeStopSkip>,
+}
+
+impl RuntimeStopReport {
+    /// Whether any process stopped.
+    pub fn stopped_any(&self) -> bool {
+        !self.stopped.is_empty()
+    }
+
+    fn skip(&mut self, pid: Option<u32>, pid_file: &Path, reason: String) {
+        warn!(
+            "Legacy stop skipped {:?} (PID {:?}): {}",
+            pid_file, pid, reason
+        );
+        self.skipped.push(RuntimeStopSkip {
+            pid,
+            pid_file: pid_file.to_path_buf(),
+            reason,
+        });
+    }
+}
 
 const LEGACY_TORCH_REJECTION: &str =
     "Legacy Torch process control is unavailable on this platform; use owned Torch runtime-profile APIs";
@@ -205,64 +264,41 @@ impl ProcessManager {
         result
     }
 
-    /// Stop Ollama processes.
+    /// Stop Ollama processes Pumas launched.
     ///
-    /// Looks for ollama.pid files in the ollama-versions directory and stops those processes.
+    /// Returns whether any process stopped. See [`Self::stop_ollama_report`]
+    /// for what was skipped and why.
     pub fn stop_ollama(&self) -> Result<bool> {
-        let timeout_ms = 2000;
-        let mut stopped_any = false;
+        self.stop_ollama_report().map(|report| report.stopped_any())
+    }
 
-        // Scan for PID files in ollama-versions directory
-        let versions_dir = self.root_dir.join("ollama-versions");
-        info!("Scanning for Ollama PID files in: {:?}", versions_dir);
-
-        if versions_dir.exists() {
-            if let Ok(entries) = fs::read_dir(&versions_dir) {
-                for entry in entries.flatten() {
-                    let pid_file = entry.path().join("ollama.pid");
-                    if pid_file.exists() {
-                        // Read PID from file
-                        if let Ok(pid_str) = fs::read_to_string(&pid_file) {
-                            if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                                info!("Stopping Ollama process {} from {:?}", pid, pid_file);
-                                if self.stop_known_process("ollama", pid, timeout_ms)? {
-                                    stopped_any = true;
-                                    // Remove PID file
-                                    if let Err(e) = ProcessLauncher::remove_pid_file(&pid_file) {
-                                        warn!("Failed to remove PID file {:?}: {}", pid_file, e);
-                                    } else {
-                                        info!("Removed Ollama PID file: {:?}", pid_file);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Also cleanup any orphaned Ollama processes by pattern
-        let orphaned = self.stop_matching_processes("ollama", "ollama serve", timeout_ms)?;
-        if orphaned > 0 {
-            info!("Stopped {} orphaned ollama processes", orphaned);
-            stopped_any = true;
-        }
-
+    /// Stop Ollama processes Pumas launched and report what was skipped.
+    ///
+    /// Only processes with proven custody are signalled: a child this manager
+    /// still holds, or a PID record whose recorded identity matches the live
+    /// process. Anything else (an Ollama the user started, a reused PID, or a
+    /// PID file without an identity record) is left running and reported as
+    /// skipped with a reason.
+    pub fn stop_ollama_report(&self) -> Result<RuntimeStopReport> {
+        let report = self.stop_recorded("ollama", OLLAMA_VERSIONS_DIR, OLLAMA_PID_FILE)?;
         self.refresh_ollama_running();
-
-        info!("stop_ollama completed, stopped_any={}", stopped_any);
-        Ok(stopped_any)
+        info!(
+            "stop_ollama completed: stopped={}, skipped={}",
+            report.stopped.len(),
+            report.skipped.len()
+        );
+        Ok(report)
     }
 
     /// Return cached Ollama liveness.
     ///
-    /// This is intentionally a non-scanning read. Expensive process-table
-    /// fallback detection happens only at startup or explicit refresh points.
+    /// This is intentionally a non-scanning read. Record verification happens
+    /// only at startup or explicit refresh points.
     pub fn is_ollama_running(&self) -> bool {
         self.ollama_status.lock().unwrap().running
     }
 
-    /// Explicitly refresh Ollama liveness by looking for PID files or running processes.
+    /// Explicitly refresh Ollama liveness from verified PID records.
     pub fn refresh_ollama_running(&self) -> bool {
         let running = Self::detect_ollama_running(&self.root_dir);
         self.set_ollama_status(running);
@@ -273,36 +309,10 @@ impl ProcessManager {
         Self::set_cached_status(&self.ollama_status, running)
     }
 
+    /// Ollama counts as running only when a PID record proves a live process
+    /// Pumas launched. An Ollama started outside Pumas is not ours to report.
     fn detect_ollama_running(root_dir: &Path) -> bool {
-        // Check for PID files in ollama-versions directory
-        let versions_dir = root_dir.join("ollama-versions");
-        if versions_dir.exists() {
-            if let Ok(entries) = fs::read_dir(&versions_dir) {
-                for entry in entries.flatten() {
-                    let pid_file = entry.path().join("ollama.pid");
-                    if pid_file.exists() {
-                        // Read PID and check if process is alive
-                        if let Ok(pid_str) = fs::read_to_string(&pid_file) {
-                            if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                                if crate::platform::is_process_alive(pid) {
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fallback: check for running ollama process by pattern
-        let processes = crate::platform::find_processes_by_cmdline("ollama");
-        for (_pid, cmdline) in &processes {
-            if cmdline.contains("serve") {
-                return true;
-            }
-        }
-
-        false
+        !Self::live_recorded_pids(root_dir, OLLAMA_VERSIONS_DIR, OLLAMA_PID_FILE).is_empty()
     }
 
     /// Launch the Torch inference server.
@@ -383,57 +393,33 @@ impl ProcessManager {
         result
     }
 
-    /// Stop Torch server processes.
+    /// Stop Torch server processes Pumas launched.
     ///
-    /// Looks for torch.pid files in the torch-versions directory and stops those processes.
+    /// Returns whether any process stopped. See [`Self::stop_torch_report`].
     pub fn stop_torch(&self) -> Result<bool> {
+        self.stop_torch_report().map(|report| report.stopped_any())
+    }
+
+    /// Stop Torch server processes Pumas launched and report what was skipped.
+    ///
+    /// Custody rules match [`Self::stop_ollama_report`]: an unrelated
+    /// `serve.py` is never signalled. Runtime-profile Torch processes belong
+    /// to the runtime-profile owner and are not touched by this legacy stop.
+    pub fn stop_torch_report(&self) -> Result<RuntimeStopReport> {
         if legacy_torch_requires_owned_api() {
             return Err(PumasError::LaunchFailed {
                 app: "torch".to_owned(),
                 message: LEGACY_TORCH_REJECTION.to_owned(),
             });
         }
-        let timeout_ms = 2000;
-        let mut stopped_any = false;
-
-        // Scan for PID files in torch-versions directory
-        let versions_dir = self.root_dir.join("torch-versions");
-        info!("Scanning for Torch PID files in: {:?}", versions_dir);
-
-        if versions_dir.exists() {
-            if let Ok(entries) = fs::read_dir(&versions_dir) {
-                for entry in entries.flatten() {
-                    let pid_file = entry.path().join("torch.pid");
-                    if pid_file.exists() {
-                        if let Ok(pid_str) = fs::read_to_string(&pid_file) {
-                            if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                                info!("Stopping Torch process {} from {:?}", pid, pid_file);
-                                if self.stop_known_process("torch", pid, timeout_ms)? {
-                                    stopped_any = true;
-                                    if let Err(e) = ProcessLauncher::remove_pid_file(&pid_file) {
-                                        warn!("Failed to remove PID file {:?}: {}", pid_file, e);
-                                    } else {
-                                        info!("Removed Torch PID file: {:?}", pid_file);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Also cleanup any orphaned torch serve processes by pattern
-        let orphaned = self.stop_matching_processes("torch", "serve.py", timeout_ms)?;
-        if orphaned > 0 {
-            info!("Stopped {} orphaned torch server processes", orphaned);
-            stopped_any = true;
-        }
-
+        let report = self.stop_recorded("torch", TORCH_VERSIONS_DIR, TORCH_PID_FILE)?;
         self.refresh_torch_running();
-
-        info!("stop_torch completed, stopped_any={}", stopped_any);
-        Ok(stopped_any)
+        info!(
+            "stop_torch completed: stopped={}, skipped={}",
+            report.stopped.len(),
+            report.skipped.len()
+        );
+        Ok(report)
     }
 
     /// Return cached Torch liveness.
@@ -441,7 +427,7 @@ impl ProcessManager {
         self.torch_status.lock().unwrap().running
     }
 
-    /// Explicitly refresh Torch liveness by checking known PID files.
+    /// Explicitly refresh Torch liveness from verified PID records.
     pub fn refresh_torch_running(&self) -> bool {
         let running = Self::detect_torch_running(&self.root_dir);
         self.set_torch_status(running);
@@ -456,26 +442,7 @@ impl ProcessManager {
         if legacy_torch_requires_owned_api() {
             return false;
         }
-        // Check for PID files in torch-versions directory
-        let versions_dir = root_dir.join("torch-versions");
-        if versions_dir.exists() {
-            if let Ok(entries) = fs::read_dir(&versions_dir) {
-                for entry in entries.flatten() {
-                    let pid_file = entry.path().join("torch.pid");
-                    if pid_file.exists() {
-                        if let Ok(pid_str) = fs::read_to_string(&pid_file) {
-                            if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                                if crate::platform::is_process_alive(pid) {
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        false
+        !Self::live_recorded_pids(root_dir, TORCH_VERSIONS_DIR, TORCH_PID_FILE).is_empty()
     }
 
     fn set_cached_status(status: &Arc<Mutex<CachedProcessStatus>>, running: bool) -> u64 {
@@ -485,38 +452,145 @@ impl ProcessManager {
         status.generation
     }
 
-    fn stop_known_process(&self, app: &str, pid: u32, timeout_ms: u64) -> Result<bool> {
-        #[cfg(target_os = "linux")]
-        {
-            let owned = self.owned_children.lock().unwrap().get(&pid).cloned();
-            if let Some(owned) = owned {
-                return owned.stop(app, timeout_ms);
-            }
-        }
-        #[cfg(not(target_os = "linux"))]
-        let _ = app;
-        ProcessLauncher::stop_process(pid, timeout_ms)
+    /// Every `<root>/<versions_dir>/*/<file_name>` that exists.
+    fn recorded_pid_files(root_dir: &Path, versions_dir: &str, file_name: &str) -> Vec<PathBuf> {
+        let Ok(entries) = fs::read_dir(root_dir.join(versions_dir)) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .map(|entry| entry.path().join(file_name))
+            .filter(|pid_file| pid_file.exists())
+            .collect()
     }
 
-    fn stop_matching_processes(&self, app: &str, pattern: &str, timeout_ms: u64) -> Result<u32> {
-        let mut stopped = 0;
-        for (pid, _) in crate::platform::find_processes_by_cmdline(pattern) {
-            #[cfg(target_os = "linux")]
-            let owned = self.owned_children.lock().unwrap().contains_key(&pid);
-            #[cfg(not(target_os = "linux"))]
-            let owned = false;
-            let complete = if owned {
-                self.stop_known_process(app, pid, timeout_ms)?
-            } else {
-                // Preserve the legacy single-PID orphan fallback. Never route
-                // it through inferred exclusive group ownership.
-                crate::platform::terminate_process(pid, timeout_ms)?
+    /// PIDs whose recorded identity matches a live process.
+    fn live_recorded_pids(root_dir: &Path, versions_dir: &str, file_name: &str) -> Vec<u32> {
+        Self::recorded_pid_files(root_dir, versions_dir, file_name)
+            .into_iter()
+            .filter_map(|pid_file| match process_identity::read_record(&pid_file) {
+                Ok(Some(PidRecord::Verified(identity)))
+                    if process_identity::verify(&identity) == IdentityCheck::Alive =>
+                {
+                    Some(identity.pid)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Stop every recorded process of one app that Pumas can prove it owns.
+    fn stop_recorded(
+        &self,
+        app: &'static str,
+        versions_dir: &str,
+        file_name: &str,
+    ) -> Result<RuntimeStopReport> {
+        let mut report = RuntimeStopReport::default();
+        for pid_file in Self::recorded_pid_files(&self.root_dir, versions_dir, file_name) {
+            let record = match process_identity::read_record(&pid_file) {
+                Ok(Some(record)) => record,
+                Ok(None) => continue,
+                Err(error) => {
+                    report.skip(
+                        None,
+                        &pid_file,
+                        format!("the PID record is unreadable: {error}"),
+                    );
+                    continue;
+                }
             };
-            if complete {
-                stopped += 1;
+            self.stop_record(app, &pid_file, record, &mut report)?;
+        }
+        Ok(report)
+    }
+
+    fn stop_record(
+        &self,
+        app: &'static str,
+        pid_file: &Path,
+        record: PidRecord,
+        report: &mut RuntimeStopReport,
+    ) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        if let Some(pid) = record.pid() {
+            let owned = self.owned_children.lock().unwrap().get(&pid).cloned();
+            if let Some(owned) = owned {
+                // This manager holds the Child itself: the strongest custody.
+                if owned.app != app {
+                    report.skip(
+                        Some(pid),
+                        pid_file,
+                        format!("process {pid} is a {} runtime, not {app}", owned.app),
+                    );
+                } else if owned.stop(app, LEGACY_STOP_TIMEOUT_MS)? {
+                    report.stopped.push(pid);
+                    Self::discard_record(pid_file);
+                } else {
+                    report.skip(
+                        Some(pid),
+                        pid_file,
+                        format!(
+                            "process {pid} did not finish stopping within \
+                             {LEGACY_STOP_TIMEOUT_MS} ms; it remains in Pumas custody"
+                        ),
+                    );
+                }
+                return Ok(());
             }
         }
-        Ok(stopped)
+        match record {
+            PidRecord::Verified(identity) => {
+                let pid = identity.pid;
+                info!("Stopping recorded {app} process {pid} from {:?}", pid_file);
+                match platform::terminate_recorded_process(&identity, LEGACY_STOP_TIMEOUT_MS) {
+                    Ok(RecordedStop::Stopped) => {
+                        report.stopped.push(pid);
+                        Self::discard_record(pid_file);
+                    }
+                    Ok(RecordedStop::AlreadyGone { reason }) => {
+                        info!("Discarding stale {app} PID record {:?}: {reason}", pid_file);
+                        Self::discard_record(pid_file);
+                    }
+                    Ok(RecordedStop::Refused { reason }) => {
+                        report.skip(Some(pid), pid_file, reason);
+                    }
+                    Err(error) => {
+                        report.skip(Some(pid), pid_file, error.to_string());
+                    }
+                }
+            }
+            PidRecord::Unverified { pid, reason } => {
+                // Never signal a PID Pumas cannot prove it launched. The file
+                // can never be proven later either, so discard it.
+                Self::discard_record(pid_file);
+                report.skip(
+                    pid,
+                    pid_file,
+                    format!(
+                        "skipped: not owned by Pumas ({reason}); the PID file was discarded \
+                         and the process, if any, was left running"
+                    ),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn discard_record(pid_file: &Path) {
+        if let Err(error) = ProcessLauncher::remove_pid_file(pid_file) {
+            warn!("Failed to remove PID record {:?}: {}", pid_file, error);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[cfg(test)]
+    fn stop_known_process(&self, app: &str, pid: u32, timeout_ms: u64) -> Result<bool> {
+        let owned = self.owned_children.lock().unwrap().get(&pid).cloned();
+        match owned {
+            Some(owned) => owned.stop(app, timeout_ms),
+            None => Ok(false),
+        }
     }
 
     fn observe_child_exit(
@@ -544,13 +618,33 @@ impl ProcessManager {
         if let Err(error) = thread::Builder::new().name(thread_name).spawn(move || {
             let _store_lifetime = store_lifetime;
             #[cfg(target_os = "linux")]
-            loop {
-                match owned.observe_and_drain() {
-                    Ok(true) => break,
-                    Ok(false) => {}
-                    Err(error) => warn!("failed observing/draining {label} process {pid}: {error}"),
+            {
+                let mut failures = 0u32;
+                let mut delay = OBSERVER_INTERVAL;
+                loop {
+                    match owned.observe_and_drain() {
+                        Ok(true) => break,
+                        Ok(false) => {
+                            failures = 0;
+                            delay = OBSERVER_INTERVAL;
+                        }
+                        Err(error) => {
+                            failures += 1;
+                            if failures >= OBSERVER_FAILURE_LIMIT {
+                                // Leave liveness and custody as they are: the
+                                // exit is unobserved, not proven.
+                                error!(
+                                    "giving up observing {label} process {pid} after {failures} \
+                                     consecutive failures: {error}; an explicit stop can still reap it"
+                                );
+                                return;
+                            }
+                            warn!("failed observing/draining {label} process {pid}: {error}");
+                            delay = (delay * 2).min(OBSERVER_MAX_BACKOFF);
+                        }
+                    }
+                    thread::sleep(delay);
                 }
-                thread::sleep(std::time::Duration::from_millis(100));
             }
             #[cfg(not(target_os = "linux"))]
             {
@@ -586,53 +680,30 @@ impl ProcessManager {
         &self.resource_tracker
     }
 
-    /// Aggregate resources for running Ollama processes.
+    /// Aggregate resources for running Ollama processes Pumas launched.
     pub fn aggregate_ollama_resources(&self) -> Option<ProcessResources> {
-        let versions_dir = self.root_dir.join("ollama-versions");
-        debug!("aggregate_ollama_resources: checking {:?}", versions_dir);
-        if !versions_dir.exists() {
-            debug!("aggregate_ollama_resources: versions_dir does not exist");
-            return None;
-        }
-
         let mut total_cpu = 0.0f32;
         let mut total_ram = 0.0f32;
         let mut total_gpu = 0.0f32;
         let mut found_any = false;
 
-        // Scan for PID files in ollama-versions directory
-        if let Ok(entries) = fs::read_dir(&versions_dir) {
-            for entry in entries.flatten() {
-                let pid_file = entry.path().join("ollama.pid");
-                debug!(
-                    "aggregate_ollama_resources: checking pid_file {:?}, exists={}",
-                    pid_file,
-                    pid_file.exists()
-                );
-                if pid_file.exists() {
-                    if let Ok(pid_str) = fs::read_to_string(&pid_file) {
-                        if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                            debug!("aggregate_ollama_resources: found PID {}", pid);
-                            let alive = crate::platform::is_process_alive(pid);
-                            debug!("aggregate_ollama_resources: PID {} alive={}", pid, alive);
-                            if alive {
-                                // Process is alive, get its resources
-                                match self.resource_tracker.get_process_resources(pid, true) {
-                                    Ok(resources) => {
-                                        debug!("aggregate_ollama_resources: PID {} resources: cpu={}, ram={}, gpu={}",
-                                            pid, resources.cpu, resources.ram_memory, resources.gpu_memory);
-                                        total_cpu += resources.cpu;
-                                        total_ram += resources.ram_memory;
-                                        total_gpu += resources.gpu_memory;
-                                        found_any = true;
-                                    }
-                                    Err(e) => {
-                                        warn!("aggregate_ollama_resources: failed to get resources for PID {}: {}", pid, e);
-                                    }
-                                }
-                            }
-                        }
-                    }
+        for pid in Self::live_recorded_pids(&self.root_dir, OLLAMA_VERSIONS_DIR, OLLAMA_PID_FILE) {
+            match self.resource_tracker.get_process_resources(pid, true) {
+                Ok(resources) => {
+                    debug!(
+                        "aggregate_ollama_resources: PID {} resources: cpu={}, ram={}, gpu={}",
+                        pid, resources.cpu, resources.ram_memory, resources.gpu_memory
+                    );
+                    total_cpu += resources.cpu;
+                    total_ram += resources.ram_memory;
+                    total_gpu += resources.gpu_memory;
+                    found_any = true;
+                }
+                Err(e) => {
+                    warn!(
+                        "aggregate_ollama_resources: failed to get resources for PID {}: {}",
+                        pid, e
+                    );
                 }
             }
         }
@@ -684,16 +755,20 @@ mod tests {
     fn ollama_liveness_read_uses_cache_until_explicit_refresh() {
         let temp_dir = TempDir::new().unwrap();
         let manager = ProcessManager::new(temp_dir.path(), None).unwrap();
-        let initial_running = manager.is_ollama_running();
+        assert!(!manager.is_ollama_running());
         let version_dir = temp_dir.path().join("ollama-versions").join("test");
         fs::create_dir_all(&version_dir).unwrap();
-        fs::write(
-            version_dir.join("ollama.pid"),
-            std::process::id().to_string(),
+        let pid_file = version_dir.join("ollama.pid");
+        // A bare PID proves nothing, even when that PID is alive.
+        fs::write(&pid_file, std::process::id().to_string()).unwrap();
+        assert!(!manager.refresh_ollama_running());
+        process_identity::write_record(
+            &pid_file,
+            &process_identity::capture(std::process::id()).unwrap(),
         )
         .unwrap();
 
-        assert_eq!(manager.is_ollama_running(), initial_running);
+        assert!(!manager.is_ollama_running());
 
         assert!(manager.refresh_ollama_running());
         assert!(manager.is_ollama_running());
@@ -704,16 +779,20 @@ mod tests {
     fn torch_liveness_read_uses_cache_until_explicit_refresh() {
         let temp_dir = TempDir::new().unwrap();
         let manager = ProcessManager::new(temp_dir.path(), None).unwrap();
-        let initial_running = manager.is_torch_running();
+        assert!(!manager.is_torch_running());
         let version_dir = temp_dir.path().join("torch-versions").join("test");
         fs::create_dir_all(&version_dir).unwrap();
-        fs::write(
-            version_dir.join("torch.pid"),
-            std::process::id().to_string(),
+        let pid_file = version_dir.join("torch.pid");
+        // A bare PID proves nothing, even when that PID is alive.
+        fs::write(&pid_file, std::process::id().to_string()).unwrap();
+        assert!(!manager.refresh_torch_running());
+        process_identity::write_record(
+            &pid_file,
+            &process_identity::capture(std::process::id()).unwrap(),
         )
         .unwrap();
 
-        assert_eq!(manager.is_torch_running(), initial_running);
+        assert!(!manager.is_torch_running());
 
         assert!(manager.refresh_torch_running());
         assert!(manager.is_torch_running());
@@ -908,12 +987,18 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn pattern_cleanup_uses_the_same_owned_child_slot() {
+    fn recorded_ollama_stop_uses_the_same_owned_child_slot() {
         assert_stop_with_exit_observer("ollama", true);
     }
 
     #[cfg(target_os = "linux")]
-    fn assert_stop_with_exit_observer(label: &'static str, pattern_stop: bool) {
+    #[test]
+    fn recorded_torch_stop_uses_the_same_owned_child_slot() {
+        assert_stop_with_exit_observer("torch", true);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn assert_stop_with_exit_observer(label: &'static str, recorded_stop: bool) {
         use crate::platform::linux_group;
         use std::os::unix::fs::PermissionsExt;
 
@@ -935,26 +1020,42 @@ mod tests {
 
         let temp = TempDir::new().unwrap();
         let manager = ProcessManager::new(temp.path(), None).unwrap();
-        let binary = temp.path().join("owned-fixture");
+        let versions = if label == "ollama" {
+            OLLAMA_VERSIONS_DIR
+        } else {
+            TORCH_VERSIONS_DIR
+        };
+        let version_dir = temp.path().join(versions).join("owned-fixture");
+        fs::create_dir_all(&version_dir).unwrap();
+        let binary = version_dir.join("owned-fixture");
         fs::write(
             &binary,
             "#!/bin/bash\nbash -c 'trap \"\" TERM; echo $$ > worker.pid; for i in $(seq 1 300); do [ -f release ] && break; sleep .01; done' &\nwait\n",
         ).unwrap();
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
-        let mut config = BinaryLaunchConfig::ollama("owned-fixture", temp.path());
+        let mut config = if label == "ollama" {
+            BinaryLaunchConfig::ollama("owned-fixture", &version_dir)
+        } else {
+            BinaryLaunchConfig::torch("owned-fixture", &version_dir)
+        };
         config.binary_path = binary;
         config.command = None;
+        config.extra_args = Vec::new();
         config.health_check_url = None;
         let mut launched = ProcessLauncher::launch_binary(&config).unwrap();
         assert!(launched.success);
+        assert!(matches!(
+            process_identity::read_record(&config.pid_file).unwrap(),
+            Some(PidRecord::Verified(_))
+        ));
         let child = launched.process.take().unwrap();
         let group = i32::try_from(child.id()).unwrap();
         let release = ReleaseWorker {
-            release: temp.path().join("release"),
+            release: version_dir.join("release"),
             group,
         };
         let until = std::time::Instant::now() + Duration::from_secs(3);
-        while !temp.path().join("worker.pid").exists() {
+        while !version_dir.join("worker.pid").exists() {
             assert!(
                 std::time::Instant::now() < until,
                 "fixture worker readiness"
@@ -973,10 +1074,13 @@ mod tests {
         assert!(!manager.stop_known_process(other_app, pid, 200).unwrap());
         assert!(linux_group::group_has_live_members(group).unwrap());
         let stopping = manager.clone();
-        let stopped = if pattern_stop {
-            stopping
-                .stop_matching_processes(label, temp.path().to_str().unwrap(), 200)
-                .map(|count| count > 0)
+        let stopped = if recorded_stop {
+            let report = if label == "ollama" {
+                stopping.stop_ollama_report()
+            } else {
+                stopping.stop_torch_report()
+            };
+            report.map(|report| report.stopped == vec![pid] && report.skipped.is_empty())
         } else {
             stopping.stop_known_process(label, pid, 200)
         };
@@ -992,8 +1096,168 @@ mod tests {
             !live_before_release,
             "managed stop must drain the TERM-ignoring worker"
         );
+        if recorded_stop {
+            assert!(!config.pid_file.exists());
+            assert!(!process_identity::identity_path(&config.pid_file).exists());
+        }
         // The completed slot remains recognizable without signalling a stale
         // numeric PID after the observer or stopper performed the sole reap.
         assert!(stopping.stop_known_process(label, pid, 200).unwrap());
+    }
+
+    /// Start an unrelated process whose command line looks like a runtime.
+    #[cfg(unix)]
+    fn impostor(argv0: &str) -> std::process::Child {
+        Command::new("bash")
+            .args(["-c", &format!("exec -a '{argv0}' sleep 30")])
+            .spawn()
+            .unwrap()
+    }
+
+    #[cfg(unix)]
+    fn wait_for_cmdline(child: &std::process::Child, needle: &str) {
+        #[cfg(target_os = "linux")]
+        {
+            let path = format!("/proc/{}/cmdline", child.id());
+            let until = std::time::Instant::now() + Duration::from_secs(5);
+            while !fs::read(&path)
+                .map(|bytes| String::from_utf8_lossy(&bytes).contains(needle))
+                .unwrap_or(false)
+            {
+                assert!(std::time::Instant::now() < until, "impostor exec");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (child, needle);
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    /// Stop with records that never prove custody of `impostor`, and assert
+    /// it survives every one of them.
+    #[cfg(unix)]
+    fn assert_impostor_survives(
+        versions_dir: &str,
+        pid_file_name: &str,
+        argv0: &str,
+        stop: impl Fn(&ProcessManager) -> RuntimeStopReport,
+    ) {
+        let temp = TempDir::new().unwrap();
+        let manager = ProcessManager::new(temp.path(), None).unwrap();
+        let mut unrelated = impostor(argv0);
+        wait_for_cmdline(&unrelated, argv0.split(' ').next().unwrap());
+        let live = process_identity::capture(unrelated.id()).unwrap();
+        let alive = |child: &mut std::process::Child| child.try_wait().unwrap().is_none();
+
+        // No record at all: the old substring sweep would have killed it.
+        let report = stop(&manager);
+        assert!(report.stopped.is_empty() && report.skipped.is_empty());
+        assert!(alive(&mut unrelated), "no record must mean no signal");
+
+        let version_dir = temp.path().join(versions_dir).join("v1");
+        fs::create_dir_all(&version_dir).unwrap();
+        let pid_file = version_dir.join(pid_file_name);
+
+        // A bare PID (older Pumas, or a stale file) is unverified.
+        fs::write(&pid_file, unrelated.id().to_string()).unwrap();
+        let report = stop(&manager);
+        assert!(report.stopped.is_empty());
+        assert_eq!(report.skipped.len(), 1);
+        assert!(report.skipped[0].reason.contains("not owned by Pumas"));
+        assert!(
+            alive(&mut unrelated),
+            "an unverified PID must not be signalled"
+        );
+        assert!(!pid_file.exists(), "the unverifiable PID file is discarded");
+
+        // A record whose PID was reused by the unrelated process.
+        let reused = process_identity::ProcessIdentity {
+            start_time: live.start_time.wrapping_sub(1),
+            ..live.clone()
+        };
+        process_identity::write_record(&pid_file, &reused).unwrap();
+        let report = stop(&manager);
+        assert!(report.stopped.is_empty() && report.skipped.is_empty());
+        assert!(alive(&mut unrelated), "a reused PID must not be signalled");
+        assert!(!pid_file.exists(), "a stale record is discarded");
+
+        // A record that cannot be proven either way is refused and kept.
+        let other_runtime = process_identity::ProcessIdentity {
+            executable: PathBuf::from("/nonexistent/runtime"),
+            ..live
+        };
+        process_identity::write_record(&pid_file, &other_runtime).unwrap();
+        let report = stop(&manager);
+        assert!(report.stopped.is_empty());
+        assert_eq!(report.skipped.len(), 1);
+        assert!(
+            alive(&mut unrelated),
+            "an unproven PID must not be signalled"
+        );
+        assert!(pid_file.exists());
+
+        unrelated.kill().unwrap();
+        unrelated.wait().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unrelated_ollama_serve_survives_legacy_stop() {
+        assert_impostor_survives(
+            OLLAMA_VERSIONS_DIR,
+            OLLAMA_PID_FILE,
+            "ollama serve",
+            |manager| manager.stop_ollama_report().unwrap(),
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unrelated_serve_py_survives_legacy_torch_stop() {
+        assert_impostor_survives(
+            TORCH_VERSIONS_DIR,
+            TORCH_PID_FILE,
+            "python serve.py",
+            |manager| manager.stop_torch_report().unwrap(),
+        );
+    }
+
+    /// A runtime launched by an earlier Pumas process is stopped through its
+    /// recorded identity alone, without any in-memory child custody.
+    #[cfg(unix)]
+    #[test]
+    fn recorded_runtime_from_a_previous_session_still_stops() {
+        let temp = TempDir::new().unwrap();
+        let version_dir = temp.path().join(OLLAMA_VERSIONS_DIR).join("v1");
+        fs::create_dir_all(&version_dir).unwrap();
+        let pid_file = version_dir.join(OLLAMA_PID_FILE);
+        let mut command = Command::new("sleep");
+        command.arg("30");
+        platform::configure_detached_command(&mut command);
+        let mut runtime = command.spawn().unwrap();
+        process_identity::write_record(
+            &pid_file,
+            &process_identity::capture(runtime.id()).unwrap(),
+        )
+        .unwrap();
+
+        let manager = ProcessManager::new(temp.path(), None).unwrap();
+        assert!(manager.is_ollama_running());
+        let report = manager.stop_ollama_report().unwrap();
+        let exited = runtime.try_wait().unwrap().is_some() || {
+            std::thread::sleep(Duration::from_millis(200));
+            runtime.try_wait().unwrap().is_some()
+        };
+        if !exited {
+            let _ = runtime.kill();
+        }
+        let _ = runtime.wait();
+        assert_eq!(report.stopped, vec![runtime.id()]);
+        assert!(report.skipped.is_empty());
+        assert!(exited, "the recorded runtime must stop");
+        assert!(!pid_file.exists());
+        assert!(!manager.is_ollama_running());
     }
 }

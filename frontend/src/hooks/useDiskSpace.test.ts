@@ -61,7 +61,7 @@ describe('useDiskSpace', () => {
     expect(result.current.diskSpaceError).toBe('The desktop backend is not available.');
   });
 
-  it('replaces the last reading with the failure reason when a refresh fails', async () => {
+  it('keeps the last valid reading and records why a refresh failed', async () => {
     getDiskSpaceMock
       .mockResolvedValueOnce({
         success: true,
@@ -83,7 +83,7 @@ describe('useDiskSpace', () => {
       await result.current.fetchDiskSpace();
     });
 
-    expect(result.current.diskSpacePercent).toBeNull();
+    expect(result.current.diskSpacePercent).toBe(64);
     expect(result.current.diskSpaceError).toBe('disk error');
 
     await act(async () => {

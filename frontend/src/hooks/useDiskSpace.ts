@@ -1,8 +1,8 @@
 /**
  * Disk space monitoring hook
  *
- * Reads disk usage on demand. An unread or failed reading is `null` with a
- * reason, never a 0% reading.
+ * Reads disk usage on demand. Until a reading succeeds the percent is `null`,
+ * never 0%. A failed read keeps the last valid reading and records why.
  */
 
 import { useState, useCallback } from 'react';
@@ -17,7 +17,6 @@ export function useDiskSpace() {
   const [diskSpaceError, setDiskSpaceError] = useState<string | null>(null);
 
   const recordFailure = useCallback((reason: string) => {
-    setDiskSpacePercent(null);
     setDiskSpaceError(reason);
   }, []);
 

@@ -45,9 +45,10 @@ Framer Motion, React Aria interactions, and Vitest with Testing Library/jsdom.
   written and a per-library revision. Its rows stay display-only until the
   first load succeeds; later refreshes keep live rows actionable and downgrade
   them only when the refresh fails.
-- A failed library load, scan or search, download-list read, disk-usage read
-  or runtime-state refresh keeps its reason on screen. It never falls back to
-  an empty list, an idle status or a 0% reading.
+- A failed library load, scan or search, download-list read or runtime-state
+  refresh keeps its reason on screen. Disk usage that was never read shows as
+  unavailable. None of these fall back to an empty list, an idle status or a
+  0% reading.
 - Do not infer that a model is complete from its name, repository or a partial
   set of files. One Hugging Face repository can hold several files or
   quantizations, and the same weights in another repository are a separate

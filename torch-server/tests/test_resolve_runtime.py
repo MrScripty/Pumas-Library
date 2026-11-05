@@ -637,6 +637,28 @@ class ResolverTests(unittest.TestCase):
             self.assertIn("differ from the hash lock", stderr.getvalue())
             self.assertFalse((output / "installed-files.json").exists())
 
+    def test_install_phase_names_a_hash_mismatch_reported_by_pip(self):
+        # pip's own wording when a locked wheel's bytes differ from the lock.
+        mismatch = SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="ERROR: THESE PACKAGES DO NOT MATCH THE HASHES FROM THE REQUIREMENTS FILE.",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            write_lock(output, report())
+            with (
+                patch.object(resolver.sys, "argv", install_argv(target, output)),
+                patch.object(resolver.subprocess, "run", return_value=mismatch),
+                redirect_stderr(StringIO()) as stderr,
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 3)
+            self.assertIn("does not match its SHA-256 in the hash lock", stderr.getvalue())
+            self.assertFalse((output / "installed-files.json").exists())
+
     def test_install_phase_refuses_resolution_inputs(self):
         for extra in (
             ["--constraints", "constraints.txt"],

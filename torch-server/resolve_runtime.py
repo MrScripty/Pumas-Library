@@ -1575,6 +1575,12 @@ def install_from_lock(
         ],
     )
     if completed.returncode:
+        if "do not match the hashes" in completed.stderr.lower():
+            parser.exit(
+                3,
+                "Locked installation failed: a downloaded wheel does not match its SHA-256 "
+                "in the hash lock, so nothing was installed\n",
+            )
         code, message = resolution_failure(completed.stderr, args.version, args.build, args.adapter)
         # The lock is already resolved: only access can be inconclusive here.
         parser.exit(code if code == 75 else 3, f"Locked installation failed: {message}\n")
